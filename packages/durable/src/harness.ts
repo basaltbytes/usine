@@ -227,7 +227,12 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
       try: () =>
         Harness.open(
           storage,
-          { models: options.models, registry, onReport: (error) => report(generation, error) },
+          {
+            models: options.models,
+            registry,
+            settings: { restartLimit: Infinity },
+            onReport: (error) => report(generation, error),
+          },
           BACKGROUND_CONTEXT,
         ),
       catch: (cause) => durableError("open the durable harness", cause),
