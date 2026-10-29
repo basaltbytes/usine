@@ -178,9 +178,14 @@ write_files:
     content: |
       #!/bin/sh
       # Installs or upgrades the gateway from npm package specs or tarballs made with pnpm pack, then restarts it.
-      # One tree for all of them, so @usine/gateway and @usine/core share one copy of effect.
+      # One tree for all of them, so @usine/gateway and @usine/core share one copy of effect. Each install
+      # builds a new tree, since npm doesn't replace the effect peer of the packages already installed.
       set -eu
-      npm install --prefix /opt/usine-gateway --omit=dev "$@"
+      rm -rf /opt/usine-gateway.next
+      npm install --prefix /opt/usine-gateway.next --omit=dev "$@"
+      rm -rf /opt/usine-gateway.previous
+      if [ -e /opt/usine-gateway ]; then mv /opt/usine-gateway /opt/usine-gateway.previous; fi
+      mv /opt/usine-gateway.next /opt/usine-gateway
       ln -sf /opt/usine-gateway/node_modules/.bin/usine-gateway /usr/local/bin/usine-gateway
       systemctl restart usine-gateway
 
