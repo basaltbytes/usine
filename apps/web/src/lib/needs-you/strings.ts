@@ -144,5 +144,6 @@ export const needKindLabel = {
 } satisfies Record<NeedView["_tag"], string>;
 
 export const needDetailsLabel = "Details";
+export const needOpenItemLabel = "Open item";
 export const needOpenRunLabel = "Open run";
 export const needActionsLabel = (title: string) => `Actions for ${title}`;

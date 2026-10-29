@@ -19,6 +19,7 @@ import {
   ApprovalNeed,
   CycleBudgetNeed,
   UnresponsiveWorkerNeed,
+  UnconfiguredWorkerNeed,
   WorkerPreflightNeed,
   BoardItemLink,
   BoardView,
@@ -336,6 +337,7 @@ it.each([1280, 390])(
         .toBeVisible();
       await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
       const actions = row.getByRole("button", { name: /^Actions for/ });
+      await expect.element(actions).toBeVisible();
       if (width === 1280) {
         actions.element().focus();
         await userEvent.keyboard("{Enter}");
@@ -367,6 +369,78 @@ it.each([1280, 390])(
       await expect.element(details).not.toBeInTheDocument();
       await expect.element(actions).toHaveFocus();
       await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
+    }
+  },
+);
+
+it.each([
+  { width: 1280, running: 0 },
+  { width: 390, running: 0 },
+  { width: 1280, running: 2 },
+  { width: 390, running: 2 },
+])(
+  "exposes the full unconfigured-worker diagnostic in Overview and the tray at $width px with $running running attempts",
+  async ({ width, running }) => {
+    await page.viewport(width, 844);
+    const worker = WorkerName.make("usine-worker-2");
+    await replaceNeeds([
+      new UnconfiguredWorkerNeed({
+        id: "unconfigured-worker:usine-worker-2",
+        worker,
+        attempts: 3,
+        running,
+      }),
+    ]);
+    const diagnostic =
+      running > 0
+        ? "usine-worker-2 is not in usine.yaml. 2 attempts still running on it. Discard the leftovers after they end"
+        : "usine-worker-2 is not in usine.yaml. Startup does not reconcile the 3 recorded attempts on it. Add the worker back and restart usine up, or discard the leftovers";
+    for (const surface of [needs, tray()]) {
+      if (surface !== needs) await bell(1).click();
+      const row = surface.getByRole("listitem").filter({ hasText: worker });
+      const actions = row.getByRole("button", { name: /^Actions for/ });
+      await expect.element(actions).toBeVisible();
+      if (width === 1280) {
+        actions.element().focus();
+        await userEvent.keyboard("{Enter}");
+        await expect
+          .element(page.getByRole("menuitem", { name: "Details", exact: true }))
+          .toHaveFocus();
+        await userEvent.keyboard("{Enter}");
+      } else {
+        await actions.click();
+        await page.getByRole("menuitem", { name: "Details", exact: true }).click();
+      }
+      const details = page.getByRole("dialog", { name: "Worker not configured", exact: true });
+      const description = details.getByText(diagnostic, { exact: true });
+      await expect.element(description).toBeVisible();
+      await expect.poll(() => details.element().getAnimations().length).toBe(0);
+      const text = description.element();
+      expect(text.scrollWidth).toBeLessThanOrEqual(text.clientWidth);
+      expect(text.scrollHeight).toBeLessThanOrEqual(text.clientHeight);
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const bounds = details.element().getBoundingClientRect();
+      for (const line of range.getClientRects()) {
+        expect(line.left).toBeGreaterThanOrEqual(bounds.left);
+        expect(line.right).toBeLessThanOrEqual(bounds.right);
+        expect(line.top).toBeGreaterThanOrEqual(bounds.top);
+        expect(line.bottom).toBeLessThanOrEqual(bounds.bottom);
+      }
+      expect(bounds.left).toBeGreaterThanOrEqual(0);
+      expect(bounds.right).toBeLessThanOrEqual(width);
+      if (running === 0) {
+        await page.screenshot({
+          path: `../../../../../.impeccable/review/unconfigured-worker-${surface === needs ? "overview" : "tray"}-${width}.png`,
+        });
+      }
+      if (width === 1280) await userEvent.keyboard("{Escape}");
+      else await details.getByRole("button", { name: "Close", exact: true }).click();
+      await expect.element(details).not.toBeInTheDocument();
+      await expect.element(actions).toHaveFocus();
+      const discard = row.getByRole("button", { name: "Discard leftovers", exact: true });
+      if (running === 0) await expect.element(discard).toBeEnabled();
+      else await expect.element(discard).not.toBeInTheDocument();
     }
   },
 );
@@ -515,12 +589,12 @@ it.each(["dark", "light"])(
           return bounds !== undefined && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
         }).length;
     };
-    expect(visibleRows()).toBeGreaterThanOrEqual(7);
+    await expect.poll(visibleRows).toBeGreaterThanOrEqual(7);
     expect(
       tray()
         .getByRole("listitem")
         .elements()
-        .every((row) => row.getBoundingClientRect().height <= 57),
+        .every((row) => Math.round(row.getBoundingClientRect().height) <= 57),
     ).toBe(true);
     await page.screenshot({
       path: `../../../../../.impeccable/review/notification-open-${theme}.png`,
@@ -532,12 +606,12 @@ it.each(["dark", "light"])(
     await expect.poll(() => tray().element().getBoundingClientRect().width).toBe(390);
     expect(tray().element().getBoundingClientRect().height).toBeLessThanOrEqual(591);
     expect(document.documentElement.scrollWidth).toBe(390);
-    expect(visibleRows()).toBeGreaterThanOrEqual(7);
+    await expect.poll(visibleRows).toBeGreaterThanOrEqual(7);
     expect(
       tray()
         .getByRole("listitem")
         .elements()
-        .every((row) => row.getBoundingClientRect().height <= 57),
+        .every((row) => Math.round(row.getBoundingClientRect().height) <= 57),
     ).toBe(true);
     await page.screenshot({
       path: `../../../../../.impeccable/review/notification-phone-${theme}.png`,

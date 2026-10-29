@@ -13,7 +13,12 @@ import {
 } from "~/components/ui/dialog";
 import { Button } from "~/components/ui/button";
 import { api } from "~/lib/api";
-import { cycleBudgetCounts, needCopy, needDetailsLabel } from "~/lib/needs-you/strings";
+import {
+  cycleBudgetCounts,
+  needCopy,
+  needDetailsLabel,
+  needOpenItemLabel,
+} from "~/lib/needs-you/strings";
 import { overviewQuery } from "~/lib/overview";
 import { NeedItem } from "~/components/needs-you/need-item";
 
@@ -53,7 +58,7 @@ export const CycleBudgetAsk = ({ need, dismiss }: CycleBudgetAskProps) => {
             </DropdownMenuItem>
             {Option.isNone(item) && need.itemUrl !== null && (
               <DropdownMenuLinkItem href={need.itemUrl} target="_blank" rel="noreferrer">
-                Open item
+                {needOpenItemLabel}
               </DropdownMenuLinkItem>
             )}
           </>
