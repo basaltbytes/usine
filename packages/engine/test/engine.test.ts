@@ -1039,6 +1039,7 @@ describe("durable run engine", () => {
               Effect.never,
               Effect.succeed(stepResult("ran on another item")),
               Effect.succeed(stepResult("ran after the stop")),
+              Effect.succeed(stepResult("another loop after the stop")),
             ],
             2,
           );
@@ -1071,6 +1072,14 @@ describe("durable run engine", () => {
               }),
             ]);
 
+            const otherLoop = yield* engine.submit(
+              new Submission({
+                ...submission({ number: 49, item: "unstoppable-cancel" }),
+                loop: LoopName.make("another-loop"),
+              }),
+            );
+            assert(otherLoop._tag === "Claimed");
+
             // A Run on another Item takes the free slot.
             const other = yield* engine.submit(submission({ number: 48, item: "another-item" }));
             assert(other._tag === "Claimed");
@@ -1087,12 +1096,14 @@ describe("durable run engine", () => {
               },
             );
             assert.deepStrictEqual(waiting.attempts, []);
+            assert.isEmpty((yield* engine.inspect(otherLoop.runId)).attempts);
             assert.deepStrictEqual(new Set(stops.map(([, reason]) => reason)), new Set(["cancel"]));
             assert.strictEqual(yield* TxRef.get(worker.leased), 1);
 
             // Once a retry stops the parent task, the queued Event's Run starts.
             yield* Ref.set(worker.unstoppable, false);
             yield* waitFor(engine, queuedRunId, ({ run }) => run.state._tag === "Succeeded");
+            yield* waitFor(engine, otherLoop.runId, ({ run }) => run.state._tag === "Succeeded");
             assert.deepStrictEqual(yield* unconfirmed.list, []);
             yield* Effect.repeat(TxRef.get(worker.leased), {
               until: (count) => count === 0,

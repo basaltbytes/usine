@@ -254,6 +254,25 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           return stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n");
         });
 
+    const recoveryComments =
+      (attempt: AttemptRecovery, worktree: string): PostedCommentsHarvest =>
+      (spec, windows) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const credential = yield* credentials(
+              attempt.repository,
+              attempt.attemptId,
+              attempt.permissions,
+              baseEnvironment,
+            );
+            return yield* harvestPostedComments(
+              spec,
+              harvestCommand("cleanup", worktree, credential, credential.environment),
+              windows,
+            );
+          }),
+        );
+
     const recover = Effect.fn("LocalExecutor.recover")(function* <E, A>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
@@ -269,23 +288,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* session.recoverPostedComments(
         attempt,
         present
-          ? Option.some<PostedCommentsHarvest>((spec, windows) =>
-              Effect.scoped(
-                Effect.gen(function* () {
-                  const credential = yield* credentials(
-                    attempt.repository,
-                    attempt.attemptId,
-                    attempt.permissions,
-                    baseEnvironment,
-                  );
-                  return yield* harvestPostedComments(
-                    spec,
-                    harvestCommand("cleanup", worktree, credential, credential.environment),
-                    windows,
-                  );
-                }),
-              ),
-            )
+          ? Option.some<PostedCommentsHarvest>(recoveryComments(attempt, worktree))
           : Option.none(),
         record,
       );
@@ -563,6 +566,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           layout: { worktree },
           ops,
           spec,
+          confirmStop: session.stopForRecovery(keptCheckoutRecovery(request)),
         });
       });
       const prepared = yield* acquire.pipe(
@@ -600,6 +604,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
               harvestPostedComments(
                 prepared.workspace.spec,
                 harvestCommand("launch", prepared.workspace.worktree, credential, environment),
+                windows,
+              ),
+            harvestKeptComments: (windows) =>
+              recoveryComments(keptCheckoutRecovery(request), worktree)(
+                prepared.workspace.spec,
                 windows,
               ),
             keepForReattach: prepared.keepForReattach,

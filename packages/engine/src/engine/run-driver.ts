@@ -95,12 +95,6 @@ type OpenAttempt =
     }
   | { readonly _tag: "Interrupted"; readonly attempt: Attempt };
 
-/** An Attempt whose parent task the engine stops, with its Run's Loop and Item and the reason. */
-export type StopTarget = Pick<
-  UnconfirmedStop,
-  "attemptId" | "runId" | "loop" | "itemKey" | "reason"
->;
-
 /** Returns the open Attempt if its parent task is live. */
 const reattaching = (open: Option.Option<OpenAttempt>): Option.Option<Attempt> =>
   Option.flatMap(open, (found) =>
@@ -113,7 +107,7 @@ const reattaching = (open: Option.Option<OpenAttempt>): Option.Option<Attempt> =
  * outcome, and repeats until the Run closes. The fiber that closes a Run gives the Item's newest
  * queued Event its turn; cancel, supersede, and revoke do that themselves. A fiber that ends
  * without closing its Run leaves it for `resume` or `reconcile`, as one does instead of starting
- * an Attempt while a parent task on its Loop's Item isn't confirmed stopped (#523).
+ * an Attempt while a parent task on its Item isn't confirmed stopped (#523).
  */
 export class RunDriver extends Context.Service<
   RunDriver,
@@ -136,7 +130,7 @@ export class RunDriver extends Context.Service<
      * `StepExecutor.sweep`.
      */
     readonly reconcile: () => Effect.Effect<void, RunStoreError>;
-    /** Returns the closed Attempts whose parent task stop `reconcile` retries. */
+    /** Returns pending stops and failed stops that `reconcile` retries. */
     readonly unconfirmedStops: Effect.Effect<ReadonlyArray<UnconfirmedStop>>;
     /**
      * Reconciles at startup the checkout of every persisted Attempt on a configured Worker, before
@@ -146,19 +140,19 @@ export class RunDriver extends Context.Service<
      */
     readonly recoverWorkspaces: () => Effect.Effect<void, RunStoreError>;
     /**
-     * Moves the slot that the fiber of Run `runId` holds to its Attempt `attemptId`, whose parent
+     * Records the pending stop and moves the run fiber's slot to the attempt, whose parent
      * task may still run, so the slot stays taken after the fiber frees it, until `releaseKept`
-     * confirms that the parent task stopped (#475). Does nothing if the fiber holds no slot.
+     * confirms that the parent task stopped (#475). Records the stop even if the fiber has no slot.
      */
-    readonly holdSlot: (runId: RunId, attemptId: AttemptId) => Effect.Effect<void>;
+    readonly holdSlot: (stop: UnconfirmedStop) => Effect.Effect<void>;
     /**
      * Releases the slot kept for the Attempt of `stop`: the slot that `holdSlot` moved, or what
      * `recoverWorkspaces` kept for reattaching it. Once the parent task is confirmed stopped for
      * `stop.reason`, reconciles a kept checkout and releases the slot. Until then, both stay kept
-     * (#177, #475), no Run of the Loop on the Item starts an Attempt (#523), and each `reconcile`
+     * (#177, #475), no Run on the Item starts an Attempt (#523), and each `reconcile`
      * retries.
      */
-    readonly releaseKept: (stop: StopTarget) => Effect.Effect<void>;
+    readonly releaseKept: (stop: UnconfirmedStop) => Effect.Effect<void>;
   }
 >()("@usine/engine/internal/RunDriver") {
   static readonly layer = Layer.effect(
@@ -172,7 +166,7 @@ export class RunDriver extends Context.Service<
       const crypto = yield* Crypto.Crypto;
       const fibers = yield* FiberMap.make<RunId>();
       const checkouts = yield* checkoutRecoveryFor(store, executor);
-      // Closed Attempts whose parent task isn't confirmed stopped; each reconcile retries the stop.
+      // Pending stops block admission; reconcile retries failed stops after their run fiber ends.
       const unconfirmed = yield* Ref.make<ReadonlyMap<AttemptId, UnconfirmedStop>>(new Map());
       // The slot that each Run's fiber holds, unless `holdSlot` moved it to the Run's Attempt.
       const slots = yield* Ref.make<ReadonlyMap<RunId, WorkerLease>>(new Map());
@@ -430,6 +424,14 @@ export class RunDriver extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ runId, worker });
         const open = yield* current;
+        if (Option.isNone(reattaching(open)) && Option.isSome(yield* stopBlocking(submission))) {
+          yield* Effect.logInfo("Run waits for an unconfirmed stop after reserving a worker slot", {
+            runId,
+            worker,
+            itemKey: submission.itemKey,
+          });
+          return "WaitingForStop";
+        }
         if (Option.isSome(open) && open.value._tag === "Finished") {
           const finished = yield* store
             .finishAttempt(open.value.attempt, open.value.result)
@@ -498,20 +500,27 @@ export class RunDriver extends Context.Service<
           // Reconcile a reattach that failed before acquiring the kept checkout, such as on a
           // credential error, so the next Attempt resumes from its salvage. `reconcile` does nothing
           // once the checkout was acquired, and fails this fiber while the stop is unconfirmed.
-          yield* checkouts.reconcile(started.execution.attempt.id, "failed");
-        }
-        // Before the Attempt closes, so a cancel meanwhile still finds it open and keeps its slot.
-        if (Result.isFailure(result))
-          yield* confirmStopAfterFailure(
-            {
+          yield* reconcileKept(
+            new UnconfirmedStop({
               attemptId: started.execution.attempt.id,
               runId,
               loop: submission.loop,
               itemKey: submission.itemKey,
+              worker,
               reason: "failed",
-            },
-            worker,
+            }),
           );
+        }
+        // Before the Attempt closes, so a cancel meanwhile still finds it open and keeps its slot.
+        if (Result.isFailure(result))
+          yield* confirmStopAfterFailure({
+            attemptId: started.execution.attempt.id,
+            runId,
+            loop: submission.loop,
+            itemKey: submission.itemKey,
+            reason: "failed",
+            worker,
+          });
         const finished = yield* store
           .finishAttempt(started.execution.attempt, result)
           .pipe(retryingStore(runId, "finish the attempt"));
@@ -538,7 +547,7 @@ export class RunDriver extends Context.Service<
           return;
         }
 
-        let outcome: FinishDecision["_tag"];
+        let outcome: FinishDecision["_tag"] | "WaitingForStop";
         do {
           // A reattached Attempt uses a slot on the Worker it started on (#177).
           const open = yield* openAttempt(runId);
@@ -546,7 +555,16 @@ export class RunDriver extends Context.Service<
             // Reconcile before waiting for a slot, so the next Attempt resumes from the salvage and
             // the slot startup occupied is freed. If the stop can't be confirmed, this fiber fails
             // and keeps the slot; the next reconcile drives the Run again.
-            yield* checkouts.reconcile(open.value.attempt.id, "startup");
+            yield* reconcileKept(
+              new UnconfirmedStop({
+                attemptId: open.value.attempt.id,
+                runId,
+                loop: submission.loop,
+                itemKey: submission.itemKey,
+                worker: open.value.attempt.worker,
+                reason: "startup",
+              }),
+            );
           }
           // A reattachment starts no parent task, so only a new Attempt waits for the stop.
           if (Option.isNone(reattaching(open))) {
@@ -554,7 +572,7 @@ export class RunDriver extends Context.Service<
             if (Option.isSome(blocking)) {
               // `reconcile` retries the stop, then starts a fiber for this Run again.
               yield* Effect.logInfo(
-                "The Run starts no Attempt while the parent task of an earlier Attempt on its Loop's Item is not confirmed stopped; each reconcile tries that stop again, then drives the Run",
+                "The Run starts no Attempt while the parent task of an earlier Attempt on its Item is not confirmed stopped; each reconcile tries that stop again, then drives the Run",
                 {
                   runId,
                   loop: submission.loop,
@@ -590,6 +608,7 @@ export class RunDriver extends Context.Service<
 
         // Cancel, supersede, and revoke handle the Item's queued Events themselves and can
         // interrupt this fiber at any point.
+        if (outcome === "WaitingForStop") return;
         if (outcome === "Unchanged") {
           yield* Effect.logInfo("Run closed by another operation; its fiber ends", { runId });
           return;
@@ -597,11 +616,10 @@ export class RunDriver extends Context.Service<
         yield* continueWithNewest(runId);
       });
 
-      const holdSlot = Effect.fn("RunDriver.holdSlot")(function* (
-        runId: RunId,
-        attemptId: AttemptId,
-      ) {
+      const holdSlot = Effect.fn("RunDriver.holdSlot")(function* (stop: UnconfirmedStop) {
+        const { runId, attemptId } = stop;
         yield* Effect.annotateCurrentSpan({ runId, attemptId });
+        yield* recordUnconfirmed(new UnconfirmedStop(stop));
         const lease = yield* Ref.modify(slots, (held) => [
           Option.fromUndefinedOr(held.get(runId)),
           without(held, runId),
@@ -624,20 +642,21 @@ export class RunDriver extends Context.Service<
 
       /**
        * Confirms through `StepExecutor.interrupt` that the parent task of the Attempt of `stop`,
-       * which failed on `worker`, stopped. The executor stops the task when an Attempt fails but
+       * which failed on `stop.worker`, stopped. The executor stops the task when an Attempt fails but
        * doesn't report whether the stop succeeded. If the stop isn't confirmed, the Attempt keeps
-       * the Run's slot, as on a cancel, no Run of the Loop on the Item starts an Attempt, and each
+       * the Run's slot, as on a cancel, no Run on the Item starts an Attempt, and each
        * `reconcile` retries the stop (#512, #523).
        */
       const confirmStopAfterFailure = Effect.fn("RunDriver.confirmStopAfterFailure")(function* (
-        stop: StopTarget,
-        worker: WorkerName,
+        stop: UnconfirmedStop,
       ) {
-        const { attemptId, runId } = stop;
+        const { attemptId, runId, worker } = stop;
         const fields = { runId, attemptId, worker, reason: stop.reason };
         yield* Effect.annotateCurrentSpan(fields);
+        yield* recordUnconfirmed(new UnconfirmedStop(stop));
         const stopped = yield* executor.interrupt(attemptId, stop.reason).pipe(Effect.result);
         if (Result.isSuccess(stopped)) {
+          yield* Ref.update(unconfirmed, (stops) => without(stops, attemptId));
           yield* Effect.logDebug(
             "The parent task of the failed Attempt is confirmed stopped; the Run's slot is freed",
             fields,
@@ -645,13 +664,10 @@ export class RunDriver extends Context.Service<
           return;
         }
         yield* Effect.logWarning(
-          "Could not confirm that the parent task of the failed Attempt stopped; the Attempt keeps its Run's slot, no Attempt starts on its Loop's Item, and each reconcile tries the stop again",
+          "Could not confirm that the parent task of the failed Attempt stopped; the Attempt keeps its Run's slot, no Attempt starts on its Item, and each reconcile tries the stop again",
           { ...fields, errorTag: stopped.failure._tag, message: stopped.failure.message },
         );
-        yield* holdSlot(runId, attemptId).pipe(
-          Effect.andThen(recordUnconfirmed(new UnconfirmedStop({ ...stop, worker }))),
-          Effect.uninterruptible,
-        );
+        yield* holdSlot(stop);
       });
 
       /** Returns the unconfirmed stop that keeps the Run of `submission` from starting an Attempt. */
@@ -659,35 +675,33 @@ export class RunDriver extends Context.Service<
         Ref.get(unconfirmed).pipe(
           Effect.map((stops) =>
             Option.fromUndefinedOr(
-              [...stops.values()].find(
-                ({ loop, itemKey }) => loop === submission.loop && itemKey === submission.itemKey,
-              ),
+              [...stops.values()].find(({ itemKey }) => itemKey === submission.itemKey),
             ),
           ),
         );
 
-      const releaseKept = Effect.fn("RunDriver.releaseKept")(function* (stop: StopTarget) {
-        const { attemptId, runId, reason } = stop;
-        yield* Effect.annotateCurrentSpan({ runId, attemptId, reason });
-        const stopped = yield* checkouts.reconcile(attemptId, reason).pipe(Effect.result);
-        if (Result.isSuccess(stopped)) {
-          const recorded = yield* Ref.modify(unconfirmed, (stops) => [
-            stops.has(attemptId),
-            without(stops, attemptId),
-          ]);
-          if (recorded)
-            yield* Effect.logInfo(
-              "The parent task of a closed Attempt is confirmed stopped; Runs on its Loop's Item start Attempts again",
-              { runId, attemptId, loop: stop.loop, itemKey: stop.itemKey, reason },
-            );
-          return;
-        }
-        const { worker } = stopped.failure;
-        yield* Effect.annotateCurrentSpan({ worker });
-        yield* recordUnconfirmed(new UnconfirmedStop({ ...stop, worker }));
-        yield* Effect.logWarning(
-          "The parent task of a closed Attempt is not confirmed stopped; its Worker's slot, and any checkout startup kept, stay kept, no Attempt starts on its Loop's Item, and the next reconcile tries the stop again",
-          { runId, attemptId, worker, loop: stop.loop, itemKey: stop.itemKey, reason },
+      const reconcileKept = Effect.fn("RunDriver.reconcileKept")(function* (stop: UnconfirmedStop) {
+        yield* Effect.annotateCurrentSpan({ ...stop });
+        yield* recordUnconfirmed(stop);
+        yield* checkouts.reconcile(stop.attemptId, stop.reason);
+        yield* Ref.update(unconfirmed, (stops) => without(stops, stop.attemptId));
+        yield* Effect.logInfo("Parent stop confirmed; runs on the item can start attempts again", {
+          ...stop,
+        });
+      });
+
+      const releaseKept = Effect.fn("RunDriver.releaseKept")(function* (stop: UnconfirmedStop) {
+        yield* Effect.annotateCurrentSpan({ ...stop });
+        yield* reconcileKept(stop).pipe(
+          Effect.catchTag("ParentStopUnconfirmedError", (error) =>
+            Effect.logWarning(
+              "Parent stop unconfirmed; the worker slot and checkout stay reserved until reconciliation succeeds",
+              {
+                ...stop,
+                errorTag: error._tag,
+              },
+            ),
+          ),
         );
       });
 
@@ -708,7 +722,14 @@ export class RunDriver extends Context.Service<
         // No Run fiber retries these stops, so reconcile does, before it starts the fibers they
         // keep from starting an Attempt.
         const unstopped = [...(yield* Ref.get(unconfirmed)).values()];
-        yield* Effect.forEach(unstopped, releaseKept, { discard: true });
+        yield* Effect.forEach(
+          unstopped,
+          (stop) =>
+            FiberMap.has(fibers, stop.runId).pipe(
+              Effect.flatMap((running) => (running ? Effect.void : releaseKept(stop))),
+            ),
+          { discard: true },
+        );
         const continuations = yield* store.pendingContinuations;
         yield* Effect.forEach(
           continuations,

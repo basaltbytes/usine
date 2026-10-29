@@ -668,6 +668,32 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         ),
     });
 
+    const recoveryComments =
+      (
+        attempt: AttemptRecovery,
+        worker: CloudflareWorker,
+        name: SandboxName,
+        worktree: string,
+      ): PostedCommentsHarvest =>
+      (spec, windows) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const access = yield* acquireSandbox(
+              worker,
+              name,
+              attempt.attemptId,
+              attempt.repository,
+              attempt.permissions,
+              "cleanup",
+            );
+            return yield* harvestPostedComments(
+              spec,
+              harvestCommand("cleanup", worker, name, worktree, access),
+              windows,
+            );
+          }),
+        );
+
     const recover = Effect.fn("CloudflareExecutor.recover")(function* <E, A>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
@@ -691,24 +717,8 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           yield* session.recoverPostedComments(
             attempt,
             present
-              ? Option.some<PostedCommentsHarvest>((spec, windows) =>
-                  Effect.scoped(
-                    Effect.gen(function* () {
-                      const access = yield* acquireSandbox(
-                        worker,
-                        name,
-                        attempt.attemptId,
-                        attempt.repository,
-                        attempt.permissions,
-                        "cleanup",
-                      );
-                      return yield* harvestPostedComments(
-                        spec,
-                        harvestCommand("cleanup", worker, name, layout.worktree, access),
-                        windows,
-                      );
-                    }),
-                  ),
+              ? Option.some<PostedCommentsHarvest>(
+                  recoveryComments(attempt, worker, name, layout.worktree),
                 )
               : Option.none(),
             record,
@@ -990,6 +1000,9 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               layout: { worktree: layout.worktree },
               ops,
               spec,
+              confirmStop: session
+                .stopForRecovery(keptCheckoutRecovery(request))
+                .pipe(Effect.tapError(() => Ref.set(keep, true))),
             }),
         });
         const releaseWorkspace = Effect.fn("CloudflareExecutor.releaseWorkspace")(
@@ -1092,6 +1105,13 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               harvestCommand("launch", worker, name, prepared.worktree, access),
               windows,
             ),
+          harvestKeptComments: (windows) =>
+            recoveryComments(
+              keptCheckoutRecovery(request),
+              worker,
+              name,
+              prepared.worktree,
+            )(prepared.spec, windows),
           keepForReattach: keptWith(provisioned.keepForReattach),
           keepUntilStopped: keptWith(provisioned.keepUntilStopped),
           reconcileKept: (record) =>
