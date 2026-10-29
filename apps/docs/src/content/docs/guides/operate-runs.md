@@ -5,6 +5,16 @@ sidebar:
   order: 3
 ---
 
+## Project boards and tasks
+
+The sidebar lists projects by display name. Each project has **Board** and **Tasks** links. Hover over a project with several repositories to see the repository count.
+
+At `/projects/<project>`, the board combines tasks from every repository in the project. Cards show a repository mark and name when the project has several repositories. Moving a card changes labels in that card's repository. The arrows between lanes list the project's matching loops.
+
+The task list at `/projects/<project>/tasks` has a repository filter for projects with several repositories. Task links include `?repository=<owner>/<name>` to distinguish item numbers across repositories. The repository control on a task page opens the corresponding filtered list. Old `/projects/<owner>/<name>/...` links redirect to the repository's project.
+
+Create a project in **Configuration > Projects > New**. Enter a slug ID and display name, add registered repositories, set their order with the move buttons, and configure shared lanes. A repository can be in only one project. Lane label choices combine the selected repositories' labels. **Save** records a revision and applies the change live. Use **Edit as text** for the export format or **History** to inspect and revert revisions.
+
 ## Overview page
 
 **Overview**, at `/`, has these sections:

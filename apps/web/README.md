@@ -44,17 +44,17 @@ The first screen, at `/`:
 - **Recent runs**: the last 10 closed runs, with outcome and the pull request the run opened, unless it names the task.
 - One line with each worker's slots in use and last preflight. A provisioned worker adds the count of its machines, if any, and while machine creation is paused, the failure and the next try in red, such as `Machine creation failed: quota reached. Next try at 19:46`.
 
-A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview links to **Configuration > Repositories**.
+A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project configured, the overview links to **Configuration > Projects**.
 
 The Overview's run statistics show the median failure-to-answer time, with separate retry and resolution medians. The first recorded answer counts once, including when a resolved failure is later retried.
 
 ## Sidebar
 
-Lists the projects, each with **Board** and **Tasks** under it. The open page's row is highlighted; a project's own row opens its board.
+Lists projects by display name, each with **Board** and **Tasks** under it. Hover over a project with several repositories to see the repository count. The open page's row is highlighted; a project's own row opens its board.
 
 ## Board
 
-A project opens as a horizontal board whose authored or proposed lanes group the latest GitHub issues and pull requests, all in one row, with every task the overview returns. It scrolls both ways below the project heading, with both ends reachable on any screen width.
+At `/projects/<project>`, a project opens as a horizontal board whose authored or proposed lanes group the latest GitHub issues and pull requests, all in one row, with every task the overview returns. It scrolls both ways below the project heading, with both ends reachable on any screen width.
 
 ### Lanes
 
@@ -64,7 +64,7 @@ The lane heading shows the name, card count, and the labels (in GitHub colors) a
 
 Between two adjacent authored label-backed lanes, an arrow at the end of the left lane's heading points to the next lane and names the loops whose trigger currently matches one of its tasks, open run or not, with `paused` after paused ones. It's blue if one has a queued or running run on the lane's tasks, peach if all their open runs wait for approval, and unlabeled if no loop matches.
 
-Only authored label-backed lanes accept moves, and only if another writable lane exists; proposed, state-only, and unmatched lanes are read-only. A board with proposed lanes explains how to enable moves: edit the repository in **Configuration > Repositories** and add `lanes`.
+Only authored label-backed lanes accept moves, and only if another writable lane exists; proposed, state-only, and unmatched lanes are read-only. A board with proposed lanes explains how to enable moves: edit the project in **Configuration > Projects** and add lanes with labels.
 
 ### Task cards
 
@@ -85,7 +85,7 @@ A moved card stays in its destination while the label write and GitHub refresh f
 
 ## Tasks list
 
-At `/projects/<owner>/<name>/tasks`: the board's tasks with at least one run, finished ones included; other tasks appear only on the board and GitHub. With no runs at all, it shows `No runs yet`. A row opens the task page.
+At `/projects/<project>/tasks`: the board's tasks with at least one run, finished ones included; other tasks appear only on the board and GitHub. With no runs at all, it shows `No runs yet`. A row opens the task page.
 
 Columns:
 
@@ -117,7 +117,7 @@ Columns follow the table's width, not the window's; [`DESIGN.md`](DESIGN.md#layo
 
 ## Task page
 
-At `/projects/<owner>/<name>/tasks/<number>`, where the number is the originating item's: the earliest issue, or else the earliest pull request. Any member's number opens the page under that address. An item outside the board's 500 newest shows `Task not found`.
+At `/projects/<project>/tasks/<number>?repository=<owner>/<name>`, where the number is the originating item's: the earliest issue, or else the earliest pull request. Any member's number opens the page under that address. An item outside the board's 500 newest shows `Task not found`.
 
 The header has the task's name; below it, the task's other pull requests, the lane, labels besides the lane's own, and **Needs attention** if it applies. **Move to** is at the right while another writable lane exists and no move is saving.
 
@@ -161,7 +161,7 @@ Once a question or blocker is marked answered or resolved, the run's actions are
 
 ## Run page
 
-At `/projects/<owner>/<name>/runs/<run>`: the whole run under the drawer's header and actions. The line under the title adds the tokens the sessions used, such as `159.6K tokens`; the total opens a breakdown per billing pool and per session under each attempt, priced by the harness or, for Codex, at OpenAI's API rates, with the Claude and ChatGPT plans as estimates.
+At `/projects/<project>/runs/<run>`: the whole run under the drawer's header and actions. The line under the title adds the tokens the sessions used, such as `159.6K tokens`; the total opens a breakdown per billing pool and per session under each attempt, priced by the harness or, for Codex, at OpenAI's API rates, with the Claude and ChatGPT plans as estimates.
 
 **Run again**, on a succeeded or canceled run (or in the card menu for the task's latest run), opens a new run of its loop on the same item content with the run's task and agent; **Edit and run again**, under **More actions**, lets you change them first. The drawer or page then shows the new run, whose event says who ran it again, when, and from which run, linked by short id in the event document and on the task page. If the item's cycle budget is used up, no run opens and the actions say so. For **Edit and retry**, see [Intervening in a run](#intervening-in-a-run).
 
@@ -220,9 +220,9 @@ The stored configuration in full-panel pages: **Loops**, **Agents**, **Workers**
 
 A loop or agent file that didn't load comes first in its list; its page shows the parse stage, the message, and how to recover.
 
-Agent forms offer server-supported harnesses and efforts, model suggestions from agents using the selected harness, and a Markdown persona preview. Model suggestions allow any value. Worker forms show the fields for each kind, environment variable names for secrets, restart requirements, and preflight-derived container limits when unset. Settings fields describe each value. The repository picker lists unregistered installation repositories; the lane manager uses live GitHub labels and supports adding, removing, renaming, and ordering lanes with drag handles, keyboard controls, and move buttons.
+Agent forms offer server-supported harnesses and efforts, model suggestions from agents using the selected harness, and a Markdown persona preview. Model suggestions allow any value. Worker forms show the fields for each kind, environment variable names for secrets, restart requirements, and preflight-derived container limits when unset. Settings fields describe each value. The repository picker lists unregistered installation repositories; the project lane manager uses live GitHub labels and supports adding, removing, renaming, and ordering lanes with drag handles, keyboard controls, and move buttons.
 
-Loops, agents, workers, settings, and repositories open a form with **Edit**. **Edit as text** switches to the export-format editor with line numbers; switching back preserves valid edits. Both modes accept an optional revision message. Labels open the text editor. **Save** uses the revision loaded when editing began. Validation errors list every field path below the editor. A concurrent change shows the newer text as a diff; **Reload text** retains the unsaved draft in a separate copyable field. Restart and worker preflight refusals display the server's reason.
+Loops, agents, workers, settings, projects, and repositories open a form with **Edit**. **Edit as text** switches to the export-format editor with line numbers; switching back preserves valid edits. Both modes accept an optional revision message. Labels open the text editor. **Save** uses the revision loaded when editing began. Validation errors list every field path below the editor. A concurrent change shows the newer text as a diff; **Reload text** retains the unsaved draft in a separate copyable field. Restart and worker preflight refusals display the server's reason.
 
 **New** on each list starts from a template. New loops start paused. **Delete** confirms the entity name and the loops or projects that reference it before sending the request. Deleting a label removes its declaration, not the label on GitHub.
 
@@ -304,11 +304,13 @@ The registry is the component library, and the theme is the only place for color
 
 Needs attention groups unresponsive workers with their last answer time and buttons to open each affected run. Entries appear after three consecutive unanswered probes and clear when the worker answers or its affected attempts end. Dismiss and Undo apply to these entries.
 
-Loop forms provide stream-specific payload completion for CEL conditions and Markdown prompt expressions, with debounced server checks. Repository and tag selectors use the registry, and agent choices use the roster. **Preview** lists up to 20 matching stored items, links each to its task, and renders the prompt for a selected item. Editing the draft clears the displayed preview. A schedule loop explains that it has no polled items. **Resume** requires confirmation after loading the saved loop's current match count; new loops remain paused until this action.
+Loop forms provide stream-specific payload completion for CEL conditions and Markdown prompt expressions, with debounced server checks. New loops select a project before the loop name. Loop lists and details link to that project. Repository and tag selectors offer only repositories and tags in that project, and agent choices use the roster. **Preview** lists up to 20 matching stored items, links each to its task, and renders the prompt for a selected item. Editing the draft clears the displayed preview. A schedule loop explains that it has no polled items. **Resume** requires confirmation after loading the saved loop's current match count; new loops remain paused until this action.
 
 A run waiting after a provider capacity refusal shows the provider's message, the next attempt number, and the earliest retry time in its header. **Cancel run** stops the pending retry. Automatic retries resume from the newest pushed salvage and stop after three attempts in total.
 
-Project configuration entities use `/configuration/projects/$project` with the shared raw entity editor and revision history. The repository form reads and writes the owning project's lanes for projects with one repository.
+**Configuration > Projects** creates and edits projects: a slug ID, a display name, ordered repositories, and shared lanes. Repository choices exclude repositories assigned to another project. Lane label choices come from the selected repositories. Project forms support **Edit as text** and revision history. Repository forms edit registry names and tags.
+
+A project board combines tasks from all project repositories. Cards show a repository mark and name when the project has several repositories; moves change labels in the card's repository. The task list has a repository filter, and the task page's repository control opens that filtered list. Old `/projects/<owner>/<name>/...` URLs redirect to the repository's project, preserving the repository on task links.
 
 ## Member authentication
 
