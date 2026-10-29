@@ -1,11 +1,11 @@
 import type { Page } from "playwright";
 import { Schema } from "effect";
-import { ConfigurationView } from "@usine/orchestrator/operator";
 
 export const loopEditorResponses = async (
   { page }: { readonly page: Page },
   configuration: string,
 ) => {
+  const { ConfigurationView } = await import("@usine/orchestrator/operator");
   const current = Schema.decodeUnknownSync(ConfigurationView)(JSON.parse(configuration));
   let saved = false;
   let paused = true;
