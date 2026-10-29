@@ -47,8 +47,8 @@ const hasBody = (request: HttpServerRequest.HttpServerRequest): boolean =>
  * in both directions without buffering. The client span is disabled, so no header value is
  * recorded in a trace.
  */
-export const forwardRequest = (
-  client: HttpClient.HttpClient,
+export const forwardRequest = <E>(
+  client: HttpClient.HttpClient.With<E>,
   request: HttpServerRequest.HttpServerRequest,
   upstream: string,
   headers: Headers.Headers,

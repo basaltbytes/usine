@@ -275,6 +275,14 @@ describe("GatewayProxy", () => {
           [403, "repository-mismatch"],
         );
         assert.deepStrictEqual(
+          refusal(
+            yield* send("http://git.gw.test/api/v3/repos/acme/other/actions/artifacts/42/zip", {
+              "x-usine-gateway-token": caller,
+            }),
+          ),
+          [403, "repository-mismatch"],
+        );
+        assert.deepStrictEqual(
           refusal(yield* send("http://git.gw.test/acme/demo.git/info/refs", {})),
           [401, "missing-caller-token"],
         );
@@ -520,7 +528,7 @@ describe("GatewayProxy", () => {
   );
 
   it.effect(
-    "a release download sends the installation token to github.com only, and passes its redirect to the asset host back unchanged",
+    "a release download streams the asset through the gateway and sends credentials only to GitHub",
     () =>
       Effect.gen(function* () {
         lines.length = 0;
@@ -529,12 +537,17 @@ describe("GatewayProxy", () => {
           "http://git.gw.test/acme/demo/releases/download/v1.2.0/tool-linux-amd64.tar.gz",
           { "x-usine-gateway-token": caller },
         );
-        assert.strictEqual(response.status, 302);
-        assert.strictEqual(response.headers.get("location"), ASSET_URL);
+        assert.strictEqual(response.status, 200);
+        assert.strictEqual(response.headers.get("location"), null);
+        assert.strictEqual(response.body, "upstream body");
+        assert.strictEqual(response.headers.get("x-upstream"), "yes");
         const requests = yield* sent;
         assert.deepStrictEqual(
           requests.map(({ url }) => url),
-          ["https://github.com/acme/demo/releases/download/v1.2.0/tool-linux-amd64.tar.gz"],
+          [
+            "https://github.com/acme/demo/releases/download/v1.2.0/tool-linux-amd64.tar.gz",
+            ASSET_URL,
+          ],
         );
         const [request] = requests;
         assert(request !== undefined);
@@ -542,14 +555,14 @@ describe("GatewayProxy", () => {
           Headers.get(request.headers, "authorization"),
           Option.some(`Basic ${Base64.encode(`x-access-token:${INSTALLATION_TOKEN}`)}`),
         );
+        assert.deepStrictEqual(requests[1]?.headers, Headers.empty);
         const served = lines.find((line) => line.includes("Served a GitHub release download"));
         assert(served !== undefined, lines.join("\n"));
-        for (const field of [
-          '"repository":"acme/demo"',
-          '"status":302',
-          '"target":"release-assets.githubusercontent.com"',
-        ])
+        for (const field of ['"repository":"acme/demo"', '"status":200'])
           assert.include(served, field);
+        assert.isTrue(
+          lines.some((line) => line.includes('"target":"release-assets.githubusercontent.com"')),
+        );
         for (const value of [caller, INSTALLATION_TOKEN, "signature-for-tests"])
           assert.isFalse(
             lines.some((line) => line.includes(value)),
