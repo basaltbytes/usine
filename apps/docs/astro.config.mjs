@@ -13,6 +13,8 @@ export default defineConfig({
       autoTheme: true,
       enableLog: false,
       mermaidConfig: {
+        fontFamily: "var(--sl-font, var(--sl-font-system))",
+        themeVariables: { fontFamily: "var(--sl-font, var(--sl-font-system))" },
         layout: "dagre",
         look: "classic",
         flowchart: { useMaxWidth: false },
