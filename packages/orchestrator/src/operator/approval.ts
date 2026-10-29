@@ -20,7 +20,7 @@ export const readApprovalItems = Effect.fn("Operator.readApprovalItems")(functio
     yield* Effect.annotateCurrentSpan({ itemKey });
     const stored = yield* reader.get(itemKey);
     if (Option.isNone(stored)) {
-      yield* Effect.logDebug("Approval has no stored item", { itemKey });
+      yield* Effect.logInfo("Approval has no stored item", { itemKey });
       return Option.none<BoardItemLink>();
     }
     return yield* projectedItem(stored.value).pipe(
