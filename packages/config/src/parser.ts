@@ -237,7 +237,7 @@ const parseUsineYaml = Effect.fn("ConfigParser.parseUsineYaml")(
     }),
 );
 
-const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
+export const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
   (file: InstancePath, source: string): Effect.Effect<AgentFile, ConfigFileError> =>
     Effect.gen(function* () {
       const name = yield* agentName(file);

@@ -1,3 +1,4 @@
+import { HARNESSES, EFFORTS } from "@usine/core/agent/brain";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page, Route } from "playwright";
@@ -117,6 +118,30 @@ export const configurationEditorResponses = async (
       });
       return;
     }
+    if (last === "capabilities") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ harnesses: HARNESSES, efforts: EFFORTS }),
+      });
+      return;
+    }
+    if (url.pathname === "/api/configuration/repositories") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(["basaltbytes/usine", "basaltbytes/new-project"]),
+      });
+      return;
+    }
+    if (url.pathname.startsWith("/api/configuration/labels/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([
+          { name: "ready", color: "00ff00", description: "Ready for work" },
+          { name: "review", color: "aabbcc", description: null },
+        ]),
+      });
+      return;
+    }
     if (last === "revisions") {
       const before = url.searchParams.get("before");
       await route.fulfill({
@@ -157,7 +182,14 @@ export const configurationEditorResponses = async (
       body: JSON.stringify({
         key: { kind, identifier: last },
         value: {},
-        text: last === "instance" ? "settings: {}\n" : text,
+        text:
+          kind === "settings"
+            ? "version: 1\nsettings:\n  poll_interval: 60\n  max_children: 4\n  upgrade_channel: latest\n  upgrade_mode: propose\nwebhooks: { mode: off }\n"
+            : kind === "agent"
+              ? "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement.\n"
+              : kind === "repository"
+                ? "name: basaltbytes/usine\ntags: []\nlanes:\n  - name: Ready\n    sources: [{ label: ready }]\n  - name: Review\n    sources: [{ label: review }]\n"
+                : text,
         number,
       }),
     });

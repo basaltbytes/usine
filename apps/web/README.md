@@ -216,7 +216,9 @@ The stored configuration in full-panel pages: **Loops**, **Agents**, **Workers**
 
 A loop or agent file that didn't load comes first in its list; its page shows the parse stage, the message, and how to recover.
 
-Each detail page has **Edit** for the export-format text, with line numbers and an optional revision message. **Save** uses the revision loaded when editing began. Validation errors list every field path below the editor. A concurrent change shows the newer text as a diff; **Reload text** retains the unsaved draft in a separate copyable field. Restart and worker preflight refusals display the server's reason.
+Agent forms offer server-supported harnesses and efforts, model suggestions from agents using the selected harness, and a Markdown persona preview. Model suggestions allow any value. Worker forms show the fields for each kind, environment variable names for secrets, restart requirements, and preflight-derived container limits when unset. Settings fields describe each value. The repository picker lists unregistered installation repositories; the lane manager uses live GitHub labels and supports adding, removing, renaming, and ordering lanes with drag handles, keyboard controls, and move buttons.
+
+Agents, workers, settings, and repositories open a form with **Edit**. **Edit as text** switches to the export-format editor with line numbers; switching back preserves valid edits. Both modes accept an optional revision message. Loops and labels open the text editor. **Save** uses the revision loaded when editing began. Validation errors list every field path below the editor. A concurrent change shows the newer text as a diff; **Reload text** retains the unsaved draft in a separate copyable field. Restart and worker preflight refusals display the server's reason.
 
 **New** on each list starts from a template. New loops start paused. **Delete** confirms the entity name and the loops or projects that reference it before sending the request. Deleting a label removes its declaration, not the label on GitHub.
 

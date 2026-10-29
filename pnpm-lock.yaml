@@ -260,6 +260,9 @@ importers:
       '@usine/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@usine/github':
+        specifier: workspace:*
+        version: link:../../packages/github
       '@usine/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator

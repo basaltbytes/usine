@@ -117,6 +117,9 @@ describe("GitHubApp", () => {
         // The slug is the App's bot login, which attributes timeline changes to the factory.
         assert.strictEqual((yield* app.installation()).appSlug, "usine-basaltbytes");
 
+        assert.deepStrictEqual(yield* app.repositories(), [
+          RepositoryName.make("basaltbytes/usine"),
+        ]);
         const access = yield* app.projectAccess([
           RepositoryName.make("BasaltBytes/Usine"),
           RepositoryName.make("basaltbytes/missing"),

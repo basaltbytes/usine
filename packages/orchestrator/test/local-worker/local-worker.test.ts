@@ -929,6 +929,7 @@ describe("local worker", () => {
         const unreadableApp = Layer.succeed(GitHubApp)({
           installation: () => Effect.fail(missing),
           botAccount: () => Effect.fail(missing),
+          repositories: () => Effect.die("unused installation repositories"),
           installationToken: () => Effect.die("unused"),
           projectAccess: () => Effect.die("unused"),
           workerToken: () => Effect.die("unused"),

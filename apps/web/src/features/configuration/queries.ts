@@ -1,3 +1,4 @@
+import type { RepositoryName } from "@usine/core/repository";
 import {
   ConfigurationEntity,
   type ConfigurationEntityKey,
@@ -160,3 +161,22 @@ export const useConfigurationWrite = () => {
       ]),
   });
 };
+
+export const capabilitiesQuery = () =>
+  queryOptions({
+    queryKey: [...configurationEditorKeys, "capabilities"],
+    queryFn: () => api((client) => client.configurationCapabilities({})),
+    staleTime: Infinity,
+  });
+
+export const installationRepositoriesQuery = () =>
+  queryOptions({
+    queryKey: [...configurationEditorKeys, "installation-repositories"],
+    queryFn: () => api((client) => client.configurationRepositories({})),
+  });
+
+export const repositoryLabelsQuery = (repository: RepositoryName) =>
+  queryOptions({
+    queryKey: [...configurationEditorKeys, "labels", repository],
+    queryFn: () => api((client) => client.configurationLabels({ params: { repository } })),
+  });

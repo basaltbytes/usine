@@ -10,7 +10,7 @@ import { entityReferences } from "~/features/configuration/lib/entities";
 import { entityQuery, useConfigurationWrite } from "~/features/configuration/queries";
 import { editorCopy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
-import { RawEditor } from "./form";
+import { ConfigurationEditorForm } from "./form";
 import { WriteFailure } from "./failure";
 import { ConfigurationHistory } from "./history";
 
@@ -57,7 +57,7 @@ export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
       </div>
       {current.isError && !write.isSuccess && <ErrorAlert message={current.error.message} />}
       {mode._tag === "edit" && (
-        <RawEditor
+        <ConfigurationEditorForm
           entity={entity}
           initial={mode.initial}
           onSaved={() => {
