@@ -28,10 +28,13 @@ export type CommitSha = typeof CommitSha.Type;
 /** Returns `value` with every character outside `[A-Za-z0-9_.-]` replaced by `_`, for a path or ref segment. */
 export const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
 
+/** Returns the owner and repository portions of `repository`, preserving their configured casing. */
 export const splitRepositoryName = (repository: RepositoryName) => {
   const separator = repository.indexOf("/");
   return {
+    /** The GitHub user or organization that owns the repository, in configured casing. */
     owner: repository.slice(0, separator),
+    /** The repository name without its owner, in configured casing. */
     name: repository.slice(separator + 1),
   } as const;
 };

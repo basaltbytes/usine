@@ -17,6 +17,7 @@ export const CycleGeneration = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)
 );
 export type CycleGeneration = typeof CycleGeneration.Type;
 
+/** The default limit of three runs per loop and item between operator resets (ADR 0022). */
 export const DEFAULT_CYCLE_LIMIT = CycleLimit.make(3);
 
 /** The number of admitted or completed Runs of one Loop on an Item. */
@@ -28,8 +29,11 @@ export type CycleCount = typeof CycleCount.Type;
 /** The admitted and completed Runs of one Loop in the current cycle generation. */
 export class LoopCycleCount extends Schema.Class<LoopCycleCount>("LoopCycleCount")(
   closedStruct({
+    /** The loop whose runs are counted in this cycle generation. */
     loop: LoopName,
+    /** The runs opened for this loop and item since the last reset. */
     admitted: CycleCount,
+    /** The admitted runs that have completed; never greater than `admitted`. */
     completed: CycleCount,
   }).check(
     Schema.makeFilter(({ admitted, completed }) => completed <= admitted, {
@@ -45,11 +49,17 @@ export type CycleBudgetAskId = typeof CycleBudgetAskId.Type;
 /** An Ask for the operator to reset an Item's cycle budget; no Runs open until the reset. */
 export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk")(
   closedStruct({
+    /** The event-derived identity of the ask in this cycle generation. */
     id: CycleBudgetAskId,
+    /** The item whose budget prevents further runs. */
     itemKey: ItemKey,
+    /** The managed repo containing the item. */
     repository: RepositoryName,
+    /** The loop whose admitted runs reached its limit. */
     loop: LoopName,
+    /** The maximum runs allowed for the exhausted loop before an operator reset. */
     limit: CycleLimit,
+    /** The distinct participating loops and their counts, including the exhausted loop. */
     counts: Schema.NonEmptyArray(LoopCycleCount),
   }).check(
     Schema.makeFilter(

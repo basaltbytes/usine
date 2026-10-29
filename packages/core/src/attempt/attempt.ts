@@ -42,15 +42,20 @@ export type StopReason = typeof StopReason.Type;
 
 /** The task and Agent that an operator sets for a Run's later Attempts. */
 export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext")({
+  /** The effective task text for subsequent attempts in the run. */
   task: AttemptTask,
+  /** The agent definition selected for subsequent attempts. */
   agent: Agent,
+  /** The effective Pi parent model, or `None` to let Pi select it. */
   parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
 
-/** An operator's resolution of a failed attempt; the login is absent if none is configured. */
+/** An operator's resolution of a failed attempt; the login is absent if none was recorded. */
 export class FailureResolution extends Schema.Class<FailureResolution>("FailureResolution")(
   closedStruct({
+    /** The time the operator marked the attempt's failure resolved. */
     resolvedAt: Schema.DateTimeUtcFromString,
+    /** The operator login attributed to the resolution, or `None` if unavailable. */
     operator: Schema.OptionFromNullOr(OperatorLogin),
   }),
 ) {}
@@ -62,7 +67,9 @@ const Kills = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
  * its memory limit, `memoryMib`: the limit of the last container that recorded kills.
  */
 export class OutOfMemoryKills extends Schema.Class<OutOfMemoryKills>("OutOfMemoryKills")({
+  /** The total processes the kernel killed across the attempt's containers. */
   kills: Kills,
+  /** The memory limit, in MiB, of the last container that recorded kills. */
   memoryMib: ContainerMemoryMib,
 }) {}
 
@@ -73,8 +80,11 @@ export class OutOfMemoryKills extends Schema.Class<OutOfMemoryKills>("OutOfMemor
 export class ContainerOutOfMemoryKills extends Schema.Class<ContainerOutOfMemoryKills>(
   "ContainerOutOfMemoryKills",
 )({
+  /** The runtime ID of the container that recorded the kills. */
   container: ContainerId,
+  /** The cumulative processes the kernel killed in this container. */
   kills: Kills,
+  /** This container's memory limit in MiB. */
   memoryMib: ContainerMemoryMib,
 }) {}
 
@@ -101,30 +111,49 @@ export const totalOutOfMemoryKills = (
  *   of them together; `None` if it killed none or the Attempt ran without a container.
  */
 export class Attempt extends Schema.Class<Attempt>("Attempt")({
+  /** The identity of this try, distinct from every retry. */
   id: AttemptId,
+  /** The run whose step this attempt tries. */
   runId: RunId,
+  /** The step name under which the run stores a successful result. */
   stepName: StepName,
+  /** The worker assigned to this attempt. */
   worker: WorkerName,
+  /** The 1-based position of this attempt in the step, including automatic retries. */
   number: AttemptNumber,
+  /** The child-session brain settings recorded for this attempt. */
   brain: BrainSpec,
+  /** The effective task text supplied when this attempt started. */
   task: AttemptTask,
+  /** The agent selected for this attempt. */
   agent: AgentName,
+  /** Whether an operator action was accepted during this attempt. */
   operatorIntervened: Schema.Boolean,
+  /** The Pi parent model recorded for this attempt, or `None` if unavailable. */
   parentModel: Schema.OptionFromNullOr(ModelId),
+  /** The time this attempt started, also the start of its attribution window. */
   startedAt: Schema.DateTimeUtc,
+  /** The terminal result, or `None` while the attempt is open. */
   outcome: Schema.Option(AttemptOutcome),
+  /** The time the outcome was recorded, or `None` while open or for older records. */
   endedAt: Schema.Option(Schema.DateTimeUtc),
+  /** The workspace recovery result after an unsuccessful end, or `None` if none was recorded. */
   salvage: Schema.Option(AttemptSalvage),
+  /** The operator's recorded failure resolution, or `None` for unresolved or older records. */
   failureResolution: Schema.Option(FailureResolution).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<FailureResolution>())),
   ),
+  /** The reason this attempt started, or `None` for older records. */
   start: Schema.Option(AttemptStart).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<AttemptStart>())),
   ),
+  /** The most recent restart reattachment time, or `None` if never reattached. */
   reattachedAt: Schema.Option(Schema.DateTimeUtc).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),
+  /** Comments and reviews from an unsuccessful attempt; successful attempts record them in the step result. */
   comments: Schema.Array(Comment).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+  /** The memory-related process kills across this attempt's containers, or `None` if none were recorded. */
   outOfMemory: Schema.Option(OutOfMemoryKills).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<OutOfMemoryKills>())),
   ),
@@ -135,8 +164,11 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
  * by Attempts that share one App login.
  */
 export class AttemptWindow extends Schema.Class<AttemptWindow>("AttemptWindow")({
+  /** The attempt to which writes in this window may belong. */
   attemptId: AttemptId,
+  /** The start time, rounded down to the second when comparing GitHub timestamps. */
   startedAt: Schema.DateTimeUtc,
+  /** The inclusive end time, or `None` while the window remains open. */
   endedAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
 
@@ -181,7 +213,9 @@ export const windowsOverlap = (left: AttemptWindow, right: AttemptWindow): boole
  * same Agent's other Attempts on the Item.
  */
 export class AttemptWindows extends Schema.Class<AttemptWindows>("AttemptWindows")({
+  /** The harvested attempt's window, or `None` when older records lack its end time. */
   own: Schema.Option(AttemptWindow),
+  /** Other attempts by the same agent on the same item whose windows overlap this one. */
   overlapping: Schema.Array(AttemptWindow),
 }) {}
 
@@ -198,13 +232,21 @@ export const shouldAutoRetry = (options: {
 /** The next attempt after a provider capacity refusal, with its earliest start time. */
 export class ProviderRetry extends Schema.Class<ProviderRetry>("ProviderRetry")(
   closedStruct({
+    /** The 1-based number of the attempt to start after the refusal. */
     nextAttempt: AttemptNumber.check(Schema.isGreaterThanOrEqualTo(2)),
+    /** The earliest permitted retry time after the provider backoff. */
     retryAt: Schema.DateTimeUtcFromString,
+    /** The provider capacity refusal reported by the previous attempt. */
     message: Schema.NonEmptyString,
   }),
 ) {}
 
-/** Returns a pending capacity retry from persisted state, including after an orchestrator restart. */
+/**
+ * Returns a pending capacity retry from persisted state, including after an orchestrator restart.
+ * `attempts` must be ordered oldest to newest. Returns `None` unless the run is running and its
+ * latest attempt has a recorded end time and a capacity failure below the automatic retry cap.
+ * The retry starts no earlier than two minutes after attempt 1 or five minutes after attempt 2.
+ */
 export const pendingProviderRetry = (
   state: RunState,
   attempts: ReadonlyArray<Attempt>,

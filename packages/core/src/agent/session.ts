@@ -23,11 +23,15 @@ export type ChildSessionBudget = typeof ChildSessionBudget.Type;
 export const ChildSessionCount = PositiveInt.pipe(Schema.brand("ChildSessionCount"));
 export type ChildSessionCount = typeof ChildSessionCount.Type;
 
+/** The Pi session that supervises the attempt and starts its child sessions. */
 export class ParentSession extends Schema.TaggedClass<ParentSession>("Agent/ParentSession")(
   "ParentSession",
   {
+    /** The usine session ID used to correlate the parent's events. */
     id: AgentSessionId,
+    /** The agent definition selected for the parent. */
     agent: AgentName,
+    /** The Pi brain actually selected for this parent session. */
     brain: BrainSpec,
   },
 ) {}
@@ -36,9 +40,13 @@ export class ParentSession extends Schema.TaggedClass<ParentSession>("Agent/Pare
 export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildSession")(
   "ChildSession",
   {
+    /** The usine session ID used to correlate the child's events. */
     id: AgentSessionId,
+    /** The usine session ID of the parent that started this child. */
     parentId: AgentSessionId,
+    /** The agent definition selected for the child. */
     agent: AgentName,
+    /** The harness, model, and effort selected for this child. */
     brain: BrainSpec,
     /**
      * The credential kind the Gateway (ADR 0027) or a Cloudflare Worker's outbound handler used
@@ -51,6 +59,7 @@ export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildS
   },
 ) {}
 
+/** The identity, agent, and selected brain of a parent or first-level child session. */
 export const AgentSession = Schema.Union([ParentSession, ChildSession]);
 export type AgentSession = typeof AgentSession.Type;
 
@@ -60,7 +69,9 @@ export type HarnessSessionId = typeof HarnessSessionId.Type;
 
 /** A saved harness conversation; `cwd` is the Worker checkout to resume it from. */
 export class HarnessSession extends Schema.Class<HarnessSession>("Agent/HarnessSession")({
+  /** The harness's own saved-conversation ID, distinct from the usine session ID. */
   id: HarnessSessionId,
+  /** The worker checkout directory from which to resume the conversation. */
   cwd: Schema.NonEmptyString,
   /**
    * The directory the harness saved the conversation in, if the Attempt set one in place of the
@@ -75,6 +86,7 @@ export class HarnessSession extends Schema.Class<HarnessSession>("Agent/HarnessS
 export class SessionStarted extends Schema.TaggedClass<SessionStarted>("Agent/SessionStarted")(
   "SessionStarted",
   {
+    /** The session identity and brain settings selected at launch. */
     session: AgentSession,
     /** `None` for older transcripts and for harnesses without a saved conversation. */
     harnessSession: Schema.OptionFromOptionalKey(HarnessSession).pipe(
@@ -85,7 +97,9 @@ export class SessionStarted extends Schema.TaggedClass<SessionStarted>("Agent/Se
 
 /** Completed assistant text, which can come before the final result. */
 export class TextOutput extends Schema.TaggedClass<TextOutput>("Agent/TextOutput")("TextOutput", {
+  /** The session that produced the assistant text. */
   session: AgentSession,
+  /** The completed assistant text; it need not be the session's final result. */
   text: Schema.NonEmptyString,
 }) {}
 
@@ -93,9 +107,13 @@ export class TextOutput extends Schema.TaggedClass<TextOutput>("Agent/TextOutput
 export class ToolStarted extends Schema.TaggedClass<ToolStarted>("Agent/ToolStarted")(
   "ToolStarted",
   {
+    /** The session that requested the tool call. */
     session: AgentSession,
+    /** The harness call ID that correlates this request with `ToolFinished`. */
     callId: Schema.NonEmptyString,
+    /** The tool name reported by the harness. */
     tool: Schema.NonEmptyString,
+    /** The normalized JSON arguments supplied to the tool. */
     input: Schema.Json,
   },
 ) {}
@@ -104,10 +122,15 @@ export class ToolStarted extends Schema.TaggedClass<ToolStarted>("Agent/ToolStar
 export class ToolFinished extends Schema.TaggedClass<ToolFinished>("Agent/ToolFinished")(
   "ToolFinished",
   {
+    /** The session that received the tool result. */
     session: AgentSession,
+    /** The harness call ID from the corresponding `ToolStarted` event. */
     callId: Schema.NonEmptyString,
+    /** The tool name reported by the harness. */
     tool: Schema.NonEmptyString,
+    /** The normalized JSON result returned by the tool. */
     output: Schema.Json,
+    /** Whether the tool reported an error; this does not end the session. */
     isError: Schema.Boolean,
   },
 ) {}
@@ -115,19 +138,28 @@ export class ToolFinished extends Schema.TaggedClass<ToolFinished>("Agent/ToolFi
 /** The end of a session's activity; the Attempt's outcome is recorded separately. */
 export class SessionFinished extends Schema.TaggedClass<SessionFinished>("Agent/SessionFinished")(
   "SessionFinished",
-  { session: AgentSession },
+  {
+    /** The session whose activity ended; the attempt's outcome is separate. */
+    session: AgentSession,
+  },
 ) {}
 
 /** A supervised session that finished a turn and accepts more operator messages. */
 export class SessionIdle extends Schema.TaggedClass<SessionIdle>("Agent/SessionIdle")(
   "SessionIdle",
-  { session: AgentSession },
+  {
+    /** The supervised session that finished a turn and accepts operator input. */
+    session: AgentSession,
+  },
 ) {}
 
 /** A live session that started another user turn in the same conversation. */
 export class SessionResumed extends Schema.TaggedClass<SessionResumed>("Agent/SessionResumed")(
   "SessionResumed",
-  { session: AgentSession },
+  {
+    /** The session that began another user turn in the same conversation. */
+    session: AgentSession,
+  },
 ) {}
 
 /** An estimated amount in US dollars from a rate table, not a bill (ADR 0013). */
@@ -158,16 +190,21 @@ export class TokenBreakdown extends Schema.Class<TokenBreakdown>("Agent/TokenBre
 export class SessionTokensUpdated extends Schema.TaggedClass<SessionTokensUpdated>(
   "Agent/SessionTokensUpdated",
 )("SessionTokensUpdated", {
+  /** The session whose cumulative usage this report replaces. */
   session: AgentSession,
+  /** Output plus uncached input tokens across all turns, excluding cache reads. */
   totalTokens: TokenCount,
+  /** The harness-reported price in US dollars, or `None` if unpriced or from an older transcript. */
   costUsd: Schema.OptionFromOptionalKey(UsdAmount).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<UsdAmount>())),
   ),
+  /** The cumulative tokens by billing rate, or `None` when the harness does not report them. */
   breakdown: Schema.OptionFromOptionalKey(TokenBreakdown).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<TokenBreakdown>())),
   ),
 }) {}
 
+/** The billing source for a session's model requests: API keys, a Claude plan, or a ChatGPT plan (ADR 0013). */
 export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
 export type BillingPool = typeof BillingPool.Type;
 
@@ -200,10 +237,13 @@ export const sessionPool = (session: AgentSession): BillingPool =>
     ChildSession: ({ brain, gatewayCredential }) => brainPool(brain, gatewayCredential),
   });
 
+/** One provider-reported allowance window, including usage outside usine. */
 export class RateLimitWindow extends Schema.Class<RateLimitWindow>("Agent/RateLimitWindow")({
   /** The percentage of the allowance used, including usage outside this Attempt. */
   usedPercent: Schema.Number,
+  /** The length of this allowance window in minutes, or `None` if unreported. */
   windowDurationMinutes: Schema.OptionFromNullOr(Schema.Number),
+  /** The provider-reported reset time, or `None` if unreported. */
   resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {}
 
@@ -211,9 +251,13 @@ export class RateLimitWindow extends Schema.Class<RateLimitWindow>("Agent/RateLi
 export class RateLimitsSnapshot extends Schema.Class<RateLimitsSnapshot>(
   "Agent/RateLimitsSnapshot",
 )({
+  /** The provider's identifier for the reported allowance, or `None`. */
   limitId: Schema.OptionFromNullOr(Schema.String),
+  /** The provider's display name for the allowance, or `None`. */
   limitName: Schema.OptionFromNullOr(Schema.String),
+  /** The provider's primary allowance window, or `None` if unreported. */
   primary: Schema.OptionFromNullOr(RateLimitWindow),
+  /** The provider's secondary allowance window, or `None` if unreported. */
   secondary: Schema.OptionFromNullOr(RateLimitWindow),
 }) {}
 
@@ -225,12 +269,15 @@ export type PoolLogin = typeof PoolLogin.Type;
 export class PoolRateLimitsUpdated extends Schema.TaggedClass<PoolRateLimitsUpdated>(
   "Agent/PoolRateLimitsUpdated",
 )("PoolRateLimitsUpdated", {
+  /** The session during which the provider reported these limits. */
   session: AgentSession,
+  /** The billing source to which the reported limits apply. */
   pool: BillingPool,
   /** Absent for older records and providers that don't report a login. */
   login: Schema.OptionFromOptionalKey(PoolLogin).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<PoolLogin>())),
   ),
+  /** The provider's latest allowance windows, including usage outside usine. */
   rateLimits: RateLimitsSnapshot,
 }) {}
 
@@ -245,6 +292,7 @@ export type ProviderRetries = typeof ProviderRetries.Type;
 export class ProviderRetrying extends Schema.TaggedClass<ProviderRetrying>(
   "Agent/ProviderRetrying",
 )("ProviderRetrying", {
+  /** The session whose harness is retrying a model provider request. */
   session: AgentSession,
   /** The harness's failure message, verbatim if it provides one. */
   message: Schema.NonEmptyString,
@@ -256,11 +304,13 @@ export class ProviderRetrying extends Schema.TaggedClass<ProviderRetrying>(
 export class ProviderRecovered extends Schema.TaggedClass<ProviderRecovered>(
   "Agent/ProviderRecovered",
 )("ProviderRecovered", {
+  /** The session whose model provider responded after retries in this turn. */
   session: AgentSession,
   /** The retries in the turn before the response. */
   retries: ProviderRetries,
 }) {}
 
+/** A normalized session activity or usage report for storage in an attempt transcript. */
 export const AgentSessionEvent = Schema.Union([
   SessionStarted,
   TextOutput,

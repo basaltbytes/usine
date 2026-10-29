@@ -7,6 +7,7 @@ export type LoopName = typeof LoopName.Type;
 
 /** The approval modes; with `required`, new Runs wait for an approval Event. */
 export const APPROVAL_REQUIREMENTS = ["none", "required"] as const;
+/** Whether a new run must wait for an operator approval before starting an attempt. */
 export const ApprovalRequirement = Schema.Literals(APPROVAL_REQUIREMENTS);
 export type ApprovalRequirement = typeof ApprovalRequirement.Type;
 
@@ -16,5 +17,6 @@ export type ApprovalRequirement = typeof ApprovalRequirement.Type;
  * token rejects the Attempt (ADR 0011).
  */
 export const LOOP_PERMISSIONS = ["write", "read"] as const;
+/** The repository access granted to attempts: `read` allows comments and reviews, while `write` also allows pushes and merges (ADR 0011). */
 export const LoopPermissions = Schema.Literals(LOOP_PERMISSIONS);
 export type LoopPermissions = typeof LoopPermissions.Type;

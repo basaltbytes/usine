@@ -11,6 +11,7 @@ import type { AttemptId, AttemptNumber, AttemptWindows } from "./attempt.ts";
 export const SalvageRef = Schema.NonEmptyString.pipe(Schema.brand("SalvageRef"));
 export type SalvageRef = typeof SalvageRef.Type;
 
+/** Returns the salvage branch for `runId` and the attempt's 1-based `number`, replacing unsafe characters in the run ID with underscores. */
 export const salvageRefFor = (runId: RunId, number: AttemptNumber): SalvageRef =>
   SalvageRef.make(`usine/salvage/${safeSegment(runId)}/${number}`);
 
@@ -18,7 +19,9 @@ export const salvageRefFor = (runId: RunId, number: AttemptNumber): SalvageRef =
 export class SalvagePushed extends Schema.TaggedClass<SalvagePushed>("AttemptSalvage/Pushed")(
   "Pushed",
   {
+    /** The remote branch containing the unfinished work. */
     ref: SalvageRef,
+    /** The head commit successfully pushed to the remote branch. */
     commit: CommitSha,
   },
 ) {}
@@ -31,9 +34,13 @@ export class SalvagePushed extends Schema.TaggedClass<SalvagePushed>("AttemptSal
 export class SalvagePartlyPushed extends Schema.TaggedClass<SalvagePartlyPushed>(
   "AttemptSalvage/PartlyPushed",
 )("PartlyPushed", {
+  /** The remote branch containing the files that could be pushed. */
   ref: SalvageRef,
+  /** The head commit successfully pushed to the remote branch. */
   commit: CommitSha,
+  /** The retained checkout on the worker, including files excluded from the push. */
   path: Schema.NonEmptyString,
+  /** The diagnostic identifying files excluded from the push. */
   message: Schema.String,
 }) {}
 
@@ -41,8 +48,11 @@ export class SalvagePartlyPushed extends Schema.TaggedClass<SalvagePartlyPushed>
 export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("AttemptSalvage/Retained")(
   "Retained",
   {
+    /** The checkout retained on the worker after salvage failed. */
     path: Schema.NonEmptyString,
+    /** The checkout's head commit, or `None` if inspection failed. */
     commit: Schema.OptionFromNullOr(CommitSha),
+    /** The diagnostic explaining why the checkout could not be salvaged. */
     message: Schema.String,
     /** A push refusal that also fails the attempt; absent on older salvage records. */
     pushFailure: Schema.OptionFromNullOr(GitHubPushFailure).pipe(
@@ -60,8 +70,11 @@ export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("Attemp
 export class SalvageRejected extends Schema.TaggedClass<SalvageRejected>("AttemptSalvage/Rejected")(
   "Rejected",
   {
+    /** The checkout retained on the worker after the remote refused the push. */
     path: Schema.NonEmptyString,
+    /** The rejected head commit, which recovery must not push again. */
     commit: CommitSha,
+    /** The remote refusal that requires intervention before another push. */
     message: Schema.String,
   },
 ) {}
@@ -77,9 +90,13 @@ export type AttemptSalvage = typeof AttemptSalvage.Type;
 
 /** A persisted Attempt whose checkout can still exist on its Worker. */
 export interface AttemptRecovery {
+  /** The persisted attempt whose checkout recovery inspects. */
   readonly attemptId: AttemptId;
+  /** The worker on which the checkout may remain. */
   readonly worker: WorkerName;
+  /** The managed repo to which recovery would push salvage. */
   readonly repository: RepositoryName;
+  /** The remote branch to use when salvage is permitted. */
   readonly ref: SalvageRef;
   /** The Loop permissions; a leftover checkout of a `read` Attempt is removed, not salvaged. */
   readonly permissions: LoopPermissions;
@@ -93,7 +110,10 @@ export interface AttemptRecovery {
 
 /** The storage that startup reconciliation uses for a persisted Attempt's salvage, comments, and windows. */
 export interface RecoverySink<E> {
+  /** Records the recovery result for this attempt; fails with `E` if storage fails. */
   readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, E>;
+  /** Records the comments and reviews attributed to this attempt during recovery; fails with `E` if storage fails. */
   readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>;
+  /** Reads this attempt's window and the same agent's overlapping windows on its item; fails with `E` if storage fails. */
   readonly windows: Effect.Effect<AttemptWindows, E>;
 }
