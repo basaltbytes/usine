@@ -57,7 +57,8 @@
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",
     "@usine/agents": "workspace:*",
-    "@usine/core": "workspace:*"
+    "@usine/core": "workspace:*",
+    "undici": "8.12.3"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
