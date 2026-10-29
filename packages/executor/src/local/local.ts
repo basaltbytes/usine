@@ -535,11 +535,31 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         checkout: linkedWorktree(
           host,
           { cache, worktree },
-          checkoutFiles((operation, command, args) =>
-            executeCommand(operation, command, args, { env: credential.environment }).pipe(
-              Effect.map(credential.scrub),
-            ),
-          ),
+          {
+            installGitDiagnostics: checkoutFiles((operation, command, args) =>
+              executeCommand(operation, command, args, { env: credential.environment }).pipe(
+                Effect.map(credential.scrub),
+              ),
+            ).installGitDiagnostics,
+            writeFile: (target, content, mode) =>
+              fileSystem
+                .makeDirectory(path.dirname(target), { recursive: true })
+                .pipe(
+                  Effect.andThen(
+                    fileSystem.writeFileString(target, content, { mode: Number.parseInt(mode, 8) }),
+                  ),
+                ),
+            readFile: (target) =>
+              fileSystem
+                .exists(target)
+                .pipe(
+                  Effect.flatMap((exists) =>
+                    exists
+                      ? fileSystem.readFileString(target).pipe(Effect.map(credential.scrub))
+                      : Effect.succeed(""),
+                  ),
+                ),
+          },
         ),
       };
       const acquire = Effect.gen(function* () {

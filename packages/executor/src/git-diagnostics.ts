@@ -35,11 +35,13 @@ mkdir -p "$helpers"
 for helper in "$original"/*; do
   name=$(basename "$helper")
   case "$name" in git-remote-http|git-remote-https) continue ;; esac
-  ln -sfn "$helper" "$helpers/$name"
+  if ! test -e "$helpers/$name"; then ln -s "$helper" "$helpers/$name"; fi
 done
-printf '%s' "$original" > "$helpers/original"
+printf '%s' "$original" > "$helpers/original.$$"
+mv -f "$helpers/original.$$" "$helpers/original"
 for name in git-remote-http git-remote-https; do
-  printf '%s' "$2" > "$helpers/$name"
-  chmod 755 "$helpers/$name"
+  printf '%s' "$2" > "$helpers/$name.$$"
+  chmod 755 "$helpers/$name.$$"
+  mv -f "$helpers/$name.$$" "$helpers/$name"
 done
 `.trim();
