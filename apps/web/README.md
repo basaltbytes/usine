@@ -18,6 +18,8 @@ Every entry has **Dismiss** in the row menu. It leaves attention lists, counts, 
 
 Entries:
 
+- **\<pool\>: rate window at \<percentage\>%**: the login, primary or secondary window, percentage used, and reset time from the pool's latest stored report. Each window appears at 80% while its reset is in the future and clears at reset or when a newer report falls below 80%. **Dismiss** and **Undo** apply. Older reports and gateway credentials can show **Login unavailable**. Scheduling continues independently of these warnings.
+
 - **<worker>: preflight failed**: the startup or retry error for a worker that takes no new attempts, with **Open worker**. The entry clears when preflight passes and scheduling resumes.
 
 - **Approval**: the loop and the task's name, with **Approve** and **Cancel run**. While any screen sends an action on the run, the buttons are disabled and name it, such as `Approving…`. The entry leaves when the action succeeds, before the overview refreshes. A refusal because the run changed state, for example after approval from the drawer, shows only in the drawer and run page; the entry leaves with the refresh.

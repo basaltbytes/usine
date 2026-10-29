@@ -78,6 +78,8 @@ Attempts on a worker that `StepExecutor.workers` doesn't list aren't reconciled.
 
 Attempt channel envelopes go to an append-only transcript. A redelivered envelope (same attempt, direction, and channel sequence, as a reattached parent can send) keeps the first copy. Envelopes from protocol v3 to v6 still read under v7. Parent and child session events keep their session identity. A protocol v4 `Started` writes the SDK-selected parent model to the attempt.
 
+`RunReader.latestPoolRateLimits()` reads the newest stored `PoolRateLimitsUpdated` event for each pool by global transcript append order, across all attempts. It queries the existing transcript table through a partial index of rate-limit events, including reports below warning thresholds and reports whose windows have reset.
+
 `RunEngine.transcript` takes distinct query types: `TranscriptAllQuery`, `TranscriptTailQuery` and `TranscriptPageQuery` (bounded, with a positive row limit), and `TranscriptUsageQuery`, which returns each session's highest `SessionTokensUpdated` report. Session queries keep each session's launch record with its latest state, so harness session ids and worker paths stay available after completion and outside the loaded page.
 
 The run ledger keeps the submitted agent, rendered task, payload snapshot, effective parent model, and each attempt's child brain across restarts.

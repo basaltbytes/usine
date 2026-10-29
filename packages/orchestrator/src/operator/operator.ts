@@ -7,7 +7,13 @@ import {
   AttentionAcknowledgement,
   type AttentionKey,
 } from "@usine/engine/attention";
-import { attentionKey, partitionNeeds, taskNeedsAttention, projectAttention } from "./attention.ts";
+import {
+  attentionKey,
+  partitionNeeds,
+  taskNeedsAttention,
+  projectAttention,
+  poolAttentionFor,
+} from "./attention.ts";
 import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/config/label";
@@ -226,6 +232,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const stops = yield* UnconfirmedStops;
   const workerStatus = yield* WorkerStatus;
   const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
+  const poolAttention = poolAttentionFor(reader, acknowledgements);
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -686,6 +693,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           running,
           instance.config.workers.map(({ name }) => name),
         ).pipe(
+          Effect.flatMap(poolAttention),
           Effect.tap(({ needsYou, dismissedNeeds }) =>
             reports.pollReported && reports.scheduleReported
               ? acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey))
@@ -1418,6 +1426,7 @@ export {
   WorkerPreflightNeed,
   UnconfirmedStopNeed,
   NeedView,
+  PoolLimitNeed,
 } from "./need.ts";
 export {
   LoopSelectorView,

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession, TokenBreakdown } from "@usine/core/agent/session";
+import { AgentSessionId, ChildSession, PoolLogin, TokenBreakdown } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import {
   Cause,
@@ -114,7 +114,10 @@ const successfulResponses = (
 ) =>
   ({
     initialize: {},
-    "account/read": { account: { type: "chatgpt" }, requiresOpenaiAuth: true },
+    "account/read": {
+      account: { type: "chatgpt", email: "operator@example.com" },
+      requiresOpenaiAuth: true,
+    },
     "model/list": { data: models, nextCursor: null },
     "thread/start": {
       thread: { id: "thread-1" },
@@ -420,6 +423,9 @@ describe("Codex child backend", () => {
             "SessionFinished",
           ],
         );
+        const limits = events.find((event) => event._tag === "PoolRateLimitsUpdated");
+        assert(limits?._tag === "PoolRateLimitsUpdated");
+        assert.strictEqual(Option.getOrNull(limits.login), "operator@example.com");
         assert.strictEqual(events.filter((event) => event._tag === "TextOutput").length, 1);
         const thread = calls.find(({ method }) => method === "thread/start")?.params;
         assert(
@@ -805,6 +811,60 @@ describe("Codex child backend", () => {
     );
   }
 
+  it.effect(
+    "attributes later rate windows to the new ChatGPT login after an account change",
+    () => {
+      const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+      ]);
+      const rateUpdate = {
+        method: "account/rateLimits/updated",
+        params: { rateLimits: { primary: { usedPercent: 85 } } },
+      };
+      let accountReads = 0;
+      const server = Layer.succeed(CodexAppServer)({
+        open: () =>
+          Effect.succeed({
+            close: Effect.void,
+            notify: () => Effect.void,
+            request: (_operation, method) =>
+              Effect.sync(() =>
+                method === "account/read"
+                  ? {
+                      account: {
+                        type: "chatgpt",
+                        email: ++accountReads === 1 ? "first@example.com" : "second@example.com",
+                      },
+                      requiresOpenaiAuth: true,
+                    }
+                  : (responses[method] ?? {}),
+              ),
+            notifications: Stream.fromIterable([
+              rateUpdate,
+              { method: "account/updated", params: { authMode: "chatgpt" } },
+              rateUpdate,
+              {
+                method: "turn/completed",
+                params: { turn: { id: "turn-1", status: "completed", error: null } },
+              },
+            ]),
+          }),
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const running = yield* (yield* CodexChildBackend).launch(request());
+          const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
+          assert.deepStrictEqual(
+            events
+              .filter((event) => event._tag === "PoolRateLimitsUpdated")
+              .map(({ login }) => Option.getOrNull(login)),
+            [PoolLogin.make("first@example.com"), PoolLogin.make("second@example.com")],
+          );
+        }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
+      );
+    },
+  );
+
   it.effect("stops attributing rate windows after a mid-session authentication change", () => {
     const server = connectionLayer(
       successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
@@ -894,6 +954,7 @@ describe("Codex child backend", () => {
             const limits = events.find((event) => event._tag === "PoolRateLimitsUpdated");
             assert(limits?._tag === "PoolRateLimitsUpdated");
             assert.strictEqual(limits.pool, pool);
+            assert(Option.isNone(limits.login));
             const started = events[0];
             assert(started?._tag === "SessionStarted" && started.session._tag === "ChildSession");
             assert.deepStrictEqual(started.session.gatewayCredential, Option.some(credential));

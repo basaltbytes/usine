@@ -1,0 +1,3 @@
+CREATE INDEX `usine_attempt_transcript_pool_limits` ON `usine_attempt_transcripts` (json_extract("envelope", '$.payload.event.pool'),`sequence`) WHERE "usine_attempt_transcripts"."direction" = 'outbound'
+        and json_extract("usine_attempt_transcripts"."envelope", '$.payload._tag') = 'SessionEvent'
+        and json_extract("usine_attempt_transcripts"."envelope", '$.payload.event._tag') = 'PoolRateLimitsUpdated';

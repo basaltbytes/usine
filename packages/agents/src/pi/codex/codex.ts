@@ -53,7 +53,12 @@ import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
 import { CodexAppServer, type CodexClient, operationError } from "./app-server.ts";
-import { codexChildPool, codexPoolUnavailable, initializeCodex } from "./account.ts";
+import {
+  codexChildAccount,
+  codexPoolUnavailable,
+  initializeCodex,
+  verifyCodexAccount,
+} from "./account.ts";
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
 
@@ -92,7 +97,7 @@ const makeCodexChild = Effect.gen(function* () {
       };
       const connection = yield* appServer.open(client);
       yield* initializeCodex(connection);
-      const pool = yield* codexChildPool(
+      let billing = yield* codexChildAccount(
         connection,
         request.session.brain,
         request.session.gatewayCredential,
@@ -443,10 +448,11 @@ const makeCodexChild = Effect.gen(function* () {
                 yield* Effect.logError("Codex authentication changed during the session", {
                   sessionId: session.id,
                   authentication: account.authMode ?? "logged-out",
-                  requiredPool: pool,
+                  requiredPool: billing.pool,
                 });
                 return yield* codexPoolUnavailable(request.session.brain.model);
               }
+              billing = yield* verifyCodexAccount(connection, request.session.brain.model);
               return;
             }
             if (method === "account/rateLimits/updated") {
@@ -461,7 +467,8 @@ const makeCodexChild = Effect.gen(function* () {
               return yield* channel.emit(
                 new PoolRateLimitsUpdated({
                   session,
-                  pool,
+                  pool: billing.pool,
+                  login: billing.login,
                   rateLimits: new RateLimitsSnapshot({
                     limitId: Option.fromNullishOr(snapshot.limitId),
                     limitName: Option.fromNullishOr(snapshot.limitName),

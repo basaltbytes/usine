@@ -1,8 +1,14 @@
-import { AttentionKey, AttentionRevision } from "@usine/engine/attention";
-import { Match, Schema } from "effect";
+import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
+import {
+  AttentionKey,
+  AttentionRevision,
+  type AttentionAcknowledgements,
+} from "@usine/engine/attention";
+import type { RunReader } from "@usine/engine/run-reader";
+import { DateTime, Effect, Match, Option, Schema } from "effect";
 import { BoardTaskView, BoardView, ReadOnlyBoardLaneView, WritableBoardLaneView } from "./board.ts";
-import { NeedView } from "./need.ts";
-import { ProjectView } from "./overview.ts";
+import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT } from "./need.ts";
+import { ProjectView, ReadyOverview } from "./overview.ts";
 
 const encodeNeed = Schema.encodeSync(NeedView);
 
@@ -27,6 +33,7 @@ const repositoriesOf = (need: NeedView) =>
     ConfigFileNeed: () => [],
     UnconfiguredWorkerNeed: () => [],
     WorkerPreflightNeed: () => [],
+    PoolLimitNeed: () => [],
     UnresponsiveWorkerNeed: ({ attempts }) => attempts.map(({ repository }) => repository),
   });
 
@@ -91,3 +98,51 @@ export const partitionNeeds = (
   }
   return { needsYou, dismissedNeeds };
 };
+
+export const poolLimitNeeds = (
+  snapshots: ReadonlyArray<PoolRateLimitsUpdated>,
+  now: DateTime.Utc,
+): ReadonlyArray<PoolLimitNeed> =>
+  snapshots.flatMap(({ pool, login, rateLimits }) =>
+    (["primary", "secondary"] as const).flatMap((window) => {
+      const limit = rateLimits[window];
+      if (Option.isNone(limit) || limit.value.usedPercent < POOL_LIMIT_WARNING_PERCENT) return [];
+      const { usedPercent, resetsAt } = limit.value;
+      if (Option.isNone(resetsAt) || !DateTime.isGreaterThan(resetsAt.value, now)) return [];
+      return [
+        new PoolLimitNeed({
+          id: `pool-limit:${pool}:${window}`,
+          pool,
+          login,
+          window,
+          usedPercent,
+          resetsAt: resetsAt.value,
+        }),
+      ];
+    }),
+  );
+
+export const poolAttentionFor = (
+  reader: Pick<RunReader["Service"], "latestPoolRateLimits">,
+  acknowledgements: Pick<AttentionAcknowledgements["Service"], "list">,
+) =>
+  Effect.fn("Operator.poolAttention")(function* (overview: ReadyOverview) {
+    const snapshots = yield* reader.latestPoolRateLimits();
+    yield* Effect.annotateCurrentSpan({ pools: snapshots.map(({ pool }) => pool) });
+    const needs = poolLimitNeeds(snapshots, yield* DateTime.now);
+    yield* Effect.logDebug("Refreshed pool attention", {
+      snapshots: snapshots.map(({ pool, rateLimits: { primary, secondary } }) => ({
+        pool,
+        primary,
+        secondary,
+      })),
+      activeWindows: needs.length,
+    });
+    if (needs.length === 0) return overview;
+    const { needsYou, dismissedNeeds } = partitionNeeds(needs, yield* acknowledgements.list());
+    return new ReadyOverview({
+      ...overview,
+      needsYou: [...overview.needsYou, ...needsYou],
+      dismissedNeeds: [...overview.dismissedNeeds, ...dismissedNeeds],
+    });
+  });

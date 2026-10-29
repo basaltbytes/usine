@@ -8,6 +8,7 @@ import {
   ChildSessionCount,
   ParentSession,
   PoolRateLimitsUpdated,
+  PoolLogin,
   RateLimitsSnapshot,
   RateLimitWindow,
   SessionStarted,
@@ -204,7 +205,7 @@ describe("attempt channel", () => {
     }
   });
 
-  it("round-trips rate-limit reset dates through JSON", () => {
+  it("reads older rate limits without a login and round-trips login and reset dates through JSON", () => {
     const session = new ParentSession({
       id: AgentSessionId.make("parent-1"),
       agent: agent.name,
@@ -219,6 +220,7 @@ describe("attempt channel", () => {
         event: new PoolRateLimitsUpdated({
           session,
           pool: "chatgptPlan",
+          login: Option.some(PoolLogin.make("operator@example.com")),
           rateLimits: new RateLimitsSnapshot({
             limitId: Option.some("codex"),
             limitName: Option.some("ChatGPT"),
@@ -247,6 +249,13 @@ describe("attempt channel", () => {
     });
 
     assert.deepStrictEqual(decoded, envelope);
+    assert(envelope.payload._tag === "SessionEvent");
+    assert(envelope.payload.event._tag === "PoolRateLimitsUpdated");
+    const { login: _, ...legacy } = Schema.encodeSync(PoolRateLimitsUpdated)(
+      envelope.payload.event,
+    );
+    assert(Option.isNone(Schema.decodeUnknownSync(PoolRateLimitsUpdated)(legacy).login));
+    assert.throws(() => PoolLogin.make(""));
   });
 
   it("rejects credentials smuggled into a RunSpec", () => {

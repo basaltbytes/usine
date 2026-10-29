@@ -64,9 +64,13 @@ export interface TurnInterruptParams {
   readonly turnId: string;
 }
 
-// Decodes only the authentication type, so account identity is never logged.
 export const AccountResponse = Schema.Struct({
-  account: Schema.NullOr(Schema.Struct({ type: Schema.String })),
+  account: Schema.NullOr(
+    Schema.Struct({
+      type: Schema.String,
+      email: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    }),
+  ),
   requiresOpenaiAuth: Schema.Boolean,
 });
 export const AccountUpdated = Schema.Struct({ authMode: Schema.NullOr(Schema.String) });

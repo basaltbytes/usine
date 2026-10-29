@@ -889,6 +889,7 @@ describe("OperatorStatistics", () => {
         let itemReads = 0;
         let historyReads = 0;
         const reader = Layer.succeed(RunReader)({
+          latestPoolRateLimits: () => Effect.succeed([]),
           inspect: () => Effect.die("unused"),
           evidence: () => Effect.die("unused"),
           // The open Runs, and a closed Run that the window read already counts.

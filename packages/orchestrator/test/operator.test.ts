@@ -40,6 +40,10 @@ import {
   AgentSessionId,
   ChildSession,
   ParentSession,
+  PoolLogin,
+  PoolRateLimitsUpdated,
+  RateLimitsSnapshot,
+  RateLimitWindow,
   SessionTokensUpdated,
   TextOutput,
   TokenBreakdown,
@@ -91,6 +95,7 @@ import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
 import {
@@ -472,6 +477,17 @@ const testLayer = (
     transcript: readTranscript,
   });
   const reader = Layer.succeed(RunReader)({
+    latestPoolRateLimits: () =>
+      Effect.succeed([
+        ...new Map(
+          laterReports.flatMap(({ envelope }) => {
+            const payload = envelope.payload;
+            return payload._tag === "SessionEvent" && payload.event._tag === "PoolRateLimitsUpdated"
+              ? [[payload.event.pool, payload.event] as const]
+              : [];
+          }),
+        ).values(),
+      ]),
     inspect: () => Effect.succeed(runSnapshot),
     evidence: () => Effect.die("unused"),
     list: () =>
@@ -750,6 +766,114 @@ describe("Operator", () => {
       );
       assert.deepStrictEqual((yield* refresh(overview, [], [])).needsYou, []);
     }),
+  );
+
+  it.effect(
+    "refreshes pool warnings on a cached overview, supports dismissal and undo, and clears at reset",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(DateTime.toEpochMillis(now));
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const reports: Array<TranscriptEntry> = [];
+        const resetsAt = DateTime.add(now, { hours: 1 });
+        const append = (usedPercent: number) =>
+          reports.push(
+            new TranscriptEntry({
+              sequence: TranscriptSequence.make(3000 + reports.length),
+              attemptId,
+              direction: "outbound",
+              receivedAt: now,
+              envelope: new AttemptChannel.OutboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId,
+                sequence: AttemptChannel.Sequence.make(3000 + reports.length),
+                sentAt: now,
+                payload: new AttemptChannel.SessionEvent({
+                  event: new PoolRateLimitsUpdated({
+                    session: parent,
+                    pool: "chatgptPlan",
+                    login: Option.some(PoolLogin.make("operator@example.com")),
+                    rateLimits: new RateLimitsSnapshot({
+                      limitId: Option.none(),
+                      limitName: Option.none(),
+                      secondary: Option.none(),
+                      primary: Option.some(
+                        new RateLimitWindow({
+                          usedPercent,
+                          resetsAt: Option.some(resetsAt),
+                          windowDurationMinutes: Option.some(300),
+                        }),
+                      ),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          );
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const needs = Effect.map(operator.overview(instance), (view) =>
+            view.needsYou.filter((need) => need._tag === "PoolLimitNeed"),
+          );
+          assert.deepStrictEqual(yield* needs, []);
+          append(85);
+          const [need] = yield* needs;
+          assert(need !== undefined);
+          assert.strictEqual(need.pool, "chatgptPlan");
+          assert.strictEqual(Option.getOrNull(need.login), "operator@example.com");
+          assert.strictEqual(need.usedPercent, 85);
+          assert.deepStrictEqual(need.resetsAt, resetsAt);
+          assert.strictEqual(
+            yield* Ref.get(reads),
+            1,
+            "rate windows refresh without a board revision",
+          );
+          yield* operator.dismissNeed(instance, attentionKey(need));
+          assert.deepStrictEqual(yield* needs, []);
+          assert(
+            (yield* operator.overview(instance)).dismissedNeeds.some(
+              (entry) => entry.id === need.id,
+            ),
+          );
+          yield* operator.undoDismissNeed(attentionKey(need));
+          assert.deepStrictEqual(yield* needs, [need]);
+          yield* operator.dismissNeed(instance, attentionKey(need));
+          append(20);
+          assert.deepStrictEqual(yield* needs, []);
+          assert(
+            !(yield* operator.overview(instance)).dismissedNeeds.some(
+              (entry) => entry.id === need.id,
+            ),
+          );
+          append(85);
+          assert.deepStrictEqual(yield* needs, [need], "a cleared warning needs a new dismissal");
+          yield* TestClock.adjust("1 hour");
+          assert.deepStrictEqual(
+            yield* needs,
+            [],
+            "the reset clears the warning with no new event",
+          );
+          yield* TestClock.adjust("1 second");
+          assert.deepStrictEqual(yield* needs, []);
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              moved,
+              reads,
+              revision,
+              snapshot,
+              noCycleBudgets,
+              undefined,
+              [],
+              reports,
+            ),
+          ),
+        );
+      }),
   );
 
   it.effect(
