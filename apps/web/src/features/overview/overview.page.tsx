@@ -8,7 +8,12 @@ import { Button } from "~/components/ui/button";
 import { useNow } from "~/hooks/use-now";
 import { NeedEntry } from "~/components/needs-you/needs-you";
 import { overviewQuery } from "~/lib/overview";
-import { deskCounts, lastCheckedLabel, overviewRefreshFailed } from "~/features/overview/strings";
+import {
+  deskCounts,
+  lastCheckedLabel,
+  noProjectsCopy,
+  overviewRefreshFailed,
+} from "~/features/overview/strings";
 import { LastOutcomes } from "~/features/overview/components/last-outcomes";
 import { NotMoving } from "~/features/overview/components/not-moving";
 import { deskQuery } from "~/lib/desk/queries";
@@ -21,11 +26,11 @@ const NoProjects = () => {
   return (
     <section className="flex flex-col items-start gap-3">
       <div className="flex max-w-prose flex-col gap-1">
-        <h2 className="text-md font-medium">No projects registered</h2>
-        <p className="text-muted-foreground">Register a repository in Configuration.</p>
+        <h2 className="text-md font-medium">{noProjectsCopy.title}</h2>
+        <p className="text-muted-foreground">{noProjectsCopy.description}</p>
       </div>
       <Button variant="outline" render={<Link to="/configuration/repositories" />}>
-        Open repositories
+        {noProjectsCopy.action}
       </Button>
     </section>
   );

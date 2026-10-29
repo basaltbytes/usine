@@ -1,3 +1,4 @@
+import { preflightTiming } from "~/features/configuration/strings";
 import { entityKey } from "~/features/configuration/lib/entities";
 import { Link } from "@tanstack/react-router";
 import type { ConfigurationView, WorkerSlotsView } from "@usine/orchestrator/operator";
@@ -82,10 +83,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
           )}
         </DetailSection>
         {worker.provisioner !== null && <Machines worker={worker} />}
-        <DetailSection
-          title="Preflight"
-          aside="At startup, and when a revision adds workers, slots, or an agent with a new harness, model, or effort"
-        >
+        <DetailSection title="Preflight" aside={preflightTiming}>
           {worker.provisioner !== null && (
             <p className="text-muted-foreground">{provisionedHarnessCheckDescription}</p>
           )}

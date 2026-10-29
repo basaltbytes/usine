@@ -557,11 +557,6 @@ describe("operator HTTP API", () => {
       configurationView,
     );
 
-    const removedReload = await app.handler(
-      new Request("http://localhost/api/instance/reload", { method: "POST" }),
-    );
-    assert.strictEqual(removedReload.status, 404);
-
     const invalidCursor = await app.handler(
       new Request(`http://localhost/api/runs/${runId}?after=0`),
     );

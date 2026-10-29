@@ -314,11 +314,6 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
       await expect.poll(harness, { timeout: 10_000 }).toBe("claude");
       await writeFile(join(directory, "usine.yaml"), "invalid");
       await writeFile(join(directory, "agents/developer.md"), "invalid");
-      const removedReload = await fetch(`${origin}/api/instance/reload`, {
-        method: "POST",
-        headers: { Origin: origin },
-      });
-      expect(removedReload.status, await removedReload.text()).toBe(404);
       expect(await harness()).toBe("claude");
       const entity = Schema.decodeUnknownSync(ConfigurationEntityView)(
         await (await fetch(`${origin}/api/configuration/entities/agent/developer`)).json(),

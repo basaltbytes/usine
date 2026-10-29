@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
-import { harnessLabel, plural } from "~/features/configuration/strings";
+import { agentCopy, harnessLabel, plural } from "~/features/configuration/strings";
 import { FileError } from "~/features/configuration/components/file-error";
 import {
   ConfigurationPage,
@@ -104,7 +104,7 @@ type AgentsListProps = { readonly configuration: ConfigurationView };
 export const AgentsList = ({ configuration }: AgentsListProps) => (
   <ConfigurationPage title="Agents" createKind="agent" counts={agentCounts(configuration)}>
     {configuration.agents.length === 0 && configuration.invalidAgents.length === 0 ? (
-      <Missing title="No agents">Choose New to add an agent.</Missing>
+      <Missing title="No agents">{agentCopy.add}</Missing>
     ) : (
       <div className="-mx-2">
         <Table>
@@ -159,17 +159,17 @@ const AgentFacts = ({ agent, configuration }: AgentFactsProps) => (
       )}
       <Source>
         {agent.parentModel !== null
-          ? "Set on this agent"
+          ? agentCopy.parentOverride
           : configuration.settings.parentModel !== null
             ? "From settings.parent_model"
-            : "Not set on this agent or in settings"}
+            : agentCopy.parentModelUnset}
       </Source>
     </Fact>
     <Fact label="Parent effort">
       {agent.resolvedParentEffort}
       <Source>
         {agent.parentEffort !== null
-          ? "Set on this agent"
+          ? agentCopy.parentOverride
           : configuration.settings.parentEffort !== null
             ? "From settings.parent_effort"
             : "Same as effort"}

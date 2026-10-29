@@ -227,3 +227,16 @@ export const editorCopy = {
   create: (kind: string) => `New ${kind}`,
   revision: (number: number) => `Revision ${number}`,
 };
+
+export const agentCopy = {
+  add: "Choose New to add an agent.",
+  parentOverride: "Set on this agent",
+  parentModelUnset: "Not set on this agent or in settings",
+};
+
+export const addLoop = "Choose New to add a loop. New loops start paused.";
+
+export const addRepository = "Choose New to register a repository.";
+
+export const preflightTiming =
+  "At startup, and when a revision adds workers, slots, or an agent with a new harness, model, or effort";

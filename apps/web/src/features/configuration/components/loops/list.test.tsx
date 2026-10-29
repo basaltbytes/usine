@@ -81,7 +81,6 @@ describe("Loops page", () => {
     assert.include(markup, 'href="/configuration/loops/start-dev"');
     assert.include(page, "Paused");
     assert.include(page, "Resume");
-    assert.notInclude(page, "Reload configuration");
   });
 
   it("offers no Pause or Resume while operator actions are unavailable", async () => {

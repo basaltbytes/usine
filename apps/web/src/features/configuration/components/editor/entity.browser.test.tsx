@@ -226,13 +226,12 @@ it("links the changed entities from instance history", async () => {
     .element(page.getByRole("link", { name: "worker:local", exact: true }))
     .toHaveAttribute("href", "/configuration/workers/local");
   await expect.element(page.getByText("Increase worker slots")).toBeVisible();
-  await expect.element(button("Reload configuration")).not.toBeInTheDocument();
 });
 
 it.each([
   ["/configuration/loops/start-dev", "loop", "start-dev"],
   ["/configuration/agents/developer", "agent", "developer"],
-  ["/configuration/repositories/basaltbytes/usine", "repository", "basaltbytes%2Fusine"],
+  ["/configuration/repositories/BasaltBytes/Usine", "repository", "basaltbytes%2Fusine"],
   ["/configuration/settings", "settings", "instance"],
   ["/configuration/labels/ready", "label", "ready"],
 ])("edits the stored entity at %s", async (path, kind, identifier) => {

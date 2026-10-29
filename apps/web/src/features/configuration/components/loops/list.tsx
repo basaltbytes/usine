@@ -5,7 +5,7 @@ import { LoopRow } from "~/features/configuration/components/loops/row";
 import { QuarantinedRow } from "~/features/configuration/components/loops/quarantined-row";
 import { ConfigurationPage, Missing } from "~/features/configuration/components/section";
 import { usePauseLoop } from "~/features/configuration/queries";
-import { loopCounts } from "~/features/configuration/strings";
+import { addLoop, loopCounts } from "~/features/configuration/strings";
 
 export type PauseLoop = ReturnType<typeof usePauseLoop>;
 
@@ -19,7 +19,7 @@ export const LoopsList = ({ configuration, pause }: LoopsListProps) => (
   <ConfigurationPage title="Loops" createKind="loop" counts={loopCounts(configuration)}>
     {pause?.isError === true && <ErrorAlert message={pause.error.message} />}
     {configuration.loops.length === 0 && configuration.quarantinedLoops.length === 0 ? (
-      <Missing title="No loops">Choose New to add a loop. New loops start paused.</Missing>
+      <Missing title="No loops">{addLoop}</Missing>
     ) : (
       <div className="-mx-2">
         <Table>

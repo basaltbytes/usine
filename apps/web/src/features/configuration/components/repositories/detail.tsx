@@ -40,7 +40,7 @@ export const RepositoryDetail = ({ owner, name, configuration }: RepositoryDetai
     );
   return (
     <ConfigurationPage
-      entity={entityKey("repository", full)}
+      entity={entityKey("repository", repository.name)}
       title={repository.name}
       leading={<RepositoryMark repository={repository.name} size="title" />}
     >
