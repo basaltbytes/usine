@@ -262,18 +262,30 @@ The runtime store and the durable storage move with the instance folder, so the 
 
    | Path                                                            | Contents                                                                                                                                    |
    | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-   | `usine.yaml`, `loops/`, `agents/`                               | The configuration.                                                                                                                          |
+   | `usine.yaml`, `loops/`, `agents/`                               | Configuration files imported only on the first start, before the runtime store has configuration.                                           |
    | `.env`                                                          | The variables that `usine up` reads, such as gateway admin tokens and `HCLOUD_TOKEN`.                                                       |
    | `.usine/github-app.json`                                        | The GitHub App ID and private key, if you don't set them in `.env`.                                                                         |
-   | `.usine/runtime.sqlite`, `.usine/durable.sqlite`                | The runs, transcripts, and Pi parent tasks. After a clean stop, their `-wal` and `-shm` files can be absent.                                |
+   | `.usine/runtime.sqlite`                                         | The active configuration and its revisions, runs, and transcripts. After a clean stop, its `-wal` and `-shm` files can be absent.           |
+   | `.usine/durable.sqlite`                                         | The Pi parent tasks. After a clean stop, its `-wal` and `-shm` files can be absent.                                                         |
    | `.usine/instance-id`                                            | The instance ID, which labels the attempt containers on SSH workers. Without it, usine no longer removes the containers that it left there. |
    | `.usine/workers/`, `.usine/ssh-workers/`, `.usine/known-hosts/` | The workers' state, how to reach them, and the host keys of provisioned servers.                                                            |
 
 4. Copy the identity files of the gateway and the workers to `/home/usine/.ssh/`, with the `config` and `known_hosts` entries of [Set up the usine user's SSH access](#set-up-the-usine-users-ssh-access).
 
-5. Check that `.env` on the server sets every variable that the laptop's shell exported for `usine up`, such as the variable that a provisioned worker's `token_env` names, usually `HCLOUD_TOKEN`. The service gets no variable from a shell. Add `USINE_ORIGIN` as in [Start the orchestrator](#start-the-orchestrator).
+5. Move the [Pi parent's model credential](/guides/write-an-agent/#pi-parent) to the server. For `parent_model: openai-codex/...`, this is the ChatGPT login in the laptop user's `~/.pi/agent/auth.json`. Copy it as `usine`, with mode `0600` for the file and `0700` for its folders:
 
-6. Remove the laptop's public address from the gateway's Hetzner firewall. The server reaches the gateway over the private network, which the Hetzner firewall doesn't filter, and you reach it over the tailnet:
+   ```sh title="Your laptop"
+   ssh usine-orchestrator 'install -d -m 0700 /home/usine/.pi /home/usine/.pi/agent'
+   rsync --perms --chmod=F600 ~/.pi/agent/auth.json usine-orchestrator:/home/usine/.pi/agent/auth.json
+   ```
+
+   The SSH alias connects as `usine`, so that user owns the copied file and folders. Both copies share one refresh token: after the copy, only the server may use that login. Stop using it on the laptop, including in other Pi sessions.
+
+   Alternatively, install Pi on the server, start `pi` as `usine`, and run `/login` to select the provider for the parent model. Keep `/home/usine/.pi/agent` at mode `0700` and its `auth.json` at `0600`. If you use [`PI_CODING_AGENT_DIR`](/reference/configuration/agent-files/#pi-parent), use that folder instead and set the variable in the server's `.env`.
+
+6. Check that `.env` on the server sets every variable that the laptop's shell exported for `usine up`, such as the variable that a provisioned worker's `token_env` names, usually `HCLOUD_TOKEN`. The service gets no variable from a shell. Add `USINE_ORIGIN` as in [Start the orchestrator](#start-the-orchestrator).
+
+7. Remove the laptop's public address from the gateway's Hetzner firewall. The server reaches the gateway over the private network, which the Hetzner firewall doesn't filter, and you reach it over the tailnet:
 
    ```sh title="usine checkout"
    hcloud firewall delete-rule usine-gateway --direction in --protocol tcp --port 22 \
@@ -282,7 +294,7 @@ The runtime store and the durable storage move with the instance folder, so the 
 
    A worker without a gateway admits SSH from the orchestrator's public address only. Replace the laptop's address in its firewall, `usine-<worker>` or `provisioner.firewall`, with the server's, which `hcloud server ip usine-orchestrator` prints.
 
-7. Start the service on the server, and check the instance:
+8. Start the service on the server, and check the instance:
 
    ```sh title="usine@usine-orchestrator"
    cd ~/factory
@@ -296,9 +308,10 @@ The runtime store and the durable storage move with the instance folder, so the 
 
 The secrets stay in these files, readable only by `usine`. The setup creates `/home/usine/factory` with mode `0700`:
 
-| File                                                          | Secret                                                            | Mode                               |
-| ------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------- |
-| `/home/usine/factory/.env`                                    | Gateway admin tokens, `HCLOUD_TOKEN`, API keys                    | `0600`                             |
-| `/home/usine/factory/.usine/github-app.json`                  | The GitHub App's private key                                      | `0600`; usine refuses another mode |
-| `/home/usine/.ssh/usine_worker` and the other identity files  | The keys for the gateway and the workers                          | `0600`                             |
-| `/home/usine/factory/.usine/runtime.sqlite`, `durable.sqlite` | Transcripts, which can contain repository content and tool output | in the `0700` folder               |
+| File                                                          | Secret                                                                     | Mode                                    |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------- |
+| `/home/usine/factory/.env`                                    | Gateway admin tokens, `HCLOUD_TOKEN`, API keys                             | `0600`                                  |
+| `/home/usine/factory/.usine/github-app.json`                  | The GitHub App's private key                                               | `0600`; usine refuses another mode      |
+| `/home/usine/.ssh/usine_worker` and the other identity files  | The keys for the gateway and the workers                                   | `0600`                                  |
+| `/home/usine/.pi/agent/auth.json`                             | Pi parent model credentials, including the ChatGPT login and refresh token | `0600`; folder `0700`; owned by `usine` |
+| `/home/usine/factory/.usine/runtime.sqlite`, `durable.sqlite` | Transcripts, which can contain repository content and tool output          | in the `0700` folder                    |
