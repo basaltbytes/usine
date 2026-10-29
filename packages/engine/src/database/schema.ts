@@ -321,6 +321,12 @@ export const attemptTranscripts = snakeCase.table(
       table.channelSequence,
     ),
     index("usine_attempt_transcript_tail").on(table.attemptId, table.sequence),
+    index("usine_attempt_transcript_pool_limits").on(
+      sql`json_extract(${table.envelope}, '$.payload.event.pool')`,
+      table.sequence,
+    ).where(sql`${table.direction} = 'outbound'
+        and json_extract(${table.envelope}, '$.payload._tag') = 'SessionEvent'
+        and json_extract(${table.envelope}, '$.payload.event._tag') = 'PoolRateLimitsUpdated'`),
   ],
 );
 

@@ -203,6 +203,7 @@ const boardMove = new BoardMoveRecord({
 
 const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArray<string>>) => {
   const reader = Layer.succeed(RunReader)({
+    latestPoolRateLimits: () => Effect.succeed([]),
     inspect: () => Ref.get(current),
     evidence: () => Effect.die("unused"),
     list: () => Effect.die("unused"),

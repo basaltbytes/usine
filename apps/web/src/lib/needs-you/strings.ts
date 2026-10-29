@@ -5,7 +5,8 @@ import type {
   NeedView,
   UnresponsiveWorkerNeed,
 } from "@usine/orchestrator/operator";
-import { Match } from "effect";
+import { DateTime, Match, Option } from "effect";
+import { poolLabel } from "~/lib/strings";
 import { failureMessage, failureReason } from "~/lib/runs/strings";
 
 export interface NeedCopy {
@@ -21,6 +22,12 @@ export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>
 
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {
+    PoolLimitNeed: ({ pool, login, window, usedPercent, resetsAt }) => ({
+      title: `${poolLabel(pool)}: rate window at ${usedPercent}%`,
+      detail: `${Option.getOrElse(login, () => "Login unavailable")} · ${window} window · resets ${DateTime.formatIso(resetsAt)}`,
+      repository: null,
+      runId: null,
+    }),
     CycleBudgetNeed: ({ ask, itemLabel }) => ({
       title: "Cycle budget exhausted",
       detail: `${itemLabel}: ${cycleBudgetCounts(ask)}`,
@@ -129,6 +136,7 @@ export const attentionOverviewLink = "View all on Overview";
 export const attentionBellLabel = (count: number) => `Needs attention (${count})`;
 
 export const needKindLabel = {
+  PoolLimitNeed: "Pool rate window",
   ApprovalNeed: "Approval needed",
   CycleBudgetNeed: "Cycle budget exhausted",
   WorkerPreflightNeed: "Worker preflight failed",

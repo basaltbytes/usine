@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/re
 import { createMemoryHistory, createRouter, RouterContextProvider } from "@tanstack/react-router";
 import {
   ApprovalNeed,
+  PoolLimitNeed,
   FactoryOverview,
   ReadyOverview,
   projectAttention,
@@ -9,7 +10,8 @@ import {
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
+import { PoolLogin } from "@usine/core/agent/session";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
@@ -37,14 +39,29 @@ const Attention = () => {
   );
 };
 
-it("dismisses an approval, keeps it in a collapsed section after refresh, and restores it with Undo", async () => {
-  const need = new ApprovalNeed({
-    id: "approval:run",
-    runId: RunId.make("run"),
-    repository: RepositoryName.make("test/project"),
-    loop: LoopName.make("implement"),
-    item: null,
-  });
+it.each([
+  {
+    kind: "approval",
+    need: new ApprovalNeed({
+      id: "approval:run",
+      runId: RunId.make("run"),
+      repository: RepositoryName.make("test/project"),
+      loop: LoopName.make("implement"),
+      item: null,
+    }),
+  },
+  {
+    kind: "pool warning",
+    need: new PoolLimitNeed({
+      id: "pool-limit:chatgptPlan:primary",
+      pool: "chatgptPlan",
+      login: Option.some(PoolLogin.make("operator@example.com")),
+      window: "primary",
+      usedPercent: 85,
+      resetsAt: DateTime.makeUnsafe("2026-10-29T15:00:00Z"),
+    }),
+  },
+])("dismisses a $kind across refreshes and restores it with Undo", async ({ need }) => {
   const before = new ReadyOverview({ projects: [], loops: [], needsYou: [need] });
   const after = new ReadyOverview({
     ...before,
@@ -75,6 +92,19 @@ it("dismisses an approval, keeps it in a collapsed section after refresh, and re
         </QueryClientProvider>,
       ),
     );
+    if (need._tag === "PoolLimitNeed") {
+      await expect
+        .element(page.getByText("ChatGPT plan: rate window at 85%", { exact: true }))
+        .toBeVisible();
+      await expect
+        .element(
+          page.getByText(
+            "operator@example.com · primary window · resets 2026-10-29T15:00:00.000Z",
+            { exact: true },
+          ),
+        )
+        .toBeVisible();
+    }
     await page.getByRole("button", { name: /^Actions for/ }).click();
     await page.getByRole("menuitem", { name: "Dismiss", exact: true }).click();
     await expect.element(page.getByText("Nothing needs attention")).toBeVisible();
@@ -91,7 +121,10 @@ it("dismisses an approval, keeps it in a collapsed section after refresh, and re
     await expect.element(disclosure).toHaveAttribute("aria-expanded", "true");
     await page.getByRole("button", { name: "Undo", exact: true }).click();
     await expect.element(page.getByRole("button", { name: /^Actions for/ })).toBeVisible();
-    await expect.element(page.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
+    if (need._tag === "ApprovalNeed")
+      await expect
+        .element(page.getByRole("button", { name: "Approve", exact: true }))
+        .toBeEnabled();
     await queries.invalidateQueries({ queryKey: overviewQuery().queryKey });
     expect(queries.getQueryData<FactoryOverview>(overviewQuery().queryKey)?.needsYou).toHaveLength(
       1,

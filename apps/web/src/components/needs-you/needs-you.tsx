@@ -111,6 +111,10 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
   const openRun = useOpenRun();
   const dismiss = <DismissNeed need={need} action="dismissNeed" />;
   switch (need._tag) {
+    case "PoolLimitNeed": {
+      const copy = needCopy(need);
+      return <NeedItem copy={copy} heading={copy.title} dismiss={dismiss} />;
+    }
     case "ApprovalNeed":
       return <ApprovalAsk need={need} dismiss={dismiss} />;
     case "CycleBudgetNeed":

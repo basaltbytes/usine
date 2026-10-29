@@ -6,6 +6,10 @@ import {
   AgentSessionId,
   ChildSession,
   ParentSession,
+  PoolRateLimitsUpdated,
+  PoolLogin,
+  RateLimitsSnapshot,
+  RateLimitWindow,
   SessionTokensUpdated,
   TextOutput,
   TokenCount,
@@ -23,7 +27,7 @@ import { StepName } from "@usine/core/step";
 
 import { WorkerName } from "@usine/core/worker";
 import { eq } from "drizzle-orm";
-import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 
 import { RunDatabase } from "../../src/database/database.ts";
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
@@ -40,10 +44,114 @@ import {
 } from "../../src/transcript.ts";
 import { InstanceDirectory } from "@usine/core/instance";
 
+import { RunReader } from "../../src/run-reader/run-reader.ts";
 import { RunStore } from "../../src/store/store.ts";
 
 import { lifecycleSubmission, testAgent } from "./support.ts";
 describe("Attempt transcripts", () => {
+  it.live(
+    "reads each pool's newest stored snapshot across attempts and unrelated transcript output",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-pool-limits-" }),
+        );
+        yield* Effect.gen(function* () {
+          const store = yield* RunStore;
+          const reader = yield* RunReader;
+          assert.deepStrictEqual(yield* reader.latestPoolRateLimits(), []);
+          const at = DateTime.makeUnsafe("2026-10-29T00:00:00Z");
+          const session = new ParentSession({
+            id: AgentSessionId.make("pool-session"),
+            agent: testAgent.name,
+            brain: testAgent.brain,
+          });
+          const high = new PoolRateLimitsUpdated({
+            session,
+            pool: "chatgptPlan",
+            login: Option.some(PoolLogin.make("first@example.com")),
+            rateLimits: new RateLimitsSnapshot({
+              limitId: Option.none(),
+              limitName: Option.none(),
+              secondary: Option.none(),
+              primary: Option.some(
+                new RateLimitWindow({
+                  usedPercent: 85,
+                  windowDurationMinutes: Option.some(300),
+                  resetsAt: Option.some(DateTime.add(at, { hours: 1 })),
+                }),
+              ),
+            }),
+          });
+          const low = new PoolRateLimitsUpdated({
+            ...high,
+            login: Option.some(PoolLogin.make("second@example.com")),
+            rateLimits: new RateLimitsSnapshot({
+              ...high.rateLimits,
+              primary: Option.some(
+                new RateLimitWindow({
+                  usedPercent: 20,
+                  windowDurationMinutes: Option.some(300),
+                  resetsAt: Option.some(DateTime.add(at, { hours: 2 })),
+                }),
+              ),
+            }),
+          });
+          const other = new PoolRateLimitsUpdated({ ...high, pool: "claudePlan" });
+          for (const [index, report] of [high, low].entries()) {
+            const runId = RunId.make(`pool-run-${index}`);
+            yield* store.recordAndClaim(
+              new Submission({
+                ...lifecycleSubmission,
+                itemKey: ItemKey.make(`pool-item-${index}`),
+                event: new Event({
+                  ...lifecycleSubmission.event,
+                  id: EventId.make(`pool-event-${index}`),
+                  dedupKey: DedupKey.make(`pool-dedup-${index}`),
+                }),
+              }),
+              runId,
+            );
+            const started = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
+            assert(started._tag === "AttemptStarted");
+            const attemptId = started.execution.attempt.id;
+            let sequence = 0;
+            const append = (payload: AttemptChannel.OutboundPayload) =>
+              store.appendTranscript(
+                "outbound",
+                new AttemptChannel.OutboundEnvelope({
+                  version: AttemptChannel.PROTOCOL_VERSION,
+                  attemptId,
+                  sequence: AttemptChannel.Sequence.make(++sequence),
+                  sentAt: at,
+                  payload,
+                }),
+              );
+            yield* append(new AttemptChannel.SessionEvent({ event: report }));
+            if (index === 0) yield* append(new AttemptChannel.SessionEvent({ event: other }));
+            for (let i = 0; i < 205; i++)
+              yield* append(
+                new AttemptChannel.SessionEvent({
+                  event: new TextOutput({ session, text: "More activity" }),
+                }),
+              );
+            assert.deepStrictEqual(
+              new Set(yield* reader.latestPoolRateLimits()),
+              new Set([report, other]),
+            );
+          }
+        }).pipe(
+          Effect.provide(Layer.merge(RunStore.layer, RunReader.layer)),
+          Effect.provide(localSqliteLayer(directory)),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live(
     "keeps the latest worker notice beyond transcript pages and replaces it on recovery",
     () =>

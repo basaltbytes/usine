@@ -1,4 +1,5 @@
 import { ConfigFileError } from "@usine/config/file";
+import { BillingPool, PoolLogin } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
@@ -159,6 +160,19 @@ export class WorkerPreflightNeed extends Schema.TaggedClass<WorkerPreflightNeed>
   message: Schema.String,
 }) {}
 
+export const POOL_LIMIT_WARNING_PERCENT = 80;
+
+export class PoolLimitNeed extends Schema.TaggedClass<PoolLimitNeed>(
+  "@usine/orchestrator/PoolLimitNeed",
+)("PoolLimitNeed", {
+  id: Schema.String,
+  pool: BillingPool,
+  login: Schema.OptionFromNullOr(PoolLogin),
+  window: Schema.Literals(["primary", "secondary"]),
+  usedPercent: Schema.Number.check(Schema.isGreaterThanOrEqualTo(POOL_LIMIT_WARNING_PERCENT)),
+  resetsAt: Schema.DateTimeUtcFromString,
+}) {}
+
 /** One reason the overview asks for operator attention. */
 export const NeedView = Schema.Union([
   CycleBudgetNeed,
@@ -173,5 +187,6 @@ export const NeedView = Schema.Union([
   UnconfirmedStopNeed,
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
+  PoolLimitNeed,
 ]);
 export type NeedView = typeof NeedView.Type;

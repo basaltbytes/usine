@@ -6,13 +6,14 @@ import { WorkerName } from "@usine/core/worker";
 import {
   BlockedFailureView,
   ConfigFileNeed,
+  PoolLimitNeed,
   QuestionFailureView,
   RunFailureNeed,
   UnconfiguredWorkerNeed,
   UnresponsiveWorkerNeed,
   UnconfirmedStopNeed,
 } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { needsYouByProject } from "~/lib/overview";
 import { needCopy } from "~/lib/needs-you/strings";
@@ -162,4 +163,17 @@ it("counts a worker alert once for each affected project", () => {
     ],
   );
   assert.include(needCopy(need).detail, "3 attempts are still running");
+});
+
+it("identifies an unrecorded pool login without assigning its warning to a project", () => {
+  const need = new PoolLimitNeed({
+    id: "pool-limit:chatgptPlan:secondary",
+    pool: "chatgptPlan",
+    login: Option.none(),
+    window: "secondary",
+    usedPercent: 80,
+    resetsAt: DateTime.makeUnsafe("2026-10-29T15:00:00Z"),
+  });
+  assert.include(needCopy(need).detail, "Login unavailable");
+  assert.deepStrictEqual([...needsYouByProject([need])], []);
 });

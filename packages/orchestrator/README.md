@@ -294,6 +294,8 @@ After polling and schedule triggers each report their first cycle, the overview 
 
 For Boat workers behind a gateway, the SSH adapter resolves `provisioner.tailnet.client_id_env` and `client_secret_env` into redacted OAuth credentials. Missing variables produce a gateway capability error before an attempt starts.
 
+`PoolLimitNeed` warns about each primary or secondary window at 80% or more whose reset time is in the future. It includes the pool, recorded login when available, percentage, and reset time. Every overview read checks the latest stored snapshot per pool, even when its board projection is cached. A newer report below 80%, a missing window or reset time, or reaching the reset clears the warning. Dismiss and Undo use the existing attention acknowledgements; changed content appears again. Pool warnings affect the overview attention count and leave project badges and scheduling unchanged.
+
 Needs attention includes `UnresponsiveWorkerNeed` after three consecutive unanswered worker probes. Each entry lists the affected running attempts and the last answer time. Worker notices refresh even when the board projection is cached, and remain visible beyond the recent transcript page. Recovery or completion removes the affected attempt; a later outage or changed attempt list resurfaces a dismissed entry. Worker preflight runs for every slot-count change on reload, including reductions.
 
 ## Configuration revisions API
