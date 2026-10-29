@@ -9,6 +9,8 @@ Create an agent in **Configuration > Agents > New**, or import a Markdown file f
 
 ## Agent file
 
+To add an agent from the CLI, run `usine config export ./config-export`, write the agent file below under `config-export/agents/`, and run `usine config import ./config-export --message "Add developer agent"`. Retain the other exported entities. To edit an existing agent, run `EDITOR=vi usine config edit agent developer`. A saved revision applies to new runs after preflight; running attempts keep their definitions.
+
 Two agents from the factory that runs usine on its own repository:
 
 ```markdown title="agents/developer.md"
@@ -33,7 +35,7 @@ Finish one pull request at a time. Own the latest findings, direct fixes, final 
 If and only if a tool literally named `subagent` is available, delegate this complete finishing task to it once, including the PR context and all completion requirements, then return its completion or blocker report. Otherwise, do the work yourself. Do not divide the task into review-only and fix-only children, use another delegation tool, or launch a nested reviewer.
 ```
 
-[Agent files](/reference/configuration/agent-files/) lists the frontmatter keys and validation rules. An agent file that doesn't load is left out of the roster, with every loop that uses it.
+[Agent files](/reference/configuration/agent-files/) lists the frontmatter keys and validation rules. An invalid agent rejects the complete import or edit and saves no revision.
 
 ## Parent and child sessions
 

@@ -41,7 +41,7 @@ To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` aga
 
 ## Create the instance folder
 
-The first start imports the files below into the database as revision 1. Later starts read only the stored configuration. Use [`usine config edit`, `import`, `export`, and `log`](/reference/configuration/cli/#configuration-revisions) to change configuration and inspect its history. `.env`, the GitHub App credentials, and the listen address remain in files or environment variables.
+The first start imports the files below into the database as revision 1. Later starts read only the stored configuration. Use [`usine config edit`, `import`, `export`, and `log`](/reference/configuration/config/) to change configuration and inspect its history. `.env`, the GitHub App credentials, and the listen address remain in files or environment variables.
 
 <FileTree>
 
@@ -49,8 +49,10 @@ The first start imports the files below into the database as revision 1. Later s
   - usine.yaml registry, labels, settings, and workers
   - agents/
     - developer.md one agent per file
-  - loops/
-    - start-dev.md one loop per file
+  - projects/
+    - widgets/
+      - loops/
+        - start-dev.md one loop per file
   - .gitignore
   - .env secrets that usine reads, such as tokens
   - .usine/ runtime state that usine up writes
@@ -69,20 +71,29 @@ The first start imports the files below into the database as revision 1. Later s
 
 <Steps>
 
-1. Create the folder with a `usine.yaml` file and the `agents/` and `loops/` folders. `usine up` stops if either folder is missing, even if it would be empty.
+1. Create the bootstrap folder and an `agents/` directory, which must exist even if empty. This CLI version has no `usine init` command; create the starting files as shown here. A version 2 project without loops can omit its loops directory.
 
-2. Register the repositories in `usine.yaml`. This is the smallest valid file:
+   ```sh
+   mkdir -p ~/my-factory/agents ~/my-factory/projects/widgets/loops
+   cd ~/my-factory
+   ```
+
+2. Register the repositories and their project in the bootstrap `usine.yaml`:
 
    ```yaml title="usine.yaml"
-   version: 1
+   version: 2
    repos:
      - name: acme/widgets
+   projects:
+     - id: widgets
+       name: Widgets
+       repositories: [acme/widgets]
    ```
 
    A fuller file declares labels, board lanes, settings, workers, and your GitHub login:
 
    ```yaml title="usine.yaml"
-   version: 1
+   version: 2
    labels:
      - name: ready-for-agent
        color: "0e8a16"
@@ -91,6 +102,10 @@ The first start imports the files below into the database as revision 1. Later s
    repos:
      - name: acme/widgets
        tags: [backend]
+   projects:
+     - id: widgets
+       name: Widgets
+       repositories: [acme/widgets]
        lanes:
          - name: Ready
            sources: [{ label: ready-for-agent }]
@@ -109,7 +124,7 @@ The first start imports the files below into the database as revision 1. Later s
 
    [`usine.yaml`](/reference/configuration/usine-yaml/) lists every key and its default.
 
-3. Add at least one [agent](/guides/write-an-agent/) and one [loop](/guides/write-a-loop/).
+3. Copy the [agent example](/guides/write-an-agent/) to `agents/developer.md` and the [loop example](/guides/write-a-loop/) to `projects/widgets/loops/start-dev.md`. These files become stored entities during the first import.
 
 4. Keep the runtime state and the [environment file](/reference/configuration/cli/#environment-file) out of git:
 
@@ -144,7 +159,7 @@ usine uses one GitHub App. The orchestrator polls and writes labels with an inst
 
 4. Create the App, generate a private key, and note the App ID.
 
-5. On the App's **Install App** page, install the App on the account that owns the repositories, and select every repository in `usine.yaml`. usine expects exactly one installation and refuses a suspended one.
+5. On the App's **Install App** page, install the App on the account that owns the repositories, and select every repository in your bootstrap registry. usine expects exactly one installation and refuses a suspended one.
 
 6. Save the credentials in `.usine/github-app.json` with mode `0600`:
 
@@ -161,7 +176,7 @@ usine uses one GitHub App. The orchestrator polls and writes labels with an inst
 
 ## Start the orchestrator
 
-From the instance folder, run `usine up`:
+From the instance folder, run `usine up`. The first start imports the bootstrap files as revision 1, preserving loop pause state. Later starts read the database and ignore the original configuration files:
 
 ```sh title="Instance folder"
 usine up
@@ -202,23 +217,25 @@ The sidebar lists **Projects**, with one board per repository, and **Configurati
 
 usine writes its state to `.usine/` in the instance folder:
 
-| Path                                          | Contents                                                                                                                                                                                                                                                             |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.usine/runtime.sqlite`                       | Events, runs, attempts, transcripts, board projections, poll cursors, and loop pause flags. usine never deletes a row.                                                                                                                                               |
-| `.usine/durable.sqlite`                       | The Pi parent task and conversation of each attempt, which usine resumes after a restart.                                                                                                                                                                            |
-| `.usine/github-app.json`                      | The App credentials, if you use the file.                                                                                                                                                                                                                            |
-| `.usine/instance.lock`, `.usine/instance.pid` | The lock that prevents a second `usine up`, and the process ID of the running one.                                                                                                                                                                                   |
-| `.usine/instance.json`                        | The [instance record](/reference/configuration/cli/#instance-record) of the running `usine up`.                                                                                                                                                                      |
-| `.usine/instance-id`                          | The instance's ID, which labels its attempt containers on SSH workers.                                                                                                                                                                                               |
-| `.usine/usine.log`                            | The output of an orchestrator that `usine up --detach`, `usine restart`, or `usine upgrade` started.                                                                                                                                                                 |
-| `.usine/backups/`                             | The copies of the stores that `usine upgrade` makes before it moves the pin.                                                                                                                                                                                         |
-| `.usine/workers/<worker>/`                    | For a local worker: cached clones in `repos/`, attempt worktrees in `attempts/`, and the Turborepo cache in `turbo/`.                                                                                                                                                |
-| `.usine/known-hosts/`                         | The host key of each machine that a [provisioned worker](/guides/add-a-provisioned-worker/) created, one file per machine.                                                                                                                                           |
-| `.usine/ssh-workers/`                         | How to reach each SSH worker that has a `destination`, one file per worker, without secrets. **Discard leftovers** reads it to remove the attempts' Codex homes from a worker that `usine.yaml` no longer declares (see [Restarts](/guides/operate-runs/#restarts)). |
+| Path                                          | Contents                                                                                                                                                                                                                                                                         |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.usine/runtime.sqlite`                       | Events, runs, attempts, transcripts, board projections, poll cursors, and loop pause flags. usine never deletes a row.                                                                                                                                                           |
+| `.usine/durable.sqlite`                       | The Pi parent task and conversation of each attempt, which usine resumes after a restart.                                                                                                                                                                                        |
+| `.usine/github-app.json`                      | The App credentials, if you use the file.                                                                                                                                                                                                                                        |
+| `.usine/instance.lock`, `.usine/instance.pid` | The lock that prevents a second `usine up`, and the process ID of the running one.                                                                                                                                                                                               |
+| `.usine/instance.json`                        | The [instance record](/reference/configuration/cli/#instance-record) of the running `usine up`.                                                                                                                                                                                  |
+| `.usine/instance-id`                          | The instance's ID, which labels its attempt containers on SSH workers.                                                                                                                                                                                                           |
+| `.usine/usine.log`                            | The output of an orchestrator that `usine up --detach`, `usine restart`, or `usine upgrade` started.                                                                                                                                                                             |
+| `.usine/backups/`                             | The copies of the stores that `usine upgrade` makes before it moves the pin.                                                                                                                                                                                                     |
+| `.usine/workers/<worker>/`                    | For a local worker: cached clones in `repos/`, attempt worktrees in `attempts/`, and the Turborepo cache in `turbo/`.                                                                                                                                                            |
+| `.usine/known-hosts/`                         | The host key of each machine that a [provisioned worker](/guides/add-a-provisioned-worker/) created, one file per machine.                                                                                                                                                       |
+| `.usine/ssh-workers/`                         | How to reach each SSH worker that has a `destination`, one file per worker, without secrets. **Discard leftovers** reads it to remove the attempts' Codex homes from a worker that the stored configuration no longer declares (see [Restarts](/guides/operate-runs/#restarts)). |
 
-The runtime store records every event, so that a loop doesn't act twice on the same item content. Deleting it deletes this record and the run history, so back it up with [`usine backup`](/guides/operate-runs/#back-up-and-export) instead.
+The runtime store records every event, so that a loop doesn't act twice on the same item content. Deleting it deletes configuration, revision history, this record, and the run history, so back it up with [`usine backup`](/guides/operate-runs/#back-up-and-export) instead.
 
 ## Change the configuration
+
+For command-line changes, run `EDITOR=vi usine config edit settings instance`, `usine config edit worker local`, or `usine config edit loop widgets/start-dev`. To add entities or change several together, export a folder, edit it, and import it with a message. See [`usine config`](/reference/configuration/config/) for every entity kind and the fields that require a restart.
 
 Open **Configuration** to change loops, agents, workers, repositories, labels, or settings. On a detail page, select **Edit**, change the export-format text, optionally enter a message, and select **Save**. Errors appear below the editor with their field paths. If another change was saved first, review the newer revision's diff and select **Reload text**; your draft remains below the editor for copying.
 
@@ -226,7 +243,7 @@ Use **New** on a list to create an entity from a template. New loops start pause
 
 Each detail page has **History**, with revision numbers, actors, times, and messages. Select a revision to see the before-and-after text as a diff. **Revert** creates a revision restoring every entity in the selected revision, with an optional message. A later change to an affected entity can prevent a revert. **Configuration > History** lists all revisions and links to the changed entities.
 
-Accepted revisions apply live to new work; running attempts continue. A change that needs a restart or fails worker preflight is refused with the reason. For command-line editing and bulk changes, use [`usine config edit`, `import`, `export`, and `log`](/reference/configuration/cli/#configuration-revisions). Files are an import and export format; editing the original files does not change the stored configuration.
+Revisions accepted by the UI apply live to new work; running attempts continue. The UI refuses a change that needs a restart or fails worker preflight. CLI writes save these revisions, but the running configuration stays unchanged until the restart or preflight succeeds. For command-line editing and bulk changes, use [`usine config edit`, `import`, `export`, and `log`](/reference/configuration/config/). Files are an import and export format; editing the original files does not change the stored configuration.
 
 ## Next steps
 

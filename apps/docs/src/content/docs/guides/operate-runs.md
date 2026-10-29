@@ -90,7 +90,7 @@ The conversation is next to an outline of the task, the event, and the attempts.
 | Line                                         | The attempt started because                                                    |
 | -------------------------------------------- | ------------------------------------------------------------------------------ |
 | **From the event**                           | the run's event opened it. Every run's first attempt starts this way.          |
-| **Retried by \<login\>**                     | you selected **Retry**. The login is the `operator` in `usine.yaml`.           |
+| **Retried by \<login\>**                     | you selected **Retry**. The login is the stored `operator` setting.           |
 | **Edited and retried by \<login\>**          | you used **Edit and retry**.                                                   |
 | **Retried after an infrastructure failure**  | the engine retried after the previous attempt's `InfraFailure`.                |
 | **Started again after a restart**            | a restart interrupted the previous attempt, and its parent task no longer existed. |
@@ -137,7 +137,7 @@ stateDiagram-v2
 
 ## Approve a run
 
-A run that needs approval appears in **Needs attention** as **\<loop\>: approval needed**. Read its **Task** and **Event**, and select **Approve**. The run becomes `Queued` and starts when a worker slot is free. Its **Event** then shows the approver, time, and channel, such as **Approved by octocat · 15 Oct 19:30 · from the UI**, where the name is the `operator` in `usine.yaml`. Runs approved before usine recorded approvers show **Approved**.
+A run that needs approval appears in **Needs attention** as **\<loop\>: approval needed**. Read its **Task** and **Event**, and select **Approve**. The run becomes `Queued` and starts when a worker slot is free. Its **Event** then shows the approver, time, and channel, such as **Approved by octocat · 15 Oct 19:30 · from the UI**, where the name is the stored `operator` setting. Runs approved before usine recorded approvers show **Approved**.
 
 If the item changes before you approve and still matches, usine opens a new waiting run and cancels this one as superseded. If the item no longer matches, usine revokes the run.
 
@@ -188,7 +188,7 @@ As with a question, the blocker comment opens no run. After you remove the block
 
 ## Edit and retry a run
 
-**Edit and retry** opens the run's task and the roster's agents, including agents that a reload added. **Save and retry** takes the selected agent's current loaded definition, replaces the task, the agent, and the parent model that usine picks for it, and retries. To use a reloaded agent definition, keep the same task and agent name and select **Save and retry**. Every later attempt of the run uses the change, including automatic retries, until you edit again. Each attempt records the task and agent that it ran. The event doesn't change.
+**Edit and retry** opens the run's task and the roster's agents, including agents added by a revision. **Save and retry** takes the selected agent's current loaded definition, replaces the task, the agent, and the parent model that usine picks for it, and retries. To use an updated agent definition, keep the same task and agent name and select **Save and retry**. Every later attempt of the run uses the change, including automatic retries, until you edit again. Each attempt records the task and agent that it ran. The event doesn't change.
 
 ## Cancel a run
 
@@ -224,7 +224,7 @@ The API also has `Steer`, which adds guidance without a hold, and which the runa
 
 If the parent's last turn answered you and the attempt has no commit, pull request, or comment to show, the attempt fails with that answer instead of succeeding, so that you decide what happens next.
 
-For a Claude Code or Codex child, the terminal icon in the outline shows the session ID, the worktree, and a **Resume this session** command: `cd -- '<worktree>' && claude --resume '<id>'`, or `codex resume -- '<id>'`. For an ssh worker, the command runs over `ssh -t <destination>`, with `-p <port>` if the worker sets `port`, and the worktree line includes the worker. If `usine.yaml` no longer declares the worker, the block shows the local form and says so. For a Codex child using a local login with a recorded custom home, the command sets `CODEX_HOME='<home>'` before `codex resume`. The block notes that the command uses the attempt's harness login, or, for a child whose model requests used the gateway's credential, that the gateway credential isn't available from your shell. For a provisioned worker, the block notes that the command runs on the attempt's machine, and, for such a child, that the gateway credential or API key isn't available from your shell. The command works only until attempt cleanup removes the worktree.
+For a Claude Code or Codex child, the terminal icon in the outline shows the session ID, the worktree, and a **Resume this session** command: `cd -- '<worktree>' && claude --resume '<id>'`, or `codex resume -- '<id>'`. For an ssh worker, the command runs over `ssh -t <destination>`, with `-p <port>` if the worker sets `port`, and the worktree line includes the worker. If the stored configuration no longer declares the worker, the block shows the local form and says so. For a Codex child using a local login with a recorded custom home, the command sets `CODEX_HOME='<home>'` before `codex resume`. The block notes that the command uses the attempt's harness login, or, for a child whose model requests used the gateway's credential, that the gateway credential isn't available from your shell. For a provisioned worker, the block notes that the command runs on the attempt's machine, and, for such a child, that the gateway credential or API key isn't available from your shell. The command works only until attempt cleanup removes the worktree.
 
 Codex children that used an external credential, including the gateway's ChatGPT login, have no resume action because your shell lacks that credential. Children that used a local login keep the action, even if the worker's configuration has since changed.
 
@@ -239,12 +239,10 @@ Codex children that used an external credential, including the gateway's ChatGPT
 | **Question from \<loop\>**             | An agent asked you a question. See [Answer a question](#answer-a-question).                                          |
 | **Cycle budget exhausted**             | An item reached a loop's [`max_cycles`](/reference/configuration/loop-files/#max_cycles). Inspect it, then select **Reset cycle budget**. |
 | An error name from polling             | A repository's poll failed, for example on a GitHub error, a missing App permission, or an `if:` that fails to evaluate. |
-| **Label preflight failed**             | usine couldn't create a label that `usine.yaml` declares.                                                            |
+| **Label preflight failed**             | usine couldn't create a label that the stored configuration declares.                                                            |
 | **Item not shown on the board**        | usine couldn't place an item on its board.                                                                           |
 | A schedule error                       | A schedule loop couldn't evaluate or submit a tick.                                                                  |
-| **Loop file not loaded**               | A loop file failed to load and opens no runs. Fix the file and reload the configuration.                             |
-| **Agent file not loaded**              | An agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
-| **Worker not configured**              | Attempts are recorded on a worker that `usine.yaml` no longer declares. See [Restarts](#restarts).                   |
+| **Worker not configured**              | Attempts are recorded on a worker that the stored configuration no longer declares. See [Restarts](#restarts).                   |
 | **\<loop\>: parent task not stopped**  | A closed attempt's parent task may still run, so the attempt keeps a slot on its worker and its worktree, and no attempt of the loop starts on the item. See [Cancel a run](#cancel-a-run) and [Retry a failed run](#retry-a-failed-run). |
 
 Entries about an issue that is closed or a pull request that is closed or merged leave on their own:
@@ -253,13 +251,13 @@ Entries about an issue that is closed or a pull request that is closed or merged
 - The item's **Cycle budget exhausted** entry leaves at the next poll. usine records the ask as closed, not reset, so the item keeps its budget: if the item is reopened and a loop matches it again, the entry comes back.
 - A run waiting for approval is revoked at the next poll if the loop's `if:` requires an open item, such as `item.state == "OPEN"`.
 
-A run in a repository that you remove from `usine.yaml` leaves too: its approval, failure, question, or blocker isn't listed, because the repository has no project to mark. A failed run stays under **Recent runs**.
+A run in a repository that you remove from the registry leaves too: its approval, failure, question, or blocker isn't listed, because the repository has no project to mark. A failed run stays under **Recent runs**.
 
 ## Runaway guards
 
-`max_attempt_minutes` and `max_attempt_tokens` in [`settings`](/reference/configuration/usine-yaml/#settings) limit each attempt. Both are off by default:
+`max_attempt_minutes` and `max_attempt_tokens` in [`settings`](/reference/configuration/usine-yaml/#settings) limit each attempt. Both are off by default. Run `usine config edit settings instance` to set them; this is the relevant part of the editor text:
 
-```yaml title="usine.yaml"
+```yaml title="settings instance (fragment)"
 settings:
   max_attempt_minutes: 120
   max_attempt_tokens: 5000000
@@ -294,7 +292,7 @@ Canceling a run whose attempt waits for its reattach salvages and removes the wo
 
 At each start, usine also reconciles checkouts that earlier attempts left on declared workers: it salvages failed and canceled attempts and removes succeeded ones, after it stops the parent task of a closed attempt that still runs. If it can't confirm that stop, it keeps the worktree and a slot, starts no attempt of the loop on the item, logs `Could not confirm that the parent task of a closed Attempt stopped`, lists the attempt in **Needs attention**, and retries at each reconcile. After that, and at each reconcile, it removes each Codex home in `<root>/workers/<name>/codex/` on an SSH worker that no running attempt uses and whose attempt has no checkout there, such as one that a crash left with the attempt's Codex sessions.
 
-usine skips attempts on a worker that `usine.yaml` no longer declares, for example after you replace `local` with an SSH worker. It logs one warning per start with their count, shows **Worker not configured** in **Needs attention**, and leaves their checkouts. Their runs wait until you declare the worker again or cancel them. Declare the worker again and restart `usine up`, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them. On an SSH worker with its own machine, the discard also removes the attempts' Codex homes from `<root>/workers/<name>/codex/`: usine records how to reach the machine in `.usine/ssh-workers/` each time it adds the worker. If the machine can't be reached, or usine has no record of it, usine logs it and the Codex homes stay. Remove the checkouts yourself. A worker that you declare again reconciles only attempts recorded after the discard. After a reload removes a worker, the entry says how many attempts still run, such as `2 attempts still running on it. Discard the leftovers after they end`, and refuses a discard until they end.
+usine skips attempts on a worker that the stored configuration no longer declares, for example after you replace `local` with an SSH worker. It logs one warning per start with their count, shows **Worker not configured** in **Needs attention**, and leaves their checkouts. Their runs wait until you declare the worker again or cancel them. Add the worker to a fresh export and run `usine config import ./config-export --message "Restore worker"`, then restart `usine up` for startup recovery, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them. On an SSH worker with its own machine, the discard also removes the attempts' Codex homes from `<root>/workers/<name>/codex/`: usine records how to reach the machine in `.usine/ssh-workers/` each time it adds the worker. If the machine can't be reached, or usine has no record of it, usine logs it and the Codex homes stay. Remove the checkouts yourself. A worker that you declare again reconciles only attempts recorded after the discard. After a revision removes a worker, the entry says how many attempts still run, such as `2 attempts still running on it. Discard the leftovers after they end`, and refuses a discard until they end.
 
 ## Stop the orchestrator
 
@@ -318,7 +316,7 @@ Run `usine backup` from the instance folder, with a new file name, while the orc
 usine backup /backups/factory-2026-10-16.sqlite
 ```
 
-It also writes the durable storage to `/backups/factory-2026-10-16.durable.sqlite` ([`usine backup`](/reference/configuration/cli/#usine-backup-path)). Keep backups outside the instance folder, and back up `usine.yaml`, the loop and agent files, and the credentials separately.
+It also writes the durable storage to `/backups/factory-2026-10-16.durable.sqlite` ([`usine backup`](/reference/configuration/cli/#usine-backup-path)). Keep backups outside the instance folder, and copy credentials separately. The runtime backup includes stored configuration and its revision history. Use `usine config export <folder>` for a separate YAML and Markdown copy; it omits history and pause state.
 
 To restore a backup:
 
