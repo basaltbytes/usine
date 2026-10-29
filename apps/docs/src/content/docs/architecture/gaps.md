@@ -44,7 +44,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 
 - [#234][]: Claude subscription tokens through the gateway are untested against Anthropic.
 - [#235][]: the gateway can't store a Codex ChatGPT login with token refresh.
-- [#240][]: a tunnel to an allowed name can serve other names on the same certificate (HTTP/2 coalescing, domain fronting).
 - [#261][]: harness turns behind the gateway request hosts outside the egress allowlist.
 - [#264][]: infrastructure changes apply to running gateways only by hand, and never to running workers.
 
@@ -74,7 +73,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 [#230]: https://github.com/basaltbytes/usine/issues/230
 [#234]: https://github.com/basaltbytes/usine/issues/234
 [#235]: https://github.com/basaltbytes/usine/issues/235
-[#240]: https://github.com/basaltbytes/usine/issues/240
 [#258]: https://github.com/basaltbytes/usine/issues/258
 [#261]: https://github.com/basaltbytes/usine/issues/261
 [#264]: https://github.com/basaltbytes/usine/issues/264
