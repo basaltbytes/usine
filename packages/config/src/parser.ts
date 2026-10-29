@@ -1,3 +1,4 @@
+import { boardRepositories } from "./project/operations.ts";
 import { StepName } from "@usine/core/step";
 import { ApprovalRequirement, LoopName } from "@usine/core/loop";
 import {
@@ -166,9 +167,13 @@ const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError
 const loopName = (file: InstancePath): Effect.Effect<LoopName, ConfigFileError> =>
   markdownName(file).pipe(
     Effect.flatMap((name) =>
-      Schema.decodeUnknownEffect(LoopFile.fields.name)(name).pipe(
-        Effect.mapError((error) => schemaError(file, error)),
-      ),
+      Schema.decodeUnknownEffect(LoopFile.fields.name)(
+        file.startsWith("projects/")
+          ? `${file.split("/")[1]}/${name}`
+          : file.startsWith("loops/")
+            ? file.slice(6, -3)
+            : name,
+      ).pipe(Effect.mapError((error) => schemaError(file, error))),
     ),
   );
 
@@ -371,7 +376,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
           const parsed = Schema.decodeUnknownResult(LoopText)(
             {
               frontmatter: fields,
-              name: yield* markdownName(file),
+              name: yield* loopName(file),
               body: markdown.body,
             },
             { errors: "all", onExcessProperty: "error" },
@@ -403,7 +408,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
       const named = Schema.decodeUnknownOption(Schema.Struct({ name: LoopFile.fields.name }))(
         value,
       );
-      if (Option.isSome(named) && named.value.name !== (yield* markdownName(file))) {
+      if (Option.isSome(named) && named.value.name !== (yield* loopName(file))) {
         const message = "Entity identifier does not match its name";
         problems.push(
           new ConfigFileError({
@@ -484,7 +489,7 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
   ) {
     const declared = new Set(config.labels.map(({ name }) => canonicalLabelName(name)));
     const warnings: Array<ConfigWarning> = [];
-    for (const repository of config.repos) {
+    for (const repository of boardRepositories(config)) {
       for (const lane of repository.lanes) {
         for (const source of lane.sources) {
           if ("label" in source && !declared.has(canonicalLabelName(source.label))) {

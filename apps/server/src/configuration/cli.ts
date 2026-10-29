@@ -5,7 +5,9 @@ import {
   ConfigurationStoreError,
   configurationDiff,
   configurationEntities,
+  resolveConfigurationEntityKey,
   type ConfigurationChange,
+  type ConfigurationEntityKey,
   type ConfigurationRevisionNumber,
 } from "@usine/config/configuration";
 import {
@@ -26,6 +28,18 @@ export const runConfigCommand = Effect.fn("Cli.config")(
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
     const { instance, number } = yield* initializeConfiguration(directory);
+    const resolveKey = (
+      key: ConfigurationEntityKey,
+    ): Effect.Effect<ConfigurationEntityKey, ConfigCommandError> =>
+      Option.match(resolveConfigurationEntityKey(configurationEntities(instance), key), {
+        onSome: Effect.succeed,
+        onNone: () =>
+          Effect.fail(
+            new ConfigCommandError({
+              message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
+            }),
+          ),
+      });
     const save = (
       expected: ConfigurationRevisionNumber,
       changes: ReadonlyArray<ConfigurationChange>,
@@ -65,7 +79,12 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         );
       }
       case "ConfigLogCommand": {
-        const revisions = yield* store.list(command.entity);
+        const revisions = yield* store.list(
+          yield* Option.match(command.entity, {
+            onNone: () => Effect.succeed(Option.none()),
+            onSome: (key) => resolveKey(key).pipe(Effect.map(Option.some)),
+          }),
+        );
         return yield* Effect.forEach(
           revisions,
           (revision) =>
@@ -82,7 +101,8 @@ export const runConfigCommand = Effect.fn("Cli.config")(
       }
       case "ConfigEditCommand": {
         const entities = configurationEntities(instance);
-        const entity = entities.find(({ key }) => key.key === command.entity.key);
+        const resolved = yield* resolveKey(command.entity);
+        const entity = entities.find(({ key }) => key.key === resolved.key);
         if (entity === undefined)
           return yield* new ConfigCommandError({
             message: `Unknown ${command.entity.kind} ${command.entity.identifier}.`,

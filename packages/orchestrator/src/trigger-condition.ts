@@ -1,5 +1,5 @@
 import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
-import { matchesSelector } from "@usine/config/selector";
+import { matchesLoop } from "@usine/config/project";
 import { canonicalRepositoryName } from "@usine/core/repository";
 import type { Submission } from "@usine/engine/engine";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
@@ -40,18 +40,18 @@ export const triggerConditionLayer: Layer.Layer<
         yield* Effect.logInfo("Queued Event belongs to a Loop that is no longer loaded", fields);
         return "no-longer-matches";
       }
-      if (loop.trigger.on === "schedule") return "matches";
       const repository = instance.config.repos.find(
         ({ name }) =>
           canonicalRepositoryName(name) === canonicalRepositoryName(submission.repository),
       );
-      if (repository === undefined || !matchesSelector(loop.selector, repository)) {
+      if (repository === undefined || !matchesLoop(instance.config, loop, repository)) {
         yield* Effect.logInfo("Queued Event's repository is no longer watched by its Loop", {
           ...fields,
           managed: repository !== undefined,
         });
         return "no-longer-matches";
       }
+      if (loop.trigger.on === "schedule") return "matches";
       const item = decodeItemKey(submission.itemKey);
       if (Option.isNone(item)) {
         yield* Effect.logWarning(

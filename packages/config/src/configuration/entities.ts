@@ -23,11 +23,20 @@ const entity = (kind: ConfigurationEntityKind, identifier: string, value: Schema
 export const configurationEntities = (
   instance: LoadedInstance,
 ): ReadonlyArray<ConfigurationEntity> => {
-  const { workers, repos, labels, ...settings } = Schema.encodeSync(UsineConfig)(instance.config);
+  const { workers, repos, labels, projects, ...settings } = Schema.encodeSync(UsineConfig)(
+    instance.config,
+  );
   return [
     entity("settings", "instance", settings),
     ...(workers ?? []).map((value) => entity("worker", value.name, value)),
-    ...repos.map((value) => entity("repository", value.name, value)),
+    ...repos.map(({ lanes, ...value }) =>
+      entity(
+        "repository",
+        value.name,
+        instance.config.version === 1 ? { ...value, lanes: lanes ?? [] } : value,
+      ),
+    ),
+    ...(projects ?? []).map((value) => entity("project", value.id, value)),
     ...(labels ?? []).map((value) => entity("label", value.name, value)),
     ...instance.agents.map((value) =>
       entity("agent", value.name, Schema.encodeSync(AgentJson)(value)),
@@ -76,4 +85,41 @@ export const configurationDiff = (
     return [new ConfigurationChange(moved ? { ...change, position } : change)];
   });
   return [...removed, ...changed];
+};
+
+/** Resolves short loop names; a new short name requires exactly one project. */
+export const resolveConfigurationEntityKey = (
+  entities: ReadonlyArray<ConfigurationEntity>,
+  key: ConfigurationEntityKey,
+): Option.Option<ConfigurationEntityKey> => {
+  if (key.kind !== "loop" || key.identifier.includes("/")) return Option.some(key);
+  const matches = entities.filter(
+    (entry) =>
+      entry.key.kind === "loop" &&
+      (entry.key.identifier === key.identifier ||
+        entry.key.identifier.endsWith(`/${key.identifier}`)),
+  );
+  if (matches.length === 1) return Option.fromUndefinedOr(matches[0]?.key);
+  if (matches.length > 1) return Option.none();
+  const projects = entities.filter((entry) => entry.key.kind === "project");
+  const project = projects[0];
+  if (projects.length === 1 && project !== undefined)
+    return Option.some(
+      new ConfigurationEntityKey({
+        kind: "loop",
+        identifier: ConfigurationEntityId.make(`${project.key.identifier}/${key.identifier}`),
+      }),
+    );
+  return projects.length === 0 ? Option.some(key) : Option.none();
+};
+
+export const qualifyLoopValue = (key: ConfigurationEntityKey, value: Schema.Json): Schema.Json => {
+  if (key.kind !== "loop") return value;
+  return Option.match(Schema.decodeUnknownOption(Schema.JsonObject)(value), {
+    onNone: () => value,
+    onSome: (fields) =>
+      fields.name === key.identifier.split("/").at(-1)
+        ? { ...fields, name: key.identifier }
+        : value,
+  });
 };

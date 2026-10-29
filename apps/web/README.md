@@ -301,3 +301,5 @@ The registry is the component library, and the theme is the only place for color
 Needs attention groups unresponsive workers with their last answer time and buttons to open each affected run. Entries appear after three consecutive unanswered probes and clear when the worker answers or its affected attempts end. Dismiss and Undo apply to these entries.
 
 Loop forms provide stream-specific payload completion for CEL conditions and Markdown prompt expressions, with debounced server checks. Repository and tag selectors use the registry, and agent choices use the roster. **Preview** lists up to 20 matching stored items, links each to its task, and renders the prompt for a selected item. Editing the draft clears the displayed preview. A schedule loop explains that it has no polled items. **Resume** requires confirmation after loading the saved loop's current match count; new loops remain paused until this action.
+
+Project configuration entities use `/configuration/projects/$project` with the shared raw entity editor and revision history. The repository form reads and writes the owning project's lanes for projects with one repository.

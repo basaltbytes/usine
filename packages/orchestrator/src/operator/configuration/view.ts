@@ -32,7 +32,7 @@ import { ConfigFileError, InstancePath } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
 import { DeclaredLabel, canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import { LoopPriority, PromptTemplate } from "@usine/config/loop";
-import { matchesSelector } from "@usine/config/selector";
+import { boardRepositories, Project, matchesLoop } from "@usine/config/project";
 import { Cron, TimeZone, Stream } from "@usine/config/trigger";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
@@ -296,7 +296,7 @@ export class StateLaneSourceView extends Schema.TaggedClass<StateLaneSourceView>
 export const LaneSourceView = Schema.Union([LabelLaneSourceView, StateLaneSourceView]);
 export type LaneSourceView = typeof LaneSourceView.Type;
 
-/** One lane declared in `repos[].lanes`, with its sources in file order. */
+/** One lane declared in a project, with its sources in file order. */
 export class LaneConfigurationView extends Schema.Class<LaneConfigurationView>(
   "@usine/orchestrator/LaneConfigurationView",
 )({
@@ -314,7 +314,7 @@ export class RepositoryConfigurationView extends Schema.Class<RepositoryConfigur
   lanes: Schema.Array(LaneConfigurationView),
   /** The labels declared in `usine.yaml`, as this repository has them. */
   declaredLabels: Schema.Array(LabelStateView),
-  /** The loaded Loops whose selector selects this repository. */
+  /** The project loops whose selectors select this repository. */
   loops: Schema.Array(LoopName),
 }) {}
 
@@ -341,6 +341,10 @@ export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrato
 export class ConfigurationView extends Schema.Class<ConfigurationView>(
   "@usine/orchestrator/ConfigurationView",
 )({
+  projects: Schema.Array(Project).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
   labels: Schema.Array(DeclaredLabel),
   loops: Schema.Array(LoopFileView),
   quarantinedLoops: Schema.Array(QuarantinedLoopView),
@@ -458,7 +462,9 @@ const makeOperatorConfiguration = Effect.gen(function* () {
     return new RepositoryConfigurationView({
       name: repository.name,
       tags: repository.tags,
-      lanes: repository.lanes.map(
+      lanes: (
+        boardRepositories(instance.config).find(({ name }) => name === repository.name)?.lanes ?? []
+      ).map(
         (lane) =>
           new LaneConfigurationView({
             name: lane.name,
@@ -471,7 +477,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       ),
       declaredLabels: instance.config.labels.map(({ name }) => labelState(name)),
       loops: instance.loops
-        .filter((loop) => matchesSelector(loop.selector, repository))
+        .filter((loop) => matchesLoop(instance.config, loop, repository))
         .map(({ name }) => name),
     });
   });
@@ -523,7 +529,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
               }),
           }),
           repositories: config.repos
-            .filter((repository) => matchesSelector(loop.selector, repository))
+            .filter((repository) => matchesLoop(instance.config, loop, repository))
             .map(({ name }) => name),
           approval: loop.approval,
           maxCycles: loop.maxCycles,
@@ -589,6 +595,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
     });
     const { settings, webhooks, tracing } = config;
     const configuration = new ConfigurationView({
+      projects: config.projects,
       labels: instance.config.labels,
       loops,
       quarantinedLoops: instance.quarantinedLoops.map(

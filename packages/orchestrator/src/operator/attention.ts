@@ -55,7 +55,7 @@ export const projectAttention = (
     (project) =>
       new ProjectView({
         ...project,
-        status: repositories.has(project.repository)
+        status: [project.repository, ...project.repositories].some((name) => repositories.has(name))
           ? "needs-you"
           : project.runs.some(({ canCancel }) => canCancel)
             ? "active"

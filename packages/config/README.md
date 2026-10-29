@@ -2,8 +2,8 @@
 
 Stores versioned configuration and imports and exports the files of a [usine](https://github.com/basaltbytes/usine) instance folder. The [`usine.yaml`](https://docs.usine.dev/reference/configuration/usine-yaml/), [loop file](https://docs.usine.dev/reference/configuration/loop-files/), and [agent file](https://docs.usine.dev/reference/configuration/agent-files/) references describe every key.
 
-- `usine.yaml`: schema version, factory-wide GitHub labels, the managed-repo registry, settings, workers, webhook mode, and operator login.
-- `loops/*.md`: strict YAML frontmatter and a Markdown prompt. The parser type-checks the trigger and every `{{ CEL expression }}` against the trigger's payload.
+- `usine.yaml`: schema version, factory-wide GitHub labels, the managed-repo registry, projects, settings, workers, webhook mode, and operator login.
+- `projects/<project>/loops/*.md`: strict YAML frontmatter and a Markdown prompt. The parser type-checks the trigger and every `{{ CEL expression }}` against the trigger's payload.
 - `agents/*.md`: harness, model, effort, optional parent model and parent effort, and persona.
 
 `updateYaml` and `updateFrontmatter` change one path in the YAML tree and keep comments, key order, and the Markdown body. Files use snake_case keys (`poll_interval`, `max_concurrent_attempts`); decoded types use camelCase (`pollInterval`, `maxConcurrentAttempts`). The schema does the rename, so edits keep snake_case.
@@ -22,11 +22,19 @@ labels:
 
 An undeclared label in a lane source or a trigger expression string literal adds a non-blocking entry to `LoadedInstance.warnings`. Prompt prose isn't checked.
 
-Each managed repo can define an exclusive board lane map of label and item state sources:
+Each project owns an ordered list of registered repositories and one lane map. A repository belongs to at most one project. A registered repository without a project has no board and runs no loops. Label lanes match by name in every member repository, and polling creates missing lane labels.
+
+For example:
 
 ```yaml
+version: 2
 repos:
   - name: acme/widget
+  - name: acme/widget-api
+projects:
+  - id: widget
+    name: Widget
+    repositories: [acme/widget, acme/widget-api]
     lanes:
       - name: Ready
         sources:
@@ -37,7 +45,7 @@ repos:
           - state: pr-open
 ```
 
-`isSettledItemState` reports the settled states, `issue-closed`, `pr-closed`, and `pr-merged`; the board places such an item by state alone, whatever its labels. A repo without a lane map gets proposed lanes from the labels that polling finds.
+`isSettledItemState` reports the settled states, `issue-closed`, `pr-closed`, and `pr-merged`; the board places such an item by state alone, whatever its labels. A project without a lane map gets proposed lanes from the labels that polling finds.
 
 ## Settings and workers
 
@@ -60,7 +68,7 @@ A loop's optional `priority`, a positive integer (`LoopFile.priority`, `LoopPrio
 
 ## Imports
 
-Subpaths: `/factory` (settings and registry), `/board` (lanes), `/label`, `/loop`, `/trigger`, `/agent`, `/selector` (schema and matching), `/instance` (`LoadedInstance` and warnings), and `/file` (file paths and loading failures). Shared identities and agent personas come from `@usine/core`.
+Subpaths: `/factory` (settings and registry), `/board` (lanes), `/project` (project schema, loop scope, migration, and unique short-name resolution), `/label`, `/loop`, `/trigger`, `/agent`, `/selector` (schema and matching), `/instance` (`LoadedInstance` and warnings), and `/file` (file paths and loading failures). Shared identities and agent personas come from `@usine/core`.
 
 `InstanceFolder` (`/instance-folder`) and `ConfigParser` (`/parser`) are Effect services. `InstanceFolder.layer` needs `FileSystem.FileSystem` and `Path.Path`; `ConfigParser.layer` needs `ExpressionEngine` from `@usine/expression/expression-engine`.
 
@@ -70,7 +78,7 @@ For a global server installation managed by systemd, `settings.upgrade_channel` 
 
 ## Configuration revisions
 
-`ConfigurationStore` from `/configuration` reads the current `Configuration`, lists revisions (optionally by entity), reads one revision, commits changes with an expected revision number, and streams revisions after a supplied number. A `ConfigurationRevision` records the actor, time, optional message, and before and after values for settings, workers, repositories (including lanes), labels, loops, and agents. The actor is optional for instances without an `operator` value.
+`ConfigurationStore` from `/configuration` reads the current `Configuration`, lists revisions (optionally by entity), reads one revision, commits changes with an expected revision number, and streams revisions after a supplied number. A `ConfigurationRevision` records the actor, time, optional message, and before and after values for settings, workers, repositories, projects (including lanes), labels, loops, and agents. The actor is optional for instances without an `operator` value.
 
 Revision changes record order only for workers, because worker order determines scheduling preference. A change's optional `position` is a zero-based index in the resulting worker list. The diff detects moves by comparing the relative order of workers present in both configurations. Adding or removing an entity leaves unrelated entities out of the revision; reordering repositories, labels, loops, or agents produces no changes.
 
@@ -95,3 +103,9 @@ Both SSH provisioners accept `timings` with `ssh_wait`, `creation_backoff_min`, 
 `parseConfigurationForm(key, text)` and `validateConfigurationForm(key, value)` from `/folder-codec` support agent, worker, repository, and settings forms. They use the entity schemas and return `ConfigFileError` with field paths. Agent drafts use the JSON codec of `AgentFile`; other drafts use the export-format keys. `WorkerFromYaml` from `/factory` exposes the worker schema with snake_case keys and cross-field checks.
 
 Loop form drafts use `parseConfigurationForm` and `validateConfigurationForm` from `/folder-codec`. They preserve the loop's JSON representation while expressions are incomplete. Saving checks the schema, CEL expressions, prompt interpolations, and references. Expression diagnostics include the field path, expression, and a zero-based position when the CEL checker provides one.
+
+## Project migration
+
+Configuration version 2 stores projects separately from the repository registry. Loops use `project/loop` identities; a short name resolves while it is unique across projects. Selectors narrow the repositories within the owning project.
+
+`migrateProjects` converts version 1 snapshots to one project per registered repository and copies each loop into every project whose repository its selector matched. `ConfigurationFolder.import` accepts the legacy `loops/*.md` layout and converts it. Export writes a `projects` block in `usine.yaml` and `projects/<project>/loops/*.md`. Historical version 1 revisions remain readable. A version 2 store rejects a downgrade to version 1; import legacy files to convert their contents instead.

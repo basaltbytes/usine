@@ -1,3 +1,4 @@
+import { LoopName } from "@usine/core/loop";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import {
   ConfigurationEntity,
@@ -8,12 +9,14 @@ import {
   ConfigurationStoreError,
   configurationEntities,
   validateConfiguration,
+  resolveConfigurationEntityKey,
+  qualifyLoopValue,
 } from "@usine/config/configuration";
 import { referenceIndex } from "@usine/config/instance";
 import { loopPath } from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
 import { repositoryContext } from "@usine/config/payload-slices";
-import { matchesSelector } from "@usine/config/selector";
+import { matchesLoop } from "@usine/config/project";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { Array as Arr, Effect, Option, Result } from "effect";
@@ -30,7 +33,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
 
   const candidate = (input: LoopPreviewRequest) =>
     Effect.gen(function* () {
-      const key = new ConfigurationEntityKey({
+      const requested = new ConfigurationEntityKey({
         kind: "loop",
         identifier: ConfigurationEntityId.make(input.name),
       });
@@ -39,11 +42,17 @@ export const configurationLoopOperations = Effect.gen(function* () {
         onNone: () => [],
         onSome: configurationEntities,
       });
+      const resolved = resolveConfigurationEntityKey(entities, requested);
+      if (Option.isNone(resolved))
+        return yield* new ConfigurationNotFound({
+          message: "Loop is ambiguous. Use project/loop.",
+        });
+      const key = resolved.value;
       const instance = yield* validateConfiguration(parser, [
         ...entities.filter((entity) => entity.key.key !== key.key),
-        new ConfigurationEntity({ key, value: input.value }),
+        new ConfigurationEntity({ key, value: qualifyLoopValue(key, input.value) }),
       ]);
-      const loop = instance.loops.find((loop) => loop.name === input.name);
+      const loop = instance.loops.find((loop) => loop.name === LoopName.make(key.identifier));
       if (loop === undefined)
         return yield* new ConfigurationNotFound({
           message: "Loop was not found in the checked configuration.",
@@ -54,10 +63,22 @@ export const configurationLoopOperations = Effect.gen(function* () {
   const check = Effect.fn("ConfigurationEditor.checkLoop")(function* (input: LoopDraft) {
     yield* Effect.annotateCurrentSpan({ loop: input.name });
     const snapshot = yield* store.read;
+    const resolved = resolveConfigurationEntityKey(
+      Option.match(snapshot.instance, { onNone: () => [], onSome: configurationEntities }),
+      new ConfigurationEntityKey({
+        kind: "loop",
+        identifier: ConfigurationEntityId.make(input.name),
+      }),
+    );
+    if (Option.isNone(resolved))
+      return yield* new ConfigurationNotFound({ message: "Loop is ambiguous. Use project/loop." });
+    const key = resolved.value;
     const errors = yield* parser
       .checkLoopDraft(
-        loopPath(input.name),
-        input.text === undefined ? { value: input.value } : { text: input.text },
+        loopPath(LoopName.make(key.identifier)),
+        input.text === undefined
+          ? { value: qualifyLoopValue(key, input.value) }
+          : { text: input.text },
         Option.map(snapshot.instance, (instance) =>
           referenceIndex(instance.config, instance.agents),
         ),
@@ -87,7 +108,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
       let total = 0;
       if (loop.trigger.on !== "schedule") {
         for (const repository of instance.config.repos.filter((repo) =>
-          matchesSelector(loop.selector, repo),
+          matchesLoop(instance.config, loop, repo),
         )) {
           const stored = yield* items.list(repository.name, { limit: Number.MAX_SAFE_INTEGER });
           const candidates = stored.filter(

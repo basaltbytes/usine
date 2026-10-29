@@ -1,3 +1,5 @@
+import { ProjectId } from "@usine/core/project";
+import { ProjectView } from "./overview.ts";
 import {
   LoopDraft,
   LoopCheck,
@@ -425,6 +427,34 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
       }),
       HttpApiEndpoint.post("cancel", "/api/runs/:runId/cancel", {
         params: runParams,
+        success: acknowledged,
+      }),
+      HttpApiEndpoint.get("project", "/api/projects/:project", {
+        params: { project: ProjectId },
+        success: ProjectView,
+      }),
+      HttpApiEndpoint.get("projectTask", "/api/projects/:project/tasks/:item", {
+        params: {
+          project: ProjectId,
+          item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
+        },
+        query: Schema.Struct({ repository: RepositoryName }),
+        success: TaskView,
+      }),
+      HttpApiEndpoint.post("moveProjectItem", "/api/projects/:project/items/:item/lane", {
+        params: {
+          project: ProjectId,
+          item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
+        },
+        payload: Schema.Struct({ repository: RepositoryName, toLane: BoardLaneId }),
+        success: acknowledged,
+      }),
+      HttpApiEndpoint.post("pauseProjectLoop", "/api/loops/:project/:loop/pause", {
+        params: { project: ProjectId, loop: LoopName },
+        success: acknowledged,
+      }),
+      HttpApiEndpoint.post("unpauseProjectLoop", "/api/loops/:project/:loop/unpause", {
+        params: { project: ProjectId, loop: LoopName },
         success: acknowledged,
       }),
       HttpApiEndpoint.post("moveBoardItem", "/api/projects/:owner/:repository/items/:item/lane", {

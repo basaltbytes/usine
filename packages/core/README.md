@@ -72,3 +72,7 @@ Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to rea
 `WorkerUnresponsive.unansweredProbes` records consecutive unanswered probes; older notices decode to 1. `WORKER_UNRESPONSIVE_PROBES` is the shared attention threshold of 3. The executor reports at that threshold so consumers can distinguish persistent outages from the first missed probe.
 
 `ProvisionerTimings` in `/worker` validates provisioner waits and check intervals in seconds, including ordered creation backoff bounds. Defaults are 600 seconds for SSH, 30 to 600 seconds for backoff, and 86400 seconds between machine checks.
+
+## Project identities
+
+`ProjectId` from `@usine/core/project` is a lowercase slug of letters, digits, and separating hyphens. Project-owned loops use `project/loop` as their `LoopName`; repository identities remain independent of project membership.

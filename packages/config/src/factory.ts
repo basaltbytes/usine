@@ -2,7 +2,7 @@ import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
-import { RepositoryName } from "@usine/core/repository";
+import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import {
   ProvisionerTimings,
   BoatSize,
@@ -32,7 +32,7 @@ import {
 } from "@usine/core/worker";
 import { Effect, Option, Schema } from "effect";
 import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
-import { LaneSource, Lane } from "./board.ts";
+import { Lanes, Project } from "./project/project.ts";
 import { canonicalLabelName, DeclaredLabel } from "./label.ts";
 
 /** A repository tag that Loop selectors match. */
@@ -48,19 +48,6 @@ const uniqueNames = Schema.makeFilter<ReadonlyArray<{ readonly name: string }>>(
   (values) => new Set(values.map(({ name }) => name)).size === values.length,
   { message: "Expected unique names" },
 );
-
-const laneSourceKey = (source: LaneSource): string =>
-  "label" in source ? `label:${canonicalLabelName(source.label)}` : `state:${source.state}`;
-
-const uniqueLaneSources = Schema.makeFilter<ReadonlyArray<Lane>>(
-  (lanes) => {
-    const keys = lanes.flatMap(({ sources }) => sources.map(laneSourceKey));
-    return new Set(keys).size === keys.length;
-  },
-  { message: "Expected each lane source in only one lane" },
-);
-
-const Lanes = Schema.Array(Lane).check(uniqueNames, uniqueLaneSources);
 
 const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
   (values) => new Set(values.map(({ name }) => canonicalLabelName(name))).size === values.length,
@@ -464,17 +451,43 @@ const ManagedRepos = Schema.Array(ManagedRepo).check(
 const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNames);
 
 /** The decoded `usine.yaml`. */
-export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")({
-  version: Schema.Literal(1),
-  labels: DeclaredLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
-  repos: ManagedRepos,
-  settings: SettingsFromYaml.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
-  workers: Workers.pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed([{ name: "local", kind: "local" }])),
+export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")(
+  Schema.Struct({
+    version: Schema.Literals([1, 2]),
+    projects: Schema.Array(Project).pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed([])),
+      Schema.withConstructorDefault(Effect.succeed([])),
+    ),
+    labels: DeclaredLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+    repos: ManagedRepos,
+    settings: SettingsFromYaml.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
+    workers: Workers.pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed([{ name: "local", kind: "local" }])),
+    ),
+    webhooks: Webhooks.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ mode: "off" }))),
+    operator: Schema.OptionFromOptionalKey(OperatorLogin),
+    tracing: Schema.OptionFromOptionalKey(
+      Tracing.pipe(Schema.encodeKeys({ otlpUrl: "otlp_url", serviceName: "service_name" })),
+    ),
+  }).check(
+    Schema.makeFilter(
+      ({ version, projects, repos }) => {
+        if (version === 1) return projects.length === 0;
+        const names = projects.flatMap(({ repositories }) =>
+          repositories.map(canonicalRepositoryName),
+        );
+        const registry = new Set(repos.map(({ name }) => canonicalRepositoryName(name)));
+        return (
+          new Set(projects.map(({ id }) => id)).size === projects.length &&
+          new Set(names).size === names.length &&
+          names.every((name) => registry.has(name)) &&
+          repos.every(({ lanes }) => lanes.length === 0)
+        );
+      },
+      {
+        message:
+          "Projects require version 2, unique identifiers, and registered repositories in at most one project; lanes belong to projects",
+      },
+    ),
   ),
-  webhooks: Webhooks.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ mode: "off" }))),
-  operator: Schema.OptionFromOptionalKey(OperatorLogin),
-  tracing: Schema.OptionFromOptionalKey(
-    Tracing.pipe(Schema.encodeKeys({ otlpUrl: "otlp_url", serviceName: "service_name" })),
-  ),
-}) {}
+) {}

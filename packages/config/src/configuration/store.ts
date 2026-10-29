@@ -56,6 +56,11 @@ export {
   StaleRevision,
 } from "./model.ts";
 export { commit, validateConfiguration } from "./commit.ts";
-export { configurationDiff, configurationEntities } from "./entities.ts";
+export {
+  configurationDiff,
+  configurationEntities,
+  resolveConfigurationEntityKey,
+  qualifyLoopValue,
+} from "./entities.ts";
 
 export { revertConfiguration } from "./revert.ts";

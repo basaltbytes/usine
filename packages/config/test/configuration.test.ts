@@ -1,3 +1,4 @@
+import { migrateProjects } from "../src/project/operations.ts";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, expect, it } from "@effect/vitest";
@@ -242,12 +243,14 @@ for (const [name, layer] of adapters)
         expect(revision.changes).toEqual(configurationDiff([], canonical));
         const { instance } = yield* store.read;
         if (Option.isNone(instance)) return yield* Effect.die("configuration is uninitialized");
-        yield* folder.export(root, instance.value);
+        yield* folder.export(root, migrateProjects(instance.value));
         const imported = configurationEntities(yield* folder.load(root));
         expect(new Set(imported.map(({ key }) => key.kind))).toEqual(
-          new Set(["settings", "worker", "repository", "label", "loop", "agent"]),
+          new Set(["settings", "worker", "repository", "project", "label", "loop", "agent"]),
         );
-        expect(configurationDiff(canonical, imported)).toEqual([]);
+        expect(
+          configurationDiff(configurationEntities(migrateProjects(instance.value)), imported),
+        ).toEqual([]);
         for (const entity of imported) {
           const edited = yield* parseConfigurationEntity(
             parser,
@@ -556,7 +559,7 @@ it.effect(
       const fs = yield* FileSystem.FileSystem;
       const folder = yield* ConfigurationFolder;
       const root = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
-      const original = yield* fixture;
+      const original = migrateProjects(yield* fixture);
       yield* folder.export(root, original);
       const imported = yield* folder.load(root);
       expect(Equal.equals(imported, original)).toBe(true);

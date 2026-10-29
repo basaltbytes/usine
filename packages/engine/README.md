@@ -182,3 +182,7 @@ pnpm --filter @usine/engine db:generate --name <migration_name>
 `TranscriptWorkerQuery` returns an attempt's latest `WorkerUnresponsive` or `WorkerResponsive` notice. Later session output does not hide the notice, and recovery replaces the outage in this query.
 
 `prune(current)` deletes acknowledgements whose ID and revision don't match any of the supplied current entries. Pass the complete list, including dismissed entries; an empty list clears all acknowledgements. Pruning preserves matching records and invalidates projections only when it deletes rows.
+
+## Project migration
+
+`migrateProjectLoops` from `/database` accepts repository-to-project assignments and migrates stored loop references before the engine starts. The caller runs it in the configuration transaction. It preserves run and event IDs, deduplication, suppression, pause state, cycle budgets, and attention acknowledgements. Repeating the migration leaves qualified identities unchanged. The implementation uses the supplied `SqlClient` and requires no Node adapter.

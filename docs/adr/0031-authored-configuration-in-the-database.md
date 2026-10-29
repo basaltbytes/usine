@@ -32,3 +32,11 @@ The decision:
 - The runtime store is the whole configuration, so a backup of the store is a backup of the instance's configuration, with the secrets files beside it.
 - The glossary's loop, instance repo, registry, and project change meaning. The project entry changes with this ADR; the others change when #633's implementation replaces the files.
 - Every guide and reference page that tells the reader to edit `usine.yaml` or a loop file changes with the implementation.
+
+## Project configuration format (2026-10-29)
+
+Configuration version 2 introduces project entities with slug IDs, display names, ordered registry names, and lanes. A repository belongs to at most one project. Unassigned repositories have no board or loop execution. Loop identities are `project/loop`; API and CLI operations accept short names only when unambiguous. Selectors narrow membership within the project.
+
+The version 1 codec remains available for historical revisions. Startup converts a stored version 1 snapshot in one revision with the message “Migrated repositories and loops to projects”. Each repository becomes a project; each selected loop is copied with its body unchanged. Configuration and runtime references migrate in the same SQL transaction before execution starts. Run and event IDs remain stable, while loop references and deduplication keys change to the project namespace.
+
+Exports use a `projects` block in `usine.yaml` and `projects/<project>/loops/*.md`. Legacy imports convert through the same configuration transformation. Version 2 commits reject version 1 downgrades because reverting configuration alone cannot undo migrated runtime identities. The repository lane field remains in the version 1 codec and repository-scoped board views; version 2 persistence owns lanes only on projects. The existing single-repository editor translates its lane writes to project changes in the same revision.

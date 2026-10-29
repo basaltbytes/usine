@@ -41,7 +41,7 @@ export class ConfigCommandError extends Schema.TaggedError<ConfigCommandError>(
 const usage = () =>
   new ConfigCommandError({
     message:
-      "Use usine config export <folder>, import <folder> [--message <text>], edit <kind> <name>, or log [<kind> <name>]. Kinds: settings, worker, repository, label, loop, agent. Settings use the name instance.",
+      "Use usine config export <folder>, import <folder> [--message <text>], edit <kind> <name>, or log [<kind> <name>]. Kinds: settings, worker, repository, project, label, loop, agent. Settings use the name instance.",
   });
 
 export const parseConfigCommand = (

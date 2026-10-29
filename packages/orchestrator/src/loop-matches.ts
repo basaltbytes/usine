@@ -1,7 +1,7 @@
 import type { ManagedRepo } from "@usine/config/factory";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { LoopFile } from "@usine/config/loop";
-import { matchesSelector } from "@usine/config/selector";
+import { matchesLoop } from "@usine/config/project";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { Array as Arr, Context, Effect, Layer, Option, Result } from "effect";
@@ -45,7 +45,8 @@ export class LoopMatches extends Context.Service<
         ) {
           yield* Effect.annotateCurrentSpan({ repository: repository.name, items: items.length });
           const loops = instance.loops.filter(
-            (loop) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
+            (loop) =>
+              loop.trigger.on !== "schedule" && matchesLoop(instance.config, loop, repository),
           );
           const present = items.filter(({ goneAt }) => Option.isNone(goneAt));
           // Each Loop's trigger is checked once and evaluated on all of its stream's Items in one

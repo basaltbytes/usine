@@ -1,8 +1,20 @@
+import { NodeServices } from "@effect/platform-node";
+import { InstanceDirectory } from "@usine/core/instance";
+import { InstanceFolder } from "@usine/config/instance-folder";
+import { ConfigParser } from "@usine/config/parser";
+import { sqliteConfigurationLayer } from "@usine/config/sqlite";
+import { localSqliteLayer } from "@usine/engine/local-sqlite";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { createServer } from "node:net";
 import { ConfigurationEntityView, UpgradeView } from "@usine/orchestrator/operator/http";
 import { UsineConfig } from "@usine/config/factory";
-import { ConfigurationEntity } from "@usine/config/configuration";
-import { Schema } from "effect";
+import {
+  ConfigurationStore,
+  configurationDiff,
+  configurationEntities,
+  ConfigurationEntity,
+} from "@usine/config/configuration";
+import { Effect, Layer, Option, Schema } from "effect";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -69,7 +81,7 @@ test(
             )(row).value,
         );
       expect(new Set(stored.map(({ key }) => key.kind))).toEqual(
-        new Set(["settings", "worker", "repository", "label", "loop", "agent"]),
+        new Set(["settings", "worker", "repository", "project", "label", "loop", "agent"]),
       );
       expect(stored.find(({ key }) => key.kind === "loop")?.value).toMatchObject({
         maxCycles: 3,
@@ -197,7 +209,7 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
     expect(run(directory, ["log", "agent", "developer"]).stdout).toContain("2\toperator\t");
 
     await writeFile(join(exported, "agents/developer.md"), "invalid");
-    await writeFile(join(exported, "loops/implement.md"), "invalid");
+    await writeFile(join(exported, "projects/acme-project/loops/implement.md"), "invalid");
     const invalid = run(directory, ["import", exported]);
     expect(invalid.status).toBe(1);
     expect(invalid.stderr).toContain("agents/developer.md");
@@ -358,23 +370,117 @@ test(
       ).toBe(1);
       expect(
         database
-          .prepare("SELECT * FROM usine_configuration_entities WHERE key = 'loop:review'")
+          .prepare(
+            "SELECT * FROM usine_configuration_entities WHERE key = 'loop:acme-project/review'",
+          )
           .all(),
       ).toEqual([]);
       database.exec("DROP TRIGGER refuse_loop_pause");
       const imported = run(directory, ["import", directory]);
       expect(imported.status, imported.stderr).toBe(0);
       expect(database.prepare("SELECT * FROM usine_loop_runtime").all()).toEqual([
-        { loop_name: "review", paused: 1 },
+        { loop_name: "acme-project/review", paused: 1 },
       ]);
-      database.prepare("UPDATE usine_loop_runtime SET paused = 0 WHERE loop_name = 'review'").run();
+      database
+        .prepare("UPDATE usine_loop_runtime SET paused = 0 WHERE loop_name = 'acme-project/review'")
+        .run();
       expect(run(directory, ["import", directory]).status).toBe(0);
       expect(
-        database.prepare("SELECT paused FROM usine_loop_runtime WHERE loop_name = 'review'").get()
-          ?.paused,
+        database
+          .prepare("SELECT paused FROM usine_loop_runtime WHERE loop_name = 'acme-project/review'")
+          .get()?.paused,
       ).toBe(0);
     } finally {
       database.close();
     }
   },
 );
+
+for (const scenario of [
+  { repositories: ["basaltbytes/usine"], loops: ["implement", "review", "fix", "finish", "check"] },
+  { repositories: ["acme/one", "acme/two"], loops: ["implement"] },
+]) {
+  test(
+    `migrates a part-1 store with ${scenario.repositories.length} repositories and ${scenario.loops.length} loops as one revision`,
+    { timeout: 60_000 },
+    async ({ directory }) => {
+      await writeFile(
+        join(directory, "usine.yaml"),
+        stringify({
+          version: 1,
+          operator: "operator",
+          repos: scenario.repositories.map((name) => ({
+            name,
+            lanes: [{ name: "Ready", sources: [{ label: "ready" }] }],
+          })),
+        }),
+      );
+      for (const name of scenario.loops)
+        await writeFile(
+          join(directory, `loops/${name}.md`),
+          "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement #{{ item.number }}.\n",
+        );
+      const root = InstanceDirectory.make(directory);
+      const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
+      const legacyStore = Layer.mergeAll(sqliteConfigurationLayer, InstanceFolder.layer).pipe(
+        Layer.provide(parser),
+        Layer.provide(localSqliteLayer(root)),
+        Layer.provide(NodeServices.layer),
+      );
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const instance = yield* (yield* InstanceFolder).load(root);
+          const store = yield* ConfigurationStore;
+          const current = yield* store.read;
+          yield* store.commit({
+            expected: current.number,
+            actor: instance.config.operator,
+            message: Option.some("Part 1 configuration"),
+            changes: configurationDiff([], configurationEntities(instance)),
+          });
+        }).pipe(Effect.provide(legacyStore), Effect.scoped),
+      );
+      const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+      try {
+        database
+          .prepare("INSERT INTO usine_loop_runtime (loop_name, paused) VALUES ('implement', 1)")
+          .run();
+        const exported = join(directory, "exported");
+        const result = run(directory, ["export", exported]);
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toContain("Exported revision 2");
+        const revisions = database
+          .prepare("SELECT value FROM usine_configuration_revisions ORDER BY number")
+          .all();
+        expect(revisions).toHaveLength(2);
+        expect(revisions[1]?.value).toContain("Migrated repositories and loops to projects");
+        const config = Schema.decodeUnknownSync(UsineConfig)(
+          parse(await readFile(join(exported, "usine.yaml"), "utf8")),
+        );
+        expect(config.version).toBe(2);
+        expect(config.projects).toHaveLength(scenario.repositories.length);
+        for (const project of config.projects) {
+          expect(project.lanes[0]?.name).toBe("Ready");
+          expect(
+            database
+              .prepare("SELECT paused FROM usine_loop_runtime WHERE loop_name = ?")
+              .get(`${project.id}/implement`)?.paused,
+          ).toBe(1);
+          for (const name of scenario.loops)
+            expect(
+              await readFile(join(exported, `projects/${project.id}/loops/${name}.md`), "utf8"),
+            ).toContain("Implement #{{ item.number }}.");
+        }
+        const reimported = run(directory, ["import", exported]);
+        expect(reimported.status, reimported.stderr).toBe(0);
+        expect(reimported.stdout).toContain("No configuration changes.");
+        expect(
+          database.prepare("SELECT count(*) AS count FROM usine_configuration_revisions").get()
+            ?.count,
+        ).toBe(2);
+      } finally {
+        database.close();
+      }
+    },
+  );
+}

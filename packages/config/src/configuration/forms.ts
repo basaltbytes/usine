@@ -6,7 +6,13 @@ import { parseYamlDocument } from "../yaml/document.ts";
 import type { ConfigurationEntityKey } from "./model.ts";
 import { AgentJson, LoopJson } from "./entities.ts";
 
-const { workers: _workers, repos: _repos, labels: _labels, ...settings } = UsineConfig.fields;
+const {
+  workers: _workers,
+  repos: _repos,
+  labels: _labels,
+  projects: _projects,
+  ...settings
+} = UsineConfig.fields;
 const SettingsEntity = Schema.Struct(settings);
 const formSchemas = {
   agent: AgentJson,

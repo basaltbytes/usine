@@ -18,6 +18,12 @@ export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/
     Schema.makeFilter(
       ({ agents, config, loops }) => {
         const references = referenceIndex(config, agents);
+        if (new Set(loops.map(({ name }) => name)).size !== loops.length) return false;
+        if (
+          config.version === 2 &&
+          !loops.every(({ name }) => config.projects.some(({ id }) => name.startsWith(`${id}/`)))
+        )
+          return false;
         return loops.every((loop) =>
           Option.isNone(loopReferenceFailure(loopPath(loop.name), loop, references)),
         );

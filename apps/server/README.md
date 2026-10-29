@@ -120,3 +120,11 @@ Install the helper service and polkit rule in the [server guide](https://docs.us
 Configuration forms for agents, workers, settings, and repositories save revisions through the operator API. The server supplies supported harnesses and efforts, installation repositories, and live repository labels. GitHub choices return an availability error in setup mode or when GitHub cannot answer; configuration editing remains available.
 
 The loop form checks CEL and prompt expressions as you type and previews matches from stored GitHub items. New loops start paused. **Resume** shows a fresh preview count before allowing the loop to open runs. The check and preview endpoints are available in setup mode, using configuration and items already stored by the instance.
+
+## Projects
+
+At startup, version 1 stored configuration migrates in one revision to one project per repository. For example, `basaltbytes/usine` becomes `basaltbytes-usine`. Selected loops become `project/loop`; their runs, pauses, cycle budgets, and attention acknowledgements migrate in the same transaction. Exported configuration uses version 2 with a `projects` block and loops under `projects/<project>/loops/`. Legacy imports convert automatically.
+
+`GET /api/configuration` and the overview include projects. `GET /api/projects/:project` returns the project board. `GET /api/projects/:project/tasks/:item?repository=owner/repo` reads a member repository's task, and `POST /api/projects/:project/items/:item/lane` accepts `repository` and `toLane`. Existing owner/repository task and move routes remain available.
+
+Configuration entity writes accept kind `project`. CLI and API loop operations accept `project/loop`; a short loop name works while unique. The single-repository configuration editor continues to read and write lanes through the repository form.

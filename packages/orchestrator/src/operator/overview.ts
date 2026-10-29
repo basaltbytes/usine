@@ -1,3 +1,4 @@
+import { ProjectId } from "@usine/core/project";
 import { AgentName } from "@usine/core/agent";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
@@ -11,8 +12,15 @@ import { NeedView } from "./need.ts";
 export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
 export type ProjectStatus = typeof ProjectStatus.Type;
 
-/** A managed repository with its Runs, Board, label catalog, and preflight findings. */
+/** A project with its runs, board, label catalog, and preflight findings. */
 export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/ProjectView")({
+  id: Schema.optionalKey(ProjectId),
+  name: Schema.optionalKey(Schema.String),
+  repositories: Schema.Array(RepositoryName).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
+  /** First member repository, retained for repository-scoped clients. */
   repository: RepositoryName,
   status: ProjectStatus,
   runs: Schema.Array(RunView),

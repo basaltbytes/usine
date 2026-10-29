@@ -15,3 +15,5 @@ export class RunDatabase extends Context.Service<RunDatabase, RunDatabaseClient>
 ) {
   static readonly layer = (database: RunDatabaseClient) => Layer.succeed(RunDatabase)(database);
 }
+
+export { RepositoryProject, migrateProjectLoops } from "./project-migration.ts";

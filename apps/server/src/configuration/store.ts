@@ -12,7 +12,20 @@ export const configurationLoopControlLayer = Layer.effect(
     return ConfigurationStore.of({
       ...store,
       commit: Effect.fn("Server.commitConfiguration")(function* (request) {
+        const before = yield* store.read;
         const revision = yield* store.commit(request);
+        const after = yield* store.read;
+        if (
+          Option.isSome(before.instance) &&
+          before.instance.value.config.version === 1 &&
+          Option.isSome(after.instance) &&
+          after.instance.value.config.version === 2
+        ) {
+          yield* Effect.logInfo("Project migration preserves loop pause states", {
+            revision: revision.number,
+          });
+          return revision;
+        }
         yield* Effect.annotateCurrentSpan({ expectedRevision: request.expected });
         if (request.expected === 0) {
           yield* Effect.logInfo("Initial configuration import preserves loop pause states", {

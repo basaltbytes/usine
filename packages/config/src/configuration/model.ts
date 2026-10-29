@@ -12,6 +12,7 @@ export const ConfigurationEntityKind = Schema.Literals([
   "settings",
   "worker",
   "repository",
+  "project",
   "label",
   "loop",
   "agent",
