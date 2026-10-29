@@ -60,7 +60,7 @@ Each `AttemptView` has `start`, the last reattach time, and `workerAccess`: `Loc
 
 Board moves use the instance App, so `moveBoardItem` records each move in `BoardMoves` (`@usine/engine/board-moves`) before sending labels, and doesn't send a move it can't record. A timeline label change that the move sent the same way, recorded from 1 second before to 10 seconds after the move's second, belongs to the move: it leaves the attempt's list, and the move appears as `BoardMoved` with its lanes in the attempt at work then. A move with no label recorded, such as a refused write, doesn't appear. Moves from before recording existed still read as the agent's.
 
-One read asks GitHub once per distinct bot, including the App for board moves, from the earliest uncached attempt's start. Attempts are cached in memory by attempt and bot a minute after they end, so settled attempts reuse their timeline results until a restart. Schedule runs have no item and list no attempts. API: `GET /api/runs/:runId/github-changes`; a gone item returns 404 `GitHubItemNotFoundError`.
+One read asks GitHub once per distinct bot, including the App for board moves, from the earliest uncached attempt's start. The reader caches results in memory a minute after an attempt ends, by attempt, bot, and the full configured worker-to-bot mapping. Adding, removing, or changing another worker's bot recomputes attribution because that worker can have an overlapping attempt. Reordering workers preserves cached results. Schedule runs have no item and list no attempts. API: `GET /api/runs/:runId/github-changes`; a gone item returns 404 `GitHubItemNotFoundError`.
 
 ### Cycle budgets, run again, and failure resolution
 

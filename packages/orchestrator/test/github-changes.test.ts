@@ -291,6 +291,53 @@ const summary = (view: RunGitHubChangesView) =>
   );
 
 describe("RunGitHubChanges", () => {
+  it.effect("recomputes settled attribution when an overlapping worker's identity changes", () =>
+    Effect.gen(function* () {
+      const settled = new Attempt({
+        ...third,
+        worker: exeWorker.name,
+        outcome: failed,
+        endedAt: Option.some(time("2026-10-16T13:07:00Z")),
+      });
+      const current = yield* Ref.make(snapshot([settled]));
+      const requests = yield* Ref.make<ReadonlyArray<string>>([]);
+      yield* TestClock.setTime(DateTime.toEpochMillis(time("2026-10-16T13:10:00Z")));
+      yield* Effect.gen(function* () {
+        const changes = yield* RunGitHubChanges;
+        assert.deepStrictEqual(summary(yield* changes.read([exeWorker], runId)), [[]]);
+        const known = yield* changes.read(workers, runId);
+        assert.deepStrictEqual(summary(known), [
+          ["2026-10-16T13:05:08.000Z Commented issuecomment-51"],
+        ]);
+        const fetched = yield* Ref.get(requests);
+        assert.deepStrictEqual(
+          summary(yield* changes.read([exeWorker, localWorker], runId)),
+          summary(known),
+        );
+        assert.deepStrictEqual(yield* Ref.get(requests), fetched);
+        assert.deepStrictEqual(summary(yield* changes.read([exeWorker], runId)), [[]]);
+        assert.deepStrictEqual(
+          summary(
+            yield* changes.read(
+              [exeWorker, new ExeDevWorker({ ...localWorker, kind: "exe.dev" })],
+              runId,
+            ),
+          ),
+          [[]],
+        );
+        assert.deepStrictEqual(summary(yield* changes.read(workers, runId)), summary(known));
+      }).pipe(
+        Effect.provide(
+          testLayer(
+            current,
+            requests,
+            new Map([[exeActor, [comment("2026-10-16T13:05:08Z", 51)]]]),
+          ),
+        ),
+      );
+    }),
+  );
+
   it.effect(
     "matches exe.dev writes, separates App board moves, and invalidates cached identities",
     () =>

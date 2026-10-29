@@ -240,10 +240,13 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     const workerActors = new Map(
       workers.map(({ name, kind }) => [name, githubBotLogin(kind, appActor)]),
     );
+    const identityKey = JSON.stringify([
+      appActor,
+      [...workerActors].sort(([left], [right]) => left.localeCompare(right)),
+    ]);
     const cacheKey = (attempt: Attempt) =>
-      Option.map(
-        Option.fromUndefinedOr(workerActors.get(attempt.worker)),
-        (actor) => `${attempt.id}/${actor}`,
+      Option.map(Option.fromUndefinedOr(workerActors.get(attempt.worker)), (actor) =>
+        JSON.stringify([attempt.id, actor, identityKey]),
       );
     const stored = yield* Ref.get(cache);
     const cached = new Map(
