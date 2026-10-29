@@ -238,7 +238,9 @@ If no `usine up` runs, the command moves the pin and installs, and doesn't start
 
 ## `usine backup <path>`
 
-Copies the instance's runtime store, `.usine/runtime.sqlite`, to `<path>`, and its durable storage, `.usine/durable.sqlite`, next to it ([`backup`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/backup.ts#L19)). The durable copy's name is the destination name with `.durable` before the extension: `backup.sqlite` gives `backup.durable.sqlite`.
+Copies the instance's runtime store, `.usine/runtime.sqlite`, to `<path>`, and its durable storage, `.usine/durable.sqlite`, next to it.
+
+For destinations ending in `.sqlite` or `.db`, the durable copy has `.durable` before that extension: `backup.sqlite` becomes `backup.durable.sqlite`, and `backup.db` becomes `backup.durable.db`. For all other names, the command appends `.durable.sqlite`: `before-pi-1.4-2026-10-29` becomes `before-pi-1.4-2026-10-29.durable.sqlite`, and `nightly` becomes `nightly.durable.sqlite`.
 
 - It works while `usine up` runs, without the instance lock, through SQLite's backup API on read-only connections.
 - Both copies have owner-only permissions.
