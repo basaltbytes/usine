@@ -96,3 +96,7 @@ export const windowLabel = (minutes: number): string =>
 export const loadingPage = "Loading…";
 export const pageUnavailable = "Could not load the page";
 export const tryAgain = "Try again";
+
+export const membersLabel = "Members";
+export const tokensPageLabel = "Tokens";
+export const signOutLabel = "Sign out";

@@ -2,6 +2,8 @@ import type { InstanceDirectory } from "@usine/core/instance";
 import { ReleaseVersion } from "@usine/core/upgrade";
 import { OperatorApi, UpgradeRequest } from "@usine/orchestrator/operator/http";
 import { Console, Effect, Option, Schema } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { readAdminToken } from "../auth/local.ts";
 import { HttpApiClient } from "effect/http-api";
 import type { UpgradeCommand } from "../cli.ts";
 import { compareVersions, SERVER_PACKAGE } from "../instance/manifest.ts";
@@ -11,7 +13,9 @@ import { UpgradeError } from "./control.ts";
 
 export const requestSystemUpgrade = Effect.fn("Cli.requestSystemUpgrade")(
   function* (directory: InstanceDirectory, record: InstanceRecord, command: UpgradeCommand) {
+    const token = yield* readAdminToken(directory);
     const client = yield* HttpApiClient.make(OperatorApi, {
+      transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(token)),
       baseUrl: `http://127.0.0.1:${record.launch.port}`,
     });
     const status = yield* client.operator.upgradeStatus({});

@@ -346,7 +346,7 @@ export const approvals = snakeCase.table(
   (table) => [
     check(
       "usine_approvals_source",
-      sql`(${table.channel} is null and ${table.approver} is null) or ${table.channel} = 'ui' or (${table.channel} = 'github-ask' and ${table.approver} is not null)`,
+      sql`(${table.channel} is null and ${table.approver} is null) or ${table.channel} = 'ui'`,
     ),
   ],
 );

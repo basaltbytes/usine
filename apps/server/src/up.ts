@@ -1,3 +1,10 @@
+import { Authentication, authenticationLayer, seedOperator } from "./auth/authentication.ts";
+import { GitHubSignIn, githubSignInLayer } from "./auth/github.ts";
+import { AuthStore } from "./auth/store.ts";
+import { sqliteAuthLayer } from "./auth/sqlite.ts";
+import { writeAdminToken } from "./auth/local.ts";
+import type { AuthServices } from "./auth/http.ts";
+import { FetchHttpClient } from "effect/http";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubPolling } from "@usine/github/polling";
@@ -65,6 +72,7 @@ import { tracingLayer } from "./tracing.ts";
 
 // Untraced: a span around a server that never returns would parent every request span.
 const serve = Effect.fnUntraced(function* (options: {
+  readonly auth: AuthServices;
   readonly backend: ReturnType<typeof liveBackendLayer>;
   readonly webRoot: string;
   readonly port: Port;
@@ -81,6 +89,7 @@ const serve = Effect.fnUntraced(function* (options: {
       options.webRoot,
       options.port,
       options.origin,
+      options.auth,
       Layer.mergeAll(
         options.catalog ?? Layer.empty,
         Layer.succeed(ServerUpgrades, options.upgrades),
@@ -97,8 +106,10 @@ const serve = Effect.fnUntraced(function* (options: {
       ? `usine is running in setup mode at ${options.url}`
       : `usine is running at ${options.url}`,
   );
+  const signInLink = yield* options.auth.authentication.link;
+  yield* Console.log(`Sign in: ${signInLink}`);
   if (options.openSetupPage) {
-    yield* openBrowser(options.url).pipe(
+    yield* openBrowser(signInLink).pipe(
       Effect.tapError((error) =>
         Effect.logWarning("The setup page could not be opened automatically", {
           command: error.command,
@@ -143,6 +154,7 @@ const start = Effect.fnUntraced(function* (
   record: InstanceRecord,
   database: Layer.Layer<RunDatabase, EnginePersistenceError>,
   configurationEditor: ConfigurationEditor["Service"],
+  auth: AuthServices,
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(
@@ -176,6 +188,7 @@ const start = Effect.fnUntraced(function* (
       }),
     );
     return yield* serve({
+      auth,
       backend,
       configurationEditor,
       webRoot,
@@ -214,6 +227,7 @@ const start = Effect.fnUntraced(function* (
       drain: engine.drain(),
       running: Effect.raceFirst(
         serve({
+          auth,
           backend: liveBackendLayer(
             instances,
             operator,
@@ -302,6 +316,27 @@ export const up = (command: UpCommand) =>
       );
       const configurationEditor = Context.get(editorContext, ConfigurationEditor);
       const { config } = yield* instances.get;
+      const authStoreContext = yield* Layer.build(sqliteAuthLayer.pipe(Layer.provide(database)));
+      const githubContext = yield* Layer.build(
+        githubSignInLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+      );
+      const authDependencies = Layer.mergeAll(
+        Layer.succeedContext(authStoreContext),
+        Layer.succeedContext(githubContext),
+      );
+      yield* seedOperator(config.operator).pipe(Effect.provide(authDependencies));
+      const localToken = yield* writeAdminToken(directory).pipe(Effect.provide(NodeServices.layer));
+      const authContext = yield* Layer.build(
+        authenticationLayer({
+          origin: Option.getOrElse(origin, () => `http://127.0.0.1:${port}`),
+          localToken,
+        }).pipe(Layer.provide(authDependencies)),
+      );
+      const auth = {
+        authentication: Context.get(authContext, Authentication),
+        store: Context.get(authStoreContext, AuthStore),
+        github: Context.get(githubContext, GitHubSignIn),
+      };
       // Built before the runtime, so the exporter flushes the runtime's last spans when it closes.
       const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
         Effect.provide(NodeServices.layer),
@@ -315,6 +350,7 @@ export const up = (command: UpCommand) =>
         record,
         database,
         configurationEditor,
+        auth,
       ).pipe(Effect.provideContext(tracer));
     }),
   ).pipe(Effect.provideService(References.MinimumLogLevel, command.logLevel));

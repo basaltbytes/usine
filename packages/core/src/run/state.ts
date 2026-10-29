@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { OperatorLogin } from "../operator.ts";
+import { Effect, Option, Schema } from "effect";
 import { EventId } from "../event.ts";
 
 /**
@@ -19,7 +20,12 @@ import { EventId } from "../event.ts";
 
 export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(
   "CancelReason/OperatorCanceled",
-)("OperatorCanceled", {}) {}
+)("OperatorCanceled", {
+  by: Schema.OptionFromNullOr(OperatorLogin).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
+}) {}
 
 /** Cancellation because a newer Event for the same Item arrived before any Attempt started. */
 export class Superseded extends Schema.TaggedClass<Superseded>("CancelReason/Superseded")(
@@ -124,8 +130,10 @@ export const fail = (_state: Running): Failed => new Failed();
 
 export const retry = (_state: Failed): Running => new Running();
 
-export const cancelByOperator = (_state: Open): Canceled =>
-  new Canceled({ reason: new OperatorCanceled() });
+export const cancelByOperator = (
+  _state: Open,
+  by: Option.Option<OperatorLogin> = Option.none(),
+): Canceled => new Canceled({ reason: new OperatorCanceled({ by }) });
 
 /**
  * Returns `Canceled` for a Run replaced by the newer Event `by`. A running Run isn't

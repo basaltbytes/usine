@@ -1,5 +1,7 @@
 import { ProjectId } from "@usine/core/project";
 import { Project } from "@usine/config/project";
+import { authenticatedRoutes } from "../src/auth/http.ts";
+import { authFixture, localSecret } from "./auth/fixture.ts";
 import { UpgradeView } from "@usine/orchestrator/operator/http";
 import { ServerUpgrades } from "../src/upgrade/control.ts";
 import {
@@ -396,6 +398,56 @@ const app = HttpRouter.toWebHandler(
 
 afterAll(() => app.dispose());
 
+it("denies anonymous requests for every registered API route before decoding a request", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const auth = authenticatedRoutes(yield* authFixture());
+      const secured = HttpRouter.toWebHandler(
+        Layer.mergeAll(
+          apiRoutes(Option.none()).pipe(Layer.provide(auth.guard.layer)),
+          auth.routes,
+        ).pipe(HttpRouter.provideRequest(backend)),
+        { disableLogger: true },
+      );
+      yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
+      const publicRoutes = new Set([
+        "GET /api/health",
+        "GET /api/version",
+        "GET /api/auth/info",
+        "GET /api/auth/github",
+        "GET /api/auth/callback",
+        "POST /api/auth/device",
+        "POST /api/auth/device/poll",
+        "POST /api/auth/link/consume",
+      ]);
+      const endpoints = [
+        ...Object.values(OperatorApi.groups).flatMap((group) => Object.values(group.endpoints)),
+        ...auth.endpoints,
+      ];
+      for (const endpoint of endpoints) {
+        if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
+        const path = endpoint.path.replace(/:[^/]+/gu, "test");
+        for (const spelling of [
+          path,
+          path.replace("/api/", "/API/"),
+          `/${path}`,
+          path.replace("/api/", "/%61pi/"),
+        ]) {
+          const response = yield* Effect.promise(() =>
+            secured.handler(
+              new Request(`http://127.0.0.1${spelling}`, {
+                method: endpoint.method,
+                headers: { "x-forwarded-for": "127.0.0.1" },
+              }),
+            ),
+          );
+          assert.equal(response.status, 401, `${endpoint.method} ${spelling}`);
+        }
+      }
+    }).pipe(Effect.scoped),
+  );
+});
+
 describe("operator HTTP API", () => {
   it("reports the running release and validates upgrade requests before accepting them", async () => {
     const requested: Array<string> = [];
@@ -418,22 +470,31 @@ describe("operator HTTP API", () => {
           requested.push(input.timing);
         }),
     });
+    const auth = await Effect.runPromise(authFixture().pipe(Effect.scoped));
     const upgradeApp = HttpRouter.toWebHandler(
       apiRoutes(Option.none()).pipe(
+        Layer.provide(authenticatedRoutes(auth).guard.layer),
         HttpRouter.provideRequest(Layer.merge(backend, upgradeBackend)),
       ),
       { disableLogger: true },
     );
+    const authorization = { authorization: `Bearer ${localSecret}` };
     try {
-      const version = await upgradeApp.handler(new Request("http://localhost/api/version"));
-      assert.strictEqual(await version.json(), "1.0.0");
-      const status = await upgradeApp.handler(new Request("http://localhost/api/upgrade"));
+      for (const path of ["/api/version", "/API/version", "//api/version", "/%61pi/version"]) {
+        const version = await upgradeApp.handler(new Request(`http://localhost${path}`));
+        assert.strictEqual(version.status, 200);
+        assert.strictEqual(await version.json(), "1.0.0");
+      }
+      const status = await upgradeApp.handler(
+        new Request("http://localhost/api/upgrade", { headers: authorization }),
+      );
       assert.strictEqual(
         Schema.decodeUnknownSync(UpgradeView)(await status.json()).channel,
         "next",
       );
       const invalid = await upgradeApp.handler(
         new Request("http://localhost/api/upgrade", {
+          headers: authorization,
           method: "POST",
           body: JSON.stringify({ timing: "tomorrow" }),
         }),
@@ -441,6 +502,7 @@ describe("operator HTTP API", () => {
       assert.strictEqual(invalid.status, 400);
       const invalidVersion = await upgradeApp.handler(
         new Request("http://localhost/api/upgrade", {
+          headers: authorization,
           method: "POST",
           body: JSON.stringify({ timing: "now", version: "1.0.0-01" }),
         }),
@@ -450,6 +512,7 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(requested, []);
       const accepted = await upgradeApp.handler(
         new Request("http://localhost/api/upgrade", {
+          headers: authorization,
           method: "POST",
           body: JSON.stringify({ timing: "idle" }),
         }),
@@ -1201,12 +1264,13 @@ describe("operator HTTP API", () => {
                 webRoot,
                 port,
                 Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net")),
+                yield* authFixture(),
               ),
             );
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped),
         );
-        assert.deepStrictEqual(statuses, [200, "unreachable"]);
+        assert.deepStrictEqual(statuses, [401, "unreachable"]);
       } finally {
         await rm(webRoot, { recursive: true });
       }

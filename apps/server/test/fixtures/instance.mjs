@@ -7,7 +7,7 @@
 // contains `<lines> <milliseconds>`, it logs that many lines at that interval before it listens, as
 // startup recovery does; if it contains `never`, it never listens. If `fixture-unit` contains a
 // systemd service name, it records that a service by that name runs it.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
@@ -65,6 +65,10 @@ const listen = (port) =>
   Effect.acquireRelease(
     Effect.callback((resume) => {
       const server = createServer((request, response) => {
+        if (request.headers.authorization !== `Bearer ${"l".repeat(43)}`) {
+          response.writeHead(401).end();
+          return;
+        }
         const body = responses[request.url];
         if (body === undefined) {
           response.writeHead(404).end();
@@ -101,6 +105,7 @@ NodeRuntime.runMain(
         systemdUnit: systemdUnit(),
       });
       yield* holdInstance(directory, record);
+      writeFileSync(join(directory, ".usine/admin-token"), "l".repeat(43), { mode: 0o600 });
       const requested = yield* Deferred.make();
       yield* withGracefulShutdown(
         Effect.gen(function* () {

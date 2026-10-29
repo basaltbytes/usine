@@ -78,3 +78,7 @@ Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to rea
 ## Project identities
 
 `ProjectId` from `@usine/core/project` is a lowercase slug of letters, digits, and separating hyphens. Project-owned loops use `project/loop` as their `LoopName`; repository identities remain independent of project membership.
+
+## Member authentication
+
+Authenticated operator actions use `ActingMember` and `requestActor` from `@usine/core/operator`. Operator cancellations record the member login in `OperatorCanceled.by`; older cancellations decode with no actor. The approval channel is `ui`.

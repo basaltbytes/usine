@@ -1,0 +1,9 @@
+export const title = "Members";
+export const adminAccess = "Every member has admin access to this instance.";
+export const loginLabel = "GitHub login";
+export const addMember = "Add member";
+export const adding = "Saving…";
+export const removeMember = "Remove";
+export const confirmRemove = "Confirm removal";
+export const keepMember = "Keep member";
+export const addedBy = "Added by";

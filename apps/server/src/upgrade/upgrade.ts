@@ -249,8 +249,13 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     return yield* Effect.die(new Error(`Could not rewrite the ${SERVER_PACKAGE} pin`));
   }
   if (Option.isSome(running)) {
-    yield* refuseMissingEnvironment("upgrade", running.value.launch.port);
-    yield* refuseLiveAttempts("upgrade", running.value.launch.port, command.options.force);
+    yield* refuseMissingEnvironment("upgrade", running.value.launch.port, directory);
+    yield* refuseLiveAttempts(
+      "upgrade",
+      running.value.launch.port,
+      command.options.force,
+      directory,
+    );
   }
   const unit = Option.isSome(running)
     ? yield* supervisingUnit(running.value.pid, running.value.systemdUnit)
@@ -286,7 +291,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   }
 
   if (Option.isSome(running)) {
-    yield* stopProcess("upgrade", running.value.pid, running, unit, command.options);
+    yield* stopProcess("upgrade", running.value.pid, running, unit, command.options, directory);
   }
 
   const failure = (

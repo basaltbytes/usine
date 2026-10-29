@@ -1,3 +1,5 @@
+import * as RunState from "@usine/core/run/state";
+import { ActingMember, OperatorLogin } from "@usine/core/operator";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 
@@ -34,7 +36,6 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { OperatorLogin } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
@@ -282,8 +283,16 @@ describe("run store", () => {
         // A Run canceled before any Attempt closes at the cancel time, not at its open time.
         const waited = yield* claim("waited-for-approval");
         yield* finish(yield* begin(yield* claim("finished-meanwhile")));
-        yield* store.cancel(waited);
+        yield* store
+          .cancel(waited)
+          .pipe(Effect.provideService(ActingMember, Option.some(OperatorLogin.make("alice"))));
         const canceled = yield* store.snapshot(waited);
+        assert.deepStrictEqual(
+          canceled.run.state,
+          new RunState.Canceled({
+            reason: new RunState.OperatorCanceled({ by: Option.some(OperatorLogin.make("alice")) }),
+          }),
+        );
         assert.strictEqual(canceled.attempts.length, 0);
         assert.isTrue(
           Option.exists(
@@ -907,7 +916,7 @@ describe("run store", () => {
           runId,
           approval,
           new ApprovalSource({
-            channel: "github-ask",
+            channel: "ui",
             approver: Option.some(OperatorLogin.make("Philippe")),
           }),
         );

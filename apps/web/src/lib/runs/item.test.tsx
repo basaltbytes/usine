@@ -832,7 +832,6 @@ describe("Run approval", () => {
     run({ approval: new ApprovalView({ approvedAt, source }) });
   const philippe = Option.some(OperatorLogin.make("Philippe"));
   const fromUi = approved(new ApprovalSource({ channel: "ui", approver: philippe }));
-  const fromAsk = approved(new ApprovalSource({ channel: "github-ask", approver: philippe }));
   // Approved before usine recorded the approver.
   const unrecorded = approved(null);
   const eventDocument = (view: RunView) =>
@@ -861,8 +860,7 @@ describe("Run approval", () => {
     const time = dayTimeLabel(approvedAt);
     for (const render of [eventDocument, outline]) {
       assert.include(text(render(fromUi)), `Approved by Philippe · ${time} · from the UI`);
-      assert.include(text(render(fromAsk)), `Approved by Philippe · ${time} · from GitHub`);
-      assert.include(render(fromAsk), `dateTime="${approvedAt}"`);
+      assert.include(render(fromUi), `dateTime="${approvedAt}"`);
     }
   });
 

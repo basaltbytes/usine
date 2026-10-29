@@ -9,7 +9,7 @@ import {
   Schema,
   SchemaTransformation,
 } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/http";
+import { FetchHttpClient, HttpClient, UrlParams } from "effect/http";
 import { OtlpSerialization, OtlpTracer } from "effect/observability";
 import { type CliVersionError, packageVersion } from "./cli.ts";
 
@@ -111,4 +111,11 @@ export const tracingLayer = (
           );
         }),
       ),
-  });
+  }).pipe(
+    Layer.merge(
+      Layer.effect(
+        UrlParams.CurrentRedactedNames,
+        Effect.map(UrlParams.CurrentRedactedNames, (names) => [...names, "code", "state"]),
+      ),
+    ),
+  );

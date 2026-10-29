@@ -186,3 +186,7 @@ pnpm --filter @usine/engine db:generate --name <migration_name>
 ## Project migration
 
 `migrateProjectLoops` from `/database` accepts repository-to-project assignments and migrates stored loop references before the engine starts. The caller runs it in the configuration transaction. It preserves run and event IDs, deduplication, suppression, pause state, cycle budgets, and attention acknowledgements. Repeating the migration leaves qualified identities unchanged. The implementation uses the supplied `SqlClient` and requires no Node adapter.
+
+## Member authentication
+
+Operator cancellations persist the authenticated member login. The approval migration converts stored `github-ask` channels to `ui` while preserving the approver and removes that channel from the table constraint.

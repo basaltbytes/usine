@@ -1,9 +1,6 @@
-import { Schema } from "effect";
+import { Context, Effect, Option, Schema } from "effect";
 
-/**
- * The operator's GitHub login from `usine.yaml`. The web UI acts as this login, and only this
- * login can answer an Ask (ADR 0017).
- */
+/** A GitHub login used for member and operator attribution. */
 export const OperatorLogin = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u, {
     message: "Expected a GitHub login",
@@ -11,3 +8,12 @@ export const OperatorLogin = Schema.String.check(
 ).pipe(Schema.brand("OperatorLogin"));
 
 export type OperatorLogin = typeof OperatorLogin.Type;
+
+export const ActingMember = Context.Reference<Option.Option<OperatorLogin>>(
+  "@usine/core/ActingMember",
+  { defaultValue: Option.none },
+);
+
+/** Uses the authenticated member, or the supplied actor for a non-HTTP operation. */
+export const requestActor = (fallback: Option.Option<OperatorLogin>) =>
+  Effect.map(ActingMember, (member) => Option.orElse(member, () => fallback));

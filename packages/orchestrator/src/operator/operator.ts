@@ -1,6 +1,7 @@
 import { groupProjectViews } from "./projects.ts";
 import { readApprovalItems } from "./approval.ts";
 import { boardRepositories } from "@usine/config/project";
+import { requestActor } from "@usine/core/operator";
 import {
   AttentionAcknowledgements,
   AttentionAcknowledgement,
@@ -899,7 +900,7 @@ const makeOperator = Effect.gen(function* () {
     yield* acknowledgements.dismiss(
       new AttentionAcknowledgement({
         ...key,
-        dismissedBy: instance.config.operator,
+        dismissedBy: yield* requestActor(instance.config.operator),
         dismissedAt: yield* DateTime.now,
       }),
     );
@@ -933,7 +934,10 @@ const makeOperator = Effect.gen(function* () {
         payload: { runId, decision: "approved" },
         receivedAt,
       }),
-      new ApprovalSource({ channel: "ui", approver: instance.config.operator }),
+      new ApprovalSource({
+        channel: "ui",
+        approver: yield* requestActor(instance.config.operator),
+      }),
     );
     yield* Effect.logInfo("Operator approved Run", { runId });
   });
@@ -944,14 +948,17 @@ const makeOperator = Effect.gen(function* () {
     attemptId: AttemptId,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
-    yield* runs.resolveFailure(runId, attemptId, instance.config.operator);
+    yield* runs.resolveFailure(runId, attemptId, yield* requestActor(instance.config.operator));
   });
 
   const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.retry(
       runId,
-      new RetryRequest({ requestedBy: instance.config.operator, amendment: Option.none() }),
+      new RetryRequest({
+        requestedBy: yield* requestActor(instance.config.operator),
+        amendment: Option.none(),
+      }),
     );
     yield* Effect.logInfo("Operator retried Run", { runId });
   });
@@ -972,7 +979,7 @@ const makeOperator = Effect.gen(function* () {
     yield* runs.retry(
       runId,
       new RetryRequest({
-        requestedBy: instance.config.operator,
+        requestedBy: yield* requestActor(instance.config.operator),
         amendment: Option.some(
           new AttemptContext({
             task: edit.task,
@@ -1027,7 +1034,7 @@ const makeOperator = Effect.gen(function* () {
           agent,
           parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
         }),
-        requestedBy: instance.config.operator,
+        requestedBy: yield* requestActor(instance.config.operator),
       }),
     );
     yield* Effect.logInfo(
@@ -1054,7 +1061,10 @@ const makeOperator = Effect.gen(function* () {
       runId,
       input.attemptId,
       new Intervention({
-        operator: Option.getOrElse(instance.config.operator, () => "local operator"),
+        operator: Option.getOrElse(
+          yield* requestActor(instance.config.operator),
+          () => "local operator",
+        ),
         target: input.target,
         action: input.action,
       }),

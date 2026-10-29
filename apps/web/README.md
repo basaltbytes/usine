@@ -307,3 +307,7 @@ Loop forms provide stream-specific payload completion for CEL conditions and Mar
 A run waiting after a provider capacity refusal shows the provider's message, the next attempt number, and the earliest retry time in its header. **Cancel run** stops the pending retry. Automatic retries resume from the newest pushed salvage and stop after three attempts in total.
 
 Project configuration entities use `/configuration/projects/$project` with the shared raw entity editor and revision history. The repository form reads and writes the owning project's lanes for projects with one repository.
+
+## Member authentication
+
+The sign-in page supports GitHub user authorization and one-time links from `usine sign-in-link`. **Members** adds and removes instance admins. **Tokens** lists and revokes the signed-in member’s browsers and devices. **Sign out** ends the current session. All browser writes include the session’s CSRF token.

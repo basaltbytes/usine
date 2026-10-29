@@ -333,3 +333,7 @@ The configuration view includes all declared labels, including declarations with
 Polling and schedule triggers scope every loop to its project's repositories before applying its selector. Repositories outside projects open no runs. Polling provisions missing project lane labels in each member repository.
 
 Configuration views include project entities. Overview project views include the slug, display name, ordered repository list, and a shared board containing each repository's task cards. Repository-scoped task reads and board moves use the owning project's lanes. The configuration editor accepts project writes and resolves unique short loop names. For a project with one repository, repository-editor lane changes update the project in the same revision.
+
+## Member authentication
+
+HTTP actions use the authenticated member for approvals, retries, interventions, board moves, and configuration revisions. Non-HTTP operations can supply an actor through `ActingMember` from `@usine/core/operator`.

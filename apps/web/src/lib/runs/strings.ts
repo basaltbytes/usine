@@ -114,7 +114,6 @@ export const openedTitle = (openedAt: string): string => `Opened ${timestampLabe
 /** The approval source text, shown after the time on the approval line. */
 export const approvalChannelLabel = {
   ui: "from the UI",
-  "github-ask": "from GitHub",
 } as const satisfies Record<ApprovalChannel, string>;
 
 export const runActionProgress = {

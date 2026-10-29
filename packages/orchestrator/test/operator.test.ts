@@ -35,7 +35,7 @@ import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate, QuarantinedLoop } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
 import { LocalWorker, UsineConfig } from "@usine/config/factory";
-import { OperatorLogin } from "@usine/core/operator";
+import { ActingMember, OperatorLogin } from "@usine/core/operator";
 import {
   AgentSessionId,
   ChildSession,
@@ -1986,15 +1986,15 @@ describe("Operator", () => {
         const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
         const overviewReads = yield* Ref.make(0);
         const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-        const askAnswer = new ApprovalSource({
-          channel: "github-ask",
+        const earlierApproval = new ApprovalSource({
+          channel: "ui",
           approver: Option.some(OperatorLogin.make("Philippe")),
         });
         const queued = new RunSnapshot({
           ...snapshot,
           run: new Run({ ...snapshot.run, state: new RunState.Queued() }),
           approval: Option.some(
-            new RunApproval({ approvedAt: now, source: Option.some(askAnswer) }),
+            new RunApproval({ approvedAt: now, source: Option.some(earlierApproval) }),
           ),
         });
         yield* Effect.gen(function* () {
@@ -2014,7 +2014,7 @@ describe("Operator", () => {
           // The overview and the detail both show who approved, when, and from where.
           const shown = new ApprovalView({
             approvedAt: DateTime.formatIso(now),
-            source: askAnswer,
+            source: earlierApproval,
           });
           assert.deepStrictEqual(run.approval, shown);
           assert.deepStrictEqual((yield* operator.detail(instance, runId)).run.approval, shown);
@@ -2149,17 +2149,19 @@ describe("Operator", () => {
             operator: Option.some(OperatorLogin.make("Philippe")),
           }),
         });
-        yield* operator.approve(configured, runId);
+        yield* operator
+          .approve(configured, runId)
+          .pipe(Effect.provideService(ActingMember, Option.some(OperatorLogin.make("alice"))));
         const approvals = yield* Ref.get(approved);
         const recorded = approvals[0];
         assert(recorded !== undefined);
         assert.strictEqual(recorded.runId, runId);
-        // The UI has no sign-in, so it approves as the operator set in `usine.yaml`.
+        // The authenticated member overrides the historical operator setting.
         assert.deepStrictEqual(
           recorded.source,
           new ApprovalSource({
             channel: "ui",
-            approver: Option.some(OperatorLogin.make("Philippe")),
+            approver: Option.some(OperatorLogin.make("alice")),
           }),
         );
         // The approval Event is recorded whole: a deterministic identity for idempotent re-approval

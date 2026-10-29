@@ -89,7 +89,7 @@ const runningLines = Effect.fn("Cli.statusRunning")(function* (
   record: InstanceRecord,
 ) {
   const now = yield* DateTime.now;
-  const runs = yield* listRuns(record.launch.port).pipe(
+  const runs = yield* listRuns(record.launch.port, directory).pipe(
     Effect.map(openRuns),
     Effect.catchTag("OperatorApiError", (error) => Effect.succeed(`unavailable: ${error.reason}`)),
   );

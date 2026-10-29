@@ -36,10 +36,13 @@ export const fallbackLaunch = (environment: CliEnvironment) =>
  * Returns the port on which the process answers the operator API, or `None` if none of its ports
  * does. Fails if the OS can't list its ports.
  */
-const operatorPort = Effect.fn("Cli.operatorPort")(function* (pid: ProcessId) {
+const operatorPort = Effect.fn("Cli.operatorPort")(function* (
+  pid: ProcessId,
+  directory: InstanceDirectory,
+) {
   const ports = yield* listeningPorts(pid);
   const port = yield* Effect.findFirst(ports, (port) =>
-    listRuns(port).pipe(
+    listRuns(port, directory).pipe(
       Effect.tapError((error) =>
         Effect.logDebug("A port of the instance process doesn't answer the operator API", {
           pid,
@@ -91,7 +94,7 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
   const pid = state.pid.value;
   yield* Effect.annotateCurrentSpan({ pid });
   const launch = yield* fallback;
-  const port = yield* operatorPort(pid).pipe(
+  const port = yield* operatorPort(pid, directory).pipe(
     Effect.tapError((error) =>
       Effect.logWarning("Refusing to restart: the ports of the instance process are unknown", {
         pid,
@@ -137,8 +140,8 @@ export const restart = Effect.fn("Cli.restart")(function* (
 ) {
   const { pid, record, unit, port, launch } = yield* restartTarget(directory, fallback);
   if (Option.isSome(port)) {
-    yield* refuseMissingEnvironment("restart", port.value);
-    yield* refuseLiveAttempts("restart", port.value, options.force);
+    yield* refuseMissingEnvironment("restart", port.value, directory);
+    yield* refuseLiveAttempts("restart", port.value, options.force, directory);
   } else {
     yield* Effect.logWarning(
       "Skipping the restart checks: the instance process answers on no port",
@@ -147,7 +150,7 @@ export const restart = Effect.fn("Cli.restart")(function* (
       },
     );
   }
-  yield* stopProcess("restart", pid, record, unit, options);
+  yield* stopProcess("restart", pid, record, unit, options, directory);
   const started = yield* startAgain(directory, launch, unit, pid, options.timeout);
   yield* Console.log(startedMessage(started));
 });

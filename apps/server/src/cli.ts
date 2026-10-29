@@ -31,9 +31,11 @@ export const UiOrigin = Schema.String.check(
   Schema.makeFilter(
     (origin: string) =>
       URL.canParse(origin) &&
-      ["http:", "https:"].includes(new URL(origin).protocol) &&
+      (new URL(origin).protocol === "https:" ||
+        (new URL(origin).protocol === "http:" &&
+          ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname))) &&
       new URL(origin).origin === origin,
-    { message: "Expected an http or https origin, such as https://orchestrator.example.ts.net" },
+    { message: "Expected an HTTPS origin, or HTTP on loopback" },
   ),
 ).pipe(Schema.brand("UiOrigin"));
 export type UiOrigin = typeof UiOrigin.Type;
@@ -63,6 +65,8 @@ export const CLI_USAGE = `Usage:
   usine config log [<kind> <name>]
   usine up [--port <port>] [--origin <url>] [--log-level <level>] [--allow-volatile-instance] [--detach]
   usine status
+  usine sign-in [<instance-url>]
+  usine sign-in-link
   usine stop [--timeout <seconds>] [--force]
   usine restart [--timeout <seconds>] [--force]
   usine upgrade [<version> | --channel <latest|next>] [--check] [--timeout <seconds>] [--force]
@@ -200,6 +204,11 @@ export class BackupCommand extends Schema.TaggedClass<BackupCommand>("@usine/ser
   { output: Schema.NonEmptyString },
 ) {}
 
+export class SignInCommand extends Schema.TaggedClass<SignInCommand>("SignInCommand")(
+  "SignInCommand",
+  { action: Schema.Literals(["device", "link"]), origin: UiOrigin },
+) {}
+
 export interface CliEnvironment {
   readonly port: Option.Option<string>;
   readonly origin: Option.Option<string>;
@@ -209,6 +218,7 @@ export interface CliEnvironment {
 
 export const CliCommand = Schema.Union([
   ConfigCommand,
+  SignInCommand,
   HelpCommand,
   VersionCommand,
   UpCommand,
@@ -472,6 +482,17 @@ export const parseCli = Effect.fn("Cli.parse")((
     return Effect.succeed(new VersionCommand());
   }
   switch (command) {
+    case "sign-in":
+    case "sign-in-link":
+      if (rest.length > (command === "sign-in" ? 1 : 0)) return Effect.fail(usageError());
+      return Effect.gen(function* () {
+        const options = yield* environmentUp(environment);
+        const origin = yield* decodeUiOrigin(
+          "--origin",
+          rest[0] ?? Option.getOrElse(options.origin, () => `http://127.0.0.1:${options.port}`),
+        );
+        return new SignInCommand({ action: command === "sign-in" ? "device" : "link", origin });
+      });
     case "config":
       return parseConfigCommand(rest).pipe(Effect.mapError(({ message }) => usageError(message)));
     case "backup":

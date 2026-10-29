@@ -1,4 +1,5 @@
 import { repositoryEditorEntity, repositoryEditorChanges } from "./repositories.ts";
+import { requestActor } from "@usine/core/operator";
 import { configurationLoopOperations } from "./loops/operations.ts";
 import {
   type LoopDraft,
@@ -125,12 +126,14 @@ export class ConfigurationEditor extends Context.Service<
         input: ConfigurationWrite,
         changes: ReadonlyArray<ConfigurationChange>,
       ) =>
-        current.commit({
-          expected: input.expected,
-          changes,
-          actor: snapshot.actor,
-          message: Option.fromUndefinedOr(input.message),
-        });
+        Effect.flatMap(requestActor(snapshot.actor), (actor) =>
+          current.commit({
+            expected: input.expected,
+            changes,
+            actor,
+            message: Option.fromUndefinedOr(input.message),
+          }),
+        );
       const resolveKey = (snapshot: Configuration, key: ConfigurationEntityKey) =>
         Option.match(resolveConfigurationEntityKey(entitiesOf(snapshot), key), {
           onSome: Effect.succeed,

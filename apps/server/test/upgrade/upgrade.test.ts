@@ -15,13 +15,14 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Duration, Effect, Layer, Option, Schema } from "effect";
-import { FetchHttpClient, type HttpClient } from "effect/http";
+import { DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { afterEach, assert, beforeEach, describe, it } from "vitest";
 import { LifecycleOptions, Port, SERVER_HOST, UpgradeCommand } from "../../src/cli.ts";
 import { CommandError, runCommand } from "../../src/command.ts";
 import { startDetached } from "../../src/detach.ts";
-import { InstanceLaunch } from "../../src/instance/record.ts";
+import { requestSystemUpgrade } from "../../src/upgrade/client.ts";
+import { InstanceRecord, ProcessId, InstanceLaunch } from "../../src/instance/record.ts";
 import { probeInstance } from "../../src/instance/state.ts";
 import { PackageLookupError, resolveVersion } from "../../src/registry.ts";
 import { stop } from "../../src/stop.ts";
@@ -226,4 +227,66 @@ describe("usine upgrade", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.instanceOf(failed, CommandError);
     assert.match(failed.reason, /^exited with status 2/u);
   });
+});
+
+it("authenticates system upgrade checks and requests with the local admin-token file", async () => {
+  const directory = InstanceDirectory.make(mkdtempSync(join(tmpdir(), "usine-system-upgrade-")));
+  folders.push(directory);
+  mkdirSync(join(directory, ".usine"));
+  const token = "u".repeat(43);
+  writeFileSync(join(directory, ".usine", "admin-token"), token, { mode: 0o600 });
+  const requests: Array<string> = [];
+  const client = HttpClient.make((request) => {
+    if (request.headers.authorization !== `Bearer ${token}`)
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(request, new Response(null, { status: 401 })),
+      );
+    requests.push(`${request.method} ${new URL(request.url).pathname}`);
+    return Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        request.method === "GET"
+          ? Response.json({
+              running: "1.0.0",
+              channel: "latest",
+              mode: "propose",
+              supported: true,
+              available: "2.0.0",
+              phase: "idle",
+              message: null,
+              outcome: null,
+            })
+          : Response.json({ ok: true }),
+      ),
+    );
+  });
+  await run(
+    Effect.gen(function* () {
+      const record = new InstanceRecord({
+        pid: ProcessId.make(process.pid),
+        version: "1.0.0",
+        startedAt: yield* DateTime.now,
+        launch: new InstanceLaunch({
+          node: process.execPath,
+          nodeOptions: [],
+          script: FIXTURE,
+          port: Port.make(8080),
+          logLevel: "Info",
+          allowVolatileInstance: false,
+        }),
+      });
+      yield* requestSystemUpgrade(
+        directory,
+        record,
+        new UpgradeCommand({ ...latest, check: true }),
+      );
+      assert.deepEqual(requests, ["GET /api/upgrade"]);
+      yield* requestSystemUpgrade(directory, record, latest);
+      assert.deepEqual(requests, ["GET /api/upgrade", "GET /api/upgrade", "POST /api/upgrade"]);
+      rmSync(join(directory, ".usine", "admin-token"));
+      const refused = yield* requestSystemUpgrade(directory, record, latest).pipe(Effect.flip);
+      assert.include(refused.message, "admin token");
+      assert.lengthOf(requests, 3);
+    }).pipe(Effect.provideService(HttpClient.HttpClient, client)),
+  );
 });

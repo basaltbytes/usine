@@ -1,3 +1,4 @@
+import { ActingMember } from "@usine/core/operator";
 import {
   Attempt,
   AttemptId,
@@ -867,7 +868,7 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(runId);
-        const decision = cancelRun(current);
+        const decision = cancelRun(current, yield* ActingMember);
         yield* Effect.logInfo("Operator cancellation decided", {
           runId,
           state: current.run.state._tag,

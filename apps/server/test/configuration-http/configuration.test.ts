@@ -1,5 +1,6 @@
 import { LoopFile } from "@usine/config/loop";
 import { ManagedRepo } from "@usine/config/factory";
+import { ActingMember, OperatorLogin } from "@usine/core/operator";
 import {
   ItemProjection,
   ItemContentHash,
@@ -24,6 +25,18 @@ import { GitHubApp, InvalidGitHubResponseError } from "@usine/github/github-app"
 import { Effect, Layer, Option, Ref, Schema } from "effect";
 
 import { harness, agentText, loopText, unused } from "./support.ts";
+it("attributes a revision to the authenticated member instead of the configured operator", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const { request } = yield* harness(
+        Layer.succeed(ActingMember, Option.some(OperatorLogin.make("alice"))),
+      );
+      expect(
+        yield* request("PUT", "/entities/label/ready", { expected: 1, value: { name: "ready" } }),
+      ).toMatchObject({ status: 200, body: { actor: "alice" } });
+    }).pipe(Effect.scoped),
+  ));
+
 it("creates, reads, replaces and deletes entities with paginated and filtered revision history", () =>
   Effect.runPromise(
     Effect.gen(function* () {
