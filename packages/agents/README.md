@@ -4,6 +4,8 @@ The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Co
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version. Harness SDKs and protocols are exact-pinned.
 
+The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the parent in `@usine/durable`.
+
 ## Compose the child backends
 
 `/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `childDispatcherLayer` (`/children`) picks a backend from the agent's `harness`. Provide its three backends from `/claude`, `/codex`, and `/pi`, which also export their SDK contracts and production SDK layers. `@usine/durable/live` composes them:

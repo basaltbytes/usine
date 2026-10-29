@@ -20,6 +20,8 @@ const attempts = durableLayer(instanceDirectory);
 
 Building the layer installs the usine extension and resumes tasks. Closing it writes no task outcome, so the next start resumes the same work.
 
+The Pi packages are pinned together at 1.4.0. The attempt and hold documents use explicit checkpoint policies that keep ordinary updates as deltas, preserving their stored format and behavior from Pi 1.2.0.
+
 ## Run an attempt
 
 `execute(request, io)` creates the attempt's task, or finds it by attempt id after a restart, and waits for the outcome. Attempt and task ids are committed together, so a later call always finds the task. `isLive(attemptId)` is true from the first `execute` until the terminal envelope is sent or the task is canceled, so a restarted orchestrator reattaches the attempt.
