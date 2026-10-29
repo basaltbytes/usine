@@ -12,7 +12,7 @@ import {
   totalOutOfMemoryKills,
 } from "@usine/core/attempt";
 
-import { AttemptOutcome } from "@usine/core/attempt/outcome";
+import { AttemptFailed, AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage, salvageRefFor } from "@usine/core/attempt/salvage";
 import type { OperatorRetryStart } from "@usine/core/attempt/start";
 import { Event, DedupKey, EventId } from "@usine/core/event";
@@ -542,6 +542,20 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ salvageJson: encodeSalvage(salvage) })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
+    if (salvage._tag === "Retained" && Option.isSome(salvage.pushFailure))
+      yield* database
+        .update(attempts)
+        .set({
+          outcomeJson: encodeOutcome(new AttemptFailed({ failure: salvage.pushFailure.value })),
+        })
+        .where(
+          and(
+            eq(attempts.attemptId, attemptId),
+            sql`json_extract(${attempts.outcomeJson}, '$._tag') = 'Failed'`,
+            sql`json_extract(${attempts.outcomeJson}, '$.failure._tag') != 'GitHubPushFailure'`,
+          ),
+        )
+        .execute();
   });
 
   const recordComments = Effect.fn("RunStoreQueries.recordComments")(function* (

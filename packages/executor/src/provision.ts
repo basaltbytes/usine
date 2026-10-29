@@ -281,6 +281,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
               ).pipe(Effect.as(Option.none<AttemptSalvage>()))
             : yield* salvageWorktree({
                 attemptId: request.attemptId,
+                repository: request.repository,
                 worker: request.worker,
                 host: options.host,
                 worktree: layout.worktree,

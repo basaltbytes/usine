@@ -1,4 +1,5 @@
-import { type Effect, type Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
+import { GitHubPushFailure } from "./failure.ts";
 import type { LoopPermissions } from "../loop.ts";
 import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
@@ -43,6 +44,11 @@ export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("Attemp
     path: Schema.NonEmptyString,
     commit: Schema.OptionFromNullOr(CommitSha),
     message: Schema.String,
+    /** A push refusal that also fails the attempt; absent on older salvage records. */
+    pushFailure: Schema.OptionFromNullOr(GitHubPushFailure).pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed(null)),
+      Schema.withConstructorDefault(Effect.succeed(Option.none<GitHubPushFailure>())),
+    ),
   },
 ) {}
 

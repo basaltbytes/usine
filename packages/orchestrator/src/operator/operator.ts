@@ -1330,6 +1330,7 @@ export {
 } from "./usage.ts";
 export {
   InfraFailureView,
+  GitHubPushFailureView,
   DefectFailureView,
   AgentFailureView,
   BlockedFailureView,

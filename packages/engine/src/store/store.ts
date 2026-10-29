@@ -538,7 +538,12 @@ const makeRunStore = Effect.gen(function* () {
       Match.valueTags(salvage, {
         Pushed: ({ ref, commit }) => ({ attemptId, ref, commit }),
         PartlyPushed: ({ ref, commit, path }) => ({ attemptId, ref, commit, path }),
-        Retained: ({ path, commit }) => ({ attemptId, path, commit }),
+        Retained: ({ path, commit, pushFailure }) => ({
+          attemptId,
+          path,
+          commit,
+          pushFailure: Option.map(pushFailure, ({ message }) => message),
+        }),
         Rejected: ({ path, commit }) => ({ attemptId, path, commit }),
       }),
     );
@@ -621,7 +626,7 @@ const makeRunStore = Effect.gen(function* () {
         const current = yield* tx.snapshot(attempt.runId);
         const decision = decideFinishAttempt(current, attempt.id, result);
         yield* applyFinish(tx, attempt.runId, decision);
-        const stop = operatorStop(decision);
+        const stop = operatorStop(decision, result);
         if (Option.isSome(stop)) yield* suppressForOperator(tx, current, stop.value);
         return decision;
       }),

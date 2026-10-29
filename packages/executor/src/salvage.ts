@@ -1,4 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
+import { GitHubPushFailure } from "@usine/core/attempt/failure";
 import {
   type AttemptSalvage,
   type SalvageRef,
@@ -7,7 +8,7 @@ import {
   SalvageRejected,
   SalvageRetained,
 } from "@usine/core/attempt/salvage";
-import { CommitSha } from "@usine/core/repository";
+import { CommitSha, type RepositoryName } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { Effect, Option, Result, Schema } from "effect";
 
@@ -35,6 +36,7 @@ const SALVAGED_PATHS = [
 
 export interface SalvageOptions<E extends Error> {
   readonly attemptId: AttemptId;
+  readonly repository: RepositoryName;
   readonly worker: WorkerName;
   readonly host: string;
   readonly worktree: string;
@@ -110,6 +112,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
 ) {
   const fields = {
     attemptId: options.attemptId,
+    repository: options.repository,
     worker: options.worker,
     host: options.host,
     worktree: options.worktree,
@@ -253,6 +256,28 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
   );
   if (Option.isSome(pushFailure)) {
     const message = pushFailure.value;
+    if (/\bThe requested URL returned error: 403\b/u.test(message)) {
+      const ref = `refs/heads/${options.ref}`;
+      const failure = new GitHubPushFailure({
+        repository: options.repository,
+        ref,
+        message: `GitHub refused the push to ${options.repository} at ${ref} (HTTP 403). The token is a single-repository installation token. GitHub's message: ${message}`,
+      });
+      yield* Effect.logError("GitHub refused the salvage push; retaining its checkout", {
+        ...fields,
+        ref,
+        commit,
+        message: failure.message,
+      });
+      return Option.some<AttemptSalvage>(
+        new SalvageRetained({
+          path: options.worktree,
+          commit: Option.some(commit),
+          message: failure.message,
+          pushFailure: Option.some(failure),
+        }),
+      );
+    }
     if (LARGE_FILES_REFUSAL.test(message)) {
       yield* Effect.logError(
         "GitHub refused the salvage push for a file over its size limit; retaining the Attempt worktree, which recovery doesn't push again until its commit changes",

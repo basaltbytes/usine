@@ -8,6 +8,11 @@ import { AttemptStart } from "@usine/core/attempt/start";
 import { MachineProvider, SshDestination, SshPort, WorkerName } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 
+/** A GitHub push refusal with its repository, ref, and token scope in the message. */
+export class GitHubPushFailureView extends Schema.TaggedClass<GitHubPushFailureView>(
+  "@usine/orchestrator/GitHubPushFailureView",
+)("GitHubPushFailure", { message: Schema.String }) {}
+
 /** An infra failure without its defect cause. */
 export class InfraFailureView extends Schema.TaggedClass<InfraFailureView>(
   "@usine/orchestrator/InfraFailureView",
@@ -54,6 +59,7 @@ export class ChildSessionBudgetFailureView extends Schema.TaggedClass<ChildSessi
 
 /** An Attempt failure with only the details shown to the operator. */
 export const FailureView = Schema.Union([
+  GitHubPushFailureView,
   InfraFailureView,
   DefectFailureView,
   AgentFailureView,

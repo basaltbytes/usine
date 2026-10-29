@@ -1,7 +1,8 @@
-import { NodeServices } from "@effect/platform-node";
+import { createServer } from "node:http";
+import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ChildSessionBudget } from "@usine/core/agent/session";
-import { InfraFailure } from "@usine/core/attempt/failure";
+import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -31,6 +32,7 @@ import {
   waitForStarted,
   withLocalEngine,
 } from "./support.ts";
+import { runView } from "../../src/operator/projection.ts";
 import { testBotAccount } from "../support/github-app.ts";
 
 /** The identity of `testBotAccount` in git's `<name> <email>` form. */
@@ -43,6 +45,71 @@ const identityOf = (commit: string, cwd: string) =>
   );
 
 describe("local worker salvage", () => {
+  it.live(
+    "records a git-receive-pack 403 as the attempt failure and retains its work",
+    () =>
+      Effect.gen(function* () {
+        const requests: Array<string | undefined> = [];
+        const githubMessage = "Permission to acme/demo.git denied to usine-test[bot].";
+        const server = yield* NodeHttpServer.make(
+          () =>
+            createServer((request, response) => {
+              requests.push(request.url);
+              response.writeHead(403, { "content-type": "text/plain" });
+              response.end(`${githubMessage} ${TOKEN}`);
+            }),
+          { host: "127.0.0.1", port: 0 },
+        );
+        assert(server.address._tag !== "UnixPathAddress");
+        const pushUrl = `http://127.0.0.1:${server.address.port}/acme/demo.git`;
+        const parent = stubAttemptRuntime(new StubStorage(), ({ request }) =>
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            yield* fs.writeFileString(`${request.cwd}/progress.txt`, "keep this work\n");
+            yield* run("git", ["remote", "set-url", "--push", "origin", pushUrl], request.cwd);
+          }).pipe(
+            Effect.provide(NodeServices.layer),
+            Effect.orDie,
+            Effect.andThen(new AgentFailure({ message: "The agent could not finish" })),
+          ),
+        );
+        yield* withLocalEngine({ attemptRuntime: parent }, ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert(accepted._tag === "Claimed");
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            assert.lengthOf(snapshot.attempts, 1);
+            const attempt = snapshot.attempts[0];
+            assert(attempt !== undefined && Option.isSome(attempt.outcome));
+            assert(attempt.outcome.value._tag === "Failed");
+            const failure = attempt.outcome.value.failure;
+            assert(failure._tag === "GitHubPushFailure");
+            assert.strictEqual(failure.repository, "acme/demo");
+            assert.strictEqual(failure.ref, `refs/heads/usine/salvage/${accepted.runId}/1`);
+            assert.include(failure.message, githubMessage);
+            assert.notInclude(failure.message, TOKEN);
+            assert.include(failure.message, failure.repository);
+            assert.include(failure.message, failure.ref);
+            assert.include(failure.message, "single-repository installation token");
+            assert(Option.isSome(attempt.salvage) && attempt.salvage.value._tag === "Retained");
+            assert.deepStrictEqual(attempt.salvage.value.pushFailure, Option.some(failure));
+            const fs = yield* FileSystem.FileSystem;
+            assert.strictEqual(
+              yield* fs.readFileString(`${attempt.salvage.value.path}/progress.txt`),
+              "keep this work\n",
+            );
+            const view = runView(snapshot, new Set(), new Map());
+            assert.isTrue(view.canResolveFailure);
+            const outcome = view.attempts[0]?.outcome;
+            assert(outcome?._tag === "Failed" && outcome.failure._tag === "GitHubPushFailure");
+            assert.strictEqual(outcome.failure.message, failure.message);
+          }),
+        );
+        assert.include(requests, "/acme/demo.git/info/refs?service=git-receive-pack");
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
   it.live(
     "salvages uncommitted work to the salvage ref when a live Attempt is canceled",
     () =>

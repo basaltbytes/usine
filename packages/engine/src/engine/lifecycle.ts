@@ -58,13 +58,24 @@ const openAttempt = (current: RunProgress): Option.Option<Attempt> =>
     Option.filter((attempt) => Option.isNone(attempt.outcome)),
   );
 
+const pushFailureOf = (attempt: Attempt) =>
+  Option.flatMap(attempt.salvage, (salvage) =>
+    salvage._tag === "Retained" ? salvage.pushFailure : Option.none(),
+  );
+
 const failRunningAttempt = (
   state: RunState.Running,
   attempt: Attempt,
   failure: AttemptFailure,
 ): RetryAttempt | RunFailed => {
   const outcome = new AttemptFailed({ failure });
-  if (shouldAutoRetry({ failure, number: attempt.number, maxAutoAttempts: MAX_AUTO_ATTEMPTS })) {
+  if (
+    shouldAutoRetry({
+      failure,
+      number: attempt.number,
+      maxAutoAttempts: MAX_AUTO_ATTEMPTS,
+    })
+  ) {
     return { _tag: "RetryAttempt", attempt, outcome };
   }
   return { _tag: "RunFailed", attempt, outcome, state: RunState.fail(state) };
@@ -86,15 +97,19 @@ export const finishAttempt = (
   if (Option.isNone(attempt)) return { _tag: "Unchanged", reason: "NoOpenAttempt" };
   // A result from before a restart or retry doesn't apply to the replacement Attempt.
   if (attempt.value.id !== attemptId) return { _tag: "Unchanged", reason: "AttemptReplaced" };
-  if (Result.isFailure(result)) {
-    return failRunningAttempt(current.run.state, attempt.value, result.failure);
+  const completed = Option.match(pushFailureOf(attempt.value), {
+    onNone: () => result,
+    onSome: (failure) => Result.fail(failure),
+  });
+  if (Result.isFailure(completed)) {
+    return failRunningAttempt(current.run.state, attempt.value, completed.failure);
   }
   return {
     _tag: "RunSucceeded",
     attempt: attempt.value,
     outcome: new AttemptSucceeded(),
     state: RunState.succeed(current.run.state),
-    result: result.success,
+    result: completed.success,
   };
 };
 
@@ -155,7 +170,11 @@ export const beginAttempt = (
         resume: newestPushedSalvage(current.attempts),
       };
     }
-    const recovery = failRunningAttempt(state, attempt.value, interruption);
+    const recovery = failRunningAttempt(
+      state,
+      attempt.value,
+      Option.getOrElse(pushFailureOf(attempt.value), () => interruption),
+    );
     if (recovery._tag === "RunFailed") return recovery;
     interrupted = Option.some(recovery);
   }
@@ -276,10 +295,14 @@ export interface Suppression {
 /** The kind of operator stop: a question or a blocker. */
 export type OperatorStop = "question" | "blocker";
 
-/** Returns the kind of operator stop that fails the Run in `decision`, or `None` (ADR 0017). */
-export const operatorStop = (decision: FinishDecision): Option.Option<OperatorStop> => {
+/** Preserves the original operator stop when a push failure replaces its displayed outcome (ADR 0017). */
+export const operatorStop = (
+  decision: FinishDecision,
+  result: Result.Result<StepResult, AttemptFailure>,
+): Option.Option<OperatorStop> => {
   if (decision._tag !== "RunFailed") return Option.none();
-  switch (decision.outcome.failure._tag) {
+  if (Result.isSuccess(result)) return Option.none();
+  switch (result.failure._tag) {
     case "QuestionFailure":
       return Option.some("question");
     case "BlockedFailure":
