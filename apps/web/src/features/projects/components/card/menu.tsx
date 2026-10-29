@@ -53,7 +53,7 @@ const RunHistory = ({ runs, openRun }: RunHistoryProps) => (
         <DropdownMenuItem key={run.id} onClick={() => openRun(run.id)}>
           <span className="truncate">{run.loop}</span>
           <span className="ml-auto flex shrink-0 items-center gap-2 pl-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5">
+            <span className="flex items-center gap-2">
               <StateMark state={run.state} />
               {run.state}
             </span>

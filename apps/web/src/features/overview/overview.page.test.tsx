@@ -91,9 +91,10 @@ describe("Desk", () => {
     assert.strictEqual(html, "Nothing running, 3 of 3 worker slots free");
   });
 
-  it("lists each Attempt in flight with its Worker, last activity, and open warnings", () => {
+  it("lists each Attempt in flight with the running mark, its Worker, last activity, and open warnings", () => {
     const html = render(<RunningNow running={desk.running} workers={desk.workers} now={now} />);
     const visible = text(html);
+    assert.include(html, 'data-slot="usine-mark" data-running=""');
     assert.include(html, 'title="Issue #403, open"');
     assert.include(visible, "Operator desk replaces the Projects home");
     assert.include(visible, "hz-worker-1");

@@ -1,3 +1,4 @@
+import { UsineMark } from "~/components/usine-mark";
 import { cn } from "~/lib/utils";
 
 /** Returns the tone class for a Run, Attempt, Project, or Loop state (ADR 0015). An unpaused Loop
@@ -32,19 +33,30 @@ type StateMarkProps = {
   readonly className?: string;
 };
 
-/** Renders a dot in the state's tone that pulses while the state is `Running`. */
-export const StateMark = ({ state, className }: StateMarkProps) => (
-  <span
-    data-slot="state-mark"
-    aria-hidden="true"
-    className={cn(
-      "inline-block size-1.5 shrink-0 rounded-full bg-current",
-      stateTone(state),
-      state === "Running" && "animate-pulse motion-reduce:animate-none",
-      className,
-    )}
-  />
-);
+/**
+ * Renders a 6px dot in the state's tone. While the state is `Running`, the 12px running mark takes
+ * the dot's place, centered on it, so a row keeps its alignment.
+ */
+export const StateMark = ({ state, className }: StateMarkProps) =>
+  state === "Running" ? (
+    <span
+      data-slot="state-mark"
+      aria-hidden="true"
+      className={cn("relative inline-block size-1.5 shrink-0", stateTone(state), className)}
+    >
+      <UsineMark running className="absolute top-1/2 left-1/2 size-3 -translate-1/2" />
+    </span>
+  ) : (
+    <span
+      data-slot="state-mark"
+      aria-hidden="true"
+      className={cn(
+        "inline-block size-1.5 shrink-0 rounded-full bg-current",
+        stateTone(state),
+        className,
+      )}
+    />
+  );
 
 type StatusBadgeProps = {
   readonly state: string;
@@ -53,14 +65,14 @@ type StatusBadgeProps = {
 
 /** `label` replaces the state name when the state key is not its sentence-case name. */
 export const StatusBadge = ({ state, label = state }: StatusBadgeProps) => (
-  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
+  <span className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
     <StateMark state={state} />
     {label}
   </span>
 );
 
 export const NeedsYouBadge = () => (
-  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-needs-you">
+  <span className="inline-flex items-center gap-2 text-xs font-medium text-needs-you">
     <StateMark state="needs-you" />
     Needs attention
   </span>

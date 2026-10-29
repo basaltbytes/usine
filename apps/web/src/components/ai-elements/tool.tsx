@@ -1,21 +1,16 @@
 // Adapted from Vercel AI Elements. See README.md and LICENSE in this folder.
-import {
-  CaretDownIcon,
-  CircleNotchIcon,
-  StopCircleIcon,
-  WrenchIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react";
+import { CaretDownIcon, StopCircleIcon, WrenchIcon, XCircleIcon } from "@phosphor-icons/react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { Badge } from "~/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
+import { UsineMark } from "~/components/usine-mark";
 import { cn } from "~/lib/utils";
 
 type ToolStatus = "Running" | "Completed" | "Error" | "Stopped";
 
 const statusIcons = {
-  Running: <CircleNotchIcon className="motion-safe:animate-spin text-run-active" />,
+  Running: <UsineMark running className="text-run-active" />,
   Error: <XCircleIcon className="text-destructive" />,
   Stopped: <StopCircleIcon className="text-muted-foreground" />,
 } satisfies Record<Exclude<ToolStatus, "Completed">, ReactNode>;

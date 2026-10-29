@@ -179,7 +179,10 @@ it("times a burst from its first start to its last result and counts failed and 
   const html = render(events);
   assert.include(html, "Ran 3 commands");
   assert.match(html, /, (?:<!-- -->)?1(?:<!-- -->)? failed/u);
-  assert.match(html, /, (?:<!-- -->)?1(?:<!-- -->)? running/u);
+  assert.match(
+    html,
+    /, <svg data-slot="usine-mark" data-running=""[^>]*>.*?<\/svg>1(?:<!-- -->)? running/u,
+  );
   assert.include(html, ">27s<");
 });
 
