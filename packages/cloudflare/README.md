@@ -54,6 +54,8 @@ A keepalive alarm keeps the container running for two hours after the last creat
 
 When Cloudflare restarts a host or replaces an instance, it sends the container SIGTERM and stops it up to 15 minutes later. The image's init (`image/init.sh`) writes the time to `/home/usine/.usine/draining` and keeps the container running, and each sandbox summary reports `draining` while the file exists. The executor then drains the Attempt: it salvages the checkout and destroys the sandbox before the container stops.
 
+The sandbox image installs Codex 0.164.0 and Claude Code 2.1.308. Redeploy the Worker to rebuild its image when upgrading these pins.
+
 ## Deploy
 
 You need a Cloudflare account with Workers Paid, which Containers require, and [Wrangler](https://developers.cloudflare.com/workers/wrangler/) logged in to it. The image is linux/amd64; Wrangler builds it with your local Docker.

@@ -111,6 +111,8 @@ No client resolved a provider or registry name itself.
 
 ### Harness login hosts
 
+The worker images install Codex 0.164.0. Its gateway model-provider configuration is unchanged; the ChatGPT placeholder-swap test passes with that binary. The direct-login observations in this section describe the older versions used for that check.
+
 `egress-allowlist` lists these hosts in its harness logins section. They come from the gateway's journal on a Debian 13 worker with Claude Code 2.1.296 and Codex 0.153.4, while each login command ran up to its code and each harness sent a prompt with a made-up login; nothing else was requested. No login was completed, so the post-login calls come from URLs in Claude Code's binary: they go to `api.anthropic.com`.
 
 | Harness and login | Host | What calls it |
