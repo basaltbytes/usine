@@ -22,7 +22,9 @@ The [server guide](src/content/docs/guides/run-the-orchestrator-on-a-server.mdx)
 
 TypeDoc generates `reference/api/` on every `build`, `dev`, and `check`, from the declaration files of the public subpaths of each `@usine/*` package in this package's `devDependencies`. The folder isn't committed. Build those packages first with `pnpm build` from the repository root, or `pnpm turbo run build --filter=@usine/docs^...` before `dev`. The TypeDoc plugin in `typedoc/` makes one page per package and per subpath, and shortens some Effect types; `typedoc/plugin.mjs` lists its changes.
 
-A fenced `mermaid` code block renders as a diagram in the browser and follows the light or dark theme.
+TypeScript stays on 6.0.3 because TypeDoc 0.28.20 supports TypeScript through 6.0; the rest of the workspace uses the catalog version, 7.0.2. Dependabot updates all workspace dependencies from the repository root so manifest changes include the shared `pnpm-lock.yaml`. Its TypeScript major-update ignore applies to the whole workspace: Dependabot combines the requirements and compares updates against the lowest installed version, 6.0.3. Update the TypeScript 7 catalog manually until TypeDoc supports it; [#497](https://github.com/basaltbytes/usine/issues/497) tracks removing the docs pin and the ignore.
+
+A fenced `mermaid` code block renders as a diagram in the browser and follows the light or dark theme. `astro-mermaid` 2.2.0 supports Mermaid 12 and ELK layout 1.
 
 `wrangler.jsonc` makes the Worker serve `dist/` as static assets on the `docs.usine.dev` custom domain, with no Worker script. The `Deploy docs` workflow (`.github/workflows/deploy-docs.yml`) builds and deploys on every push to `main`, with the `CLOUDFLARE_API_TOKEN` repository secret. To deploy by hand, run `pnpm turbo run build --filter=@usine/docs` first, because `deploy` uploads `dist/` as it is, after `npx wrangler login` to the Basaltbytes account.
 
