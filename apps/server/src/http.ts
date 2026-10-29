@@ -255,6 +255,10 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
         return yield* fromBackend((backend) => backend.task(repository, params.item));
       }),
     )
+    .handle("checkLoop", ({ payload }) => fromConfiguration((editor) => editor.checkLoop(payload)))
+    .handle("previewLoop", ({ payload }) =>
+      fromConfiguration((editor) => editor.previewLoop(payload)),
+    )
     .handle("configurationCapabilities", () =>
       Effect.succeed({ harnesses: HARNESSES, efforts: EFFORTS }),
     )

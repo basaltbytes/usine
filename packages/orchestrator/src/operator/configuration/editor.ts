@@ -1,3 +1,10 @@
+import { configurationLoopOperations } from "./loops/operations.ts";
+import {
+  type LoopDraft,
+  type LoopCheck,
+  type LoopPreviewRequest,
+  type LoopPreview,
+} from "./loops/model.ts";
 import {
   Configuration,
   ConfigurationChange,
@@ -56,6 +63,10 @@ const entitiesOf = (configuration: Configuration) =>
 export class ConfigurationEditor extends Context.Service<
   ConfigurationEditor,
   {
+    readonly checkLoop: (input: LoopDraft) => Effect.Effect<LoopCheck, ConfigurationEditorError>;
+    readonly previewLoop: (
+      input: LoopPreviewRequest,
+    ) => Effect.Effect<LoopPreview, ConfigurationEditorError>;
     readonly list: (
       query: ConfigurationRevisionQuery,
     ) => Effect.Effect<ConfigurationRevisionPage, ConfigurationEditorError>;
@@ -85,6 +96,7 @@ export class ConfigurationEditor extends Context.Service<
       const store = yield* ConfigurationStore;
       const parser = yield* ConfigParser;
       const current = yield* CurrentInstance;
+      const loops = yield* configurationLoopOperations;
 
       const revision = Effect.fn("ConfigurationEditor.revision")(function* (
         number: ConfigurationRevisionNumber,
@@ -128,6 +140,7 @@ export class ConfigurationEditor extends Context.Service<
       };
 
       return ConfigurationEditor.of({
+        ...loops,
         revision,
         list: Effect.fn("ConfigurationEditor.list")(function* (query) {
           if (query.kind !== undefined)

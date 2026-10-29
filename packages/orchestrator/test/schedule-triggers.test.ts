@@ -445,6 +445,7 @@ describe("ScheduleTriggers", () => {
       const healthy = scheduleLoop(config, { cron: "0 0 1 1 *", name: "healthy-prompt" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       const parser = Layer.succeed(ConfigParser)({
+        checkLoopDraft: () => Effect.die("unused"),
         parseAgentFile: () => Effect.die("unused"),
         parseLoopFile: () => Effect.die("unused"),
         parseUsineYaml: () => Effect.die("unused"),

@@ -54,6 +54,11 @@ export const ConfigurationEditorForm = ({
   const [problems, setProblems] = useState<readonly FormProblem[]>([]);
   const [message, setMessage] = useState("");
   const write = useConfigurationWrite();
+  const changeDraft = (next: Draft) => {
+    setEditor(next);
+    setProblems([]);
+    if (write.error instanceof ConfigurationInvalidRefusal) write.reset();
+  };
   const text = editor.mode === "text" ? editor.text : formText(entity, editor.value);
   const serverProblems =
     write.error instanceof ConfigurationInvalidRefusal
@@ -91,7 +96,7 @@ export const ConfigurationEditorForm = ({
           disabled={write.isPending}
           onClick={() => {
             if (editor.mode === "form") {
-              setEditor({ mode: "text", text });
+              changeDraft({ mode: "text", text });
               setProblems([]);
               return;
             }
@@ -103,7 +108,7 @@ export const ConfigurationEditorForm = ({
               return;
             }
             setProblems([]);
-            setEditor({ mode: "form", value: parsed.success });
+            changeDraft({ mode: "form", value: parsed.success });
           }}
         >
           {editor.mode === "form" ? formCopy.text : formCopy.form}
@@ -113,7 +118,7 @@ export const ConfigurationEditorForm = ({
         {editor.mode === "text" ? (
           <SourceEditor
             value={editor.text}
-            onChange={(text) => setEditor({ mode: "text", text })}
+            onChange={(text) => changeDraft({ mode: "text", text })}
             disabled={write.isPending}
           />
         ) : (
@@ -121,7 +126,7 @@ export const ConfigurationEditorForm = ({
             key={base.number}
             entity={entity}
             value={editor.value}
-            onChange={(value) => setEditor({ mode: "form", value })}
+            onChange={(value) => changeDraft({ mode: "form", value })}
             problems={[...problems, ...serverProblems]}
           />
         )}

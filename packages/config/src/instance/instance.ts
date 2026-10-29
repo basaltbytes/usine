@@ -32,3 +32,5 @@ export {
   UndeclaredTriggerLabelWarning,
   ConfigWarning,
 } from "./diagnostics.ts";
+
+export { referenceIndex } from "./references.ts";

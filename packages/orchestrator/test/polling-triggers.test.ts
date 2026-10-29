@@ -1485,6 +1485,7 @@ describe("PollingTriggers", () => {
     });
     const parser = Layer.succeed(ConfigParser)({
       configWarnings: () => Effect.die("unused"),
+      checkLoopDraft: () => Effect.die("unused"),
       parseAgentFile: () => Effect.die("unused"),
       parseLoopFile: () => Effect.die("unused"),
       parseUsineYaml: () => Effect.die("unused"),

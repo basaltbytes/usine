@@ -1,3 +1,4 @@
+import { loopEditorResponses } from "./src/features/configuration/components/forms/loop/browser-fixture.ts";
 import {
   delayConfigurationLookup,
   releaseConfigurationLookup,
@@ -80,6 +81,7 @@ export default mergeConfig(
                 executablePath === undefined ? {} : { launchOptions: { executablePath } },
               ),
               commands: {
+                loopEditorResponses,
                 delayConfigurationLookup,
                 releaseConfigurationLookup,
                 configurationEditorResponses,

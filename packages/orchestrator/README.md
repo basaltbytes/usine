@@ -300,6 +300,8 @@ Needs attention includes `UnresponsiveWorkerNeed` after three consecutive unansw
 
 | Method | Path | Result |
 | --- | --- | --- |
+| POST | `/api/configuration/loops/check` | Checks a loop draft without saving. |
+| POST | `/api/configuration/loops/preview` | Matches stored items and renders a sample prompt without opening runs. |
 | GET | `/api/configuration/capabilities` | Supported harnesses and efforts. |
 | GET | `/api/configuration/repositories` | Repository names accessible to the GitHub App installation. |
 | GET | `/api/configuration/labels/:repository` | Live repository labels with names, colors, and descriptions. |
@@ -317,3 +319,7 @@ Revision lists default to 50 entries and accept limits from 1 to 100. Pass a res
 Stale writes return 409 with `expected` and `current`. Invalid configuration returns 422 with a `problems` array containing the entity key, field path when available, and message. Unknown entities, kinds, and revision numbers return 404. A revert returns 409 with the conflicting entity keys if a later revision changed them. Restart and preflight refusals use the reload endpoint's error responses.
 
 The configuration view includes all declared labels, including declarations with no managed repository. The web UI uses the revision and entity endpoints for editing and history. The obsolete `POST /api/instance/reload` endpoint is removed; committed revisions apply live.
+
+`check` accepts `{ name, value }` or `{ name, text }`, where `value` uses the loop entity's JSON representation and `text` uses its export format. It returns `{ problems }`; each problem has a field `path` and `message`. CEL problems also include `expression` and, when available, its zero-based `position`.
+
+`preview` accepts `{ name, value, itemKey? }`. It applies the selector, stream, and condition to stored items, excluding items marked gone. The response includes up to 20 `items`, the full match `total`, and a `prompt` with the selected item's key and rendered text. Without `itemKey`, it renders the first match; an explicitly selected item that no longer matches returns 404. Evaluation or rendering failures appear in `failures`, and `repositoriesWithoutItems` identifies repositories with no stored items for that stream. Schedule loops return no polled items. Preview makes no GitHub requests and saves no revision.

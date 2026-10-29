@@ -32,7 +32,7 @@ const quoted = (names: ReadonlyArray<string>): string =>
  */
 export const loopReferenceFailure = (
   file: InstancePath,
-  loop: LoopFile,
+  loop: { readonly agent: AgentName | undefined; readonly selector: LoopFile["selector"] },
   references: ReferenceIndex,
 ): Option.Option<ConfigFileError> => {
   const problems: Array<{ readonly path: ReadonlyArray<string>; readonly message: string }> = [];
@@ -48,7 +48,7 @@ export const loopReferenceFailure = (
             details: problems,
           }),
         );
-  if (!references.agentNames.has(loop.agent)) {
+  if (loop.agent !== undefined && !references.agentNames.has(loop.agent)) {
     problems.push({
       path: ["agent"],
       message: `Unknown agent "${loop.agent}": agents/${loop.agent}.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`,

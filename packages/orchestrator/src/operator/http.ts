@@ -1,3 +1,16 @@
+import {
+  LoopDraft,
+  LoopCheck,
+  LoopPreviewRequest,
+  LoopPreview,
+} from "./configuration/loops/model.ts";
+export {
+  LoopDraft,
+  LoopCheck,
+  LoopPreviewRequest,
+  LoopPreview,
+} from "./configuration/loops/model.ts";
+import { ConfigProblem } from "@usine/config/file";
 import { Harness, Effort } from "@usine/core/agent/brain";
 import { RepositoryLabel } from "@usine/github/polling";
 import {
@@ -246,8 +259,7 @@ export class ConfigurationInvalidRefusal extends Schema.Error<ConfigurationInval
     problems: Schema.NonEmptyArray(
       Schema.Struct({
         entity: ConfigurationEntityKey,
-        path: Schema.Array(Schema.Union([Schema.String, Schema.Number])),
-        message: Schema.String,
+        ...ConfigProblem.fields,
       }),
     ),
   },
@@ -448,6 +460,16 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
       }),
     )
     .add(
+      HttpApiEndpoint.post("checkLoop", "/api/configuration/loops/check", {
+        payload: LoopDraft,
+        success: LoopCheck,
+        error: configurationWriteErrors,
+      }),
+      HttpApiEndpoint.post("previewLoop", "/api/configuration/loops/preview", {
+        payload: LoopPreviewRequest,
+        success: LoopPreview,
+        error: configurationWriteErrors,
+      }),
       HttpApiEndpoint.get("configurationCapabilities", "/api/configuration/capabilities", {
         success: Schema.Struct({ harnesses: Schema.Array(Harness), efforts: Schema.Array(Effort) }),
       }),

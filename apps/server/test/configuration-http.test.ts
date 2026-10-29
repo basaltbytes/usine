@@ -1,3 +1,10 @@
+import {
+  ItemProjectionReader,
+  ItemProjection,
+  ItemContentHash,
+  ItemProjectionSource,
+} from "@usine/engine/item-projection";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { GitHubPolling, RepositoryLabelCatalog } from "@usine/github/polling";
 import { expect, it } from "vitest";
@@ -40,6 +47,7 @@ const harness = (
   catalog: Layer.Layer<GitHubApp | GitHubPolling> | Layer.Layer<never> = Layer.empty,
 ) =>
   Effect.gen(function* () {
+    const projections = yield* Ref.make<readonly ItemProjection[]>([]);
     const states = yield* Ref.make(new Map<LoopName, LoopRuntimeState>());
     const setPause = (loop: LoopName, paused: boolean) =>
       Ref.modify(states, (previous) => {
@@ -78,7 +86,7 @@ const harness = (
     const initial = new LoadedInstance({
       config: yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
-        "version: 1\noperator: operator\nrepos: []\n",
+        "version: 1\noperator: operator\nrepos:\n  - name: acme/project\n    tags: [app]\n  - name: acme/other\n    tags: [other]\n",
       ),
       agents: [yield* parser.parseAgentFile(InstancePath.make("agents/developer.md"), agentText)],
       loops: [yield* parser.parseLoopFile(InstancePath.make("loops/implement.md"), loopText)],
@@ -164,6 +172,17 @@ const harness = (
     );
     const editorContext = yield* Layer.build(
       ConfigurationEditor.layer.pipe(
+        Layer.provide(MarcbachmannCelLayer),
+        Layer.provide(
+          Layer.succeed(ItemProjectionReader, {
+            get: unused,
+            openIssues: unused,
+            list: (repository) =>
+              Ref.get(projections).pipe(
+                Effect.map((items) => items.filter((item) => item.repository === repository)),
+              ),
+          }),
+        ),
         Layer.provide(currentLayer),
         Layer.provide(Layer.succeedContext(services)),
       ),
@@ -227,6 +246,7 @@ const harness = (
       });
     return {
       request,
+      projections,
       store,
       current,
       controls,
@@ -760,4 +780,213 @@ it("serves installation repositories, live labels and supported harnesses, and r
         body: { error: "BackendUnavailableError" },
       });
     }).pipe(Effect.scoped),
+  ));
+
+const previewItem = (number: number) =>
+  new ItemProjection({
+    itemKey: ItemKey.make(`github:acme/project#${number}`),
+    repository: RepositoryName.make("acme/project"),
+    source: ItemProjectionSource.make("issue"),
+    number: ItemNumber.make(number),
+    contentHash: ItemContentHash.make(`hash-${number}`),
+    payload: {
+      number,
+      title: `Issue ${number}`,
+      body: "Task",
+      url: `https://github.com/acme/project/issues/${number}`,
+      state: "OPEN",
+      stateReason: null,
+      createdAt: "2026-10-28T00:00:00Z",
+      updatedAt: "2026-10-28T00:00:00Z",
+      closedAt: null,
+      author: null,
+      issueType: null,
+      milestone: null,
+      labels: { totalCount: 0, nodes: [] },
+      assignees: { totalCount: 0, nodes: [] },
+      comments: { totalCount: 0, nodes: [] },
+      closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
+    },
+  });
+
+it("checks drafts without saving and returns CEL positions, template errors, and references together", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { request, store } = yield* harness();
+        const invalid = yield* request("POST", "/loops/check", {
+          name: "draft",
+          text: '---\ntrigger: { on: issue, if: "item.unknown == 1" }\nagent: missing\n---\n{{ }} {{ item.nope }} {{ item.missing }}',
+        });
+        expect(invalid.status).toBe(200);
+        expect(invalid.body).toMatchObject({
+          problems: expect.arrayContaining([
+            expect.objectContaining({ path: ["trigger", "if"], position: expect.any(Number) }),
+            expect.objectContaining({ path: ["body"], expression: "item.nope" }),
+            expect.objectContaining({
+              path: ["body"],
+              message: expect.stringContaining("empty expression"),
+            }),
+            expect.objectContaining({ path: ["body"], expression: "item.missing" }),
+            expect.objectContaining({ path: ["agent"] }),
+          ]),
+        });
+        const valid = yield* request("POST", "/loops/check", { name: "draft", text: loopText });
+        expect(valid).toEqual({ status: 200, body: { problems: [] } });
+        const schema = yield* request("POST", "/loops/check", {
+          name: "draft",
+          value: {
+            name: "draft",
+            trigger: { on: "issue", if: "true" },
+            maxCycles: 0,
+            permissions: "invalid",
+          },
+        });
+        expect(schema.body).toMatchObject({
+          problems: expect.arrayContaining([
+            expect.objectContaining({ path: ["maxCycles"] }),
+            expect.objectContaining({ path: ["permissions"] }),
+            expect.objectContaining({ path: ["agent"] }),
+          ]),
+        });
+        expect((yield* store.read).number).toBe(1);
+        expect(yield* store.list(Option.none())).toHaveLength(1);
+      }),
+    ),
+  ));
+
+it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop draft", (format) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { request, store } = yield* harness();
+        const value = {
+          name: "different-name",
+          trigger: { on: "issue", if: "item.unknown == 1" },
+          agent: "missing",
+          body: "{{ }} {{ item.nope }}",
+          maxCycles: 0,
+          permissions: "invalid",
+          step: "run",
+          approval: "none",
+          selector: { _tag: "Some", value: { repos: ["acme/missing"] } },
+          priority: { _tag: "None" },
+        };
+        const text =
+          '---\nname: different-name\ntrigger: { on: issue, if: "item.unknown == 1" }\nagent: missing\nmax_cycles: 0\npermissions: invalid\nselector: { repos: [acme/missing] }\n---\n{{ }} {{ item.nope }}';
+        const draft = format === "text" ? { text } : { value };
+        const checked = yield* request("POST", "/loops/check", { name: "draft", ...draft });
+        expect(checked.status).toBe(200);
+        expect(checked.body).toMatchObject({
+          problems: expect.arrayContaining([
+            expect.objectContaining({ path: [format === "text" ? "max_cycles" : "maxCycles"] }),
+            expect.objectContaining({ path: ["permissions"] }),
+            expect.objectContaining({ path: ["name"] }),
+            expect.objectContaining({ path: ["trigger", "if"], position: expect.any(Number) }),
+            expect.objectContaining({ path: ["body"], expression: "item.nope" }),
+            expect.objectContaining({
+              path: ["body"],
+              message: expect.stringContaining("empty expression"),
+            }),
+            expect.objectContaining({
+              path: ["agent"],
+              message: expect.stringContaining("Unknown agent"),
+            }),
+            expect.objectContaining({ path: ["selector", "repos"] }),
+          ]),
+        });
+        const malformedCondition = yield* request("POST", "/loops/check", {
+          name: "draft",
+          ...(format === "text"
+            ? { text: text.replace('"item.unknown == 1"', "42") }
+            : { value: { ...value, trigger: { on: "issue", if: 42 } } }),
+        });
+        expect(malformedCondition.body).toMatchObject({
+          problems: expect.arrayContaining([
+            expect.objectContaining({ path: ["trigger", "if"] }),
+            expect.objectContaining({ path: ["body"], expression: "item.nope" }),
+            expect.objectContaining({ path: ["agent"] }),
+          ]),
+        });
+        if (format === "json") {
+          const saved = yield* request("PUT", "/entities/loop/draft", { expected: 1, value });
+          expect(saved.status).toBe(422);
+          expect(saved.body).toMatchObject({
+            problems: expect.arrayContaining([
+              expect.objectContaining({ path: ["maxCycles"] }),
+              expect.objectContaining({ path: ["body"], message: expect.stringContaining("nope") }),
+              expect.objectContaining({ path: ["agent"] }),
+            ]),
+          });
+        }
+        expect((yield* store.read).number).toBe(1);
+        expect(yield* store.list(Option.none())).toHaveLength(1);
+      }),
+    ),
+  ),
+);
+
+it("previews at most 20 stored matches with an exact total, a selected prompt, and empty selector results", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { request, projections, store } = yield* harness();
+        yield* Ref.set(
+          projections,
+          Array.from({ length: 25 }, (_, index) => previewItem(index + 1)),
+        );
+        const value = {
+          name: "draft",
+          trigger: { on: "issue", if: "true" },
+          agent: "developer",
+          body: "Implement {{ item.title }} in {{ repo.name }}.",
+          step: "run",
+          approval: "none",
+          selector: { _tag: "None" },
+          priority: { _tag: "None" },
+        };
+        const first = yield* request("POST", "/loops/preview", { name: "draft", value });
+        expect(first.status).toBe(200);
+        expect(first.body).toMatchObject({
+          total: 25,
+          items: expect.any(Array),
+          prompt: { text: "Implement Issue 1 in acme/project." },
+        });
+        expect(
+          Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))(
+            first.body,
+          ).items,
+        ).toHaveLength(20);
+        const selected = yield* request("POST", "/loops/preview", {
+          name: "draft",
+          value,
+          itemKey: previewItem(25).itemKey,
+        });
+        expect(selected.body).toMatchObject({
+          total: 25,
+          prompt: { text: "Implement Issue 25 in acme/project." },
+        });
+        const empty = yield* request("POST", "/loops/preview", {
+          name: "draft",
+          value: {
+            ...value,
+            selector: {
+              _tag: "Some",
+              value: {
+                repos: ["acme/project"],
+                tags: ["other"],
+              },
+            },
+          },
+        });
+        expect(empty.body).toMatchObject({ total: 0, items: [], prompt: null });
+        const noMatch = yield* request("POST", "/loops/preview", {
+          name: "draft",
+          value: { ...value, trigger: { on: "issue", if: "false" } },
+          itemKey: previewItem(1).itemKey,
+        });
+        expect(noMatch.status).toBe(404);
+        expect((yield* store.read).number).toBe(1);
+      }),
+    ),
   ));

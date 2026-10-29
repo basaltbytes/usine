@@ -1,6 +1,6 @@
 import { Effect, Option, Schema } from "effect";
 import { ConfigFileError, InstancePath } from "../file.ts";
-import { type ConfigParser, formatAgent, formatLoop } from "../parser.ts";
+import { type ConfigParser, formatAgent, formatLoop, parseLoopDraft } from "../parser.ts";
 import { parseYamlDocument } from "../yaml/document.ts";
 import { writeYaml } from "../yaml/writer.ts";
 import { AgentJson, LoopJson } from "./entities.ts";
@@ -44,9 +44,9 @@ export const parseConfigurationEntity = (
           .parseAgentFile(InstancePath.make(`agents/${key.identifier}.md`), source)
           .pipe(Effect.map(Schema.encodeSync(AgentJson)))
       : key.kind === "loop"
-        ? parser
-            .parseLoopFile(InstancePath.make(`loops/${key.identifier}.md`), source)
-            .pipe(Effect.map(Schema.encodeSync(LoopJson)))
+        ? parseLoopDraft(InstancePath.make(`loops/${key.identifier}.md`), source).pipe(
+            Effect.map(Schema.encodeSync(LoopJson)),
+          )
         : parseYamlDocument(file, source).pipe(
             Effect.flatMap((document) =>
               Schema.decodeUnknownEffect(Schema.Json)(document.toJS()).pipe(

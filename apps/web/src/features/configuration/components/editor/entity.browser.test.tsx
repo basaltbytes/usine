@@ -1,3 +1,4 @@
+import { RegistryTag } from "@usine/config/factory";
 import { ContainerLimits } from "@usine/core/worker";
 import { Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -17,6 +18,10 @@ import "~/index.css";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
+    loopEditorResponses: (
+      configuration: string,
+      resumeRejections?: readonly { readonly status: number; readonly body: string }[],
+    ) => Promise<void>;
     delayConfigurationLookup: (identifier: string) => Promise<void>;
     releaseConfigurationLookup: (identifier: string) => Promise<void>;
     configurationEditorScreenshot: (name: string) => Promise<void>;
@@ -32,8 +37,11 @@ declare module "vitest/browser" {
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
+let wasDark: boolean;
 
 beforeEach(() => {
+  wasDark = document.documentElement.classList.contains("dark");
+  document.documentElement.classList.add("dark");
   host = document.createElement("div");
   host.className = "dark text-foreground";
   document.body.append(host);
@@ -49,13 +57,16 @@ afterEach(() => {
   flushSync(() => root.unmount());
   client.clear();
   host.remove();
+  document.documentElement.classList.toggle("dark", wasDark);
 });
 
 const mount = async (
   path = "/configuration/workers/local",
   rejections: readonly { readonly status: number; readonly body: string }[] = [],
+  resumeRejections: readonly { readonly status: number; readonly body: string }[] = [],
 ) => {
   await commands.configurationEditorResponses(rejections, JSON.stringify(configurationJson));
+  await commands.loopEditorResponses(JSON.stringify(configurationJson), resumeRejections);
   await page.viewport(390, 844);
   const router = createRouter({
     routeTree,
@@ -70,6 +81,7 @@ const mount = async (
       </QueryClientProvider>,
     ),
   );
+  return router;
 };
 const button = (name: string) => page.getByRole("button", { name, exact: true });
 const editText = async () => {
@@ -739,4 +751,196 @@ it.each([
   expect((await commands.configurationEditorRequests())[0]?.payload).toMatchObject({
     value: scenario.expected,
   });
+});
+
+it("checks CEL while typing, completes payload fields, previews, saves paused, and confirms resume", async () => {
+  await mount("/configuration/loops");
+  await button("New").click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
+  await button("Edit").click();
+  const condition = page.getByRole("textbox", { name: "Condition (CEL)", exact: true });
+  await condition.fill("item.unknown == 1");
+  await expect.element(page.getByText("Unknown field: unknown", { exact: true })).toBeVisible();
+  await condition.fill("item.tit");
+  await button("item.title").click();
+  await expect.element(condition).toHaveValue("item.title");
+  await condition.fill('item.state == "OPEN"');
+  await page.getByRole("checkbox", { name: "basaltbytes/usine", exact: true }).click();
+  await page.getByRole("switch", { name: "Require approval" }).click();
+  await page
+    .getByRole("textbox", { name: "Prompt (Markdown)", exact: true })
+    .fill("Implement {{ item.title }}.");
+  await button("Preview").click();
+  await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
+  await expect
+    .element(page.getByRole("link", { name: "Issue #1, open Fix issue 1" }))
+    .toHaveAttribute("href", "/projects/basaltbytes/usine/tasks/1");
+  await page.getByRole("button", { name: "Render prompt", exact: true }).nth(1).click();
+  await expect.element(page.getByText("Implement Fix issue 2.", { exact: true })).toBeVisible();
+  page.getByRole("heading", { name: "New loop", exact: true }).element().scrollIntoView();
+  await commands.configurationEditorScreenshot("loop-mobile-final");
+  await page.viewport(1280, 900);
+  await commands.configurationEditorScreenshot("loop-desktop-final");
+  await condition.fill("true");
+  await expect
+    .element(page.getByRole("heading", { name: "2 matching items" }))
+    .not.toBeInTheDocument();
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  expect((await commands.configurationEditorRequests())[0]).toMatchObject({
+    method: "PUT",
+    payload: {
+      value: {
+        name: "draft-loop",
+        approval: "required",
+        selector: { _tag: "Some", value: { repos: ["basaltbytes/usine"] } },
+      },
+    },
+  });
+  await button("Resume").click();
+  const confirmation = page.getByRole("dialog", { name: "Resume loop: draft-loop" });
+  await expect.element(confirmation.getByText("2 matching items", { exact: true })).toBeVisible();
+  await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect.element(button("Pause")).toBeVisible();
+});
+
+it("keeps resume confirmation, cancellation, and request errors on the loops list", async () => {
+  const router = await mount(
+    "/configuration/loops",
+    [],
+    [
+      {
+        status: 503,
+        body: JSON.stringify({
+          error: "BackendUnavailableError",
+          message: "Resume is unavailable",
+        }),
+      },
+    ],
+  );
+  await button("New").click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
+  await button("Edit").click();
+  await button("Save").click();
+  await expect.element(button("Resume")).toBeVisible();
+  await router.navigate({ to: "/configuration/loops" });
+
+  const confirmation = page.getByRole("dialog", { name: "Resume loop: draft-loop" });
+  await button("Resume draft-loop").click();
+  await confirmation.getByText("2 matching items", { exact: true }).click();
+  await expect.element(confirmation).toBeVisible();
+  expect(router.state.location.pathname).toBe("/configuration/loops");
+  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect.element(confirmation).not.toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/configuration/loops");
+
+  await button("Resume draft-loop").click();
+  await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect.element(confirmation.getByRole("alert")).toHaveTextContent("Resume is unavailable");
+  expect(router.state.location.pathname).toBe("/configuration/loops");
+  await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect.element(confirmation).not.toBeInTheDocument();
+  await expect.element(button("Pause draft-loop")).toBeVisible();
+  expect(router.state.location.pathname).toBe("/configuration/loops");
+});
+
+it("matches and removes repository selections regardless of casing", async () => {
+  await mount("/configuration/loops/start-dev");
+  client.setQueryData(
+    configurationQuery().queryKey,
+    new ConfigurationView({
+      ...configurationFixture(),
+      repositories: configurationFixture().repositories.map((repository) => ({
+        ...repository,
+        tags: [RegistryTag.make("Team"), RegistryTag.make("team")],
+      })),
+    }),
+  );
+  await editText();
+  await page
+    .getByRole("textbox", { name: "Configuration text" })
+    .fill(
+      '---\ntrigger: { on: issue, if: "true" }\nagent: developer\nselector: { repos: [BasaltBytes/Usine], tags: [Team] }\n---\nImplement.',
+    );
+  await button("Edit as form").click();
+  const repository = page.getByRole("checkbox", { name: "basaltbytes/usine", exact: true });
+  await expect.element(repository).toBeChecked();
+  await expect.element(page.getByRole("checkbox", { name: "Team", exact: true })).toBeChecked();
+  const tag = page.getByRole("checkbox", { name: "team", exact: true });
+  await expect.element(tag).not.toBeChecked();
+  await tag.click();
+  await repository.click();
+  await expect.element(repository).not.toBeChecked();
+  await button("Edit as text").click();
+  await expect
+    .element(page.getByRole("textbox", { name: "Configuration text" }))
+    .not.toHaveValue(expect.stringContaining("repos:"));
+  await button("Edit as form").click();
+  await repository.click();
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  expect((await commands.configurationEditorRequests())[0]?.payload).toMatchObject({
+    value: {
+      selector: { _tag: "Some", value: { repos: ["basaltbytes/usine"], tags: ["Team", "team"] } },
+    },
+  });
+});
+
+it("clears local validation errors and enables Preview after correcting a draft", async () => {
+  await mount("/configuration/loops/start-dev");
+  await editText();
+  await page
+    .getByRole("textbox", { name: "Configuration text" })
+    .fill('---\ntrigger: { on: issue, if: "true" }\nagent: developer\n---\nImplement.');
+  await button("Edit as form").click();
+  const cycles = page.getByRole("spinbutton", { name: "Cycle limit", exact: true });
+  await cycles.fill("0");
+  await button("Save").click();
+  await expect.element(cycles).toHaveAttribute("aria-invalid", "true");
+  await expect.element(button("Preview")).toBeDisabled();
+  await cycles.fill("3");
+  await expect.element(cycles).not.toHaveAttribute("aria-invalid", "true");
+  await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+  await button("Preview").click();
+  await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
+});
+
+it.each(["form", "text"])("clears a save refusal after changing the %s draft", async (mode) => {
+  await mount("/configuration/loops/start-dev", [
+    {
+      status: 422,
+      body: JSON.stringify({
+        error: "ConfigurationInvalid",
+        message: "The configuration is invalid.",
+        problems: [
+          {
+            entity: { kind: "loop", identifier: "start-dev" },
+            path: ["maxCycles"],
+            message: "Cycle limit was refused",
+          },
+        ],
+      }),
+    },
+  ]);
+  await editText();
+  await page
+    .getByRole("textbox", { name: "Configuration text" })
+    .fill('---\ntrigger: { on: issue, if: "true" }\nagent: developer\n---\nImplement.');
+  await button("Edit as form").click();
+  if (mode === "text") await button("Edit as text").click();
+  await button("Save").click();
+  await expect
+    .element(page.getByText("Cycle limit was refused", { exact: false }).first())
+    .toBeVisible();
+  if (mode === "text") {
+    await page
+      .getByRole("textbox", { name: "Configuration text" })
+      .fill(
+        '---\ntrigger: { on: issue, if: "true" }\nagent: developer\nmax_cycles: 4\n---\nImplement.',
+      );
+    await button("Edit as form").click();
+  } else await page.getByRole("spinbutton", { name: "Cycle limit", exact: true }).fill("4");
+  await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+  await button("Preview").click();
+  await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
 });
