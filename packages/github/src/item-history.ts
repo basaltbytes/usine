@@ -1,3 +1,4 @@
+import type { BotLogin } from "@usine/core/worker";
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
@@ -6,25 +7,24 @@ import { GitHubItemNotFoundError, type GitHubAppError } from "./error.ts";
 import { GitHubApp } from "./github-app.ts";
 import { queryGraphql } from "./graphql.ts";
 import { invalidResponse } from "./http.ts";
-import type { AppSlug } from "./installation.ts";
 import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./polling/labels.ts";
 
 /** The maximum timeline pages per walk; more changes since `since` fail instead of returning partial results. */
 const MAX_TIMELINE_PAGES = 10;
 
-/** A label the App added to the Item; `label` is its current GitHub definition. */
+/** A label the bot added to the item; `label` is its current GitHub definition. */
 export class LabelAdded extends Schema.TaggedClass<LabelAdded>("@usine/github/LabelAdded")(
   "LabelAdded",
   { at: Schema.DateTimeUtc, label: RepositoryLabel },
 ) {}
 
-/** A label the App removed from the Item; `label` is its current GitHub definition. */
+/** A label the bot removed from the item; `label` is its current GitHub definition. */
 export class LabelRemoved extends Schema.TaggedClass<LabelRemoved>("@usine/github/LabelRemoved")(
   "LabelRemoved",
   { at: Schema.DateTimeUtc, label: RepositoryLabel },
 ) {}
 
-/** A comment the App posted on the Item; `url` links to it. */
+/** A comment the bot posted on the item; `url` links to it. */
 export class Commented extends Schema.TaggedClass<Commented>("@usine/github/Commented")(
   "Commented",
   { at: Schema.DateTimeUtc, url: Schema.NonEmptyString },
@@ -39,14 +39,14 @@ export const ReviewState = Schema.Literals([
 ]);
 export type ReviewState = typeof ReviewState.Type;
 
-/** A review the App submitted on the pull request; `url` links to it. */
+/** A review the bot submitted on the pull request; `url` links to it. */
 export class Reviewed extends Schema.TaggedClass<Reviewed>("@usine/github/Reviewed")("Reviewed", {
   at: Schema.DateTimeUtc,
   url: Schema.NonEmptyString,
   state: ReviewState,
 }) {}
 
-/** A change the App made on an issue or pull request, with GitHub's timestamp. */
+/** A change the bot made on an issue or pull request, with GitHub's timestamp. */
 export const ItemChange = Schema.Union([LabelAdded, LabelRemoved, Commented, Reviewed]);
 export type ItemChange = typeof ItemChange.Type;
 
@@ -131,9 +131,11 @@ const TimelineData = Schema.Struct({
   ),
 });
 
-const appChange = (slug: AppSlug, node: TimelineNode): ReadonlyArray<ItemChange> => {
+const appChange = (botLogin: BotLogin, node: TimelineNode): ReadonlyArray<ItemChange> => {
   const byApp = (actor: typeof Actor.Type) =>
-    actor !== null && actor.__typename === "Bot" && actor.login === slug;
+    actor !== null &&
+    actor.__typename === "Bot" &&
+    actor.login === botLogin.slice(0, -"[bot]".length);
   const label = (from: typeof TimelineLabel.Type) =>
     new RepositoryLabel({
       name: from.name,
@@ -160,20 +162,22 @@ const appChange = (slug: AppSlug, node: TimelineNode): ReadonlyArray<ItemChange>
   }
 };
 
-/** The App's changes on an Item, read from the Item's GitHub timeline. */
+/** A bot's changes on an item, read from the Item's GitHub timeline. */
 export class GitHubItemHistory extends Context.Service<
   GitHubItemHistory,
   {
     /**
-     * Returns the labels the App added or removed, its comments, and its submitted reviews on one
+     * Matches `actor` against GraphQL's bot login, which omits the REST `[bot]` suffix.
+     * Returns the labels the bot added or removed, its comments, and its submitted reviews on one
      * issue or pull request at or after `since`, oldest first. Labels have their current name,
      * color, and description. Fails with `GitHubItemNotFoundError` if the repository responds but
-     * has no such Item.
+     * has no such item.
      */
     readonly appChanges: (
       repository: RepositoryName,
       item: ItemNumber,
       since: DateTime.Utc,
+      actor: BotLogin,
     ) => Effect.Effect<ReadonlyArray<ItemChange>, GitHubAppError | GitHubItemNotFoundError>;
   }
 >()("@usine/github/GitHubItemHistory") {
@@ -190,6 +194,7 @@ export class GitHubItemHistory extends Context.Service<
           since: string,
           after: string | null,
         ) {
+          yield* Effect.annotateCurrentSpan({ repository, item });
           const token = yield* app.installationToken();
           const { name, owner } = splitRepositoryName(repository);
           const data = yield* queryGraphql(
@@ -226,9 +231,9 @@ export class GitHubItemHistory extends Context.Service<
           repository: RepositoryName,
           item: ItemNumber,
           since: DateTime.Utc,
+          actor: BotLogin,
         ) {
-          yield* Effect.annotateCurrentSpan({ repository, item });
-          const { appSlug } = yield* app.installation();
+          yield* Effect.annotateCurrentSpan({ repository, item, actor });
           const sinceIso = DateTime.formatIso(since);
           const nodes: Array<TimelineNode | null> = [];
           let next = Option.none<string>();
@@ -244,10 +249,11 @@ export class GitHubItemHistory extends Context.Service<
               "fetch-item-timeline",
               `the timeline of ${repository}#${item} since ${sinceIso} has more than ${MAX_TIMELINE_PAGES} pages`,
             );
-          const changes = nodes.flatMap((node) => (node === null ? [] : appChange(appSlug, node)));
-          yield* Effect.logDebug("Read the App's changes from an Item timeline", {
+          const changes = nodes.flatMap((node) => (node === null ? [] : appChange(actor, node)));
+          yield* Effect.logDebug("Read the bot's changes from an Item timeline", {
             repository,
             item,
+            actor,
             since: sinceIso,
             pages,
             timelineItems: nodes.length,

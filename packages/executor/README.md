@@ -21,6 +21,8 @@ Preparation stays interruptible during clone, fetch, credential requests, and lo
 
 `CheckoutRequest.maxAttemptMinutes` bounds live execution, excluding preparation and cleanup. Both runaway ceilings are optional: an absent one leaves that half of the guard off, and an armed one steers the parent once at 80%. The clock starts once launch registers the session. The guard delivers its warning apart from its checks, once an `execute` relays the parent's channel (`AttemptRuntime.attached`): no trip waits for delivery, and the append that reaches the token warning returns before the steer is delivered, since the durable runtime records the steer in order with its envelopes.
 
+`githubBotLogin(kind, appLogin)` returns the GitHub writer for each worker kind. Local, SSH (including provisioned), and Cloudflare workers use `appLogin`; exe.dev workers use `exe-dev-github-integration[bot]`, fixed by the exe.dev adapter. The scheduler and run reader use this same mapping.
+
 `CheckoutRequest.commitAuthor` is the GitHub App's bot account. Every worker kind sets it as `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` in the parent's and children's environment, and in the environment of the executor's own git commands on the checkout, which git prefers to any `user.name` and `user.email` config on the machine. On a remote worker they're exported in each command line, since they aren't secret.
 
 Every worker kind sets `ENABLE_CLAUDEAI_MCP_SERVERS=0` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in the parent's and children's environment. These values override inherited settings to disable Claude Code's claude.ai connectors and nonessential traffic, including telemetry and update checks.

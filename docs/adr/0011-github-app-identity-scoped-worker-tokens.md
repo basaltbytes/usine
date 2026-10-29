@@ -74,3 +74,9 @@ Preflight requires the image's default user to match the SSH user's UID, initial
 ## Amendment (2026-10-28, #555): shared Turborepo cache on each worker machine
 
 Attempt containers also share the Docker volume `usine-turbo-cache` read-write at `/home/usine/.cache/turbo`, the image's `TURBO_CACHE_DIR`, so concurrent and later attempts reuse cached task outputs. Preflight and first-use preparation apply the pnpm store's ownership checks to both volumes. The Turborepo cache has the same trust boundary and lifetime as the pnpm store: worker entries and instances on the same Docker daemon share it, container removal preserves it, and a provisioned machine deletes it after its one attempt. Operators reclaim it with `docker volume rm usine-turbo-cache` after removing containers that reference it.
+
+## Amendment (2026-10-29, #355): worker identity in the run reader
+
+The run reader matches GitHub timeline changes against the bot of the attempt's worker kind. Local, SSH, provisioned SSH, and Cloudflare workers use the instance App; exe.dev uses `exe-dev-github-integration[bot]`, fixed in its adapter. The executor package provides the mapping for both the scheduler and the reader. GraphQL reports these bot logins without the REST `[bot]` suffix.
+
+The reader looks up the attempt's worker in the supplied instance configuration. If the worker is no longer configured, the reader logs the unknown writer and omits the attempt's agent changes. Board moves still match the instance App. Overlapping attempts with the same bot make attribution ambiguous; another exe.dev VM writing in the same window can also appear as the attempt's work.

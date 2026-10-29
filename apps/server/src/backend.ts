@@ -123,7 +123,8 @@ export const liveBackendLayer = (
     overview: Effect.flatMap(instances.get, operator.overview),
     detail: (runId, request) =>
       Effect.flatMap(instances.get, (instance) => operator.detail(instance, runId, request)),
-    githubChanges: operator.githubChanges,
+    githubChanges: (runId) =>
+      Effect.flatMap(instances.get, (instance) => operator.githubChanges(instance, runId)),
     approve: (runId) =>
       Effect.flatMap(instances.get, (instance) => operator.approve(instance, runId)),
     dismissNeed: (key) =>

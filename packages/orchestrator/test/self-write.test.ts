@@ -1,3 +1,4 @@
+import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
@@ -218,6 +219,7 @@ describe("Board self-writes", () => {
             Layer.provide(alwaysHoldsLayer),
           );
           const dependencies = Layer.mergeAll(
+            testAppLayer,
             engine,
             writer,
             MarcbachmannCelLayer,

@@ -1,28 +1,16 @@
 import { assert, describe, it } from "@effect/vitest";
 import { ItemNumber } from "@usine/core/item";
+import { BotLogin } from "@usine/core/worker";
 import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../src/github-app.ts";
-import {
-  AppSlug,
-  Installation,
-  InstallationId,
-  InstallationToken,
-  InstallationWide,
-} from "../src/installation.ts";
+import { InstallationToken, InstallationWide } from "../src/installation.ts";
 import { GitHubItemHistory } from "../src/item-history.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const appLayer = Layer.succeed(GitHubApp)({
-  installation: () =>
-    Effect.succeed(
-      new Installation({
-        id: InstallationId.make(77),
-        accountLogin: "basaltbytes",
-        appSlug: AppSlug.make("usine-phildl"),
-      }),
-    ),
+  installation: () => Effect.die("the caller selects the actor"),
   repositories: () => Effect.die("unused installation repositories"),
   installationToken: () =>
     Effect.succeed(
@@ -64,7 +52,6 @@ const respond = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json
     new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }),
   );
 
-const app = { __typename: "Bot", login: "usine-phildl" };
 const label = (name: string, color: string) => ({ name, color, description: null });
 const page = (nodes: ReadonlyArray<Schema.Json>, endCursor: string | null) => ({
   data: {
@@ -77,9 +64,10 @@ const page = (nodes: ReadonlyArray<Schema.Json>, endCursor: string | null) => ({
 });
 
 describe("GitHubItemHistory", () => {
-  it.effect(
-    "returns only the App's own changes, across timeline pages, labels as GitHub has them",
-    () => {
+  it.effect.each(["usine-phildl", "exe-dev-github-integration"])(
+    "returns only %s's changes across pages, excluding other bots and users",
+    (login) => {
+      const app = { __typename: "Bot", login };
       const requests: Array<HttpClientRequest.HttpClientRequest> = [];
       const client = HttpClient.make((request) =>
         Effect.sync(() => {
@@ -93,7 +81,7 @@ describe("GitHubItemHistory", () => {
                   {
                     __typename: "LabeledEvent",
                     createdAt: "2026-10-15T19:28:13Z",
-                    actor: { __typename: "User", login: "PhilDL" },
+                    actor: { __typename: "User", login },
                     label: label("ready-for-agent", "1f883d"),
                   },
                   {
@@ -167,6 +155,7 @@ describe("GitHubItemHistory", () => {
           repository,
           ItemNumber.make(247),
           DateTime.makeUnsafe("2026-10-15T19:30:39Z"),
+          BotLogin.make(`${login}[bot]`),
         );
         assert.deepStrictEqual(
           changes.map((change) => [change._tag, DateTime.formatIso(change.at)]),
@@ -205,7 +194,12 @@ describe("GitHubItemHistory", () => {
     return Effect.gen(function* () {
       const history = yield* GitHubItemHistory;
       const failure = yield* history
-        .appChanges(repository, ItemNumber.make(999), DateTime.makeUnsafe("2026-10-15T19:30:39Z"))
+        .appChanges(
+          repository,
+          ItemNumber.make(999),
+          DateTime.makeUnsafe("2026-10-15T19:30:39Z"),
+          BotLogin.make("usine-phildl[bot]"),
+        )
         .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "GitHubItemNotFoundError");
     }).pipe(Effect.provide(historyLayer(client)));

@@ -1,3 +1,4 @@
+import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements, type AttentionAcknowledgement } from "@usine/engine/attention";
 import { attentionKey, partitionNeeds } from "../src/operator/attention.ts";
@@ -648,6 +649,7 @@ const testLayer = (
     onItem: () => Effect.die("unused"),
   });
   const dependencies = Layer.mergeAll(
+    testAppLayer,
     Layer.succeed(AttentionAcknowledgements)({
       list: () => Effect.sync(() => [...acknowledged]),
       prune: (current) =>
