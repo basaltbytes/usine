@@ -22,7 +22,9 @@ Building the layer installs the usine extension and resumes tasks. Closing it wr
 
 ## Run an attempt
 
-`execute(request, io)` creates the attempt's task, or finds it by attempt id after a restart, and waits for the outcome. Attempt and task ids are committed together, so a later call always finds the task. `isLive(attemptId)` is true from the first `execute` until the terminal envelope is sent or the task is canceled, so a restarted orchestrator reattaches the attempt.
+`execute(request, io)` creates the attempt's task, or finds it by attempt id after a restart, and waits for the outcome. Attempt and task ids are committed together, so a later call always finds the task. `isLive(attemptId)` is true from the first `execute` until the terminal envelope is sent or the task is canceled or settled, so a restarted orchestrator reattaches the attempt.
+
+After confirming cancellation and stopping the relay, the caller can call `settle(attemptId)` to persist that the attempt is no longer live. This also handles a task that completed or failed before cancellation, when its terminal envelope couldn't be delivered. Settlement preserves the task's outcome and delivery state: it doesn't make an undelivered report available through `finished`. Repeated calls are safe.
 
 After the terminal envelope, `finished(attemptId)` returns `ParentReported` with the report, `ParentFailed` with the failure, or `ResultRecorded` once the executor calls `recordResult(attemptId, result)` with the harvested result. If the orchestrator stopped before the engine recorded the outcome, it finishes the attempt with this instead of running the agent again. A canceled task leaves nothing.
 

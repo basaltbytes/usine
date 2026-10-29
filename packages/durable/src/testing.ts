@@ -324,6 +324,7 @@ interface StubTask {
   state: StubTaskState;
   outbound: number;
   inbound: number;
+  settled: boolean;
 }
 
 /** Stub runtime storage that persists across runtime rebuilds, to simulate a restart. */
@@ -396,6 +397,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             state: { _tag: "live" },
             outbound: 0,
             inbound: 0,
+            settled: false,
           };
           storage.tasks.set(attemptId, task);
           const canceled = yield* Deferred.make<void>();
@@ -471,7 +473,15 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
       return AttemptRuntime.of({
         execute,
         isLive: (attemptId) =>
-          Effect.sync(() => storage.tasks.get(attemptId)?.state._tag === "live"),
+          Effect.sync(() => {
+            const task = storage.tasks.get(attemptId);
+            return task?.state._tag === "live" && !task.settled;
+          }),
+        settle: (attemptId) =>
+          Effect.sync(() => {
+            const task = storage.tasks.get(attemptId);
+            if (task !== undefined) task.settled = true;
+          }),
         finished: (attemptId) =>
           Effect.sync(() => {
             const state = storage.tasks.get(attemptId)?.state;

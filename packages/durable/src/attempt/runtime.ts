@@ -136,13 +136,15 @@ const makeAttemptRuntime = Effect.gen(function* () {
         harness.getTask(taskId, context),
       );
       const outcome = task?.state.outcome?.status;
-      const live = task !== undefined && outcome !== "aborted" && !record.terminalRelayed;
+      const live =
+        task !== undefined && outcome !== "aborted" && !record.terminalRelayed && !record.settled;
       yield* Effect.logDebug("Checked whether the Attempt is live", {
         attemptId,
         taskId,
         status: task?.state.status,
         outcome,
         terminalRelayed: record.terminalRelayed,
+        settled: record.settled ?? false,
         live,
       });
       return live;
@@ -565,6 +567,20 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
+  const settle = Effect.fn("AttemptRuntime.settle")(
+    function* (attemptId: AttemptId) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      yield* durable.use("settle the attempt", (harness, context) =>
+        harness.commit(async (tx) => {
+          const record = await tx.doc(AttemptRecordDoc, attemptId, null);
+          record.settled = true;
+        }, context),
+      );
+      yield* Effect.logInfo("The attempt is settled; no relay will resume it", { attemptId });
+    },
+    Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
+  );
+
   const notify = Effect.fn("AttemptRuntime.notify")(
     function* (attemptId: AttemptId, notice: AttemptChannel.WorkerNotice) {
       yield* Effect.annotateCurrentSpan({ attemptId, notice: notice._tag });
@@ -594,6 +610,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     intervene,
     attached,
     cancel,
+    settle,
     notify,
   });
 });
