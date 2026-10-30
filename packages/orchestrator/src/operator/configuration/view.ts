@@ -6,7 +6,7 @@ import {
 } from "@usine/core/agent";
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { CycleLimit } from "@usine/core/cycle-budget";
-import { ApprovalRequirement, LoopName, LoopPermissions } from "@usine/core/loop";
+import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
@@ -31,7 +31,7 @@ import { RegistryTag, type ManagedRepo, type Worker } from "@usine/config/factor
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
 import { DeclaredLabel, canonicalLabelName, GitHubLabelName } from "@usine/config/label";
-import { LoopPriority, PromptTemplate, loopPath } from "@usine/config/loop";
+import { LoopApproval, LoopPriority, PromptTemplate, loopPath } from "@usine/config/loop";
 import { boardRepositories, Project, matchesLoop } from "@usine/config/project";
 import { Cron, TimeZone, Stream } from "@usine/config/trigger";
 import type { EnginePersistenceError } from "@usine/engine/engine";
@@ -81,7 +81,7 @@ export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrato
   /** Project repositories that match the selector, in registry order. */
   repositories: Schema.Array(RepositoryName),
   /** Whether a matched event must wait for operator approval. */
-  approval: ApprovalRequirement,
+  approval: LoopApproval,
   /** The maximum cycles on one item before an operator reset. */
   maxCycles: CycleLimit,
   /** The GitHub permission level for attempt credentials. */

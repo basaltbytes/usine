@@ -58,6 +58,7 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<LoopName>().notNull(),
     stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
+    approvalReason: text(),
     // The Loop's permissions at match time, used by every Attempt of the Run.
     permissions: text({ enum: LOOP_PERMISSIONS })
       .$type<LoopPermissions>()

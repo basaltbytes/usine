@@ -51,7 +51,12 @@ export const LoopFacts = ({ loop, configuration }: LoopFactsProps) => {
           </ul>
         )}
       </Fact>
-      <Fact label="Approval">{approvalLabel[loop.approval]}</Fact>
+      <Fact label="Approval">
+        {approvalLabel(loop.approval)}
+        {loop.approval !== "none" && loop.approval !== "required" && (
+          <code className="block text-xs wrap-anywhere">{loop.approval}</code>
+        )}
+      </Fact>
       <Fact label="Max cycles">
         <span className="tabular-nums">{loop.maxCycles}</span>{" "}
         <Unset>runs per item before a reset</Unset>

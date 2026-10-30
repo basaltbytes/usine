@@ -46,9 +46,9 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: ask.repository,
       runId: null,
     }),
-    ApprovalNeed: ({ loop, repository, runId, item }) => ({
+    ApprovalNeed: ({ loop, repository, runId, item, approvalReason }) => ({
       title: `${loop}: approval needed`,
-      detail: item === null ? "Open the run for the task text" : item.title,
+      detail: approvalReason ?? (item === null ? "Open the run for the task text" : item.title),
       repository,
       runId,
     }),

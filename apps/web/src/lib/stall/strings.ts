@@ -17,7 +17,7 @@ export const stallNamesLoop = ({ reason }: StalledItemView): boolean =>
 /** Returns a short fragment that states why a matched Item is stalled. */
 export const stallSentence = ({ loop, reason }: StalledItemView, now: number): string =>
   Match.valueTags(reason, {
-    AwaitingApproval: () => "Waiting for approval",
+    AwaitingApproval: ({ run }) => run.approvalReason ?? "Waiting for approval",
     SuppressedForOperator: ({ run }) =>
       isQuestion(run) ? "Question from the agent" : "Blocked by the agent",
     CycleBudgetUsedUp: ({ ask }) => `Cycle budget used, ${ask.limit} rounds`,

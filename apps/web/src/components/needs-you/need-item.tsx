@@ -31,6 +31,7 @@ type NeedItemProps = {
   readonly loop?: LoopName | undefined;
   readonly error?: string | null;
   readonly since?: string;
+  readonly description?: string | null;
 };
 
 export const NeedItem = ({
@@ -44,6 +45,7 @@ export const NeedItem = ({
   loop,
   error,
   since,
+  description,
 }: NeedItemProps) => {
   const overview = useOverview();
   const now = useNow(15_000);
@@ -110,6 +112,12 @@ export const NeedItem = ({
       </div>
       <p className="truncate text-xs text-muted-foreground" title={copy.detail}>
         {context || (title === copy.detail ? null : copy.detail)}
+        {description != null && (
+          <>
+            {" · "}
+            <span>{description}</span>
+          </>
+        )}
         {at !== undefined && (
           <>
             {" · "}

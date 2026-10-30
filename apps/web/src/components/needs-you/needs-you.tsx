@@ -68,6 +68,7 @@ const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
     <>
       <NeedItem
         copy={copy}
+        description={need.approvalReason}
         loop={need.loop}
         heading={need.loop}
         item={origin}

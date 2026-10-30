@@ -1,11 +1,11 @@
 import { Stream } from "@usine/config/trigger";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { LOOP_PERMISSIONS, LoopName } from "@usine/core/loop";
 import { ErrorAlert } from "~/components/error-alert";
 import { Button } from "~/components/ui/button";
 import { Label } from "~/components/ui/label";
-import { Switch } from "~/components/ui/switch";
+import { NativeSelect } from "~/components/ui/native-select";
 import { PromptMarkdown } from "~/features/configuration/components/prompt";
 import { objectValue, stringValue, type FormFieldsProps } from "~/features/configuration/lib/forms";
 import { loopCheckQuery } from "~/features/configuration/queries";
@@ -18,6 +18,9 @@ import { LoopPreview } from "./preview";
 
 type LoopFieldsProps = FormFieldsProps & { readonly name: string };
 export const LoopFields = ({ name, ...fields }: LoopFieldsProps) => {
+  const approvalId = useId();
+  const approval = stringValue(fields.value.approval);
+  const conditionalApproval = approval !== "none" && approval !== "required";
   const configuration = useQuery(configurationQuery());
   const project = configuration.data?.projects.find((project) => name.startsWith(`${project.id}/`));
   const repositories =
@@ -97,15 +100,32 @@ export const LoopFields = ({ name, ...fields }: LoopFieldsProps) => {
         repositories={repositories.map(({ name }) => name)}
         tags={[...new Set(repositories.flatMap(({ tags }) => tags))]}
       />
-      <Label className="flex items-center gap-2">
-        <Switch
-          checked={fields.value.approval === "required"}
-          onCheckedChange={(checked) =>
-            fields.onChange({ ...fields.value, approval: checked ? "required" : "none" })
+      <div className="flex min-w-0 flex-col gap-2">
+        <Label htmlFor={approvalId}>{loopFormCopy.approval}</Label>
+        <NativeSelect
+          id={approvalId}
+          value={conditionalApproval ? "condition" : approval}
+          onChange={(event) =>
+            fields.onChange({
+              ...fields.value,
+              approval: event.target.value === "condition" ? "true" : event.target.value,
+            })
           }
+        >
+          <option value="none">{loopFormCopy.approvalNone}</option>
+          <option value="required">{loopFormCopy.approvalRequired}</option>
+          <option value="condition">{loopFormCopy.approvalConditional}</option>
+        </NativeSelect>
+      </div>
+      {conditionalApproval && (
+        <ExpressionField
+          {...props}
+          path="approval"
+          label={loopFormCopy.approvalCondition}
+          stream={stream}
         />
-        {loopFormCopy.approval}
-      </Label>
+      )}
+      <p className="text-xs text-muted-foreground">{loopFormCopy.approvalHint}</p>
       <Fields
         {...props}
         definitions={[
