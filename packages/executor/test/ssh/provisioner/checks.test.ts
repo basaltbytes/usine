@@ -1,7 +1,9 @@
 import { assert, it } from "@effect/vitest";
 import { ContainerImage, ProvisionerSeconds, ProvisionerTimings } from "@usine/core/worker";
 import { Effect, Fiber, Option } from "effect";
-import { WorkerMachines } from "../../../src/executor.ts";
+import { AttemptId } from "@usine/core/attempt";
+import { SshWorkers } from "../../../src/ssh/ssh.ts";
+import { Executor, WorkerMachines } from "../../../src/executor.ts";
 import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
 import { boatAddress, hetznerAddress, RUN, runtimeOf } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
@@ -61,3 +63,29 @@ it.live("reports the Boat SSH user's UID and image to rebuild on the first machi
     yield* machines.release(fixed.hold);
   }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
 });
+
+it.live(
+  "uses a changed provisioner for new machines and deletes the existing machine through its original provider",
+  () => {
+    const machine = fakeMachine();
+    machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAATest");
+    const providers = fakeProviders();
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const workers = yield* SshWorkers;
+      const executor = yield* Executor;
+      const original = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+      yield* workers.addWorker(boatAddress);
+      yield* executor.preflight(WORKER, [], 1);
+      const next = yield* machines.create(WORKER, RUN, AttemptId.make("replacement-attempt"), []);
+      assert.strictEqual(next.provider, "boat");
+      assert.strictEqual(providers.hetzner.servers.size, 1);
+      assert.strictEqual(providers.boat.sandboxes.size, 1);
+      yield* machines.release(original.hold);
+      assert.strictEqual(providers.hetzner.servers.size, 0);
+      assert.strictEqual(providers.boat.sandboxes.size, 1);
+      yield* machines.release(next.hold);
+      assert.strictEqual(providers.boat.sandboxes.size, 0);
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
+  },
+);

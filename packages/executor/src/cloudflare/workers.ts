@@ -1,14 +1,14 @@
 import { RemoteShell, type SshCommand } from "@usine/agents/child-host";
 import { type SandboxName, SandboxOwner } from "@usine/cloudflare";
 import type { CloudflareLlmProvider, WorkerName } from "@usine/core/worker";
-import { Array as Arr, Context, Effect, Option, Redacted, Schema, Semaphore } from "effect";
+import { Array as Arr, Context, Effect, Equal, Option, Redacted, Schema, Semaphore } from "effect";
 import { HttpClient } from "effect/http";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import { type SandboxClient, sandboxClientFor } from "./client.ts";
 import type { CloudflareExecutorOptions, CloudflareWorkerAddress } from "./model.ts";
 import { SHELL_ENVIRONMENT } from "./shell/environment.ts";
 
-/** Registers worker addresses after their credentials resolve. Existing workers keep their credentials. */
+/** Registers worker addresses after their credentials resolve. Running attempts keep their existing client. */
 export class CloudflareWorkers extends Context.Service<
   CloudflareWorkers,
   {
@@ -35,7 +35,7 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
       address: CloudflareWorkerAddress,
     ) {
       yield* Effect.annotateCurrentSpan({ worker: address.name });
-      if (workers.has(address.name)) {
+      if (Equal.equals(workers.get(address.name)?.address, address)) {
         yield* Effect.logDebug("Cloudflare worker is already registered", { worker: address.name });
         return;
       }
@@ -73,7 +73,7 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
         providers: Arr.dedupe(address.providers.map(({ provider }) => provider)),
         shellFor: (name) => new RemoteShell({ ssh: shell, sshEnvironment, destination: name }),
       });
-      yield* Effect.logInfo("Cloudflare worker added to the executor", { worker: address.name });
+      yield* Effect.logInfo("Cloudflare worker client registered", { worker: address.name });
     }, exclusive.withPermit);
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length) {
       return yield* Effect.die(

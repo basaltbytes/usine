@@ -18,7 +18,7 @@ import { Deferred, Effect, Exit, Fiber, Layer, Option, Redacted, Ref, Stream } f
 import { FetchHttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { fileURLToPath } from "node:url";
-import { layer as cloudflareLayer } from "../../src/cloudflare/cloudflare.ts";
+import { layer as cloudflareLayer, CloudflareWorkers } from "../../src/cloudflare/cloudflare.ts";
 import type { CloudflareProviderKey } from "../../src/cloudflare/model.ts";
 import { SHELL_ENVIRONMENT } from "../../src/cloudflare/shell/environment.ts";
 import {
@@ -697,3 +697,42 @@ describe("sandbox shell", () => {
     }).pipe(Effect.scoped),
   );
 });
+
+it.live(
+  "adds a Cloudflare client and replaces its connection while a prepared attempt keeps its sandbox",
+  () =>
+    Effect.gen(function* () {
+      const original = yield* fakeWorker;
+      const next = yield* fakeWorker;
+      yield* Effect.gen(function* () {
+        const service = yield* Executor;
+        const workers = yield* CloudflareWorkers;
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const prepared = yield* service.prepare(request);
+            const address = {
+              name: WORKER,
+              workerUrl: next.url,
+              accessClientId: Redacted.make(ACCESS_CLIENT_ID),
+              accessClientSecret: Redacted.make(ACCESS_CLIENT_SECRET),
+              image: CloudflareImageName.make("usine"),
+              instanceType: "standard-4" as const,
+              providers: [ANTHROPIC],
+            };
+            yield* workers.addWorker(address);
+            yield* service.preflight(WORKER, [], 1);
+            const added = WorkerName.make("cf-two");
+            yield* workers.addWorker({ ...address, name: added });
+            yield* service.preflight(added, [], 1);
+            assert.strictEqual(
+              next.state.requests.filter((request) => request === "GET /v1/health").length,
+              2,
+            );
+            yield* prepared.launch(sink);
+          }),
+        );
+        assert(original.state.requests.some((request) => request.startsWith("DELETE ")));
+        assert.isFalse(next.state.requests.some((request) => request.startsWith("DELETE ")));
+      }).pipe(Effect.provide(executor(original, mintingProvider())));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
