@@ -18,7 +18,7 @@ RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.308 @openai/codex@0.164.0 \
+RUN npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.311 @openai/codex@0.164.0 \
   && npm cache clean --force
 
 # Files in @cloudflare/sandbox runs this helper to read the process files.
