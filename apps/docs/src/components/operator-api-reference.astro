@@ -1,0 +1,68 @@
+---
+import document from "../../public/openapi.json";
+
+const operations = Object.entries(document.paths).flatMap(([path, methods]) =>
+  Object.entries(methods).map(([method, operation]) => ({ path, method, operation })),
+);
+---
+
+<table>
+  <thead><tr><th>Method and path</th><th>Operation</th></tr></thead>
+  <tbody>
+    {
+      operations.map(({ path, method, operation }) => (
+        <tr>
+          <td><code>{method.toUpperCase()} {path}</code></td>
+          <td><a href={`#${operation.operationId}`}>{operation.summary}</a></td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>
+
+{
+  operations.map(({ path, method, operation }) => (
+    <section aria-labelledby={operation.operationId}>
+      <h2 id={operation.operationId}>{operation.summary}</h2>
+      <p><code>{method.toUpperCase()} {path}</code></p>
+      <p>{operation.description}</p>
+      <p>{operation.security.length === 0 ? "Public endpoint." : "Requires an instance bearer token or browser session."}</p>
+      {operation.parameters.length > 0 && (
+        <table>
+          <thead><tr><th>Parameter</th><th>Location</th><th>Required</th><th>Schema</th></tr></thead>
+          <tbody>
+            {operation.parameters.map((parameter: (typeof operation.parameters)[number]) => (
+              <tr>
+                <td><code>{parameter.name}</code></td>
+                <td>{parameter.in}</td>
+                <td>{parameter.required ? "Yes" : "No"}</td>
+                <td><code>{JSON.stringify(parameter.schema)}</code></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {"requestBody" in operation && (
+        <details>
+          <summary>Request body</summary>
+          <pre><code>{JSON.stringify(operation.requestBody, null, 2)}</code></pre>
+        </details>
+      )}
+      <details>
+        <summary>Responses</summary>
+        <pre><code>{JSON.stringify(operation.responses, null, 2)}</code></pre>
+      </details>
+    </section>
+  ))
+}
+
+<h2 id="schemas">Schemas</h2>
+<p>Request and response references resolve to these shared schemas.</p>
+{
+  Object.entries(document.components.schemas).map(([name, schema]) => (
+    <details>
+      <summary><code>{name}</code></summary>
+      <pre><code>{JSON.stringify(schema, null, 2)}</code></pre>
+    </details>
+  ))
+}

@@ -14,6 +14,11 @@
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md", "$TURBO_ROOT$/tooling/test/**"],
       "env": ["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "VITEST_MAX_WORKERS"]
+    },
+    "@usine/docs#build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/apps/server/src/**"],
+      "outputs": ["dist/**", "public/openapi.json"]
     }
   }
 }

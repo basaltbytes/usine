@@ -157,7 +157,7 @@ Configuration entity writes accept kind `project`. CLI and API loop operations a
 
 ## Sign-in
 
-Operator API requests require an instance token or a browser session, including requests from loopback. Health and sign-in endpoints are public. Every member has instance admin access.
+Operator API requests require an instance token or a browser session, including requests from loopback. Health, sign-in, and API schema endpoints are public. Every member has instance admin access.
 
 `GET /api/version` is an upgrade health endpoint that returns only the running release string. It remains public so helpers copied by releases before member authentication can verify the new server during a managed upgrade. Upgrade status and upgrade requests require authentication.
 
@@ -197,3 +197,9 @@ The SQLite storage, configuration, and export tests use the shared [SQLite fixtu
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
 
 Loop checks at `/api/configuration/loops/check` validate integer CEL priorities. `/api/configuration/loops/preview` returns each matching item’s evaluated `priority`; evaluation errors appear in `failures` and use zero. `/api/desk` includes the scheduler’s captured priority for runs waiting for a worker slot.
+
+## API schema
+
+`GET /api/openapi.json` publicly serves the generated OpenAPI 3.1 contract, including sign-in, members, and tokens. It describes request and response schemas and authentication requirements without reading instance state. See the [HTTP API reference](https://docs.usine.dev/reference/operator-api/) for endpoint descriptions and the downloadable document.
+
+Route definitions and schema annotations generate the contract. Authentication handlers use the paths and request schemas in `src/auth/api.ts`; the server combines those definitions with `OperatorApi` in `src/openapi.ts`. After changing a contract, regenerate and commit `apps/docs/public/openapi.json` as described in the [docs README](../docs/README.md#operator-http-api-reference).

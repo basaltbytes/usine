@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "check": "turbo run check",
+    "check": "turbo run check && pnpm --filter @usine/docs openapi:check && git diff --exit-code -- apps/docs/public/openapi.json",
     "check:packed-install": "node scripts/check-packed-install.mjs",
     "test": "node --experimental-strip-types --test tooling/test/*.test.mts scripts/release/*.test.mjs infra/hetzner/gateway/test/*.test.mjs && turbo run test --concurrency=1",
     "lint": "oxlint",

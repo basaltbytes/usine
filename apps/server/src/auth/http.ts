@@ -1,9 +1,18 @@
-import { ActingMember, OperatorLogin } from "@usine/core/operator";
+import { ActingMember } from "@usine/core/operator";
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Authentication, type Access, type IssuedToken } from "./authentication.ts";
 import { GitHubSignIn } from "./github.ts";
-import { AuthError, authFailure, GitHubUserId, Member, TokenId, TokenName } from "./model.ts";
+import { AuthError, authFailure, GitHubUserId, Member, TokenId } from "./model.ts";
+import {
+  AuthApi,
+  publicAuthPaths,
+  ConsumeLink,
+  StartDevice,
+  PollDevice,
+  AddMember,
+} from "./api.ts";
+import { publicOperatorPaths } from "../openapi.ts";
 import { AuthStore } from "./store.ts";
 
 export interface AuthServices {
@@ -22,15 +31,6 @@ const accessEffect = Effect.flatMap(RequestAccess, (access) =>
 );
 const COOKIE = "usine_session";
 const STATE_COOKIE = "usine_sign_in_state";
-const PUBLIC = new Set([
-  "/api/health",
-  "/api/auth/github",
-  "/api/auth/callback",
-  "/api/auth/device",
-  "/api/auth/device/poll",
-  "/api/auth/link/consume",
-  "/api/auth/info",
-]);
 const json = <A>(body: A, status = 200) => HttpServerResponse.jsonUnsafe(body, { status });
 const secretOf = (request: HttpServerRequest.HttpServerRequest) =>
   request.headers.authorization?.startsWith("Bearer ")
@@ -76,19 +76,27 @@ export const authenticatedRoutes = (services: AuthServices) => {
     }),
   );
   const endpoints = [
-    HttpRouter.route("GET", "/api/health", json({ ok: true })),
-    HttpRouter.route("GET", "/api/auth/info", json({ github: auth.githubAvailable })),
     HttpRouter.route(
-      "GET",
-      "/api/auth/session",
+      AuthApi.endpoints.health.method,
+      AuthApi.endpoints.health.path,
+      json({ ok: true }),
+    ),
+    HttpRouter.route(
+      AuthApi.endpoints.info.method,
+      AuthApi.endpoints.info.path,
+      json({ github: auth.githubAvailable }),
+    ),
+    HttpRouter.route(
+      AuthApi.endpoints.session.method,
+      AuthApi.endpoints.session.path,
       Effect.gen(function* () {
         const access = yield* accessEffect;
         return json({ member: Option.getOrNull(access.member), csrf: access.csrf });
       }),
     ),
     HttpRouter.route(
-      "POST",
-      "/api/auth/link",
+      AuthApi.endpoints.link.method,
+      AuthApi.endpoints.link.path,
       Effect.gen(function* () {
         const access = yield* accessEffect;
         if (access.credential !== "local")
@@ -97,10 +105,10 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
     HttpRouter.route(
-      "POST",
-      "/api/auth/link/consume",
+      AuthApi.endpoints.consumeLink.method,
+      AuthApi.endpoints.consumeLink.path,
       Effect.gen(function* () {
-        const { token } = yield* body(Schema.Struct({ token: Schema.NonEmptyString }));
+        const { token } = yield* body(ConsumeLink);
         return session(
           yield* auth.consumeLink(token),
           json({ ok: true, bootstrap: (yield* store.members).length === 0 }),
@@ -108,8 +116,8 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
     HttpRouter.route(
-      "GET",
-      "/api/auth/github",
+      AuthApi.endpoints.github.method,
+      AuthApi.endpoints.github.path,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const access = yield* auth.authenticate(secretOf(request)).pipe(Effect.option);
@@ -127,8 +135,8 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
     HttpRouter.route(
-      "GET",
-      "/api/auth/callback",
+      AuthApi.endpoints.callback.method,
+      AuthApi.endpoints.callback.path,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const params = new URL(request.url, auth.origin).searchParams;
@@ -148,19 +156,19 @@ export const authenticatedRoutes = (services: AuthServices) => {
       ),
     ),
     HttpRouter.route(
-      "POST",
-      "/api/auth/device",
+      AuthApi.endpoints.device.method,
+      AuthApi.endpoints.device.path,
       Effect.gen(function* () {
-        const { name } = yield* body(Schema.Struct({ name: TokenName }));
+        const { name } = yield* body(StartDevice);
         const started = yield* auth.startDevice(name);
         return json({ ...started, id: Redacted.value(started.id) });
       }),
     ),
     HttpRouter.route(
-      "POST",
-      "/api/auth/device/poll",
+      AuthApi.endpoints.pollDevice.method,
+      AuthApi.endpoints.pollDevice.path,
       Effect.gen(function* () {
-        const { id } = yield* body(Schema.Struct({ id: Schema.NonEmptyString }));
+        const { id } = yield* body(PollDevice);
         const result = yield* auth.pollDevice(id);
         return Option.match(result, {
           onNone: () => json({ pending: true }),
@@ -169,8 +177,8 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
     HttpRouter.route(
-      "POST",
-      "/api/auth/sign-out",
+      AuthApi.endpoints.signOut.method,
+      AuthApi.endpoints.signOut.path,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         yield* auth.signOut(secretOf(request));
@@ -181,19 +189,19 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
     HttpRouter.route(
-      "GET",
-      "/api/members",
+      AuthApi.endpoints.members.method,
+      AuthApi.endpoints.members.path,
       Effect.asVoid(member).pipe(
         Effect.andThen(store.members),
         Effect.map((members) => json(members)),
       ),
     ),
     HttpRouter.route(
-      "POST",
-      "/api/members",
+      AuthApi.endpoints.addMember.method,
+      AuthApi.endpoints.addMember.path,
       Effect.gen(function* () {
         const actor = yield* member;
-        const { login } = yield* body(Schema.Struct({ login: OperatorLogin }));
+        const { login } = yield* body(AddMember);
         const identity = yield* github.lookup(login);
         yield* store.add(
           new Member({
@@ -207,8 +215,8 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
     HttpRouter.route(
-      "DELETE",
-      "/api/members/:id",
+      AuthApi.endpoints.removeMember.method,
+      AuthApi.endpoints.removeMember.path,
       Effect.gen(function* () {
         yield* member;
         const { id } = yield* HttpRouter.params;
@@ -220,8 +228,8 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
     HttpRouter.route(
-      "GET",
-      "/api/tokens",
+      AuthApi.endpoints.tokens.method,
+      AuthApi.endpoints.tokens.path,
       Effect.gen(function* () {
         const actor = yield* member;
         const tokens = yield* store.tokens(actor.id);
@@ -237,8 +245,8 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
     HttpRouter.route(
-      "DELETE",
-      "/api/tokens/:id",
+      AuthApi.endpoints.revokeToken.method,
+      AuthApi.endpoints.revokeToken.path,
       Effect.gen(function* () {
         const actor = yield* member;
         const { id } = yield* HttpRouter.params;
@@ -253,8 +261,8 @@ export const authenticatedRoutes = (services: AuthServices) => {
   const guard = HttpRouter.middleware<{ handles: AuthError }>()((handler) =>
     Effect.gen(function* () {
       const { route } = yield* HttpRouter.RouteContext;
-      if (route.method === "GET" && route.path === "/api/version") {
-        yield* Effect.logDebug("Serving public upgrade health check", { route: route.path });
+      if (route.method === "GET" && publicOperatorPaths.has(route.path)) {
+        yield* Effect.logDebug("Serving public operator API route", { route: route.path });
         return yield* handler;
       }
       const request = yield* HttpServerRequest.HttpServerRequest;
@@ -301,10 +309,10 @@ export const authenticatedRoutes = (services: AuthServices) => {
     ),
   );
   const routes = Layer.merge(
-    HttpRouter.addAll(endpoints.filter((route) => PUBLIC.has(route.path))).pipe(
+    HttpRouter.addAll(endpoints.filter((route) => publicAuthPaths.has(route.path))).pipe(
       Layer.provide(publicGuard.layer),
     ),
-    HttpRouter.addAll(endpoints.filter((route) => !PUBLIC.has(route.path))).pipe(
+    HttpRouter.addAll(endpoints.filter((route) => !publicAuthPaths.has(route.path))).pipe(
       Layer.provide(guard.layer),
     ),
   );
