@@ -1,5 +1,32 @@
 # @usine/server
 
+## 0.6.0
+
+### Minor Changes
+
+- 25728fa: Allow a boolean CEL condition to require approval per run. Save and display the
+  approval decision, require approval when evaluation fails, and validate conditions
+  in the loop editor and configuration API.
+- 13bdef9: Guide first-run setup through GitHub App creation, credential recovery, installation, and first-admin sign-in. Save App and OAuth secrets atomically with mode 0600, support existing credential files, and initialize empty instance configuration in the database.
+- a7bd195: Add an exact browser origin allowlist with credentialed CORS and security headers on all server responses. Configure additional origins in `auth.origins` and restart; loopback browser origins now require an explicit entry unless they are the canonical server origin. Document public HTTPS deployment with Caddy, Cloudflare Tunnel, and Tailscale Serve.
+- 50ab3dd: Run preflight on an idle worker from Configuration > Workers or `POST /api/workers/:worker/preflight`. Checks refresh the worker's stored results, scheduling availability, and Needs attention without a restart. Busy workers return a typed refusal.
+
+### Patch Changes
+
+- 1f12974: Apply webhook mode and URL changes and add Cloudflare workers without restarting the orchestrator. New Cloudflare workers resolve credentials and register a client before preflight; existing clients remain unchanged. A refused addition of a never-accepted worker releases its client, so a corrected revision can add the worker; an accepted worker keeps its client. Document why tracing and existing worker connection fields require a restart.
+- 45bb9cb: Keep worker slots free while an idle upgrade defers new attempts. Show the requested version on deferred runs and worker rows, and report prolonged waits in Needs attention. Cancel a pending upgrade from Settings or with `DELETE /api/upgrade` to resume attempts without restarting.
+- Updated dependencies [25728fa]
+- Updated dependencies [13bdef9]
+- Updated dependencies [13bdef9]
+- Updated dependencies [1f12974]
+- Updated dependencies [a7bd195]
+- Updated dependencies [45bb9cb]
+- Updated dependencies [50ab3dd]
+  - @usine/config@0.6.0
+  - @usine/engine@0.7.0
+  - @usine/orchestrator@0.6.0
+  - @usine/github@0.5.0
+
 ## 0.5.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@usine/config",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Versioned configuration for usine: domain validation, revision stores, and instance folder import and export.",
   "license": "AGPL-3.0-only",
   "repository": {
