@@ -181,6 +181,7 @@ export const harness = (
             repositories: () => Effect.die("unused installation repositories"),
             installationToken: unused,
             projectAccess: unused,
+            installationUrl: () => Effect.die("unused installation URL"),
             configureWebhook: () => Effect.die("unused webhook configuration"),
             deliveries: () => Effect.die("unused webhook deliveries"),
             workerToken: unused,

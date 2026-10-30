@@ -45,7 +45,7 @@ export class Authentication extends Context.Service<
   {
     readonly origin: UiOrigin;
     readonly origins: ReadonlyArray<UiOrigin>;
-    readonly githubAvailable: boolean;
+    readonly githubAvailable: Effect.Effect<boolean>;
     readonly authenticate: (secret: string) => Effect.Effect<Access, AuthError>;
     readonly link: Effect.Effect<string, AuthError>;
     readonly consumeLink: (secret: string) => Effect.Effect<IssuedToken, AuthError>;

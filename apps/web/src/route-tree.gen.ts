@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConfigurationRouteRouteImport } from './routes/configuration/route'
 import { Route as MembersRouteImport } from './routes/members'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as TokensRouteImport } from './routes/tokens'
 import { Route as ConfigurationIndexRouteImport } from './routes/configuration/index'
@@ -53,6 +54,11 @@ const ConfigurationRouteRoute = ConfigurationRouteRouteImport.update({
 const MembersRoute = MembersRouteImport.update({
   id: '/members',
   path: '/members',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignInRoute = SignInRouteImport.update({
@@ -211,6 +217,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/configuration': typeof ConfigurationRouteRouteWithChildren
   '/members': typeof MembersRoute
+  '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/tokens': typeof TokensRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
@@ -242,6 +249,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/members': typeof MembersRoute
+  '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/tokens': typeof TokensRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
@@ -273,6 +281,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/configuration': typeof ConfigurationRouteRouteWithChildren
   '/members': typeof MembersRoute
+  '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/tokens': typeof TokensRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
@@ -307,6 +316,7 @@ export interface FileRouteTypes {
     | '/'
     | '/configuration'
     | '/members'
+    | '/setup'
     | '/sign-in'
     | '/tokens'
     | '/configuration/history'
@@ -338,6 +348,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/members'
+    | '/setup'
     | '/sign-in'
     | '/tokens'
     | '/configuration/history'
@@ -368,6 +379,7 @@ export interface FileRouteTypes {
     | '/'
     | '/configuration'
     | '/members'
+    | '/setup'
     | '/sign-in'
     | '/tokens'
     | '/configuration/history'
@@ -401,6 +413,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ConfigurationRouteRoute: typeof ConfigurationRouteRouteWithChildren
   MembersRoute: typeof MembersRoute
+  SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
   TokensRoute: typeof TokensRoute
   ProjectsProjectRoute: typeof ProjectsProjectRouteWithChildren
@@ -427,6 +440,13 @@ declare module '@tanstack/react-router' {
       path: '/members'
       fullPath: '/members'
       preLoaderRoute: typeof MembersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-in': {
@@ -702,6 +722,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ConfigurationRouteRoute: ConfigurationRouteRouteWithChildren,
   MembersRoute: MembersRoute,
+  SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,
   TokensRoute: TokensRoute,
   ProjectsProjectRoute: ProjectsProjectRouteWithChildren,

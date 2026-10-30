@@ -16,6 +16,8 @@ actors when present. Existing runs retain their original decision.
 
 ## Operator
 
+`SetupState` describes the GitHub App setup response shared by the server and web UI: missing credentials, installation, first sign-in, repository selection, or completion.
+
 `Operator` provides run and board observation, transcript pages, label-backed board moves, approve, retry, cancel, and loop pause. It returns typed data for consuming apps. Captured executor defects appear as `DefectFailure` with a safe message, without the original cause. `OperatorObservation` gives the same read-only projection without execution services.
 
 `OperatorConfiguration.view(instance)` returns the instance folder as already parsed: each loop, agent, worker, registered repo with its lanes, and the settings; every quarantined loop and invalid agent with its error; each loop's pause; each worker's slots, last preflight per harness, and Attempt container limits (from `WorkerStatus`); and each repo's labels as polling last read them. A gateway's admin token appears only as its variable name.
