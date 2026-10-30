@@ -29,11 +29,15 @@ export interface CodexClient {
    * exported on top of a remote host's environment.
    */
   readonly environment: Readonly<Record<string, string>>;
+  /** The local or remote host on which to start the app-server process. */
   readonly host: ChildHost;
 }
 
+/** A server event received without a client request ID. */
 export interface CodexNotification {
+  /** The protocol method name used to select the notification decoder. */
   readonly method: string;
+  /** The protocol payload, decoded by the child backend for the named method. */
   readonly params: Schema.Json;
 }
 
@@ -41,12 +45,21 @@ export interface CodexNotification {
 export interface CodexConnection {
   /** Closes stdin and waits for the app server to shut down its threads and commands. */
   readonly close: Effect.Effect<void, SessionOperationError>;
+  /** Server events in receive order; fails if the process or its output stream fails. */
   readonly notifications: Stream.Stream<CodexNotification, SessionOperationError>;
+  /**
+   * Sends `method` with its JSON `params` and waits up to 60 seconds for the matching response.
+   * Failures identify `operation`; the caller decodes the returned protocol payload.
+   */
   readonly request: (
     operation: SessionOperationError["operation"],
     method: string,
     params: Schema.Json,
   ) => Effect.Effect<Schema.Json, SessionOperationError>;
+  /**
+   * Sends `method` with its JSON `params` without waiting for a response. Write failures identify
+   * `operation`, such as `launch` for the initialization acknowledgement.
+   */
   readonly notify: (
     operation: SessionOperationError["operation"],
     method: string,
@@ -58,6 +71,10 @@ export interface CodexConnection {
 export class CodexAppServer extends Context.Service<
   CodexAppServer,
   {
+    /**
+     * Starts the app server on `request.host` with its environment and session identity. The
+     * connection belongs to the calling scope; the caller initializes the JSON-RPC protocol.
+     */
     readonly open: (
       request: CodexClient,
     ) => Effect.Effect<CodexConnection, SessionOperationError, Scope.Scope>;
@@ -109,6 +126,7 @@ interface PendingRequest {
 
 const repositoryTrustOverride = (cwd: string): string =>
   `projects.${JSON.stringify(cwd)}.trust_level="untrusted"`;
+/** Command-line overrides for every Codex invocation: disable nested agents, plugins, apps, startup update checks, and analytics. */
 export const codexConfigArgs: ReadonlyArray<string> = [
   "features.multi_agent=false",
   "features.plugins=false",
@@ -495,4 +513,5 @@ const makeCodexAppServer = Effect.gen(function* () {
   return CodexAppServer.of({ open });
 });
 
+/** Provides `CodexAppServer` over process standard streams using `ChildProcessSpawner`. Scope cleanup closes stdin and force-stops the process if graceful shutdown fails. */
 export const codexAppServerLive = Layer.effect(CodexAppServer, makeCodexAppServer);

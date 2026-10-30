@@ -572,6 +572,7 @@ const makeCodexChild = Effect.gen(function* () {
   return CodexChildBackend.of({ launch });
 });
 
+/** Provides `CodexChildBackend` for local or remote children. Requires `CodexAppServer`; validates the model and authentication before starting the task. */
 export const codexChildBackendLayer = Layer.effect(CodexChildBackend, makeCodexChild);
 
 export { codexConfigArgs } from "./app-server.ts";

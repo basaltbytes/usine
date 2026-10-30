@@ -6,12 +6,22 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { Context, Layer, Schema } from "effect";
 
+/** A user message sent to a Claude Code child through the SDK's streaming input. */
 export interface ClaudeUserMessage {
+  /** Identifies an input message rather than a harness output event. */
   readonly type: "user";
-  readonly message: { readonly role: "user"; readonly content: string };
+  /** The user-role text to submit as a task or operator guidance. */
+  readonly message: {
+    /** The conversation role required by the SDK for input. */
+    readonly role: "user";
+    /** The task or guidance text, passed unchanged to Claude Code. */
+    readonly content: string;
+  };
+  /** Always `null`: this input is not a response to a tool call. */
   readonly parent_tool_use_id: null;
 }
 
+/** The Claude SDK launch options used by the child backend, including worker credentials, settings sources, permissions, and process spawning. */
 export type ClaudeQueryOptions = Pick<
   Options,
   | "allowDangerouslySkipPermissions"
@@ -29,15 +39,21 @@ export type ClaudeQueryOptions = Pick<
   | "hooks"
 >;
 
+/** A model name advertised by Claude Code, with its resolved ID when the SDK provides one. */
 export interface ClaudeModelInfo {
+  /** The name accepted by the SDK's model option, which may be an alias. */
   readonly value: string;
+  /** The concrete model ID behind an alias, when Claude Code reports it. */
   readonly resolvedModel?: string;
 }
 
 /** A running Claude Code session: its message stream, model list, and stop controls. */
 export interface ClaudeQuery extends AsyncIterable<Schema.Json> {
+  /** Ends the query and releases the SDK's process resources. */
   readonly close: () => void;
+  /** Requests that Claude stop the current turn while keeping the query available for more input. */
   readonly interrupt: () => Promise<void>;
+  /** Lists the models available to this query for validating the requested brain spec. */
   readonly supportedModels: () => Promise<ReadonlyArray<ClaudeModelInfo>>;
 }
 
@@ -45,6 +61,10 @@ export interface ClaudeQuery extends AsyncIterable<Schema.Json> {
 export class ClaudeSdk extends Context.Service<
   ClaudeSdk,
   {
+    /**
+     * Opens a query that consumes task and guidance messages from `input`, using `options` for
+     * the model, environment, settings, and process host. The caller must close the query.
+     */
     readonly open: (
       input: AsyncIterable<ClaudeUserMessage>,
       options: ClaudeQueryOptions,
@@ -57,6 +77,7 @@ const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schem
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>
   decodeVendorMessage(JSON.stringify(message));
 
+/** Provides `ClaudeSdk` through the installed Agent SDK, exposing output messages as JSON for decoding by the child backend. */
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
   open: (input, options) => {
     // SAFETY: ClaudeUserMessage is the streaming-input subset of SDKUserMessage.
