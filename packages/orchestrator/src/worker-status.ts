@@ -3,7 +3,7 @@ import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
-import type { ContainerLimits, WorkerName } from "@usine/core/worker";
+import { type ContainerLimits, WorkerName } from "@usine/core/worker";
 import type {
   ExecutorError,
   MachineStatus,
@@ -246,6 +246,20 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
   containerLimits: Option.none(),
 });
 
+/** An on-demand preflight could not reserve the configured worker. */
+export class WorkerPreflightRejectedError extends Schema.TaggedError<WorkerPreflightRejectedError>(
+  "@usine/orchestrator/WorkerPreflightRejectedError",
+)("WorkerPreflightRejectedError", {
+  worker: WorkerName,
+  reason: Schema.Literals([
+    "not-configured",
+    "attempt-running",
+    "preflight-running",
+    "unavailable",
+  ]),
+  message: Schema.String,
+}) {}
+
 /** A worker excluded from scheduling until its startup preflight passes. */
 export interface WorkerPreflightFailure {
   /** The configured worker name. */
@@ -273,6 +287,12 @@ export class WorkerStatus extends Context.Service<
      * preflight.
      */
     readonly preflights: Effect.Effect<ReadonlyArray<WorkerPreflight>>;
+    /** Workers with a queued or running preflight. */
+    readonly checking: Effect.Effect<ReadonlySet<WorkerName>>;
+    /** Checks one idle worker and replaces its last preflight result. */
+    readonly runPreflight: (
+      worker: WorkerName,
+    ) => Effect.Effect<WorkerPreflight, WorkerPreflightRejectedError>;
     /** Startup failures that still prevent scheduling, including the latest retry message. */
     readonly unavailable: Effect.Effect<ReadonlyArray<WorkerPreflightFailure>>;
     /** The machines of the provisioned Workers in flight, oldest first. */
@@ -286,6 +306,15 @@ export class WorkerStatus extends Context.Service<
     slots: Effect.succeed([]),
     queue: Effect.succeed([]),
     preflights: Effect.succeed([]),
+    checking: Effect.succeed(new Set()),
+    runPreflight: (worker) =>
+      Effect.fail(
+        new WorkerPreflightRejectedError({
+          worker,
+          reason: "unavailable",
+          message: "Preflight is unavailable until the GitHub App is set up.",
+        }),
+      ),
     unavailable: Effect.succeed([]),
     machines: Effect.succeed([]),
     provisioning: Effect.succeed([]),

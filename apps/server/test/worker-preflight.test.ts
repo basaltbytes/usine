@@ -1,3 +1,6 @@
+import { GitHubItemWriter } from "@usine/github/item-writer";
+import { GitHubItemHistory } from "@usine/github/item-history";
+import { WorkerStatus } from "@usine/orchestrator/worker-status";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { ConfigurationStore } from "@usine/config/configuration";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
@@ -29,6 +32,8 @@ import {
   Operator,
   OperatorConfiguration,
   OperatorObservation,
+  WorkerPreflightView,
+  ConfigurationView,
 } from "@usine/orchestrator/operator";
 import { stepExecutorLayer } from "@usine/orchestrator/scheduler";
 import {
@@ -89,7 +94,7 @@ const submission = new Submission({
   parentModel: Option.none(),
 });
 
-it("serves the API and runs on a healthy worker, then restores a failed worker and clears attention without restarting", async () => {
+it("runs on-demand preflight, refuses busy workers, stores failures, and restores scheduling and attention without restarting", async () => {
   const program = Effect.gen(function* () {
     const directory = InstanceDirectory.make(
       yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
@@ -99,15 +104,27 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
     );
     const executing = yield* Deferred.make<WorkerName>();
     let failedChecks = 0;
+    let broken = true;
+    let delayCheck = false;
+    const checking = yield* Deferred.make<void>();
+    const finishCheck = yield* Deferred.make<void>();
     const executor = Layer.mock(Executor)({
       kind: "local",
       preflight: (worker, brains) =>
         Effect.gen(function* () {
           assert.deepStrictEqual(brains, [submission.agent.brain]);
-          if (worker === failedWorker && ++failedChecks === 1)
+          if (worker === failedWorker) {
+            failedChecks += 1;
+            if (delayCheck) {
+              yield* Deferred.succeed(checking, undefined);
+              yield* Deferred.await(finishCheck);
+            }
+          }
+          if (worker === failedWorker && broken)
             return yield* new ExecutorOperationError({
               operation: "preflight",
-              message: "Scripted probe unavailable",
+              message:
+                "SSH destination is unreachable. Correct the worker destination or restore connectivity.",
               cause: "offline",
             });
           return fullPreflight;
@@ -140,21 +157,28 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
       Layer.provideMerge(scheduler),
       Layer.provide(Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") })),
     );
-    const observation = OperatorObservation.layer.pipe(
-      Layer.provide(Layer.mock(ConfigurationStore)({})),
+    const observation = Layer.mergeAll(
+      OperatorObservation.layer,
+      Operator.layer,
+      OperatorConfiguration.layer,
+    ).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ConfigurationStore)({}),
+          Layer.mock(GitHubItemWriter)({}),
+          Layer.mock(GitHubItemHistory)({}),
+          app,
+        ),
+      ),
       Layer.provide(Layer.merge(idleTriggersLayer, MarcbachmannCelLayer)),
       Layer.provideMerge(engine),
     );
     yield* Effect.gen(function* () {
-      const reads = yield* OperatorObservation;
       const runs = yield* RunEngine;
       const steps = yield* StepExecutor;
-      const operator = yield* Operator.pipe(
-        Effect.provide(Layer.mock(Operator)({ overview: reads.overview, desk: reads.desk })),
-      );
-      const configuration = yield* OperatorConfiguration.pipe(
-        Effect.provide(Layer.mock(OperatorConfiguration)({})),
-      );
+      const operator = yield* Operator;
+      const configuration = yield* OperatorConfiguration;
+      const status = yield* WorkerStatus;
       const backend = liveBackendLayer({ get: Effect.succeed(instance) }, operator, configuration);
       const server = HttpRouter.serve(
         apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(backend)),
@@ -175,18 +199,63 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
         const need = before.needsYou[0];
         assert(need?._tag === "WorkerPreflightNeed");
         assert.strictEqual(need.worker, failedWorker);
-        assert.include(need.message, "Scripted probe unavailable");
+        assert.include(need.message, "Correct the worker destination");
         yield* runs.submit(submission);
         assert.strictEqual(yield* Deferred.await(executing), healthyWorker);
+        const busy = yield* client.post(`/api/workers/${healthyWorker}/preflight`);
+        assert.strictEqual(busy.status, 409);
+        assert.include(yield* busy.text, "WorkerPreflightRejectedError");
+        const missing = yield* client.post("/api/workers/missing/preflight");
+        assert.strictEqual(missing.status, 409);
+        assert.include(yield* missing.text, "not configured");
+        const failed = yield* client.post(`/api/workers/${failedWorker}/preflight`).pipe(
+          Effect.tap((response) => Effect.sync(() => assert.strictEqual(response.status, 200))),
+          Effect.flatMap((response) => response.text),
+          Effect.map(Schema.decodeUnknownSync(Schema.fromJsonString(WorkerPreflightView))),
+        );
+        assert.strictEqual(failed.prerequisites?._tag, "Failed");
+        assert.deepStrictEqual(
+          (yield* status.unavailable).map(({ worker }) => worker),
+          [failedWorker],
+        );
+        broken = false;
+        delayCheck = true;
+        const requested = yield* client
+          .post(`/api/workers/${failedWorker}/preflight`)
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(checking);
+        const duplicate = yield* client.post(`/api/workers/${failedWorker}/preflight`);
+        assert.strictEqual(duplicate.status, 409);
+        assert.include(yield* duplicate.text, "already running");
+        const during = yield* client.get("/api/configuration").pipe(
+          Effect.flatMap((response) => response.text),
+          Effect.map(Schema.decodeUnknownSync(Schema.fromJsonString(ConfigurationView))),
+        );
+        assert.strictEqual(
+          during.workers.find(({ name }) => name === failedWorker)?.preflightRunning,
+          true,
+        );
         const waiting = yield* steps
           .reserve(RunId.make("waiting-for-failed"), submission, Option.some(failedWorker))
           .pipe(Effect.forkChild);
-        yield* TestClock.adjust("59 seconds");
+        yield* Effect.yieldNow;
         assert.isUndefined(waiting.pollUnsafe());
-        yield* TestClock.adjust("1 second");
+        yield* Deferred.succeed(finishCheck, undefined);
+        const response = yield* Fiber.join(requested);
+        assert.strictEqual(response.status, 200);
+        const fresh = Schema.decodeUnknownSync(Schema.fromJsonString(WorkerPreflightView))(
+          yield* response.text,
+        );
+        assert.strictEqual(fresh.prerequisites?._tag, "Passed");
+        assert.strictEqual((yield* status.checking).size, 0);
+        const stored = yield* configuration.view(instance);
+        assert.deepStrictEqual(
+          stored.workers.find(({ name }) => name === failedWorker)?.prerequisites,
+          fresh.prerequisites,
+        );
         const lease = yield* Fiber.join(waiting);
         assert.strictEqual(lease.worker, failedWorker);
-        assert.strictEqual(failedChecks, 2);
+        assert.strictEqual(failedChecks, 3);
         assert.deepStrictEqual((yield* overview).needsYou, []);
         const desk = yield* client.get("/api/desk").pipe(
           Effect.flatMap((response) => response.text),
@@ -197,6 +266,8 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
           "Passed",
         );
         yield* lease.release;
+        yield* TestClock.adjust("10 minutes");
+        assert.strictEqual(failedChecks, 3, "a passing manual check cancels automatic retries");
       }).pipe(Effect.provide(server));
     }).pipe(Effect.provide(observation));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(TestClock.layer()));

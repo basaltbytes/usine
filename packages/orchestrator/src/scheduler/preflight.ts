@@ -19,7 +19,12 @@ import {
   Semaphore,
   TxRef,
 } from "effect";
-import { recordPreflight, unchecked, type WorkerPreflight } from "../worker-status.ts";
+import {
+  recordPreflight,
+  unchecked,
+  WorkerPreflightRejectedError,
+  type WorkerPreflight,
+} from "../worker-status.ts";
 
 interface PreflightConfiguration {
   readonly workers: ReadonlyArray<Worker>;
@@ -33,6 +38,11 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
   const configuration = yield* Ref.make<PreflightConfiguration>({ workers: [], roster: [] });
   const records = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
   const blocked = yield* TxRef.make<ReadonlyMap<WorkerName, string>>(new Map());
+  const requested = yield* TxRef.make<ReadonlySet<WorkerName>>(new Set());
+  const checking = yield* TxRef.make<ReadonlySet<WorkerName>>(new Set());
+  const inFlight = Effect.all([TxRef.get(requested), TxRef.get(checking)]).pipe(
+    Effect.map(([requested, checking]) => new Set([...requested, ...checking])),
+  );
   const retries = yield* FiberMap.make<WorkerName>();
   const exclusive = yield* Semaphore.make(1);
 
@@ -62,18 +72,27 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     roster: ReadonlyArray<BrainSpec>,
   ) {
     yield* Effect.annotateCurrentSpan({ worker: worker.name });
-    return yield* initialize(worker).pipe(
-      Effect.andThen(executor.preflight(worker.name, roster, worker.maxConcurrentAttempts)),
-      Effect.mapError((error) =>
-        error._tag === "ExecutorOperationError"
-          ? new ExecutorOperationError({
-              operation: error.operation,
-              cause: error.cause,
-              message: `worker "${worker.name}": ${error.message}`,
-            })
-          : error,
-      ),
-      Effect.onExit((exit) => record(worker.name, roster, exit)),
+    return yield* Effect.acquireUseRelease(
+      TxRef.update(checking, (current) => new Set([...current, worker.name])),
+      () =>
+        initialize(worker).pipe(
+          Effect.andThen(executor.preflight(worker.name, roster, worker.maxConcurrentAttempts)),
+          Effect.mapError((error) =>
+            error._tag === "ExecutorOperationError"
+              ? new ExecutorOperationError({
+                  operation: error.operation,
+                  cause: error.cause,
+                  message: `worker "${worker.name}": ${error.message}`,
+                })
+              : error,
+          ),
+          Effect.onExit((exit) => record(worker.name, roster, exit)),
+        ),
+      () =>
+        TxRef.update(
+          checking,
+          (current) => new Set([...current].filter((name) => name !== worker.name)),
+        ),
     );
   });
 
@@ -151,6 +170,81 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     });
   });
 
+  const run = Effect.fn("WorkerScheduler.runPreflight")(function* (
+    name: WorkerName,
+    leased: Effect.Effect<number>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker: name });
+    const acquire = Effect.tx(
+      Effect.gen(function* () {
+        if ((yield* inFlight).has(name))
+          return yield* new WorkerPreflightRejectedError({
+            worker: name,
+            reason: "preflight-running",
+            message: `Preflight is already running on worker "${name}".`,
+          });
+        if ((yield* leased) > 0)
+          return yield* new WorkerPreflightRejectedError({
+            worker: name,
+            reason: "attempt-running",
+            message: `An attempt is running on worker "${name}". Run preflight after all attempts end.`,
+          });
+        yield* TxRef.update(requested, (current) => new Set([...current, name]));
+      }),
+    );
+    return yield* Effect.acquireUseRelease(
+      acquire,
+      () =>
+        exclusive.withPermit(
+          Effect.gen(function* () {
+            const { workers, roster } = yield* Ref.get(configuration);
+            const worker = workers.find((worker) => worker.name === name);
+            if (worker === undefined)
+              return yield* new WorkerPreflightRejectedError({
+                worker: name,
+                reason: "not-configured",
+                message: `Worker "${name}" is not configured.`,
+              });
+            yield* Effect.logInfo("On-demand worker preflight started", { worker: name });
+            const result = yield* check(worker, roster).pipe(Effect.result);
+            if (Result.isFailure(result)) {
+              yield* TxRef.update(blocked, (current) =>
+                new Map(current).set(name, result.failure.message),
+              );
+              yield* Effect.logWarning("On-demand worker preflight failed; scheduling disabled", {
+                worker: name,
+                errorTag: result.failure._tag,
+                message: result.failure.message,
+              });
+              yield* FiberMap.run(retries, name, retry(name));
+            } else {
+              yield* TxRef.update(
+                blocked,
+                (current) => new Map([...current].filter(([worker]) => worker !== name)),
+              );
+              yield* FiberMap.remove(retries, name);
+              yield* Effect.logInfo("On-demand worker preflight passed; scheduling resumed", {
+                worker: name,
+              });
+            }
+            return (yield* Ref.get(records)).get(name) ?? unchecked(name);
+          }),
+        ),
+      () =>
+        TxRef.update(
+          requested,
+          (current) => new Set([...current].filter((worker) => worker !== name)),
+        ),
+    ).pipe(
+      Effect.tapError((error) =>
+        Effect.logInfo("On-demand worker preflight refused", {
+          worker: name,
+          reason: error.reason,
+        }),
+      ),
+    );
+  });
+
   const accept = Effect.fn("WorkerScheduler.acceptPreflight")(function* (
     declared: ReadonlyArray<Worker>,
     roster: ReadonlyArray<BrainSpec>,
@@ -182,11 +276,15 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
 
   return {
     start,
+    run,
+    checking: inFlight,
     check,
     record,
     accept,
     exclusive,
-    blocked: TxRef.get(blocked).pipe(Effect.map((current) => new Set(current.keys()))),
+    blocked: Effect.all([TxRef.get(blocked), TxRef.get(requested)]).pipe(
+      Effect.map(([blocked, requested]) => new Set([...blocked.keys(), ...requested])),
+    ),
     unavailable: TxRef.get(blocked).pipe(
       Effect.map((current) => [...current].map(([worker, message]) => ({ worker, message }))),
     ),

@@ -1,3 +1,4 @@
+import type { WorkerPreflightView } from "@usine/orchestrator/operator";
 import { resolveLoopName } from "@usine/config/project";
 import { requestActor } from "@usine/core/operator";
 import {
@@ -75,6 +76,9 @@ export class FactoryBackend extends Context.Service<
       input: SessionIntervention,
     ) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly runWorkerPreflight: (
+      worker: WorkerName,
+    ) => Effect.Effect<WorkerPreflightView, BackendError>;
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, BackendError>;
     readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
     readonly pause: (loop: LoopName) => Effect.Effect<void, BackendError>;
@@ -144,6 +148,7 @@ export const liveBackendLayer = (
     intervene: (runId, input) =>
       Effect.flatMap(instances.get, (instance) => operator.intervene(instance, runId, input)),
     cancel: operator.cancel,
+    runWorkerPreflight: operator.runWorkerPreflight,
     discardLeftovers: operator.discardLeftovers,
     moveBoardItem: (move) =>
       Effect.flatMap(instances.get, (instance) => operator.moveBoardItem(instance, move)),
@@ -208,6 +213,7 @@ export const needsSetupBackendLayer = (
     runAgain: fail,
     intervene: fail,
     cancel: fail,
+    runWorkerPreflight: fail,
     discardLeftovers: fail,
     moveBoardItem: fail,
     pause: fail,
