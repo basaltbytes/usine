@@ -10,7 +10,7 @@ import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository"
 import { WorkerName } from "@usine/core/worker";
 import { Equal, Schema } from "effect";
 
-const RESTART_BLOCKS = ["workers", "webhooks", "tracing", "auth"] as const;
+const RESTART_BLOCKS = ["workers", "tracing", "auth"] as const;
 
 /**
  * A `usine.yaml` block with changes that apply only when `usine up` starts, so a reload refuses
@@ -27,9 +27,9 @@ export type RestartBlock = typeof RestartBlock.Type;
 /** A change to `usine.yaml` that only a restart of `usine up` applies. */
 export interface RestartChange {
   readonly block: RestartBlock;
-  /** The changed field as a path into `usine.yaml`, such as `webhooks` or `workers.build-1.destination`. */
+  /** The changed field as a path into `usine.yaml`, such as `tracing` or `workers.build-1.kind`. */
   readonly field: string;
-  /** An operator-facing clause, such as `the webhooks block changed`. */
+  /** An operator-facing clause, such as `the tracing block changed`. */
   readonly reason: string;
 }
 
@@ -152,7 +152,7 @@ export const agentsWithNewBrains = (
 };
 
 /**
- * Returns the changes in `loaded` that only a restart applies: a changed `webhooks`, `tracing`, or `auth`
+ * Returns the changes in `loaded` that only a restart applies: a changed `tracing` or `auth`
  * block, and a changed `workers` block while no Worker runs Attempts, as in setup mode.
  */
 export const restartChanges = (
@@ -160,9 +160,6 @@ export const restartChanges = (
   loaded: LoadedInstance,
   workersRun: boolean,
 ): ReadonlyArray<RestartChange> => [
-  ...(Equal.equals(running.config.webhooks, loaded.config.webhooks)
-    ? []
-    : [{ block: "webhooks", field: "webhooks", reason: "the webhooks block changed" } as const]),
   ...(Equal.equals(running.config.tracing, loaded.config.tracing)
     ? []
     : [{ block: "tracing", field: "tracing", reason: "the tracing block changed" } as const]),

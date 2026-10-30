@@ -221,6 +221,13 @@ const botAccountFailure = (error: GitHubAppError) => {
 };
 
 /**
+ * Why the scheduler removes a Worker from its executor: `Removed` for a Worker that startup or an
+ * accepted reload gave the scheduler, which can have run Attempts, or `Refused` for one that only
+ * reloads whose preparation or persistence failed have added.
+ */
+export type WorkerRemoval = "Removed" | "Refused";
+
+/**
  * The Worker set of an executor that connects only to the Workers it was given, such as the SSH
  * executor.
  */
@@ -234,7 +241,7 @@ export interface ExecutorWorkers {
    * Removes `worker` once no Attempt runs on it: a Worker removed by a reload, or one added by a
    * reload whose preparation or persistence failed.
    */
-  readonly remove: (worker: WorkerName) => Effect.Effect<void>;
+  readonly remove: (worker: WorkerName, removal: WorkerRemoval) => Effect.Effect<void>;
 }
 
 /**
@@ -312,6 +319,11 @@ export const stepExecutorLayer = (
       // addition.
       const membership = yield* Semaphore.make(1);
       const adding = yield* Ref.make<ReadonlySet<WorkerName>>(new Set());
+      // The Workers that startup or an accepted reload gave the scheduler, whose removal is never
+      // `Refused`.
+      const accepted = yield* Ref.make<ReadonlySet<WorkerName>>(
+        new Set(workers.map(({ name }) => name)),
+      );
       const machines = options.machines;
       const paused = yield* TxRef.make<ReadonlyMap<WorkerName, WorkerPause>>(new Map());
       // The machine of each Run's lease, which `execute` gives to the Run's Attempt.
@@ -325,8 +337,9 @@ export const stepExecutorLayer = (
        */
       const removeUnused = Effect.fn("WorkerScheduler.removeFromExecutor")(function* (
         worker: WorkerName,
+        removal: WorkerRemoval,
       ) {
-        yield* Effect.annotateCurrentSpan({ worker });
+        yield* Effect.annotateCurrentSpan({ worker, removal });
         const scheduled = (yield* TxRef.get(pool)).has(worker);
         const added = (yield* Ref.get(adding)).has(worker);
         if (scheduled || added) {
@@ -336,19 +349,36 @@ export const stepExecutorLayer = (
           );
           return;
         }
-        yield* executorWorkers.remove(worker);
+        if (removal === "Refused" && (yield* Ref.get(accepted)).has(worker)) {
+          yield* Effect.logInfo(
+            "The Worker leaves the executor as removed, because the scheduler accepted it before this refused reload",
+            { worker },
+          );
+          return yield* executorWorkers.remove(worker, "Removed");
+        }
+        yield* executorWorkers.remove(worker, removal);
       });
 
       /**
-       * Ends a reload's addition of `added` and removes each Worker that the scheduler doesn't
-       * have.
+       * Ends a reload's addition of `added` and removes each Worker of `removed` that the scheduler
+       * doesn't have.
        */
-      const settleAdded = (added: ReadonlySet<WorkerName>, removed: ReadonlyArray<WorkerName>) =>
+      const settleAdded = (
+        added: ReadonlySet<WorkerName>,
+        removed: ReadonlyArray<WorkerName>,
+        removal: WorkerRemoval,
+      ) =>
         membership.withPermit(
           Ref.update(
             adding,
             (current) => new Set([...current].filter((name) => !added.has(name))),
-          ).pipe(Effect.andThen(Effect.forEach(removed, removeUnused, { discard: true }))),
+          ).pipe(
+            Effect.andThen(
+              Effect.forEach(removed, (worker) => removeUnused(worker, removal), {
+                discard: true,
+              }),
+            ),
+          ),
         );
 
       const unservedChange = (worker: ConfigWorker): Option.Option<RestartChange> =>
@@ -397,9 +427,14 @@ export const stepExecutorLayer = (
                 { worker: name, running: running(name) },
               ),
         );
+        yield* Ref.update(
+          accepted,
+          (current) => new Set([...current, ...change.added.map(({ name }) => name)]),
+        );
         yield* settleAdded(
           new Set(change.added.map(({ name }) => name)),
           change.removed.map(({ name }) => name),
+          "Removed",
         );
       });
 
@@ -451,7 +486,7 @@ export const stepExecutorLayer = (
               Exit.isFailure(exit)
                 ? Effect.logInfo("Releasing workers prepared for a failed configuration change", {
                     workers: [...added],
-                  }).pipe(Effect.andThen(settleAdded(added, [...added])))
+                  }).pipe(Effect.andThen(settleAdded(added, [...added], "Refused")))
                 : Effect.void,
           );
           yield* Effect.logInfo("Preflighting the Workers, slots, and brains the reload adds", {
@@ -494,7 +529,7 @@ export const stepExecutorLayer = (
                 Effect.logInfo(
                   "The last Attempt on a removed Worker ended; the Worker leaves the scheduler",
                   { worker },
-                ).pipe(Effect.andThen(membership.withPermit(removeUnused(worker)))),
+                ).pipe(Effect.andThen(membership.withPermit(removeUnused(worker, "Removed")))),
             }),
           ),
         );

@@ -141,11 +141,11 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
       expect(
         yield* request("PUT", "/entities/settings/instance", {
           expected: 1,
-          text: "version: 2\noperator: operator\nwebhooks: { mode: deliveries }\n",
+          text: "version: 2\noperator: operator\ntracing: { otlp_url: http://localhost:4318/v1/traces }\n",
         }),
       ).toMatchObject({
         status: 409,
-        body: { error: "RestartRequiredError", fields: ["webhooks"] },
+        body: { error: "RestartRequiredError", fields: ["tracing"] },
       });
       const preflight = yield* request("PUT", "/entities/worker/broken", {
         expected: 1,
@@ -905,5 +905,28 @@ it("preserves lanes across repository casing, scopes project previews, and refus
           },
         }),
       ).toMatchObject({ status: 422 });
+    }).pipe(Effect.scoped),
+  ));
+
+it("accepts webhook mode revisions and returns the running mode", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const { request } = yield* harness();
+      for (const [index, mode] of ["deliveries", "endpoint", "off"].entries()) {
+        const webhooks =
+          mode === "endpoint"
+            ? { mode, public_url: "https://usine.example/webhooks/github" }
+            : { mode };
+        expect(
+          yield* request("PUT", "/entities/settings/instance", {
+            expected: index + 1,
+            value: { version: 2, operator: "operator", webhooks },
+          }),
+        ).toMatchObject({ status: 200, body: { number: index + 2 } });
+        expect(yield* request("GET", "/entities/settings/instance")).toMatchObject({
+          status: 200,
+          body: { value: { webhooks } },
+        });
+      }
     }).pipe(Effect.scoped),
   ));

@@ -5,7 +5,7 @@ import type { CloudflareWorker, UsineConfig, Worker as ConfigWorker } from "@usi
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
+import { WorkerCapabilityError } from "@usine/executor";
 import {
   CloudflareWorkers,
   type CloudflareExecutorOptions,
@@ -15,7 +15,12 @@ import {
 import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
 import { Config, ConfigProvider, Effect, Layer } from "effect";
 import { externalHttpClientLayer } from "./http-client.ts";
-import { stepExecutorLayer } from "./scheduler/scheduler.ts";
+import {
+  stepExecutorLayer,
+  type StepExecutorOptions,
+  type WorkerRemoval,
+} from "./scheduler/scheduler.ts";
+import { workersChange } from "./current-instance/changes.ts";
 import { withSshWorkerDiscard } from "./ssh.ts";
 
 /** Returns the Cloudflare Workers that `usine.yaml` declares, in declared order. */
@@ -67,7 +72,7 @@ export const cloudflareWorkerAddressesOf = Effect.fn("Orchestrator.cloudflareWor
 
 /**
  * Provides the full engine and `WorkerStatus` for Cloudflare Workers. The executor reads its
- * Workers' secrets once, so a reload adds back only a Worker that `usine up` started with.
+ * workers' secrets when a revision adds a worker; existing clients remain unchanged.
  * Requires `CredentialProvider`, `GitHubApp`, `TriggerCondition`, `AttemptRuntime` (built before
  * the engine), `ClaudeLoginLock`, and `CurrentInstance`.
  */
@@ -82,42 +87,91 @@ export const layer = (
     Layer.provide(NodeServices.layer),
     Layer.provide(externalHttpClientLayer),
   );
-  const started = new Set(config.workers.map(({ name }) => name));
-  // Discarding leftovers still removes the Codex homes on an SSH Worker that `usine.yaml` dropped.
   const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
-    Layer.unwrap(
-      Effect.gen(function* () {
-        const workers = yield* CloudflareWorkers;
-        const environment = yield* ConfigProvider.ConfigProvider;
-        const initialized = new Set<WorkerName>(options.workers.map(({ name }) => name));
-        const add = Effect.fn("Orchestrator.addCloudflareWorker")(function* (worker: ConfigWorker) {
-          yield* Effect.annotateCurrentSpan({ worker: worker.name });
-          if (!started.has(worker.name))
-            return yield* new ExecutorOperationError({
-              operation: "preflight",
-              message: `A reload can't add cloudflare worker "${worker.name}", whose secrets usine up reads when it starts. Restart usine up to add it.`,
-              cause: new Error(worker.name),
-            });
-          if (worker.kind !== "cloudflare")
-            return yield* Effect.die(new Error(`Unexpected worker kind ${worker.kind}`));
-          if (initialized.has(worker.name)) {
-            yield* Effect.logDebug("Cloudflare worker credentials are already initialized", {
-              worker: worker.name,
-            });
-            return;
-          }
-          const address = yield* cloudflareWorkerAddressOf(worker).pipe(
-            Effect.provideService(ConfigProvider.ConfigProvider, environment),
-          );
-          yield* workers.addWorker(address);
-          initialized.add(worker.name);
-        });
-        return stepExecutorLayer(config, brains, {
-          discard,
-          workers: { add, remove: () => Effect.void },
-        });
-      }),
-    ),
+    cloudflareStepExecutorLayer(config, brains, {
+      discard,
+      initializedWorkers: options.workers.map(({ name }) => name),
+    }),
   ).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
 };
+
+/**
+ * Resolves credentials and registers a client once for each added Cloudflare worker. A worker
+ * that the scheduler accepted keeps its client for the life of the process; a worker whose
+ * addition was refused before any acceptance loses its client, so a corrected revision can add it.
+ */
+export const cloudflareStepExecutorLayer = (
+  config: UsineConfig,
+  brains: ReadonlyArray<BrainSpec>,
+  options: Pick<StepExecutorOptions, "discard"> & {
+    readonly initializedWorkers?: ReadonlyArray<WorkerName>;
+  } = {},
+) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const workers = yield* CloudflareWorkers;
+      const environment = yield* ConfigProvider.ConfigProvider;
+      const initialized = new Map(
+        config.workers
+          .filter(({ name }) => options.initializedWorkers?.includes(name))
+          .map((worker) => [worker.name, worker]),
+      );
+      const add = Effect.fn("Orchestrator.addCloudflareWorker")(function* (worker: ConfigWorker) {
+        yield* Effect.annotateCurrentSpan({ worker: worker.name });
+        if (worker.kind !== "cloudflare")
+          return yield* Effect.die(new Error(`Unexpected worker kind ${worker.kind}`));
+        const previous = initialized.get(worker.name);
+        if (previous !== undefined) {
+          const { restart } = workersChange([previous], [worker]);
+          if (restart.length > 0) {
+            yield* Effect.logWarning(
+              "Refused a changed Cloudflare connection already initialized",
+              {
+                worker: worker.name,
+                fields: restart.map(({ field }) => field),
+              },
+            );
+            return yield* new WorkerCapabilityError({
+              worker: worker.name,
+              capability: "machine",
+              message: `Restart the orchestrator to change the connection of Cloudflare worker "${worker.name}"; retained attempts keep their machine`,
+              cause: restart,
+            });
+          }
+          yield* Effect.logDebug("Cloudflare worker credentials are already initialized", {
+            worker: worker.name,
+          });
+          return;
+        }
+        const address = yield* cloudflareWorkerAddressOf(worker).pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, environment),
+        );
+        yield* workers.addWorker(address);
+        initialized.set(worker.name, worker);
+      });
+      const remove = Effect.fn("Orchestrator.removeCloudflareWorker")(function* (
+        worker: WorkerName,
+        removal: WorkerRemoval,
+      ) {
+        yield* Effect.annotateCurrentSpan({ worker, removal });
+        if (removal === "Removed") {
+          yield* Effect.logDebug(
+            "The Cloudflare worker keeps its client, because the scheduler accepted it",
+            { worker, removal },
+          );
+          return;
+        }
+        yield* workers.removeWorker(worker);
+        initialized.delete(worker);
+        yield* Effect.logInfo(
+          "Released the client of a Cloudflare worker whose addition was refused",
+          { worker },
+        );
+      });
+      return stepExecutorLayer(config, brains, {
+        ...options,
+        workers: { add, remove },
+      });
+    }),
+  );

@@ -37002,7 +37002,6 @@
                 "type": "string",
                 "enum": [
                   "workers",
-                  "webhooks",
                   "tracing",
                   "auth"
                 ]
@@ -37013,7 +37012,6 @@
               "type": "string",
               "enum": [
                 "workers",
-                "webhooks",
                 "tracing",
                 "auth"
               ]

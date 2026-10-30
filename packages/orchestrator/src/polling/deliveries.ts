@@ -1,7 +1,7 @@
 import type { LoadedInstance } from "@usine/config/instance";
 import { CursorKey, CursorStore } from "@usine/engine/cursor";
 import { GitHubApp, WebhookDeliveryId } from "@usine/github/github-app";
-import { Clock, Context, DateTime, Duration, Effect, Layer, Option } from "effect";
+import { Clock, Context, DateTime, Duration, Effect, Equal, Layer, Option, Stream } from "effect";
 import type { WatchedInstance } from "../reloads.ts";
 import { PollingTriggers } from "./polling.ts";
 
@@ -62,9 +62,8 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const run = (instances: WatchedInstance): Effect.Effect<never> =>
+  const source = (instances: WatchedInstance, startup: LoadedInstance) =>
     Effect.gen(function* () {
-      const startup = yield* instances.get;
       if (startup.config.webhooks.mode !== "deliveries") {
         yield* Effect.logInfo("Webhook delivery polling disabled", {
           mode: startup.config.webhooks.mode,
@@ -98,6 +97,26 @@ const make = Effect.gen(function* () {
         yield* Effect.sleep(Duration.millis(delay));
       }).pipe(Effect.forever);
     });
+
+  const run = (instances: WatchedInstance): Effect.Effect<never> =>
+    instances.changes.pipe(
+      Stream.changesWith((before, after) =>
+        Equal.equals(before.config.webhooks, after.config.webhooks),
+      ),
+      Stream.switchMap((instance) =>
+        Stream.fromEffect(
+          source(instances, instance).pipe(
+            Effect.onInterrupt(() =>
+              Effect.logInfo("Webhook hint source stopped", {
+                mode: instance.config.webhooks.mode,
+              }),
+            ),
+          ),
+        ),
+      ),
+      Stream.runDrain,
+      Effect.andThen(Effect.never),
+    );
 
   return { poll, run };
 });

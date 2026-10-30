@@ -48,8 +48,8 @@ export class RestartRequiredError extends Schema.TaggedError<RestartRequiredErro
   /** The configuration blocks whose changes require an orchestrator restart. */
   blocks: Schema.NonEmptyArray(RestartBlock),
   /**
-   * The changed fields as paths into `usine.yaml`, such as `webhooks` or
-   * `workers.build-1.destination`.
+   * The changed fields as paths into `usine.yaml`, such as `tracing` or
+   * `workers.build-1.kind`.
    */
   fields: Schema.NonEmptyArray(Schema.NonEmptyString),
   /** An operator summary of each change, stating that the running configuration is kept. */
@@ -172,7 +172,7 @@ export class CurrentInstance extends Context.Service<
     readonly changes: Stream.Stream<LoadedInstance>;
     /**
      * Re-reads the configuration store, one reload at a time, and returns what changed. Fails and keeps
-     * the running snapshot on an unreadable store, a changed `webhooks`, `tracing`, or `auth` block, or
+     * the running snapshot on an unreadable store, a changed `tracing` or `auth` block, or
      * a rejected `workers` change.
      */
     readonly reload: Effect.Effect<InstanceReload, InstanceReloadError>;

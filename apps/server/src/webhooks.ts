@@ -1,10 +1,23 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import type { GitHubApp } from "@usine/github/github-app";
+import type { CurrentInstance } from "@usine/orchestrator/current-instance";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { PollingTriggers } from "@usine/orchestrator/polling-triggers";
 import type { WebhookHealth } from "@usine/orchestrator/webhooks";
-import { ByteSize, Config, Effect, Layer, Option, Redacted, Schema } from "effect";
+import {
+  ByteSize,
+  Config,
+  Effect,
+  Equal,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Schema,
+  Stream,
+  type Scope,
+} from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 export class WebhookConfigurationError extends Schema.TaggedError<WebhookConfigurationError>(
@@ -26,13 +39,19 @@ const Payload = Schema.fromJsonString(
 const Secret = Schema.Redacted(Schema.NonEmptyString);
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
-export const webhookEndpoint: (
+type WebhookHandler = Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  HttpServerRequest.HttpServerRequest
+>;
+
+const makeWebhookHandler: (
   instances: { readonly get: Effect.Effect<LoadedInstance> },
   polling: Pick<PollingTriggers["Service"], "hint">,
   health: WebhookHealth["Service"],
   app: Pick<GitHubApp["Service"], "configureWebhook">,
-) => Effect.Effect<Layer.Layer<never, never, HttpRouter.HttpRouter>, WebhookConfigurationError> =
-  Effect.fn("Server.webhookEndpoint")(function* (
+) => Effect.Effect<WebhookHandler, WebhookConfigurationError> = Effect.fn("Server.webhookHandler")(
+  function* (
     instances: { readonly get: Effect.Effect<LoadedInstance> },
     polling: Pick<PollingTriggers["Service"], "hint">,
     health: WebhookHealth["Service"],
@@ -44,7 +63,7 @@ export const webhookEndpoint: (
     yield* Effect.annotateCurrentSpan({ mode: webhooks.mode });
     if (webhooks.mode !== "endpoint") {
       yield* Effect.logInfo("Webhook endpoint disabled", { mode: webhooks.mode });
-      return Layer.empty;
+      return Effect.succeed(HttpServerResponse.empty({ status: 404 }));
     }
     const secret = yield* Config.schema(Secret, "USINE_GITHUB_WEBHOOK_SECRET").pipe(
       Effect.mapError(
@@ -70,6 +89,9 @@ export const webhookEndpoint: (
     );
 
     const receive = Effect.fn("Server.githubWebhook")(function* () {
+      if ((yield* instances.get).config.webhooks.mode !== "endpoint") {
+        return HttpServerResponse.empty({ status: 404 });
+      }
       const request = yield* HttpServerRequest.HttpServerRequest;
       const signature = request.headers["x-hub-signature-256"];
       if (signature === undefined || !/^sha256=[a-f0-9]{64}$/u.test(signature)) {
@@ -139,21 +161,64 @@ export const webhookEndpoint: (
       return HttpServerResponse.empty({ status: 204 });
     });
 
-    return HttpRouter.add(
-      "POST",
-      "/webhooks/github",
-      receive().pipe(
-        Effect.catchTag("WebhookRequestError", (error) =>
-          Effect.logWarning("Webhook delivery rejected", {
-            status: error.status,
-            reason: error.message,
-          }).pipe(Effect.as(HttpServerResponse.text(error.message, { status: error.status }))),
-        ),
-        Effect.map(
-          HttpServerResponse.setHeaders({
-            "cache-control": "no-store",
-          }),
-        ),
+    return receive().pipe(
+      Effect.catchTag("WebhookRequestError", (error) =>
+        Effect.logWarning("Webhook delivery rejected", {
+          status: error.status,
+          reason: error.message,
+        }).pipe(Effect.as(HttpServerResponse.text(error.message, { status: error.status }))),
+      ),
+      Effect.map(
+        HttpServerResponse.setHeaders({
+          "cache-control": "no-store",
+        }),
       ),
     );
-  });
+  },
+);
+
+/** Replaces the endpoint handler and App URL when the accepted webhook configuration changes. */
+export const webhookEndpoint: (
+  instances: Pick<CurrentInstance["Service"], "get" | "changes">,
+  polling: Pick<PollingTriggers["Service"], "hint">,
+  health: WebhookHealth["Service"],
+  app: Pick<GitHubApp["Service"], "configureWebhook">,
+) => Effect.Effect<
+  Layer.Layer<never, never, HttpRouter.HttpRouter>,
+  WebhookConfigurationError,
+  Scope.Scope
+> = Effect.fn("Server.webhookEndpoint")(function* (
+  instances: Pick<CurrentInstance["Service"], "get" | "changes">,
+  polling: Pick<PollingTriggers["Service"], "hint">,
+  health: WebhookHealth["Service"],
+  app: Pick<GitHubApp["Service"], "configureWebhook">,
+) {
+  const initial = yield* instances.get;
+  const active = yield* Ref.make(yield* makeWebhookHandler(instances, polling, health, app));
+  yield* instances.changes.pipe(
+    Stream.map(({ config }) => config.webhooks),
+    Stream.changesWith((before, after) => Equal.equals(before, after)),
+    Stream.dropWhile((webhooks) => Equal.equals(webhooks, initial.config.webhooks)),
+    Stream.switchMap((webhooks) =>
+      Stream.fromEffect(
+        Effect.gen(function* () {
+          yield* Ref.set(active, Effect.succeed(HttpServerResponse.empty({ status: 503 })));
+          yield* health.reset;
+          const handler = yield* makeWebhookHandler(instances, polling, health, app).pipe(
+            Effect.catchTag("WebhookConfigurationError", (error) =>
+              Effect.logWarning("Webhook endpoint unavailable; normal polling remains active", {
+                mode: webhooks.mode,
+                message: error.message,
+              }).pipe(Effect.as(Effect.succeed(HttpServerResponse.empty({ status: 503 })))),
+            ),
+          );
+          yield* Ref.set(active, handler);
+          yield* Effect.logInfo("Webhook endpoint configuration applied", { mode: webhooks.mode });
+        }),
+      ),
+    ),
+    Stream.runDrain,
+    Effect.forkScoped,
+  );
+  return HttpRouter.add("POST", "/webhooks/github", Ref.get(active).pipe(Effect.flatten));
+});
