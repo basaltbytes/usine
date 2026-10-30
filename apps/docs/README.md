@@ -55,3 +55,5 @@ pnpm --filter @usine/docs openapi:check
 ```
 
 Commit the updated JSON with the contract change. `openapi:check` compares the file without modifying it. The root `pnpm check` command also checks the git diff after the docs build, so CI regeneration cannot hide a stale committed document. Turborepo includes server contract sources in the docs build inputs and caches the generated JSON with the site.
+
+The [public HTTPS deployment guide](src/content/docs/guides/expose-an-instance.md) describes browser origins, response security headers, and reverse proxy configuration. The generated API reference includes origin-related 403 responses on public and authenticated routes.

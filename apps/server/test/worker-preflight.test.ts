@@ -180,10 +180,9 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
       const configuration = yield* OperatorConfiguration;
       const status = yield* WorkerStatus;
       const backend = liveBackendLayer({ get: Effect.succeed(instance) }, operator, configuration);
-      const server = HttpRouter.serve(
-        apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(backend)),
-        { disableLogger: true },
-      ).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
+      const server = HttpRouter.serve(apiRoutes().pipe(HttpRouter.provideRequest(backend)), {
+        disableLogger: true,
+      }).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
       yield* Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient;
         const overview = client.get("/api/overview").pipe(

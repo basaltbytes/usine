@@ -1,4 +1,5 @@
 import { SetupApi } from "./setup/api.ts";
+import { CrossSiteRequestError } from "./security.ts";
 import { OperatorApi } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api";
@@ -24,6 +25,26 @@ export const publicOperatorPaths = new Set<string>([
   SetupApi.endpoints.callback.path,
 ]);
 
+const addForbiddenResponse = (
+  operation: OpenApi.OpenAPISpecOperation,
+  schema: Schema.Top,
+  description: string,
+) => {
+  const forbidden = operation.responses["403"];
+  const existingSchema = forbidden?.content?.["application/json"]?.schema;
+  const additionalSchema = Schema.toJsonSchemaDocument(schema).schema;
+  operation.responses["403"] = {
+    ...forbidden,
+    description: `${forbidden?.description ?? "Forbidden."} ${description}`,
+    content: {
+      ...forbidden?.content,
+      "application/json": {
+        schema: existingSchema ? { anyOf: [existingSchema, additionalSchema] } : additionalSchema,
+      },
+    },
+  };
+};
+
 export const operatorOpenApi = () => {
   const document = OpenApi.fromApi(OperatorApi.add(AuthApi, SetupApi, DocumentationApi));
   const authenticationError = Schema.toJsonSchemaDocument(AuthenticationError).schema;
@@ -43,6 +64,11 @@ export const operatorOpenApi = () => {
   for (const [path, methods] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(methods)) {
       if (!("responses" in operation)) continue;
+      addForbiddenResponse(
+        operation,
+        CrossSiteRequestError,
+        "Requests with an Origin header require an allowed origin. Unknown origins receive no CORS headers.",
+      );
       if (publicAuthPaths.has(path) || (method === "get" && publicOperatorPaths.has(path)))
         continue;
       operation.security = [{ bearer: [] }, { session: [] }];
@@ -55,20 +81,11 @@ export const operatorOpenApi = () => {
         },
       };
       if (method !== "get") {
-        const forbidden = operation.responses["403"];
-        const existingSchema = forbidden?.content?.["application/json"]?.schema;
-        operation.responses["403"] = {
-          ...forbidden,
-          description: `${forbidden?.description ?? "Forbidden."} Browser session writes require a valid X-Usine-CSRF header.`,
-          content: {
-            ...forbidden?.content,
-            "application/json": {
-              schema: existingSchema
-                ? { anyOf: [existingSchema, authenticationError] }
-                : authenticationError,
-            },
-          },
-        };
+        addForbiddenResponse(
+          operation,
+          AuthenticationError,
+          "Browser session writes require a valid X-Usine-CSRF header.",
+        );
       }
     }
   }

@@ -1,3 +1,4 @@
+import { UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
 import { ConfigProvider, Context, Effect, Layer, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
@@ -58,7 +59,8 @@ export const authFixture = (initial: ReadonlyArray<Member> = [alice], identity =
     const github = Context.get(githubContext, GitHubSignIn);
     const context = yield* Layer.build(
       authenticationLayer({
-        origin: "https://usine.example",
+        origin: UiOrigin.make("https://usine.example"),
+        origins: [UiOrigin.make("https://client.example")],
         localToken: Redacted.make(localSecret),
       }).pipe(
         Layer.provide(Layer.succeed(AuthStore, store)),

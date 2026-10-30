@@ -410,6 +410,20 @@ export class CloudflareWorker extends Schema.Class<CloudflareWorker>(
 export const Worker = Schema.Union([LocalWorker, ExeDevWorker, SshWorker, CloudflareWorker]);
 export type Worker = typeof Worker.Type;
 
+/** An exact HTTPS browser origin, or an HTTP origin on loopback. */
+export const UiOrigin = Schema.String.check(
+  Schema.makeFilter(
+    (origin: string) =>
+      URL.canParse(origin) &&
+      (new URL(origin).protocol === "https:" ||
+        (new URL(origin).protocol === "http:" &&
+          ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname))) &&
+      new URL(origin).origin === origin,
+    { message: "Expected an HTTPS origin, or HTTP on loopback" },
+  ),
+).pipe(Schema.brand("UiOrigin"));
+export type UiOrigin = typeof UiOrigin.Type;
+
 /** Instance-wide defaults for polling, upgrades, and agent attempts. */
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
   /** The npm distribution tag for server upgrades; decoding defaults to `latest`. */
@@ -554,6 +568,13 @@ export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineC
      * The source of early-poll hints; decoding defaults to `off` while regular polling continues.
      */
     webhooks: Webhooks.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ mode: "off" }))),
+    /** Additional trusted browser origins; changes require a server restart. */
+    auth: Schema.Struct({
+      origins: Schema.Array(UiOrigin).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+    }).pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed({})),
+      Schema.withConstructorDefault(Effect.succeed({ origins: [] })),
+    ),
     /** The configured operator login for revision attribution, or `None` when unset. */
     operator: Schema.OptionFromOptionalKey(OperatorLogin),
     /** The OTLP span exporter settings, or `None` to disable export (ADR 0028). */

@@ -20,6 +20,7 @@ import { assert, it } from "vitest";
 import { GitHubSignIn, githubSignInLayer } from "../../src/auth/github.ts";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { Setup } from "../../src/setup/control.ts";
+import { securityMiddleware } from "../../src/security.ts";
 import { setupRoutes } from "../../src/setup/http.ts";
 import { alice, authFixture, localSecret } from "../auth/fixture.ts";
 
@@ -105,6 +106,7 @@ const fixture = Effect.gen(function* () {
   const routes = setupRoutes(setup, auth.authentication.origin);
   const secured = authenticatedRoutes(auth);
   const transportRoutes = Layer.mergeAll(
+    securityMiddleware(auth.authentication),
     routes.callback,
     routes.protected.pipe(Layer.provide(secured.guard.layer)),
   );
@@ -124,7 +126,14 @@ const fixture = Effect.gen(function* () {
       return app.handler(new Request(`https://usine.example${path}`, options));
     });
   const begin = Effect.gen(function* () {
-    const response = yield* request("/api/setup/manifest", { name: "usine test" });
+    const response = yield* request(
+      "/api/setup/manifest",
+      { name: "usine test" },
+      {
+        authorization: `Bearer ${localSecret}`,
+        origin: "https://usine.example",
+      },
+    );
     assert.equal(response.status, 200);
     const result = Schema.decodeUnknownSync(
       Schema.Struct({ action: Schema.String, manifest: Schema.String }),
@@ -182,6 +191,8 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
         const callback = `/api/setup/callback?state=${begun.state}&code=code`;
         const response = yield* f.request(callback, undefined, { cookie: begun.cookie });
         assert.equal(response.headers.get("location"), "/setup");
+        assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+        assert.include(response.headers.get("content-security-policy") ?? "", "script-src 'self'");
         assert.match(response.headers.get("set-cookie") ?? "", /Max-Age=0/);
         const target = `${f.directory}/${GITHUB_APP_SECRETS_PATH}`;
         assert.equal((yield* f.fs.stat(target)).mode & 0o777, 0o600);
@@ -233,6 +244,17 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
       Effect.gen(function* () {
         const f = yield* fixture;
         assert.equal((yield* f.request("/api/setup/manifest", { name: "usine" }, {})).status, 401);
+        const crossSite = yield* f.request(
+          "/api/setup/manifest",
+          { name: "usine" },
+          {
+            authorization: `Bearer ${localSecret}`,
+            origin: "https://evil.example",
+          },
+        );
+        assert.equal(crossSite.status, 403);
+        assert.isNull(crossSite.headers.get("access-control-allow-origin"));
+        assert.deepEqual(yield* f.setup.status, { _tag: "NoApp" });
         const session = yield* f.auth.authentication.consumeLink(
           new URLSearchParams(new URL(yield* f.auth.authentication.link).hash.slice(1)).get(
             "link",

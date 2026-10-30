@@ -26,6 +26,38 @@ const invalidFactoryRoot = InstanceDirectory.make(
 );
 
 describe("ConfigParser", () => {
+  it.effect(
+    "parses exact HTTPS or local HTTP auth origins and rejects unsafe origin settings",
+    () =>
+      Effect.gen(function* () {
+        const parser = yield* ConfigParser;
+        const file = InstancePath.make("usine.yaml");
+        const config = yield* parser.parseUsineYaml(
+          file,
+          "version: 1\nrepos: []\nauth:\n  origins: [https://client.example, http://localhost:5173]\n",
+        );
+        expect(config.auth.origins).toEqual(["https://client.example", "http://localhost:5173"]);
+        for (const origin of [
+          "*",
+          "null",
+          "http://remote.example",
+          "https://client.example/",
+          "https://user:pass@client.example",
+          "https://client.example?query=1",
+          "https://client.example#fragment",
+        ]) {
+          const result = yield* parser
+            .parseUsineYaml(file, `version: 1\nrepos: []\nauth:\n  origins: ["${origin}"]\n`)
+            .pipe(Effect.result);
+          expect(Result.isFailure(result), origin).toBe(true);
+        }
+        const typo = yield* parser
+          .parseUsineYaml(file, "version: 1\nrepos: []\nauth:\n  orgins: []\n")
+          .pipe(Effect.result);
+        expect(Result.isFailure(typo)).toBe(true);
+      }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("applies usine.yaml defaults and rejects unknown keys", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

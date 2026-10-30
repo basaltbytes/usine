@@ -1,6 +1,7 @@
 import { DocumentationApi, operatorOpenApi } from "./openapi.ts";
 import { setupRoutes } from "./setup/http.ts";
 import type { Setup } from "./setup/control.ts";
+import { securityMiddleware } from "./security.ts";
 import { type ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { authenticatedRoutes, type AuthServices } from "./auth/http.ts";
@@ -24,7 +25,7 @@ import { Effect, Layer, Option, Schema, type Types } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder, HttpApiError } from "effect/http-api";
 import { FactoryBackend, type BackendError } from "./backend.ts";
-import { type Port, SERVER_HOST, type UiOrigin } from "./cli.ts";
+import { type Port, SERVER_HOST } from "./cli.ts";
 
 const operatorFailure = (error: BackendError) => {
   const message = (() => {
@@ -93,74 +94,40 @@ const requireProjectRepository = (project: ProjectId, repository: RepositoryName
     }),
   );
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
-
-/**
- * Whether the request has an `Origin` other than a loopback one and `page`, which marks a
- * cross-site request. Requests without `Origin` (curl, same-origin GETs) are allowed.
- */
-const crossSiteOrigin = (
-  request: HttpServerRequest.HttpServerRequest,
-  page: Option.Option<UiOrigin>,
-): boolean => {
-  const origin = request.headers.origin;
-  if (origin === undefined) return false;
-  try {
-    const url = new URL(origin);
-    return !LOOPBACK_HOSTS.has(url.hostname) && !Option.exists(page, (o) => o === url.origin);
-  } catch {
-    return true;
-  }
-};
-
-const policy = (page: Option.Option<UiOrigin>) =>
-  Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      if (crossSiteOrigin(request, page)) {
-        yield* Effect.logWarning("Cross-site request to the operator API was refused", {
-          origin: request.headers.origin,
-          acceptedOrigin: Option.getOrUndefined(page),
-          url: request.url,
-        });
-        return yield* new OperatorHttpError({
-          error: "CrossSiteRequestError",
-          message: "Cross-site requests are not allowed.",
-        });
-      }
-      // JSON is accepted regardless of Content-Type, including simple browser POSTs;
-      // `crossSiteOrigin` guards against CSRF.
-      const decoded =
-        endpoint.payload.size === 0
-          ? handler
-          : handler.pipe(
-              Effect.provideService(
-                HttpServerRequest.HttpServerRequest,
-                request.modify({
-                  headers: Headers.set(request.headers, "content-type", "application/json"),
-                }),
-              ),
-            );
-      return yield* decoded.pipe(
-        Effect.catch((error): Effect.Effect<never, OperatorHttpError | Types.unhandled> => {
-          if (!HttpApiError.HttpApiSchemaError.is(error)) return Effect.fail(error);
-          const responseEncoding = error.kind === "Body" || error.kind === "ResponseHeaders";
-          return Effect.fail(
-            new OperatorHttpError({
-              error: responseEncoding
-                ? "HttpBodyError"
-                : error.kind === "Payload"
-                  ? "InvalidRequestError"
-                  : "SchemaError",
-              message: responseEncoding
-                ? "The server could not encode its response."
-                : `Invalid request: ${error.cause.message}`,
-            }),
+const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const decoded =
+      endpoint.payload.size === 0
+        ? handler
+        : handler.pipe(
+            Effect.provideService(
+              HttpServerRequest.HttpServerRequest,
+              request.modify({
+                headers: Headers.set(request.headers, "content-type", "application/json"),
+              }),
+            ),
           );
-        }),
-      );
-    }),
-  );
+    return yield* decoded.pipe(
+      Effect.catch((error): Effect.Effect<never, OperatorHttpError | Types.unhandled> => {
+        if (!HttpApiError.HttpApiSchemaError.is(error)) return Effect.fail(error);
+        const responseEncoding = error.kind === "Body" || error.kind === "ResponseHeaders";
+        return Effect.fail(
+          new OperatorHttpError({
+            error: responseEncoding
+              ? "HttpBodyError"
+              : error.kind === "Payload"
+                ? "InvalidRequestError"
+                : "SchemaError",
+            message: responseEncoding
+              ? "The server could not encode its response."
+              : `Invalid request: ${error.cause.message}`,
+          }),
+        );
+      }),
+    );
+  }),
+);
 
 const acknowledge = <E, R>(effect: Effect.Effect<void, E, R>) =>
   Effect.as(effect, { ok: true } as const);
@@ -361,10 +328,9 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
 );
 
 /**
- * Returns the operator API, which accepts browser requests from the UI's pages at the loopback
- * names and at `origin`.
+ * Returns the operator API routes.
  */
-export const apiRoutes = (origin: Option.Option<UiOrigin>) =>
+export const apiRoutes = () =>
   Layer.merge(
     HttpApiBuilder.layer(OperatorApi),
     HttpRouter.add(
@@ -374,7 +340,7 @@ export const apiRoutes = (origin: Option.Option<UiOrigin>) =>
     ),
   ).pipe(
     Layer.provide(handlers),
-    Layer.provide(policy(origin)),
+    Layer.provide(policy),
     Layer.provide(NodeHttpServer.layerHttpServices),
   );
 
@@ -426,14 +392,12 @@ export const staticRoutes = (webRoot: string) => {
 };
 
 /**
- * Serves the operator API and the UI on `SERVER_HOST` at `port`, for the UI's pages there and at
- * `origin`.
+ * Serves the authenticated operator API and the UI on `SERVER_HOST` at `port`.
  */
 export const serverLayer = (
   backend: Layer.Layer<FactoryBackend>,
   webRoot: string,
   port: Port,
-  origin: Option.Option<UiOrigin>,
   auth: AuthServices,
   services:
     | Layer.Layer<ServerUpgrades | ConfigurationEditor | GitHubApp | GitHubPolling>
@@ -447,10 +411,11 @@ export const serverLayer = (
   const routes = Layer.mergeAll(
     setupHttp?.protected.pipe(Layer.provide(authenticated.guard.layer)) ?? Layer.empty,
     setupHttp?.callback ?? Layer.empty,
-    apiRoutes(origin).pipe(Layer.provide(authenticated.guard.layer)),
+    apiRoutes().pipe(Layer.provide(authenticated.guard.layer)),
     staticRoutes(webRoot),
     authenticated.routes,
     webhooks,
+    securityMiddleware(auth.authentication),
   ).pipe(HttpRouter.provideRequest(Layer.merge(backend, services)));
   return HttpRouter.serve(routes).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),

@@ -315,3 +315,5 @@ The secrets stay in these files, readable only by `usine`. The setup creates `/h
 | `/home/usine/.ssh/usine_worker` and the other identity files  | The keys for the gateway and the workers                                   | `0600`                                  |
 | `/home/usine/.pi/agent/auth.json`                             | Pi parent model credentials, including the ChatGPT login and refresh token | `0600`; folder `0700`; owned by `usine` |
 | `/home/usine/factory/.usine/runtime.sqlite`, `durable.sqlite` | Transcripts, which can contain repository content and tool output          | in the `0700` folder                    |
+
+For public access through Caddy or Cloudflare Tunnel, follow [Expose an instance over HTTPS](/guides/expose-an-instance/). Complete member enrollment and configure the canonical HTTPS origin before enabling public traffic.

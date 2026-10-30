@@ -246,7 +246,7 @@ export const harness = (
       runStatistics: unused,
     });
     const app = HttpRouter.toWebHandler(
-      apiRoutes(Option.none()).pipe(
+      apiRoutes().pipe(
         HttpRouter.provideRequest(
           Layer.mergeAll(backend, Layer.succeedContext(editorContext), catalog),
         ),

@@ -42,16 +42,11 @@ const body = <A, I>(schema: Schema.Codec<A, I>) =>
   );
 const sensitive = HttpServerResponse.setHeaders({
   "cache-control": "no-store",
-  "referrer-policy": "no-referrer",
-  "x-content-type-options": "nosniff",
-  "x-frame-options": "DENY",
 });
 
 export const authenticatedRoutes = (services: AuthServices) => {
   const { authentication: auth, store, github } = services;
-  const secure =
-    !["localhost", "127.0.0.1", "[::1]"].includes(new URL(auth.origin).hostname) ||
-    new URL(auth.origin).protocol === "https:";
+  const secure = auth.origin.startsWith("https:");
   const session = (issued: IssuedToken, response = json({ ok: true })) =>
     response.pipe(
       HttpServerResponse.setCookieUnsafe("usine_csrf", issued.csrf, {
@@ -292,16 +287,7 @@ export const authenticatedRoutes = (services: AuthServices) => {
     ),
   );
   const publicGuard = HttpRouter.middleware<{ handles: AuthError }>()((handler) =>
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      if (
-        request.method !== "GET" &&
-        request.headers.origin !== undefined &&
-        request.headers.origin !== auth.origin
-      )
-        return yield* authFailure("Cross-site sign-in requests are not allowed.", 403);
-      return yield* handler;
-    }).pipe(
+    handler.pipe(
       Effect.catchTag("AuthError", (error) =>
         Effect.logWarning("Sign-in request refused", { status: error.status }).pipe(
           Effect.as(json({ error: "AuthenticationError", message: error.message }, error.status)),

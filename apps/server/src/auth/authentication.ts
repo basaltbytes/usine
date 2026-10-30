@@ -1,3 +1,4 @@
+import { type UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
 import { Clock, Context, Effect, Layer, Option, Redacted } from "effect";
 import { GitHubSignIn } from "./github.ts";
@@ -42,7 +43,8 @@ const SESSION_LIFETIME = 30 * 24 * 60 * 60 * 1000;
 export class Authentication extends Context.Service<
   Authentication,
   {
-    readonly origin: string;
+    readonly origin: UiOrigin;
+    readonly origins: ReadonlyArray<UiOrigin>;
     readonly githubAvailable: Effect.Effect<boolean>;
     readonly authenticate: (secret: string) => Effect.Effect<Access, AuthError>;
     readonly link: Effect.Effect<string, AuthError>;
@@ -70,7 +72,8 @@ export class Authentication extends Context.Service<
 >()("@usine/server/Authentication") {}
 
 export const authenticationLayer = (options: {
-  readonly origin: string;
+  readonly origin: UiOrigin;
+  readonly origins: ReadonlyArray<UiOrigin>;
   readonly localToken: Redacted.Redacted<string>;
 }) =>
   Layer.effect(
@@ -190,6 +193,7 @@ export const authenticationLayer = (options: {
       });
       return Authentication.of({
         origin: options.origin,
+        origins: [options.origin, ...options.origins],
         githubAvailable: github.available,
         authenticate,
         limit,

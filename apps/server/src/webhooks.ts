@@ -152,7 +152,6 @@ export const webhookEndpoint: (
         Effect.map(
           HttpServerResponse.setHeaders({
             "cache-control": "no-store",
-            "x-content-type-options": "nosniff",
           }),
         ),
       ),
