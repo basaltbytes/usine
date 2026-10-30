@@ -13,7 +13,7 @@ import {
   qualifyLoopValue,
 } from "@usine/config/configuration";
 import { referenceIndex } from "@usine/config/instance";
-import { loopPath } from "@usine/config/loop";
+import { evaluateLoopPriority, PriorityValue, loopPath } from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
 import { repositoryContext } from "@usine/config/payload-slices";
 import { matchesLoop } from "@usine/config/project";
@@ -141,10 +141,26 @@ export const configurationLoopOperations = Effect.gen(function* () {
             }
             if (!result.success) continue;
             total += 1;
+            const priority = yield* evaluateLoopPriority(expressions, loop, {
+              repo: repositoryContext(repository),
+              item: item.payload,
+            }).pipe(
+              Effect.catch((error) => {
+                failures.push({
+                  itemKey: item.itemKey,
+                  message: `Priority evaluation failed; using zero: ${error.message}`,
+                });
+                return Effect.succeed(PriorityValue.make(0));
+              }),
+            );
             const projected = yield* projectedItem(item).pipe(Effect.result);
             if (Result.isSuccess(projected) && matched.length < 20)
               matched.push(
-                new LoopPreviewItem({ ...projected.success, repository: repository.name }),
+                new LoopPreviewItem({
+                  ...projected.success,
+                  repository: repository.name,
+                  priority,
+                }),
               );
             else if (Result.isFailure(projected))
               failures.push({ itemKey: item.itemKey, message: projected.failure.message });

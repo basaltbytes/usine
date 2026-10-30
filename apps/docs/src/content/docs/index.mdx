@@ -25,7 +25,7 @@ import { ContainerSection } from "lucode-starlight/components";
 
 usine stores loops and agents in its database, with a revision for each configuration change. Markdown files are their import and export format. A loop's frontmatter sets which issues or pull requests open a run, whether you approve each run, and which agent does the work. Its body is the agent's task. This loop runs usine on its own repository:
 
-```markdown title="projects/usine/loops/start-dev.md (export format)" wrap
+```markdown title="usine/start-dev (export format)" wrap
 ---
 trigger:
   on: issue

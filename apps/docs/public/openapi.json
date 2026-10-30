@@ -30157,6 +30157,18 @@
               }
             ]
           },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "creating": {
             "anyOf": [
               {
@@ -30172,6 +30184,7 @@
           "_tag",
           "run",
           "ahead",
+          "priority",
           "creating"
         ],
         "additionalProperties": false
@@ -31894,8 +31907,12 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1,
+                "minimum": -9007199254740991,
                 "maximum": 9007199254740991
+              },
+              {
+                "type": "string",
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -32796,6 +32813,11 @@
               "pr-closed",
               "pr-merged"
             ]
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -32805,7 +32827,8 @@
           "number",
           "title",
           "url",
-          "state"
+          "state",
+          "priority"
         ],
         "additionalProperties": false
       },

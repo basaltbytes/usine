@@ -24,6 +24,7 @@ export class ExecStart extends Schema.TaggedClass<ExecStart>()("ExecStart", {
 /** Closes the command's stdin. Binary messages from the client are its stdin bytes. */
 export class StdinEnd extends Schema.TaggedClass<StdinEnd>()("StdinEnd", {}) {}
 
+/** A text message from the client that starts a command or closes its stdin. */
 export const ClientMessage = Schema.Union([ExecStart, StdinEnd]);
 export type ClientMessage = typeof ClientMessage.Type;
 
@@ -45,12 +46,17 @@ export class StreamFailed extends Schema.TaggedClass<StreamFailed>()("StreamFail
   message: Schema.String,
 }) {}
 
+/** A text message from the sandbox reporting that a command started, exited, or could not be followed. */
 export const ServerMessage = Schema.Union([Started, Exited, StreamFailed]);
 export type ServerMessage = typeof ServerMessage.Type;
 
+/** Encodes a client message as JSON text. Throws `SchemaError` if the value doesn't match the schema. */
 export const encodeClientMessage = Schema.encodeSync(Schema.fromJsonString(ClientMessage));
+/** Decodes client JSON text, returning `None` for invalid JSON or a message that doesn't match the schema. */
 export const decodeClientMessage = Schema.decodeUnknownOption(Schema.fromJsonString(ClientMessage));
+/** Encodes a server message as JSON text. Throws `SchemaError` if the value doesn't match the schema. */
 export const encodeServerMessage = Schema.encodeSync(Schema.fromJsonString(ServerMessage));
+/** Decodes server JSON text, returning `None` for invalid JSON or a message that doesn't match the schema. */
 export const decodeServerMessage = Schema.decodeUnknownOption(Schema.fromJsonString(ServerMessage));
 
 /** The command's output stream that a binary server message carries. */
@@ -66,6 +72,7 @@ export const outputFrame = (channel: OutputChannel, bytes: Uint8Array): Uint8Arr
   return frame;
 };
 
+/** A decoded output frame with its stdout or stderr channel and bytes after the channel byte. */
 export interface OutputChunk {
   readonly channel: OutputChannel;
   readonly bytes: Uint8Array;

@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { MachineQuotaWait, quotaWaits } from "../src/operator/machines.ts";
 import { workerAttentionFor } from "../src/operator/worker-attention.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
@@ -149,6 +150,7 @@ const scheduler = (machines: WorkerMachines["Service"], config = configWithTimin
       discard: (worker, attempts) =>
         Effect.sync(() => void discarded.push(`${worker} ${attempts.join(",")}`)),
     }).pipe(
+      Layer.provide(MarcbachmannCelLayer),
       Layer.provide(executor),
       Layer.provide(fixedConfigLayer(config)),
       Layer.provide(testAppLayer),

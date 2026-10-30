@@ -1,7 +1,7 @@
 import { Stream } from "@usine/config/trigger";
 import { LaneItemState } from "@usine/config/board";
 import { ConfigProblem } from "@usine/config/file";
-import { LoopFile } from "@usine/config/loop";
+import { LoopFile, PriorityValue } from "@usine/config/loop";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
@@ -46,6 +46,8 @@ export class LoopPreviewItem extends Schema.Class<LoopPreviewItem>("LoopPreviewI
   title: Schema.String,
   url: Schema.String,
   state: LaneItemState,
+  /** The evaluated queue priority; zero when evaluation fails. */
+  priority: PriorityValue,
 }) {}
 /** Matching stored items and a rendered prompt for a loop draft, with per-item failures. */
 export class LoopPreview extends Schema.Class<LoopPreview>("LoopPreview")({

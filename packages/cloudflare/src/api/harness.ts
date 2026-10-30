@@ -32,6 +32,7 @@ export const PROVIDER_HOSTS = {
 
 /** The GitHub hosts whose requests the GitHub outbound handler authenticates. */
 export const GITHUB_HOSTS = ["github.com", "api.github.com"] as const;
+/** A GitHub host whose requests the outbound handler authenticates with the installation token. */
 export type GitHubHost = (typeof GITHUB_HOSTS)[number];
 
 /**

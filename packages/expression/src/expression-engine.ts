@@ -91,6 +91,17 @@ export interface ExpressionEngineService {
     source: Source,
     environment: Environment,
   ) => Effect.Effect<void, ExpressionCheckError>;
+  /** Checks that the expression has type `int`. */
+  readonly checkInteger: (
+    source: Source,
+    environment: Environment,
+  ) => Effect.Effect<void, ExpressionCheckError>;
+  /** Checks and evaluates an `int` expression without losing integer precision. */
+  readonly evaluateInteger: (
+    source: Source,
+    environment: Environment,
+    context: Schema.JsonObject,
+  ) => Effect.Effect<bigint, ExpressionError>;
   /** Checks that the expression can be a prompt interpolation. */
   readonly checkScalar: (
     source: Source,

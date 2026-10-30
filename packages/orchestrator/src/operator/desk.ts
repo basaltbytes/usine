@@ -1,3 +1,4 @@
+import { PriorityValue } from "@usine/config/loop";
 import type { LoadedInstance } from "@usine/config/instance";
 import { AgentName } from "@usine/core/agent";
 import { ProviderRetries } from "@usine/core/agent/session";
@@ -21,7 +22,12 @@ import { Context, DateTime, Effect, Layer, Match, Option, Order, Result, Schema 
 import { projectedItem } from "../board/items.ts";
 import { LoopMatches } from "../loop-matches.ts";
 import { PollingTriggers } from "../polling-triggers.ts";
-import { type PreflightCheck, type WorkerPreflight, WorkerStatus } from "../worker-status.ts";
+import {
+  type PreflightCheck,
+  type WorkerPreflight,
+  type QueuedRun,
+  WorkerStatus,
+} from "../worker-status.ts";
 import {
   MachineView,
   machineView,
@@ -172,6 +178,8 @@ export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>
    * queue `run`: it hasn't asked for a slot yet, or this process runs no Attempts.
    */
   ahead: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  /** The evaluated queue priority, or null before the scheduler reserves a slot. */
+  priority: Schema.NullOr(PriorityValue).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
   /**
    * The machine that a provisioned Worker creates for `run`'s next Attempt, or null if none is
    * being created.
@@ -300,8 +308,8 @@ interface StallFacts {
   readonly paused: boolean;
   /** The Item's open cycle-budget Ask. */
   readonly ask: Option.Option<CycleBudgetAsk>;
-  /** The number of Runs ahead of each Run in the scheduler's queue. */
-  readonly ahead: ReadonlyMap<RunView["id"], number>;
+  /** The scheduler's captured priority, lane, and queue position for each run. */
+  readonly queue: ReadonlyMap<RunView["id"], QueuedRun>;
   /** The machine being created for each Run's next Attempt. */
   readonly creating: ReadonlyMap<RunView["id"], MachineView>;
   /** The Attempt on the Item whose parent task isn't confirmed stopped, for the Loop's open Run. */
@@ -317,7 +325,7 @@ const stallReason = ({
   sighting,
   paused,
   ask,
-  ahead,
+  queue,
   creating,
   stop,
 }: StallFacts): Option.Option<StallReasonView> => {
@@ -336,7 +344,8 @@ const stallReason = ({
         return Option.some(
           new QueuedForWorkerView({
             run: open,
-            ahead: ahead.get(open.id) ?? null,
+            ahead: queue.get(open.id)?.ahead ?? null,
+            priority: queue.get(open.id)?.position.priority ?? null,
             creating: creating.get(open.id) ?? null,
           }),
         );
@@ -556,7 +565,7 @@ const makeDesk = Effect.gen(function* () {
           : [],
       ),
     );
-    const ahead = new Map(queue.map(({ runId, ahead }) => [runId, ahead]));
+    const queued = new Map(queue.map((reservation) => [reservation.runId, reservation]));
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
     const repositories = yield* Effect.forEach(
@@ -628,7 +637,7 @@ const makeDesk = Effect.gen(function* () {
         ),
         paused: paused.has(loop.name),
         ask: Option.fromNullishOr(asks.find(({ itemKey }) => itemKey === item.itemKey)),
-        ahead,
+        queue: queued,
         creating,
         stop: stopOn(item.itemKey),
       });

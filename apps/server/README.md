@@ -196,6 +196,8 @@ The SQLite storage, configuration, and export tests use the shared [SQLite fixtu
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
 
+Loop checks at `/api/configuration/loops/check` validate integer CEL priorities. `/api/configuration/loops/preview` returns each matching item’s evaluated `priority`; evaluation errors appear in `failures` and use zero. `/api/desk` includes the scheduler’s captured priority for runs waiting for a worker slot.
+
 ## API schema
 
 `GET /api/openapi.json` publicly serves the generated OpenAPI 3.1 contract, including sign-in, members, and tokens. It describes request and response schemas and authentication requirements without reading instance state. See the [HTTP API reference](https://docs.usine.dev/reference/operator-api/) for endpoint descriptions and the downloadable document.

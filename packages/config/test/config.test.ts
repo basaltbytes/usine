@@ -830,7 +830,7 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
-  it.effect("leaves the Loop priority unset by default and accepts only a positive integer", () =>
+  it.effect("accepts integer priorities and checks CEL priorities against the trigger stream", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;
       const source = (field: string) =>
@@ -839,9 +839,32 @@ describe("ConfigParser", () => {
         parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
       expect(Option.isNone((yield* parse("")).priority)).toBe(true);
       expect((yield* parse("priority: 2\n")).priority).toStrictEqual(Option.some(2));
-      for (const invalid of ["priority: 0\n", "priority: 1.5\n", "priority: high\n"]) {
-        expect((yield* parse(invalid).pipe(Effect.flip)).stage).toBe("schema");
-      }
+      for (const value of [0, -1])
+        expect((yield* parse(`priority: ${value}\n`)).priority).toStrictEqual(Option.some(value));
+      expect((yield* parse("priority: 1.5\n").pipe(Effect.flip)).stage).toBe("schema");
+      const expression = 'item.labels.nodes.exists(l, l.name == "low-priority") ? -1 : 0';
+      expect((yield* parse(`priority: '${expression}'\n`)).priority).toStrictEqual(
+        Option.some(expression),
+      );
+      expect((yield* parse("priority: item.additions\n")).priority).toStrictEqual(
+        Option.some("item.additions"),
+      );
+      const wrongStream = yield* parser
+        .parseLoopFile(
+          InstancePath.make("loops/review.md"),
+          source("priority: item.additions\n").replace("on: pr", "on: issue"),
+        )
+        .pipe(Effect.flip);
+      expect(wrongStream.stage).toBe("expression");
+      const scheduled = yield* parser.parseLoopFile(
+        InstancePath.make("loops/daily.md"),
+        `---\ntrigger: { on: schedule, cron: "0 9 * * *", tz: UTC, if: 'true' }\nagent: reviewer\npriority: 'item.tick.tz == "UTC" ? -1 : 0'\n---\nReview.`,
+      );
+      expect(Option.isSome(scheduled.priority)).toBe(true);
+      for (const invalid of ["high", "item.missing", "true", "1.5", "1u", "[]"])
+        expect((yield* parse(`priority: '${invalid}'\n`).pipe(Effect.flip)).stage).toBe(
+          "expression",
+        );
     }).pipe(Effect.provide(parserLayer)),
   );
 

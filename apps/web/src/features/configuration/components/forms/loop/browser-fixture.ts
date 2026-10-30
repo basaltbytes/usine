@@ -103,6 +103,7 @@ export const loopEditorResponses = async (
           title: `Fix issue ${number}`,
           url: `https://github.com/basaltbytes/usine/issues/${number}`,
           state: "issue-open",
+          priority: -1,
         })),
         prompt: {
           itemKey: `github:basaltbytes/usine#${number}`,

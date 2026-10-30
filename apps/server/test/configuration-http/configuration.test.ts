@@ -664,10 +664,10 @@ it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop
           step: "run",
           approval: "none",
           selector: { _tag: "Some", value: { repos: ["acme/missing"] } },
-          priority: { _tag: "None" },
+          priority: { _tag: "Some", value: "true" },
         };
         const text =
-          '---\nname: different-name\ntrigger: { on: issue, if: "item.unknown == 1" }\nagent: missing\nmax_cycles: 0\npermissions: invalid\nselector: { repos: [acme/missing] }\n---\n{{ }} {{ item.nope }}';
+          '---\nname: different-name\ntrigger: { on: issue, if: "item.unknown == 1" }\nagent: missing\npriority: "true"\nmax_cycles: 0\npermissions: invalid\nselector: { repos: [acme/missing] }\n---\n{{ }} {{ item.nope }}';
         const draft = format === "text" ? { text } : { value };
         const checked = yield* request("POST", "/loops/check", {
           name: "acme-project/draft",
@@ -678,6 +678,7 @@ it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop
           problems: expect.arrayContaining([
             expect.objectContaining({ path: [format === "text" ? "max_cycles" : "maxCycles"] }),
             expect.objectContaining({ path: ["permissions"] }),
+            expect.objectContaining({ path: ["priority"], expression: "true" }),
             expect.objectContaining({ path: ["name"] }),
             expect.objectContaining({ path: ["trigger", "if"], position: expect.any(Number) }),
             expect.objectContaining({ path: ["body"], expression: "item.nope" }),
@@ -743,7 +744,7 @@ it("previews at most 20 stored matches with an exact total, a selected prompt, a
           step: "run",
           approval: "none",
           selector: { _tag: "None" },
-          priority: { _tag: "None" },
+          priority: { _tag: "Some", value: "item.number == 1 ? -1 : 0" },
         };
         const first = yield* request("POST", "/loops/preview", {
           name: "acme-project/draft",
@@ -752,7 +753,10 @@ it("previews at most 20 stored matches with an exact total, a selected prompt, a
         expect(first.status).toBe(200);
         expect(first.body).toMatchObject({
           total: 25,
-          items: expect.any(Array),
+          items: expect.arrayContaining([
+            expect.objectContaining({ number: 1, priority: -1 }),
+            expect.objectContaining({ number: 2, priority: 0 }),
+          ]),
           prompt: { text: "Implement Issue 1 in acme/project." },
         });
         expect(
@@ -768,6 +772,19 @@ it("previews at most 20 stored matches with an exact total, a selected prompt, a
         expect(selected.body).toMatchObject({
           total: 25,
           prompt: { text: "Implement Issue 25 in acme/project." },
+        });
+        const failedPriority = yield* request("POST", "/loops/preview", {
+          name: "acme-project/draft",
+          value: { ...value, priority: { _tag: "Some", value: "1 / 0" } },
+        });
+        expect(failedPriority.body).toMatchObject({
+          total: 25,
+          items: expect.arrayContaining([expect.objectContaining({ priority: 0 })]),
+          failures: expect.arrayContaining([
+            expect.objectContaining({
+              message: expect.stringContaining("Priority evaluation failed; using zero"),
+            }),
+          ]),
         });
         const empty = yield* request("POST", "/loops/preview", {
           name: "acme-project/draft",

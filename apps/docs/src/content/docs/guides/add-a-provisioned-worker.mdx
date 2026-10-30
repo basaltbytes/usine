@@ -71,7 +71,7 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
      ./infra/hetzner/snapshot.sh ~/.ssh/usine_worker.pub
    ```
 
-   The script creates a temporary server from `infra/hetzner/cloud-init.yaml` and `infra/hetzner/gateway/worker-cloud-init.yaml`, waits for cloud-init, pulls the attempt image, and saves the server as a snapshot labeled `usine=snapshot`. It then deletes the server and prints the snapshot's ID and description, such as `usine-worker-claude-2.1.308-codex-0.164.0`. The snapshot has the gateway's address and domain, so it works only in that gateway's network. It has no harness login and no token. If you created the gateway with other `GATEWAY_IP`, `DOMAIN`, or `NETWORK_CIDR` values, set the same ones for `snapshot.sh`.
+   The script creates a temporary server from `infra/hetzner/cloud-init.yaml` and `infra/hetzner/gateway/worker-cloud-init.yaml`, waits for cloud-init, pulls the attempt image, and saves the server as a snapshot labeled `usine=snapshot`. It then deletes the server and prints the snapshot's ID and description, such as `usine-worker-claude-2.1.311-codex-0.164.0`. The snapshot has the gateway's address and domain, so it works only in that gateway's network. It has no harness login and no token. If you created the gateway with other `GATEWAY_IP`, `DOMAIN`, or `NETWORK_CIDR` values, set the same ones for `snapshot.sh`.
 
    Run the script from a checkout of the usine release that you run, so that the snapshot has that release's attempt image. The image must be public on GHCR, because a machine created for one attempt has no `docker login`.
 
@@ -96,7 +96,7 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
          token_env: HCLOUD_TOKEN
          server_type: cx33
          location: fsn1
-         image: usine-worker-claude-2.1.308-codex-0.164.0
+         image: usine-worker-claude-2.1.311-codex-0.164.0
          network: usine-gateway
          ssh_key: usine-worker
    ```
@@ -239,7 +239,7 @@ Use a gateway to keep the GitHub installation token, Claude subscription token, 
 
    ```sh
    infra/boat/build-snapshot.sh usine-attempt \
-     ghcr.io/basaltbytes/usine-worker:claude-2.1.308-codex-0.164.0 \
+     ghcr.io/basaltbytes/usine-worker:claude-2.1.311-codex-0.164.0 \
      ~/.ssh/usine_boat
    ```
 

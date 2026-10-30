@@ -1,6 +1,6 @@
 # @usine/expression
 
-Typed CEL checking and evaluation for [usine](https://github.com/basaltbytes/usine). Describe types and root variables with `Environment`. `ExpressionEngine` then checks boolean trigger and scalar prompt expressions, and evaluates them over plain JSON.
+Typed CEL checking and evaluation for [usine](https://github.com/basaltbytes/usine). Describe types and root variables with `Environment`. `ExpressionEngine` then checks boolean trigger, integer priority, and scalar prompt expressions, and evaluates them over plain JSON.
 
 Import `ExpressionEngine`, `Source`, `Environment`, the environment descriptors, `Scalar`, and the typed errors from `@usine/expression/expression-engine`, which replaces `@usine/expression/model`. The CEL adapter layer is in `@usine/expression/marcbachmann-cel`. That subpath also exports `makeExpressionEngine()` for callers that supply the service explicitly without a layer.
 
@@ -18,3 +18,5 @@ Errors: `ExpressionCheckError` (parse, type, or result type), `ExpressionEvaluat
 `MarcbachmannCelLayer` uses `@marcbachmann/cel-js@8.0.0`. The contract uses CEL type names and usine descriptors, not library objects; an `@bufbuild/cel` adapter can provide the same tag.
 
 The 0.x APIs can change between minor releases.
+
+`checkInteger` requires a CEL `int` result. `evaluateInteger` checks and evaluates it as a `bigint`, preserving precision; consumers apply their own numeric range constraints.

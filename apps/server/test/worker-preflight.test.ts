@@ -133,6 +133,7 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
         ),
     });
     const scheduler = stepExecutorLayer(instance.config, [submission.agent.brain]).pipe(
+      Layer.provide(MarcbachmannCelLayer),
       Layer.provide(Layer.mergeAll(executor, current, app)),
     );
     const engine = engineLayer(directory).pipe(

@@ -30,13 +30,17 @@ export const stallSentence = ({ loop, reason }: StalledItemView, now: number): s
       `${run.state === "Succeeded" ? "Succeeded" : "Canceled"} ${agoLabel(runActivityAt(run), now)}, unchanged since`,
     LoopPaused: () => `${loop} paused`,
     WaitingForStop: ({ run, stop }) => stopWaitLine(run.id, stop),
-    QueuedForWorker: ({ ahead, creating }) =>
+    QueuedForWorker: ({ ahead, creating, priority }) =>
       creating !== null
         ? machineCreationLine(creating, now)
-        : ahead === null
-          ? "Waiting for a free worker slot"
-          : ahead === 0
-            ? "Waiting for a free worker slot, next in queue"
-            : `Waiting for a free worker slot, behind ${ahead} ${ahead === 1 ? "run" : "runs"}`,
+        : [
+            "Waiting for a free worker slot",
+            ...(priority === null ? [] : [`priority ${priority}`]),
+            ...(ahead === null
+              ? []
+              : [
+                  ahead === 0 ? "next in queue" : `behind ${ahead} ${ahead === 1 ? "run" : "runs"}`,
+                ]),
+          ].join(", "),
     AwaitingPoll: () => "Waiting for the next poll",
   });

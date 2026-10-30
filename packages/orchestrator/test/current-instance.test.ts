@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/config/label";
@@ -103,7 +104,11 @@ const startWorkers = (preflighted: Array<string>) =>
       stepExecutorLayer(
         config,
         agents.map(({ agent }) => agent.brain),
-      ).pipe(Layer.provide(executor), Layer.provide(testAppLayer)),
+      ).pipe(
+        Layer.provide(MarcbachmannCelLayer),
+        Layer.provide(executor),
+        Layer.provide(testAppLayer),
+      ),
     );
   });
 
