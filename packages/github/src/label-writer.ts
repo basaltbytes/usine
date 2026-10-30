@@ -10,8 +10,11 @@ import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./po
 export class NewRepositoryLabel extends Schema.Class<NewRepositoryLabel>(
   "@usine/github/NewRepositoryLabel",
 )({
+  /** The label name to create in the repository, preserving case. */
   name: RepositoryLabelName,
+  /** Six hexadecimal digits without `#`; `None` omits the color so GitHub chooses its default. */
   color: Schema.Option(RepositoryLabelColor),
+  /** The label description; `None` omits it from the create request. */
   description: Schema.Option(Schema.String),
 }) {}
 
@@ -36,12 +39,17 @@ const labelsUrl = (repository: RepositoryName): string => {
 export class GitHubLabelWriter extends Context.Service<
   GitHubLabelWriter,
   {
+    /**
+     * Creates `label` in `repository` and returns GitHub's resulting definition. Uses a single
+     * POST request; an existing name fails with GitHub's API error instead of updating it.
+     */
     readonly create: (
       repository: RepositoryName,
       label: NewRepositoryLabel,
     ) => Effect.Effect<RepositoryLabel, GitHubAppError>;
   }
 >()("@usine/github/GitHubLabelWriter") {
+  /** Provides repository label creation through the HTTP client with the App's shared token. */
   static readonly layer: Layer.Layer<GitHubLabelWriter, never, GitHubApp | HttpClient.HttpClient> =
     Layer.effect(
       GitHubLabelWriter,

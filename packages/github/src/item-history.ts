@@ -15,19 +15,34 @@ const MAX_TIMELINE_PAGES = 10;
 /** A label the bot added to the item; `label` is its current GitHub definition. */
 export class LabelAdded extends Schema.TaggedClass<LabelAdded>("@usine/github/LabelAdded")(
   "LabelAdded",
-  { at: Schema.DateTimeUtc, label: RepositoryLabel },
+  {
+    /** The UTC time GitHub recorded for the label change. */
+    at: Schema.DateTimeUtc,
+    /** The label's current definition, which can differ from its definition at the change time. */
+    label: RepositoryLabel,
+  },
 ) {}
 
 /** A label the bot removed from the item; `label` is its current GitHub definition. */
 export class LabelRemoved extends Schema.TaggedClass<LabelRemoved>("@usine/github/LabelRemoved")(
   "LabelRemoved",
-  { at: Schema.DateTimeUtc, label: RepositoryLabel },
+  {
+    /** The UTC time GitHub recorded for the label change. */
+    at: Schema.DateTimeUtc,
+    /** The label's current definition, which can differ from its definition at the change time. */
+    label: RepositoryLabel,
+  },
 ) {}
 
 /** A comment the bot posted on the item; `url` links to it. */
 export class Commented extends Schema.TaggedClass<Commented>("@usine/github/Commented")(
   "Commented",
-  { at: Schema.DateTimeUtc, url: Schema.NonEmptyString },
+  {
+    /** The UTC time GitHub recorded for the comment's creation. */
+    at: Schema.DateTimeUtc,
+    /** The URL of the bot's comment. */
+    url: Schema.NonEmptyString,
+  },
 ) {}
 
 /** The state of a submitted pull request review. */
@@ -41,8 +56,11 @@ export type ReviewState = typeof ReviewState.Type;
 
 /** A review the bot submitted on the pull request; `url` links to it. */
 export class Reviewed extends Schema.TaggedClass<Reviewed>("@usine/github/Reviewed")("Reviewed", {
+  /** The review submission time in UTC, or its creation time when GitHub omits submission time. */
   at: Schema.DateTimeUtc,
+  /** The URL of the submitted review. */
   url: Schema.NonEmptyString,
+  /** The submitted review state; pending drafts do not appear as item changes. */
   state: ReviewState,
 }) {}
 
@@ -162,7 +180,7 @@ const appChange = (botLogin: BotLogin, node: TimelineNode): ReadonlyArray<ItemCh
   }
 };
 
-/** A bot's changes on an item, read from the Item's GitHub timeline. */
+/** A bot's changes on an item, read from the item's GitHub timeline. */
 export class GitHubItemHistory extends Context.Service<
   GitHubItemHistory,
   {
@@ -171,7 +189,8 @@ export class GitHubItemHistory extends Context.Service<
      * Returns the labels the bot added or removed, its comments, and its submitted reviews on one
      * issue or pull request at or after `since`, oldest first. Labels have their current name,
      * color, and description. Fails with `GitHubItemNotFoundError` if the repository responds but
-     * has no such item.
+     * has no such item. Reads at most ten pages of 100 timeline entries and fails with
+     * `InvalidGitHubResponseError` if more remain, rather than returning partial history.
      */
     readonly appChanges: (
       repository: RepositoryName,
@@ -181,6 +200,7 @@ export class GitHubItemHistory extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<ItemChange>, GitHubAppError | GitHubItemNotFoundError>;
   }
 >()("@usine/github/GitHubItemHistory") {
+  /** Provides bot timeline reads through GraphQL with the App's shared token and HTTP client. */
   static readonly layer: Layer.Layer<GitHubItemHistory, never, GitHubApp | HttpClient.HttpClient> =
     Layer.effect(
       GitHubItemHistory,

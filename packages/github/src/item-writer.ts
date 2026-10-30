@@ -9,11 +9,13 @@ import type { GitHubAppError } from "./error.ts";
 const LabelResponse = Schema.Array(Schema.Struct({ name: Schema.NonEmptyString }));
 const LabelNames = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique());
 
-/** The labels to add and remove on one Item; other labels are unchanged. */
+/** The labels to add and remove on one item; other labels are unchanged. */
 export class ItemLabelMutation extends Schema.Class<ItemLabelMutation>(
   "@usine/github/ItemLabelMutation",
 )({
+  /** A nonempty list of unique labels to add before removing labels. */
   add: LabelNames.check(Schema.isNonEmpty()),
+  /** Unique labels to remove after additions; labels already absent are ignored. */
   remove: LabelNames,
 }) {}
 
@@ -25,11 +27,16 @@ const labelsUrl = (repository: RepositoryName, item: number): string => {
 const labelUrl = (repository: RepositoryName, item: number, label: string): string =>
   `${labelsUrl(repository, item)}/${encodeURIComponent(label)}`;
 
-/** Label writes on GitHub Items, used when the Board moves a card between lanes. */
+/** Label writes on GitHub items, used when the board moves a card between lanes. */
 export class GitHubItemWriter extends Context.Service<
   GitHubItemWriter,
   {
-    /** Adds and removes only the listed labels and keeps every other applied label. */
+    /**
+     * Applies `mutation` to the issue or pull request numbered `item` in `repository`, adding
+     * labels before removing them. Keeps unrelated labels and ignores a 404 for a removal.
+     * Returns the label names from the last successful response. Writes are sequential and
+     * can be partially applied if a later request fails; callers should refresh the item.
+     */
     readonly updateLabels: (
       repository: RepositoryName,
       item: ItemNumber,
@@ -37,6 +44,7 @@ export class GitHubItemWriter extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<string>, GitHubAppError>;
   }
 >()("@usine/github/GitHubItemWriter") {
+  /** Provides item label writes through the HTTP client with the App's installation-wide token. */
   static readonly layer: Layer.Layer<GitHubItemWriter, never, GitHubApp | HttpClient.HttpClient> =
     Layer.effect(
       GitHubItemWriter,

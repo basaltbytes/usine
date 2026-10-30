@@ -16,8 +16,11 @@ export type RepositoryLabelColor = typeof RepositoryLabelColor.Type;
 /** A repository label. The name selects lanes; color and description are for display only. */
 export class RepositoryLabel extends Schema.Class<RepositoryLabel>("@usine/github/RepositoryLabel")(
   {
+    /** The GitHub label name, with case preserved, used to match board lanes. */
     name: RepositoryLabelName,
+    /** The display color as six hexadecimal digits without `#`. */
     color: RepositoryLabelColor,
+    /** The GitHub label description, or `None` when GitHub returns null. */
     description: Schema.OptionFromNullOr(Schema.String),
   },
 ) {}
@@ -31,7 +34,9 @@ const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<RepositoryLabel>>(
 export class RepositoryLabelCatalog extends Schema.Class<RepositoryLabelCatalog>(
   "@usine/github/RepositoryLabelCatalog",
 )({
+  /** The validator for the canonical first-page URL; `None` requires an unconditional catalog read. */
   entityTag: Schema.OptionFromNullOr(EntityTag),
+  /** Every repository label from all pages, with unique case-preserved names. */
   labels: Schema.Array(RepositoryLabel).check(uniqueLabelNames),
 }) {}
 
