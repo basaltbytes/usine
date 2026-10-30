@@ -12,7 +12,10 @@ import type { Stream } from "./trigger.ts";
 
 const reference = Schema.decodeUnknownSync(TypeReference);
 
-/** A field name, its CEL type, and `nullable` if the GitHub payload can have `null` for the field or omit it. */
+/**
+ * A field name, its CEL type, and `nullable` if the GitHub payload can have `null` for the field
+ * or omit it.
+ */
 type FieldDeclaration = readonly [name: string, type: string, nullability?: "nullable"];
 
 const objectType = (name: string, fields: ReadonlyArray<FieldDeclaration>): ObjectType =>
@@ -245,9 +248,16 @@ export const pullRequestEnvironment = environment(
   "PullRequestPayload",
 );
 
-/** The CEL environment for schedule triggers; `item.tick` has `scheduledAt`, `scheduledAtLocal`, `cron`, and `tz`. */
+/**
+ * The CEL environment for schedule triggers; `item.tick` has `scheduledAt`, `scheduledAtLocal`,
+ * `cron`, and `tz`.
+ */
 export const scheduleEnvironment = environment([tick, schedule], "SchedulePayload");
 
+/**
+ * Returns the CEL type environment for `stream`, including its `item` payload slice and the `repo`
+ * variable.
+ */
 export const environmentFor = (stream: Stream): Environment => {
   switch (stream) {
     case "issue":

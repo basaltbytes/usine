@@ -5,6 +5,10 @@ import { Configuration, ConfigurationRevision } from "./model.ts";
 import { ConfigurationStore, type ConfigurationCommit } from "./store.ts";
 import { watchRevisions } from "./watch.ts";
 
+/**
+ * Provides an initially empty configuration store in memory, using `ConfigParser` for validation.
+ * Each fresh layer build has independent state; commits serialize and use the Effect clock.
+ */
 export const memoryConfigurationLayer = Layer.effect(
   ConfigurationStore,
   Effect.gen(function* () {

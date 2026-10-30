@@ -23,7 +23,11 @@ const Row = Schema.Struct({ value: Schema.String });
 const entityTable = getTableName(configurationEntitiesTable);
 const revisionTable = getTableName(configurationRevisionsTable);
 
-/** Uses the application's SqlClient; migrations have a separate ledger from the runtime engine. */
+/**
+ * Provides a configuration store using the application's `SqlClient` and `ConfigParser`. Applies
+ * embedded migrations with a separate ledger and commits revisions and entity values in one
+ * transaction (ADR 0020).
+ */
 export const sqliteConfigurationLayer = Layer.effect(
   ConfigurationStore,
   Effect.gen(function* () {

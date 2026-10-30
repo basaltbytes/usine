@@ -6,6 +6,10 @@ import { writeYaml } from "../yaml/writer.ts";
 import { AgentJson, LoopJson } from "./entities.ts";
 import { ConfigurationEntity, ConfigurationEntityKey, ConfigurationInvalid } from "./model.ts";
 
+/**
+ * Formats `entity` as Markdown for an agent or loop, or YAML for other kinds. Invalid agent or
+ * loop JSON fails with `ConfigurationInvalid`.
+ */
 export const formatConfigurationEntity = (
   entity: ConfigurationEntity,
 ): Effect.Effect<string, ConfigurationInvalid> => {
@@ -32,6 +36,11 @@ export const formatConfigurationEntity = (
   );
 };
 
+/**
+ * Parses `source` in the export format for `key`, using `parser` for agents. Loop expressions and
+ * references require later validation; other kinds decode as YAML JSON. Parsing failures become
+ * `ConfigurationInvalid`.
+ */
 export const parseConfigurationEntity = (
   parser: ConfigParser["Service"],
   key: ConfigurationEntityKey,

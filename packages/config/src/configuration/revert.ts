@@ -9,7 +9,16 @@ import {
   type ConfigurationRevision,
 } from "./model.ts";
 
-/** Restores values and worker positions, refusing to overwrite later changes to the same entities. */
+/**
+ * Computes changes that undo `target` while preserving unrelated changes in `current`.
+ * Fails with `ConfigurationRevertBlocked` if later revisions changed a target entity.
+ *
+ * @param parser - The parser used to reconstruct historical snapshots.
+ * @param target - The revision to undo.
+ * @param history - The complete revision history through the current snapshot; input order is ignored.
+ * @param current - The snapshot whose surviving workers determine restored positions.
+ * @returns Reverse changes to commit against `current.number`; this operation writes nothing.
+ */
 export const revertConfiguration = (
   parser: ConfigParser["Service"],
   target: ConfigurationRevision,

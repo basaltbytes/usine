@@ -30,16 +30,31 @@ export {
 
 export { formatConfigurationEntity, parseConfigurationEntity } from "./format.ts";
 
+/**
+ * Imports and exports configuration as instance-folder files (ADR 0031). Import rejects invalid
+ * files as a whole.
+ */
 export class ConfigurationFolder extends Context.Service<
   ConfigurationFolder,
   {
+    /**
+     * Reads configuration files from `root`, validates all entities and references, and converts
+     * version 1 configuration to projects. Any invalid file fails the import with
+     * `ConfigurationInvalid`; no store revision is written.
+     */
     readonly load: (root: InstanceDirectory) => Effect.Effect<LoadedInstance, ConfigurationInvalid>;
+    /**
+     * Writes `instance` to `root`, creating directories and replacing complete YAML and Markdown
+     * files. Removes stale Markdown files in written entity directories; comments are not
+     * preserved. Filesystem failures become `ConfigurationStoreError`.
+     */
     readonly export: (
       root: InstanceDirectory,
       instance: LoadedInstance,
     ) => Effect.Effect<void, ConfigurationStoreError>;
   }
 >()("@usine/config/ConfigurationFolder") {
+  /** Provides strict folder import and export using `FileSystem`, `Path`, and `ConfigParser`. */
   static readonly layer = Layer.effect(
     ConfigurationFolder,
     Effect.gen(function* () {
