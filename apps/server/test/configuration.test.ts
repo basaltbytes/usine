@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { InstanceFolder } from "@usine/config/instance-folder";
@@ -17,7 +18,6 @@ import {
 import { Effect, Layer, Option, Schema } from "effect";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -27,7 +27,7 @@ import { parse, stringify } from "yaml";
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const test = it.extend<{ directory: string }>({
   directory: async ({ task }, use) => {
-    const directory = await mkdtemp(join(tmpdir(), `usine-config-${task.id}-`));
+    const directory = await mkdtemp(join(sqliteTempDirectory(), `usine-config-${task.id}-`));
     await mkdir(join(directory, "agents"));
     await mkdir(join(directory, "loops"));
     await writeFile(

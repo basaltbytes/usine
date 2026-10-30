@@ -192,3 +192,9 @@ pnpm --filter @usine/engine db:generate --name <migration_name>
 ## Member authentication
 
 Operator cancellations persist the authenticated member login. The approval migration converts stored `github-ask` channels to `ui` while preserving the approver and removes that channel from the table constraint.
+
+## Test storage
+
+File-backed SQLite fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts), including migration, transcript, and run-reader tests.
+
+See [Development](../../README.md#development) for temporary storage selection and worker concurrency.

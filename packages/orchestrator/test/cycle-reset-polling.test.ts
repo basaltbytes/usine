@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
 import { InstancePath } from "@usine/config/file";
@@ -129,7 +130,10 @@ it.live(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-reset-race-" }),
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-reset-race-",
+        }),
       );
       const parser = yield* ConfigParser;
       const makeLoop = (body: string, approval: "none" | "required") =>

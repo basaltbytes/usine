@@ -349,3 +349,9 @@ Configuration views include project entities. Overview project views include the
 ## Member authentication
 
 HTTP actions use the authenticated member for approvals, retries, interventions, board moves, and configuration revisions. Non-HTTP operations can supply an actor through `ActingMember` from `@usine/core/operator`.
+
+## Test storage
+
+Polling and statistics SQLite fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Local-worker tests that exercise Git hooks and executable files use the OS temporary directory.
+
+See [Development](../../README.md#development) for temporary storage selection and worker concurrency.

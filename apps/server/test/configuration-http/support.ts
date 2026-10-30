@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { ItemProjectionReader, ItemProjection } from "@usine/engine/item-projection";
 import { NodeServices } from "@effect/platform-node";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
@@ -59,7 +60,12 @@ export const harness = (
     });
     const controlLayer = Layer.succeed(LoopControl, controls);
     const directory = yield* FileSystem.FileSystem.pipe(
-      Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "usine-configuration-http-" })),
+      Effect.flatMap((fs) =>
+        fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-configuration-http-",
+        }),
+      ),
       Effect.map(InstanceDirectory.make),
       Effect.provide(NodeServices.layer),
     );

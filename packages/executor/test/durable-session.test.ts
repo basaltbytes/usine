@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { LocalProcess } from "@usine/agents/child-host";
@@ -42,7 +43,10 @@ describe("durable session settlement", () => {
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-settle-" });
+          const directory = yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-settle-",
+          });
           const database = `${directory}/durable.sqlite`;
           let cancellations = 0;
           const runtimeLayer = Layer.effect(
@@ -113,7 +117,10 @@ describe("durable session settlement", () => {
   it.live("leaves a drained task unsettled when its terminal relay fails", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-drain-" });
+      const directory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-drain-",
+      });
       yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const terminal = yield* Deferred.make<void>();

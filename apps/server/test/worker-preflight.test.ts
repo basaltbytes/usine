@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { ConfigurationStore } from "@usine/config/configuration";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
@@ -92,6 +93,7 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
   const program = Effect.gen(function* () {
     const directory = InstanceDirectory.make(
       yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
         prefix: "usine-preflight-api-",
       }),
     );

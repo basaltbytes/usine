@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
@@ -154,7 +155,10 @@ describe("PollingTriggers open-issue check", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-open-issues-" }),
+          yield* fileSystem.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-open-issues-",
+          }),
         );
         const instance = instanceWith([loop]);
         let deleted = false;

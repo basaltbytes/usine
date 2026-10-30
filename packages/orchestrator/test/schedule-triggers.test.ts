@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
@@ -557,7 +558,10 @@ describe("ScheduleTriggers", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-schedules-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-schedules-",
+        }),
       );
       const config = configWith([{ name: "basaltbytes/usine" }]);
       const instance = instanceWith(config, [scheduleLoop(config, { cron: "0 0 1 1 *" })]);

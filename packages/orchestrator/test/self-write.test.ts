@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { assert, describe, it } from "@effect/vitest";
@@ -139,7 +140,10 @@ describe("Board self-writes", () => {
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const directory = InstanceDirectory.make(
-            yield* fs.makeTempDirectoryScoped({ prefix: "usine-self-write-" }),
+            yield* fs.makeTempDirectoryScoped({
+              directory: sqliteTempDirectory(),
+              prefix: "usine-self-write-",
+            }),
           );
           let labels: ReadonlyArray<string> = ["backlog"];
           let writeFailure: Option.Option<GitHubAppError> = Option.none();

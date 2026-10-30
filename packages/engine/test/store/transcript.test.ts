@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 
@@ -55,7 +56,10 @@ describe("Attempt transcripts", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-pool-limits-" }),
+          yield* fileSystem.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-pool-limits-",
+          }),
         );
         yield* Effect.gen(function* () {
           const store = yield* RunStore;
@@ -158,7 +162,10 @@ describe("Attempt transcripts", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-worker-notice-" }),
+          yield* fileSystem.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-worker-notice-",
+          }),
         );
         yield* Effect.gen(function* () {
           const store = yield* RunStore;
@@ -221,7 +228,10 @@ describe("Attempt transcripts", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-started-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-store-started-",
+        }),
       );
       const submission = new Submission({
         event: new Event({
@@ -338,7 +348,10 @@ describe("Attempt transcripts", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-usage-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-store-usage-",
+        }),
       );
       const runId = RunId.make("usage-run");
       yield* Effect.gen(function* () {
@@ -412,7 +425,10 @@ describe("Attempt transcripts", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-protocol-v3-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-store-protocol-v3-",
+        }),
       );
       const submission = new Submission({
         event: new Event({
@@ -470,7 +486,10 @@ describe("Attempt transcripts", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-protocol-v4-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-store-protocol-v4-",
+        }),
       );
       const submission = new Submission({
         event: new Event({

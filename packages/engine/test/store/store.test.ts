@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import * as RunState from "@usine/core/run/state";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
 import { NodeServices } from "@effect/platform-node";
@@ -85,7 +86,10 @@ describe("run store", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({ prefix: "usine-resolved-failure-" }),
+          yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-resolved-failure-",
+          }),
         );
         yield* TestClock.setTime(DateTime.toEpochMillis(lifecycleSubmission.event.receivedAt));
         const runId = RunId.make("resolved-failure");
@@ -211,7 +215,10 @@ describe("run store", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-closed-runs-" }),
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-closed-runs-",
+        }),
       );
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
@@ -534,7 +541,10 @@ describe("run store", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-store-",
+        }),
       );
       const event = new Event({
         id: EventId.make("store-event"),
@@ -853,7 +863,10 @@ describe("run store", () => {
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-unopenable-store-" });
+        const directory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-unopenable-store-",
+        });
         // SQLite can't open a directory as a database file.
         yield* fs.makeDirectory(`${directory}/.usine/runtime.sqlite`, { recursive: true });
         const failure = yield* Layer.build(
@@ -868,7 +881,10 @@ describe("run store", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-queued-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-store-queued-",
+        }),
       );
       const submission = new Submission({
         event: new Event({
@@ -941,7 +957,10 @@ describe("run store", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-closed-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-store-closed-",
+        }),
       );
       const submission = new Submission({
         event: new Event({
@@ -983,7 +1002,10 @@ describe("Item projections", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-item-projection-",
+        }),
       );
       const repository = RepositoryName.make("basaltbytes/usine");
       const item = new ItemProjection({
@@ -1024,7 +1046,10 @@ describe("Item projections", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-gone-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-item-projection-gone-",
+        }),
       );
       const repository = RepositoryName.make("basaltbytes/usine");
       const item = new ItemProjection({
@@ -1072,7 +1097,10 @@ describe("Item projections", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-open-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-item-projection-open-",
+        }),
       );
       const repository = RepositoryName.make("basaltbytes/usine");
       const projection = (
@@ -1124,7 +1152,10 @@ describe("repository label projections", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-label-projection-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-label-projection-",
+        }),
       );
       const repository = RepositoryName.make("basaltbytes/usine");
       const projection = new RepositoryLabelProjection({
@@ -1177,7 +1208,10 @@ describe("cursor store", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-cursor-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-cursor-",
+        }),
       );
       const key = CursorKey.make("github:basaltbytes/usine");
       const database = localSqliteLayer(directory);
@@ -1550,7 +1584,10 @@ describe("Loop runtime state", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-loop-runtime-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-loop-runtime-",
+        }),
       );
       const loop = LoopName.make("review");
       const database = localSqliteLayer(directory);

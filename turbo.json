@@ -8,12 +8,12 @@
     },
     "check": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md"]
+      "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md", "$TURBO_ROOT$/tooling/test/**"]
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md"],
-      "env": ["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"]
+      "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md", "$TURBO_ROOT$/tooling/test/**"],
+      "env": ["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "VITEST_MAX_WORKERS"]
     }
   }
 }

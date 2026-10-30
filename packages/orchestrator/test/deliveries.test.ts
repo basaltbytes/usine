@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -70,6 +71,7 @@ describe("Webhook delivery polling", () => {
       Effect.gen(function* () {
         const directory = InstanceDirectory.make(
           yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
             prefix: "usine-deliveries-",
           }),
         );

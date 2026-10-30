@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { OperatorLogin } from "@usine/core/operator";
 import { fileURLToPath } from "node:url";
 import { SqliteClient } from "@effect/sql-sqlite-node";
@@ -45,9 +46,13 @@ describe("Attempt migrations", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-intervention-upgrade-" }),
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-intervention-upgrade-",
+        }),
       );
       const historical = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
         prefix: "usine-historical-migrations-",
       });
       const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -146,9 +151,13 @@ describe("Run driver migration", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-workflow-upgrade-" }),
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-workflow-upgrade-",
+        }),
       );
       const historical = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
         prefix: "usine-workflow-migrations-",
       });
       const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -201,9 +210,13 @@ describe("Event reopening migration", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({ prefix: "usine-reopening-upgrade-" }),
+          yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-reopening-upgrade-",
+          }),
         );
         const historical = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
           prefix: "usine-reopening-migrations-",
         });
         const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -262,9 +275,13 @@ describe("Attempt salvage check migration", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({ prefix: "usine-salvage-check-upgrade-" }),
+          yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-salvage-check-upgrade-",
+          }),
         );
         const historical = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
           prefix: "usine-salvage-check-migrations-",
         });
         const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -337,9 +354,13 @@ describe("Attempt start migration", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({ prefix: "usine-attempt-start-upgrade-" }),
+          yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-attempt-start-upgrade-",
+          }),
         );
         const historical = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
           prefix: "usine-attempt-start-migrations-",
         });
         const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -396,9 +417,13 @@ describe("Run approval source migration", () => {
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const directory = InstanceDirectory.make(
-            yield* fs.makeTempDirectoryScoped({ prefix: "usine-approval-source-upgrade-" }),
+            yield* fs.makeTempDirectoryScoped({
+              directory: sqliteTempDirectory(),
+              prefix: "usine-approval-source-upgrade-",
+            }),
           );
           const historical = yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
             prefix: "usine-approval-source-migrations-",
           });
           const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -477,9 +502,13 @@ describe("Run close time migration", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-run-closed-at-upgrade-" }),
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-run-closed-at-upgrade-",
+        }),
       );
       const historical = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
         prefix: "usine-run-closed-at-migrations-",
       });
       const source = fileURLToPath(new URL("../../drizzle", import.meta.url));

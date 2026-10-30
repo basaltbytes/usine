@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { OperatorLogin } from "@usine/core/operator";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -22,7 +23,10 @@ const sqlLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({ prefix: "usine-members-" }),
+      yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-members-",
+      }),
     );
     return sqliteAuthLayer.pipe(Layer.provide(localSqliteLayer(directory)));
   }),

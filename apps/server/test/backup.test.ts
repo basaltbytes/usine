@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { spawnSync } from "node:child_process";
 import {
   mkdir,
@@ -10,7 +11,6 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,9 @@ import { assert, expect, it } from "vitest";
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const test = it.extend<{ directory: string }>({
   directory: async ({ task }, use) => {
-    const directory = await realpath(await mkdtemp(join(tmpdir(), `usine-backup-${task.id}-`)));
+    const directory = await realpath(
+      await mkdtemp(join(sqliteTempDirectory(), `usine-backup-${task.id}-`)),
+    );
     try {
       await use(directory);
     } finally {

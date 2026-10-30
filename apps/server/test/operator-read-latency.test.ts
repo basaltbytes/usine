@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { ConfigurationStore } from "@usine/config/configuration";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
@@ -185,7 +186,10 @@ describe("operator read latency", () => {
   it(`answers /api/overview and /api/desk, requested together, in under ${READ_BUDGET_MILLIS} ms while an Attempt starts on a Board of ${BOARD_ITEMS} Items and five Loops`, async () => {
     const program = Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-read-latency-" });
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-read-latency-",
+      });
       const preparing = yield* Deferred.make<void>();
       // A Worker whose preparation, such as an SSH preflight, lasts until the test ends.
       const slowWorker = Layer.succeed(StepExecutor)({

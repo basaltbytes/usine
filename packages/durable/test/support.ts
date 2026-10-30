@@ -1,5 +1,5 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert } from "@effect/vitest";
 import { type ChildHost, LocalProcess } from "@usine/agents/child-host";
@@ -60,7 +60,7 @@ export const attemptRequest = (
 
 /** A temporary folder for one test's storage, removed when the scope closes. */
 export const temporaryDatabase = Effect.acquireRelease(
-  Effect.sync(() => mkdtempSync(join(tmpdir(), "usine-durable-"))),
+  Effect.sync(() => mkdtempSync(join(sqliteTempDirectory(), "usine-durable-"))),
   (directory) => Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
 ).pipe(Effect.map((directory) => join(directory, "durable.sqlite")));
 

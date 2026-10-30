@@ -1,6 +1,6 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -163,15 +163,17 @@ const test = it.extend<{
   saved: Effect.Success<ReturnType<typeof seed>>;
 }>({
   directory: async ({ task }, use) => {
-    const directory = await mkdtemp(join(tmpdir(), `usine-export-${task.id}-`));
+    const directory = await mkdtemp(join(sqliteTempDirectory(), `usine-export-${task.id}-`));
     try {
       await use(directory);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   },
-  saved: async ({ directory }, use) => {
-    await use(await Effect.runPromise(seed(directory).pipe(Effect.provide(NodeServices.layer))));
+  saved: async ({ directory, signal }, use) => {
+    await use(
+      await Effect.runPromise(seed(directory).pipe(Effect.provide(NodeServices.layer)), { signal }),
+    );
   },
 });
 
