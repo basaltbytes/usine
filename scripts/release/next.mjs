@@ -4,10 +4,13 @@ import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { unpublishedPackages } from "./registry.mjs";
 
+const maxAttempts = 3;
+const visibilityBudgetMs = 600_000;
+
 const log = (event, fields) => console.log(JSON.stringify({ event, ...fields }));
 
 export async function publishNext({ run, sha, runAttempt, packages }, { command, wait, registry }) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const suffix = `next.${run}.g${sha.slice(0, 7)}.${runAttempt}.${attempt}`;
     const versions = packages.map(({ file, manifest }) => {
       const [major, minor, patch] = manifest.version.split("-")[0].split(".").map(Number);
@@ -27,37 +30,54 @@ export async function publishNext({ run, sha, runAttempt, packages }, { command,
       "--no-git-checks",
       "--provenance",
     ]);
-    let reason;
-    if (result.code !== 0) {
-      if (/\bTLOG_CREATE_ENTRY_ERROR\b[^\n]*\(409\)/u.test(result.output)) {
-        reason = "sigstore_conflict";
-      } else if (/Cannot publish over previously staged version/iu.test(result.output)) {
-        reason = "staged_version_conflict";
-      } else {
-        throw new Error(`Snapshot publish failed (exit ${result.code}); see pnpm output`);
-      }
-    } else {
-      // A successful upload can still be unavailable to installers.
-      for (let check = 1; check <= 6; check++) {
-        const pending = await unpublishedPackages(versions, registry);
-        if (pending.length === 0) {
-          log("next_publish_completed", { attempt, suffix });
-          return;
-        }
-        log("next_publish_not_public", { attempt, check, packages: pending });
-        if (check < 6) await wait(10_000);
-      }
-      reason = "versions_not_public";
+    if (result.code === 0) {
+      await waitUntilPublic(versions, { attempt, suffix }, { wait, registry });
+      return;
     }
-    if (attempt === 3) {
+    let reason;
+    if (/\bTLOG_CREATE_ENTRY_ERROR\b[^\n]*\(409\)/u.test(result.output)) {
+      reason = "sigstore_conflict";
+    } else if (/Cannot publish over previously staged version/iu.test(result.output)) {
+      reason = "staged_version_conflict";
+    } else {
+      throw new Error(`Snapshot publish failed (exit ${result.code}); see pnpm output`);
+    }
+    if (attempt === maxAttempts) {
       log("next_publish_exhausted", { attempt, suffix, reason });
       throw new Error(
-        "Snapshot publish failed after 3 attempts; inspect the logged versions on npm",
+        `Snapshot publish failed after ${maxAttempts} attempts; inspect the logged versions on npm`,
       );
     }
     const delayMs = attempt * 15_000;
     log("next_publish_retry", { attempt, nextAttempt: attempt + 1, reason, delayMs });
     await wait(delayMs);
+  }
+}
+
+async function waitUntilPublic(versions, { attempt, suffix }, { wait, registry }) {
+  let waitedMs = 0;
+  for (let check = 1; ; check++) {
+    const pending = await unpublishedPackages(versions, registry);
+    if (pending.length === 0) {
+      log("next_publish_completed", { attempt, suffix, check, waitedMs });
+      return;
+    }
+    log("next_publish_not_public", { attempt, check, waitedMs, packages: pending });
+    if (waitedMs >= visibilityBudgetMs) {
+      log("next_publish_exhausted", {
+        attempt,
+        suffix,
+        reason: "versions_not_public",
+        waitedMs,
+        packages: pending,
+      });
+      throw new Error(
+        `Snapshot versions are not public after ${visibilityBudgetMs / 60_000} minutes; inspect the logged versions on npm`,
+      );
+    }
+    const delayMs = Math.min(5_000 + check * 5_000, 30_000, visibilityBudgetMs - waitedMs);
+    await wait(delayMs);
+    waitedMs += delayMs;
   }
 }
 
