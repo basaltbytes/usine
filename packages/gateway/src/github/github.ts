@@ -7,8 +7,11 @@ import { UpstreamBase } from "../upstream.ts";
 
 /** The upstream origins for GitHub requests: `web` for git smart HTTP, `api` for REST and GraphQL, `uploads` for release asset uploads. */
 export interface GitHubOrigins {
+  /** The origin for git smart HTTP and web release-download paths. */
   readonly web: UpstreamBase;
+  /** The origin for GitHub REST and GraphQL requests. */
   readonly api: UpstreamBase;
+  /** The origin for release asset uploads. */
   readonly uploads: UpstreamBase;
 }
 
@@ -133,7 +136,7 @@ export const githubRoute = (
 
 /**
  * Returns `location` on `git.<domain>` if it points at github.com or api.github.com, with its
- * path and query, so a Worker follows GitHub's redirects, such as those for a renamed
+ * path and query, so a worker follows GitHub's redirects, such as those for a renamed
  * repository, through the gateway. API paths move under `/api/v3`. Returns `None` for other
  * hosts, such as the release asset hosts.
  */

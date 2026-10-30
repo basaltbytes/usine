@@ -8,17 +8,22 @@ import { Base64Url } from "effect/encoding";
 export class ChatGptAuthFileError extends Schema.TaggedError<ChatGptAuthFileError>()(
   "ChatGptAuthFileError",
   {
+    /** The auth file involved in the failed read, validation, or write. */
     path: Schema.String,
+    /** Whether loading the login or persisting rotated tokens failed. */
     operation: Schema.Literals(["read", "write"]),
+    /** A diagnostic explanation that excludes token values. */
     message: Schema.String,
   },
 ) {}
 
 const Token = Schema.Redacted(Schema.NonEmptyString);
 
-/** A ChatGPT login's tokens as the Gateway holds them in memory. */
+/** A ChatGPT login's tokens stored in memory for requests and refreshes. */
 export class ChatGptTokens extends Schema.Class<ChatGptTokens>("@usine/gateway/ChatGptTokens")({
+  /** The bearer token used for ChatGPT backend requests. */
   accessToken: Token,
+  /** The token exchanged at the OAuth endpoint when the access token needs renewal. */
   refreshToken: Token,
   /** The ChatGPT account or workspace ID, sent as `ChatGPT-Account-ID`. */
   accountId: Schema.Option(Schema.NonEmptyString),
@@ -32,7 +37,7 @@ const JsonObject = Schema.Record(Schema.String, Schema.Json);
 const decodeJsonObject = Schema.decodeUnknownOption(JsonObject);
 const decodeAuthFileObject = Schema.decodeUnknownOption(Schema.fromJsonString(JsonObject));
 
-/** The fields of Codex's `auth.json` that the Gateway reads; the others are kept as they are. */
+/** The fields of Codex's `auth.json` that the gateway reads; the others are kept as they are. */
 const AuthFileFields = Schema.Struct({
   tokens: Schema.Struct({
     access_token: Schema.NonEmptyString,
@@ -178,7 +183,7 @@ export const writeAuthFile = Effect.fn("ChatGptAuthFile.write")(function* (
 });
 
 /**
- * Checks that the Gateway can write the rotated tokens next to the auth file at `path`, by
+ * Checks that the gateway can write the rotated tokens next to the auth file at `path`, by
  * creating and removing a file there, so a missing write permission shows before the first
  * refresh.
  */

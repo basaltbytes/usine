@@ -62,8 +62,11 @@ const REJECTED_CODES: ReadonlySet<string> = new Set([
 export class ChatGptLoginUnavailable extends Schema.TaggedError<ChatGptLoginUnavailable>()(
   "ChatGptLoginUnavailable",
   {
+    /** The auth file of the login that could not provide an access token. */
     authFile: Schema.String,
+    /** Whether the auth file is unreadable, refresh needs a retry, or a new login is required. */
     reason: Schema.Literals(["unreadable", "refresh-failed", "refresh-rejected"]),
+    /** A client-safe explanation that excludes tokens and token-endpoint response text. */
     message: Schema.String,
   },
 ) {}
@@ -182,7 +185,7 @@ const expiryField = (tokens: ChatGptTokens) =>
   Option.match(tokens.expiresAt, { onNone: () => "unknown", onSome: DateTime.formatIso });
 
 /**
- * The ChatGPT logins the Gateway holds, keyed by auth file. Each login's tokens stay in memory;
+ * The ChatGPT logins stored by auth file path. Each login's tokens stay in memory;
  * an access token is refreshed before it expires, one refresh at a time, and the rotated tokens
  * are written back to the auth file. A request never gets an access token that a failed
  * refresh should have replaced.
@@ -209,6 +212,10 @@ export class ChatGptLogins extends Context.Service<
     readonly reload: (login: ChatGptLogin) => Effect.Effect<void, ChatGptAuthFileError>;
   }
 >()("@usine/gateway/ChatGptLogins") {
+  /**
+   * Creates a scoped login cache with serialized refreshes and reloads. Requires a file system
+   * for auth files and an HTTP client for OAuth refreshes; reads each login on first use.
+   */
   static readonly layer = Layer.effect(
     ChatGptLogins,
     Effect.gen(function* () {

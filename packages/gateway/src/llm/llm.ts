@@ -7,6 +7,7 @@ const Secret = Schema.Redacted(Schema.NonEmptyString);
 
 /** An Anthropic API key, sent upstream as `x-api-key`. */
 export class AnthropicApiKey extends Schema.TaggedClass<AnthropicApiKey>()("AnthropicApiKey", {
+  /** The nonempty API key sent in the upstream `x-api-key` header. */
   key: Secret,
 }) {}
 
@@ -18,37 +19,48 @@ export class AnthropicApiKey extends Schema.TaggedClass<AnthropicApiKey>()("Anth
  */
 export class AnthropicSubscriptionToken extends Schema.TaggedClass<AnthropicSubscriptionToken>()(
   "AnthropicSubscriptionToken",
-  { token: Secret },
+  {
+    /** The nonempty Claude subscription token sent as a bearer token with the OAuth beta flag. */
+    token: Secret,
+  },
 ) {}
 
 /** The credential added to Anthropic requests. */
 export const AnthropicCredential = Schema.Union([AnthropicApiKey, AnthropicSubscriptionToken]);
 export type AnthropicCredential = typeof AnthropicCredential.Type;
 
-/** Claude Code's upstream. On the Worker, `ANTHROPIC_BASE_URL` is `http://llm.<domain>/anthropic`. */
+/** Claude Code's upstream. On the worker, `ANTHROPIC_BASE_URL` is `http://llm.<domain>/anthropic`. */
 export class AnthropicProvider extends Schema.TaggedClass<AnthropicProvider>()(
   "AnthropicProvider",
-  { upstream: UpstreamBase, credential: AnthropicCredential },
+  {
+    /** The Anthropic-compatible base URL to which allowed API paths are appended. */
+    upstream: UpstreamBase,
+    /** The API key or subscription token that replaces the caller token upstream. */
+    credential: AnthropicCredential,
+  },
 ) {}
 
 /** An OpenAI-compatible API key, sent upstream as a bearer token. */
 export class OpenAiApiKey extends Schema.TaggedClass<OpenAiApiKey>()("OpenAiApiKey", {
+  /** The nonempty API key sent in the upstream `Authorization: Bearer` header. */
   key: Secret,
 }) {}
 
-/** An absolute path to a file on the Gateway host. */
+/** An absolute path to a file on the gateway host. */
 export const HostFilePath = Schema.String.check(
   Schema.isPattern(/^\/\S*[^/\s]$/u, { message: "Expected an absolute file path" }),
 ).pipe(Schema.brand("HostFilePath"));
 export type HostFilePath = typeof HostFilePath.Type;
 
 /**
- * A ChatGPT login from `codex login`, read from the `auth.json` that Codex writes. The Gateway
+ * A ChatGPT login from `codex login`, read from the `auth.json` that Codex writes. The gateway
  * keeps its tokens in memory, refreshes them at `tokenUrl` before they expire, and writes the
  * rotated tokens back to `authFile`.
  */
 export class ChatGptLogin extends Schema.TaggedClass<ChatGptLogin>()("ChatGptLogin", {
+  /** The absolute path to a Codex ChatGPT auth file. Refreshes require write access to its directory. */
   authFile: HostFilePath,
+  /** The OAuth token endpoint used to refresh this login. */
   tokenUrl: UpstreamBase,
 }) {}
 
@@ -58,17 +70,21 @@ export type OpenAiCredential = typeof OpenAiCredential.Type;
 
 /**
  * Codex's upstream: an OpenAI-compatible API with an API key, or the ChatGPT backend with a
- * ChatGPT login. On the Worker, the `model_provider` `base_url` is `http://llm.<domain>/openai/v1`
+ * ChatGPT login. On the worker, the `model_provider` `base_url` is `http://llm.<domain>/openai/v1`
  * in both cases.
  */
 export class OpenAiProvider extends Schema.TaggedClass<OpenAiProvider>()("OpenAiProvider", {
+  /** The API base URL, or ChatGPT backend URL when using a ChatGPT login. */
   upstream: UpstreamBase,
+  /** The API key or refreshable ChatGPT login that replaces the caller token upstream. */
   credential: OpenAiCredential,
 }) {}
 
-/** The LLM upstreams the Gateway forwards to. Requests for a provider without a credential are refused. */
+/** The LLM upstreams the gateway forwards to. Requests for a provider without a credential are refused. */
 export interface LlmProviders {
+  /** The configured Anthropic upstream and credential, or `None` to refuse Anthropic requests. */
   readonly anthropic: Option.Option<AnthropicProvider>;
+  /** The configured OpenAI or ChatGPT upstream and credential, or `None` to refuse OpenAI requests. */
   readonly openai: Option.Option<OpenAiProvider>;
 }
 
@@ -117,7 +133,7 @@ export const configuredProvider = (
  * The routes each provider serves after its prefix: those Claude Code and Codex call. Each
  * pattern matches whole plain segments, so a percent-encoded separator or a dot segment never
  * matches, and other parts of the provider's API, such as files or organization administration,
- * can't be reached with the Gateway's credential.
+ * can't be reached with the gateway's credential.
  */
 const LLM_ROUTES = {
   anthropic: [
@@ -181,6 +197,7 @@ export const withStaticCredential = (
 
 /** A ChatGPT login's current access token and account, as Codex sends them to the ChatGPT backend. */
 export interface ChatGptAccess {
+  /** The current ChatGPT access token to send as a bearer token, redacted in diagnostics. */
   readonly accessToken: Redacted.Redacted<string>;
   /** The ChatGPT account or workspace ID, sent as `ChatGPT-Account-ID`; `None` if the login has none. */
   readonly accountId: Option.Option<string>;

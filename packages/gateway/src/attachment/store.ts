@@ -26,7 +26,15 @@ interface Entry {
 
 /** Loads and atomically replaces the attachment snapshot. */
 export interface AttachmentPersistence {
+  /**
+   * Loads the snapshot for startup; returns an empty array when no snapshot exists and fails if
+   * stored data cannot be restored.
+   */
   readonly load: Effect.Effect<ReadonlyArray<LiveAttachment>, AttachmentPersistenceError>;
+  /**
+   * Atomically replaces the snapshot with `entries`, including credentials and learned names. A
+   * failure must preserve the previous snapshot.
+   */
   readonly save: (
     entries: ReadonlyArray<LiveAttachment>,
   ) => Effect.Effect<void, AttachmentPersistenceError>;
@@ -47,7 +55,9 @@ export class Attachments extends Context.Service<
   {
     /**
      * Stores an attachment, or replaces the credential and expiry of the one with the same ID.
-     * Fails with `AttachmentConflict` if the ID belongs to another Worker or repository.
+     * Fails with `AttachmentAlreadyExpired` if the expiry is at or before now, or
+     * `AttachmentConflict` if the ID belongs to another worker or repository. A persistence
+     * failure leaves the stored attachment unchanged.
      */
     readonly attach: (
       attachment: Attachment,
@@ -74,7 +84,11 @@ export class Attachments extends Context.Service<
     readonly sweep: () => Effect.Effect<number, AttachmentPersistenceError>;
   }
 >()("@usine/gateway/Attachments") {
-  /** Restores live attachments and persists mutations before acknowledging them. */
+  /**
+   * Restores unexpired entries from `persistence` and saves that filtered snapshot before use.
+   * Persists mutations before updating memory and removes expired entries every minute until
+   * the layer closes. Startup fails if loading or saving fails (ADR 0027).
+   */
   static readonly layerWithPersistence = (persistence: AttachmentPersistence) =>
     Layer.effect(
       Attachments,

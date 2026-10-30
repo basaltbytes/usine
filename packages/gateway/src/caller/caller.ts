@@ -7,26 +7,35 @@ import { AttachmentId } from "../attachment/attachment.ts";
 import { GatewaySettings } from "../settings.ts";
 
 /**
- * The claims in a caller token: its attachment ID, Worker, and repository. Because the
- * attachment ID is included, a token from an earlier attachment is rejected after a new attach.
+ * The attachment ID, worker, and repository signed into a caller token. The proxy checks these
+ * claims against an active attachment; a new attachment cannot reactivate an old token.
  */
 export class CallerClaims extends Schema.Class<CallerClaims>("@usine/gateway/CallerClaims")({
+  /** The attachment ID whose validity the proxy checks after signature verification. */
   attachment: AttachmentId,
+  /** The worker authorized by the attachment. */
   worker: WorkerName,
+  /** The repository authorized by the attachment, in owner/name form. */
   repository: RepositoryName,
 }) {}
 
 /**
- * The token a Worker VM sends instead of a real credential. It's issued with each attachment
+ * The token a worker VM sends instead of a real credential. It's issued with each attachment
  * and accepted only while that attachment is active.
  */
 export const CallerToken = Schema.Redacted(Schema.NonEmptyString);
 export type CallerToken = typeof CallerToken.Type;
 
-/** The error for a caller token the Gateway didn't issue: `malformed` if the format is wrong, `bad-signature` if it wasn't signed with the Gateway's key. */
+/**
+ * The error for a caller token the gateway didn't issue: `malformed` if the format is wrong,
+ * `bad-signature` if it wasn't signed with the gateway's key.
+ */
 export class CallerTokenRejected extends Schema.TaggedError<CallerTokenRejected>()(
   "CallerTokenRejected",
-  { reason: Schema.Literals(["malformed", "bad-signature"]) },
+  {
+    /** Whether decoding failed or the signature did not match the gateway caller key. */
+    reason: Schema.Literals(["malformed", "bad-signature"]),
+  },
 ) {}
 
 /** The header for tools that can add one, such as git with `http.extraHeader`. */
@@ -56,21 +65,30 @@ const decodeClaims = Schema.decodeUnknownOption(ClaimsJson);
 
 /**
  * Issues and verifies caller tokens of the form `ugw1.<claims>.<HMAC-SHA256>` under the
- * Gateway's caller key. The same attachment always yields the same token, so no token table
+ * gateway's caller key. The same attachment always yields the same token, so no token table
  * is kept.
  */
 export class CallerTokens extends Context.Service<
   CallerTokens,
   {
+    /**
+     * Signs `claims` with the configured caller key. Identical claims produce the same token; this
+     * does not register an attachment.
+     */
     readonly issue: (claims: CallerClaims) => Effect.Effect<CallerToken>;
+    /**
+     * Checks the format and signature of `token` and returns its claims. Callers must separately
+     * check that the attachment is active and matches the claims.
+     */
     readonly verify: (token: CallerToken) => Effect.Effect<CallerClaims, CallerTokenRejected>;
     /**
-     * Removes caller tokens from headers for a host outside the Gateway: always the Gateway
+     * Removes caller tokens from headers for a host outside the gateway: always the gateway
      * header, and `Authorization` or `x-api-key` only if the value verifies as a caller token.
      */
     readonly withoutCallerTokens: (headers: Headers.Headers) => Effect.Effect<Headers.Headers>;
   }
 >()("@usine/gateway/CallerTokens") {
+  /** Imports the caller key from `GatewaySettings` for signing and verification with Web Crypto. */
   static readonly layer = Layer.effect(
     CallerTokens,
     Effect.gen(function* () {
@@ -163,6 +181,7 @@ export class CallerTokens extends Context.Service<
 /**
  * Returns the credential in an `Authorization` or `Proxy-Authorization` value: the `Bearer` or
  * `token` parameter, or the `Basic` password (the user name if the password is empty).
+ * Returns `None` for an unsupported scheme or an unusable credential. Does not verify the token.
  */
 export const tokenFromAuthorization = (value: string): Option.Option<CallerToken> => {
   const match = /^(\S+)\s+(\S+)\s*$/u.exec(value.trim());
@@ -183,7 +202,7 @@ export const tokenFromAuthorization = (value: string): Option.Option<CallerToken
 };
 
 /**
- * Returns the caller token from the request headers, checking the Gateway header, then
+ * Returns the caller token from the request headers, checking the gateway header, then
  * `Authorization` (gh, Codex, git, and Claude Code with `ANTHROPIC_AUTH_TOKEN` or
  * `CLAUDE_CODE_OAUTH_TOKEN`), then `x-api-key` (Claude Code with `ANTHROPIC_API_KEY`).
  */
