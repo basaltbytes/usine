@@ -15,6 +15,7 @@ describe("machine copy for provisioned workers", () => {
       state: "Queued",
       attempts: [],
       providerRetry: null,
+      upgradeWait: null,
       machineWait: null,
     } as const;
     assert.strictEqual(

@@ -340,6 +340,8 @@ Endpoint webhook mode shows **No webhook delivery received** in Needs attention 
 
 Loop forms accept an integer or CEL priority with payload completion. **Preview** shows each matching item’s evaluated priority and any evaluation errors. Overview’s waiting text includes the priority captured when the run requested its worker slot.
 
+Idle upgrade waits show the requested version in run headers, Overview's Running section, and worker rows. Settings offers **Cancel pending upgrade** while an upgrade waits. Needs attention links to Settings after an upgrade has deferred runs for ten minutes.
+
 ## GitHub App setup
 
 `/setup` resumes App creation, credential recovery, installation discovery, and repository selection. A one-time sign-in link opens the setup session. The page posts a prepared manifest to GitHub and supports restoring existing credential JSON. After installation, GitHub sign-in enrolls the first admin and ends the setup session. **Add repositories** opens the existing installation repository picker.

@@ -33,6 +33,7 @@ describe("run state while a parent task isn't confirmed stopped", () => {
     id: RunId.make("retrying"),
     state: "Running",
     attempts: [],
+    upgradeWait: null,
     providerRetry: null,
     machineWait: null,
   } as const;
@@ -62,6 +63,7 @@ it("shows the provider refusal and the scheduled attempt in the run header", () 
     id: RunId.make("capacity"),
     state: "Running",
     attempts: [],
+    upgradeWait: null,
     machineWait: null,
     providerRetry: new ProviderRetry({
       message,
@@ -78,6 +80,7 @@ it("shows the assigned worker quota refusal while a persisted attempt waits for 
     id: RunId.make("quota"),
     state: "Running",
     attempts: [],
+    upgradeWait: null,
     providerRetry: null,
     machineWait: new MachineQuotaWait({
       worker: WorkerName.make("hetzner-pool"),

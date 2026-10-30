@@ -134,3 +134,46 @@ it("keeps the rollback reason visible and explains a refused retry", async () =>
     host.remove();
   }
 });
+
+it("cancels a waiting upgrade and reports a cancellation rejected after installation starts", async () => {
+  const waiting = new UpgradeView({ ...available, phase: "waiting", target: available.available });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(upgradeQuery().queryKey, waiting);
+  try {
+    await commands.upgradeResponses(
+      json(waiting),
+      json(available),
+      "cancel",
+      "Installation already started.",
+    );
+    flushSync(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <Suspense>
+            <Upgrades />
+          </Suspense>
+        </QueryClientProvider>,
+      ),
+    );
+    await expect
+      .element(page.getByText(`Requested version: ${waiting.target}`, { exact: true }))
+      .toBeVisible();
+    await page.getByRole("button", { name: "Cancel pending upgrade" }).click();
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent("Installation already started.");
+    await commands.upgradeResponses(json(waiting), json(available), "cancel", "");
+    await page.getByRole("button", { name: "Cancel pending upgrade" }).click();
+    await expect.element(page.getByRole("button", { name: "Upgrade when idle" })).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Cancel pending upgrade" }))
+      .not.toBeInTheDocument();
+  } finally {
+    flushSync(() => root.unmount());
+    client.clear();
+    host.remove();
+  }
+});

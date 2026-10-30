@@ -14,7 +14,10 @@ export const deskQuery = () =>
       const busy =
         desk !== undefined &&
         (desk.running.length > 0 ||
-          desk.notMoving.some(({ reason }) => reason._tag === "QueuedForWorker"));
+          desk.notMoving.some(
+            ({ reason }) =>
+              reason._tag === "QueuedForWorker" || reason._tag === "WaitingForUpgrade",
+          ));
       return busy ? BUSY_DESK_REFRESH_MS : IDLE_DESK_REFRESH_MS;
     },
   });

@@ -4,15 +4,27 @@ import { Suspense } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
-import { page } from "vitest/browser";
+import { commands, page } from "vitest/browser";
 import { SetupPage } from "./setup.page";
 import { setupQuery, activateInstance } from "./queries";
 import "~/index.css";
 
-it.each([1280, 390])(
-  "walks setup through all states at %i pixels with a fake backend",
-  async (width) => {
-    await page.viewport(width, 900);
+it.each([
+  { device: "desktop", width: 1440, height: 900, theme: "dark" },
+  { device: "desktop", width: 1440, height: 900, theme: "light" },
+  { device: "phone", width: 390, height: 844, theme: "dark" },
+  { device: "phone", width: 390, height: 844, theme: "light" },
+])(
+  "walks setup through all states on $device in $theme with a fake backend",
+  async ({ device, width, height, theme }) => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    await commands.reducedMotion(true);
+    const capture = async (state: string) => {
+      await document.fonts.ready;
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+      await commands.configurationEditorScreenshot(`779-${state}-${device}-${theme}`);
+    };
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     let state: SetupState = { _tag: "NoApp" };
     const originalFetch = globalThis.fetch;
@@ -72,6 +84,7 @@ it.each([1280, 390])(
       await expect
         .element(page.getByRole("heading", { name: "Create your GitHub App" }))
         .toBeVisible();
+      await capture("no-app");
       await page.getByLabelText("App name").fill("usine-test");
       await page.getByLabelText("Organization (optional)").fill("acme");
       await page.getByRole("button", { name: "Create App on GitHub" }).click();
@@ -80,6 +93,7 @@ it.each([1280, 390])(
       await expect
         .element(page.getByRole("heading", { name: "Recover your GitHub App" }))
         .toBeVisible();
+      await capture("missing-key");
       await page.getByLabelText("Credential JSON").fill('{"app_id":123,"private_key":"restored"}');
       await page.getByRole("button", { name: "Save credentials" }).click();
       await expect
@@ -88,14 +102,17 @@ it.each([1280, 390])(
       await expect
         .element(page.getByRole("button", { name: "Install App on GitHub" }))
         .toHaveAttribute("href", "https://github.com/apps/usine-test/installations/new");
+      await capture("no-installation");
       state = { _tag: "Repositories", signIn: true, github: true };
       await page.getByRole("button", { name: "Check installation" }).click();
       await expect
         .element(page.getByRole("button", { name: "Sign in with GitHub" }))
         .toHaveAttribute("href", "/api/auth/github");
+      await capture("empty-registry");
       state = { _tag: "Repositories", signIn: false, github: true };
       await client.invalidateQueries(setupQuery());
       await expect.element(page.getByRole("button", { name: "Add repositories" })).toBeVisible();
+      await capture("repository-handoff");
       await activateInstance();
       expect(runtimeChecks).toBe(3);
       state = { _tag: "Ready" };
@@ -107,6 +124,8 @@ it.each([1280, 390])(
       host.remove();
       globalThis.fetch = originalFetch;
       document.removeEventListener("submit", stopNavigation);
+      document.documentElement.classList.remove("dark");
+      await commands.reducedMotion(false);
     }
   },
 );

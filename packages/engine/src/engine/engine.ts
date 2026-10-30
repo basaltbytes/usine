@@ -1,3 +1,5 @@
+import type { ReleaseVersion } from "@usine/core/upgrade";
+import type { UpgradeDrain } from "./upgrade.ts";
 import { AttentionAcknowledgements } from "../attention/attention.ts";
 import { Event } from "@usine/core/event";
 import { AttemptId } from "@usine/core/attempt";
@@ -287,6 +289,9 @@ const makeRunEngine = Effect.gen(function* () {
     cancel,
     discardLeftovers,
     drain: admission.drain,
+    waitForUpgrade: admission.waitForUpgrade,
+    cancelUpgrade: admission.cancelUpgrade,
+    upgradeDrain: admission.upgradeDrain,
     inspect,
     intervene,
     reconcile: driver.reconcile,
@@ -305,6 +310,12 @@ export class RunEngine extends Context.Service<
   {
     /** Stops admitting Attempts, including retries, and waits for admitted Attempts to finish. Admission stays closed until restart. */
     readonly drain: () => Effect.Effect<void>;
+    /** Defers reservations and new attempts while admitted attempts finish. */
+    readonly waitForUpgrade: (target: ReleaseVersion) => Effect.Effect<void>;
+    /** Reopens upgrade admission without reopening a process shutdown. */
+    readonly cancelUpgrade: Effect.Effect<void>;
+    /** The pending upgrade and the runs it defers in this process. */
+    readonly upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>>;
     /** Records the approval Event and its source, and opens the Run's approval gate. A repeated approval keeps the first source. */
     readonly approve: (
       runId: RunId,
@@ -461,3 +472,5 @@ export {
   RunStoreError,
   RunEngineError,
 } from "./error.ts";
+
+export { UpgradeDrain, UpgradeWait } from "./upgrade.ts";

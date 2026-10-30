@@ -205,7 +205,8 @@ const start = Effect.fnUntraced(function* (
         running: record.version,
         settings: Effect.map(instances.get, ({ config }) => config.settings),
         platform: Option.none(),
-        drain: Effect.void,
+        drain: () => Effect.void,
+        resume: Effect.void,
       }),
     );
     return yield* serve({
@@ -250,7 +251,8 @@ const start = Effect.fnUntraced(function* (
         platform: yield* systemUpgradePlatform(directory, record).pipe(
           Effect.provide(NodeServices.layer),
         ),
-        drain: engine.drain(),
+        drain: engine.waitForUpgrade,
+        resume: engine.cancelUpgrade,
       }),
     );
     const upgrades = Context.get(upgradeContext, ServerUpgrades);

@@ -52,7 +52,11 @@ export const SignInPage = ({ error }: SignInPageProps) => {
           </p>
         ) : (
           <>
-            {data.github && <Button render={<a href="/api/auth/github" />}>{githubSignIn}</Button>}
+            {data.github && (
+              <Button nativeButton={false} render={<a href="/api/auth/github" />}>
+                {githubSignIn}
+              </Button>
+            )}
             <p className="text-sm text-muted-foreground">{localSignIn}</p>
           </>
         )}
