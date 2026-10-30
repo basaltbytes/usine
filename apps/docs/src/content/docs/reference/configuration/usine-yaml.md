@@ -7,7 +7,7 @@ sidebar:
 
 `usine config export <folder>` writes `usine.yaml` at the top of the destination folder, next to `projects/` and `agents/`. `usine config import <folder>` reads that format, and `usine config edit` uses it for individual entities. The first start imports these files once; later starts read the configuration store. Use [`usine config edit` or `usine config import`](/reference/configuration/config/) to save changes. The export contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
 
-Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Webhook and worker connection changes also apply live. Changes to `tracing`, `auth`, worker names, and executor kinds need a restart. See [Live changes and restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements) for the exact fields and the difference between saving a revision and applying it.
+Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Webhook changes also apply live. Changes to `tracing`, `auth`, existing worker connections, worker names, and executor kinds need a restart. See [Live changes and restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements) for the exact fields and the difference between saving a revision and applying it.
 
 The parser is strict:
 
@@ -281,11 +281,11 @@ An automatically applied [revision](/reference/configuration/config/#live-change
 | A worker's `max_concurrent_attempts` goes up | Runs preflight on the worker with the new count and every harness in the roster. Then the new slots take waiting runs immediately. |
 | A worker's `max_concurrent_attempts` goes down | The worker starts no new attempt until it runs fewer attempts than the new count. Running attempts finish, and usine removes each extra slot when its attempt ends. |
 | A new worker | Runs preflight on it with every harness in the roster. The worker takes attempts after preflight passes. For an `ssh` worker behind a gateway, the reload first reads the variable named by `admin_token_env`, and refuses with `ReloadPreflightError` if it's unset. A new worker shares the admin API forward of a gateway that another worker uses. For a new gateway, usine opens a new forward. For a `cloudflare` worker, the reload reads its Access and provider credential variables and builds its client before preflight. |
-| A worker connection or runtime setting changes | Accepts the revision and runs preflight with the new settings. Running attempts keep their existing machine and clients. A failed check disables new scheduling on that worker until preflight passes. |
 | A removed worker | The worker starts no new attempt, and its running attempts finish. **Needs attention** shows **Worker not configured** with the number of attempts that still run. After the last one ends, you can select **Discard leftovers**. Then the forward to an `ssh` worker's gateway closes, unless another worker uses that gateway. |
 
 A failed preflight for an added worker or a resize keeps the running configuration unchanged with `ReloadPreflightError`; a revision saved by the CLI remains in the database. These changes need a restart, and a reload refuses them with `RestartRequiredError`, which includes the field, such as `workers.worker-2.kind`:
 
+- An existing worker's connection fields: `destination`, `identity_file`, `port`, `root`, `gateway`, `container`, or `provisioner` for `ssh`, and `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, or `llm_providers` for `cloudflare`. Retained attempts keep their machine, so reattachment and recovery must use the original connection and client.
 - A worker's `kind`, because the process selects its executor at startup.
 - A renamed worker: one worker removed and one added with the same `kind` and other keys. Stored attempt and machine identities use the original name.
 - A new worker whose `kind` differs from the kind of the running workers, because the process has no executor for it.
@@ -532,7 +532,7 @@ The parser refuses an `ssh` worker that:
 
 Removing a worker keeps its provider token for one final machine sweep, then discards it. If deletion fails, the warning includes the instance and worker labels to use for manual cleanup. At startup, usine also warns about machines with its instance label whose worker is not configured. This discovery uses configured workers' tokens; if the removed worker used a separate provider account, restore its configuration to sweep that account.
 
-A changed `provisioner` applies to new machines after preflight. Running attempts retain their machine and the provider client that deletes it.
+A reload refuses a changed `provisioner` with `RestartRequiredError` so retained attempts keep their machine.
 
 Preflight creates no machine. It checks the provider token; for Hetzner, the server type in the location, the image, the SSH key, and the network; for Boat, the account's limits, which fail preflight if Boat doesn't offer the account the `size`. Hetzner documents no limits endpoint, so preflight reads none for it. It also checks the gateway's admin API, and that each harness of the roster has a credential that no machine has to keep: for Claude Code, `anthropic` in the gateway's `llm_providers` or `api_keys.anthropic`; for Codex, `openai` in `llm_providers` or `api_keys.openai`. Pi agents fail preflight on a provisioned worker. A Hetzner server type that is out of stock in the location logs a warning, and so does a Boat account that can't start sandboxes now or whose active-sandbox cap is below `max_concurrent_attempts`. The checks that need a machine run on the worker's first machine after `usine up` and after the configured machine check interval.
 

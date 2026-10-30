@@ -25,8 +25,8 @@ export class SshWorkers extends Context.Service<
     /**
      * Adds the machine at `address` for preflight and Attempts. Behind a Gateway, shares the admin
      * API forward with other Workers that have the same `destination` and `adminPort`, or opens it.
-     * Adding a worker again with the same address does nothing. A different address replaces it
-     * for new work; running attempts retain their machine and gateway forward. The SSH executor's `addWorker` also records how to reach
+     * Adding a Worker again with the same address does nothing; with a different address, fails
+     * with a `machine` capability error. The SSH executor's `addWorker` also records how to reach
      * a long-lived Worker's machine in `SshExecutorOptions.workerRecordsDirectory`.
      */
     readonly addWorker: (address: SshWorkerAddress) => Effect.Effect<void, WorkerCapabilityError>;
@@ -214,8 +214,16 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     const added = yield* SynchronizedRef.modifyEffect(machines, (current) =>
       Effect.gen(function* () {
         const existing = current.byWorker.get(address.name);
-        if (existing !== undefined && Equal.equals(existing.address, address)) {
-          return [Option.none(), current] as const;
+        if (existing !== undefined) {
+          if (Equal.equals(existing.address, address)) return [Option.none(), current] as const;
+          return yield* new WorkerCapabilityError({
+            worker: address.name,
+            capability: "machine",
+            message: `Can't change the settings of SSH worker "${address.name}" while its attempts run. Reload again after they end.`,
+            cause: new Error(
+              `SSH worker "${address.name}" is in use at ${placeOf(existing.address)}`,
+            ),
+          });
         }
         const behind = yield* Effect.transposeOption(
           Option.map(address.gateway, (settings) => gatewayFor(current, address, settings)),
@@ -273,31 +281,42 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       const byWorker = new Map(current.byWorker);
       byWorker.delete(worker);
       const forwards = new Map(current.forwards);
-      const released = [];
-      for (const [key, held] of forwards) {
-        if (!held.workers.has(worker)) continue;
+      const left = Option.flatMap(machine.gateway, ({ settings }) => {
+        const key = forwardKey(settings);
+        const held = forwards.get(key);
+        if (held === undefined) return Option.none();
         const workers = new Set(held.workers);
         workers.delete(worker);
-        if (workers.size === 0) {
-          forwards.delete(key);
-          released.push(held);
-        } else forwards.set(key, { ...held, workers });
-      }
-      return [Option.some({ machine, released }), { byWorker, forwards }] as const;
+        if (workers.size === 0) forwards.delete(key);
+        else forwards.set(key, { ...held, workers });
+        return Option.some({ held, others: workers.size });
+      });
+      return [Option.some({ machine, left }), { byWorker, forwards }] as const;
     });
     if (Option.isNone(removed)) {
       yield* Effect.logDebug("The SSH executor has no Worker by this name to remove", { worker });
       return;
     }
-    const { machine, released } = removed.value;
-    yield* Effect.forEach(released, ({ scope }) => Scope.close(scope, Exit.void), {
-      discard: true,
-    });
-    yield* Effect.logInfo("SSH Worker removed from the executor; unused Gateway forwards closed", {
-      worker,
-      host: placeOf(machine.address),
-      forwardsClosed: released.length,
-    });
+    const { machine, left } = removed.value;
+    const fields = { worker, host: placeOf(machine.address) };
+    if (Option.isNone(left)) {
+      yield* Effect.logInfo("SSH Worker removed from the executor", fields);
+      return;
+    }
+    const { held, others } = left.value;
+    const gatewayFields = { ...fields, gateway: held.forward.gateway };
+    if (others > 0) {
+      yield* Effect.logInfo(
+        "SSH Worker removed from the executor; the forward to its Gateway's admin API stays open for the other Workers behind it",
+        { ...gatewayFields, others },
+      );
+      return;
+    }
+    yield* Scope.close(held.scope, Exit.void);
+    yield* Effect.logInfo(
+      "SSH Worker removed from the executor; it was the last behind its Gateway, so the forward to the Gateway's admin API closed",
+      gatewayFields,
+    );
   });
 
   const workerFor = Effect.fn("SshExecutor.workerFor")(function* (worker: WorkerName) {

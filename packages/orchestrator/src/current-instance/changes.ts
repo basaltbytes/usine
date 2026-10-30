@@ -177,6 +177,9 @@ export const restartChanges = (
       ]),
 ];
 
+const yamlKey = (field: string): string =>
+  field.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`);
+
 /**
  * Returns the keys of a Worker entry, other than `name` and `max_concurrent_attempts`, that differ
  * between `before` and `after`. Returns only `kind` if the kind differs.
@@ -192,9 +195,9 @@ const changedWorkerSettings = (
     );
   const previous = settings(before);
   const next = settings(after);
-  return [...new Set([...previous.keys(), ...next.keys()])].filter(
-    (key) => !Equal.equals(previous.get(key), next.get(key)),
-  );
+  return [...new Set([...previous.keys(), ...next.keys()])]
+    .filter((key) => !Equal.equals(previous.get(key), next.get(key)))
+    .map(yamlKey);
 };
 
 /** A Worker that a reload keeps with a new `max_concurrent_attempts`. */
@@ -207,11 +210,12 @@ interface ResizedWorker {
 /** The changes a reload makes to the `workers` block, by Worker name. */
 export interface WorkersChange {
   readonly resized: ReadonlyArray<ResizedWorker>;
-  readonly updated: ReadonlyArray<ConfigWorker>;
   readonly added: ReadonlyArray<ConfigWorker>;
   readonly removed: ReadonlyArray<ConfigWorker>;
   /**
-   * A changed kind or a rename, which counts as a removal plus an addition with the same settings.
+   * The changes running Workers can't apply: a changed kind or setting other than
+   * `max_concurrent_attempts`, and a rename, which counts as a removal plus an addition with the
+   * same settings.
    */
   readonly restart: ReadonlyArray<RestartChange>;
 }
@@ -225,17 +229,18 @@ export const workersChange = (
   const after = new Set(loaded.map(({ name }) => name));
   const restart: Array<RestartChange> = [];
   const resized: Array<ResizedWorker> = [];
-  const updated: Array<ConfigWorker> = [];
   for (const worker of loaded) {
     const previous = before.get(worker.name);
     if (previous === undefined) continue;
     const changed = changedWorkerSettings(previous, worker);
-    if (previous.kind === worker.kind && changed.length > 0) updated.push(worker);
-    if (previous.kind !== worker.kind) {
+    for (const key of changed) {
       restart.push({
         block: "workers",
-        field: `workers.${worker.name}.kind`,
-        reason: `worker "${worker.name}" changed kind from ${previous.kind} to ${worker.kind}`,
+        field: `workers.${worker.name}.${key}`,
+        reason:
+          key === "kind"
+            ? `worker "${worker.name}" changed kind from ${previous.kind} to ${worker.kind}`
+            : `worker "${worker.name}" changed ${key}`,
       });
     }
     if (changed.length === 0 && previous.maxConcurrentAttempts !== worker.maxConcurrentAttempts) {
@@ -253,5 +258,5 @@ export const workersChange = (
       reason: `worker "${previous.name}" was renamed to "${renamed.name}"`,
     });
   }
-  return { resized, updated, added, removed, restart };
+  return { resized, added, removed, restart };
 };

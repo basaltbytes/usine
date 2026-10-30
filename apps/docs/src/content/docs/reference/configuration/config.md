@@ -99,7 +99,7 @@ The next poll or schedule tick uses the new loops and registry. Changes to setti
 
 Webhook revisions replace the active hint source. Switching away from `deliveries` interrupts its current request or backoff; switching to it resumes from the stored delivery cursor. Endpoint mode updates the App URL and replaces the HTTP handler. **Settings** shows the accepted mode and the next hint received. The endpoint health interval starts again after a webhook change.
 
-Worker connection changes apply to new work, including SSH connection, gateway, container, and provisioner settings, and Cloudflare URL, credentials references, image, instance type, and provider settings. Existing attempts retain their machine, gateway, and provider client. A changed connection runs preflight after acceptance; if it fails, the revision stays applied, that worker starts no new attempts, and preflight retries automatically. A new Cloudflare worker resolves its credential references and builds its client before preflight, without a restart.
+A new Cloudflare worker resolves its credential references and builds its client before preflight, without a restart. Existing worker connections and Cloudflare clients remain unchanged until the orchestrator restarts.
 
 These changes require a restart:
 
@@ -108,8 +108,9 @@ These changes require a restart:
 | Instance | `tracing` | The exporter belongs to the process-wide Effect context created before the runtime. Existing fibers retain that tracer, and its shutdown flush runs after the runtime closes. Replacing only the exporter layer would leave existing fibers exporting through the old context. |
 | Instance | `auth` | Browser origin restrictions initialize the HTTP middleware at startup. |
 | Existing worker | `kind` or a rename (`name`). | The executor kind is selected at startup, and stored attempt and machine identities use the worker name. |
+| Existing worker connection | SSH: `destination`, `identity_file`, `port`, `root`, `gateway`, `container`, `provisioner`. Cloudflare: `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, `llm_providers`. | Retained attempts keep their machine. Reattachment and recovery must use the original connection, isolation settings, and cleanup client. |
 | Worker set | Changes while no worker executor is registered, as in setup mode, or adding a worker of another kind. | There is no matching executor to initialize or preflight these workers. |
-| Bootstrap values | GitHub App credentials, `.env` and provider or gateway credential values, listen port, origin, and log level. | These values initialize process services and are outside configuration revisions. Credential references can change live to variables already available to the process. |
+| Bootstrap values | GitHub App credentials, `.env` and provider or gateway credential values, listen port, origin, and log level. | These values initialize process services and are outside configuration revisions. |
 
 A CLI write can succeed while the running process refuses to apply it with `RestartRequiredError` or `ReloadPreflightError`. The revision remains saved, and the complete running configuration stays unchanged. Check the orchestrator log for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`.
 

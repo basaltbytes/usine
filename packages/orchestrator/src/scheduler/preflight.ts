@@ -274,38 +274,10 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     );
   });
 
-  const refresh = Effect.fn("WorkerScheduler.refreshPreflight")(function* (
-    workers: ReadonlyArray<Worker>,
-  ) {
-    yield* Effect.annotateCurrentSpan({ workers: workers.map(({ name }) => name) });
-    yield* TxRef.update(
-      blocked,
-      (current) =>
-        new Map([
-          ...current,
-          ...workers.map(({ name }) => [name, "Checking changed worker connection"] as const),
-        ]),
-    );
-    yield* Effect.forEach(
-      workers,
-      (worker) =>
-        Effect.gen(function* () {
-          yield* FiberMap.remove(retries, worker.name);
-          yield* Effect.logInfo("Worker connection changed; running attempts keep their machine", {
-            worker: worker.name,
-          });
-          if (yield* recover(worker.name))
-            yield* FiberMap.run(retries, worker.name, retry(worker.name));
-        }),
-      { concurrency: "unbounded", discard: true },
-    );
-  });
-
   return {
     start,
     run,
     checking: inFlight,
-    refresh,
     check,
     record,
     accept,

@@ -17,7 +17,7 @@ import type { RemoteCommands } from "./commands.ts";
 import type { AttemptIsolation } from "./container.ts";
 
 /** A machine with checkouts left for reconciliation. */
-export interface RemoteLeftovers<M extends RemoteMachine> {
+interface RemoteLeftovers<M extends RemoteMachine> {
   readonly machine: M;
   /** The paths directly under the Worker's `attempts` directory. */
   readonly checkouts: ReadonlySet<string>;

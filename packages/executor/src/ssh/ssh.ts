@@ -1,13 +1,20 @@
 import type { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
-import type { RepositoryName } from "@usine/core/repository";
+import type { AttemptId } from "@usine/core/attempt";
+import type { AttemptRecovery } from "@usine/core/attempt/salvage";
+import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Context, Effect, FileSystem, Layer, Option, type Path } from "effect";
 import type { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
-import { type CredentialProvider, Executor, WorkerMachines } from "../executor.ts";
+import {
+  type CredentialProvider,
+  Executor,
+  type ExecutorError,
+  WorkerMachines,
+} from "../executor.ts";
 import { agentsHarnessProbe, type HarnessProbe } from "../harness-preflight.ts";
 import { DEFAULT_SSH, remoteCommandsFor } from "../remote/commands.ts";
 import type { RemoteGrant } from "../remote/machine.ts";
@@ -89,7 +96,6 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       instance: options.instance,
       commands,
       workerFor,
-      machineFor,
       entries,
       machineAt,
       verifyMachine,
@@ -173,14 +179,40 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       );
     });
 
+    const attemptMachine = (
+      worker: WorkerName,
+      attemptId: AttemptId,
+    ): Effect.Effect<SshMachine, ExecutorError> =>
+      Effect.flatMap(
+        provisioned.provisions(worker),
+        (perAttempt): Effect.Effect<SshMachine, ExecutorError> =>
+          perAttempt ? provisioned.attemptMachine(worker, attemptId) : machineFor(worker),
+      );
+
     const executor = yield* remoteExecutorFor<SshMachine>({
       kind: "ssh",
       spanPrefix: "SshExecutor",
       label: "SSH",
       commands,
       machineFor,
-      attemptMachine: provisioned.attemptMachine,
-      leftovers: provisioned.leftovers,
+      attemptMachine,
+      leftovers: (attempt: AttemptRecovery, listed) =>
+        provisioned.provisions(attempt.worker).pipe(
+          Effect.flatMap((perAttempt) =>
+            perAttempt
+              ? provisioned.recoveryMachine(attempt.worker, attempt.attemptId).pipe(
+                  Effect.map(
+                    Option.map((machine) => ({
+                      machine,
+                      checkouts: new Set([
+                        `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`,
+                      ]),
+                    })),
+                  ),
+                )
+              : Effect.map(listed, Option.some),
+          ),
+        ),
       recovered: (attempt, succeeded) => provisioned.recovered(attempt.attemptId, succeeded),
       checkoutHeld: provisioned.checkoutHeld,
       preflight: sshPreflightFor(workerFor, verifyMachine, provisioned.verifyProvisioned),

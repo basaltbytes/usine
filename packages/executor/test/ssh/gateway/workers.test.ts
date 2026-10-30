@@ -113,7 +113,11 @@ describe("SSH Workers added and removed while the executor runs", () => {
         const logged = logs.lines.join("\n");
         assert.include(
           logged,
-          "SSH Worker removed from the executor; unused Gateway forwards closed",
+          "SSH Worker removed from the executor; the forward to its Gateway's admin API stays open for the other Workers behind it",
+        );
+        assert.include(
+          logged,
+          "SSH Worker removed from the executor; it was the last behind its Gateway, so the forward to the Gateway's admin API closed",
         );
         assert.include(logged, "Closed the forward to the Gateway's admin API");
       }).pipe(
@@ -125,41 +129,30 @@ describe("SSH Workers added and removed while the executor runs", () => {
   );
 
   it.effect(
-    "uses a changed connection for preflight while an existing attempt keeps its machine and Gateway",
+    "takes a Worker it has back with the same address, and refuses it with another while it is in use",
     () => {
       const machine = fakeMachine();
       const gateway = fakeGateway(machine);
       return Effect.gen(function* () {
         const workers = yield* SshWorkers;
-        const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [], 1);
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const prepared = yield* executor.prepare(request);
-            yield* workers.addWorker({
-              ...gatewayAddress({ gateway: OTHER_GATEWAY }),
-              machine: { _tag: "Fixed", destination: SshDestination.make("usine@203.0.113.8") },
-            });
-            yield* executor.preflight(WORKER, [], 1);
-            assert(
-              machine.state.calls.some(({ command }) => command.args.includes("usine@203.0.113.8")),
-            );
-            assert.strictEqual(machine.state.forwards.length, 2);
-            assert(machine.state.forwards.every(({ live }) => live));
-            machine.state.calls.length = 0;
-            yield* prepared.launch(sink);
-            assert(
-              machine.state.calls.every(
-                ({ command }) => !command.args.includes("usine@203.0.113.8"),
-              ),
-            );
-          }),
+        yield* workers.addWorker(gatewayAddress());
+        const refused = yield* workers
+          .addWorker({
+            ...gatewayAddress(),
+            machine: { _tag: "Fixed", destination: SshDestination.make("usine@203.0.113.8") },
+          })
+          .pipe(Effect.flip);
+        assert.strictEqual(refused.capability, "machine");
+        assert.strictEqual(
+          refused.message,
+          'Can\'t change the settings of SSH worker "eu-one" while its attempts run. Reload again after they end.',
         );
-        const detach = gateway.calls.at(-1);
-        assert(detach?.method === "DELETE" && detach.delivered);
-        assert.strictEqual(detach.port, machine.state.forwards[0]?.port);
-        yield* workers.removeWorker(WORKER);
-        assert(machine.state.forwards.every(({ live }) => !live));
+        yield* (yield* Executor).preflight(WORKER, [], 1);
+        assert.strictEqual(machine.state.forwards.length, 1);
+        assert(
+          machine.state.calls.every(({ command }) => !command.args.includes("usine@203.0.113.8")),
+          "the executor kept the machine it had",
+        );
       }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
     },
   );

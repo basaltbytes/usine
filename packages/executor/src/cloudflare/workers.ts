@@ -1,15 +1,14 @@
 import { RemoteShell, type SshCommand } from "@usine/agents/child-host";
-import { type SandboxName, sandboxName, SandboxOwner } from "@usine/cloudflare";
-import type { AttemptId } from "@usine/core/attempt";
+import { type SandboxName, SandboxOwner } from "@usine/cloudflare";
 import type { CloudflareLlmProvider, WorkerName } from "@usine/core/worker";
-import { Array as Arr, Context, Effect, Equal, Option, Redacted, Schema, Semaphore } from "effect";
+import { Array as Arr, Context, Effect, Option, Redacted, Schema, Semaphore } from "effect";
 import { HttpClient } from "effect/http";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import { type SandboxClient, sandboxClientFor } from "./client.ts";
 import type { CloudflareExecutorOptions, CloudflareWorkerAddress } from "./model.ts";
 import { SHELL_ENVIRONMENT } from "./shell/environment.ts";
 
-/** Registers worker addresses after their credentials resolve. Running attempts keep their existing client. */
+/** Registers worker addresses after their credentials resolve. Existing workers keep their credentials. */
 export class CloudflareWorkers extends Context.Service<
   CloudflareWorkers,
   {
@@ -30,16 +29,13 @@ export interface CloudflareWorker {
 export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: SshCommand) =>
   Effect.gen(function* () {
     const workers = new Map<WorkerName, CloudflareWorker>();
-    // Startup recovery can defer reattachment before this executor sees the attempt.
-    const firstConnections = new Map<WorkerName, CloudflareWorker>();
-    const sandboxes = new Map<SandboxName, CloudflareWorker>();
     const http = yield* HttpClient.HttpClient;
     const exclusive = yield* Semaphore.make(1);
     const addWorker = Effect.fn("CloudflareExecutor.addWorker")(function* (
       address: CloudflareWorkerAddress,
     ) {
       yield* Effect.annotateCurrentSpan({ worker: address.name });
-      if (Equal.equals(workers.get(address.name)?.address, address)) {
+      if (workers.has(address.name)) {
         yield* Effect.logDebug("Cloudflare worker is already registered", { worker: address.name });
         return;
       }
@@ -70,16 +66,14 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
         [SHELL_ENVIRONMENT.accessClientId]: Redacted.value(address.accessClientId),
         [SHELL_ENVIRONMENT.accessClientSecret]: Redacted.value(address.accessClientSecret),
       };
-      const worker: CloudflareWorker = {
+      workers.set(address.name, {
         address,
         owner,
         client,
         providers: Arr.dedupe(address.providers.map(({ provider }) => provider)),
         shellFor: (name) => new RemoteShell({ ssh: shell, sshEnvironment, destination: name }),
-      };
-      workers.set(address.name, worker);
-      if (!firstConnections.has(address.name)) firstConnections.set(address.name, worker);
-      yield* Effect.logInfo("Cloudflare worker client registered", { worker: address.name });
+      });
+      yield* Effect.logInfo("Cloudflare worker added to the executor", { worker: address.name });
     }, exclusive.withPermit);
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length) {
       return yield* Effect.die(
@@ -101,36 +95,5 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
         onSome: Effect.succeed,
       });
 
-    const retainedWorkerFor = Effect.fn("CloudflareExecutor.retainedWorkerFor")(function* (
-      operation: ExecutorOperation,
-      name: WorkerName,
-      attemptId: AttemptId,
-    ) {
-      yield* Effect.annotateCurrentSpan({ worker: name, attemptId });
-      const current = yield* workerFor(operation, name);
-      const worker =
-        sandboxes.get(sandboxName(current.owner, attemptId)) ??
-        firstConnections.get(name) ??
-        current;
-      yield* Effect.logDebug("Resolved the retained sandbox connection", {
-        worker: name,
-        attemptId,
-        currentConnection: worker === current,
-      });
-      return worker;
-    });
-
-    return {
-      workerFor,
-      retainedWorkerFor,
-      retain: (name: SandboxName, worker: CloudflareWorker) =>
-        Effect.sync(() => {
-          sandboxes.set(name, worker);
-        }),
-      forget: (name: SandboxName) =>
-        Effect.sync(() => {
-          sandboxes.delete(name);
-        }),
-      membership: CloudflareWorkers.of({ addWorker }),
-    };
+    return { workerFor, membership: CloudflareWorkers.of({ addWorker }) };
   });

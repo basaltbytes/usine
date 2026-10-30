@@ -6,7 +6,6 @@ import { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { RunId } from "@usine/core/run";
 import {
-  WorkerRoot,
   ProvisionerTimings,
   ContainerCpus,
   ContainerLimits,
@@ -42,7 +41,6 @@ import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { layer as sshLayer, SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
-  ADDRESS,
   capturedLogs,
   fakeMachine,
   INSTANCE,
@@ -698,91 +696,56 @@ describe("Provisioned SSH Worker", () => {
     },
   );
 
-  for (const replaced of [false, true]) {
-    it.live(
-      `recovers an earlier process's attempt before deleting its machine (connection replaced: ${replaced})`,
-      () => {
-        const machine = fakeMachine();
-        machine.state.cacheExists = true;
-        const providers = fakeProviders();
-        return Effect.gen(function* () {
-          const executor = yield* Executor;
-          pinnedEarlier(machine, 21);
-          providers.hetzner.servers.set(21, {
-            id: 21,
-            name: "usine-eu-one-21",
-            status: "running",
-            created: new Date().toISOString(),
-            labels: {
-              "usine-instance": INSTANCE,
-              "usine-worker": WORKER,
-              "usine-run": RUN,
-              "usine-process": "earlier00000",
-              "usine-attempt": attemptTag(request.attemptId),
-            },
-            privateIp: undefined,
-            publicIp: "203.0.113.91",
-            startingReads: 0,
-          });
-          const machines = yield* WorkerMachines;
-          const hold = replaced ? yield* machines.adopt(WORKER, request.attemptId) : Option.none();
-          if (replaced) {
-            assert.isTrue(Option.isSome(hold));
-            yield* (yield* SshWorkers).addWorker({
-              ...ADDRESS,
-              root: WorkerRoot.make("/srv/replacement"),
-            });
-          }
-          machine.state.salvage = "dirty";
-          let salvages = 0;
-          const attempt: AttemptRecovery = {
-            attemptId: request.attemptId,
-            worker: WORKER,
-            repository: request.repository,
-            ref: request.salvageRef,
-            permissions: "write",
-            succeeded: false,
-            open: false,
-            rejected: Option.none(),
-          };
-          yield* executor.recover(
-            attempt,
-            {
-              ...sink,
-              salvage: () =>
-                Effect.sync(() => {
-                  salvages += 1;
-                }),
-            },
-            Effect.succeed(request.commitAuthor),
-          );
-          assert.strictEqual(salvages, 1, "the original checkout is salvaged before deletion");
-          if (Option.isSome(hold)) {
-            assert.isTrue(
-              providers.hetzner.servers.has(21),
-              "the occupied slot retains its machine",
-            );
-            yield* machines.release(hold.value);
-          }
-          assert.isTrue(
-            machine.state.calls.some(({ command }) => command.args.includes("usine@203.0.113.91")),
-            "the recovery ran on the Attempt's machine",
-          );
-          assert.strictEqual(providers.hetzner.servers.size, 0, "the machine is deleted after");
-          machine.state.cacheExists = false;
-          // An Attempt whose machine is gone has nothing to reconcile.
-          yield* executor.recover(
-            {
-              ...attempt,
-              attemptId: AttemptId.make("remote-run/execute/2"),
-            },
-            sink,
-            Effect.succeed(request.commitAuthor),
-          );
-        }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
-      },
-    );
-  }
+  it.live("recovers an earlier process's Attempt on its machine, then deletes the machine", () => {
+    const machine = fakeMachine();
+    machine.state.cacheExists = true;
+    const providers = fakeProviders();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      pinnedEarlier(machine, 21);
+      providers.hetzner.servers.set(21, {
+        id: 21,
+        name: "usine-eu-one-21",
+        status: "running",
+        created: new Date().toISOString(),
+        labels: {
+          "usine-instance": INSTANCE,
+          "usine-worker": WORKER,
+          "usine-run": RUN,
+          "usine-process": "earlier00000",
+          "usine-attempt": attemptTag(request.attemptId),
+        },
+        privateIp: undefined,
+        publicIp: "203.0.113.91",
+        startingReads: 0,
+      });
+      const attempt: AttemptRecovery = {
+        attemptId: request.attemptId,
+        worker: WORKER,
+        repository: request.repository,
+        ref: request.salvageRef,
+        permissions: "write",
+        succeeded: true,
+        open: false,
+        rejected: Option.none(),
+      };
+      yield* executor.recover(attempt, sink, Effect.succeed(request.commitAuthor));
+      assert.isTrue(
+        machine.state.calls.some(({ command }) => command.args.includes("usine@203.0.113.91")),
+        "the recovery ran on the Attempt's machine",
+      );
+      assert.strictEqual(providers.hetzner.servers.size, 0, "the machine is deleted after");
+      // An Attempt whose machine is gone has nothing to reconcile.
+      yield* executor.recover(
+        {
+          ...attempt,
+          attemptId: AttemptId.make("remote-run/execute/2"),
+        },
+        sink,
+        Effect.succeed(request.commitAuthor),
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
+  });
 
   it.live(
     "keeps a machine with no recorded host key through worker removal and restoration",

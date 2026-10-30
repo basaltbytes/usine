@@ -1,7 +1,7 @@
-import { Effect, FileSystem, Option, Ref, Semaphore } from "effect";
-import { HttpClient } from "effect/http";
+import type { WorkerName } from "@usine/core/worker";
+import { Cache, Effect, FileSystem, Option, Ref } from "effect";
 import { homedir } from "node:os";
-import { WorkerCapabilityError } from "../../executor.ts";
+import { type ExecutorError, WorkerCapabilityError } from "../../executor.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { ProvisionedMachinesOptions } from "./machines.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
@@ -12,12 +12,11 @@ import { type MachineDriver, tagValue } from "./model.ts";
 const expandHome = (file: string): string =>
   file.startsWith("~/") ? `${homedir()}/${file.slice(2)}` : file;
 
-/** Reuses provider clients for each worker connection; running machines retain their client. */
+/** Caches provider credentials until a removed worker completes its final sweep. */
 export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(function* (
-  options: Pick<ProvisionedMachinesOptions, "settings" | "instance">,
+  options: Pick<ProvisionedMachinesOptions, "workerFor" | "settings" | "instance">,
 ) {
   const fs = yield* FileSystem.FileSystem;
-  const http = yield* HttpClient.HttpClient;
   const { settings, instance } = options;
   const readPublicKey = Effect.fn("SshExecutor.readPublicKey")(function* (entry: SshWorkerEntry) {
     const worker = entry.address.name;
@@ -41,9 +40,9 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
     });
   });
 
-  const buildDriver = Effect.fn("SshExecutor.machineDriver")(function* (entry: SshWorkerEntry) {
-    const worker = entry.address.name;
+  const buildDriver = Effect.fn("SshExecutor.machineDriver")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
+    const entry = yield* options.workerFor(worker);
     const provisioner =
       entry.address.machine._tag === "Provisioned"
         ? Option.some(entry.address.machine.provisioner)
@@ -73,18 +72,9 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
         );
     }
   });
-  const drivers = new WeakMap<SshWorkerEntry, MachineDriver>();
-  const exclusive = yield* Semaphore.make(1);
-  const forEntry = Effect.fn("SshExecutor.driverForConnection")(function* (entry: SshWorkerEntry) {
-    yield* Effect.annotateCurrentSpan({ worker: entry.address.name });
-    const existing = drivers.get(entry);
-    if (existing !== undefined) return existing;
-    const driver = yield* buildDriver(entry).pipe(
-      Effect.provideService(HttpClient.HttpClient, http),
-    );
-    drivers.set(entry, driver);
-    return driver;
-  }, exclusive.withPermit);
+  const drivers = yield* Cache.make({ capacity: Number.POSITIVE_INFINITY, lookup: buildDriver });
+  const driverFor = (worker: WorkerName): Effect.Effect<MachineDriver, ExecutorError> =>
+    Cache.get(drivers, worker);
 
   const warned = yield* Ref.make(false);
   const warnUnowned = Effect.fn("SshExecutor.warnUnownedMachines")(function* (
@@ -98,7 +88,7 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
         Effect.gen(function* () {
           const worker = entry.address.name;
           yield* Effect.annotateCurrentSpan({ worker, instance });
-          const driver = yield* forEntry(entry);
+          const driver = yield* driverFor(worker);
           const configured = new Set(
             entries
               .filter(
@@ -136,7 +126,8 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
     );
   });
   return {
-    forEntry,
+    get: driverFor,
+    forget: (worker: WorkerName) => Cache.invalidate(drivers, worker),
     warnUnowned,
   };
 });

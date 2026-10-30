@@ -235,8 +235,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     const shell = options.shell ?? DEFAULT_SHELL;
     const drainPollInterval = options.drainPollInterval ?? "30 seconds";
 
-    const { workerFor, retainedWorkerFor, retain, forget, membership } =
-      yield* cloudflareWorkersFor(options, shell);
+    const { workerFor, membership } = yield* cloudflareWorkersFor(options, shell);
 
     const lastIssued = yield* Ref.make(DateTime.makeUnsafe(0));
     /**
@@ -281,7 +280,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       const { destroyed } = yield* worker.client
         .destroy(name)
         .pipe(Effect.mapError(operationError("cleanup")));
-      yield* forget(name);
       yield* Effect.logInfo(destroyed ? "Destroyed the sandbox" : "The sandbox was already gone", {
         worker: worker.address.name,
         sandbox: name,
@@ -301,7 +299,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     ) {
       const fields = { worker: worker.address.name, sandbox: name, reason };
       yield* Effect.annotateCurrentSpan(fields);
-      yield* retain(name, worker);
       yield* worker.client.hold(name).pipe(
         Effect.tap(() =>
           Effect.logInfo("Holding the sandbox until usine reconciles or destroys it", fields),
@@ -416,7 +413,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         instanceType: worker.address.instanceType,
       };
       yield* Effect.annotateCurrentSpan(fields);
-      yield* retain(name, worker);
       yield* worker.client
         .create(
           name,
@@ -704,7 +700,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     ) {
       yield* Effect.annotateCurrentSpan(recoveryFields(attempt));
       yield* session.stopForRecovery(attempt);
-      const worker = yield* retainedWorkerFor("cleanup", attempt.worker, attempt.attemptId);
+      const worker = yield* workerFor("cleanup", attempt.worker);
       const name = sandboxName(worker.owner, attempt.attemptId);
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -727,7 +723,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             record,
           );
           if (Option.isNone(summary)) {
-            yield* forget(name);
             yield* Effect.logInfo("The Attempt's sandbox is gone; nothing to reconcile", {
               attemptId: attempt.attemptId,
               sandbox: name,
@@ -839,9 +834,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         reattach: request.reattach,
       };
       yield* Effect.annotateCurrentSpan(fields);
-      const worker = yield* request.reattach
-        ? retainedWorkerFor("prepare", request.worker, request.attemptId)
-        : workerFor("prepare", request.worker);
+      const worker = yield* workerFor("prepare", request.worker);
       const gap = brainGap(worker.address, request.agent.brain);
       if (Option.isSome(gap)) {
         yield* Effect.logWarning("Refused an Attempt whose brain the sandbox can't run", {

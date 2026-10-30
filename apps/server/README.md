@@ -90,7 +90,7 @@ A failed hook configuration request is logged; the endpoint and normal polling r
 
 The web UI edits stored entities in their export format, validates each save, and shows revision history and diffs. Concurrent writes return a conflict; the editor retains the draft while the operator reviews the newer text. Create, delete, and revert actions use the same API as other configuration writes. New loops start paused.
 
-The reload HTTP endpoint has been removed. Revisions apply automatically; `SIGHUP` remains available to explicitly re-read the store without stopping the process. A configuration write that requires a restart, or whose added worker or slots fail preflight, stores nothing and returns the reason. A changed connection applies first; a failed preflight disables new scheduling on that worker and retries automatically. App signing credentials are read at startup and after setup saves them. GitHub sign-in reads the client ID and secret from the runtime file when their environment overrides are unset.
+The reload HTTP endpoint has been removed. Revisions apply automatically; `SIGHUP` remains available to explicitly re-read the store without stopping the process. A configuration write that requires a restart or fails worker preflight stores nothing and returns the reason. Existing worker connection changes require a restart so retained attempts keep their machine. App signing credentials are read at startup and after setup saves them. GitHub sign-in reads the client ID and secret from the runtime file when their environment overrides are unset.
 
 ## Back up and export
 
