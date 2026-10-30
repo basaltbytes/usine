@@ -40,3 +40,11 @@ GitHub user IDs bind membership to accounts across login changes. Sessions and d
 - `operator:` in `usine.yaml` identifies only the approvals and interventions recorded before sign-in exists.
 - Every client signs in, including the bundled UI and a browser on the instance's own machine. Scripts that call the API with `curl` need a token; the CLI on the instance's machine reads the admin token file.
 - The API on a public address is an attack surface that the network used to hide. A deployment guide states what an instance needs before it's public: TLS, the allowed origins, and the rate limits.
+
+## Published API schema
+
+Amended for [#778](https://github.com/basaltbytes/usine/issues/778) on 2026-10-30: keep existing `/api/...` paths. Path versioning is deferred until an external client needs it. This replaces the versioned-path requirement above.
+
+`GET /api/openapi.json` is public, alongside health and sign-in routes. It contains the generated API contract, without instance configuration or credentials. The server combines the shared `OperatorApi` contract with authentication route declarations; authentication handlers use those declarations for registration and request decoding. Static assets and the separate GitHub webhook listener are outside this contract.
+
+The docs build regenerates a committed OpenAPI document and renders the HTTP reference from it. CI validates the document against the OpenAPI 3.1 schema, checks route coverage and anonymous access, and rejects a committed document that differs from generation.

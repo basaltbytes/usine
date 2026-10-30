@@ -1,0 +1,24 @@
+---
+title: Operator HTTP API
+description: Paths, authentication, parameters, request bodies, and responses for the usine operator API.
+---
+
+import OperatorApiReference from "../../../components/operator-api-reference.astro";
+
+The operator API reads instance state, manages configuration, and operates runs. This reference renders the committed [OpenAPI 3.1 document](/openapi.json). For the contract of a running instance, request `GET /api/openapi.json` from that instance. The schema endpoint is public and contains no instance configuration or credentials.
+
+## Authentication
+
+Send an instance token as `Authorization: Bearer <token>`. Browser clients can use the `usine_session` cookie; writes with a session also require `X-Usine-CSRF`. See [Sign in](/guides/sign-in/) for token issuance and browser sessions. The document marks health, sign-in, and schema operations as public. Every member has instance admin access.
+
+Use HTTPS through a reverse proxy for remote access. Browser requests must use an origin accepted by the instance. URL-encode path parameters, including slashes in repository names and qualified loop names. An acknowledgement from an asynchronous action means the server accepted the request; read the corresponding status to learn its outcome.
+
+## Paths and versions
+
+Paths remain under `/api/...`. Path versioning is deferred until an external client needs it, as recorded in [ADR 0030](https://github.com/basaltbytes/usine/blob/main/docs/adr/0030-operator-api-authentication-and-access-control.md). The document's `info.version` is `unversioned`; read `GET /api/version` for the running release.
+
+The reference covers the operator HTTP API, including sign-in, members, and tokens. Static UI assets and the separate signature-verified GitHub webhook listener are outside this contract.
+
+## Operations
+
+<OperatorApiReference />

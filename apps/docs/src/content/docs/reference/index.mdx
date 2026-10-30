@@ -13,7 +13,11 @@ description: Configuration revisions, their import and export files, the usine c
 - [Expressions](/reference/configuration/expressions/): the CEL that loop conditions and prompt templates use.
 - [CLI](/reference/configuration/cli/): the `usine` commands, their flags, and the environment variables they read.
 
-## API
+## HTTP API
+
+The [operator HTTP API](/reference/operator-api/) documents instance reads, configuration, run actions, and sign-in. Download its [OpenAPI document](/openapi.json) or fetch `/api/openapi.json` from a running instance.
+
+## Package API
 
 The site build generates these pages from the TSDoc comments of each package's public subpaths, the entries of its `exports` map, such as `@usine/core/run`. Other modules are internal and not documented.
 

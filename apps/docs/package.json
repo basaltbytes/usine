@@ -7,10 +7,12 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "pnpm openapi:generate && astro build",
     "preview": "astro preview",
     "check": "astro check",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "openapi:generate": "node --experimental-strip-types openapi.mjs",
+    "openapi:check": "node --experimental-strip-types openapi.mjs --check"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.7",

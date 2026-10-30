@@ -1,3 +1,4 @@
+import { DocumentationApi, operatorOpenApi } from "./openapi.ts";
 import { type ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { authenticatedRoutes, type AuthServices } from "./auth/http.ts";
@@ -361,7 +362,14 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
  * names and at `origin`.
  */
 export const apiRoutes = (origin: Option.Option<UiOrigin>) =>
-  HttpApiBuilder.layer(OperatorApi).pipe(
+  Layer.merge(
+    HttpApiBuilder.layer(OperatorApi),
+    HttpRouter.add(
+      DocumentationApi.endpoints.openapi.method,
+      DocumentationApi.endpoints.openapi.path,
+      HttpServerResponse.jsonUnsafe(operatorOpenApi()),
+    ),
+  ).pipe(
     Layer.provide(handlers),
     Layer.provide(policy(origin)),
     Layer.provide(NodeHttpServer.layerHttpServices),

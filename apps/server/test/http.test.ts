@@ -1,3 +1,5 @@
+import { registerSchema, unregisterSchema, validate } from "@hyperjump/json-schema/openapi-3-1";
+import { DocumentationApi, operatorOpenApi } from "../src/openapi.ts";
 import { ConfigurationStoreError } from "@usine/config/configuration";
 import { ProjectId } from "@usine/core/project";
 import { Project } from "@usine/config/project";
@@ -12,7 +14,7 @@ import {
 } from "@usine/engine/attention";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,7 +95,7 @@ import {
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
-import { DateTime, Effect, Layer, Option, Schema } from "effect";
+import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { afterAll, assert, describe, it } from "vitest";
@@ -401,10 +403,11 @@ const app = HttpRouter.toWebHandler(
 
 afterAll(() => app.dispose());
 
-it("denies anonymous requests for every registered API route before decoding a request", async () => {
+it("publishes a valid OpenAPI document for every API route and protects non-public routes", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
-      const auth = authenticatedRoutes(yield* authFixture());
+      const services = yield* authFixture();
+      const auth = authenticatedRoutes(services);
       const secured = HttpRouter.toWebHandler(
         Layer.mergeAll(
           apiRoutes(Option.none()).pipe(Layer.provide(auth.guard.layer)),
@@ -416,6 +419,7 @@ it("denies anonymous requests for every registered API route before decoding a r
       const publicRoutes = new Set([
         "GET /api/health",
         "GET /api/version",
+        "GET /api/openapi.json",
         "GET /api/auth/info",
         "GET /api/auth/github",
         "GET /api/auth/callback",
@@ -426,7 +430,48 @@ it("denies anonymous requests for every registered API route before decoding a r
       const endpoints = [
         ...Object.values(OperatorApi.groups).flatMap((group) => Object.values(group.endpoints)),
         ...auth.endpoints,
+        ...Object.values(DocumentationApi.endpoints),
       ];
+      const response = yield* Effect.promise(() =>
+        secured.handler(new Request("http://127.0.0.1/api/openapi.json")),
+      );
+      assert.equal(response.status, 200);
+      assert.include(response.headers.get("content-type"), "application/json");
+      const document = yield* Effect.promise(() => response.json());
+      const validation = yield* Effect.promise(() =>
+        validate("https://spec.openapis.org/oas/3.1/schema-base", document, "BASIC"),
+      );
+      assert.isTrue(validation.valid, JSON.stringify(validation));
+      const generated = operatorOpenApi();
+      assert.deepEqual(document, generated);
+      const committed = yield* Effect.promise(() =>
+        readFile(new URL("../../docs/public/openapi.json", import.meta.url), "utf8"),
+      );
+      assert.deepEqual(document, JSON.parse(committed));
+      const documentedRoutes = Object.entries(generated.paths).flatMap(([path, methods]) =>
+        Object.entries(methods).map(([method, operation]) => {
+          assert.property(operation, "summary", `${method} ${path}`);
+          assert.property(operation, "description", `${method} ${path}`);
+          return `${method.toUpperCase()} ${path}`;
+        }),
+      );
+      assert.sameMembers(
+        documentedRoutes,
+        endpoints.map(({ method, path }) => `${method} ${path.replace(/:([^/]+)/gu, "{$1}")}`),
+      );
+      assert.deepEqual(generated.paths["/api/openapi.json"]?.get?.security, []);
+      assert.deepEqual(generated.paths["/api/version"]?.get?.security, []);
+      assert.deepEqual(generated.paths["/api/overview"]?.get?.security, [
+        { bearer: [] },
+        { session: [] },
+      ]);
+      const schemaId = "https://usine.example/openapi-test";
+      registerSchema(document, schemaId, "https://spec.openapis.org/oas/3.1/dialect/base");
+      yield* Effect.addFinalizer(() => Effect.sync(() => unregisterSchema(schemaId)));
+      const link = new URL(yield* services.authentication.link);
+      const session = yield* services.authentication.consumeLink(
+        new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
+      );
       for (const endpoint of endpoints) {
         if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
         const path = endpoint.path.replace(/:[^/]+/gu, "test");
@@ -446,9 +491,64 @@ it("denies anonymous requests for every registered API route before decoding a r
           );
           assert.equal(response.status, 401, `${endpoint.method} ${spelling}`);
         }
+        if (endpoint.method !== "GET") {
+          const schemaPath = encodeURIComponent(
+            endpoint.path.replace(/:([^/]+)/gu, "{$1}").replaceAll("/", "~1"),
+          );
+          const responseSchema = `${schemaId}#/paths/${schemaPath}/${endpoint.method.toLowerCase()}/responses/403/content/application~1json/schema`;
+          for (const csrf of [undefined, "stale-csrf"]) {
+            const headers = new Headers({
+              cookie: `usine_session=${Redacted.value(session.secret)}`,
+            });
+            if (csrf !== undefined) headers.set("x-usine-csrf", csrf);
+            const response = yield* Effect.promise(() =>
+              secured.handler(
+                new Request(`http://127.0.0.1${path}`, {
+                  method: endpoint.method,
+                  headers,
+                }),
+              ),
+            );
+            assert.equal(response.status, 403);
+            const body = yield* Effect.promise(() => response.json());
+            const result = yield* Effect.promise(() => validate(responseSchema, body));
+            assert.isTrue(result.valid, `${endpoint.method} ${path}: ${JSON.stringify(body)}`);
+          }
+        }
       }
+      const forbiddenSchema = `${schemaId}#/paths/~1api~1runs~1%7BrunId%7D~1cancel/post/responses/403/content/application~1json/schema`;
+      const crossSite = yield* Effect.promise(() =>
+        validate(forbiddenSchema, {
+          error: "CrossSiteRequestError",
+          message: "Origin is not allowed",
+        }),
+      );
+      assert.isTrue(crossSite.valid);
     }).pipe(Effect.scoped),
   );
+});
+
+it("publishes optional transcript cursor parameters with their domain constraints", () => {
+  const parameters = operatorOpenApi().paths["/api/runs/{runId}"]?.get?.parameters;
+  assert.isDefined(parameters);
+  assert.sameMembers(
+    parameters.map(({ name }) => name),
+    ["runId", "after", "before", "attempt"],
+  );
+  const cursors = parameters.filter((parameter) => parameter.in === "query");
+  assert.sameMembers(
+    cursors.map(({ name }) => name),
+    ["after", "before", "attempt"],
+  );
+  for (const cursor of cursors) {
+    assert.isFalse(cursor.required);
+    assert.deepEqual(
+      cursor.schema,
+      cursor.name === "attempt"
+        ? { type: "string", minLength: 1 }
+        : { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+    );
+  }
 });
 
 describe("operator HTTP API", () => {

@@ -37,6 +37,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@hyperjump/json-schema": "1.18.0",
     "@usine/executor": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "@usine/web": "workspace:*",

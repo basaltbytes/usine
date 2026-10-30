@@ -50,6 +50,7 @@ export default defineConfig({
           label: "Reference",
           items: [
             { label: "Overview", slug: "reference" },
+            { label: "Operator HTTP API", slug: "reference/operator-api" },
             {
               label: "Configuration",
               items: [{ autogenerate: { directory: "reference/configuration" } }],

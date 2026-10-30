@@ -53,7 +53,13 @@ import { RunAgainResult } from "@usine/engine/engine";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { ExecutorOperation, WorkerCapability } from "@usine/executor";
 import { Effect, Match, Record, Schema, SchemaTransformation } from "effect";
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/http-api";
+import {
+  HttpApi,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiMiddleware,
+  OpenApi,
+} from "effect/http-api";
 import { RestartBlock } from "../current-instance/changes.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
@@ -114,9 +120,11 @@ export class OperatorHttpError extends Schema.Error<OperatorHttpError>(
   "@usine/orchestrator/OperatorHttpError",
 )({
   /** The domain failure tag used to select the HTTP status. */
-  error: Schema.Literals(Record.keys(errorStatuses)),
+  error: Schema.Literals(Record.keys(errorStatuses)).annotate({
+    description: "Domain failure tag that selects the HTTP status.",
+  }),
   /** The diagnostic text to show to the operator. */
-  message: Schema.String,
+  message: Schema.String.annotate({ description: "Diagnostic text safe to show to the operator." }),
 }) {
   /** The HTTP status for this error. */
   get status() {
@@ -387,7 +395,10 @@ const transcriptQuery = Schema.Union([
 const repositoryPart = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9_.-]+$/u, { message: "Expected a repository path segment" }),
 );
-const acknowledged = Schema.Struct({ ok: Schema.Literal(true) });
+const acknowledged = Schema.Struct({ ok: Schema.Literal(true) }).annotate({
+  title: "Acknowledgement",
+  description: "The request was accepted. An asynchronous action may still be running.",
+});
 const runParams = { runId: RunId };
 const loopParams = { loop: LoopName };
 const statisticsQuery = Schema.Struct({
@@ -396,6 +407,14 @@ const statisticsQuery = Schema.Struct({
     Schema.withDecodingDefaultKey(Effect.succeed("30d" as const)),
   ),
 });
+
+const operatorApi = HttpApi.make("OperatorApi")
+  .annotate(OpenApi.Title, "usine operator API")
+  .annotate(OpenApi.Version, "unversioned")
+  .annotate(
+    OpenApi.Description,
+    "Read instance state, manage configuration, and operate runs. Requests use instance bearer tokens or browser sessions. API paths remain under /api.",
+  );
 
 /**
  * The operator's HTTP API contract for reads and interventions, shared by server handlers and
@@ -406,74 +425,196 @@ const statisticsQuery = Schema.Struct({
  * It returns 409 `WorkerPreflightRejectedError` while an attempt or another preflight uses
  * that worker. The result updates configuration, overview, and desk reads without a restart.
  */
-export const OperatorApi = HttpApi.make("OperatorApi").add(
+export const OperatorApi = operatorApi.add(
   HttpApiGroup.make("operator")
+    .annotate(OpenApi.Title, "Operator")
+    .annotate(OpenApi.Description, "Instance reads, configuration revisions, and run actions.")
     .add(
-      HttpApiEndpoint.get("upgradeStatus", "/api/upgrade", { success: UpgradeView }),
-      HttpApiEndpoint.get("serverVersion", "/api/version", { success: Schema.String }),
+      HttpApiEndpoint.get("upgradeStatus", "/api/upgrade", { success: UpgradeView })
+        .annotate(OpenApi.Summary, "Read upgrade status")
+        .annotate(
+          OpenApi.Description,
+          "Returns the running release, available release, and upgrade progress.",
+        ),
+      HttpApiEndpoint.get("serverVersion", "/api/version", { success: Schema.String })
+        .annotate(OpenApi.Summary, "Read the running release")
+        .annotate(
+          OpenApi.Description,
+          "Public health check that returns the running release string.",
+        ),
       HttpApiEndpoint.post("requestUpgrade", "/api/upgrade", {
         payload: UpgradeRequest,
         success: acknowledged,
-      }),
-      HttpApiEndpoint.get("overview", "/api/overview", { success: FactoryOverview }),
+      })
+        .annotate(OpenApi.Summary, "Request an upgrade")
+        .annotate(
+          OpenApi.Description,
+          "Accepts an upgrade when idle or an immediate restart. Poll upgrade status for the outcome.",
+        ),
+      HttpApiEndpoint.get("overview", "/api/overview", { success: FactoryOverview })
+        .annotate(OpenApi.Summary, "Read the instance overview")
+        .annotate(
+          OpenApi.Description,
+          "Returns project boards, loops, workers, and instance readiness.",
+        ),
       HttpApiEndpoint.post("dismissNeed", "/api/attention/dismiss", {
         payload: AttentionKey,
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Dismiss an attention item")
+        .annotate(
+          OpenApi.Description,
+          "Acknowledges the current attention item until its state changes.",
+        ),
       HttpApiEndpoint.post("undoDismissNeed", "/api/attention/undo", {
         payload: AttentionKey,
         success: acknowledged,
-      }),
-      HttpApiEndpoint.get("agents", "/api/agents", { success: Schema.Array(AgentName) }),
+      })
+        .annotate(OpenApi.Summary, "Undo an attention dismissal")
+        .annotate(
+          OpenApi.Description,
+          "Removes the acknowledgement for the supplied attention item.",
+        ),
+      HttpApiEndpoint.get("agents", "/api/agents", { success: Schema.Array(AgentName) })
+        .annotate(OpenApi.Summary, "List agents")
+        .annotate(
+          OpenApi.Description,
+          "Returns the names of saved agent definitions available for runs.",
+        ),
       HttpApiEndpoint.post("editAndRetry", "/api/runs/:runId/edit-and-retry", {
         params: runParams,
         payload: EditAndRetry,
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Edit and retry a run")
+        .annotate(
+          OpenApi.Description,
+          "Retries a failed run with the supplied task or agent changes.",
+        ),
       HttpApiEndpoint.post("runAgain", "/api/runs/:runId/run-again", {
         params: runParams,
         payload: EditAndRetry,
         success: RunAgainResult,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Run an item again")
+        .annotate(
+          OpenApi.Description,
+          "Opens a new run for a succeeded or canceled run and returns the admission result.",
+        ),
       HttpApiEndpoint.post("intervene", "/api/runs/:runId/intervene", {
         params: runParams,
         payload: SessionIntervention,
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Send an operator message")
+        .annotate(
+          OpenApi.Description,
+          "Sends a message to the selected session of a running attempt.",
+        ),
       HttpApiEndpoint.post("resetCycleBudget", "/api/cycle-budgets/reset", {
         payload: Schema.Struct({ askId: CycleBudgetAskId }),
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Reset an item cycle budget")
+        .annotate(
+          OpenApi.Description,
+          "Answers an open cycle budget ask and allows the item to run again.",
+        ),
       HttpApiEndpoint.get("detail", "/api/runs/:runId", {
         params: runParams,
         query: transcriptQuery,
         success: RunDetailView,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read a run and its transcript")
+        .annotate(
+          OpenApi.Description,
+          "Without cursors, returns the latest transcript page. Use after for updates, or before and attempt together for earlier messages.",
+        )
+        .annotate(OpenApi.Transform, (operation) => ({
+          ...operation,
+          // Effect 4.0.6 omits parameters for union query schemas.
+          parameters: [
+            ...operation.parameters,
+            ...[
+              {
+                name: "after",
+                schema: TranscriptSequence,
+                description:
+                  "Return messages after this sequence. Cannot be combined with before or attempt.",
+              },
+              {
+                name: "before",
+                schema: TranscriptSequence,
+                description:
+                  "Return messages before this sequence. Requires attempt; cannot be combined with after.",
+              },
+              {
+                name: "attempt",
+                schema: AttemptId,
+                description:
+                  "Attempt to read earlier messages from. Requires before; cannot be combined with after.",
+              },
+            ].map(({ name, schema, description }) => ({
+              name,
+              in: "query",
+              required: false,
+              description,
+              schema: Schema.toJsonSchemaDocument(schema).schema,
+            })),
+          ],
+        })),
       HttpApiEndpoint.get("githubChanges", "/api/runs/:runId/github-changes", {
         params: runParams,
         success: RunGitHubChangesView,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read GitHub changes for a run")
+        .annotate(OpenApi.Description, "Returns GitHub writes grouped by attempt window."),
       HttpApiEndpoint.post("approve", "/api/runs/:runId/approve", {
         params: runParams,
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Approve a waiting run")
+        .annotate(
+          OpenApi.Description,
+          "Records the signed-in member approval for a run waiting at a gate.",
+        ),
       HttpApiEndpoint.post("resolveFailure", "/api/runs/:runId/resolve-failure", {
         params: runParams,
         payload: Schema.Struct({ attemptId: AttemptId }),
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Resolve a run failure")
+        .annotate(
+          OpenApi.Description,
+          "Acknowledges the supplied failed attempt only while it remains the current failure.",
+        ),
       HttpApiEndpoint.post("retry", "/api/runs/:runId/retry", {
         params: runParams,
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Retry a failed run")
+        .annotate(
+          OpenApi.Description,
+          "Starts another attempt of a failed run with its saved definitions.",
+        ),
       HttpApiEndpoint.post("cancel", "/api/runs/:runId/cancel", {
         params: runParams,
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Cancel a run")
+        .annotate(
+          OpenApi.Description,
+          "Cancels an open run and requests that any active attempt stop.",
+        ),
       HttpApiEndpoint.get("project", "/api/projects/:project", {
         params: { project: ProjectId },
         success: ProjectView,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read a project board")
+        .annotate(
+          OpenApi.Description,
+          "Returns the project and its board across member repositories.",
+        ),
       HttpApiEndpoint.get("projectTask", "/api/projects/:project/tasks/:item", {
         params: {
           project: ProjectId,
@@ -481,7 +622,12 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         },
         query: Schema.Struct({ repository: RepositoryName }),
         success: TaskView,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read a project task")
+        .annotate(
+          OpenApi.Description,
+          "Returns linked issues, pull requests, and runs for an item in a project repository.",
+        ),
       HttpApiEndpoint.post("moveProjectItem", "/api/projects/:project/items/:item/lane", {
         params: {
           project: ProjectId,
@@ -489,15 +635,27 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         },
         payload: Schema.Struct({ repository: RepositoryName, toLane: BoardLaneId }),
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Move a project item")
+        .annotate(
+          OpenApi.Description,
+          "Changes the GitHub labels of the task current item to match the destination lane.",
+        ),
       HttpApiEndpoint.post("pauseProjectLoop", "/api/loops/:project/:loop/pause", {
         params: { project: ProjectId, loop: LoopName },
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Pause a project loop")
+        .annotate(
+          OpenApi.Description,
+          "Stops the loop from opening new runs without canceling existing runs.",
+        ),
       HttpApiEndpoint.post("unpauseProjectLoop", "/api/loops/:project/:loop/unpause", {
         params: { project: ProjectId, loop: LoopName },
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Resume a project loop")
+        .annotate(OpenApi.Description, "Allows the loop to open runs for matching items."),
       HttpApiEndpoint.post("moveBoardItem", "/api/projects/:owner/:repository/items/:item/lane", {
         params: {
           owner: repositoryPart,
@@ -506,23 +664,48 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         },
         payload: Schema.Struct({ toLane: BoardLaneId }),
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Move a repository item")
+        .annotate(
+          OpenApi.Description,
+          "Moves the item using the lanes of the project that contains its repository.",
+        ),
       HttpApiEndpoint.post("runWorkerPreflight", "/api/workers/:worker/preflight", {
         params: { worker: WorkerName },
         success: WorkerPreflightView,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Run worker preflight")
+        .annotate(
+          OpenApi.Description,
+          "Checks one idle worker and replaces its stored capability results, including failures with remediation. Returns 409 while an attempt or another preflight uses the worker.",
+        ),
       HttpApiEndpoint.post("discardLeftovers", "/api/workers/:worker/discard-leftovers", {
         params: { worker: WorkerName },
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Discard worker leftovers")
+        .annotate(
+          OpenApi.Description,
+          "Discards a removed worker only after its running attempts have ended.",
+        ),
       HttpApiEndpoint.post("pause", "/api/loops/:loop/pause", {
         params: loopParams,
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Pause a loop")
+        .annotate(
+          OpenApi.Description,
+          "Accepts a qualified project/loop name, or a short name while it is unique. Encode slashes in the path segment.",
+        ),
       HttpApiEndpoint.post("unpause", "/api/loops/:loop/unpause", {
         params: loopParams,
         success: acknowledged,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Resume a loop")
+        .annotate(
+          OpenApi.Description,
+          "Accepts a qualified project/loop name, or a short name while it is unique. Encode slashes in the path segment.",
+        ),
     )
     .add(
       HttpApiEndpoint.get("task", "/api/projects/:owner/:repository/tasks/:item", {
@@ -532,29 +715,56 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
           item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
         },
         success: TaskView,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read a repository task")
+        .annotate(OpenApi.Description, "Returns linked items and runs for the repository item."),
     )
     .add(
       HttpApiEndpoint.post("checkLoop", "/api/configuration/loops/check", {
         payload: LoopDraft,
         success: LoopCheck,
         error: configurationWriteErrors,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Check a loop definition")
+        .annotate(
+          OpenApi.Description,
+          "Checks the proposed loop, CEL expressions, and prompt without saving a revision.",
+        ),
       HttpApiEndpoint.post("previewLoop", "/api/configuration/loops/preview", {
         payload: LoopPreviewRequest,
         success: LoopPreview,
         error: configurationWriteErrors,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Preview a loop")
+        .annotate(
+          OpenApi.Description,
+          "Evaluates the proposed loop against stored GitHub items without making GitHub requests or saving a revision.",
+        ),
       HttpApiEndpoint.get("configurationCapabilities", "/api/configuration/capabilities", {
-        success: Schema.Struct({ harnesses: Schema.Array(Harness), efforts: Schema.Array(Effort) }),
-      }),
+        success: Schema.Struct({
+          harnesses: Schema.Array(Harness),
+          efforts: Schema.Array(Effort),
+        }),
+      })
+        .annotate(OpenApi.Summary, "List configuration capabilities")
+        .annotate(OpenApi.Description, "Returns supported harnesses and reasoning efforts."),
       HttpApiEndpoint.get("configurationRepositories", "/api/configuration/repositories", {
         success: Schema.Array(RepositoryName),
-      }),
+      })
+        .annotate(OpenApi.Summary, "List installation repositories")
+        .annotate(
+          OpenApi.Description,
+          "Returns repositories available to the instance GitHub App installation.",
+        ),
       HttpApiEndpoint.get("configurationLabels", "/api/configuration/labels/:repository", {
         params: { repository: RepositoryName },
         success: Schema.Array(RepositoryLabel),
-      }),
+      })
+        .annotate(OpenApi.Summary, "List repository labels")
+        .annotate(
+          OpenApi.Description,
+          "Reads live GitHub labels. Encode the repository slash in the path segment.",
+        ),
       HttpApiEndpoint.get("configurationRevisions", "/api/configuration/revisions", {
         query: Schema.Struct({
           kind: Schema.optionalKey(queryValue),
@@ -573,17 +783,32 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         }),
         success: ConfigurationRevisionPage,
         error: configurationWriteErrors,
-      }),
+      })
+        .annotate(OpenApi.Summary, "List configuration revisions")
+        .annotate(
+          OpenApi.Description,
+          "Returns a page of revisions, newest first. Pass nextBefore as before for the next page; the default limit is 50.",
+        ),
       HttpApiEndpoint.get("configurationRevision", "/api/configuration/revisions/:number", {
         params: revisionParams,
         success: ConfigurationRevisionView,
         error: configurationWriteErrors,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read a configuration revision")
+        .annotate(
+          OpenApi.Description,
+          "Returns each changed entity with its values before and after the revision.",
+        ),
       HttpApiEndpoint.get("configurationEntity", "/api/configuration/entities/:kind/:identifier", {
         params: entityParams,
         success: ConfigurationEntityView,
         error: configurationWriteErrors,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read a configuration entity")
+        .annotate(
+          OpenApi.Description,
+          "Returns the current JSON value, export-format text, and revision number.",
+        ),
       HttpApiEndpoint.put(
         "replaceConfigurationEntity",
         "/api/configuration/entities/:kind/:identifier",
@@ -593,7 +818,12 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
           success: ConfigurationRevisionView,
           error: configurationWriteErrors,
         },
-      ),
+      )
+        .annotate(OpenApi.Summary, "Replace a configuration entity")
+        .annotate(
+          OpenApi.Description,
+          "Creates or replaces an entity from value or text. The expected revision rejects stale writes.",
+        ),
       HttpApiEndpoint.delete(
         "deleteConfigurationEntity",
         "/api/configuration/entities/:kind/:identifier",
@@ -603,7 +833,9 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
           success: ConfigurationRevisionView,
           error: configurationWriteErrors,
         },
-      ),
+      )
+        .annotate(OpenApi.Summary, "Delete a configuration entity")
+        .annotate(OpenApi.Description, "Deletes the entity if the expected revision is current."),
       HttpApiEndpoint.post(
         "revertConfigurationRevision",
         "/api/configuration/revisions/:number/revert",
@@ -613,19 +845,48 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
           success: ConfigurationRevisionView,
           error: configurationWriteErrors,
         },
-      ),
+      )
+        .annotate(OpenApi.Summary, "Revert a configuration revision")
+        .annotate(
+          OpenApi.Description,
+          "Creates a revision restoring earlier values unless later edits conflict.",
+        ),
     )
-    .add(HttpApiEndpoint.get("configuration", "/api/configuration", { success: ConfigurationView }))
-    .add(HttpApiEndpoint.get("desk", "/api/desk", { success: DeskView }))
+    .add(
+      HttpApiEndpoint.get("configuration", "/api/configuration", { success: ConfigurationView })
+        .annotate(OpenApi.Summary, "Read instance configuration")
+        .annotate(
+          OpenApi.Description,
+          "Returns stored configuration for the configuration editor.",
+        ),
+    )
+    .add(
+      HttpApiEndpoint.get("desk", "/api/desk", { success: DeskView })
+        .annotate(OpenApi.Summary, "Read overview attention and activity")
+        .annotate(
+          OpenApi.Description,
+          "Returns attention items, active attempts, recent runs, and worker slots.",
+        ),
+    )
     .add(
       HttpApiEndpoint.get("statistics", "/api/statistics", {
         query: statisticsQuery,
         success: StatisticsView,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read task statistics")
+        .annotate(
+          OpenApi.Description,
+          "Aggregates task outcomes and worker utilization for the requested window, defaulting to 30d.",
+        ),
       HttpApiEndpoint.get("runStatistics", "/api/statistics/runs", {
         query: statisticsQuery,
         success: RunStatisticsView,
-      }),
+      })
+        .annotate(OpenApi.Summary, "Read run statistics")
+        .annotate(
+          OpenApi.Description,
+          "Aggregates runs, attempts, retries, and durations for the requested window, defaulting to 30d.",
+        ),
     )
     .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
     .middleware(OperatorHttpPolicy),
