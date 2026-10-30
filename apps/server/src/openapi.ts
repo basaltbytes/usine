@@ -1,7 +1,7 @@
 import { OperatorApi } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api";
-import { AuthApi, publicAuthPaths } from "./auth/api.ts";
+import { AuthApi, AuthenticationError, publicAuthPaths } from "./auth/api.ts";
 
 export const DocumentationApi = HttpApiGroup.make("documentation").add(
   HttpApiEndpoint.get("openapi", "/api/openapi.json", {
@@ -24,6 +24,7 @@ export const publicOperatorPaths = new Set<string>([
 
 export const operatorOpenApi = () => {
   const document = OpenApi.fromApi(OperatorApi.add(AuthApi, DocumentationApi));
+  const authenticationError = Schema.toJsonSchemaDocument(AuthenticationError).schema;
   document.components.securitySchemes = {
     bearer: {
       type: "http",
@@ -47,14 +48,26 @@ export const operatorOpenApi = () => {
         description: "A valid instance token or browser session is required.",
         content: {
           "application/json": {
-            schema: {
-              type: "object",
-              required: ["error", "message"],
-              properties: { error: { const: "AuthenticationError" }, message: { type: "string" } },
-            },
+            schema: authenticationError,
           },
         },
       };
+      if (method !== "get") {
+        const forbidden = operation.responses["403"];
+        const existingSchema = forbidden?.content?.["application/json"]?.schema;
+        operation.responses["403"] = {
+          ...forbidden,
+          description: `${forbidden?.description ?? "Forbidden."} Browser session writes require a valid X-Usine-CSRF header.`,
+          content: {
+            ...forbidden?.content,
+            "application/json": {
+              schema: existingSchema
+                ? { anyOf: [existingSchema, authenticationError] }
+                : authenticationError,
+            },
+          },
+        };
+      }
     }
   }
   return document;

@@ -97,18 +97,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -634,77 +638,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -1672,18 +1703,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -2211,77 +2246,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -2760,77 +2822,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -3299,18 +3388,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -3848,77 +3941,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -4400,77 +4520,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -4959,77 +5106,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -5508,77 +5682,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -5977,6 +6178,38 @@
               "minLength": 1
             },
             "required": true
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Return messages after this sequence. Cannot be combined with before or attempt.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "Return messages before this sequence. Requires attempt; cannot be combined with after.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "attempt",
+            "in": "query",
+            "required": false,
+            "description": "Attempt to read earlier messages from. Requires before; cannot be combined with after.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         ],
         "security": [
@@ -6063,18 +6296,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -6598,18 +6835,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -7147,77 +7388,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -7696,77 +7964,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -8265,77 +8560,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -8814,77 +9136,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -9349,18 +9698,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -9901,18 +10254,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -10458,77 +10815,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -11041,77 +11425,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -11599,77 +12010,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -12165,77 +12603,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -12734,77 +13199,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -13283,77 +13775,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -13832,77 +14351,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -14384,18 +14930,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -14909,77 +15459,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -15511,77 +16088,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -16105,18 +16709,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -16634,18 +17242,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -17172,18 +17784,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -17794,18 +18410,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -18354,18 +18974,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -18923,18 +19547,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -19490,77 +20118,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -20124,77 +20779,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -20694,77 +21376,104 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
                       "enum": [
-                        "UpgradeError",
-                        "ConfigurationNotFound",
-                        "ConfigurationStoreError",
-                        "SchemaError",
-                        "InvalidRequestError",
-                        "CrossSiteRequestError",
-                        "RunNotFoundError",
-                        "TranscriptAttemptNotFoundError",
-                        "BoardProjectNotFoundError",
-                        "BoardItemNotFoundError",
-                        "BoardLaneNotFoundError",
-                        "GitHubItemNotFoundError",
-                        "RunOperationRejectedError",
-                        "RunRetryBlockedError",
-                        "RunInterventionRejectedError",
-                        "LeftoversDiscardRejectedError",
-                        "RosterAgentNotFoundError",
-                        "LoopNotFoundError",
-                        "CycleBudgetResetRejectedError",
-                        "BoardLaneReadOnlyError",
-                        "RestartRequiredError",
-                        "ReloadPreflightError",
-                        "FactoryConfigError",
-                        "EnginePersistenceError",
-                        "AttemptCancellationError",
-                        "HttpBodyError",
-                        "GitHubApiError",
-                        "InvalidGitHubResponseError",
-                        "BackendUnavailableError",
-                        "InstallationDiscoveryError",
-                        "AppPermissionError",
-                        "GitHubRateLimitError"
-                      ],
-                      "description": "Domain failure tag that selects the HTTP status."
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
-                      "type": "string",
-                      "description": "Diagnostic text safe to show to the operator."
+                      "type": "string"
                     }
                   },
                   "required": [
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -21255,18 +21964,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -21780,18 +22493,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -22330,18 +23047,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -22880,18 +23601,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -23463,18 +24188,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -23714,28 +24443,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Sign-in or credential operation failed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
@@ -23751,8 +24458,57 @@
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false,
-                  "description": "Sign-in or credential operation failed."
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sign-in or credential operation failed. Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Sign-in or credential operation failed."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -25094,28 +25850,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Sign-in or credential operation failed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
@@ -25131,8 +25865,57 @@
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false,
-                  "description": "Sign-in or credential operation failed."
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sign-in or credential operation failed. Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Sign-in or credential operation failed."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -25339,18 +26122,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -25592,28 +26379,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Sign-in or credential operation failed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
@@ -25629,8 +26394,57 @@
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false,
-                  "description": "Sign-in or credential operation failed."
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sign-in or credential operation failed. Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Sign-in or credential operation failed."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -25876,28 +26690,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Sign-in or credential operation failed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
@@ -25913,8 +26705,57 @@
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false,
-                  "description": "Sign-in or credential operation failed."
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sign-in or credential operation failed. Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Sign-in or credential operation failed."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }
@@ -26177,18 +27018,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
                   "properties": {
                     "error": {
-                      "const": "AuthenticationError"
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -26442,28 +27287,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error",
-                    "message"
-                  ],
-                  "properties": {
-                    "error": {
-                      "const": "AuthenticationError"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Sign-in or credential operation failed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
                   "properties": {
                     "error": {
                       "type": "string",
@@ -26479,8 +27302,57 @@
                     "error",
                     "message"
                   ],
-                  "additionalProperties": false,
-                  "description": "Sign-in or credential operation failed."
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sign-in or credential operation failed. Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Sign-in or credential operation failed."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
                 }
               }
             }

@@ -522,7 +522,40 @@ export const OperatorApi = operatorApi.add(
         .annotate(
           OpenApi.Description,
           "Without cursors, returns the latest transcript page. Use after for updates, or before and attempt together for earlier messages.",
-        ),
+        )
+        .annotate(OpenApi.Transform, (operation) => ({
+          ...operation,
+          // Effect 4.0.6 omits parameters for union query schemas.
+          parameters: [
+            ...operation.parameters,
+            ...[
+              {
+                name: "after",
+                schema: TranscriptSequence,
+                description:
+                  "Return messages after this sequence. Cannot be combined with before or attempt.",
+              },
+              {
+                name: "before",
+                schema: TranscriptSequence,
+                description:
+                  "Return messages before this sequence. Requires attempt; cannot be combined with after.",
+              },
+              {
+                name: "attempt",
+                schema: AttemptId,
+                description:
+                  "Attempt to read earlier messages from. Requires before; cannot be combined with after.",
+              },
+            ].map(({ name, schema, description }) => ({
+              name,
+              in: "query",
+              required: false,
+              description,
+              schema: Schema.toJsonSchemaDocument(schema).schema,
+            })),
+          ],
+        })),
       HttpApiEndpoint.get("githubChanges", "/api/runs/:runId/github-changes", {
         params: runParams,
         success: RunGitHubChangesView,

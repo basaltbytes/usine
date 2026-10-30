@@ -20,8 +20,12 @@ export const AddMember = Schema.Struct({ login: OperatorLogin });
 const acknowledged = Schema.Struct({ ok: Schema.Literal(true) }).annotate({
   description: "The request completed successfully.",
 });
+export const AuthenticationError = Schema.Struct({
+  error: Schema.Literal("AuthenticationError"),
+  message: Schema.String,
+});
 const error = AuthError.fields.status.literals.map((status) =>
-  Schema.Struct({ error: Schema.Literal("AuthenticationError"), message: Schema.String }).annotate({
+  AuthenticationError.annotate({
     httpApiStatus: status,
     description: "Sign-in or credential operation failed.",
   }),
