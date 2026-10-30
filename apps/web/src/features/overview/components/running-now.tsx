@@ -57,6 +57,9 @@ const RunningRow = ({ running, overview, now }: RunningRowProps) => {
             />
           )}
         </RunPageLink>
+        {run.approvalReason !== null && (
+          <p className="mt-0.5 text-xs text-muted-foreground wrap-anywhere">{run.approvalReason}</p>
+        )}
         <p className="mt-0.5 truncate text-xs text-muted-foreground lg:hidden">
           <span className="md:hidden">
             <RunningMark />

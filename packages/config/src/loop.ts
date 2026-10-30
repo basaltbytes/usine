@@ -36,6 +36,10 @@ export const LoopPriority = Schema.Union([PriorityValue, Source]);
 
 export type LoopPriority = typeof LoopPriority.Type;
 
+/** A fixed approval requirement or a CEL condition whose true result requires approval. */
+export const LoopApproval = Schema.Union([ApprovalRequirement, Source]);
+export type LoopApproval = typeof LoopApproval.Type;
+
 /**
  * A parsed loop definition from `projects/<project>/loops/<loop>.md` or the legacy
  * `loops/<name>.md` format (ADR 0031).
@@ -50,7 +54,7 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
    */
   selector: Schema.Option(ValidSelector),
   /** Whether a run must wait for operator approval before its first attempt. */
-  approval: ApprovalRequirement,
+  approval: LoopApproval,
   /**
    * The positive run limit per item between operator resets; defaults to 3 and does not limit
    * schedule loops.

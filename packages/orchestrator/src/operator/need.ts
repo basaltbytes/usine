@@ -11,6 +11,7 @@ import { Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
+import { RunView } from "./run.ts";
 import { FailureView } from "./attempt.ts";
 import { BoardItemLink, BoardProjectionError } from "./board.ts";
 
@@ -24,6 +25,8 @@ export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
   repository: RepositoryName,
   /** The run waiting for operator approval. */
   runId: RunId,
+  /** The saved reason approval is required. */
+  approvalReason: RunView.fields.approvalReason,
   /** The project-qualified loop name. */
   loop: LoopName,
   /**

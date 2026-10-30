@@ -6,6 +6,14 @@ The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `Sch
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version.
 
+## Conditional approval
+
+Loop approval accepts `required`, `none`, or a boolean CEL condition over the event
+payload and repository. Polling, schedules, and Run again evaluate the condition
+before submission. Evaluation errors require approval and emit a warning. Run
+views and approval needs include the saved `approvalReason`, including label
+actors when present. Existing runs retain their original decision.
+
 ## Operator
 
 `SetupState` describes the GitHub App setup response shared by the server and web UI: missing credentials, installation, first sign-in, repository selection, or completion.

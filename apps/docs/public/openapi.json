@@ -32132,6 +32132,17 @@
               }
             ]
           },
+          "approvalReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "runAgain": {
             "anyOf": [
               {
@@ -34978,10 +34989,18 @@
             }
           },
           "approval": {
-            "type": "string",
-            "enum": [
-              "none",
-              "required"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "required"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "\\S"
+              }
             ]
           },
           "maxCycles": {
@@ -39436,6 +39455,17 @@
           "runId": {
             "type": "string",
             "minLength": 1
+          },
+          "approvalReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "loop": {
             "type": "string",

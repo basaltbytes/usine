@@ -1,0 +1,1 @@
+ALTER TABLE `usine_trigger_events` ADD `approval_reason` text;

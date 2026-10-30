@@ -211,3 +211,7 @@ Loop checks at `/api/configuration/loops/check` validate integer CEL priorities.
 Route definitions and schema annotations generate the contract. Authentication handlers use the paths and request schemas in `src/auth/api.ts`; setup handlers use `src/setup/api.ts`; the server combines those definitions with `OperatorApi` in `src/openapi.ts`. After changing a contract, regenerate and commit `apps/docs/public/openapi.json` as described in the [docs README](../docs/README.md#operator-http-api-reference).
 
 Apps created through `/setup` already have the web callback and client credentials. Enable the device flow in the App settings before using CLI device sign-in.
+
+`POST /api/configuration/loops/check` validates conditional approval as a boolean
+CEL expression in the trigger's environment. Approval diagnostics use the
+`approval` field path. Run and overview responses include the saved decision.

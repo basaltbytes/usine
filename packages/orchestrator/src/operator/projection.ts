@@ -243,6 +243,7 @@ export const runView = (
     closedAt: Option.match(snapshot.closedAt, { onNone: () => null, onSome: DateTime.formatIso }),
     task: snapshot.task,
     attempts: snapshot.attempts.map((attempt) => attemptView(attempt, workers)),
+    approvalReason: Option.getOrNull(snapshot.approvalReason),
     approval: Option.match(snapshot.approval, {
       onNone: () => null,
       onSome: ({ approvedAt, source }) =>

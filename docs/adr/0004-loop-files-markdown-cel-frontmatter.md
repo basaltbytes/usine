@@ -17,3 +17,14 @@ A loop file is `loops/<name>.md` in the instance repo: YAML frontmatter for stru
 - UI writes edit the YAML AST in place, keeping comments, key order, and formatting. Nothing rewrites hand-authored files in the background.
 - Validation is strict, and an invalid loop is quarantined alone. An invalid `usine.yaml` (instance-wide `version:`, registry, settings) is an instance-level error.
 - Short defaults: `step: run`, `approval: none`. ([ADR 0016](./0016-config-editing-forms-first-preview-before-arming.md) removed `enabled:`: pause is runtime state per [ADR 0009](./0009-instance-repo-remote-optional-runtime-state.md), never a file field.)
+
+## Amendment (2026-10-30, #790): conditional approval
+
+`approval` accepts `required`, `none`, or a boolean CEL expression in the trigger's
+environment. Before submitting an event, the orchestrator evaluates the condition
+against that event's payload and repository. A true result or an evaluation error
+requires approval. Errors log a warning. The engine stores the resolved requirement
+and explanation with the event, so configuration edits and retries preserve the
+original decision. Run again evaluates the current condition against the saved
+payload. The loop form replaces the approval toggle with fixed modes and a CEL
+condition field, extending ADR 0016's form.

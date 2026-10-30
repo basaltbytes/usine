@@ -304,7 +304,7 @@ export class ScheduleTriggers extends Context.Service<
         const dedupKey = eventKey(due.loop, due.repository, due.scheduledAt);
         const task = yield* config.renderPrompt(due.loop, context);
         const submitted = yield* runs.submit(
-          triggerSubmission({
+          yield* triggerSubmission(expressions, {
             cycleGeneration: CycleGeneration.make(0),
             agent: due.agent,
             dedupKey,

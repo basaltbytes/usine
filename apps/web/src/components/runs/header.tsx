@@ -156,6 +156,9 @@ export const RunHeader = ({
             </>
           )}
           {run.loopPaused && <span>Loop paused</span>}
+          {run.approvalReason !== null && (
+            <span className="basis-full text-xs wrap-anywhere">{run.approvalReason}</span>
+          )}
         </>
       }
       actions={actions}

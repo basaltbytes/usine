@@ -55,7 +55,7 @@ export const LoopRow = ({ loop, pause, projects }: LoopRowProps) => {
         </code>
       </FillCell>
       <TableCell className="hidden sm:table-cell">{loop.agent}</TableCell>
-      <TableCell className="hidden md:table-cell">{approvalLabel[loop.approval]}</TableCell>
+      <TableCell className="hidden md:table-cell">{approvalLabel(loop.approval)}</TableCell>
       <TableCell>
         <LoopState paused={loop.paused} />
       </TableCell>
