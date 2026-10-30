@@ -203,24 +203,33 @@ const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) =
   return epochs.length === 0 ? Option.none<DateTime.Utc>() : dateTimeAt(Math.max(...epochs));
 };
 
-/** The service that finds changed GitHub Items and fetches their snapshots for Loop selection. */
+/** The service that finds changed GitHub items and fetches their snapshots for loop selection. */
 export class GitHubPolling extends Context.Service<
   GitHubPolling,
   {
-    /** Returns issue and PR updates since the saved cursor. Persist the returned cursor after processing the detected Items. */
+    /**
+     * Returns issue and pull request updates in `repository` since `cursor`, with a five-second
+     * watermark overlap. Reads at most ten REST pages; `backlog` reports remaining pages.
+     * Persist the returned cursor after processing detected items and respect its poll and
+     * backoff deadlines (ADR 0007).
+     */
     readonly changes: (
       repository: RepositoryName,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
-    /** Returns the repository's label catalog, or confirms that the catalog with `entityTag` is unchanged. */
+    /**
+     * Returns the complete label catalog for `repository`, or confirms that `entityTag` is
+     * unchanged. Pass `None` without a cached catalog. Fails with `InvalidGitHubResponseError`
+     * if 100 pages do not complete the catalog; never returns a partial catalog.
+     */
     readonly labels: (
       repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
     /**
      * Returns the head commit of branch `baseRefName`. Sends the ETag of `known`, a head read
-     * earlier for the same branch, and returns `known` if GitHub answers 304, which costs no rate
-     * limit. Fails with a 404 `GitHubApiError` if the branch doesn't exist.
+     * earlier for the same repository and branch, and returns `known` if GitHub answers 304,
+     * which costs no rate limit. Fails with a 404 `GitHubApiError` if the branch doesn't exist.
      */
     readonly baseRefHead: (
       repository: RepositoryName,
@@ -228,8 +237,11 @@ export class GitHubPolling extends Context.Service<
       known: Option.Option<BaseRefHead>,
     ) => Effect.Effect<BaseRefHead, GitHubAppError>;
     /**
-     * Returns an Item's selection and prompt payload with its content hash. Fails with
-     * `GitHubItemNotFoundError` if the repository responds but has no such Item.
+     * Fetches the issue or pull request identified by `item` in `repository`; its update time
+     * does not limit the fetch. Returns the selection and prompt payload with a timestamp-free
+     * content hash. Fails with `GitHubItemNotFoundError` if the repository responds but has no
+     * such item. Includes current labels and their latest available addition events, searching
+     * at most ten timeline pages; missing label history has no map entry.
      */
     readonly snapshot: (
       repository: RepositoryName,
@@ -247,6 +259,10 @@ export class GitHubPolling extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<ItemNumber>, GitHubAppError>;
   }
 >()("@usine/github/GitHubPolling") {
+  /**
+   * Provides REST change detection and GraphQL snapshots with the App's shared token.
+   * Uses the supplied HTTP client for requests and crypto service for SHA-256 content hashes.
+   */
   static readonly layer: Layer.Layer<
     GitHubPolling,
     never,

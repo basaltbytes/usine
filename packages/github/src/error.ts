@@ -28,8 +28,11 @@ export type GitHubOperation = typeof GitHubOperation.Type;
 export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
   "@usine/github/GitHubApiError",
 )("GitHubApiError", {
+  /** The GitHub operation that failed. */
   operation: GitHubOperation,
+  /** The HTTP response status, or `None` when transport failed before a response arrived. */
   status: Schema.Option(Schema.Int),
+  /** An operator-facing explanation; branch on the error tag and fields instead of matching this text. */
   message: Schema.NonEmptyString,
 }) {}
 
@@ -37,8 +40,11 @@ export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
 export class GitHubRateLimitError extends Schema.TaggedError<GitHubRateLimitError>(
   "@usine/github/GitHubRateLimitError",
 )("GitHubRateLimitError", {
+  /** The GitHub operation that failed. */
   operation: GitHubOperation,
+  /** The earliest UTC retry time derived from GitHub's retry or rate-limit headers. */
   retryAt: Schema.DateTimeUtc,
+  /** An operator-facing explanation; branch on the error tag and fields instead of matching this text. */
   message: Schema.NonEmptyString,
 }) {}
 
@@ -46,21 +52,26 @@ export class GitHubRateLimitError extends Schema.TaggedError<GitHubRateLimitErro
 export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHubResponseError>(
   "@usine/github/InvalidGitHubResponseError",
 )("InvalidGitHubResponseError", {
+  /** The GitHub operation that failed. */
   operation: GitHubOperation,
+  /** An operator-facing explanation; branch on the error tag and fields instead of matching this text. */
   message: Schema.NonEmptyString,
   /** The decode path, missing field, or GraphQL errors. */
   detail: Schema.NonEmptyString,
 }) {}
 
 /**
- * The error when the repository has no Item with this number because it was deleted,
+ * The error when the repository has no item with this number because it was deleted,
  * transferred, or is no longer readable by the App. The repository itself responded.
  */
 export class GitHubItemNotFoundError extends Schema.TaggedError<GitHubItemNotFoundError>(
   "@usine/github/GitHubItemNotFoundError",
 )("GitHubItemNotFoundError", {
+  /** The GitHub operation that failed. */
   operation: GitHubOperation,
+  /** The issue or pull request number that the responding repository could not return. */
   item: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  /** An operator-facing explanation; branch on the error tag and fields instead of matching this text. */
   message: Schema.NonEmptyString,
 }) {}
 

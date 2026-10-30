@@ -111,35 +111,52 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
       };
 
 /**
- * The factory's GitHub App identity and repository access. Orchestrator operations share an
- * installation-wide token; each Worker token is minted for its Attempt's repository.
+ * The instance's GitHub App identity and repository access. Orchestrator operations share an
+ * installation-wide token; each worker token is minted for its attempt's repository.
  */
 export class GitHubApp extends Context.Service<
   GitHubApp,
   {
     /** Sets the App's webhook URL and JSON encoding; the App must already have an active webhook. */
     readonly configureWebhook: (url: URL) => Effect.Effect<void, GitHubAppError>;
-    /** Reads new delivery summaries, newest first, with at most ten pages per call. */
+    /**
+     * Reads delivery summaries with IDs greater than `after`, newest first. Pass `None` for
+     * the first read. Reads at most ten pages of 100 summaries and drops older hints at that
+     * limit; polling still detects repository changes (ADR 0014).
+     */
     readonly deliveries: (
       after: Option.Option<WebhookDeliveryId>,
     ) => Effect.Effect<ReadonlyArray<WebhookDelivery>, GitHubAppError>;
+    /** Lists every repository accessible to the installation, following all pages. */
     readonly repositories: () => Effect.Effect<ReadonlyArray<RepositoryName>, GitHubAppError>;
-    /** Returns the App installation after checking its required permissions. */
+    /**
+     * Returns the single active installation after checking its required permissions.
+     * Shares discovery and token renewal with `installationToken`; missing, multiple, or
+     * suspended installations fail with `InstallationDiscoveryError`.
+     */
     readonly installation: () => Effect.Effect<Installation, GitHubAppError>;
     /**
      * Returns the App's bot account, `<slug>[bot]`, read from GitHub's users API once per App
      * slug.
      */
     readonly botAccount: () => Effect.Effect<BotAccount, GitHubAppError>;
-    /** Returns the shared installation-wide token for orchestrator operations, renewing it near expiry. */
+    /**
+     * Returns the shared installation-wide token for orchestrator operations. Renews it when
+     * five minutes or less remain, sharing one discovery and mint across concurrent callers.
+     */
     readonly installationToken: () => Effect.Effect<InstallationToken, GitHubAppError>;
-    /** Returns the access of every registry repository, with each uncovered Project as its own error. */
+    /**
+     * Checks `registry` against all installation repositories, matching names without case
+     * sensitivity. Returns one result per registry entry in input order; an uncovered
+     * repository is a `ProjectNotInstalledError` value, not a failed effect (ADR 0011).
+     */
     readonly projectAccess: (
       registry: ReadonlyArray<RepositoryName>,
     ) => Effect.Effect<ReadonlyArray<ProjectAccess>, GitHubAppError>;
     /**
-     * Mints a new Worker token for the covered Project's repository, with the permissions
-     * `WORKER_TOKEN_PERMISSIONS` lists for the Loop permission level.
+     * Mints a new token for `project` on every call, using `permissions` to select the loop's
+     * `WORKER_TOKEN_PERMISSIONS` (ADR 0011). Fails with `InvalidGitHubResponseError` if GitHub
+     * does not confirm exactly the covered repository ID or returns an invalid expiry.
      */
     readonly workerToken: (
       project: CoveredProject,
@@ -147,6 +164,11 @@ export class GitHubApp extends Context.Service<
     ) => Effect.Effect<InstallationToken, GitHubAppError>;
   }
 >()("@usine/github/GitHubApp") {
+  /**
+   * Provides App operations using the supplied credentials and HTTP client. Imports the signing
+   * key during construction, which can fail with `AppAuthenticationError`; installation
+   * discovery and token minting occur on demand.
+   */
   static readonly layer: Layer.Layer<
     GitHubApp,
     AppAuthenticationError,

@@ -18,9 +18,11 @@ export type PrivateKey = typeof PrivateKey.Type;
 /** The App private key, redacted in diagnostics and not encodable. */
 export const RedactedPrivateKey = Schema.RedactedFromValue(PrivateKey, { disallowEncode: true });
 
-/** The App credentials, kept by the orchestrator and never passed to a Worker. */
+/** The App credentials, kept by the orchestrator and never passed to a worker. */
 export class AppCredentials extends Schema.Class<AppCredentials>("@usine/github/AppCredentials")({
+  /** The GitHub App ID used as the issuer of signed App JWTs, distinct from its bot user ID. */
   appId: AppId,
+  /** The PEM signing key, redacted in diagnostics and rejected by encoding; retain it only in the orchestrator. */
   privateKey: RedactedPrivateKey,
 }) {}
 
@@ -33,5 +35,6 @@ export class GitHubCredentials extends Context.Service<GitHubCredentials, AppCre
 export class AppAuthenticationError extends Schema.TaggedError<AppAuthenticationError>(
   "@usine/github/AppAuthenticationError",
 )("AppAuthenticationError", {
+  /** An operator-facing explanation of the private-key import failure. */
   message: Schema.NonEmptyString,
 }) {}

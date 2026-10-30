@@ -169,7 +169,7 @@ export const PullRequestPayload = Schema.Struct({
 });
 export type PullRequestPayload = typeof PullRequestPayload.Type;
 
-/** The hash of an Item's payload content for Event deduplication; timestamp-only changes keep the same hash. */
+/** The hash of an item's payload content for event deduplication; timestamp-only changes keep the same hash. */
 export const ContentHash = Schema.String.check(
   Schema.isPattern(/^[a-f0-9]{64}$/u, { message: "Expected a SHA-256 content hash" }),
 ).pipe(Schema.brand("GitHubContentHash"));
@@ -179,7 +179,9 @@ export type ContentHash = typeof ContentHash.Type;
 export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/github/IssueSnapshot")(
   "IssueSnapshot",
   {
+    /** The fetched payload slice for loop selection and prompt rendering, including its timestamps. */
     payload: IssuePayload,
+    /** The SHA-256 hash of canonical payload content; timestamp-only changes keep the same hash (ADR 0007). */
     contentHash: ContentHash,
   },
 ) {}
@@ -188,10 +190,12 @@ export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/git
 export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>(
   "@usine/github/PullRequestSnapshot",
 )("PullRequestSnapshot", {
+  /** The fetched payload slice for loop selection and prompt rendering, including its timestamps. */
   payload: PullRequestPayload,
+  /** The SHA-256 hash of canonical payload content; timestamp-only changes keep the same hash (ADR 0007). */
   contentHash: ContentHash,
 }) {}
 
-/** The fetched Item state used by selection, prompt rendering, and Event deduplication. */
+/** The fetched item state used by selection, prompt rendering, and event deduplication. */
 export const PayloadSnapshot = Schema.Union([IssueSnapshot, PullRequestSnapshot]);
 export type PayloadSnapshot = typeof PayloadSnapshot.Type;
