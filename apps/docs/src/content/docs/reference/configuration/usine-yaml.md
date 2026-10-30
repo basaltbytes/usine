@@ -340,7 +340,7 @@ Without Docker, the worker runs its attempts as the SSH user, as before containe
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `image` | string | the release's image | The image to run, such as `ghcr.io/basaltbytes/usine-worker:claude-2.1.308-codex-0.164.0`. Without it, the image built from `infra/worker-image/Dockerfile` with the harness versions of the running usine release. Preflight pulls it. |
+| `image` | string | the release's image | The image to run, such as `ghcr.io/basaltbytes/usine-worker:claude-2.1.311-codex-0.164.0`. Without it, the image built from `infra/worker-image/Dockerfile` with the harness versions of the running usine release. Preflight pulls it. |
 | `cpus` | number > 0 | derived from the machine | CPUs per container, passed as `docker run --cpus`. |
 | `memory_mib` | integer ≥ 256 | derived from the machine | Memory per container in MiB, passed as `docker run --memory`. A process that goes over it is ended by the kernel, not the whole machine. |
 | `pids` | integer ≥ 64 | derived from the machine | Processes and threads per container, passed as `docker run --pids-limit`. |
@@ -479,7 +479,7 @@ workers:
       token_env: HCLOUD_TOKEN
       server_type: cx33
       location: fsn1
-      image: usine-worker-claude-2.1.308-codex-0.164.0
+      image: usine-worker-claude-2.1.311-codex-0.164.0
       network: usine-gateway
       ssh_key: usine-worker
       labels: { team: platform }

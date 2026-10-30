@@ -232,7 +232,7 @@ When an instance loads, usine collects the string literals that a loop's `if` co
 
 An issue is ready, and no open pull request closes it yet:
 
-```yaml title="projects/widgets/loops/start-dev.md"
+```yaml title="widgets/start-dev (export format)"
 if: >-
   item.state == "OPEN" &&
   item.labels.nodes.exists(label, label.name == "ready-for-agent") &&

@@ -1,6 +1,6 @@
 ---
 title: "Dogfood instance loops"
-description: "The five loops and three agents of the dogfood instance, the labels that pass an item from one loop to the next, and each loop file."
+description: "The five loops and three agents of the dogfood instance, the labels that pass an item from one loop to the next, and each loop definition."
 sidebar:
   order: 6
 ---
@@ -9,7 +9,7 @@ sidebar:
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine and the dogfood instance as they were on 2026-10-16.
 :::
 
-usine has no built-in loop. At commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b), the engine reads stored loop definitions; [ADR 0031](https://github.com/basaltbytes/usine/blob/main/docs/adr/0031-authored-configuration-in-the-database.md) replaced file loading with configuration revisions. The examples below retain the historical version 1 import format. To use them now, import a complete folder with `usine config import <folder> --message <text>`; later exports use `projects/<project>/loops/`. This repository has loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and in [Bounded review and fix loops](/guides/review-fix-loops/). The loops below are copied unchanged from the dogfood instance at `~/Code/usine-factory` on 2026-10-16.
+usine has no built-in loop. At commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b), the engine reads stored loop definitions; [ADR 0031](https://github.com/basaltbytes/usine/blob/main/docs/adr/0031-authored-configuration-in-the-database.md) replaced file loading with configuration revisions. The examples below retain the historical version 1 import format. To use them now, import a complete folder with `usine config import <folder> --message <text>`; run [`usine config export <folder>`](/reference/configuration/config/#export) to export the current configuration, including loop files under `projects/<project>/loops/`. This repository has loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and in [Bounded review and fix loops](/guides/review-fix-loops/). The loops below are copied unchanged from the dogfood instance at `~/Code/usine-factory` on 2026-10-16.
 
 ## Instance settings
 
@@ -68,7 +68,7 @@ Every loop has `selector: { repos: [basaltbytes/usine] }` and no `max_cycles`, s
 
 This is the only loop with `approval: required`: each run stays `Waiting` until the operator approves it in the run drawer; the instance's README calls this approval the way to start work.
 
-```markdown title="loops/start-dev.md"
+```markdown title="start-dev"
 ---
 trigger:
   on: issue
@@ -93,7 +93,7 @@ If work cannot continue, add a comment to the issue that states the exact blocke
 
 [#226][] reports a review run that pushed a commit, which the prompt forbids. Like `act-on-findings`, the prompt says the attempt starts from the default branch, but a `pr` run checks out the pull request's head commit ([loop-evaluation.ts:78][]), so the head fetch and check find the commit already checked out.
 
-```markdown title="loops/review-pr.md"
+```markdown title="review-pr"
 ---
 trigger:
   on: pr
@@ -120,7 +120,7 @@ Post the review on GitHub. If you find any actionable issue, explain it with fil
 
 An attempt that ended with a question for the operator used to repeat until the cycle budget ran out ([#241][]). usine now suppresses the pull request for the loop until the operator answers or the pull request changes ([Operator questions and blockers](/architecture/run-lifecycle/#operator-questions-and-blockers)).
 
-```markdown title="loops/act-on-findings.md"
+```markdown title="act-on-findings"
 ---
 trigger:
   on: pr
@@ -145,7 +145,7 @@ Read every review comment signed `usine agent: reviewer`. Act only on findings g
 
 [#242][] reports a `finish-pr` commit on the local worker with the operator as author instead of the App.
 
-```markdown title="loops/finish-pr.md"
+```markdown title="finish-pr"
 ---
 trigger:
   on: pr
@@ -176,7 +176,7 @@ When the final branch is green and pushed and the outcome is recorded, remove `r
 
 ### rebase-pr
 
-```markdown title="loops/rebase-pr.md"
+```markdown title="rebase-pr"
 ---
 trigger:
   on: pr
