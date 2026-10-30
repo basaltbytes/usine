@@ -8,12 +8,18 @@ import type { AgentFile } from "../agent.ts";
 
 /** The names a loop can reference in a loaded instance. */
 export interface ReferenceIndex {
+  /** The names of valid agents available to loops. */
   readonly agentNames: ReadonlySet<AgentName>;
+  /** The tags declared by at least one registered repository. */
   readonly registryTags: ReadonlySet<RegistryTag>;
   /** The registry repository names, canonicalized with `canonicalRepositoryName`. */
   readonly repoNames: ReadonlySet<string>;
 }
 
+/**
+ * Builds the agent names, registry tags, and canonical repository names that draft reference
+ * checks accept, from `config` and the loaded `agents`.
+ */
 export const referenceIndex = (
   config: UsineConfig,
   agents: ReadonlyArray<AgentFile>,

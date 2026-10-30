@@ -13,6 +13,10 @@ import { Project } from "./project.ts";
 
 export { Project } from "./project.ts";
 
+/**
+ * Returns whether `repository` matches the loop selector and, in version 2, belongs to the loop's
+ * project in `config`.
+ */
 export const matchesLoop = (
   config: UsineConfig,
   loop: LoopFile,
@@ -24,7 +28,10 @@ export const matchesLoop = (
       (project) => loop.name.startsWith(`${project.id}/`) && project.includes(repository.name),
     ));
 
-/** Resolves an exact identifier or a short name that occurs in only one project. */
+/**
+ * Resolves `name` against `loops`, accepting an exact identifier or a unique short name. Returns
+ * `None` when no loop matches or the name is ambiguous.
+ */
 export const resolveLoopName = (
   loops: ReadonlyArray<LoopFile>,
   name: LoopName,
@@ -47,7 +54,11 @@ export const boardRepositories = (config: UsineConfig): ReadonlyArray<ManagedRep
         ),
       );
 
-/** Converts the version 1 registry and selectors without changing agent or loop content. */
+/**
+ * Converts a version 1 `instance` to one project per repository, copying each loop to its selected
+ * projects (ADR 0031). Returns version 2 unchanged; a loop matching no registered repo fails with
+ * `ConfigurationInvalid`.
+ */
 export const migrateProjects = (
   instance: LoadedInstance,
 ): Result.Result<LoadedInstance, ConfigurationInvalid> => {
@@ -112,6 +123,10 @@ export const migrateProjects = (
   );
 };
 
+/**
+ * Returns instance declarations plus undeclared lane labels for projects containing `repository`.
+ * Compares names case-insensitively and preserves explicit color and description settings.
+ */
 export const labelsForRepository = (
   config: UsineConfig,
   repository: RepositoryName,

@@ -35,7 +35,7 @@ import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
 import { Lanes, Project } from "./project/project.ts";
 import { canonicalLabelName, DeclaredLabel } from "./label.ts";
 
-/** A repository tag that Loop selectors match. */
+/** A repository tag that loop selectors match. */
 export const RegistryTag = nonBlankString("Expected a non-blank registry tag").pipe(
   Schema.brand("RegistryTag"),
 );
@@ -56,27 +56,40 @@ const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
 
 const DeclaredLabels = Schema.Array(DeclaredLabel).check(uniqueLabelNames);
 
+/** A registry entry with selector tags and legacy repository lanes (ADR 0031). */
 export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/ManagedRepo")({
+  /** The registered GitHub repository in `owner/repo` form. */
   name: RepositoryName,
+  /** Unique selector tags; decoding defaults to an empty list. */
   tags: Schema.Array(RegistryTag)
     .check(Schema.isUnique())
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  /**
+   * Repository lanes for version 1 and board views; version 2 persistence requires an empty list
+   * (ADR 0031).
+   */
   lanes: Lanes.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
 
 const MaxConcurrentAttempts = PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1)));
 
-/** A Worker that runs Attempts on the orchestrator's machine. */
+/** A worker that runs attempts on the orchestrator's machine. */
 export class LocalWorker extends Schema.Class<LocalWorker>("@usine/config/LocalWorker")({
+  /** The worker identifier, unique within the instance. */
   name: WorkerName,
+  /** The discriminator that selects the local executor. */
   kind: Schema.Literal("local"),
+  /** The positive number of attempts this worker can run concurrently; decoding defaults to 1. */
   maxConcurrentAttempts: MaxConcurrentAttempts,
 }) {}
 
-/** A Worker on the exe.dev VM with the same name. */
+/** A worker on the exe.dev VM with the same name. */
 export class ExeDevWorker extends Schema.Class<ExeDevWorker>("@usine/config/ExeDevWorker")({
+  /** The worker identifier, unique within the instance. */
   name: WorkerName,
+  /** The discriminator that selects the exe.dev executor. */
   kind: Schema.Literal("exe.dev"),
+  /** The positive number of attempts this worker can run concurrently; decoding defaults to 1. */
   maxConcurrentAttempts: MaxConcurrentAttempts,
 }) {}
 
@@ -87,55 +100,57 @@ const EnvironmentVariableName = Schema.String.check(
 ).pipe(Schema.brand("EnvironmentVariableName"));
 
 /**
- * The Gateway in front of an SSH Worker's machine on a private network (ADR 0027).
- *
- * - `domain`: the Gateway's private DNS domain.
- * - `destination`: the Gateway's `ssh` destination, usually the Host alias in the Worker's
- *   `ProxyJump`. The executor forwards through it to the admin API at `adminPort` on the
- *   Gateway's loopback interface.
- * - `adminTokenEnv`: the orchestrator environment variable with the admin token, read when
- *   `usine up` starts or a reload adds the Worker.
- * - `llmProviders`: the providers whose credential the Gateway injects: `anthropic` for Claude
- *   Code, `openai` for Codex. Harnesses for other providers use the operator's login on the
- *   Worker through the forward proxy.
+ * The credential proxy for an SSH worker on a private network (ADR 0027). Credential fields
+ * contain orchestrator environment-variable names, not secret values.
  */
 export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
+  /** The private DNS domain used for gateway proxy requests. */
   domain: GatewayDomain,
+  /** The SSH destination used to forward the gateway admin API. */
   destination: SshDestination,
+  /** The gateway loopback admin port; decoding defaults to 7070. */
   adminPort: GatewayAdminPort.pipe(Schema.withDecodingDefaultKey(Effect.succeed(7070))),
+  /** The orchestrator environment variable containing the gateway admin token. */
   adminTokenEnv: EnvironmentVariableName,
+  /** The providers whose credentials the gateway injects; decoding defaults to none. */
   llmProviders: Schema.Array(GatewayLlmProvider)
     .check(Schema.isUnique())
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
 
 /**
- * The container that each Attempt on an SSH Worker runs in, if the machine has Docker.
- *
- * - `image`: the image to run. If `None`, the executor's image for the harness versions of this
- *   release.
- * - `cpus`, `memoryMib`, and `pids`: the limits of each Attempt's container. If `None`, the
- *   executor derives the limit from the machine at preflight: the machine's total less a reserve
- *   for its own processes, divided by `maxConcurrentAttempts`.
+ * The image and resource limits for each SSH attempt container. Preflight derives unset limits
+ * from machine capacity after reserving resources for host processes, divided by worker
+ * concurrency.
  */
 export class WorkerContainer extends Schema.Class<WorkerContainer>("@usine/config/WorkerContainer")(
   {
+    /** The container image override, or `None` to use the executor image for this release. */
     image: Schema.OptionFromOptionalKey(ContainerImage),
+    /** The CPU limit per attempt container, or `None` to derive it at preflight. */
     cpus: Schema.OptionFromOptionalKey(ContainerCpus),
+    /** The memory limit per attempt container in MiB, or `None` to derive it at preflight. */
     memoryMib: Schema.OptionFromOptionalKey(ContainerMemoryMib),
+    /** The process limit per attempt container, or `None` to derive it at preflight. */
     pids: Schema.OptionFromOptionalKey(ContainerPids),
   },
 ) {}
 
 /**
- * The orchestrator environment variables with the LLM provider API keys that each Attempt on a
- * provisioned Worker gets in its environment, read when `usine up` starts or a reload adds the
- * Worker. `anthropic` becomes `ANTHROPIC_API_KEY` for Claude Code, and `openai` becomes
- * `OPENAI_API_KEY` for Codex.
+ * Orchestrator environment-variable names for API keys delivered to attempts on provisioned
+ * workers. Credentials are read when starting or adding the worker.
  */
 export class ProviderApiKeys extends Schema.Class<ProviderApiKeys>("@usine/config/ProviderApiKeys")(
   {
+    /**
+     * The orchestrator variable containing the Anthropic key to expose as `ANTHROPIC_API_KEY`, or
+     * `None`.
+     */
     anthropic: Schema.OptionFromOptionalKey(EnvironmentVariableName),
+    /**
+     * The orchestrator variable containing the OpenAI key to expose as `OPENAI_API_KEY`, or
+     * `None`.
+     */
     openai: Schema.OptionFromOptionalKey(EnvironmentVariableName),
   },
 ) {}
@@ -155,54 +170,66 @@ const ProvisionerTimingsFromYaml = ProvisionerTimings.pipe(
 );
 
 /**
- * Creates one Hetzner Cloud server per Attempt from a snapshot, and deletes it after the
- * Attempt (#550).
- *
- * - `tokenEnv`: the orchestrator environment variable with a Hetzner Cloud API token with read
- *   and write access to the project.
- * - `serverType` and `location`: each server's type and location.
- * - `image`: the snapshot's ID or description, which `infra/hetzner/snapshot.sh` prints.
- * - `network`: the private network to attach each server to. With a Gateway, it's the Gateway's
- *   network and the server gets no public address.
- * - `firewall`: the project's firewall to apply to each server, such as one that admits SSH only
- *   from the orchestrator's address to a server with a public address.
- * - `sshKey`: the name of the SSH key in the project that each server authorizes.
- * - `sshUser`: the user the executor connects as.
- * - `labels`: extra labels for each server.
- * - `apiKeys`: provider API keys for each Attempt, for harnesses whose credential the Gateway
- *   doesn't have.
+ * Settings for creating one Hetzner Cloud server per attempt from a snapshot and deleting it after
+ * the attempt (ADR 0029).
  */
 export class HetznerProvisioner extends Schema.Class<HetznerProvisioner>(
   "@usine/config/HetznerProvisioner",
 )({
+  /** The discriminator that selects the Hetzner Cloud provisioner. */
   provider: Schema.Literal("hetzner"),
+  /** The orchestrator environment variable containing the Hetzner Cloud API token. */
   tokenEnv: EnvironmentVariableName,
+  /** The Hetzner server type created for each attempt. */
   serverType: HetznerServerType,
+  /** The Hetzner location in which to create each server. */
   location: HetznerLocation,
+  /** The snapshot ID or description used to create each server. */
   image: HetznerImage,
+  /** The private network name, required when using a gateway; `None` omits network attachment. */
   network: Schema.OptionFromOptionalKey(HetznerResourceName),
+  /** The firewall name to apply to each server, or `None` to omit it. */
   firewall: Schema.OptionFromOptionalKey(HetznerResourceName),
+  /** The SSH key name registered in the Hetzner project. */
   sshKey: HetznerResourceName,
+  /** The SSH login on the provisioned server; decoding defaults to `usine`. */
   sshUser: SshUser.pipe(Schema.withDecodingDefaultKey(Effect.succeed("usine"))),
+  /** Additional Hetzner labels applied to each server; decoding defaults to an empty map. */
   labels: HetznerLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
+  /** Provider key variable names for attempts that use API keys; decoding defaults to none. */
   apiKeys: ProviderApiKeysFromYaml,
+  /**
+   * SSH readiness, creation backoff, and machine-check intervals in seconds; decoding applies the
+   * provisioner defaults.
+   */
   timings: ProvisionerTimingsFromYaml,
 }) {}
 
 /** The gateway address and OAuth client variables for a Boat sandbox's tailnet join. */
 export class BoatTailnet extends Schema.Class<BoatTailnet>("@usine/config/BoatTailnet")({
+  /** The gateway address reachable through the tailnet. */
   gatewayAddress: TailnetAddress,
+  /** The orchestrator variable containing the Tailscale OAuth client ID. */
   clientIdEnv: EnvironmentVariableName,
+  /** The orchestrator variable containing the Tailscale OAuth client secret. */
   clientSecretEnv: EnvironmentVariableName,
 }) {}
 
-/** Creates one credential-free Boat sandbox per attempt. */
+/** Settings for creating one Boat sandbox per attempt, optionally from a snapshot (ADR 0029). */
 export class BoatProvisioner extends Schema.Class<BoatProvisioner>("@usine/config/BoatProvisioner")(
   {
+    /** The discriminator that selects the Boat provisioner. */
     provider: Schema.Literal("boat"),
+    /** The orchestrator environment variable containing the Boat API token. */
     tokenEnv: EnvironmentVariableName,
+    /** The Boat sandbox size; decoding defaults to `default`. */
     size: BoatSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("default"))),
+    /** The Boat snapshot to resume, required with a gateway; `None` uses a new sandbox. */
     snapshot: Schema.OptionFromOptionalKey(BoatSnapshotName),
+    /**
+     * The gateway address and OAuth variable names for joining the tailnet, or `None` without a
+     * gateway.
+     */
     tailnet: Schema.OptionFromOptionalKey(
       BoatTailnet.pipe(
         Schema.encodeKeys({
@@ -212,12 +239,17 @@ export class BoatProvisioner extends Schema.Class<BoatProvisioner>("@usine/confi
         }),
       ),
     ),
+    /** Provider key variable names for attempts that use API keys; decoding defaults to none. */
     apiKeys: ProviderApiKeysFromYaml,
+    /**
+     * SSH readiness, creation backoff, and machine-check intervals in seconds; decoding applies
+     * the provisioner defaults.
+     */
     timings: ProvisionerTimingsFromYaml,
   },
 ) {}
 
-/** The provider that creates one machine per Attempt for an SSH Worker; `provider` selects it. */
+/** The provider that creates one machine per attempt for an SSH worker; `provider` selects it. */
 export const WorkerProvisioner = Schema.Union([HetznerProvisioner, BoatProvisioner]);
 export type WorkerProvisioner = typeof WorkerProvisioner.Type;
 
@@ -235,21 +267,31 @@ const WorkerProvisionerFromYaml = Schema.Union([
 ]);
 
 /**
- * A Linux machine reached with `ssh`, with Worker state under `<root>/workers/<name>`. If
- * `gateway` is set, the machine stores no GitHub token; the executor sends each Attempt's token
- * to the Gateway. A Worker sets either `destination`, for one long-lived machine, or
- * `provisioner`, for one machine per Attempt; `maxConcurrentAttempts` then caps the machines in
- * flight.
+ * An SSH worker with state under `<root>/workers/<name>`. Configures either a long-lived
+ * destination or a provisioner for one machine per attempt; concurrency caps active attempts (ADR
+ * 0029).
  */
 export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker")({
+  /** The worker identifier, unique within the instance. */
   name: WorkerName,
+  /** The discriminator that selects the SSH executor. */
   kind: Schema.Literal("ssh"),
+  /** The positive number of attempts this worker can run concurrently; decoding defaults to 1. */
   maxConcurrentAttempts: MaxConcurrentAttempts,
+  /** The SSH destination for a long-lived machine; set this or `provisioner`, but not both. */
   destination: Schema.OptionFromOptionalKey(SshDestination),
+  /** The provider settings for a machine per attempt, or `None` for a long-lived machine. */
   provisioner: Schema.OptionFromOptionalKey(WorkerProvisionerFromYaml),
+  /** The local SSH private-key path; Boat also requires the adjacent `.pub` file. */
   identityFile: Schema.OptionFromOptionalKey(SshIdentityFile),
+  /**
+   * The SSH port override for a long-lived machine; provisioned workers get the port from their
+   * provider.
+   */
   port: Schema.OptionFromOptionalKey(SshPort),
+  /** The remote base directory for worker state under `workers/<name>`. */
   root: WorkerRoot,
+  /** The credential proxy settings, or `None` for direct credential delivery. */
   gateway: Schema.OptionFromOptionalKey(
     WorkerGateway.pipe(
       Schema.encodeKeys({
@@ -259,13 +301,14 @@ export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker"
       }),
     ),
   ),
+  /** The attempt image and resource limits; decoding defaults to executor-selected values. */
   container: WorkerContainer.pipe(
     Schema.encodeKeys({ memoryMib: "memory_mib" }),
     Schema.withDecodingDefaultKey(Effect.succeed({})),
   ),
 }) {}
 
-/** Returns the reason an SSH Worker's machine settings conflict, or `undefined` if they don't. */
+/** Returns the reason an SSH worker's machine settings conflict, or `undefined` if they don't. */
 const sshMachineConflict = (worker: SshWorker): string | undefined => {
   const provisioner = Option.getOrUndefined(worker.provisioner);
   if (provisioner === undefined)
@@ -308,13 +351,15 @@ const HttpsUrl = Schema.URLFromString.check(
 );
 
 /**
- * An LLM provider whose API key the Cloudflare Worker's outbound handlers hold for each Attempt.
- * `apiKeyEnv` is the orchestrator environment variable with the key, read when `usine up` starts.
+ * An LLM provider API-key variable for credential injection by the deployed Cloudflare Worker. The
+ * key stays outside the attempt sandbox.
  */
 export class CloudflareLlmProviderKey extends Schema.Class<CloudflareLlmProviderKey>(
   "@usine/config/CloudflareLlmProviderKey",
 )({
+  /** The LLM provider whose outbound requests need an API key. */
   provider: CloudflareLlmProvider,
+  /** The orchestrator environment variable containing the provider API key. */
   apiKeyEnv: EnvironmentVariableName,
 }) {}
 
@@ -324,30 +369,36 @@ const uniqueProviders = Schema.makeFilter<ReadonlyArray<CloudflareLlmProviderKey
 );
 
 /**
- * A Worker that runs each Attempt in its own Cloudflare sandbox, through the Worker that the
- * operator deploys from `@usine/cloudflare`.
- *
- * - `workerUrl`: the deployed Worker's origin.
- * - `accessClientIdEnv` and `accessClientSecretEnv`: the orchestrator environment variables with
- *   the Cloudflare Access service token that the Worker accepts, read when `usine up` starts.
- * - `image`: the name of the image in the Worker's `containers[].images`.
- * - `instanceType`: the container instance type of each sandbox.
- * - `llmProviders`: the providers whose API key the Worker's outbound handlers inject. Claude Code
- *   needs `anthropic` and Codex needs `openai`; a sandbox holds no harness login.
+ * A worker that runs each attempt in a Cloudflare sandbox through a deployed `@usine/cloudflare`
+ * Worker. Outbound handlers inject the configured provider credentials (ADR 0029).
  */
 export class CloudflareWorker extends Schema.Class<CloudflareWorker>(
   "@usine/config/CloudflareWorker",
 )({
+  /** The worker identifier, unique within the instance. */
   name: WorkerName,
+  /** The discriminator that selects the Cloudflare sandbox executor. */
   kind: Schema.Literal("cloudflare"),
+  /** The positive number of attempts this worker can run concurrently; decoding defaults to 1. */
   maxConcurrentAttempts: MaxConcurrentAttempts,
+  /**
+   * The deployed Cloudflare Worker HTTPS origin, without a path, credentials, query, or fragment.
+   */
   workerUrl: HttpsUrl,
+  /** The orchestrator variable containing the Cloudflare Access service-token client ID. */
   accessClientIdEnv: EnvironmentVariableName,
+  /** The orchestrator variable containing the Cloudflare Access service-token secret. */
   accessClientSecretEnv: EnvironmentVariableName,
+  /** The image name configured in the deployed Worker's `containers[].images`. */
   image: CloudflareImageName,
+  /** The sandbox container instance type; decoding defaults to `standard-4`. */
   instanceType: CloudflareInstanceType.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed("standard-4")),
   ),
+  /**
+   * Unique provider API-key variable mappings for outbound credential injection; decoding defaults
+   * to none.
+   */
   llmProviders: Schema.Array(
     CloudflareLlmProviderKey.pipe(Schema.encodeKeys({ apiKeyEnv: "api_key_env" })),
   )
@@ -355,34 +406,50 @@ export class CloudflareWorker extends Schema.Class<CloudflareWorker>(
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
 
-/** A configured Worker; `kind` selects the adapter. */
+/** A configured worker; `kind` selects the adapter. */
 export const Worker = Schema.Union([LocalWorker, ExeDevWorker, SshWorker, CloudflareWorker]);
 export type Worker = typeof Worker.Type;
 
+/** Instance-wide defaults for polling, upgrades, and agent attempts. */
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
+  /** The npm distribution tag for server upgrades; decoding defaults to `latest`. */
   upgradeChannel: UpgradeChannel.pipe(Schema.withDecodingDefaultKey(Effect.succeed("latest"))),
+  /**
+   * Whether server upgrades are disabled, proposed, or automatic; decoding defaults to `propose`.
+   */
   upgradeMode: UpgradeMode.pipe(Schema.withDecodingDefaultKey(Effect.succeed("propose"))),
   /** The interval between GitHub polling cycles, in seconds. */
   pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
-  /** The maximum number of child sessions per Attempt, counting sequential spawns. */
+  /** The maximum number of child sessions per attempt, counting sequential spawns. */
   maxChildren: ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
-  /** The wall-clock limit per Attempt, in minutes, or `None` for no limit. */
+  /** The wall-clock limit per attempt, in minutes, or `None` for no limit. */
   maxAttemptMinutes: Schema.OptionFromOptionalKey(PositiveInt),
-  /** The token limit per Attempt, counting the parent and every child, or `None` for no limit. */
+  /** The token limit per attempt, counting the parent and every child, or `None` for no limit. */
   maxAttemptTokens: Schema.OptionFromOptionalKey(PositiveInt),
-  /** The parent model for Agents that set none, or `None` to let Pi select it. */
+  /** The parent model for agents that set none, or `None` to let Pi select it. */
   parentModel: Schema.OptionFromOptionalKey(ModelId),
-  /** The parent reasoning effort for Agents that set none, or `None` to use the child's effort. */
+  /** The parent reasoning effort for agents that set none, or `None` to use the child's effort. */
   parentEffort: Schema.OptionFromOptionalKey(Effort),
 }) {}
 
-/** The source of GitHub webhook events that trigger an early poll; polling continues in every mode. */
+/**
+ * The source of GitHub webhook events that trigger an early poll; polling continues in every mode.
+ */
 export const Webhooks = Schema.Union([
-  Schema.Struct({ mode: Schema.Literal("off") }),
-  Schema.Struct({ mode: Schema.Literal("deliveries") }),
-  Schema.Struct({ mode: Schema.Literal("endpoint"), publicUrl: Schema.URLFromString }).pipe(
-    Schema.encodeKeys({ publicUrl: "public_url" }),
-  ),
+  Schema.Struct({
+    /** Disables webhook hints while regular polling continues. */
+    mode: Schema.Literal("off"),
+  }),
+  Schema.Struct({
+    /** Reads GitHub App delivery history for early-poll hints. */
+    mode: Schema.Literal("deliveries"),
+  }),
+  Schema.Struct({
+    /** Accepts webhook deliveries at the instance HTTP endpoint. */
+    mode: Schema.Literal("endpoint"),
+    /** The public URL configured for GitHub webhook delivery. */
+    publicUrl: Schema.URLFromString,
+  }).pipe(Schema.encodeKeys({ publicUrl: "public_url" })),
 ]);
 
 export type Webhooks = typeof Webhooks.Type;
@@ -423,6 +490,10 @@ const SettingsFromYaml = Settings.pipe(
   }),
 );
 
+/**
+ * Decodes snake_case worker settings and checks SSH destination, provisioner, and gateway
+ * constraints.
+ */
 export const WorkerFromYaml = Schema.Union([
   LocalWorker.pipe(Schema.encodeKeys({ maxConcurrentAttempts: "max_concurrent_attempts" })),
   ExeDevWorker.pipe(Schema.encodeKeys({ maxConcurrentAttempts: "max_concurrent_attempts" })),
@@ -453,19 +524,39 @@ const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNa
 /** The decoded `usine.yaml`. */
 export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")(
   Schema.Struct({
+    /**
+     * The configuration format: 1 for repository lanes, or 2 for projects and qualified loops (ADR
+     * 0031).
+     */
     version: Schema.Literals([1, 2]),
+    /**
+     * Projects with disjoint registered repository membership; decoding defaults to none and
+     * version 1 requires none.
+     */
     projects: Schema.Array(Project).pipe(
       Schema.withDecodingDefaultKey(Effect.succeed([])),
       Schema.withConstructorDefault(Effect.succeed([])),
     ),
+    /** Case-insensitively unique labels to create in managed repos; decoding defaults to none. */
     labels: DeclaredLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+    /** The registry of managed repos, unique by case-insensitive repository name. */
     repos: ManagedRepos,
+    /** Instance-wide settings with decoding defaults applied. */
     settings: SettingsFromYaml.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
+    /**
+     * The ordered, nonempty worker list with unique names; decoding defaults to one local worker
+     * named `local`.
+     */
     workers: Workers.pipe(
       Schema.withDecodingDefaultKey(Effect.succeed([{ name: "local", kind: "local" }])),
     ),
+    /**
+     * The source of early-poll hints; decoding defaults to `off` while regular polling continues.
+     */
     webhooks: Webhooks.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ mode: "off" }))),
+    /** The configured operator login for revision attribution, or `None` when unset. */
     operator: Schema.OptionFromOptionalKey(OperatorLogin),
+    /** The OTLP span exporter settings, or `None` to disable export (ADR 0028). */
     tracing: Schema.OptionFromOptionalKey(
       Tracing.pipe(Schema.encodeKeys({ otlpUrl: "otlp_url", serviceName: "service_name" })),
     ),

@@ -20,6 +20,10 @@ const entity = (kind: ConfigurationEntityKind, identifier: string, value: Schema
     value,
   });
 
+/**
+ * Encodes `instance` as configuration entities with defaults applied. Worker order preserves
+ * scheduling preference; settings use the singleton identifier `instance`.
+ */
 export const configurationEntities = (
   instance: LoadedInstance,
 ): ReadonlyArray<ConfigurationEntity> => {
@@ -47,6 +51,11 @@ export const configurationEntities = (
   ];
 };
 
+/**
+ * Returns changes from `before` to `after`, comparing values and the relative order of retained
+ * workers. Other entity order changes are ignored; worker positions are zero-based among workers
+ * in `after`.
+ */
 export const configurationDiff = (
   before: ReadonlyArray<ConfigurationEntity>,
   after: ReadonlyArray<ConfigurationEntity>,
@@ -87,7 +96,11 @@ export const configurationDiff = (
   return [...removed, ...changed];
 };
 
-/** Resolves short loop names; a new short name requires exactly one project. */
+/**
+ * Resolves `key` against `entities`. A unique short loop name becomes qualified; a new short name
+ * needs exactly one project, or stays unqualified with no projects. Returns `None` for ambiguity
+ * and leaves other keys unchanged.
+ */
 export const resolveConfigurationEntityKey = (
   entities: ReadonlyArray<ConfigurationEntity>,
   key: ConfigurationEntityKey,
@@ -113,6 +126,10 @@ export const resolveConfigurationEntityKey = (
   return projects.length === 0 ? Option.some(key) : Option.none();
 };
 
+/**
+ * Replaces a loop JSON object's short `name` with `key.identifier` when they match. Returns other
+ * entity values and mismatched names unchanged.
+ */
 export const qualifyLoopValue = (key: ConfigurationEntityKey, value: Schema.Json): Schema.Json => {
   if (key.kind !== "loop") return value;
   return Option.match(Schema.decodeUnknownOption(Schema.JsonObject)(value), {

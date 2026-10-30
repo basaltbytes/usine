@@ -11,6 +11,7 @@ export const writeYaml = (value: Schema.Json): string => stringify(value);
 export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
   /** The keys as written in the file, for example `["settings", "max_children"]`. */
   path: Schema.Array(Schema.NonEmptyString).check(Schema.isNonEmpty()),
+  /** The replacement JSON value at `path`; missing mapping keys are created. */
   value: Schema.Json,
 }) {}
 
@@ -19,7 +20,10 @@ const restoreNewlines = (text: string, newline: "\n" | "\r\n"): string => {
   return newline === "\r\n" ? normalized.replaceAll("\n", "\r\n") : normalized;
 };
 
-/** Returns `source` with `edit` applied, keeping comments, key order, and newline style. */
+/**
+ * Returns YAML `source` with `edit` applied, keeping comments, key order, and newline style. Uses
+ * `file` only for diagnostics; parsing failures return `ConfigFileError` and no file is written.
+ */
 export const updateYaml = Effect.fn("YamlWriter.updateYaml")(
   (file: InstancePath, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
     Effect.gen(function* () {
@@ -30,7 +34,11 @@ export const updateYaml = Effect.fn("YamlWriter.updateYaml")(
     }),
 );
 
-/** Applies `edit` to the frontmatter of a Markdown config file and returns the whole file. */
+/**
+ * Applies `edit` to Markdown `source` frontmatter, preserving the body, comments, key order, and
+ * newline style. Uses `file` for diagnostics; invalid frontmatter or YAML fails with
+ * `ConfigFileError` and no file is written.
+ */
 export const updateFrontmatter = Effect.fn("YamlWriter.updateFrontmatter")(
   (file: InstancePath, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
     Effect.gen(function* () {
