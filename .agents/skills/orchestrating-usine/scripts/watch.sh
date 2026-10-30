@@ -5,7 +5,7 @@
 interval="${1:-60}"
 prev=""
 while true; do
-  cur=$("$(dirname "$0")/overview.sh" 2>/dev/null | grep -v '^## ' || true)
+  cur=$("$(dirname "$0")/overview.sh" 2>/dev/null | grep -v '^## ' | sed -E 's/ last activity [0-9]{2}:[0-9]{2}//' || true)
   if [ "$cur" != "$prev" ]; then
     echo "--- $(date -u +%H:%MZ)"
     if [ -n "$prev" ]; then

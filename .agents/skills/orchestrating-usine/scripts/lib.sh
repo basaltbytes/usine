@@ -32,17 +32,46 @@ fi
 : "${USINE_REPOS:=}"
 : "${USINE_APP:=}"
 
-# usine_api METHOD PATH [BODY]
+# usine_token prints the bearer token: USINE_TOKEN, or the instance's admin token read over SSH
+# (`.usine/admin-token`, rotated on every server start) and cached in a 0600 file.
+usine_token() {
+  if [ -n "$USINE_TOKEN" ]; then printf '%s' "$USINE_TOKEN"; return 0; fi
+  [ -n "$USINE_SSH" ] && [ -n "$USINE_DIR" ] || return 0
+  local cache="$USINE_STATE/admin-token"
+  if [ ! -s "$cache" ] || [ "${USINE_TOKEN_REFRESH:-0}" = 1 ]; then
+    if (umask 077; ssh -o ConnectTimeout=10 "$USINE_SSH" "cat $USINE_DIR/.usine/admin-token" > "$cache.tmp" 2>/dev/null) && [ -s "$cache.tmp" ]; then
+      mv "$cache.tmp" "$cache"
+    else
+      rm -f "$cache.tmp"; return 0
+    fi
+  fi
+  cat "$cache"
+}
+
+# usine_api METHOD PATH [BODY]. The token travels in a 0600 header file, never on the command line.
+# A 401 with the admin-token fallback refreshes the token once and retries.
 usine_api() {
-  local method="$1" path="$2" body="${3:-}"
-  local args=(-sS --max-time 30 -X "$method" -H 'content-type: application/json' -H 'accept: application/json')
-  if [ -n "$USINE_TOKEN" ]; then
-    args+=(-H "authorization: Bearer $USINE_TOKEN")
-  fi
-  if [ -n "$body" ]; then
-    args+=(--data "$body")
-  fi
-  curl "${args[@]}" "$USINE_URL$path"
+  local method="$1" path="$2" body="${3:-}" attempt token out status
+  for attempt in 1 2; do
+    token="$(usine_token)"
+    local args=(-sS --max-time 30 -X "$method" -H 'content-type: application/json' -H 'accept: application/json' -w '\n%{http_code}')
+    if [ -n "$token" ]; then
+      local header="$USINE_STATE/.auth-header"
+      (umask 077; printf 'authorization: Bearer %s\n' "$token" > "$header")
+      args+=(-H "@$header")
+    fi
+    if [ -n "$body" ]; then
+      args+=(--data "$body")
+    fi
+    out="$(curl "${args[@]}" "$USINE_URL$path")" || return $?
+    status="${out##*$'\n'}"
+    out="${out%$'\n'*}"
+    if [ "$status" = 401 ] && [ -z "$USINE_TOKEN" ] && [ "$attempt" = 1 ]; then
+      USINE_TOKEN_REFRESH=1; continue
+    fi
+    printf '%s' "$out"
+    return 0
+  done
 }
 
 # usine_host CMD... runs on the orchestrator host, locally when USINE_SSH is empty.

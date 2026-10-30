@@ -42,7 +42,7 @@ jobs:
           changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
           matches() { if printf '%s\n' "$changed" | grep -qE "$1"; then echo true; else echo false; fi; }
           echo "release=$(matches '^\.changeset/|(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.github/workflows/release\.yml$')" >> "$GITHUB_OUTPUT"
-          echo "next=$(matches '^(packages|apps/server|apps/web)/|^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$|^scripts/prerelease-versions\.mjs$|^\.github/workflows/release\.yml$')" >> "$GITHUB_OUTPUT"
+          echo "next=$(matches '^(packages|apps/server|apps/web)/|^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$|^scripts/release/|^\.github/workflows/release\.yml$')" >> "$GITHUB_OUTPUT"
 
   release:
     needs: changes
@@ -102,6 +102,5 @@ jobs:
             turbo-${{ runner.os }}-release-
             turbo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm prerelease:version ${{ github.run_number }} ${{ github.sha }}
-      - run: pnpm build
-      - run: pnpm -r publish --tag next --no-git-checks
+      - name: Publish snapshots with retries
+        run: pnpm prerelease:publish ${{ github.run_number }} ${{ github.sha }} ${{ github.run_attempt }}
