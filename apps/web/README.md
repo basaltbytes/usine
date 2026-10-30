@@ -232,7 +232,7 @@ Loops, agents, workers, settings, projects, and repositories open a form with **
 
 **History** lists revisions newest first, with the actor, time, and message. Select a revision for an export-format unified diff. **Revert** accepts an optional message and restores all entities changed by that revision; later changes can prevent it. The section-level history links to every changed entity, including deleted ones. **Older revisions** loads the next page.
 
-Committed revisions apply live. There is no reload control. **Pause** and **Resume** are absent in setup mode; new GitHub App credentials still require restarting `usine up`.
+Committed revisions apply live. There is no reload control. **Pause** and **Resume** are absent in setup mode. After installation and sign-in, the final setup action activates saved GitHub App credentials in the same process and waits for runtime readiness before navigating.
 
 ## Intervening in a run
 
@@ -312,7 +312,7 @@ The registry is the component library, and the theme is the only place for color
 - **Keep dependencies in one direction.** Routes compose features; features use shared `components/`, `hooks/`, and `lib/`. Features never import another feature. Put UI rendered by several features in `components/<feature>/`, and shared data or hooks in `lib/` or `hooks/`. Use `~/` for imports outside the current folder and named exports in application code.
 - **Keep components small.** Declare `type <Component>Props` above each component with readonly fields. Extract subcomponents before a component file reaches 300 lines. Vendored `components/ui/` and `components/ai-elements/` keep their upstream structure. Put display text in feature `strings.ts` files, or shared `lib/strings.ts` modules.
 - **Colocate tests.** Put unit and browser tests beside their implementation in `src/`; Vitest discovers `*.test.ts`, `*.test.tsx`, and `*.browser.test.tsx` there. Shared fixtures are in the corresponding `lib/<feature>/` folder; the memory router helper is in `lib/testing/`.
-- **A rebuilt bundle needs no restart.** `@usine/server` reads `index.html` and `assets/*` from `apps/server/dist/web` on every request, so after `pnpm build`, reload the page. GitHub credentials, the `webhooks` and `tracing` blocks of `usine.yaml`, and some `workers` changes are read only at startup; other accepted configuration revisions apply live.
+- **A rebuilt bundle needs no restart.** `@usine/server` reads `index.html` and `assets/*` from `apps/server/dist/web` on every request, so after `pnpm build`, reload the page. Setup and sign-in read saved GitHub App credentials live; the final setup action activates the runtime. The `webhooks` and `tracing` blocks of `usine.yaml` and some `workers` changes require a restart; other accepted configuration revisions apply live.
 - **Navigation is in `src/components/app-sidebar.tsx`**, built from the `sidebar` registry component. Screens render inside `SidebarInset` under a breadcrumb header; the panel has the viewport's height, and content below the header scrolls inside it.
 - **Give a table's fill column `FillCell`** (`src/components/fill-cell.tsx`) instead of `w-full`. The column takes the remaining width, and its content wraps or is cut short instead of widening the table. Every other column shrinks to its content's narrowest width, so keep that content on one line, or give its cell a minimum width to wrap at.
 - **Pick the page width.** `Page` takes `width="prose"` (default; content stops at 768px) for prose and short lists, or `width="full"` for tables and side-by-side layouts such as the configuration section.
@@ -345,3 +345,7 @@ with payload completion and server diagnostics. Run headers, Needs attention,
 and overview rows show the saved approval decision and available label actors.
 
 Idle upgrade waits show the requested version in run headers, Overview's Running section, and worker rows. Settings offers **Cancel pending upgrade** while an upgrade waits. Needs attention links to Settings after an upgrade has deferred runs for ten minutes.
+
+## GitHub App setup
+
+`/setup` resumes App creation, credential recovery, installation discovery, and repository selection. A one-time sign-in link opens the setup session. The page posts a prepared manifest to GitHub and supports restoring existing credential JSON. After installation, GitHub sign-in enrolls the first admin and ends the setup session. **Add repositories** opens the existing installation repository picker.

@@ -7,7 +7,7 @@ sidebar:
 
 import { CardGrid, FileTree, LinkCard, Steps } from "@astrojs/starlight/components";
 
-A factory is one orchestrator process that you start with `usine up` from an instance folder. The folder contains bootstrap files and the database in `.usine/`, including configuration, its revision history, and runtime state. Keep `.usine/` and secrets out of git.
+A factory is one orchestrator process that you start with `usine up` from an instance folder. The folder contains the database in `.usine/`, including configuration, its revision history, and runtime state. Keep `.usine/` and secrets out of git.
 
 ## Before you begin
 
@@ -30,99 +30,29 @@ The package provides the `usine` command. To update it, run `npm install --globa
 
 ## Create the instance folder
 
-The first start imports the files below into the database as revision 1. Later starts read only the stored configuration. Use [`usine config edit`, `import`, `export`, and `log`](/reference/configuration/config/) to change configuration and inspect its history. `.env`, the GitHub App credentials, and the listen address remain in files or environment variables.
+Create an empty folder and start usine there:
+
+```sh
+mkdir -p ~/my-factory
+cd ~/my-factory
+usine up
+```
+
+The first start saves an empty configuration revision in the database. Use the web UI to add repositories, projects, agents, and loops. Existing instance folders with `usine.yaml` import their configuration on the first start; later starts read the database. [`usine config import` and `export`](/reference/configuration/config/) support file-based configuration transfers.
 
 <FileTree>
 
 - my-factory/
-  - usine.yaml registry, labels, settings, and workers
-  - agents/
-    - developer.md one agent per file
-  - projects/
-    - widgets/
-      - loops/
-        - start-dev.md one loop per file
-  - .gitignore
-  - .env secrets that usine reads, such as tokens
-  - .usine/ runtime state that usine up writes
-    - runtime.sqlite
-    - durable.sqlite
-    - github-app.json
-    - instance.lock
-    - instance.pid
-    - instance.json
-    - instance-id
-    - usine.log
-    - backups/
-    - workers/
+  - .env optional environment overrides
+  - .usine/ runtime state and secrets
+    - runtime.sqlite configuration, revisions, and runs
+    - durable.sqlite sessions
+    - github-app.json App credentials, mode 0600
+    - admin-token local API credential, mode 0600
 
 </FileTree>
 
-<Steps>
-
-1. Create the bootstrap folder and an `agents/` directory, which must exist even if empty. This CLI version has no `usine init` command; create the starting files as shown here. A version 2 project without loops can omit its loops directory.
-
-   ```sh
-   mkdir -p ~/my-factory/agents ~/my-factory/projects/widgets/loops
-   cd ~/my-factory
-   ```
-
-2. Register the repositories and their project in the bootstrap `usine.yaml`:
-
-   ```yaml title="usine.yaml"
-   version: 2
-   repos:
-     - name: acme/widgets
-   projects:
-     - id: widgets
-       name: Widgets
-       repositories: [acme/widgets]
-   ```
-
-   A fuller file declares labels, board lanes, settings, workers, and your GitHub login:
-
-   ```yaml title="usine.yaml"
-   version: 2
-   labels:
-     - name: ready-for-agent
-       color: "0e8a16"
-       description: The developer Agent may start this issue
-     - name: ready-for-review
-   repos:
-     - name: acme/widgets
-       tags: [backend]
-   projects:
-     - id: widgets
-       name: Widgets
-       repositories: [acme/widgets]
-       lanes:
-         - name: Ready
-           sources: [{ label: ready-for-agent }]
-         - name: Review
-           sources: [{ label: ready-for-review }]
-         - name: Done
-           sources: [{ state: pr-merged }, { state: issue-closed }]
-   settings:
-     poll_interval: 60
-   workers:
-     - name: local
-       kind: local
-       max_concurrent_attempts: 2
-   operator: your-github-login
-   ```
-
-   [`usine.yaml`](/reference/configuration/usine-yaml/) lists every key and its default.
-
-3. Copy the [agent example](/guides/write-an-agent/) to `agents/developer.md` and the [loop example](/guides/write-a-loop/) to `start-dev.md` in `projects/widgets/loops/`. These files become stored entities during the first import.
-
-4. Keep the runtime state and the [environment file](/reference/configuration/cli/#environment-file) out of git:
-
-   ```text title=".gitignore"
-   .usine/
-   .env
-   ```
-
-</Steps>
+Keep `.usine/` and `.env` out of git and include them in your instance backups.
 
 ## Connect a GitHub App
 
@@ -130,42 +60,23 @@ usine uses one GitHub App. The orchestrator polls and writes labels with an inst
 
 <Steps>
 
-1. In the settings of the account or organization that owns the repositories, open **Developer settings** > **GitHub Apps** > **New GitHub App**. Set **Where can this GitHub App be installed?** to **Only on this account**.
+1. Open the sign-in link printed by `usine up`. For a detached server, run `usine sign-in-link` in the instance folder and open that link. It opens a temporary setup session.
 
-2. Under **Webhook**, clear **Active**. usine polls GitHub and doesn't use webhooks.
+2. Enter an App name on the setup page. To create the App for an organization, enter its GitHub login. Select **Create App on GitHub** and confirm on GitHub. usine supplies the required permissions, event subscriptions, sign-in callback, and webhook URL. For a remote instance, set `USINE_ORIGIN` to its public HTTPS address before starting setup.
 
-3. Set these repository permissions, and leave all other permissions at **No access**:
+3. GitHub returns to usine, which saves the App ID, private key, client ID, client secret, and webhook secret together in `.usine/github-app.json` with mode `0600`. Setup reads the saved credentials and preserves your setup session.
 
-   | Permission    | Access         |
-   | ------------- | -------------- |
-   | Checks        | Read-only      |
-   | Contents      | Read and write |
-   | Issues        | Read and write |
-   | Metadata      | Read-only      |
-   | Pull requests | Read and write |
+4. Select **Install App on GitHub**, choose the account and repositories, and return to setup. Select **Check installation**. usine requires exactly one active installation with the requested permissions.
 
-   usine requests exactly these permissions for every token and refuses an installation that lacks one. With **Workflows** at **No access**, attempt tokens can't change `.github/workflows/`.
-
-4. Create the App, generate a private key, and note the App ID.
-
-5. On the App's **Install App** page, install the App on the account that owns the repositories, and select every repository in your bootstrap registry. usine expects exactly one installation and refuses a suspended one.
-
-6. Save the credentials in `.usine/github-app.json` with mode `0600`:
-
-   ```sh title="Instance folder"
-   mkdir -p .usine
-   install -m 600 /dev/null .usine/github-app.json
-   jq -n --argjson app_id "$APP_ID" --rawfile private_key factory.private-key.pem \
-     '{app_id: $app_id, private_key: $private_key}' > .usine/github-app.json
-   ```
-
-   You can set `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY` instead. See [Environment variables](/reference/configuration/cli/#environment-variables).
+5. Select **Sign in with GitHub**. The member who completes this sign-in becomes the first instance admin, and the temporary setup session ends. Select **Add repositories** to activate the runtime and open the installation repository picker. Create a project for those repositories, then add your agents and loops.
 
 </Steps>
 
+Open `/setup` to resume an interrupted setup. It detects missing credentials, an App awaiting installation, or an installation whose registry is empty. If App creation finished on GitHub but its credentials were lost, open **I already have an App** to restore credential JSON. Generate a replacement private key in the App settings if necessary. Existing manual credential files and environment overrides remain supported.
+
 ## Start the orchestrator
 
-From the instance folder, run `usine up`. The first start imports the bootstrap files as revision 1, preserving loop pause state. Later starts read the database and ignore the original configuration files:
+From the instance folder, run `usine up`. An empty folder starts with an empty configuration revision. An existing bootstrap configuration imports as revision 1, preserving loop pause state. Later starts read the database and ignore the original configuration files:
 
 ```sh title="Instance folder"
 usine up
@@ -194,7 +105,7 @@ Closing a laptop's lid also puts it to sleep, unless it runs in closed-display m
 
 ## Open the web UI
 
-The UI is at `http://127.0.0.1:7331`, or on the port you set. The server listens only on the loopback interface and has no login. It refuses browser requests from pages on non-loopback origins, other than the URL of a proxy that [`--origin`](/reference/configuration/cli/#usine-up) sets, so other websites can't use it through your browser. To use the UI from another computer, forward the port over SSH, or publish it on your tailnet as in [Run the orchestrator on a server](/guides/run-the-orchestrator-on-a-server/#keep-the-ui-private):
+The UI is at `http://127.0.0.1:7331`, or on the port you set. The server listens only on the loopback interface and requires sign-in, including for local access. Sign in with GitHub after setup, or run `usine sign-in-link` in the instance folder to generate a one-time link. It refuses browser requests from pages on non-loopback origins, other than the URL of a proxy that [`--origin`](/reference/configuration/cli/#usine-up) sets, so other websites can't use it through your browser. To use the UI from another computer, forward the port over SSH, or publish it on your tailnet as in [Run the orchestrator on a server](/guides/run-the-orchestrator-on-a-server/#keep-the-ui-private):
 
 ```sh title="Your computer"
 ssh -N -L 7331:127.0.0.1:7331 orchestrator.example.com

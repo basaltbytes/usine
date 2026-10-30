@@ -195,7 +195,7 @@ it("does not trust forwarded headers or a caller origin to enable HSTS on local 
   }
 });
 
-it("loads the bundled sign-in UI under the production CSP without browser errors", async () => {
+it("loads sign-in and submits the setup manifest to GitHub under the production CSP", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
       const services = yield* authFixture();
@@ -237,9 +237,27 @@ it("loads the bundled sign-in UI under the production CSP without browser errors
             .getByRole("heading", { name: "Sign in to usine" })
             .waitFor({ timeout: 10_000 });
           await page
-            .getByRole("link", { name: "Continue with GitHub" })
+            .getByRole("button", { name: "Continue with GitHub" })
             .waitFor({ timeout: 10_000 });
           await page.evaluate(() => document.fonts.ready);
+          await page.route(`${url}/api/setup`, (route) =>
+            route.fulfill({ json: { _tag: "NoApp" } }),
+          );
+          const action = "https://github.com/settings/apps/new?state=test";
+          const manifest = JSON.stringify({ name: "usine browser test" });
+          await page.route(`${url}/api/setup/manifest`, (route) =>
+            route.fulfill({ json: { action, manifest } }),
+          );
+          await page.route("https://github.com/**", (route) =>
+            route.fulfill({ contentType: "text/html", body: "<main>GitHub App created</main>" }),
+          );
+          await page.goto(`${url}/setup`);
+          const [request] = await Promise.all([
+            page.waitForRequest(action, { timeout: 5_000 }),
+            page.getByRole("button", { name: "Create App on GitHub" }).click({ timeout: 5_000 }),
+          ]);
+          assert.equal(request.method(), "POST");
+          assert.equal(new URLSearchParams(request.postData() ?? "").get("manifest"), manifest);
         } finally {
           assert.deepEqual(errors, []);
         }

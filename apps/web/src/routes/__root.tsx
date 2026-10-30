@@ -232,10 +232,10 @@ const Shell = () => {
                 <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
                 <AlertDescription className="max-w-prose">
                   <p>
-                    {data.errorTag}. Set <code>USINE_GITHUB_APP_ID</code> and{" "}
-                    <code>USINE_GITHUB_PRIVATE_KEY</code>, or create{" "}
-                    <code>.usine/github-app.json</code> with mode 0600, then restart{" "}
-                    <code>usine up</code>. Credentials are read at startup only.
+                    <a href="/setup" className="underline underline-offset-4">
+                      Finish GitHub App setup
+                    </a>{" "}
+                    to connect this instance.
                   </p>
                 </AlertDescription>
               </Alert>
@@ -266,14 +266,18 @@ const Shell = () => {
 
 const Root = () => {
   const matchRoute = useMatchRoute();
-  return matchRoute({ to: "/sign-in" }) !== false ? <Outlet /> : <Shell />;
+  return matchRoute({ to: "/sign-in" }) !== false || matchRoute({ to: "/setup" }) !== false ? (
+    <Outlet />
+  ) : (
+    <Shell />
+  );
 };
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   validateSearch: RootSearch,
   loaderDeps: ({ search }) => ({ run: search.run }),
   loader: async ({ context: { queryClient }, deps: { run }, location }) => {
-    if (location.pathname === "/sign-in") return;
+    if (location.pathname === "/sign-in" || location.pathname === "/setup") return;
     await Promise.all([
       queryClient.ensureQueryData(overviewQuery()),
       // A rejected drawer query is displayed inside the drawer.

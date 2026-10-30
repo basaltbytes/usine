@@ -1,3 +1,4 @@
+import { Setup } from "./setup/control.ts";
 import { webhookEndpoint } from "./webhooks.ts";
 import { WebhookHealth } from "@usine/orchestrator/webhooks";
 import { PollingTriggers } from "@usine/orchestrator/polling-triggers";
@@ -24,7 +25,7 @@ import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory, type InstanceId } from "@usine/core/instance";
 import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
 import { GitHubApp, GitHubCredentials } from "@usine/github/github-app";
-import { loadLocalCredentials } from "@usine/github/local-secrets";
+import { loadLocalCredentials, loadLocalSecrets } from "@usine/github/local-secrets";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
 import {
   ConfigurationEditor,
@@ -76,6 +77,7 @@ import { tracingLayer } from "./tracing.ts";
 // Untraced: a span around a server that never returns would parent every request span.
 const serve = Effect.fnUntraced(function* (options: {
   readonly auth: AuthServices;
+  readonly setup: Setup["Service"];
   readonly backend: ReturnType<typeof liveBackendLayer>;
   readonly webRoot: string;
   readonly port: Port;
@@ -98,6 +100,7 @@ const serve = Effect.fnUntraced(function* (options: {
         Layer.succeed(ConfigurationEditor, options.configurationEditor),
       ),
       options.webhooks,
+      options.setup,
     ),
   ).pipe(
     Effect.mapError((error) => serverStartError(options.port, error)),
@@ -167,6 +170,15 @@ const start = Effect.fnUntraced(function* (
     Effect.provide(NodeServices.layer),
     Effect.result,
   );
+  const setupContext = yield* Layer.build(
+    Setup.layer(
+      directory,
+      Effect.map(instances.get, ({ config }) => config.repos.length > 0),
+      auth,
+      Result.isFailure(credentials) ? "setup" : "runtime",
+    ).pipe(Layer.provide(NodeServices.layer), Layer.provide(FetchHttpClient.layer)),
+  );
+  const setup = Context.get(setupContext, Setup);
   const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "web");
   const url = `http://127.0.0.1:${port}`;
 
@@ -195,6 +207,7 @@ const start = Effect.fnUntraced(function* (
       }),
     );
     return yield* serve({
+      setup,
       auth,
       backend,
       configurationEditor,
@@ -203,7 +216,10 @@ const start = Effect.fnUntraced(function* (
       url,
       openSetupPage: true,
       upgrades: Context.get(upgradeContext, ServerUpgrades),
-    });
+    }).pipe(
+      Effect.raceFirst(setup.changed),
+      Effect.tap(() => Effect.logInfo("Activating saved GitHub App credentials")),
+    );
   }
 
   const shutdown = yield* Deferred.make<void>();
@@ -240,6 +256,7 @@ const start = Effect.fnUntraced(function* (
       drain: engine.drain(),
       running: Effect.raceFirst(
         serve({
+          setup,
           auth,
           backend: liveBackendLayer(
             instances,
@@ -331,7 +348,9 @@ export const up = (command: UpCommand) =>
       const { config } = yield* instances.get;
       const authStoreContext = yield* Layer.build(sqliteAuthLayer.pipe(Layer.provide(database)));
       const githubContext = yield* Layer.build(
-        githubSignInLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+        githubSignInLayer(
+          loadLocalSecrets(directory).pipe(Effect.provide(NodeServices.layer)),
+        ).pipe(Layer.provide(FetchHttpClient.layer)),
       );
       const authDependencies = Layer.mergeAll(
         Layer.succeedContext(authStoreContext),
@@ -364,6 +383,11 @@ export const up = (command: UpCommand) =>
         database,
         configurationEditor,
         auth,
-      ).pipe(Effect.provideContext(tracer), Effect.provideContext(configurationContext));
+      ).pipe(
+        Effect.scoped,
+        Effect.forever,
+        Effect.provideContext(tracer),
+        Effect.provideContext(configurationContext),
+      );
     }),
   ).pipe(Effect.provideService(References.MinimumLogLevel, command.logLevel));

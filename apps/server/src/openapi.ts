@@ -1,3 +1,4 @@
+import { SetupApi } from "./setup/api.ts";
 import { CrossSiteRequestError } from "./security.ts";
 import { OperatorApi } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
@@ -21,6 +22,7 @@ export const DocumentationApi = HttpApiGroup.make("documentation").add(
 export const publicOperatorPaths = new Set<string>([
   OperatorApi.groups.operator.endpoints.serverVersion.path,
   DocumentationApi.endpoints.openapi.path,
+  SetupApi.endpoints.callback.path,
 ]);
 
 const addForbiddenResponse = (
@@ -44,7 +46,7 @@ const addForbiddenResponse = (
 };
 
 export const operatorOpenApi = () => {
-  const document = OpenApi.fromApi(OperatorApi.add(AuthApi, DocumentationApi));
+  const document = OpenApi.fromApi(OperatorApi.add(AuthApi, SetupApi, DocumentationApi));
   const authenticationError = Schema.toJsonSchemaDocument(AuthenticationError).schema;
   document.components.securitySchemes = {
     bearer: {

@@ -43,7 +43,7 @@ export const authFixture = (initial: ReadonlyArray<Member> = [alice], identity =
     const store = Context.get(storeContext, AuthStore);
     yield* Effect.forEach(initial, (member) => store.add(member, false));
     const githubContext = yield* Layer.build(
-      githubSignInLayer.pipe(
+      githubSignInLayer().pipe(
         Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
         Layer.provide(
           Layer.succeed(

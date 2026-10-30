@@ -941,6 +941,7 @@ describe("local worker", () => {
           repositories: () => Effect.die("unused installation repositories"),
           installationToken: () => Effect.die("unused"),
           projectAccess: () => Effect.die("unused"),
+          installationUrl: () => Effect.die("unused installation URL"),
           configureWebhook: () => Effect.die("unused webhook configuration"),
           deliveries: () => Effect.die("unused webhook deliveries"),
           workerToken: () => Effect.die("unused"),

@@ -32,7 +32,7 @@ usine upgrade       # back up, move the @usine/server pin, install, commit, and 
 
 `usine up` records the systemd service whose cgroup it runs in, such as `usine.service`. If systemd reports the process as that service's main process, `stop`, `restart`, and `upgrade` stop it with `systemctl stop --no-block` and start it with `systemctl start`, so that systemd keeps managing it, and `status` names the service. A start whose service fails or waits to restart is stopped, so that it doesn't repeat.
 
-Without GitHub App credentials, it logs the typed error, leaves both trigger streams idle, and opens the setup screen in the default browser. The browser command times out after two seconds; a failed opener only logs a warning. Runs, transcripts, and loop pause state stay readable, and stored configuration can be edited, but interventions are unavailable. Supply `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or `app_id` and `private_key` in a mode-0600 `.usine/github-app.json`. Credentials are read only at startup, so restart `usine up` after adding them, as the setup screen says.
+Without GitHub App credentials, `usine up` serves setup with idle pollers. Open its one-time sign-in link, or run `usine sign-in-link` from the instance folder. `/setup` creates the App through GitHub's manifest flow, saves its credentials with mode 0600, discovers its installation, and opens the repository picker after the first admin signs in. It resumes missing-key and missing-installation states and accepts restored credential JSON. Setup reads saved credentials live. After sign-in, its final action activates the runtime and waits for readiness before opening the repository picker. Existing environment overrides and manual credential files remain supported; restart after changing those outside setup.
 
 ## Configuration commands
 
@@ -53,6 +53,8 @@ These commands work while `usine up` runs and while it is stopped. `edit` uses `
 The [configuration revisions API](../../packages/orchestrator/README.md#configuration-revisions-api) reads history and accepts JSON or export-format entity edits. API writes check runtime compatibility before saving and apply accepted revisions without a reload. New loops created by API writes or CLI imports start paused; the initial migration preserves existing pause states. The server commits loop creation and its pause state in one SQLite transaction.
 
 ## Web UI
+
+An empty instance folder starts with an empty configuration revision in the database. Setup creates no git repository or configuration skeleton. Existing bootstrap files still import when the configuration store is empty.
 
 Each project opens as a board of authored or proposed lanes; proposed lanes are read-only. To enable moves, edit the repository with `usine config edit repository <owner/name>` (see the [lane example](../../packages/config/README.md)). Moving an item to an authored label-backed lane swaps only the labels in that map and keeps other labels; polling then evaluates label-driven loops. Cards show the latest run and open its drawer. Retry controls describe the saved harness and model. The drawer flags a changed agent definition, and **Edit and retry** uses the current loaded definition even with the same task and agent name. `POST /api/runs/:id/cancel` returns 409 for failed and succeeded runs and preserves their outcomes; repeating it on a canceled run succeeds.
 
@@ -88,7 +90,7 @@ A failed hook configuration request is logged; the endpoint and normal polling r
 
 The web UI edits stored entities in their export format, validates each save, and shows revision history and diffs. Concurrent writes return a conflict; the editor retains the draft while the operator reviews the newer text. Create, delete, and revert actions use the same API as other configuration writes. New loops start paused.
 
-The reload HTTP endpoint has been removed. Revisions apply automatically; `SIGHUP` remains available to explicitly re-read the store without stopping the process. A configuration write that requires a restart, or whose added worker or slots fail preflight, stores nothing and returns the reason. A changed connection applies first; a failed preflight disables new scheduling on that worker and retries automatically. GitHub credentials are read only at startup.
+The reload HTTP endpoint has been removed. Revisions apply automatically; `SIGHUP` remains available to explicitly re-read the store without stopping the process. A configuration write that requires a restart, or whose added worker or slots fail preflight, stores nothing and returns the reason. A changed connection applies first; a failed preflight disables new scheduling on that worker and retries automatically. App signing credentials are read at startup and after setup saves them. GitHub sign-in reads the client ID and secret from the runtime file when their environment overrides are unset.
 
 ## Back up and export
 
@@ -173,7 +175,7 @@ For an existing App, open **GitHub > Settings > Developer settings > GitHub Apps
 
 1. Under user authorization, enable **Device Flow**.
 2. Set the callback URL to `<instance-origin>/api/auth/callback`, for example `https://usine.example.com/api/auth/callback`.
-3. Copy the App's client ID and generate a client secret. Add `USINE_GITHUB_CLIENT_ID` and `USINE_GITHUB_CLIENT_SECRET` to the instance's `.env` file. These differ from the App ID and private key.
+3. For a manually created App, copy its client ID and generate a client secret. Add `USINE_GITHUB_CLIENT_ID` and `USINE_GITHUB_CLIENT_SECRET` to the instance's `.env` file. These differ from the App ID and private key.
 4. Set `USINE_ORIGIN` to the same instance origin, then restart `usine up`.
 
 Use HTTPS for remote access through a reverse proxy. With Tailscale, publish the loopback listener with `tailscale serve --bg http://127.0.0.1:7331` and set `USINE_ORIGIN` to the HTTPS address it prints. `usine up` continues to bind only `127.0.0.1`.
@@ -206,7 +208,9 @@ Loop checks at `/api/configuration/loops/check` validate integer CEL priorities.
 
 `GET /api/openapi.json` publicly serves the generated OpenAPI 3.1 contract, including sign-in, members, and tokens. It describes request and response schemas and authentication requirements without reading instance state. See the [HTTP API reference](https://docs.usine.dev/reference/operator-api/) for endpoint descriptions and the downloadable document.
 
-Route definitions and schema annotations generate the contract. Authentication handlers use the paths and request schemas in `src/auth/api.ts`; the server combines those definitions with `OperatorApi` in `src/openapi.ts`. After changing a contract, regenerate and commit `apps/docs/public/openapi.json` as described in the [docs README](../docs/README.md#operator-http-api-reference).
+Route definitions and schema annotations generate the contract. Authentication handlers use the paths and request schemas in `src/auth/api.ts`; setup handlers use `src/setup/api.ts`; the server combines those definitions with `OperatorApi` in `src/openapi.ts`. After changing a contract, regenerate and commit `apps/docs/public/openapi.json` as described in the [docs README](../docs/README.md#operator-http-api-reference).
+
+Apps created through `/setup` already have the web callback and client credentials. Enable the device flow in the App settings before using CLI device sign-in.
 
 `POST /api/configuration/loops/check` validates conditional approval as a boolean
 CEL expression in the trigger's environment. Approval diagnostics use the

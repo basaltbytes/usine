@@ -28,8 +28,7 @@ export const SignInPage = ({ error }: SignInPageProps) => {
           body: { token },
         },
       ).then(
-        (result) =>
-          window.location.replace(result.bootstrap && data.github ? "/api/auth/github" : "/"),
+        (result) => window.location.replace(result.bootstrap ? "/setup" : "/"),
         (cause: unknown) => {
           setFailure(rejectionMessage(cause));
           setPending(false);
@@ -53,7 +52,11 @@ export const SignInPage = ({ error }: SignInPageProps) => {
           </p>
         ) : (
           <>
-            {data.github && <Button render={<a href="/api/auth/github" />}>{githubSignIn}</Button>}
+            {data.github && (
+              <Button nativeButton={false} render={<a href="/api/auth/github" />}>
+                {githubSignIn}
+              </Button>
+            )}
             <p className="text-sm text-muted-foreground">{localSignIn}</p>
           </>
         )}

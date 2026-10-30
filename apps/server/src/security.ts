@@ -20,7 +20,7 @@ const SECURITY_HEADERS = {
     "object-src 'none'",
     "base-uri 'none'",
     "frame-ancestors 'none'",
-    "form-action 'self'",
+    "form-action 'self' https://github.com",
   ].join("; "),
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
