@@ -30,7 +30,7 @@ export const needCopy = (need: NeedView): NeedCopy =>
     }),
     WebhookSilenceNeed: ({ publicUrl, startedAt }) => ({
       title: "No webhook delivery received",
-      detail: `No verified delivery since startup at ${startedAt}. Check ${publicUrl}, the App webhook active setting, and USINE_GITHUB_WEBHOOK_SECRET. Polling continues.`,
+      detail: `No verified delivery since ${startedAt}, when the endpoint started or its configuration last changed. Check ${publicUrl}, the App webhook active setting, and USINE_GITHUB_WEBHOOK_SECRET. Polling continues.`,
       repository: null,
       runId: null,
     }),

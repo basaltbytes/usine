@@ -50,7 +50,7 @@ const makeWebhookHandler: (
   polling: Pick<PollingTriggers["Service"], "hint">,
   health: WebhookHealth["Service"],
   app: Pick<GitHubApp["Service"], "configureWebhook">,
-) => Effect.Effect<WebhookHandler, WebhookConfigurationError> = Effect.fn("Server.webhookEndpoint")(
+) => Effect.Effect<WebhookHandler, WebhookConfigurationError> = Effect.fn("Server.webhookHandler")(
   function* (
     instances: { readonly get: Effect.Effect<LoadedInstance> },
     polling: Pick<PollingTriggers["Service"], "hint">,
