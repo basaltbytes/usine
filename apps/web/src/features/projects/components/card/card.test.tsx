@@ -1,3 +1,5 @@
+import { RunLine } from "./run-line";
+import { MachineQuotaWait } from "@usine/orchestrator/operator";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -710,4 +712,18 @@ describe("Board card Run line", () => {
     const unrecorded = new AttemptView({ ...failed, endedAt: null });
     assert.strictEqual(runLineSince(new RunView({ ...run, attempts: [unrecorded] })), null);
   });
+});
+
+it("renders the worker and quota refusal below the board run line", () => {
+  const run = new RunView({
+    ...runOnItem("Failed", []),
+    state: "Running",
+    closedAt: null,
+    machineWait: new MachineQuotaWait({
+      worker: WorkerName.make("pool"),
+      message: "shared core limit exceeded",
+    }),
+  });
+  const markup = renderToStaticMarkup(<RunLine run={run} />);
+  assert.include(markup, "Waiting for pool: shared core limit exceeded");
 });

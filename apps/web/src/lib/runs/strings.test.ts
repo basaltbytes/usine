@@ -3,7 +3,7 @@ import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { UnconfirmedStopView } from "@usine/orchestrator/operator";
+import { MachineQuotaWait, UnconfirmedStopView } from "@usine/orchestrator/operator";
 import { DateTime } from "effect";
 import { assert, describe, it } from "vitest";
 import { conflictingSalvageMessage, runStateLine } from "~/lib/runs/strings";
@@ -34,6 +34,7 @@ describe("run state while a parent task isn't confirmed stopped", () => {
     state: "Running",
     attempts: [],
     providerRetry: null,
+    machineWait: null,
   } as const;
 
   it("names the run's own attempt and the worker it still ends on", () => {
@@ -61,6 +62,7 @@ it("shows the provider refusal and the scheduled attempt in the run header", () 
     id: RunId.make("capacity"),
     state: "Running",
     attempts: [],
+    machineWait: null,
     providerRetry: new ProviderRetry({
       message,
       nextAttempt: AttemptNumber.make(2),
@@ -69,4 +71,18 @@ it("shows the provider refusal and the scheduled attempt in the run header", () 
   });
   assert.include(line, message);
   assert.include(line, "attempt 2 at 2026-10-29 02:04");
+});
+
+it("shows the assigned worker quota refusal while a persisted attempt waits for its machine", () => {
+  const line = runStateLine({
+    id: RunId.make("quota"),
+    state: "Running",
+    attempts: [],
+    providerRetry: null,
+    machineWait: new MachineQuotaWait({
+      worker: WorkerName.make("hetzner-pool"),
+      message: "shared core limit exceeded",
+    }),
+  });
+  assert.strictEqual(line, "Waiting for hetzner-pool: shared core limit exceeded");
 });

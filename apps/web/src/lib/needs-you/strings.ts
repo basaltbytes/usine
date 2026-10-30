@@ -91,6 +91,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
+    WorkerQuotaNeed: ({ worker, message }) => ({
+      title: `${worker}: cloud quota reached`,
+      detail: `${message} Request a limit increase in the provider console, choose a smaller server_type (size on Boat), or free capacity. Machine creation retries automatically.`,
+      repository: null,
+      runId: null,
+    }),
     WorkerPreflightNeed: ({ worker, message }) => ({
       title: `${worker}: preflight failed`,
       detail: `${message} This worker takes no new attempts while preflight retries automatically.`,
@@ -147,6 +153,7 @@ export const needKindLabel = {
   ApprovalNeed: "Approval needed",
   CycleBudgetNeed: "Cycle budget exhausted",
   WorkerPreflightNeed: "Worker preflight failed",
+  WorkerQuotaNeed: "Cloud quota reached",
   UnconfiguredWorkerNeed: "Unconfigured worker",
   UnresponsiveWorkerNeed: "Unresponsive worker",
   RunFailureNeed: "Run failed",

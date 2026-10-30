@@ -3,9 +3,14 @@ import type { WorkerName } from "@usine/core/worker";
 import type { AttentionAcknowledgements } from "@usine/engine/attention";
 import type { RunReader } from "@usine/engine/run-reader";
 import { TranscriptWorkerQuery } from "@usine/engine/transcript";
-import { DateTime, Effect } from "effect";
+import { DateTime, Effect, Option } from "effect";
 import { partitionNeeds, projectAttention } from "./attention.ts";
-import { type NeedView, UnresponsiveWorkerNeed, WorkerPreflightNeed } from "./need.ts";
+import {
+  type NeedView,
+  UnresponsiveWorkerNeed,
+  WorkerPreflightNeed,
+  WorkerQuotaNeed,
+} from "./need.ts";
 import { ReadyOverview } from "./overview.ts";
 import type { WorkerStatus } from "../worker-status.ts";
 import type { RunView } from "./run.ts";
@@ -13,7 +18,7 @@ import type { RunView } from "./run.ts";
 export const workerAttentionFor = (
   reader: Pick<RunReader["Service"], "transcript">,
   acknowledgements: Pick<AttentionAcknowledgements["Service"], "list">,
-  status: Pick<WorkerStatus["Service"], "unavailable">,
+  status: Pick<WorkerStatus["Service"], "unavailable" | "provisioning">,
 ) =>
   Effect.fn("Operator.workerAttention")(function* (
     overview: ReadyOverview,
@@ -78,6 +83,12 @@ export const workerAttentionFor = (
       if (!declared.includes(worker)) continue;
       needs.push(new WorkerPreflightNeed({ id: `worker-preflight:${worker}`, worker, message }));
     }
+    for (const { worker, quota } of yield* status.provisioning) {
+      if (declared.includes(worker) && Option.isSome(quota))
+        needs.push(
+          new WorkerQuotaNeed({ id: `worker-quota:${worker}`, worker, message: quota.value }),
+        );
+    }
     if (needs.length === 0) return overview;
     const { needsYou, dismissedNeeds } = partitionNeeds(needs, yield* acknowledgements.list());
     const visible = [...overview.needsYou, ...needsYou];
@@ -85,6 +96,7 @@ export const workerAttentionFor = (
       workers: [...workers.keys()],
       attempts: silent.flat().length,
       dismissed: dismissedNeeds.length,
+      quotaRefusals: needs.filter((need) => need._tag === "WorkerQuotaNeed").length,
       preflightFailures: needs.filter((need) => need._tag === "WorkerPreflightNeed").length,
     });
     return new ReadyOverview({

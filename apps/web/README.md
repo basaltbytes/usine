@@ -10,6 +10,8 @@ A mark is the item's GitHub icon and number in GitHub's state colour: an issue i
 
 ## Needs attention
 
+When a cloud provider refuses a worker’s quota, Needs attention shows the provider message and suggests requesting a limit increase in its console, choosing a smaller `server_type` (`size` on Boat), or freeing capacity. Runs waiting for that worker to create their machine show the worker and refusal on their board cards and run pages. Machine creation keeps retrying with backoff; a successful creation clears the warning. Dismiss hides the entry while the affected runs keep their waiting reason.
+
 The bell at the right end of every page header shows the open count. It opens a 400px notification tray on desktop and a full-width bottom sheet on phones, capped at 70% of the viewport height with a scrolling list. Entries are grouped by kind, with a count per group. Each row has two lines: the linked item and title beside the primary action, then the loop, project, and recorded age when available. Worker rows show the worker and diagnostic context. The row menu contains secondary actions, including **Open run**, **Cancel run**, and **Dismiss**, when available. For a run without another primary action, **Details** opens its drawer. **View all on Overview** opens the full list, which uses the same rows. The sidebar shows the same total beside **Overview** and a count per project.
 
 Enter or Space opens the tray, Tab moves through links and actions, and Escape closes it and returns focus to the bell. The count and list update from live overview data. An empty tray shows **Nothing needs attention** and the bell has no badge.

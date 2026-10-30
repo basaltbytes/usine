@@ -9,6 +9,7 @@ import { WorkerName } from "@usine/core/worker";
 import {
   BlockedFailureView,
   ConfigFileNeed,
+  WorkerQuotaNeed,
   PoolLimitNeed,
   QuestionFailureView,
   RunFailureNeed,
@@ -182,4 +183,24 @@ it("identifies an unrecorded pool login without assigning its warning to a proje
   });
   assert.include(needCopy(need).detail, "Login unavailable");
   assert.deepStrictEqual([...needsYouByProject([need], [])], []);
+});
+
+it("explains quota recovery and automatic retries with the provider message", () => {
+  const copy = needCopy(
+    new WorkerQuotaNeed({
+      id: "worker-quota:pool",
+      worker: WorkerName.make("pool"),
+      message: "shared core limit exceeded",
+    }),
+  );
+  assert.strictEqual(copy.title, "pool: cloud quota reached");
+  for (const text of [
+    "shared core limit exceeded",
+    "provider console",
+    "server_type",
+    "size on Boat",
+    "free capacity",
+    "retries automatically",
+  ])
+    assert.include(copy.detail, text);
 });

@@ -137,6 +137,7 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
       return <ApprovalAsk need={need} dismiss={dismiss} />;
     case "CycleBudgetNeed":
       return <CycleBudgetAsk need={need} dismiss={dismiss} />;
+    case "WorkerQuotaNeed":
     case "WorkerPreflightNeed":
       return (
         <NeedItem

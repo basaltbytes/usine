@@ -14,7 +14,7 @@ import * as RunState from "@usine/core/run/state";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 import { AttemptView } from "./attempt.ts";
-import { MachineView } from "./machines.ts";
+import { MachineView, MachineQuotaWait } from "./machines.ts";
 import { TranscriptEventView, TranscriptPageCursor } from "./transcript.ts";
 import { RunUsageView } from "./usage.ts";
 
@@ -94,6 +94,11 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   state: RunStateTag,
   /** The pending provider-capacity retry, or null when none is scheduled. */
   providerRetry: Schema.NullOr(ProviderRetry).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
+  /** The worker quota refusal while this run waits for its machine, or null. */
+  machineWait: Schema.NullOr(MachineQuotaWait).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
     Schema.withConstructorDefault(Effect.succeed(null)),
   ),

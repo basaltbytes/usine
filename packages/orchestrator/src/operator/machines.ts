@@ -16,6 +16,31 @@ import { MachineState, type MachineStatus, MachineUnavailableReason } from "@usi
 import { DateTime, Effect, Option, Schema } from "effect";
 import type { ProvisioningPause } from "../worker-status.ts";
 
+/** A quota refusal that prevents a run's leased worker from creating its machine. */
+export class MachineQuotaWait extends Schema.Class<MachineQuotaWait>(
+  "@usine/orchestrator/MachineQuotaWait",
+)({
+  /** The worker assigned to the run. */
+  worker: WorkerName,
+  /** The provider's quota refusal. */
+  message: Schema.String,
+}) {}
+
+export const quotaWaits = (
+  pauses: ReadonlyArray<ProvisioningPause>,
+): ReadonlyMap<RunId, MachineQuotaWait> =>
+  new Map(
+    pauses.flatMap((pause) =>
+      Option.match(pause.quota, {
+        onNone: () => [],
+        onSome: (message) =>
+          pause.waitingRuns.map(
+            (runId) => [runId, new MachineQuotaWait({ worker: pause.worker, message })] as const,
+          ),
+      }),
+    ),
+  );
+
 /** A machine that a provisioned Worker created for one Attempt and hasn't deleted yet. */
 export class MachineView extends Schema.Class<MachineView>("@usine/orchestrator/MachineView")({
   /** The configured worker name. */

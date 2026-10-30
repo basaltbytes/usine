@@ -33,6 +33,7 @@ const repositoriesOf = (need: NeedView) =>
     ConfigFileNeed: () => [],
     UnconfiguredWorkerNeed: () => [],
     WorkerPreflightNeed: () => [],
+    WorkerQuotaNeed: () => [],
     PoolLimitNeed: () => [],
     WebhookSilenceNeed: () => [],
     UnresponsiveWorkerNeed: ({ attempts }) => attempts.map(({ repository }) => repository),
