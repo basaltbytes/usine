@@ -67,7 +67,8 @@ it.each(["npm", "curl", "timeout", "flock"])(
             running: "1.0.0",
             settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "propose" }),
             platform,
-            drain: Ref.set(drained, true),
+            drain: () => Ref.set(drained, true),
+            resume: Effect.void,
           });
           const error = yield* upgrades
             .request(
@@ -130,7 +131,8 @@ esac`,
             ...platform.value,
             launch: () => Ref.set(launched, true),
           }),
-          drain: Ref.set(drained, true),
+          drain: () => Ref.set(drained, true),
+          resume: Effect.void,
         });
         const unavailable = yield* upgrades.check().pipe(Effect.flip);
         expect(unavailable.message).toContain("@usine/cloudflare@1.1.0");

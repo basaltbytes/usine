@@ -1,3 +1,4 @@
+import { UpgradeWait } from "@usine/engine/engine";
 import { ConfigFileError } from "@usine/config/file";
 import { BillingPool, PoolLogin } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber } from "@usine/core/attempt";
@@ -256,8 +257,18 @@ export class WebhookSilenceNeed extends Schema.TaggedClass<WebhookSilenceNeed>(
   publicUrl: Schema.String,
 }) {}
 
+/** An upgrade has deferred runs for at least ten minutes. */
+export class UpgradeDrainNeed extends Schema.TaggedClass<UpgradeDrainNeed>(
+  "@usine/orchestrator/UpgradeDrainNeed",
+)("UpgradeDrainNeed", {
+  id: Schema.String,
+  wait: UpgradeWait,
+  deferredRuns: Schema.Int.check(Schema.isGreaterThan(0)),
+}) {}
+
 /** One reason the overview asks for operator attention. */
 export const NeedView = Schema.Union([
+  UpgradeDrainNeed,
   WebhookSilenceNeed,
   CycleBudgetNeed,
   ApprovalNeed,

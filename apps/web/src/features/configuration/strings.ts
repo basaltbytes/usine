@@ -482,6 +482,8 @@ export const webhookStatusCopy = {
     "The last self-write or webhook hint received since startup. Polling runs independently.",
 };
 
+export const upgradeCancel = "Cancel pending upgrade";
+export const upgradeTarget = (version: string): string => `Requested version: ${version}`;
 export const runPreflightLabel = "Run preflight";
 export const runningPreflightLabel = "Running preflight…";
 export const preflightBusyReason = "Available after all attempts end";

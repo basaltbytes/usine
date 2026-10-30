@@ -1,3 +1,4 @@
+import type { UpgradeWait } from "@usine/engine/engine";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { OutOfMemoryKills } from "@usine/core/attempt";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
@@ -62,13 +63,17 @@ export const stopWaitLine = (
 export const machineWaitLine = ({ worker, message }: MachineQuotaWait): string =>
   `Waiting for ${worker}: ${message}`;
 
+export const upgradeWaitLine = ({ target }: UpgradeWait): string =>
+  `Waiting for the upgrade restart to ${target}`;
+
 /** Returns the run state, including a stop or machine creation that prevents progress. */
 export const runStateLine = (
-  run: Pick<RunView, "id" | "state" | "attempts" | "providerRetry" | "machineWait">,
+  run: Pick<RunView, "id" | "state" | "attempts" | "providerRetry" | "machineWait" | "upgradeWait">,
   unconfirmedStop: UnconfirmedStopView | null = null,
   machine: MachineView | null = null,
 ): string => {
   if (unconfirmedStop !== null) return stopWaitLine(run.id, unconfirmedStop);
+  if (run.upgradeWait !== null) return upgradeWaitLine(run.upgradeWait);
   if (run.machineWait !== null) return machineWaitLine(run.machineWait);
   if (run.state === "Queued" && machine?.state === "creating")
     return `Queued, creating a ${providerLabel[machine.provider]} machine`;

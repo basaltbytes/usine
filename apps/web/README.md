@@ -343,3 +343,5 @@ Loop forms accept an integer or CEL priority with payload completion. **Preview*
 Loop forms offer fixed approval modes and an **Approval condition (CEL)** field
 with payload completion and server diagnostics. Run headers, Needs attention,
 and overview rows show the saved approval decision and available label actors.
+
+Idle upgrade waits show the requested version in run headers, Overview's Running section, and worker rows. Settings offers **Cancel pending upgrade** while an upgrade waits. Needs attention links to Settings after an upgrade has deferred runs for ten minutes.

@@ -219,6 +219,7 @@ export const StallAction = ({ stalled, readOnly, appearance }: StallActionProps)
     case "LoopPaused":
       return <ResumeAction appearance={appearance} loop={stalled.loop} />;
     case "WaitingForStop":
+    case "WaitingForUpgrade":
     case "QueuedForWorker":
     case "AwaitingPoll":
       return null;

@@ -109,7 +109,9 @@ A reset records a fresh polling request. Trigger adapters read `CycleBudgets.gen
 
 ## Drain and shutdown
 
-`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Reservations, approval gates, and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md)).
+`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Pending reservations release their slots; approval gates and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md)).
+
+`RunEngine.waitForUpgrade(target)` defers new reservations and waits for admitted attempts to persist their outcomes. `upgradeDrain` reports the target version, start time, and deferred run IDs. `cancelUpgrade` resumes these runs without a restart; it does not reopen admission after process shutdown. Cancel the caller's wait before canceling the upgrade. Repeated waits join the pending drain.
 
 To handle shutdown during startup, provide `RunEngineShutdown` (`/engine`): a fresh `Deferred<void>` allocated before building the runtime. Completing it closes admission at once, recovered work included. After startup, `drain()` waits for admitted outcomes. The server installs this before building its runtime.
 
