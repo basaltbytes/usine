@@ -33,7 +33,7 @@ import type { SshMachine } from "./model.ts";
  * `infra/worker-image/Dockerfile` with this release's harness versions.
  */
 export const ATTEMPT_IMAGE = ContainerImage.make(
-  "ghcr.io/basaltbytes/usine-worker:claude-2.1.308-codex-0.164.0",
+  "ghcr.io/basaltbytes/usine-worker:claude-2.1.311-codex-0.164.0",
 );
 
 /** The exit code of `DETECT_SCRIPT` when the machine has no Docker and the SSH user no access to one. */
