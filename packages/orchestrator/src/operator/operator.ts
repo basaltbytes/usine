@@ -1577,3 +1577,5 @@ export {
 export { attentionKey, projectAttention } from "./attention.ts";
 
 export { ConfigurationEditor, type ConfigurationEditorError } from "./configuration/editor.ts";
+
+export { SetupState } from "./setup.ts";

@@ -84,7 +84,7 @@ export const authenticatedRoutes = (services: AuthServices) => {
     HttpRouter.route(
       AuthApi.endpoints.info.method,
       AuthApi.endpoints.info.path,
-      json({ github: auth.githubAvailable }),
+      Effect.map(auth.githubAvailable, (github) => json({ github })),
     ),
     HttpRouter.route(
       AuthApi.endpoints.session.method,
@@ -144,9 +144,11 @@ export const authenticatedRoutes = (services: AuthServices) => {
         const code = params.get("code");
         if (state === null || code === null || request.cookies[STATE_COOKIE] !== state)
           return yield* authFailure("GitHub sign-in could not be verified. Start sign-in again.");
-        return session(yield* auth.finishWeb(state, code), HttpServerResponse.redirect("/")).pipe(
-          HttpServerResponse.expireCookieUnsafe(STATE_COOKIE, { path: "/api/auth" }),
-        );
+        const firstSignIn = (yield* store.members).length === 0;
+        return session(
+          yield* auth.finishWeb(state, code),
+          HttpServerResponse.redirect(firstSignIn ? "/setup" : "/"),
+        ).pipe(HttpServerResponse.expireCookieUnsafe(STATE_COOKIE, { path: "/api/auth" }));
       }).pipe(
         Effect.catchTag("AuthError", (error) =>
           Effect.succeed(

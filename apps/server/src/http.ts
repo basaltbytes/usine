@@ -1,4 +1,6 @@
 import { DocumentationApi, operatorOpenApi } from "./openapi.ts";
+import { setupRoutes } from "./setup/http.ts";
+import type { Setup } from "./setup/control.ts";
 import { type ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { authenticatedRoutes, type AuthServices } from "./auth/http.ts";
@@ -436,9 +438,14 @@ export const serverLayer = (
     | Layer.Layer<ServerUpgrades | ConfigurationEditor | GitHubApp | GitHubPolling>
     | Layer.Layer<never> = Layer.empty,
   webhooks: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.empty,
+  setup?: Setup["Service"],
 ) => {
   const authenticated = authenticatedRoutes(auth);
+  const setupHttp =
+    setup === undefined ? undefined : setupRoutes(setup, auth.authentication.origin);
   const routes = Layer.mergeAll(
+    setupHttp?.protected.pipe(Layer.provide(authenticated.guard.layer)) ?? Layer.empty,
+    setupHttp?.callback ?? Layer.empty,
     apiRoutes(origin).pipe(Layer.provide(authenticated.guard.layer)),
     staticRoutes(webRoot),
     authenticated.routes,

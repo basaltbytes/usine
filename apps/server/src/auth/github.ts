@@ -1,3 +1,4 @@
+import type { GitHubAppSecrets, LocalSecretsError } from "@usine/github/local-secrets";
 import { OperatorLogin } from "@usine/core/operator";
 import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
@@ -18,7 +19,7 @@ const OAuthFailure = Schema.Struct({ error: Schema.String });
 export class GitHubSignIn extends Context.Service<
   GitHubSignIn,
   {
-    readonly available: boolean;
+    readonly available: Effect.Effect<boolean>;
     readonly authorizeUrl: (state: string, callback: string) => Effect.Effect<string, AuthError>;
     readonly web: (code: string, callback: string) => Effect.Effect<GitHubIdentity, AuthError>;
     readonly device: Effect.Effect<typeof DeviceCode.Type, AuthError>;
@@ -29,135 +30,171 @@ export class GitHubSignIn extends Context.Service<
   }
 >()("@usine/server/GitHubSignIn") {}
 
-export const githubSignInLayer = Layer.effect(
-  GitHubSignIn,
-  Effect.gen(function* () {
-    const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);
-    const config = yield* Config.all({
-      clientId: Config.option(Config.schema(ClientId, "USINE_GITHUB_CLIENT_ID")),
-      clientSecret: Config.option(Config.Redacted("USINE_GITHUB_CLIENT_SECRET")),
-    }).pipe(
-      Effect.mapError(() =>
-        authFailure("GitHub user authorization configuration is invalid.", 503),
-      ),
-    );
-    const credentials = Effect.gen(function* () {
-      if (Option.isNone(config.clientId) || Option.isNone(config.clientSecret))
-        return yield* authFailure(
-          "GitHub sign-in is not configured. Use usine sign-in-link on the instance machine.",
-          503,
-        );
-      return { id: config.clientId.value, secret: config.clientSecret.value };
-    });
-    const request = <A, I>(req: HttpClientRequest.HttpClientRequest, schema: Schema.Codec<A, I>) =>
-      client
-        .execute(
-          req.pipe(
-            HttpClientRequest.setHeaders({ accept: "application/json", "user-agent": "usine" }),
-          ),
-        )
-        .pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
-          Effect.timeout("15 seconds"),
+export const githubSignInLayer = (
+  file: Effect.Effect<Option.Option<GitHubAppSecrets>, LocalSecretsError> = Effect.succeed(
+    Option.none(),
+  ),
+) =>
+  Layer.effect(
+    GitHubSignIn,
+    Effect.gen(function* () {
+      const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);
+      const config = yield* Config.all({
+        clientId: Config.option(Config.schema(ClientId, "USINE_GITHUB_CLIENT_ID")),
+        clientSecret: Config.option(Config.Redacted("USINE_GITHUB_CLIENT_SECRET")),
+      }).pipe(
+        Effect.mapError(() =>
+          authFailure("GitHub user authorization configuration is invalid.", 503),
+        ),
+      );
+      const configuration = Effect.gen(function* () {
+        if (Option.isSome(config.clientId) && Option.isSome(config.clientSecret)) return config;
+        const saved = yield* file.pipe(
           Effect.mapError(() =>
-            authFailure("GitHub authorization failed. Try signing in again.", 502),
-          ),
-        );
-    const revoke = Effect.fn("GitHubSignIn.revoke")(function* (token: Redacted.Redacted<string>) {
-      const { id, secret } = yield* credentials;
-      yield* Effect.annotateCurrentSpan({ clientId: id });
-      yield* client
-        .execute(
-          HttpClientRequest.delete(
-            `https://api.github.com/applications/${encodeURIComponent(id)}/token`,
-          ).pipe(
-            HttpClientRequest.basicAuth(id, secret),
-            HttpClientRequest.setHeaders({
-              accept: "application/vnd.github+json",
-              "user-agent": "usine",
-            }),
-            HttpClientRequest.bodyJsonUnsafe({ access_token: Redacted.value(token) }),
-          ),
-        )
-        .pipe(Effect.timeout("15 seconds"));
-      yield* Effect.logDebug("GitHub user token revoked", { clientId: id });
-    });
-    const identity = (token: Redacted.Redacted<string>) =>
-      request(
-        HttpClientRequest.get("https://api.github.com/user").pipe(
-          HttpClientRequest.bearerToken(token),
-        ),
-        GitHubIdentity,
-      ).pipe(
-        Effect.ensuring(
-          revoke(token).pipe(
-            Effect.interruptible,
-            Effect.catch((error) =>
-              Effect.logWarning("Could not revoke the GitHub user token", { reason: error._tag }),
+            authFailure(
+              "Could not read GitHub sign-in credentials. Open setup to repair the credential file.",
+              503,
             ),
-            Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(token))),
           ),
-        ),
-      );
-    const exchange = (fields: Record<string, string>) =>
-      request(
-        HttpClientRequest.post("https://github.com/login/oauth/access_token").pipe(
-          HttpClientRequest.bodyUrlParams(fields),
-        ),
-        Schema.Union([AccessToken, OAuthFailure]),
-      );
-    return GitHubSignIn.of({
-      available: Option.isSome(config.clientId) && Option.isSome(config.clientSecret),
-      authorizeUrl: Effect.fn("GitHubSignIn.authorizeUrl")(function* (state, callback) {
-        const { id } = yield* credentials;
-        const params = new URLSearchParams({ client_id: id, redirect_uri: callback, state });
-        return `https://github.com/login/oauth/authorize?${params}`;
-      }),
-      web: Effect.fn("GitHubSignIn.web")(function* (code, callback) {
-        const { id, secret } = yield* credentials;
-        const result = yield* exchange({
-          client_id: id,
-          client_secret: Redacted.value(secret),
-          code,
-          redirect_uri: callback,
-        });
-        if ("error" in result)
-          return yield* authFailure("GitHub authorization was refused. Try signing in again.", 403);
-        return yield* identity(result.access_token);
-      }),
-      device: Effect.gen(function* () {
-        const { id } = yield* credentials;
-        return yield* request(
-          HttpClientRequest.post("https://github.com/login/device/code").pipe(
-            HttpClientRequest.bodyUrlParams({ client_id: id }),
-          ),
-          DeviceCode,
         );
-      }),
-      poll: Effect.fn("GitHubSignIn.poll")(function* (code) {
-        const { id } = yield* credentials;
-        const result = yield* exchange({
-          client_id: id,
-          device_code: Redacted.value(code),
-          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-        });
-        if ("error" in result) {
-          if (result.error === "authorization_pending") return Option.none();
-          if (result.error === "slow_down")
-            return yield* authFailure("Wait before checking GitHub authorization again.", 429);
+        return {
+          clientId: Option.orElse(config.clientId, () =>
+            Option.flatMap(saved, (value) => value.clientId),
+          ),
+          clientSecret: Option.orElse(config.clientSecret, () =>
+            Option.flatMap(saved, (value) => value.clientSecret),
+          ),
+        };
+      });
+      const credentials = Effect.gen(function* () {
+        const config = yield* configuration;
+        if (Option.isNone(config.clientId) || Option.isNone(config.clientSecret))
           return yield* authFailure(
-            "GitHub device authorization expired or was refused. Start sign-in again.",
-            403,
+            "GitHub sign-in is not configured. Use usine sign-in-link on the instance machine.",
+            503,
           );
-        }
-        return Option.some(yield* identity(result.access_token));
-      }),
-      lookup: Effect.fn("GitHubSignIn.lookup")((login) =>
+        return { id: config.clientId.value, secret: config.clientSecret.value };
+      });
+      const request = <A, I>(
+        req: HttpClientRequest.HttpClientRequest,
+        schema: Schema.Codec<A, I>,
+      ) =>
+        client
+          .execute(
+            req.pipe(
+              HttpClientRequest.setHeaders({ accept: "application/json", "user-agent": "usine" }),
+            ),
+          )
+          .pipe(
+            Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
+            Effect.timeout("15 seconds"),
+            Effect.mapError(() =>
+              authFailure("GitHub authorization failed. Try signing in again.", 502),
+            ),
+          );
+      const revoke = Effect.fn("GitHubSignIn.revoke")(function* (token: Redacted.Redacted<string>) {
+        const { id, secret } = yield* credentials;
+        yield* Effect.annotateCurrentSpan({ clientId: id });
+        yield* client
+          .execute(
+            HttpClientRequest.delete(
+              `https://api.github.com/applications/${encodeURIComponent(id)}/token`,
+            ).pipe(
+              HttpClientRequest.basicAuth(id, secret),
+              HttpClientRequest.setHeaders({
+                accept: "application/vnd.github+json",
+                "user-agent": "usine",
+              }),
+              HttpClientRequest.bodyJsonUnsafe({ access_token: Redacted.value(token) }),
+            ),
+          )
+          .pipe(Effect.timeout("15 seconds"));
+        yield* Effect.logDebug("GitHub user token revoked", { clientId: id });
+      });
+      const identity = (token: Redacted.Redacted<string>) =>
         request(
-          HttpClientRequest.get(`https://api.github.com/users/${encodeURIComponent(login)}`),
+          HttpClientRequest.get("https://api.github.com/user").pipe(
+            HttpClientRequest.bearerToken(token),
+          ),
           GitHubIdentity,
+        ).pipe(
+          Effect.ensuring(
+            revoke(token).pipe(
+              Effect.interruptible,
+              Effect.catch((error) =>
+                Effect.logWarning("Could not revoke the GitHub user token", { reason: error._tag }),
+              ),
+              Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(token))),
+            ),
+          ),
+        );
+      const exchange = (fields: Record<string, string>) =>
+        request(
+          HttpClientRequest.post("https://github.com/login/oauth/access_token").pipe(
+            HttpClientRequest.bodyUrlParams(fields),
+          ),
+          Schema.Union([AccessToken, OAuthFailure]),
+        );
+      return GitHubSignIn.of({
+        available: configuration.pipe(
+          Effect.map((value) => Option.isSome(value.clientId) && Option.isSome(value.clientSecret)),
+          Effect.catchTag("AuthError", () =>
+            Effect.logWarning("GitHub sign-in credentials need repair").pipe(Effect.as(false)),
+          ),
         ),
-      ),
-    });
-  }),
-);
+        authorizeUrl: Effect.fn("GitHubSignIn.authorizeUrl")(function* (state, callback) {
+          const { id } = yield* credentials;
+          const params = new URLSearchParams({ client_id: id, redirect_uri: callback, state });
+          return `https://github.com/login/oauth/authorize?${params}`;
+        }),
+        web: Effect.fn("GitHubSignIn.web")(function* (code, callback) {
+          const { id, secret } = yield* credentials;
+          const result = yield* exchange({
+            client_id: id,
+            client_secret: Redacted.value(secret),
+            code,
+            redirect_uri: callback,
+          });
+          if ("error" in result)
+            return yield* authFailure(
+              "GitHub authorization was refused. Try signing in again.",
+              403,
+            );
+          return yield* identity(result.access_token);
+        }),
+        device: Effect.gen(function* () {
+          const { id } = yield* credentials;
+          return yield* request(
+            HttpClientRequest.post("https://github.com/login/device/code").pipe(
+              HttpClientRequest.bodyUrlParams({ client_id: id }),
+            ),
+            DeviceCode,
+          );
+        }),
+        poll: Effect.fn("GitHubSignIn.poll")(function* (code) {
+          const { id } = yield* credentials;
+          const result = yield* exchange({
+            client_id: id,
+            device_code: Redacted.value(code),
+            grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          });
+          if ("error" in result) {
+            if (result.error === "authorization_pending") return Option.none();
+            if (result.error === "slow_down")
+              return yield* authFailure("Wait before checking GitHub authorization again.", 429);
+            return yield* authFailure(
+              "GitHub device authorization expired or was refused. Start sign-in again.",
+              403,
+            );
+          }
+          return Option.some(yield* identity(result.access_token));
+        }),
+        lookup: Effect.fn("GitHubSignIn.lookup")((login) =>
+          request(
+            HttpClientRequest.get(`https://api.github.com/users/${encodeURIComponent(login)}`),
+            GitHubIdentity,
+          ),
+        ),
+      });
+    }),
+  );

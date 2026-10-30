@@ -1,3 +1,5 @@
+import { LoadedInstance } from "@usine/config/instance";
+import { InstancePath } from "@usine/config/file";
 import { NodeServices } from "@effect/platform-node";
 import {
   ConfigurationStore,
@@ -14,7 +16,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { LoopControl } from "@usine/engine/loop-control";
 import { SqlClient } from "effect/sql";
 import { configurationLoopControlLayer } from "./store.ts";
-import { Effect, Layer, Option } from "effect";
+import { Effect, FileSystem, Layer, Option } from "effect";
 
 const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
 
@@ -109,12 +111,38 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
     return { instance: current.instance.value, number: current.number };
   }
   const folder = yield* ConfigurationFolder;
-  const imported = yield* folder.load(directory);
+  const hasFiles = yield* Effect.flatMap(FileSystem.FileSystem, (fs) =>
+    fs.exists(`${directory}/usine.yaml`),
+  ).pipe(
+    Effect.provide(NodeServices.layer),
+    Effect.mapError(
+      (cause) => new ConfigurationStoreError({ operation: "inspect initial configuration", cause }),
+    ),
+  );
+  const imported = hasFiles
+    ? yield* folder.load(directory)
+    : new LoadedInstance({
+        config: yield* (yield* ConfigParser)
+          .parseUsineYaml(InstancePath.make("usine.yaml"), "version: 2\nrepos: []\n")
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConfigurationStoreError({ operation: "initialize empty configuration", cause }),
+            ),
+          ),
+        agents: [],
+        loops: [],
+        warnings: [],
+        invalidAgents: [],
+        quarantinedLoops: [],
+      });
   yield* store
     .commit({
       expected: current.number,
       actor: imported.config.operator,
-      message: Option.some("Imported from the instance folder"),
+      message: Option.some(
+        hasFiles ? "Imported from the instance folder" : "Initialized empty configuration",
+      ),
       changes: configurationDiff([], configurationEntities(imported)),
     })
     .pipe(
@@ -128,5 +156,9 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
       operation: "initialize configuration",
       cause: "Configuration is empty after import",
     });
+  yield* Effect.logInfo(
+    hasFiles ? "Imported initial configuration" : "Initialized empty configuration",
+    { revision: initialized.number },
+  );
   return { instance: initialized.instance.value, number: initialized.number };
 });

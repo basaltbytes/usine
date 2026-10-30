@@ -147,7 +147,7 @@ it("enrolls the first admin only after a setup link and a cookie-bound GitHub we
           cookie: cookie(started),
         }),
       );
-      assert.equal(completed.headers.get("location"), "/");
+      assert.equal(completed.headers.get("location"), "/setup");
       assert.equal((yield* services.store.members)[0]?.login, alice.login);
       assert.equal(
         (yield* Effect.promise(() =>
