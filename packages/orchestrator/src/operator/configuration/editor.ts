@@ -43,6 +43,7 @@ import {
   ConfigurationWrite,
 } from "./model.ts";
 
+/** A configuration lookup, validation, revision conflict, persistence, or reload failure. */
 export type ConfigurationEditorError =
   | ConfigurationInvalid
   | ConfigurationStoreError
@@ -64,36 +65,77 @@ const entitiesOf = (configuration: Configuration) =>
     onSome: configurationEntities,
   });
 
+/**
+ * Reads configuration history and validates, previews, and commits operator edits against an
+ * expected revision.
+ */
 export class ConfigurationEditor extends Context.Service<
   ConfigurationEditor,
   {
+    /**
+     * Validates the JSON or Markdown in `input` against the current configuration and returns
+     * problems without writing.
+     */
     readonly checkLoop: (input: LoopDraft) => Effect.Effect<LoopCheck, ConfigurationEditorError>;
+    /**
+     * Evaluates `input` against stored items and optionally renders a prompt. It does not submit
+     * runs or change configuration.
+     */
     readonly previewLoop: (
       input: LoopPreviewRequest,
     ) => Effect.Effect<LoopPreview, ConfigurationEditorError>;
+    /**
+     * Lists revisions newest first using the entity filters, exclusive `before` cursor, and page
+     * limit in `query`.
+     */
     readonly list: (
       query: ConfigurationRevisionQuery,
     ) => Effect.Effect<ConfigurationRevisionPage, ConfigurationEditorError>;
+    /**
+     * Reads the stored revision identified by `number`; fails with `ConfigurationNotFound` when
+     * absent.
+     */
     readonly revision: (
       number: ConfigurationRevisionNumber,
     ) => Effect.Effect<ConfigurationRevision, ConfigurationEditorError>;
+    /**
+     * Reads the entity identified by `request` as form JSON and editable text at the current
+     * revision; fails when absent.
+     */
     readonly entity: (
       request: ConfigurationEntityRequest,
     ) => Effect.Effect<ConfigurationEntityView, ConfigurationEditorError>;
+    /**
+     * Creates or replaces the entity identified by `request` with `input`, validates the resulting
+     * configuration, and commits against `input.expected`. Worker preparation failures leave the
+     * running instance unchanged.
+     */
     readonly replace: (
       request: ConfigurationEntityRequest,
       input: ConfigurationReplacement,
     ) => Effect.Effect<ConfigurationRevision, ConfigurationEditorError>;
+    /**
+     * Removes the entity identified by `request` and validates references before committing
+     * against `input.expected`.
+     */
     readonly remove: (
       request: ConfigurationEntityRequest,
       input: ConfigurationWrite,
     ) => Effect.Effect<ConfigurationRevision, ConfigurationEditorError>;
+    /**
+     * Reverses revision `number` while preserving unrelated changes, then commits against
+     * `input.expected`. Refuses if later revisions changed the same entities.
+     */
     readonly revert: (
       number: ConfigurationRevisionNumber,
       input: ConfigurationWrite,
     ) => Effect.Effect<ConfigurationRevision, ConfigurationEditorError>;
   }
 >()("@usine/orchestrator/ConfigurationEditor") {
+  /**
+   * Provides revision reads and validated edits using the configuration store, parser, and current
+   * instance.
+   */
   static readonly layer = Layer.effect(
     ConfigurationEditor,
     Effect.gen(function* () {

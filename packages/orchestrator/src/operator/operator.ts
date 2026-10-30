@@ -145,6 +145,7 @@ import { machineView } from "./machines.ts";
 import { WorkerStatus } from "../worker-status.ts";
 import { workerAttentionFor } from "./worker-attention.ts";
 
+/** A refused board move, failed label write, or failure to read or record the move. */
 export type BoardMoveError =
   | BoardItemNotFoundError
   | BoardLaneNotFoundError
@@ -153,6 +154,7 @@ export type BoardMoveError =
   | EnginePersistenceError
   | RunStoreError
   | GitHubAppError;
+/** A failure to observe or change runs, tasks, loop state, or operator acknowledgements. */
 export type OperatorError =
   | LoopNotFoundError
   | RosterAgentNotFoundError
@@ -163,6 +165,7 @@ export type OperatorError =
   | CycleBudgetResetRejectedError
   | RunGitHubChangesError
   | ConfigurationStoreError;
+/** A failure to read stored operator views or locate a requested transcript attempt. */
 export type OperatorObservationError =
   | RunStoreError
   | TranscriptAttemptNotFoundError
@@ -881,6 +884,10 @@ export class OperatorObservation extends Context.Service<
     ) => Effect.Effect<RunStatisticsView, OperatorObservationError>;
   }
 >()("@usine/orchestrator/OperatorObservation") {
+  /**
+   * Provides read-only operator views from stored runs, configuration, trigger status, and worker
+   * status.
+   */
   static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -1327,6 +1334,7 @@ export class Operator extends Context.Service<
     readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/orchestrator/Operator") {
+  /** Provides operator observations and mutations using the run engine and GitHub writers. */
   static readonly layer = Layer.effect(Operator, makeOperator).pipe(
     Layer.provide(Layer.merge(OperatorObservation.layer, RunGitHubChanges.layer)),
   );

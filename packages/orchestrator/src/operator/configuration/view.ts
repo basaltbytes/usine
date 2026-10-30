@@ -56,13 +56,17 @@ import {
 export class LoopSelectorView extends Schema.Class<LoopSelectorView>(
   "@usine/orchestrator/LoopSelectorView",
 )({
+  /** Explicit repository names in the selector, or null when omitted. */
   repos: Schema.NullOr(Schema.Array(RepositoryName)),
+  /** Registry tags in the selector, or null when omitted. */
   tags: Schema.NullOr(Schema.Array(RegistryTag)),
 }) {}
 
 /** A parsed Loop file with its runtime pause state. */
 export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrator/LoopFileView")({
+  /** The project-qualified loop name. */
   name: LoopName,
+  /** The loop file path relative to the instance folder. */
   file: InstancePath,
   /** The trigger's `on:` stream. */
   stream: Stream,
@@ -70,20 +74,27 @@ export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrato
   condition: Source,
   /** A schedule trigger's cron and time zone, or null for the other streams. */
   cron: Schema.NullOr(Cron),
+  /** The schedule time zone, or null for issue and pull request triggers. */
   timeZone: Schema.NullOr(TimeZone),
   /** Null when omitted; the loop then applies to every repository in its project. */
   selector: Schema.NullOr(LoopSelectorView),
   /** Project repositories that match the selector, in registry order. */
   repositories: Schema.Array(RepositoryName),
+  /** Whether a matched event must wait for operator approval. */
   approval: ApprovalRequirement,
+  /** The maximum cycles on one item before an operator reset. */
   maxCycles: CycleLimit,
+  /** The GitHub permission level for attempt credentials. */
   permissions: LoopPermissions,
   /** The Loop's queue priority, or null if its Runs wait in lane order. */
   priority: Schema.NullOr(LoopPriority),
+  /** The step name recorded in runs of this loop. */
   step: StepName,
+  /** The referenced agent name. */
   agent: AgentName,
   /** The Markdown prompt template, with its `{{ }}` expressions as written. */
   prompt: PromptTemplate,
+  /** Whether runtime loop control prevents new trigger submissions. */
   paused: Schema.Boolean,
   /** Labels the trigger compares against that `usine.yaml` doesn't declare in `labels`. */
   undeclaredLabels: Schema.Array(GitHubLabelName),
@@ -95,25 +106,34 @@ export class QuarantinedLoopView extends Schema.Class<QuarantinedLoopView>(
 )({
   /** The file name without its folder and `.md` extension. */
   name: Schema.NonEmptyString,
+  /** The invalid file path relative to the instance folder. */
   file: InstancePath,
+  /** The failed loading stage and validation diagnostic. */
   error: ConfigFileError,
 }) {}
 
 /** A parsed rostered Agent file with the Loops that use it. */
 export class AgentFileView extends Schema.Class<AgentFileView>("@usine/orchestrator/AgentFileView")(
   {
+    /** The roster name referenced by loops. */
     name: AgentName,
+    /** The agent file path relative to the instance folder. */
     file: InstancePath,
+    /** The coding-agent CLI used by the child session. */
     harness: Harness,
+    /** The model ID supplied to the child harness. */
     model: ModelId,
+    /** The child model reasoning effort. */
     effort: Effort,
     /** The file's own parent model and effort, or null if it sets none. */
     parentModel: Schema.NullOr(ModelId),
+    /** The explicitly configured parent effort, or null to use the instance or agent default. */
     parentEffort: Schema.NullOr(Effort),
     /** The file's parent model, else `settings.parent_model`. If null, Pi chooses. */
     resolvedParentModel: Schema.NullOr(ModelId),
     /** The file's parent effort, else `settings.parent_effort`, else `effort`. */
     resolvedParentEffort: Effort,
+    /** The standing instructions supplied to the agent. */
     persona: AgentPersona,
     /** The loaded Loops that use this Agent. */
     loops: Schema.Array(LoopName),
@@ -129,7 +149,9 @@ export class InvalidAgentView extends Schema.Class<InvalidAgentView>(
 )({
   /** The file name without its folder and `.md` extension. */
   name: Schema.NonEmptyString,
+  /** The invalid file path relative to the instance folder. */
   file: InstancePath,
+  /** The failed loading stage and validation diagnostic. */
   error: ConfigFileError,
 }) {}
 
@@ -138,10 +160,15 @@ export class InvalidAgentView extends Schema.Class<InvalidAgentView>(
  * its admin token.
  */
 export class GatewayView extends Schema.Class<GatewayView>("@usine/orchestrator/GatewayView")({
+  /** The gateway domain used for credential-injected requests. */
   domain: GatewayDomain,
+  /** The SSH destination used to reach the gateway. */
   destination: SshDestination,
+  /** The gateway administration HTTP port. */
   adminPort: GatewayAdminPort,
+  /** The environment-variable name for the gateway admin token, never its value. */
   adminTokenEnv: Schema.NonEmptyString,
+  /** The model providers whose credentials the gateway injects. */
   llmProviders: Schema.Array(GatewayLlmProvider),
 }) {}
 
@@ -151,13 +178,17 @@ export class WorkerSlotsView extends Schema.Class<WorkerSlotsView>(
 )({
   /** The number of slots for Attempts: `max_concurrent_attempts` once a reload applied it. */
   capacity: Schema.Int,
+  /** The number of occupied attempt slots; it can exceed capacity after a reduction. */
   leased: Schema.Int,
 }) {}
 
 /** A passed preflight check, at an ISO instant. */
 export class PassedCheckView extends Schema.TaggedClass<PassedCheckView>(
   "@usine/orchestrator/PassedCheckView",
-)("Passed", { checkedAt: Schema.String }) {}
+)("Passed", {
+  /** The check completion time as an ISO 8601 timestamp. */
+  checkedAt: Schema.String,
+}) {}
 
 /**
  * A passed check of the Worker's own prerequisites, at an ISO instant, that found it running
@@ -165,7 +196,12 @@ export class PassedCheckView extends Schema.TaggedClass<PassedCheckView>(
  */
 export class DegradedCheckView extends Schema.TaggedClass<DegradedCheckView>(
   "@usine/orchestrator/DegradedCheckView",
-)("Degraded", { checkedAt: Schema.String, message: Schema.String }) {}
+)("Degraded", {
+  /** The check completion time as an ISO 8601 timestamp. */
+  checkedAt: Schema.String,
+  /** The diagnostic text to show to the operator. */
+  message: Schema.String,
+}) {}
 
 /**
  * A check that the preflight left for later, at an ISO instant, such as a provisioned Worker's
@@ -173,31 +209,42 @@ export class DegradedCheckView extends Schema.TaggedClass<DegradedCheckView>(
  */
 export class DeferredCheckView extends Schema.TaggedClass<DeferredCheckView>(
   "@usine/orchestrator/DeferredCheckView",
-)("Deferred", { checkedAt: Schema.String, message: Schema.String }) {}
+)("Deferred", {
+  /** The check completion time as an ISO 8601 timestamp. */
+  checkedAt: Schema.String,
+  /** The diagnostic text to show to the operator. */
+  message: Schema.String,
+}) {}
 
 /** A preflight check that found a missing prerequisite or couldn't run, at an ISO instant. */
 export class FailedCheckView extends Schema.TaggedClass<FailedCheckView>(
   "@usine/orchestrator/FailedCheckView",
 )("Failed", {
+  /** The check completion time as an ISO 8601 timestamp. */
   checkedAt: Schema.String,
   /** Null when the check itself failed, such as a timed-out probe. */
   capability: Schema.NullOr(WorkerCapability),
+  /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
+/** The last worker preflight result, including checks deferred until a machine exists. */
 export const PreflightCheckView = Schema.Union([
   PassedCheckView,
   DegradedCheckView,
   DeferredCheckView,
   FailedCheckView,
 ]);
+/** The last worker preflight result, including checks deferred until a machine exists. */
 export type PreflightCheckView = typeof PreflightCheckView.Type;
 
 /** The last preflight of one harness on a Worker. */
 export class HarnessPreflightView extends Schema.Class<HarnessPreflightView>(
   "@usine/orchestrator/HarnessPreflightView",
 )({
+  /** The coding-agent CLI checked by preflight. */
   harness: Harness,
+  /** The latest preflight outcome for this harness. */
   check: PreflightCheckView,
 }) {}
 
@@ -209,8 +256,11 @@ export class ContainerView extends Schema.Class<ContainerView>("@usine/orchestra
   {
     /** Null for the default image of this usine release. */
     image: Schema.NullOr(ContainerImage),
+    /** The CPU limit per attempt container, or null for the derived default. */
     cpus: Schema.NullOr(ContainerCpus),
+    /** The memory limit per attempt container in MiB, or null for the derived default. */
     memoryMib: Schema.NullOr(ContainerMemoryMib),
+    /** The process limit per attempt container, or null for the derived default. */
     pids: Schema.NullOr(ContainerPids),
   },
 ) {}
@@ -219,14 +269,21 @@ export class ContainerView extends Schema.Class<ContainerView>("@usine/orchestra
 export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationView>(
   "@usine/orchestrator/WorkerConfigurationView",
 )({
+  /** The configured worker identity. */
   name: WorkerName,
+  /** The executor kind used to run attempts. */
   kind: WorkerKind,
+  /** The configured maximum simultaneous attempts on this worker. */
   maxConcurrentAttempts: Schema.Int,
   /** An SSH Worker's connection and root, or null for the other kinds. */
   destination: Schema.NullOr(SshDestination),
+  /** The SSH port, or null to use the client default or for a non-SSH worker. */
   port: Schema.NullOr(SshPort),
+  /** The SSH private-key path, or null to use normal SSH identity selection. */
   identityFile: Schema.NullOr(SshIdentityFile),
+  /** The remote checkout root, or null for a non-SSH worker. */
   root: Schema.NullOr(WorkerRoot),
+  /** The credential-injecting gateway settings, or null without a gateway. */
   gateway: Schema.NullOr(GatewayView),
   /** An SSH Worker's Attempt container, used if its machine has Docker; null for the other kinds. */
   container: Schema.NullOr(ContainerView),
@@ -263,7 +320,9 @@ export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationVie
 export class RemovedWorkerView extends Schema.Class<RemovedWorkerView>(
   "@usine/orchestrator/RemovedWorkerView",
 )({
+  /** The removed worker identity retained until its attempts end. */
   name: WorkerName,
+  /** The number of attempts still running on this removed worker. */
   running: Schema.Int,
 }) {}
 
@@ -271,11 +330,13 @@ export class RemovedWorkerView extends Schema.Class<RemovedWorkerView>(
 export class LabelStateView extends Schema.Class<LabelStateView>(
   "@usine/orchestrator/LabelStateView",
 )({
+  /** The GitHub label name. */
   name: GitHubLabelName,
   /** Null until polling has read the repository's labels. */
   onGitHub: Schema.NullOr(Schema.Boolean),
   /** The repository's label color, else the color declared in `labels`, as six hex digits. */
   color: Schema.NullOr(Schema.String),
+  /** The GitHub or declared label description, or null without one. */
   description: Schema.NullOr(Schema.String),
   /** Whether `labels` in `usine.yaml` declares the label, so usine creates it if missing. */
   declared: Schema.Boolean,
@@ -286,21 +347,31 @@ export class LabelStateView extends Schema.Class<LabelStateView>(
 /** A lane source that routes Items by label. */
 export class LabelLaneSourceView extends Schema.TaggedClass<LabelLaneSourceView>(
   "@usine/orchestrator/LabelLaneSourceView",
-)("Label", { label: LabelStateView }) {}
+)("Label", {
+  /** The label and its repository creation status for this lane source. */
+  label: LabelStateView,
+}) {}
 
 /** A lane source that routes Items by issue or pull request state. */
 export class StateLaneSourceView extends Schema.TaggedClass<StateLaneSourceView>(
   "@usine/orchestrator/StateLaneSourceView",
-)("State", { state: LaneItemState }) {}
+)("State", {
+  /** The issue or pull request state that selects this lane. */
+  state: LaneItemState,
+}) {}
 
+/** A GitHub label or item state used to place tasks in a board lane. */
 export const LaneSourceView = Schema.Union([LabelLaneSourceView, StateLaneSourceView]);
+/** A GitHub label or item state used to place tasks in a board lane. */
 export type LaneSourceView = typeof LaneSourceView.Type;
 
 /** One lane declared in a project, with its sources in file order. */
 export class LaneConfigurationView extends Schema.Class<LaneConfigurationView>(
   "@usine/orchestrator/LaneConfigurationView",
 )({
+  /** The configured lane display name. */
   name: LaneName,
+  /** The label and state sources in configured order. */
   sources: Schema.Array(LaneSourceView),
 }) {}
 
@@ -308,7 +379,9 @@ export class LaneConfigurationView extends Schema.Class<LaneConfigurationView>(
 export class RepositoryConfigurationView extends Schema.Class<RepositoryConfigurationView>(
   "@usine/orchestrator/RepositoryConfigurationView",
 )({
+  /** The registered repository in `owner/name` form. */
   name: RepositoryName,
+  /** Registry tags used by loop selectors. */
   tags: Schema.Array(RegistryTag),
   /** Empty if `usine.yaml` declares no lanes, so the Board proposes lanes from the labels. */
   lanes: Schema.Array(LaneConfigurationView),
@@ -320,13 +393,21 @@ export class RepositoryConfigurationView extends Schema.Class<RepositoryConfigur
 
 /** The `settings`, `operator`, webhooks mode, and `tracing` of `usine.yaml`, with defaults applied. */
 export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrator/SettingsView")({
+  /** The configured polling interval in seconds. */
   pollInterval: Schema.Int,
+  /** The maximum child sessions per attempt. */
   maxChildren: Schema.Int,
+  /** The attempt wall-clock ceiling in minutes, or null without a ceiling. */
   maxAttemptMinutes: Schema.NullOr(Schema.Int),
+  /** The attempt token ceiling, or null without a ceiling. */
   maxAttemptTokens: Schema.NullOr(Schema.Int),
+  /** The instance default parent model, or null to let Pi choose. */
   parentModel: Schema.NullOr(ModelId),
+  /** The instance default parent reasoning effort, or null to use the agent effort. */
   parentEffort: Schema.NullOr(Effort),
+  /** The configured operator login, or null when unset. */
   operator: Schema.NullOr(OperatorLogin),
+  /** The hint delivery mode: disabled, GitHub delivery polling, or an HTTP endpoint. */
   webhooks: Schema.Literals(["off", "deliveries", "endpoint"]),
   /** The public URL for `endpoint` webhooks, or null for the other modes. */
   webhooksPublicUrl: Schema.NullOr(Schema.String),
@@ -343,18 +424,28 @@ export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrato
 export class ConfigurationView extends Schema.Class<ConfigurationView>(
   "@usine/orchestrator/ConfigurationView",
 )({
+  /** The configured projects; defaults to an empty list for older projections. */
   projects: Schema.Array(Project).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
     Schema.withConstructorDefault(Effect.succeed([])),
   ),
+  /** The labels declared for creation in managed repositories. */
   labels: Schema.Array(DeclaredLabel),
+  /** The valid loaded loops with runtime pause state. */
   loops: Schema.Array(LoopFileView),
+  /** The loop files excluded because loading failed. */
   quarantinedLoops: Schema.Array(QuarantinedLoopView),
+  /** The valid loaded agent roster. */
   agents: Schema.Array(AgentFileView),
+  /** The agent files excluded because loading failed. */
   invalidAgents: Schema.Array(InvalidAgentView),
+  /** Configured workers with current slots and preflight results. */
   workers: Schema.Array(WorkerConfigurationView),
+  /** Workers removed from configuration that still have running attempts. */
   removedWorkers: Schema.Array(RemovedWorkerView),
+  /** The repository registry with lanes, labels, and matching loops. */
   repositories: Schema.Array(RepositoryConfigurationView),
+  /** Instance settings with defaults applied and secrets omitted. */
   settings: SettingsView,
 }) {}
 
@@ -660,5 +751,9 @@ export class OperatorConfiguration extends Context.Service<
     ) => Effect.Effect<ConfigurationView, EnginePersistenceError>;
   }
 >()("@usine/orchestrator/OperatorConfiguration") {
+  /**
+   * Provides configuration views using worker status, stored labels, loop control, and trigger
+   * status.
+   */
   static readonly layer = Layer.effect(OperatorConfiguration, makeOperatorConfiguration);
 }

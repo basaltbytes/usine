@@ -26,6 +26,7 @@ import type { PipelinePosition } from "./lease-order.ts";
 
 /** A Worker's current slot usage in the scheduler. */
 export interface WorkerSlots {
+  /** The configured worker name. */
   readonly worker: WorkerName;
   /** The maximum concurrent Attempts, or zero while preflight has failed or after a reload removed the Worker. */
   readonly capacity: number;
@@ -35,9 +36,13 @@ export interface WorkerSlots {
 
 /** A Run that waits for a Worker slot. */
 export interface QueuedRun {
+  /** The run associated with this entry. */
   readonly runId: RunId;
+  /** The project-qualified loop name. */
   readonly loop: LoopName;
+  /** The stored item identity, including its stream and repository. */
   readonly itemKey: ItemKey;
+  /** The pipeline ordering used by the scheduler to compare queued runs. */
   readonly position: PipelinePosition;
   /**
    * The fewest queued Runs that take a Worker slot before this one. Of the Runs that wait for their
@@ -49,7 +54,9 @@ export interface QueuedRun {
 
 /** A passed preflight check. */
 export interface PreflightPassed {
+  /** The discriminator for this preflight outcome. */
   readonly _tag: "Passed";
+  /** The time the preflight check completed. */
   readonly checkedAt: DateTime.Utc;
 }
 
@@ -58,7 +65,9 @@ export interface PreflightPassed {
  * capability that keeps them apart, such as an SSH Worker without Docker.
  */
 export interface PreflightDegraded {
+  /** The discriminator for this preflight outcome. */
   readonly _tag: "Degraded";
+  /** The time the preflight check completed. */
   readonly checkedAt: DateTime.Utc;
   /** The executor's summary for operators. */
   readonly message: string;
@@ -69,7 +78,9 @@ export interface PreflightDegraded {
  * which run on its first machine each day.
  */
 export interface PreflightDeferred {
+  /** The discriminator for this preflight outcome. */
   readonly _tag: "Deferred";
+  /** The time the preflight check completed. */
   readonly checkedAt: DateTime.Utc;
   /** When the check runs instead, for operators. */
   readonly message: string;
@@ -77,7 +88,9 @@ export interface PreflightDeferred {
 
 /** A preflight check that found a missing prerequisite or couldn't run. */
 export interface PreflightFailed {
+  /** The discriminator for this preflight outcome. */
   readonly _tag: "Failed";
+  /** The time the preflight check completed. */
   readonly checkedAt: DateTime.Utc;
   /** The missing prerequisite, or `None` if the check itself failed, such as a timed-out probe. */
   readonly capability: Option.Option<WorkerCapability>;
@@ -97,13 +110,17 @@ export type PreflightCheck =
  * would serve keep waiting.
  */
 export interface ProvisioningPause {
+  /** The configured worker name. */
   readonly worker: WorkerName;
   /** Why the creation failed, or `check` if the first machine of the day failed its preflight. */
   readonly reason: MachineUnavailableReason | "check";
+  /** The diagnostic text to show to the operator. */
   readonly message: string;
   /** The number of failed creations in a row. */
   readonly failures: number;
+  /** The most recent machine creation or preflight failure time. */
   readonly failedAt: DateTime.Utc;
+  /** The earliest time to try creating a machine again. */
   readonly retryAt: DateTime.Utc;
   /** Whether the Worker still waits for `retryAt` before it creates a machine. */
   readonly blocked: boolean;
@@ -111,7 +128,9 @@ export interface ProvisioningPause {
 
 /** The last preflight of one harness on a Worker. */
 export interface HarnessPreflight {
+  /** The coding-agent CLI checked by preflight. */
   readonly harness: Harness;
+  /** The latest preflight outcome for this harness. */
   readonly check: PreflightCheck;
 }
 
@@ -120,6 +139,7 @@ export interface HarnessPreflight {
  * credentials), each checked harness, and the limits of its Attempt containers.
  */
 export interface WorkerPreflight {
+  /** The configured worker name. */
   readonly worker: WorkerName;
   /** `None` until a preflight checked the Worker's own prerequisites. */
   readonly prerequisites: Option.Option<PreflightCheck>;
@@ -224,7 +244,9 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
 
 /** A worker excluded from scheduling until its startup preflight passes. */
 export interface WorkerPreflightFailure {
+  /** The configured worker name. */
   readonly worker: WorkerName;
+  /** The diagnostic text to show to the operator. */
   readonly message: string;
 }
 

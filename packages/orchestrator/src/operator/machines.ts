@@ -18,8 +18,11 @@ import type { ProvisioningPause } from "../worker-status.ts";
 
 /** A machine that a provisioned Worker created for one Attempt and hasn't deleted yet. */
 export class MachineView extends Schema.Class<MachineView>("@usine/orchestrator/MachineView")({
+  /** The configured worker name. */
   worker: WorkerName,
+  /** The provider hosting this attempt machine. */
   provider: MachineProvider,
+  /** The machine lifecycle state reported by the executor. */
   state: MachineState,
   /** The provider's ID, or null until the provider accepts the creation. */
   id: Schema.NullOr(MachineId),
@@ -37,10 +40,13 @@ export class ProvisioningPauseView extends Schema.Class<ProvisioningPauseView>(
 )({
   /** Why the creation failed, or `check` if the first machine of the day failed its preflight. */
   reason: Schema.Union([MachineUnavailableReason, Schema.Literal("check")]),
+  /** The diagnostic text to show to the operator. */
   message: Schema.String,
   /** The number of failed creations in a row. */
   failures: Schema.Int,
+  /** The most recent machine creation or preflight failure time. */
   failedAt: Schema.String,
+  /** The earliest time to try creating a machine again. */
   retryAt: Schema.String,
   /** Whether the Worker waits for `retryAt` before it creates a machine. */
   blocked: Schema.Boolean,
@@ -50,16 +56,25 @@ export class ProvisioningPauseView extends Schema.Class<ProvisioningPauseView>(
 export class HetznerProvisionerView extends Schema.TaggedClass<HetznerProvisionerView>(
   "@usine/orchestrator/HetznerProvisionerView",
 )("hetzner", {
+  /** The environment-variable name for the Hetzner API token, never its value. */
   tokenEnv: Schema.String,
+  /** The Hetzner server type to create. */
   serverType: HetznerServerType,
+  /** The Hetzner location for new machines. */
   location: HetznerLocation,
+  /** The image used to initialize new machines. */
   image: HetznerImage,
+  /** The Hetzner private network name, or null without one. */
   network: Schema.NullOr(HetznerResourceName),
+  /** The Hetzner firewall name, or null without one. */
   firewall: Schema.NullOr(HetznerResourceName).pipe(
     Schema.withConstructorDefault(Effect.succeed(null)),
   ),
+  /** The registered Hetzner SSH key name. */
   sshKey: HetznerResourceName,
+  /** The SSH login user for created machines. */
   sshUser: SshUser,
+  /** Labels applied to created Hetzner machines. */
   labels: Schema.Record(Schema.String, Schema.String),
   /** The variable with the Anthropic API key for each Attempt, or null. */
   anthropicKeyEnv: Schema.NullOr(Schema.String),
@@ -71,7 +86,9 @@ export class HetznerProvisionerView extends Schema.TaggedClass<HetznerProvisione
 export class BoatProvisionerView extends Schema.TaggedClass<BoatProvisionerView>(
   "@usine/orchestrator/BoatProvisionerView",
 )("boat", {
+  /** The environment-variable name for the Boat API token, never its value. */
   tokenEnv: Schema.String,
+  /** The Boat machine size to create. */
   size: BoatSize,
   /** The variable with the Anthropic API key for each Attempt, or null. */
   anthropicKeyEnv: Schema.NullOr(Schema.String),
@@ -79,7 +96,15 @@ export class BoatProvisionerView extends Schema.TaggedClass<BoatProvisionerView>
   openaiKeyEnv: Schema.NullOr(Schema.String),
 }) {}
 
+/**
+ * Provisioner settings safe to return to operator clients; credentials appear only as
+ * environment-variable names.
+ */
 export const ProvisionerView = Schema.Union([HetznerProvisionerView, BoatProvisionerView]);
+/**
+ * Provisioner settings safe to return to operator clients; credentials appear only as
+ * environment-variable names.
+ */
 export type ProvisionerView = typeof ProvisionerView.Type;
 
 export const machineView = (machine: MachineStatus): MachineView =>

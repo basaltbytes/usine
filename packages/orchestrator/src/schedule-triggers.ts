@@ -86,8 +86,11 @@ const scheduleFailureLogFields = (error: ScheduleTriggerError) => {
 export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailure>(
   "@usine/orchestrator/ScheduleAgentFailure",
 )("ScheduleAgentFailure", {
+  /** The project-qualified loop name. */
   loop: LoopName,
+  /** The referenced agent name. */
   agent: AgentName,
+  /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
@@ -95,10 +98,15 @@ export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailur
 export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>(
   "@usine/orchestrator/ScheduleTickFailure",
 )("ScheduleTickFailure", {
+  /** The project-qualified loop name. */
   loop: LoopName,
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The UTC cron boundary whose repository submission failed. */
   scheduledAt: Schema.DateTimeUtc,
+  /** The failure tag for callers to classify the error. */
   errorTag: Schema.NonEmptyString,
+  /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
@@ -109,28 +117,47 @@ export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>
 export class ScheduleCronFailure extends Schema.TaggedClass<ScheduleCronFailure>(
   "@usine/orchestrator/ScheduleCronFailure",
 )("ScheduleCronFailure", {
+  /** The project-qualified loop name. */
   loop: LoopName,
+  /** The configured cron expression whose boundaries could not be computed. */
   cron: Schema.String,
+  /** The configured schedule time zone. */
   tz: Schema.String,
+  /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
+/**
+ * A schedule evaluation failure affecting one loop or one selected repository; sibling evaluations
+ * continue.
+ */
 export const ScheduleFailure = Schema.Union([
   ScheduleAgentFailure,
   ScheduleCronFailure,
   ScheduleTickFailure,
 ]);
+/**
+ * A schedule evaluation failure affecting one loop or one selected repository; sibling evaluations
+ * continue.
+ */
 export type ScheduleFailure = typeof ScheduleFailure.Type;
 
 /** The result of evaluating every schedule loop at one instant. */
 export class ScheduleCycle extends Schema.Class<ScheduleCycle>("@usine/orchestrator/ScheduleCycle")(
   {
+    /** The number of unpaused schedule loops evaluated. */
     loops: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    /** The number of due loop and repository pairs evaluated. */
     fanout: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    /** Run engine results for matching ticks, including deduplicated submissions. */
     submissions: Schema.Array(SubmissionResult),
+    /** The due loop and repository pairs whose condition did not match. */
     skipped: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    /** The loops whose latest cron boundary was already submitted in this process. */
     alreadyFired: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    /** Agent, cron, or per-repository failures; sibling evaluations continue. */
     failures: Schema.Array(ScheduleFailure),
+    /** The earliest next cron boundary, or `None` without a computable schedule. */
     nextTickAt: Schema.Option(Schema.DateTimeUtc),
   },
 ) {}
@@ -214,9 +241,14 @@ export class ScheduleTriggers extends Context.Service<
      * accepted reload ends the sleep so the next tick evaluates the reloaded Loops.
      */
     readonly run: (instances: WatchedInstance) => Effect.Effect<never>;
+    /** The most recent completed cycle, or `None` before the first evaluation. */
     readonly latest: Effect.Effect<Option.Option<ScheduleCycle>>;
   }
 >()("@usine/orchestrator/ScheduleTriggers") {
+  /**
+   * Provides schedule evaluation and submission with in-memory fired-tick tracking and durable
+   * event deduplication.
+   */
   static readonly layer = Layer.effect(
     ScheduleTriggers,
     Effect.gen(function* () {

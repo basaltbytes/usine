@@ -232,6 +232,10 @@ export const projectBoard = Effect.fn("Board.project")(
     }),
 );
 
+/**
+ * Returns labels to add for `target` and labels to remove from the other authored lane sources in
+ * `board`. Labels outside the authored lane map are preserved (ADR 0024).
+ */
 export const labelMutationForBoardMove = (
   board: BoardView,
   target: WritableBoardLaneView,

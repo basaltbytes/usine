@@ -18,6 +18,10 @@ const RESTART_BLOCKS = ["workers", "webhooks", "tracing"] as const;
  */
 export const RestartBlock = Schema.Literals(RESTART_BLOCKS);
 
+/**
+ * A `usine.yaml` block with changes that apply only when `usine up` starts, so a reload refuses
+ * them.
+ */
 export type RestartBlock = typeof RestartBlock.Type;
 
 /** A change to `usine.yaml` that only a restart of `usine up` applies. */
@@ -43,15 +47,25 @@ const nameChanges = <S extends Schema.Top>(name: S) =>
 export class InstanceReload extends Schema.Class<InstanceReload>(
   "@usine/orchestrator/InstanceReload",
 )({
+  /** The loop names added, removed, or changed by the accepted reload. */
   loops: nameChanges(LoopName),
+  /** The agent names added, removed, or changed by the accepted reload. */
   agents: nameChanges(AgentName),
+  /** The label names added, removed, or changed by the accepted reload. */
   labels: nameChanges(GitHubLabelName),
+  /** The repository names added, removed, or changed by the accepted reload. */
   repos: nameChanges(RepositoryName),
+  /** The project IDs added, removed, or changed by the accepted reload. */
   projects: nameChanges(ProjectId),
+  /** The worker names added, removed, or changed by the accepted reload. */
   workers: nameChanges(WorkerName),
+  /** Whether instance settings changed. */
   settingsChanged: Schema.Boolean,
+  /** Whether the configured operator login changed. */
   operatorChanged: Schema.Boolean,
+  /** Loop files excluded from the loaded instance, with their validation errors. */
   quarantinedLoops: Schema.Array(QuarantinedLoop),
+  /** Agent files excluded from the loaded roster, with their validation errors. */
   invalidAgents: Schema.Array(InvalidAgent),
 }) {}
 

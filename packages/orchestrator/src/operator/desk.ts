@@ -52,7 +52,12 @@ const DESK_ITEMS = 500;
 /** The Attempt's Worker hasn't answered the executor's probe since `lastAnsweredAt`. */
 export class WorkerSilentView extends Schema.TaggedClass<WorkerSilentView>(
   "@usine/orchestrator/WorkerSilentView",
-)("WorkerSilent", { worker: WorkerName, lastAnsweredAt: Schema.String }) {}
+)("WorkerSilent", {
+  /** The configured worker name. */
+  worker: WorkerName,
+  /** The last successful worker response time as an ISO 8601 timestamp. */
+  lastAnsweredAt: Schema.String,
+}) {}
 
 /**
  * A session's harness is retrying its model provider: the retries in this turn, the latest report,
@@ -61,9 +66,13 @@ export class WorkerSilentView extends Schema.TaggedClass<WorkerSilentView>(
 export class ProviderRetryingView extends Schema.TaggedClass<ProviderRetryingView>(
   "@usine/orchestrator/ProviderRetryingView",
 )("ProviderRetrying", {
+  /** The referenced agent name. */
   agent: AgentName,
+  /** The diagnostic text to show to the operator. */
   message: Schema.NonEmptyString,
+  /** The number of provider retries reported in the current session turn. */
   retries: ProviderRetries,
+  /** The start of the provider retry period as an ISO 8601 timestamp. */
   since: Schema.String,
 }) {}
 
@@ -72,13 +81,19 @@ export class ProviderRetryingView extends Schema.TaggedClass<ProviderRetryingVie
  * Attempt (ADR 0013).
  */
 export const ConnectivityWarningView = Schema.Union([WorkerSilentView, ProviderRetryingView]);
+/**
+ * An open connectivity problem in an attempt's transcript. It's a warning and never stops the
+ * attempt (ADR 0013).
+ */
 export type ConnectivityWarningView = typeof ConnectivityWarningView.Type;
 
 /** A running Attempt with its Run, Item, and recent transcript activity. */
 export class RunningAttemptView extends Schema.Class<RunningAttemptView>(
   "@usine/orchestrator/RunningAttemptView",
 )({
+  /** The run whose lifecycle state explains this entry. */
   run: RunView,
+  /** The open attempt currently running on a worker. */
   attempt: AttemptView,
   /**
    * The Run's Item as its Board card links it, or null for a schedule Run or an Item the desk
@@ -100,7 +115,10 @@ export class RunningAttemptView extends Schema.Class<RunningAttemptView>(
  */
 export class SuppressedForOperatorView extends Schema.TaggedClass<SuppressedForOperatorView>(
   "@usine/orchestrator/SuppressedForOperatorView",
-)("SuppressedForOperator", { run: RunView }) {}
+)("SuppressedForOperator", {
+  /** The run whose lifecycle state explains this entry. */
+  run: RunView,
+}) {}
 
 /**
  * `run` succeeded or was canceled on the Item's current state, so the Loop opens no other Run until
@@ -108,12 +126,18 @@ export class SuppressedForOperatorView extends Schema.TaggedClass<SuppressedForO
  */
 export class ClosedUnchangedView extends Schema.TaggedClass<ClosedUnchangedView>(
   "@usine/orchestrator/ClosedUnchangedView",
-)("ClosedUnchanged", { run: RunView }) {}
+)("ClosedUnchanged", {
+  /** The run whose lifecycle state explains this entry. */
+  run: RunView,
+}) {}
 
 /** `run` failed on the Item's current state and waits for the operator to retry it. */
 export class RunFailedView extends Schema.TaggedClass<RunFailedView>(
   "@usine/orchestrator/RunFailedView",
-)("RunFailed", { run: RunView }) {}
+)("RunFailed", {
+  /** The run whose lifecycle state explains this entry. */
+  run: RunView,
+}) {}
 
 /** The Loop is paused, so its trigger opens no Run. */
 export class LoopPausedView extends Schema.TaggedClass<LoopPausedView>(
@@ -123,17 +147,24 @@ export class LoopPausedView extends Schema.TaggedClass<LoopPausedView>(
 /** The Item used up its cycle budget; `ask` waits for the operator to reset it. */
 export class CycleBudgetUsedUpView extends Schema.TaggedClass<CycleBudgetUsedUpView>(
   "@usine/orchestrator/CycleBudgetUsedUpView",
-)("CycleBudgetUsedUp", { ask: CycleBudgetAsk }) {}
+)("CycleBudgetUsedUp", {
+  /** The unanswered cycle-budget ask preventing another run. */
+  ask: CycleBudgetAsk,
+}) {}
 
 /** `run` waits for the operator's approval. */
 export class AwaitingApprovalView extends Schema.TaggedClass<AwaitingApprovalView>(
   "@usine/orchestrator/AwaitingApprovalView",
-)("AwaitingApproval", { run: RunView }) {}
+)("AwaitingApproval", {
+  /** The run whose lifecycle state explains this entry. */
+  run: RunView,
+}) {}
 
 /** `run` waits for a free Worker slot. */
 export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>(
   "@usine/orchestrator/QueuedForWorkerView",
 )("QueuedForWorker", {
+  /** The run whose lifecycle state explains this entry. */
   run: RunView,
   /**
    * The fewest Runs that take a Worker slot before `run`, or null if the scheduler doesn't
@@ -153,7 +184,12 @@ export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>
  */
 export class WaitingForStopView extends Schema.TaggedClass<WaitingForStopView>(
   "@usine/orchestrator/WaitingForStopView",
-)("WaitingForStop", { run: RunView, stop: UnconfirmedStopView }) {}
+)("WaitingForStop", {
+  /** The run whose lifecycle state explains this entry. */
+  run: RunView,
+  /** The unconfirmed worker stop that prevents another attempt. */
+  stop: UnconfirmedStopView,
+}) {}
 
 /** No Event of the Loop has a Run for the Item's current state yet. The next poll acts on it. */
 export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
@@ -172,21 +208,27 @@ export const StallReasonView = Schema.Union([
   QueuedForWorkerView,
   AwaitingPollView,
 ]);
+/** The reason a matched item has no running attempt. */
 export type StallReasonView = typeof StallReasonView.Type;
 
 /** An Item that a Loop's trigger matches with no running Attempt, and the reason. */
 export class StalledItemView extends Schema.Class<StalledItemView>(
   "@usine/orchestrator/StalledItemView",
 )({
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The project-qualified loop name. */
   loop: LoopName,
+  /** The matched GitHub item that is not advancing. */
   item: BoardItemLink,
+  /** The lifecycle, approval, capacity, or configuration condition preventing progress. */
   reason: StallReasonView,
 }) {}
 
 /** A closed Run with its Item and close time. */
 export class ClosedRunView extends Schema.Class<ClosedRunView>("@usine/orchestrator/ClosedRunView")(
   {
+    /** The run whose lifecycle state explains this entry. */
     run: RunView,
     /**
      * The Run's Item as its Board card links it, or null for a schedule Run or an Item the desk
@@ -200,6 +242,7 @@ export class ClosedRunView extends Schema.Class<ClosedRunView>("@usine/orchestra
 
 /** One Worker on the desk's Workers line, with its slots and last preflight. */
 export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/WorkerView")({
+  /** The configured worker identity. */
   name: WorkerName,
   /**
    * The slots as the scheduler leases them. If the scheduler runs no Attempts (as in setup mode),
@@ -225,7 +268,9 @@ export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/Wo
 export class RepositoryPollView extends Schema.Class<RepositoryPollView>(
   "@usine/orchestrator/RepositoryPollView",
 )({
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The last completed poll time as an ISO 8601 timestamp, or null before the first poll. */
   polledAt: Schema.NullOr(Schema.String),
 }) {}
 
@@ -234,10 +279,15 @@ export class RepositoryPollView extends Schema.Class<RepositoryPollView>(
  * and poll times. Needs you comes from the overview.
  */
 export class DeskView extends Schema.Class<DeskView>("@usine/orchestrator/DeskView")({
+  /** The attempts currently running, with run and item context. */
   running: Schema.Array(RunningAttemptView),
+  /** Matched items whose loops cannot advance, with the reason for each. */
   notMoving: Schema.Array(StalledItemView),
+  /** Recently closed runs with their item and close time. */
   lastOutcomes: Schema.Array(ClosedRunView),
+  /** The configured workers with slot usage and preflight results. */
   workers: Schema.Array(WorkerView),
+  /** The last completed poll time for each managed repository. */
   polls: Schema.Array(RepositoryPollView),
 }) {}
 

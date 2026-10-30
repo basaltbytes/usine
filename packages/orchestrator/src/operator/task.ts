@@ -36,9 +36,19 @@ import { RunView } from "./run.ts";
 /** The number of newest Items the Board considers for Task membership. */
 const TASK_BOARD_ITEMS = 500;
 
-/** One issue or pull request of a Task, with its GitHub state as the Board card shows it. */
+/**
+ * One issue or pull request of a Task, with its GitHub state as the Board card shows it.
+ *
+ * @property itemKey - The stored item identity, including its stream and repository.
+ * @property kind - Whether this item is an issue or pull request.
+ * @property number - The GitHub item number within its repository.
+ * @property title - The last polled GitHub title.
+ * @property url - The GitHub URL for the item.
+ * @property state - The last polled issue or pull request state used for lane placement.
+ */
 export class TaskItemView extends Schema.Class<TaskItemView>("@usine/orchestrator/TaskItemView")({
   ...BoardItemLink.fields,
+  /** The last polled GitHub labels for this item. */
   labels: Schema.Array(GitHubLabelName),
   /** Whether the Item is an open pull request whose branch conflicts with its base. */
   conflicting: Schema.Boolean,
@@ -49,7 +59,9 @@ export class TaskItemView extends Schema.Class<TaskItemView>("@usine/orchestrato
  * label, the lane that Run was triggered from.
  */
 export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrator/TaskLaneView")({
+  /** The lane ID used by board move requests. */
   id: BoardLaneId,
+  /** The display name of the task lane. */
   name: LaneName,
 }) {}
 
@@ -60,10 +72,18 @@ export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrato
 export class TaskCommentView extends Schema.Class<TaskCommentView>(
   "@usine/orchestrator/TaskCommentView",
 )({
+  /** The run associated with this entry. */
   runId: RunId,
+  /** Whether the attributed GitHub write is a comment or review. */
   kind: CommentKind,
+  /** The GitHub URL of the comment or review. */
   url: Schema.String,
+  /**
+   * The GitHub posting time as an ISO 8601 timestamp, or null for older records without a posting
+   * time.
+   */
   postedAt: Schema.NullOr(Schema.String),
+  /** The attributed attempt end time, or null if no end was recorded. */
   attemptEndedAt: Schema.NullOr(Schema.String),
 }) {}
 
@@ -72,14 +92,20 @@ export class TaskCommentView extends Schema.Class<TaskCommentView>(
  * originating Item: the earliest issue, or else the earliest pull request.
  */
 export class TaskView extends Schema.Class<TaskView>("@usine/orchestrator/TaskView")({
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /**
+   * The originating issue number, or the earliest pull request number for tasks without an issue.
+   */
   number: ItemNumber,
+  /** The title of the originating item. */
   title: Schema.String,
   /**
    * The Item whose labels and state set the Task's lane (unless a running Run keeps it in its
    * trigger lane), and whose labels a Board move changes.
    */
   current: ItemKey,
+  /** The board lane containing the task's current item. */
   lane: TaskLaneView,
   /**
    * Whether a Run on the Task's Items waits for approval or a failure decision, or an Item used up
@@ -94,6 +120,10 @@ export class TaskView extends Schema.Class<TaskView>("@usine/orchestrator/TaskVi
   comments: Schema.Array(TaskCommentView),
 }) {}
 
+/**
+ * A task lookup failure caused by storage, an unknown repository, or an item outside the projected
+ * board.
+ */
 export type TaskReadError = RunStoreError | BoardProjectNotFoundError | BoardItemNotFoundError;
 
 const isoOrNull = Option.match({ onNone: () => null, onSome: DateTime.formatIso });

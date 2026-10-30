@@ -5,17 +5,31 @@ import { GitHubLabelWriter, NewRepositoryLabel } from "@usine/github/label-write
 import { RepositoryLabelColor, RepositoryLabelName } from "@usine/github/polling";
 import { Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 
+/**
+ * A declared label that could not be created in a managed repo. Trigger evaluation continues
+ * despite the finding.
+ */
 export class LabelPreflightFinding extends Schema.Class<LabelPreflightFinding>(
   "@usine/orchestrator/LabelPreflightFinding",
 )({
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The GitHub label name. */
   label: GitHubLabelName,
+  /** The failure tag for callers to classify the error. */
   errorTag: Schema.NonEmptyString,
+  /** The diagnostic text to show to the operator. */
   message: Schema.NonEmptyString,
 }) {}
 
+/**
+ * The repository label catalog after creation attempts, with failures and any requested polling
+ * backoff.
+ */
 export interface LabelReconciliation {
+  /** The existing catalog plus successfully created labels, sorted by name. */
   readonly labels: ReadonlyArray<StoredRepositoryLabel>;
+  /** Label creation failures; a rate limit defers the remaining declarations. */
   readonly findings: ReadonlyArray<LabelPreflightFinding>;
   /** Whether a label was created, so the poll cursor must drop its catalog ETag. */
   readonly catalogChanged: boolean;
@@ -67,6 +81,11 @@ const createInput = (label: DeclaredLabel): NewRepositoryLabel =>
 export class LabelReconciler extends Context.Service<
   LabelReconciler,
   {
+    /**
+     * Creates labels in `declared` that `existing` lacks, comparing names without case. Existing
+     * labels remain unchanged; failures become findings, and a rate limit stops further creation
+     * attempts.
+     */
     readonly reconcile: (
       repository: RepositoryName,
       declared: ReadonlyArray<DeclaredLabel>,
@@ -74,6 +93,7 @@ export class LabelReconciler extends Context.Service<
     ) => Effect.Effect<LabelReconciliation>;
   }
 >()("@usine/orchestrator/LabelReconciler") {
+  /** Provides label reconciliation using `GitHubLabelWriter`. */
   static readonly layer = Layer.effect(
     LabelReconciler,
     Effect.gen(function* () {

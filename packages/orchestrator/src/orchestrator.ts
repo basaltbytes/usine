@@ -30,6 +30,10 @@ export class Orchestrator extends Context.Service<
     readonly run: Effect.Effect<never>;
   }
 >()("@usine/orchestrator/Orchestrator") {
+  /**
+   * Provides the trigger coordinator, including webhook delivery hints, using the supplied current
+   * instance and trigger services.
+   */
   static readonly layer = Layer.effect(Orchestrator, makeOrchestrator).pipe(
     Layer.provide(WebhookDeliveries.layer),
   );

@@ -110,7 +110,12 @@ const errorStatuses = {
  */
 export class OperatorHttpError extends Schema.Error<OperatorHttpError>(
   "@usine/orchestrator/OperatorHttpError",
-)({ error: Schema.Literals(Record.keys(errorStatuses)), message: Schema.String }) {
+)({
+  /** The domain failure tag used to select the HTTP status. */
+  error: Schema.Literals(Record.keys(errorStatuses)),
+  /** The diagnostic text to show to the operator. */
+  message: Schema.String,
+}) {
   /** The HTTP status for this error. */
   get status() {
     return errorStatuses[this.error];
@@ -132,7 +137,10 @@ const errors = [...new Set(Object.values(errorStatuses))].map((status) =>
  */
 export class OperatorHttpPolicy extends HttpApiMiddleware.Service<OperatorHttpPolicy>()(
   "@usine/orchestrator/OperatorHttpPolicy",
-  { error: errors },
+  {
+    /** The operator error envelopes that this middleware can return. */
+    error: errors,
+  },
 ) {}
 
 /**
@@ -154,6 +162,10 @@ export const ReloadPreflightFailure = Schema.Union([
     message: Schema.String,
   }),
 ]);
+/**
+ * The worker preflight failure behind a refused reload. The check's observation isn't sent to the
+ * client.
+ */
 export type ReloadPreflightFailure = typeof ReloadPreflightFailure.Type;
 
 /** A reload refused because `usine.yaml` changed in a way that needs a restart of `usine up`. */
@@ -161,7 +173,9 @@ export class RestartRequiredRefusal extends Schema.Error<RestartRequiredRefusal>
   "@usine/orchestrator/RestartRequiredRefusal",
 )(
   {
+    /** The fixed domain error tag that identifies this refusal. */
     error: Schema.Literal("RestartRequiredError"),
+    /** The diagnostic text to show to the operator. */
     message: Schema.String,
     /** The `usine.yaml` blocks that contain the changed fields. */
     blocks: Schema.NonEmptyArray(RestartBlock),
@@ -179,12 +193,15 @@ export class ReloadPreflightRefusal extends Schema.Error<ReloadPreflightRefusal>
   "@usine/orchestrator/ReloadPreflightRefusal",
 )(
   {
+    /** The fixed domain error tag that identifies this refusal. */
     error: Schema.Literal("ReloadPreflightError"),
+    /** The diagnostic text to show to the operator. */
     message: Schema.String,
     /** The reloaded Agents whose brains preflight checked on every Worker. */
     agents: Schema.Array(AgentName),
     /** The Workers added or given more slots by the reload, which preflight checked. */
     workers: Schema.Array(WorkerName),
+    /** The failed preflight check with observation and credential details omitted. */
     cause: ReloadPreflightFailure,
   },
   { httpApiStatus: 409 },
@@ -195,9 +212,13 @@ export class FactoryConfigRefusal extends Schema.Error<FactoryConfigRefusal>(
   "@usine/orchestrator/FactoryConfigRefusal",
 )(
   {
+    /** The fixed domain error tag that identifies this refusal. */
     error: Schema.Literal("FactoryConfigError"),
+    /** The diagnostic text to show to the operator. */
     message: Schema.String,
+    /** The instance-relative configuration file path that failed to load. */
     file: InstancePath,
+    /** The read, parse, or validation stage that failed. */
     stage: FileStage,
   },
   { httpApiStatus: 422 },
@@ -240,24 +261,33 @@ export const reloadRefusal = (error: InstanceReloadError, message: string): Relo
       new FactoryConfigRefusal({ error: _tag, message, file, stage }),
   });
 
+/** An HTTP 409 response when a configuration write uses an outdated revision. */
 export class StaleRevisionRefusal extends Schema.Error<StaleRevisionRefusal>(
   "StaleRevisionRefusal",
 )(
   {
+    /** The fixed domain error tag that identifies this refusal. */
     error: Schema.Literal("StaleRevision"),
+    /** The diagnostic text to show to the operator. */
     message: Schema.String,
+    /** The configuration revision the caller edited; a newer stored revision rejects the write. */
     expected: ConfigurationRevisionNumber,
+    /** The stored revision the caller must read before retrying the edit. */
     current: ConfigurationRevisionNumber,
   },
   { httpApiStatus: 409 },
 ) {}
 
+/** An HTTP 422 response with validation problems for the proposed configuration. */
 export class ConfigurationInvalidRefusal extends Schema.Error<ConfigurationInvalidRefusal>(
   "ConfigurationInvalidRefusal",
 )(
   {
+    /** The fixed domain error tag that identifies this refusal. */
     error: Schema.Literal("ConfigurationInvalid"),
+    /** The diagnostic text to show to the operator. */
     message: Schema.String,
+    /** Validation diagnostics grouped by configuration entity and field path. */
     problems: Schema.NonEmptyArray(
       Schema.Struct({
         entity: ConfigurationEntityKey,
@@ -268,12 +298,16 @@ export class ConfigurationInvalidRefusal extends Schema.Error<ConfigurationInval
   { httpApiStatus: 422 },
 ) {}
 
+/** An HTTP 409 response when later revisions changed entities that a revert would overwrite. */
 export class ConfigurationRevertRefusal extends Schema.Error<ConfigurationRevertRefusal>(
   "ConfigurationRevertRefusal",
 )(
   {
+    /** The fixed domain error tag that identifies this refusal. */
     error: Schema.Literal("ConfigurationRevertBlocked"),
+    /** The diagnostic text to show to the operator. */
     message: Schema.String,
+    /** Entities modified by later revisions that prevent this revert. */
     entities: Schema.NonEmptyArray(ConfigurationEntityKey),
   },
   { httpApiStatus: 409 },

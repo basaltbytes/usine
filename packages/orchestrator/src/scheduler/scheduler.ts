@@ -68,10 +68,13 @@ import { type ProvisioningPause, type QueuedRun, WorkerStatus } from "../worker-
 
 import { preflightFor } from "./preflight.ts";
 
+/** A worker kind for which the scheduler has no configured executor. */
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
   "@usine/orchestrator/UnsupportedWorkerError",
 )("UnsupportedWorkerError", {
+  /** The configured worker name. */
   worker: WorkerName,
+  /** The configured worker kind that has no executor in this composition. */
   kind: Schema.String,
 }) {}
 
@@ -250,6 +253,9 @@ export interface ExecutorWorkers {
   readonly remove: (worker: WorkerName) => Effect.Effect<void>;
 }
 
+/**
+ * Optional worker lifecycle, machine provisioning, and cleanup operations for a scheduler adapter.
+ */
 export interface StepExecutorOptions {
   /**
    * The executor's worker set, initialized during preflight and updated on each reload. If omitted,
