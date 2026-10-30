@@ -39,3 +39,5 @@ The [`usine config` reference](src/content/docs/reference/configuration/config.m
 The [usine.yaml reference](src/content/docs/reference/configuration/usine-yaml.md#webhooks) documents webhook modes, endpoint secrets, and delivery health.
 
 The [sign-in guide](src/content/docs/guides/sign-in.md) describes terminal-only startup links, local admin token ownership, session expiry, and GitHub token revocation.
+
+The [loop file reference](src/content/docs/reference/configuration/loop-files.md#priority) and [expression reference](src/content/docs/reference/configuration/expressions.md#priority-expressions) describe integer CEL priorities, snapshot evaluation, queue ordering, and editor previews.

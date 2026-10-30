@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -61,6 +62,7 @@ const durableRuntime = (
     interruptGrace: "1 second",
     harnessReadiness: harnessReady,
   }).pipe(
+    Layer.provide(MarcbachmannCelLayer),
     Layer.provide(credentials),
     Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
     Layer.provide(claudeLoginLockLayer),

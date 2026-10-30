@@ -270,7 +270,7 @@ export const environmentFor = (stream: Stream): Environment => {
 };
 
 /** Returns the value of the CEL `repo` variable; its fields must match the `RepoContext` type. */
-export const repositoryContext = (repository: ManagedRepo): Schema.JsonObject => {
+export const repositoryContext = (repository: Pick<ManagedRepo, "name">): Schema.JsonObject => {
   const { owner } = splitRepositoryName(repository.name);
   return {
     name: repository.name,

@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { childPidFile, type RemoteShell, sshArguments } from "@usine/agents/child-host";
@@ -266,6 +267,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           harnessReadiness: () => (brain) =>
             Effect.succeed(new HarnessReady({ harness: brain.harness })),
         }).pipe(
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
@@ -639,6 +641,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           harnessReadiness: () => (brain) =>
             Effect.succeed(new HarnessReady({ harness: brain.harness })),
         }).pipe(
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),

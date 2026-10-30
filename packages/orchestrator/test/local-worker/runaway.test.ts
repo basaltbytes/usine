@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Settings, UsineConfig } from "@usine/config/factory";
@@ -97,6 +98,7 @@ describe("local worker runaway guard", () => {
           interruptGrace: "100 millis",
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(storage, spender)),
           Layer.provide(claudeLoginLockLayer),
@@ -175,6 +177,7 @@ describe("local worker runaway guard", () => {
         }).pipe(
           Effect.provide(
             stepExecutorLayer(ceiling, []).pipe(
+              Layer.provide(MarcbachmannCelLayer),
               Layer.provide(executor),
               Layer.provide(fixedConfigLayer(ceiling)),
               Layer.provide(testAppLayer),

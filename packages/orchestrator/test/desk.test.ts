@@ -1,5 +1,6 @@
 import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
+import { PriorityValue } from "@usine/config/loop";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
@@ -412,7 +413,10 @@ const deskLayer = (
     runId: RunId.make(runId),
     loop: LoopName.make("review"),
     itemKey: itemKey(number),
-    position: { _tag: "Lane", lane: LaneName.make("Review"), number: 3 },
+    position: {
+      priority: PriorityValue.make(-1),
+      lane: Option.some({ name: LaneName.make("Review"), number: 3 }),
+    },
     ahead,
   });
   const slots = Layer.succeed(WorkerStatus)({
@@ -512,6 +516,7 @@ describe("Operator desk", () => {
       const queuedReason = desk.notMoving.find(({ item }) => item.number === 4)?.reason;
       assert(queuedReason?._tag === "QueuedForWorker");
       assert.strictEqual(queuedReason.ahead, 2, "two queued Runs take a slot first");
+      assert.strictEqual(queuedReason.priority, -1);
       const budget = desk.notMoving.find(({ item }) => item.number === 5)?.reason;
       assert(budget?._tag === "CycleBudgetUsedUp");
       assert.strictEqual(budget.ask.id, ask.id);

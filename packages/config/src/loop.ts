@@ -2,7 +2,13 @@ import { AgentName } from "@usine/core/agent";
 import { CycleLimit, DEFAULT_CYCLE_LIMIT } from "@usine/core/cycle-budget";
 import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
 import { StepName } from "@usine/core/step";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option, Predicate, Schema } from "effect";
+import {
+  ExpressionEngine,
+  ExpressionEvaluationError,
+  Source,
+} from "@usine/expression/expression-engine";
+import { environmentFor } from "./payload-slices.ts";
 import { InstancePath, ConfigFileError } from "./file.ts";
 import { nonBlankString } from "./checks.ts";
 import { ValidSelector } from "./selector.ts";
@@ -21,13 +27,12 @@ export const PromptTemplate = nonBlankString("Expected a non-blank Markdown prom
 
 export type PromptTemplate = typeof PromptTemplate.Type;
 
-/**
- * The rank of a loop's queued runs for a free worker slot, a positive integer. Runs of loops with a
- * priority go before runs that lane order ranks, higher first.
- */
-export const LoopPriority = Schema.Int.check(
-  Schema.isGreaterThanOrEqualTo(1, { message: "Expected a priority of at least 1" }),
-).pipe(Schema.brand("LoopPriority"));
+/** A queue priority that can be represented exactly in JSON, higher first. */
+export const PriorityValue = Schema.Int.pipe(Schema.brand("PriorityValue"));
+export type PriorityValue = typeof PriorityValue.Type;
+
+/** A literal queue priority or a CEL expression with an `int` result. */
+export const LoopPriority = Schema.Union([PriorityValue, Source]);
 
 export type LoopPriority = typeof LoopPriority.Type;
 
@@ -59,7 +64,7 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
     Schema.withDecodingDefaultKey(Effect.succeed("write" as const)),
     Schema.withConstructorDefault(Effect.succeed("write" as const)),
   ),
-  /** The loop's queue priority, or `None` to rank its runs by lane. */
+  /** The loop's queue priority; `None` evaluates to zero. */
   priority: Schema.Option(LoopPriority).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),
@@ -91,3 +96,29 @@ export const loopPath = (name: LoopName): InstancePath => {
     loop === undefined ? `loops/${name}.md` : `projects/${project}/loops/${loop}.md`,
   );
 };
+
+/** Evaluates the priority against the supplied item and repository snapshot. */
+export const evaluateLoopPriority = Effect.fn("Loop.evaluatePriority")(function* (
+  expressions: ExpressionEngine["Service"],
+  loop: LoopFile,
+  context: Schema.JsonObject,
+) {
+  yield* Effect.annotateCurrentSpan({ loop: loop.name });
+  if (Option.isNone(loop.priority)) return PriorityValue.make(0);
+  const priority = loop.priority.value;
+  if (Predicate.isNumber(priority)) return priority;
+  const value = yield* expressions.evaluateInteger(
+    priority,
+    environmentFor(loop.trigger.on),
+    context,
+  );
+  return yield* Schema.decodeUnknownEffect(PriorityValue)(Number(value)).pipe(
+    Effect.mapError(
+      () =>
+        new ExpressionEvaluationError({
+          source: priority,
+          message: "Priority must be a safe integer between -9007199254740991 and 9007199254740991",
+        }),
+    ),
+  );
+});

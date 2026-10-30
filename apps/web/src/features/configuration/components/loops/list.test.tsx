@@ -125,7 +125,7 @@ describe("Loops page", () => {
     assert.include(page, "Required");
     assert.include(page, "3 runs per item before a reset");
     assert.include(page, "Write: push and merge");
-    assert.include(page, "None; runs wait in lane order");
+    assert.include(page, "0; ties use lane order");
     assert.include(page, "implement");
     assert.include(page, "4 outlined expressions filled in from each item");
     assert.strictEqual(markup.match(/<mark/gu)?.length, 4);
@@ -142,7 +142,7 @@ describe("Loops page", () => {
     );
     assert.include(page, "tags: engine");
     assert.include(page, "Read: review and comment, no push");
-    assert.include(page, "2 queued ahead of runs in lane order");
+    assert.include(page, "2 higher values go first; ties use lane order");
     assert.include(page, "Same text for every run");
   });
 

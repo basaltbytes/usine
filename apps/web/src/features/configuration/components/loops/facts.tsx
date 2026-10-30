@@ -59,11 +59,11 @@ export const LoopFacts = ({ loop, configuration }: LoopFactsProps) => {
       <Fact label="Permissions">{permissionsLabel[loop.permissions]}</Fact>
       <Fact label="Priority">
         {loop.priority === null ? (
-          <Unset>None; runs wait in lane order</Unset>
+          <Unset>0; ties use lane order</Unset>
         ) : (
           <>
             <span className="tabular-nums">{loop.priority}</span>{" "}
-            <Unset>queued ahead of runs in lane order</Unset>
+            <Unset>higher values go first; ties use lane order</Unset>
           </>
         )}
       </Fact>

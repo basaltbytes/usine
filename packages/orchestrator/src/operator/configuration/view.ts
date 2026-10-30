@@ -86,7 +86,7 @@ export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrato
   maxCycles: CycleLimit,
   /** The GitHub permission level for attempt credentials. */
   permissions: LoopPermissions,
-  /** The Loop's queue priority, or null if its Runs wait in lane order. */
+  /** The loop's literal priority or expression, or null for the default zero. */
   priority: Schema.NullOr(LoopPriority),
   /** The step name recorded in runs of this loop. */
   step: StepName,

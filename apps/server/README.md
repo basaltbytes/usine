@@ -195,3 +195,5 @@ The Overview’s worker utilization uses stored configuration revisions to accou
 The SQLite storage, configuration, and export tests use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Export fixture seeding receives the test cancellation signal, and directory removal retries transient filesystem errors.
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+Loop checks at `/api/configuration/loops/check` validate integer CEL priorities. `/api/configuration/loops/preview` returns each matching item’s evaluated `priority`; evaluation errors appear in `failures` and use zero. `/api/desk` includes the scheduler’s captured priority for runs waiting for a worker slot.

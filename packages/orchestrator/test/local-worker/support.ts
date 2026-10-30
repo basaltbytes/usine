@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
@@ -211,6 +212,7 @@ export const localRuntime = (
   localEngineLayer(instance).pipe(
     Layer.provide(
       stepExecutorLayer(config, []).pipe(
+        Layer.provide(MarcbachmannCelLayer),
         Layer.provide(
           localExecutorLayer({
             instanceDirectory: instance,

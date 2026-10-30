@@ -61,6 +61,7 @@ export const LoopPreview = ({ name, value }: LoopPreviewProps) => {
                     </Link>
                     <p className="text-xs text-muted-foreground">{item.repository}</p>
                   </FillCell>
+                  <TableCell>{loopFormCopy.evaluatedPriority(item.priority)}</TableCell>
                   <TableCell>
                     <Button
                       type="button"
