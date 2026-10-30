@@ -41,10 +41,11 @@ afterEach(() => {
   flushSync(() => root.unmount());
   queryClient.clear();
   host.remove();
+  document.documentElement.classList.remove("dark");
 });
 
-const mount = async (path: string, width = 1280) => {
-  await page.viewport(width, 900);
+const mount = async (path: string, width = 1280, height = 900) => {
+  await page.viewport(width, height);
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -217,51 +218,69 @@ it("disables preflight for a busy worker and shows the reason", async () => {
   await expect.element(checking).toHaveAccessibleDescription("A preflight is already running");
 });
 
-it("runs preflight from a worker row, refreshes failed checks and remediation, then passes after repair", async () => {
-  const failed = withPreflight({
-    _tag: "Failed",
-    checkedAt: "2026-10-30T12:00:00Z",
-    capability: "machine",
-    message: "SSH destination is unreachable. Restore connectivity to the worker.",
-  });
-  await commands.workerPreflightResponses(encodeConfiguration(configuration));
-  await mount("/configuration/workers", 390);
-  const action = page.getByRole("button", { name: "Run preflight on eu-1", exact: true });
-  await action.click();
-  await expect.element(action).toBeDisabled();
-  await expect.element(action).toHaveTextContent("Running preflight…");
-  const request = await commands.finishWorkerPreflight(
-    encodeConfiguration(failed),
-    preflightBody(failed),
-  );
-  expect(request).toEqual({ method: "POST", path: "/api/workers/eu-1/preflight" });
-  await expect.element(action).toBeEnabled();
-  await expect.element(row(/eu-1/u).getByText("Failed", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "eu-1", exact: true }).click();
-  await expect
-    .element(
-      page
-        .getByText("SSH destination is unreachable. Restore connectivity to the worker.", {
+it.each([
+  { device: "desktop", width: 1440, height: 900, theme: "dark" },
+  { device: "desktop", width: 1440, height: 900, theme: "light" },
+  { device: "phone", width: 390, height: 844, theme: "dark" },
+  { device: "phone", width: 390, height: 844, theme: "light" },
+])(
+  "runs preflight, shows remediation, and passes after repair on $device in $theme",
+  async ({ device, width, height, theme }) => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    const failed = withPreflight({
+      _tag: "Failed",
+      checkedAt: "2026-10-30T12:00:00Z",
+      capability: "machine",
+      message: "SSH destination is unreachable. Restore connectivity to the worker.",
+    });
+    await commands.workerPreflightResponses(encodeConfiguration(configuration));
+    await mount("/configuration/workers", width, height);
+    const action = page.getByRole("button", { name: "Run preflight on eu-1", exact: true });
+    await expect.element(action).toBeVisible();
+    await commands.configurationEditorScreenshot(`773-workers-${device}-${theme}`);
+    await action.click();
+    await expect.element(action).toBeDisabled();
+    await expect.element(action).toHaveTextContent("Running preflight…");
+    await commands.configurationEditorScreenshot(`773-running-${device}-${theme}`);
+    const request = await commands.finishWorkerPreflight(
+      encodeConfiguration(failed),
+      preflightBody(failed),
+    );
+    expect(request).toEqual({ method: "POST", path: "/api/workers/eu-1/preflight" });
+    await expect.element(action).toBeEnabled();
+    await expect.element(row(/eu-1/u).getByText("Failed", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "eu-1", exact: true }).click();
+    await expect
+      .element(
+        page.getByRole("cell", {
+          name: /SSH destination is unreachable\. Restore connectivity to the worker\./u,
+        }),
+      )
+      .toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
+    await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+    if (device === "phone")
+      page.getByRole("heading", { name: "Preflight", exact: true }).element().scrollIntoView();
+    await commands.configurationEditorScreenshot(`773-failed-${device}-${theme}`);
+    const passed = withPreflight({ _tag: "Passed", checkedAt: "2026-10-30T12:01:00Z" });
+    await commands.workerPreflightResponses(encodeConfiguration(failed));
+    await action.click();
+    await expect.element(action).toBeDisabled();
+    await commands.finishWorkerPreflight(encodeConfiguration(passed), preflightBody(passed));
+    await expect.element(page.getByRole("row", { name: /Worker.*Passed/u })).toBeVisible();
+    await expect
+      .element(
+        page.getByText("SSH destination is unreachable. Restore connectivity to the worker.", {
           exact: true,
-        })
-        .first(),
-    )
-    .toBeVisible();
-  const passed = withPreflight({ _tag: "Passed", checkedAt: "2026-10-30T12:01:00Z" });
-  await commands.workerPreflightResponses(encodeConfiguration(failed));
-  await action.click();
-  await expect.element(action).toBeDisabled();
-  await commands.finishWorkerPreflight(encodeConfiguration(passed), preflightBody(passed));
-  await expect.element(page.getByRole("row", { name: /Worker.*Passed/u })).toBeVisible();
-  await expect
-    .element(
-      page.getByText("SSH destination is unreachable. Restore connectivity to the worker.", {
-        exact: true,
-      }),
-    )
-    .not.toBeInTheDocument();
-  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
-});
+        }),
+      )
+      .not.toBeInTheDocument();
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
+    if (device === "phone")
+      page.getByRole("heading", { name: "Preflight", exact: true }).element().scrollIntoView();
+    await commands.configurationEditorScreenshot(`773-passed-${device}-${theme}`);
+  },
+);
 
 it("shows a server busy refusal and keeps the last checks", async () => {
   await commands.workerPreflightResponses(encodeConfiguration(configuration));

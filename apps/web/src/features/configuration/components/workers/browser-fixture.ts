@@ -10,6 +10,24 @@ export const workerPreflightResponses = async (
   { page }: { readonly page: Page },
   configuration: string,
 ) => {
+  for (const [path, body] of [
+    ["**/api/overview", { _tag: "Ready", projects: [], loops: [], needsYou: [] }],
+    ["**/api/configuration/revisions?*", { revisions: [], nextBefore: null }],
+    [
+      "**/api/configuration/entities/worker/eu-1",
+      {
+        key: { kind: "worker", identifier: "eu-1" },
+        value: { name: "eu-1", kind: "ssh", destination: "usine@eu-1" },
+        text: "name: eu-1\nkind: ssh\ndestination: usine@eu-1\n",
+        number: 2,
+      },
+    ],
+  ] as const) {
+    await page.unroute(path);
+    await page.route(path, (route) =>
+      route.fulfill({ contentType: "application/json", body: JSON.stringify(body) }),
+    );
+  }
   await page.unroute("**/api/configuration");
   await page.unroute("**/api/workers/*/preflight");
   let receive: (route: Route) => void;
