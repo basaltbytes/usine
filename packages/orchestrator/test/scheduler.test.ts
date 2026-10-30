@@ -1600,51 +1600,71 @@ const cloudflareWorker = (name: string, url = "https://worker.example") => `  - 
     instance_type: standard-4
 `;
 
+/**
+ * Builds the scheduler over Cloudflare workers whose preflight records each checked URL and
+ * fails for `https://typo.example`. Returns the registered addresses and the checked URLs.
+ */
+const cloudflareScheduler = Effect.gen(function* () {
+  const instances = yield* CurrentInstance;
+  const { config, agents } = yield* instances.get;
+  const addresses = new Map<WorkerName, CloudflareWorkerAddress>();
+  const checked: string[] = [];
+  const context = yield* Layer.build(
+    cloudflareStepExecutorLayer(
+      config,
+      agents.map(({ agent }) => agent.brain),
+    ).pipe(
+      Layer.provide(MarcbachmannCelLayer),
+      Layer.provide(
+        Layer.mock(Executor)({
+          kind: "cloudflare",
+          preflight: (worker) =>
+            Effect.gen(function* () {
+              const address = addresses.get(worker);
+              assert(address !== undefined, `worker ${worker} isn't registered`);
+              checked.push(address.workerUrl.href);
+              assert.strictEqual(Redacted.value(address.accessClientSecret), "secret");
+              if (address.workerUrl.hostname === "typo.example")
+                return yield* new WorkerCapabilityError({
+                  worker,
+                  capability: "machine",
+                  message: "The Worker URL doesn't answer",
+                  cause: address.workerUrl.href,
+                });
+              return fullPreflight;
+            }),
+        }),
+      ),
+      Layer.provide(
+        Layer.succeed(CloudflareWorkers, {
+          addWorker: (address) =>
+            Effect.sync(() => {
+              if (!addresses.has(address.name)) addresses.set(address.name, address);
+            }),
+          removeWorker: (worker) =>
+            Effect.sync(() => {
+              addresses.delete(worker);
+            }),
+        }),
+      ),
+      Layer.provide(testAppLayer),
+      Layer.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromUnknown({ CF_CLIENT_ID: "id", CF_CLIENT_SECRET: "secret" }),
+        ),
+      ),
+    ),
+  );
+  return { scheduler: Context.get(context, StepExecutor), addresses, checked };
+});
+
 it.live(
   "adds a Cloudflare worker after resolving credentials and refuses existing connection changes",
   () =>
     withWorkers(cloudflareWorker("cf-one"), (root) =>
       Effect.gen(function* () {
         const instances = yield* CurrentInstance;
-        const { config, agents } = yield* instances.get;
-        const addresses = new Map<WorkerName, CloudflareWorkerAddress>();
-        const checked: string[] = [];
-        const context = yield* Layer.build(
-          cloudflareStepExecutorLayer(
-            config,
-            agents.map(({ agent }) => agent.brain),
-          ).pipe(
-            Layer.provide(MarcbachmannCelLayer),
-            Layer.provide(
-              Layer.mock(Executor)({
-                kind: "cloudflare",
-                preflight: (worker) =>
-                  Effect.sync(() => {
-                    const address = addresses.get(worker);
-                    assert(address !== undefined);
-                    checked.push(address.workerUrl.href);
-                    assert.strictEqual(Redacted.value(address.accessClientSecret), "secret");
-                    return fullPreflight;
-                  }),
-              }),
-            ),
-            Layer.provide(
-              Layer.succeed(CloudflareWorkers, {
-                addWorker: (address) =>
-                  Effect.sync(() => {
-                    addresses.set(address.name, address);
-                  }),
-              }),
-            ),
-            Layer.provide(testAppLayer),
-            Layer.provide(
-              ConfigProvider.layer(
-                ConfigProvider.fromUnknown({ CF_CLIENT_ID: "id", CF_CLIENT_SECRET: "secret" }),
-              ),
-            ),
-          ),
-        );
-        const scheduler = Context.get(context, StepExecutor);
+        const { scheduler, addresses, checked } = yield* cloudflareScheduler;
         yield* writeInstanceFiles(root, [
           [
             "usine.yaml",
@@ -1714,4 +1734,70 @@ it.live(
         ]);
       }).pipe(Effect.scoped),
     ),
+);
+
+it.live("accepts a corrected Cloudflare worker after its added-worker preflight fails", () =>
+  withWorkers(cloudflareWorker("cf-one"), (root) =>
+    Effect.gen(function* () {
+      const instances = yield* CurrentInstance;
+      const { scheduler, addresses, checked } = yield* cloudflareScheduler;
+      const running = yield* instances.get;
+      yield* writeInstanceFiles(root, [
+        [
+          "usine.yaml",
+          usineYaml(
+            cloudflareWorker("cf-one") + cloudflareWorker("cf-two", "https://typo.example"),
+          ),
+        ],
+      ]);
+      const refused = yield* instances.reload.pipe(Effect.flip);
+      assert(refused._tag === "ReloadPreflightError", refused._tag);
+      assert.strictEqual(yield* instances.get, running);
+      assert.isFalse(addresses.has(WorkerName.make("cf-two")));
+
+      yield* writeInstanceFiles(root, [
+        [
+          "usine.yaml",
+          usineYaml(
+            cloudflareWorker("cf-one") + cloudflareWorker("cf-two", "https://second.example"),
+          ),
+        ],
+      ]);
+      const corrected = yield* instances.reload;
+      assert.deepStrictEqual(corrected.workers.added, [WorkerName.make("cf-two")]);
+      assert.deepStrictEqual(checked, [
+        "https://worker.example/",
+        "https://typo.example/",
+        "https://second.example/",
+      ]);
+      assert.strictEqual(
+        addresses.get(WorkerName.make("cf-two"))?.workerUrl.href,
+        "https://second.example/",
+      );
+      assert.deepStrictEqual(yield* scheduler.workers, [
+        WorkerName.make("cf-one"),
+        WorkerName.make("cf-two"),
+      ]);
+
+      yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(cloudflareWorker("cf-one"))]]);
+      yield* instances.reload;
+      const removed = yield* instances.get;
+      yield* writeInstanceFiles(root, [
+        [
+          "usine.yaml",
+          usineYaml(
+            cloudflareWorker("cf-one") + cloudflareWorker("cf-two", "https://typo.example"),
+          ),
+        ],
+      ]);
+      const changed = yield* instances.reload.pipe(Effect.flip);
+      assert(changed._tag === "ReloadPreflightError", changed._tag);
+      assert.include(changed.cause.message, "retained attempts keep their machine");
+      assert.strictEqual(yield* instances.get, removed);
+      assert.strictEqual(
+        addresses.get(WorkerName.make("cf-two"))?.workerUrl.href,
+        "https://second.example/",
+      );
+    }).pipe(Effect.scoped),
+  ),
 );

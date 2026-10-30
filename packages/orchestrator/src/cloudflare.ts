@@ -15,7 +15,11 @@ import {
 import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
 import { Config, ConfigProvider, Effect, Layer } from "effect";
 import { externalHttpClientLayer } from "./http-client.ts";
-import { stepExecutorLayer, type StepExecutorOptions } from "./scheduler/scheduler.ts";
+import {
+  stepExecutorLayer,
+  type StepExecutorOptions,
+  type WorkerRemoval,
+} from "./scheduler/scheduler.ts";
 import { workersChange } from "./current-instance/changes.ts";
 import { withSshWorkerDiscard } from "./ssh.ts";
 
@@ -92,7 +96,11 @@ export const layer = (
   return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
 };
 
-/** Resolves credentials and registers a client once for each added Cloudflare worker. */
+/**
+ * Resolves credentials and registers a client once for each added Cloudflare worker. A worker
+ * that the scheduler accepted keeps its client for the life of the process; a worker whose
+ * addition was refused before any acceptance loses its client, so a corrected revision can add it.
+ */
 export const cloudflareStepExecutorLayer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
@@ -109,6 +117,8 @@ export const cloudflareStepExecutorLayer = (
           .filter(({ name }) => options.initializedWorkers?.includes(name))
           .map((worker) => [worker.name, worker]),
       );
+      // Workers whose client a startup or an accepted reload used, which keep it.
+      const retained = new Set(initialized.keys());
       const add = Effect.fn("Orchestrator.addCloudflareWorker")(function* (worker: ConfigWorker) {
         yield* Effect.annotateCurrentSpan({ worker: worker.name });
         if (worker.kind !== "cloudflare")
@@ -142,9 +152,29 @@ export const cloudflareStepExecutorLayer = (
         yield* workers.addWorker(address);
         initialized.set(worker.name, worker);
       });
+      const remove = Effect.fn("Orchestrator.removeCloudflareWorker")(function* (
+        worker: WorkerName,
+        removal: WorkerRemoval,
+      ) {
+        yield* Effect.annotateCurrentSpan({ worker, removal });
+        if (removal === "Removed" || retained.has(worker)) {
+          retained.add(worker);
+          yield* Effect.logDebug(
+            "The Cloudflare worker keeps its client, because the scheduler accepted it",
+            { worker, removal },
+          );
+          return;
+        }
+        yield* workers.removeWorker(worker);
+        initialized.delete(worker);
+        yield* Effect.logInfo(
+          "Released the client of a Cloudflare worker whose addition was refused",
+          { worker },
+        );
+      });
       return stepExecutorLayer(config, brains, {
         ...options,
-        workers: { add, remove: () => Effect.void },
+        workers: { add, remove },
       });
     }),
   );

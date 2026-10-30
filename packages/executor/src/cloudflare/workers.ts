@@ -13,6 +13,11 @@ export class CloudflareWorkers extends Context.Service<
   CloudflareWorkers,
   {
     readonly addWorker: (address: CloudflareWorkerAddress) => Effect.Effect<void>;
+    /**
+     * Unregisters `worker` and its client, so a later `addWorker` registers a new client. Call it
+     * only for a worker that runs no Attempt and has no sandbox to recover.
+     */
+    readonly removeWorker: (worker: WorkerName) => Effect.Effect<void>;
   }
 >()("@usine/executor/CloudflareWorkers") {}
 
@@ -75,6 +80,16 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
       });
       yield* Effect.logInfo("Cloudflare worker added to the executor", { worker: address.name });
     }, exclusive.withPermit);
+    const removeWorker = Effect.fn("CloudflareExecutor.removeWorker")(function* (
+      worker: WorkerName,
+    ) {
+      yield* Effect.annotateCurrentSpan({ worker });
+      if (!workers.delete(worker)) {
+        yield* Effect.logDebug("Cloudflare worker isn't registered; nothing to remove", { worker });
+        return;
+      }
+      yield* Effect.logInfo("Cloudflare worker removed from the executor", { worker });
+    }, exclusive.withPermit);
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length) {
       return yield* Effect.die(
         new Error("CloudflareExecutorOptions.workers contains duplicate names"),
@@ -95,5 +110,5 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
         onSome: Effect.succeed,
       });
 
-    return { workerFor, membership: CloudflareWorkers.of({ addWorker }) };
+    return { workerFor, membership: CloudflareWorkers.of({ addWorker, removeWorker }) };
   });
