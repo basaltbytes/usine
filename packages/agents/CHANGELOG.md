@@ -1,5 +1,35 @@
 # @usine/agents
 
+## 0.6.0
+
+### Minor Changes
+
+- 460d50b: Retry temporary model provider capacity refusals automatically, with a delay and the existing three-attempt cap. Retries resume from salvaged work; the run page shows the provider message and the next attempt time. The retry deadline survives orchestrator restarts and cancellation stops the wait.
+  
+  Add typed capacity failures, child reports, and provider retry starts. Codex and Claude use structured overload codes where available, while message-only errors recognize capacity refusals, HTTP 529, and HTTP 503 with a retry hint. Other task failures retain their existing behavior.
+
+### Patch Changes
+
+- a7692ae: Upgrade the Codex protocol baseline and worker images to 0.164.0, which includes updated TLS certificate roots. Preflight rejects 0.153.4 and accepts 0.159.0 through 0.159.3 for one release while existing worker images upgrade. The gateway model-provider configuration remains compatible. Claude Code stays at 2.1.308.
+- 93bbe77: Upgrade the Pi packages to 1.4.0 and define the checkpoint policies required by pi-durable. Attempt and hold documents retain their existing delta-storage behavior. Disable the task restart limit to preserve automatic resumption after repeated crashes.
+  
+  Back up the instance with `usine backup <path>` before upgrading. Starting the upgraded server migrates `durable.sqlite` to SQLite storage schema version 2, which pi-durable 1.3.0 and earlier cannot open. Do not downgrade usine past this release: `usine upgrade <older version>` cannot reverse the storage migration.
+- 06a10bf: Disable Codex plugin and app sync, startup update checks, and analytics in child and preflight commands. Disable Claude Code's claude.ai connectors and nonessential traffic in the attempt environment on every worker kind.
+- f54b3bd: Record the provider login in `PoolRateLimitsUpdated.login`. Codex records the ChatGPT login email and refreshes it after an account change. Older snapshots and gateway-backed sessions remain readable without a login.
+- 98eb9cd: Document the public agent API, including harness SDK contracts, session errors, child hosts, and prompt inputs.
+- Updated dependencies [d1fd769]
+- Updated dependencies [6541e90]
+- Updated dependencies [6d7f66f]
+- Updated dependencies [7bf348a]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [56d4c04]
+- Updated dependencies [f54b3bd]
+- Updated dependencies [0f4d653]
+- Updated dependencies [52c76fa]
+- Updated dependencies [460d50b]
+- Updated dependencies [4f37e20]
+  - @usine/core@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

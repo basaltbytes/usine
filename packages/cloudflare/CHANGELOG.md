@@ -1,5 +1,23 @@
 # @usine/cloudflare
 
+## 0.1.1
+
+### Patch Changes
+
+- a7692ae: Upgrade the Codex protocol baseline and worker images to 0.164.0, which includes updated TLS certificate roots. Preflight rejects 0.153.4 and accepts 0.159.0 through 0.159.3 for one release while existing worker images upgrade. The gateway model-provider configuration remains compatible. Claude Code stays at 2.1.308.
+- Updated dependencies [d1fd769]
+- Updated dependencies [6541e90]
+- Updated dependencies [6d7f66f]
+- Updated dependencies [7bf348a]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [56d4c04]
+- Updated dependencies [f54b3bd]
+- Updated dependencies [0f4d653]
+- Updated dependencies [52c76fa]
+- Updated dependencies [460d50b]
+- Updated dependencies [4f37e20]
+  - @usine/core@0.6.0
+
 ## 0.1.0
 
 ### Minor Changes

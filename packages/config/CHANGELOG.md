@@ -1,5 +1,51 @@
 # @usine/config
 
+## 0.5.0
+
+### Minor Changes
+
+- d1fd769: Run Boat workers with gateway-held Claude and ChatGPT subscriptions over Tailscale. Add saved snapshot validation, per-sandbox ephemeral auth keys, gateway name resolution, and tailnet cleanup. Configure a prepared snapshot and Tailscale OAuth environment variables to use a Boat gateway without LLM API keys.
+- fdecd7e: Add schema validation for configuration form drafts and API endpoints for supported harnesses, efforts, installation repositories, and live repository labels.
+- 88eac4f: Add operator API endpoints to read configuration revisions, edit and delete entities, and revert changes. Reject stale writes and report validation problems by entity and field. Check runtime compatibility before saving API changes, apply accepted revisions live, and start newly created loops paused.
+- 9e14070: Add a configuration aggregate, atomic revision log, SQLite and in-memory stores, and strict folder import and export. Validate schema, CEL, and references before saving, and reject stale revisions. Expose an explicit CEL engine factory for deterministic validation without layers.
+  
+  Preserve worker preference order when importing configuration, including imports that also change worker values, and restore that order when replaying revisions.
+- 1c1e516: Expose the latest label-addition actor and time for current issue and pull request labels through `item.labelEvents`. Loop conditions can use this history to select App-set labels for approval.
+- 59d6496: Add loop forms with live CEL diagnostics, payload completion, registry selectors, and prompt previews. Preview stored matches before saving or resuming a loop. Expose read-only check and preview endpoints, and preserve expression positions in validation errors.
+- 79174da: Order waiting runs with integer CEL priority expressions over item labels and other stream fields. Priorities default to zero and sort highest first, followed by lane rank and event arrival. Failed evaluations log a warning and use zero. Overview and wait and lease logs show the evaluated value; loop checks and previews validate and evaluate expressions.
+  
+  Scheduler layers now require `ExpressionEngine`.
+  
+  Queue positions now include priority and lane together. Loop preview items and Overview’s queued-run responses include the evaluated priority.
+- 7bf348a: Add projects with ordered repository membership, shared lanes, and project-owned loops. Scope trigger execution to each project and expose projects through configuration and operator APIs.
+  
+  Migrate existing configuration and runtime loop references together, preserving runs, pauses, suppression, cycle budgets, and attention acknowledgements. Export version 2 project folders, accept legacy imports, and keep unique short loop names and single-repository editors working.
+- a22dc8e: Configure provisioner SSH waits, creation backoff bounds, and machine check intervals through `provisioner.timings`, in seconds. Defaults preserve the existing wait and backoff durations, with machine checks every 24 hours.
+- 4f37e20: Add release version and upgrade outcome schemas, plus `upgrade_channel` and `upgrade_mode` settings. The defaults select the `latest` channel and propose available upgrades.
+
+### Patch Changes
+
+- 0536c26: Exclude unchanged configuration entities from import revisions when adding or removing a worker. Preserve worker preference changes and canonical values across configuration export and import.
+- 40a70c2: Record configuration revision positions only for workers, relative to the worker list. Adding or removing an entity no longer adds unrelated entities to the revision or their `usine config log` history. Preserve worker order when importing and replaying revisions.
+- 24dc884: Support project drafts in the configuration form codec, with validation of repository membership and lanes on save. Keep repository tag edits separate from project lanes.
+- dfc713d: Document the public configuration API, including revision stores, project scope, file parsing, and worker settings.
+- Updated dependencies [d1fd769]
+- Updated dependencies [9e14070]
+- Updated dependencies [6541e90]
+- Updated dependencies [79174da]
+- Updated dependencies [6d7f66f]
+- Updated dependencies [7bf348a]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [56d4c04]
+- Updated dependencies [f54b3bd]
+- Updated dependencies [0f4d653]
+- Updated dependencies [52c76fa]
+- Updated dependencies [460d50b]
+- Updated dependencies [1c1e516]
+- Updated dependencies [4f37e20]
+  - @usine/core@0.6.0
+  - @usine/expression@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes

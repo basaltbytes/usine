@@ -1,6 +1,6 @@
 {
   "name": "@usine/executor",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "The usine scoped Worker contract with local, exe.dev, SSH, and Cloudflare adapters.",
   "license": "AGPL-3.0-only",
   "repository": {

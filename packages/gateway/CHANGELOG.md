@@ -1,5 +1,25 @@
 # @usine/gateway
 
+## 0.2.1
+
+### Patch Changes
+
+- c3ace3b: Persist encrypted gateway attachments in the state directory so running attempts retain their caller tokens across restarts. Restore unexpired credentials before listening, return typed errors for failed writes, and close HTTP sockets and CONNECT tunnels promptly on SIGTERM.
+- a7f5a57: Document the public gateway API, including attachment persistence, caller-token verification, egress rules, provider credentials, and Node listener settings.
+- 2ca5ae8: Stream GitHub Actions logs, artifact downloads, and release assets through the gateway. Follow up to three download redirects without credentials so gh can download through its Unix socket without adding download hosts to the egress allowlist.
+- Updated dependencies [d1fd769]
+- Updated dependencies [6541e90]
+- Updated dependencies [6d7f66f]
+- Updated dependencies [7bf348a]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [56d4c04]
+- Updated dependencies [f54b3bd]
+- Updated dependencies [0f4d653]
+- Updated dependencies [52c76fa]
+- Updated dependencies [460d50b]
+- Updated dependencies [4f37e20]
+  - @usine/core@0.6.0
+
 ## 0.2.0
 
 ### Minor Changes
