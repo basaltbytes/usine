@@ -1,3 +1,5 @@
+import { SetupApi } from "../src/setup/api.ts";
+import { setupRoutes } from "../src/setup/http.ts";
 import { registerSchema, unregisterSchema, validate } from "@hyperjump/json-schema/openapi-3-1";
 import { DocumentationApi, operatorOpenApi } from "../src/openapi.ts";
 import { ConfigurationStoreError } from "@usine/config/configuration";
@@ -408,10 +410,24 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
     Effect.gen(function* () {
       const services = yield* authFixture();
       const auth = authenticatedRoutes(services);
+      const setup = setupRoutes(
+        {
+          running: false,
+          status: Effect.die("unused"),
+          activate: Effect.die("unused"),
+          changed: Effect.never,
+          begin: () => Effect.die("unused"),
+          exchange: () => Effect.die("unused"),
+          restore: () => Effect.die("unused"),
+        },
+        services.authentication.origin,
+      );
       const secured = HttpRouter.toWebHandler(
         Layer.mergeAll(
           apiRoutes(Option.none()).pipe(Layer.provide(auth.guard.layer)),
           auth.routes,
+          setup.protected.pipe(Layer.provide(auth.guard.layer)),
+          setup.callback,
         ).pipe(HttpRouter.provideRequest(backend)),
         { disableLogger: true },
       );
@@ -423,6 +439,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
         "GET /api/auth/info",
         "GET /api/auth/github",
         "GET /api/auth/callback",
+        "GET /api/setup/callback",
         "POST /api/auth/device",
         "POST /api/auth/device/poll",
         "POST /api/auth/link/consume",
@@ -431,6 +448,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
         ...Object.values(OperatorApi.groups).flatMap((group) => Object.values(group.endpoints)),
         ...auth.endpoints,
         ...Object.values(DocumentationApi.endpoints),
+        ...Object.values(SetupApi.endpoints),
       ];
       const response = yield* Effect.promise(() =>
         secured.handler(new Request("http://127.0.0.1/api/openapi.json")),
@@ -461,6 +479,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       );
       assert.deepEqual(generated.paths["/api/openapi.json"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/version"]?.get?.security, []);
+      assert.deepEqual(generated.paths["/api/setup/callback"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/overview"]?.get?.security, [
         { bearer: [] },
         { session: [] },

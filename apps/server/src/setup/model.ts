@@ -22,3 +22,5 @@ export const ManifestResponse = Schema.Struct({
     webhookSecret: "webhook_secret",
   }),
 );
+
+export const RestoreRequest = Schema.Struct({ credentials: Schema.NonEmptyString });
