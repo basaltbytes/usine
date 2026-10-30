@@ -32,7 +32,7 @@
 | `POST /api/cycle-budgets/reset` | `{"askId":"..."}` | `ask.id` of the `CycleBudgetNeed` entry. |
 | `POST /api/attention/dismiss` | `{"id":"<need id>","revision":<n>}` | Hides a Needs entry; `/undo` with the same body brings it back. |
 | `POST /api/loops/<loop>/pause`, `/unpause` | none | |
-| `POST /api/projects/<o>/<r>/items/<n>/lane` | `{"toLane":"authored:<lane name>"}` | Lane id, not name: `authored:Ready`. Label swap on GitHub; use when `gh` label edits are refused. |
+| `POST /api/projects/<o>/<r>/items/<n>/lane` | `{"toLane":"<lane>"}` | Label swap on GitHub; use when `gh` label edits are refused. |
 | `POST /api/workers/<name>/discard-leftovers` | none | Only for an undeclared worker with no running attempt. |
 
 ## Edit configuration
