@@ -1,6 +1,6 @@
 {
   "name": "@usine/agents",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The usine agent layer: Claude Code, Codex, and Pi child backends, Attempt prompts, and harness preflight.",
   "license": "AGPL-3.0-only",
   "repository": {

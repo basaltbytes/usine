@@ -1,5 +1,19 @@
 # @usine/expression
 
+## 0.5.0
+
+### Minor Changes
+
+- 9e14070: Add a configuration aggregate, atomic revision log, SQLite and in-memory stores, and strict folder import and export. Validate schema, CEL, and references before saving, and reject stale revisions. Expose an explicit CEL engine factory for deterministic validation without layers.
+  
+  Preserve worker preference order when importing configuration, including imports that also change worker values, and restore that order when replaying revisions.
+- 79174da: Add `checkInteger` and `evaluateInteger` to `ExpressionEngine` for CEL expressions returning `int`. Evaluation returns a `bigint` to preserve precision. Implementations of `ExpressionEngineService` must provide both methods.
+
+### Patch Changes
+
+- 6541e90: Document the public core API, including record fields, channel messages, and operation contracts. Replace relative ADR links in core and expression API comments with portable references.
+- 1c1e516: Evaluate typed JSON map values with nullable fields and integer arithmetic while preserving field checks in expressions.
+
 ## 0.4.0
 
 ### Minor Changes

@@ -1,5 +1,131 @@
 # @usine/orchestrator
 
+## 0.5.0
+
+### Minor Changes
+
+- d1fd769: Run Boat workers with gateway-held Claude and ChatGPT subscriptions over Tailscale. Add saved snapshot validation, per-sandbox ephemeral auth keys, gateway name resolution, and tailnet cleanup. Configure a prepared snapshot and Tailscale OAuth environment variables to use a Boat gateway without LLM API keys.
+- 21813b5: Add configuration editing, creation, deletion, revision history, export-format diffs, and reverts to the web UI. Preserve drafts on validation errors and revision conflicts. Include declared labels in the configuration view and remove the obsolete configuration reload endpoint.
+- 8cb790a: Show cloud quota refusals in Needs attention with recovery steps and explain affected runs on board cards and run pages. Retain quota warnings through retries and clear them after machine creation succeeds.
+- fdecd7e: Add schema validation for configuration form drafts and API endpoints for supported harnesses, efforts, installation repositories, and live repository labels.
+- 88eac4f: Add operator API endpoints to read configuration revisions, edit and delete entities, and revert changes. Reject stale writes and report validation problems by entity and field. Check runtime compatibility before saving API changes, apply accepted revisions live, and start newly created loops paused.
+- 9e14070: Store authored configuration in the runtime database with atomic revisions, validation, and live updates. Import the instance folder once, and add `usine config export`, `import`, `edit`, and `log` for running and stopped instances. Reject stale edits and invalid imports without saving a revision.
+  
+  Share the runtime database connection between the engine and configuration store.
+- 59d6496: Add loop forms with live CEL diagnostics, payload completion, registry selectors, and prompt previews. Preview stored matches before saving or resuming a loop. Expose read-only check and preview endpoints, and preserve expression positions in validation errors.
+- 6d7f66f: Require a member session or instance token for operator API requests, including requests from loopback. Add GitHub browser and device sign-in, one-time setup links, local admin tokens, member management, token revocation, and browser CSRF checks. Attribute operator actions and configuration revisions to the signed-in member. Convert stored GitHub ask approvals to the UI channel while preserving their approvers.
+  
+  Existing instances must configure GitHub App user authorization to use GitHub sign-in. Run `usine sign-in-link` on the instance machine for access before those settings are configured.
+  
+  Keep the version health endpoint public so existing upgrade helpers can verify the first release with member authentication.
+- 79174da: Order waiting runs with integer CEL priority expressions over item labels and other stream fields. Priorities default to zero and sort highest first, followed by lane rank and event arrival. Failed evaluations log a warning and use zero. Overview and wait and lease logs show the evaluated value; loop checks and previews validate and evaluate expressions.
+  
+  Scheduler layers now require `ExpressionEngine`.
+  
+  Queue positions now include priority and lane together. Loop preview items and Overview’s queued-run responses include the evaluated priority.
+- 7bf348a: Add projects with ordered repository membership, shared lanes, and project-owned loops. Scope trigger execution to each project and expose projects through configuration and operator APIs.
+  
+  Migrate existing configuration and runtime loop references together, preserving runs, pauses, suppression, cycle budgets, and attention acknowledgements. Export version 2 project folders, accept legacy imports, and keep unique short loop names and single-repository editors working.
+- d903ac6: Add Dismiss and Undo to Needs attention. Dismissals persist with the operator and time, exclude matching entries from attention counts and badges, and show under Dismissed on the overview. Changed entries appear again. Dismissing preserves run actions and cycle budgets.
+- f54b3bd: Show Needs attention warnings when a pool's latest reported rate window reaches 80% and has a future reset. Include the recorded login, percentage, and reset time, with Dismiss and Undo. Clear warnings when a newer report recovers or the window resets, independently of scheduling.
+  
+  Expose the latest stored snapshot per pool through `RunReader.latestPoolRateLimits()`, with a partial index on the existing transcript table.
+- 0f4d653: Report an HTTP 403 on the executor's salvage push as a `GitHubPushFailure` with the repository, refused ref, GitHub's stderr message, and the single-repository installation token scope. The run page and Needs attention show the failure while the checkout remains available for salvage recovery. The failure does not retry the attempt automatically, and a later successful salvage preserves its failure history.
+  
+  `SalvageRetained.pushFailure` records the typed failure. Older salvage records decode this field as `None`. Canceled attempts remain canceled, and questions and blockers retain item suppression.
+- 4f37e20: Add npm channel checks and browser upgrades for global server installations managed by systemd. Automatic upgrades wait for running attempts to finish; a separate helper restores the previous package version if the new operator API fails to start. Configure the channel and mode with `usine config edit settings instance` and install the helper service from the server guide.
+- e59f7b8: Support endpoint webhook delivery with HMAC-SHA256 verification and startup configuration of the GitHub App hook URL. Refresh registered repositories through existing hints, show the running mode and last hint in Settings, and warn after ten minutes without a verified delivery. Endpoint mode requires an active App webhook and `USINE_GITHUB_WEBHOOK_SECRET` in the instance environment.
+- 460d50b: Retry temporary model provider capacity refusals automatically, with a delay and the existing three-attempt cap. Retries resume from salvaged work; the run page shows the provider message and the next attempt time. The retry deadline survives orchestrator restarts and cancellation stops the wait.
+  
+  Add typed capacity failures, child reports, and provider retry starts. Codex and Claude use structured overload codes where available, while message-only errors recognize capacity refusals, HTTP 529, and HTTP 503 with a retry hint. Other task failures retain their existing behavior.
+- 5e4644e: Add webhook deliveries mode to refresh managed repositories about every 10 seconds using GitHub App delivery summaries. Persist the delivery cursor across restarts, preserve the normal polling cadence, and show the last received hint in Settings.
+
+### Patch Changes
+
+- fd4123b: Fix Boat gateway preflight by using Node's HTTP client for SSH workers. Gateway probes now preserve the `Host` header when connecting to a tailnet address.
+- 52d1734: Include the same diagnostic message in board move rejection logs and HTTP responses for missing projects, items, or lanes and read-only lanes.
+- 4739c13: Document public exports, service operations, and operator view fields, including units, defaults, failure conditions, and configuration revision behavior.
+- 4144c5f: Preserve GitHub's 64-bit webhook delivery IDs when decoding summaries, filtering newer deliveries, and saving cursors. `WebhookDeliveryId` now accepts decimal strings instead of numbers; compare IDs with `BigInt`. Existing numeric cursors reset once and subsequent polls store exact strings.
+- 129d669: Start with healthy workers when another worker fails preflight. Exclude failed workers from scheduling, show their messages in Needs attention, and retry with backoff until they recover. Worker preflight includes address and credential initialization. Startup still fails if every worker fails, and live reload still refuses revisions whose preflight fails.
+- 78b1a94: Keep items with open runs visible on the board beyond the 500-item history window. Task detail and board moves use the same expanded selection, preserving linked-task grouping and bounded historical reads.
+- 9ea42f2: Block new attempts across all loops on an item before requesting a parent stop. Keep the block until the stop succeeds, recheck it after a worker slot becomes available, and show stops from other loops in the overview and run detail.
+- a22dc8e: Create provisioned machines after persisting their attempt, with the attempt label present in the creation request. Retry provider failures within the same attempt and release its machine on cancellation. `WorkerMachines.create` now requires the attempt ID; the separate `assign` operation is removed.
+  
+  Resume worker reservations when creation backoff expires, even if the attempt that started the pause was canceled.
+- a22dc8e: Configure provisioner SSH waits, creation backoff bounds, and machine check intervals through `provisioner.timings`, in seconds. Defaults preserve the existing wait and backoff durations, with machine checks every 24 hours.
+- e13fcb6: Prune attention acknowledgements when overview entries disappear or change revision. Preserve current dismissals and Undo while removing obsolete records for repeated schedule failures and changing worker attempt counts.
+- 794dd6e: Publish the operator HTTP API as an OpenAPI 3.1 document at the public `/api/openapi.json` endpoint. Add route descriptions, authentication requirements, and a generated HTTP reference to the documentation site.
+- 56d4c04: Wait for all usine dependencies to resolve on npm before offering or starting a server upgrade. Retry registry propagation errors during installation, and record the rollback failure stage so automatic mode can retry install failures while continuing to skip health-check failures.
+- 52c76fa: Show workers with three consecutive unanswered probes in Needs attention, with the last answer time and links to affected runs. Keep worker status visible beyond recent transcript pages, clear recovered workers even after an orchestrator restart, and recheck memory on slot reductions during reload.
+  
+  Distinguish a worker's first confirmed answer from outage recovery in the transcript and its checkpoints.
+- f24b4a3: Preserve attention dismissals during startup until polling and schedule triggers each report a cycle. Overview refreshes then resume pruning obsolete dismissals.
+- 34eae4d: Calculate worker utilization from slot counts in configuration revisions. Clarify that every second successful run of a loop on one item, including a rebase loop, counts against first time right.
+- e57d084: Show item numbers, titles, and links on approval needs when their items are outside the board's item window.
+- 8e49188: Show exe.dev attempts' GitHub label changes, comments, and reviews in the run reader. Match each attempt against its worker's bot identity and preserve operator board moves under the instance App.
+  
+  Recompute cached attribution when the configured worker identities change, including workers used by overlapping attempts.
+  
+  `GitHubItemHistory.appChanges` now requires the writer's `BotLogin` as its fourth argument, and `Operator.githubChanges` takes the current instance before the run ID. Removed workers have unknown writers, so the reader logs and omits their agent changes. exe.dev VMs share an integration bot; another VM's writes in the same attempt window can be attributed to the attempt.
+- Updated dependencies [8cb790a]
+- Updated dependencies [d1fd769]
+- Updated dependencies [0536c26]
+- Updated dependencies [a7692ae]
+- Updated dependencies [fdecd7e]
+- Updated dependencies [88eac4f]
+- Updated dependencies [9e14070]
+- Updated dependencies [9e14070]
+- Updated dependencies [40a70c2]
+- Updated dependencies [e59f7b8]
+- Updated dependencies [6541e90]
+- Updated dependencies [3fa96e0]
+- Updated dependencies [dd88a31]
+- Updated dependencies [4144c5f]
+- Updated dependencies [d64b7c3]
+- Updated dependencies [129d669]
+- Updated dependencies [79174da]
+- Updated dependencies [9ea42f2]
+- Updated dependencies [1c1e516]
+- Updated dependencies [59d6496]
+- Updated dependencies [e3202dc]
+- Updated dependencies [6d7f66f]
+- Updated dependencies [9ea42f2]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [93bbe77]
+- Updated dependencies [79174da]
+- Updated dependencies [24dc884]
+- Updated dependencies [7bf348a]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [e13fcb6]
+- Updated dependencies [d903ac6]
+- Updated dependencies [06a10bf]
+- Updated dependencies [56d4c04]
+- Updated dependencies [9af38cb]
+- Updated dependencies [f54b3bd]
+- Updated dependencies [52c76fa]
+- Updated dependencies [f54b3bd]
+- Updated dependencies [0f4d653]
+- Updated dependencies [56e79a7]
+- Updated dependencies [52c76fa]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [98eb9cd]
+- Updated dependencies [dfc713d]
+- Updated dependencies [460d50b]
+- Updated dependencies [7247fc9]
+- Updated dependencies [1c1e516]
+- Updated dependencies [4f37e20]
+- Updated dependencies [5e4644e]
+- Updated dependencies [8e49188]
+- Updated dependencies [8e49188]
+  - @usine/executor@0.5.0
+  - @usine/core@0.6.0
+  - @usine/config@0.5.0
+  - @usine/agents@0.6.0
+  - @usine/github@0.4.0
+  - @usine/engine@0.6.0
+  - @usine/expression@0.5.0
+  - @usine/durable@0.2.1
+
 ## 0.4.0
 
 ### Minor Changes

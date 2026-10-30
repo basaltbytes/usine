@@ -1,5 +1,36 @@
 # @usine/github
 
+## 0.4.0
+
+### Minor Changes
+
+- fdecd7e: Add schema validation for configuration form drafts and API endpoints for supported harnesses, efforts, installation repositories, and live repository labels.
+- e59f7b8: Add `GitHubApp.configureWebhook(url)` to configure the App webhook delivery URL and JSON content type with App JWT authentication.
+- 4144c5f: Preserve GitHub's 64-bit webhook delivery IDs when decoding summaries, filtering newer deliveries, and saving cursors. `WebhookDeliveryId` now accepts decimal strings instead of numbers; compare IDs with `BigInt`. Existing numeric cursors reset once and subsequent polls store exact strings.
+- 1c1e516: Expose the latest label-addition actor and time for current issue and pull request labels through `item.labelEvents`. Loop conditions can use this history to select App-set labels for approval.
+- 5e4644e: Add webhook deliveries mode to refresh managed repositories about every 10 seconds using GitHub App delivery summaries. Persist the delivery cursor across restarts, preserve the normal polling cadence, and show the last received hint in Settings.
+
+### Patch Changes
+
+- d64b7c3: Document public API credentials, token scopes, polling results, item history, and service operations in TSDoc.
+- 8e49188: Show exe.dev attempts' GitHub label changes, comments, and reviews in the run reader. Match each attempt against its worker's bot identity and preserve operator board moves under the instance App.
+  
+  Recompute cached attribution when the configured worker identities change, including workers used by overlapping attempts.
+  
+  `GitHubItemHistory.appChanges` now requires the writer's `BotLogin` as its fourth argument, and `Operator.githubChanges` takes the current instance before the run ID. Removed workers have unknown writers, so the reader logs and omits their agent changes. exe.dev VMs share an integration bot; another VM's writes in the same attempt window can be attributed to the attempt.
+- Updated dependencies [d1fd769]
+- Updated dependencies [6541e90]
+- Updated dependencies [6d7f66f]
+- Updated dependencies [7bf348a]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [56d4c04]
+- Updated dependencies [f54b3bd]
+- Updated dependencies [0f4d653]
+- Updated dependencies [52c76fa]
+- Updated dependencies [460d50b]
+- Updated dependencies [4f37e20]
+  - @usine/core@0.6.0
+
 ## 0.3.0
 
 ### Minor Changes

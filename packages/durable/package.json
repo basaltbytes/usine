@@ -1,6 +1,6 @@
 {
   "name": "@usine/durable",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The usine Pi parent on pi-durable storage: one durable conversation per Attempt, resumed after an orchestrator restart.",
   "license": "AGPL-3.0-only",
   "repository": {
