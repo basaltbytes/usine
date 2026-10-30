@@ -71,6 +71,27 @@ export const LoopFields = ({ name, ...fields }: LoopFieldsProps) => {
         label={loopFormCopy.condition}
         stream={stream}
       />
+      <ExpressionField
+        {...props}
+        value={{
+          ...fields.value,
+          priority: String(objectValue(fields.value.priority).value ?? ""),
+        }}
+        onChange={(value) => {
+          const text = stringValue(value.priority);
+          fields.onChange({
+            ...fields.value,
+            priority: text.trim() === "" ? { _tag: "None" } : { _tag: "Some", value: text },
+          });
+        }}
+        problems={problems.map((problem) =>
+          problem.path[0] === "priority" ? { ...problem, path: ["priority"] } : problem,
+        )}
+        path="priority"
+        label={loopFormCopy.priority}
+        stream={stream}
+      />
+      <p className="text-xs text-muted-foreground">{loopFormCopy.priorityHint}</p>
       <SelectorFields
         {...props}
         repositories={repositories.map(({ name }) => name)}

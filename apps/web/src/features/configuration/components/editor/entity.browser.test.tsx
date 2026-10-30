@@ -784,6 +784,8 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
   await button("item.title").click();
   await expect.element(condition).toHaveValue("item.title");
   await condition.fill('item.state == "OPEN"');
+  const priority = 'item.labels.nodes.exists(l, l.name == "low-priority") ? -1 : 0';
+  await page.getByRole("textbox", { name: "Priority", exact: true }).fill(priority);
   await page.getByRole("checkbox", { name: "basaltbytes/usine", exact: true }).click();
   await page.getByRole("switch", { name: "Require approval" }).click();
   await page
@@ -794,6 +796,7 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
   await expect
     .element(page.getByRole("link", { name: "Issue #1, open Fix issue 1" }))
     .toHaveAttribute("href", "/projects/usine/tasks/1?repository=basaltbytes%2Fusine");
+  await expect.element(page.getByText("Priority -1", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Render prompt", exact: true }).nth(1).click();
   await expect.element(page.getByText("Implement Fix issue 2.", { exact: true })).toBeVisible();
   page.getByRole("heading", { name: "New loop", exact: true }).element().scrollIntoView();
@@ -812,6 +815,7 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
       value: {
         name: "usine/draft-loop",
         approval: "required",
+        priority: { _tag: "Some", value: priority },
         selector: { _tag: "Some", value: { repos: ["basaltbytes/usine"] } },
       },
     },

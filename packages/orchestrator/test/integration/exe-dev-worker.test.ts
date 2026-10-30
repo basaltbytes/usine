@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -104,6 +105,7 @@ describe("live exe.dev Worker", () => {
           }),
         ],
       }).pipe(
+        Layer.provide(MarcbachmannCelLayer),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(durableAttemptRuntimeLayer(instanceDirectory)),
         Layer.provide(claudeLoginLockLayer),

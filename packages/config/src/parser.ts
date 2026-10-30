@@ -13,6 +13,7 @@ import {
   Effect,
   Layer,
   Option,
+  Predicate,
   Result,
   Schema,
   SchemaGetter,
@@ -345,6 +346,7 @@ const checkExpressions = (
   stream: Option.Option<Stream>,
   condition: Option.Option<Source>,
   body: Option.Option<PromptTemplate>,
+  priority: Option.Option<LoopPriority>,
 ) =>
   Effect.gen(function* () {
     const failures: Array<ConfigFileError> = [];
@@ -358,6 +360,11 @@ const checkExpressions = (
       const checked = yield* engine.checkBoolean(condition.value, environment).pipe(Effect.result);
       if (Result.isFailure(checked))
         failures.push(expressionError(file, checked.failure, ["trigger", "if"]));
+    }
+    if (Option.isSome(priority) && Predicate.isString(priority.value)) {
+      const checked = yield* engine.checkInteger(priority.value, environment).pipe(Effect.result);
+      if (Result.isFailure(checked))
+        failures.push(expressionError(file, checked.failure, ["priority"]));
     }
     for (const { source } of prompt.expressions) {
       const checked = yield* engine.checkScalar(source, environment).pipe(Effect.result);
@@ -444,6 +451,13 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
       Schema.Struct({ trigger: Schema.Struct({ if: authored ? ConditionFromYaml : Source }) }),
     )(value);
     const body = Schema.decodeUnknownOption(Schema.Struct({ body: PromptTemplate }))(value);
+    const priority = Schema.decodeUnknownOption(
+      Schema.Struct({
+        priority: authored
+          ? LoopFrontmatter.fields.priority
+          : Schema.toCodecJson(LoopFile.fields.priority),
+      }),
+    )(value);
     problems.push(
       ...(yield* checkExpressions(
         engine,
@@ -451,6 +465,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
         Option.map(stream, ({ trigger }) => trigger.on),
         Option.map(condition, ({ trigger }) => trigger.if),
         Option.map(body, ({ body }) => body),
+        Option.flatMap(priority, ({ priority }) => priority),
       )),
     );
     const agent = Schema.decodeUnknownOption(Schema.Struct({ agent: AgentName }))(value);
@@ -490,6 +505,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
           Option.some(loop.trigger.on),
           Option.some(loop.trigger.if),
           Option.some(loop.body),
+          loop.priority,
         );
         if (Arr.isArrayNonEmpty(failures)) return yield* expressionFailures(file, failures);
         return loop;

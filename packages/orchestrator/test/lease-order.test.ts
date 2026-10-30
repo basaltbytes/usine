@@ -1,9 +1,11 @@
+import { Source } from "@usine/expression/expression-engine";
+import { makeExpressionEngine } from "@usine/expression/marcbachmann-cel";
 import { assert, describe, it } from "@effect/vitest";
 import { LabelLaneSource, Lane, LaneName, StateLaneSource } from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
-import { LoopPriority } from "@usine/config/loop";
+import { LoopFile, PriorityValue, evaluateLoopPriority } from "@usine/config/loop";
 import { WorkerName } from "@usine/core/worker";
-import { Array as EffectArray, Option } from "effect";
+import { Array as EffectArray, Effect, Option, Schema } from "effect";
 import {
   aheadCount,
   type LeaseCandidate,
@@ -30,48 +32,51 @@ const lanes = [
   labelLane("Merge", "ready-to-merge"),
 ];
 
-const noPriority = Option.none<LoopPriority>();
+const noPriority = PriorityValue.make(0);
 
 describe("Pipeline position", () => {
   it("is the first lane, in lanes order, with a label of the Item, ignoring case", () => {
     assert.deepStrictEqual(pipelinePosition(noPriority, lanes, ["Ready-For-Review"]), {
-      _tag: "Lane",
-      lane: LaneName.make("Review"),
-      number: 3,
+      priority: noPriority,
+      lane: Option.some({ name: LaneName.make("Review"), number: 3 }),
     });
     assert.deepStrictEqual(
       pipelinePosition(noPriority, lanes, ["ready-to-merge", "agent-in-progress"]),
-      { _tag: "Lane", lane: LaneName.make("In progress"), number: 2 },
+      {
+        priority: noPriority,
+        lane: Option.some({ name: LaneName.make("In progress"), number: 2 }),
+      },
     );
   });
 
-  it("is the Loop's priority when the Loop file sets one, whatever the lanes", () => {
-    assert.deepStrictEqual(
-      pipelinePosition(Option.some(LoopPriority.make(1)), lanes, ["ready-to-merge"]),
-      { _tag: "Priority", priority: LoopPriority.make(1) },
-    );
+  it("retains the lane when a priority is set", () => {
+    assert.deepStrictEqual(pipelinePosition(PriorityValue.make(1), lanes, ["ready-to-merge"]), {
+      priority: PriorityValue.make(1),
+      lane: Option.some({ name: LaneName.make("Merge"), number: 5 }),
+    });
   });
 
   it("is unset without a priority or a label that a lane has", () => {
     assert.deepStrictEqual(pipelinePosition(noPriority, lanes, ["bug"]), {
-      _tag: "Unpositioned",
+      priority: noPriority,
+      lane: Option.none(),
     });
     assert.deepStrictEqual(pipelinePosition(noPriority, [], ["ready-for-agent"]), {
-      _tag: "Unpositioned",
+      priority: noPriority,
+      lane: Option.none(),
     });
   });
 });
 
 const lane = (number: number): PipelinePosition => ({
-  _tag: "Lane",
-  lane: LaneName.make(`lane-${number}`),
-  number,
+  priority: noPriority,
+  lane: Option.some({ name: LaneName.make(`lane-${number}`), number }),
 });
 const priority = (value: number): PipelinePosition => ({
-  _tag: "Priority",
-  priority: LoopPriority.make(value),
+  lane: Option.none(),
+  priority: PriorityValue.make(value),
 });
-const unpositioned: PipelinePosition = { _tag: "Unpositioned" };
+const unpositioned: PipelinePosition = { priority: noPriority, lane: Option.none() };
 
 const candidate = (
   order: number,
@@ -154,3 +159,46 @@ describe("Runs ahead", () => {
     assert.strictEqual(aheadCount([reattaching, onSpare], alsoLocal, [local, spare]), 1);
   });
 });
+
+it.effect("orders label-driven priorities before event time and rejects unsafe integers", () =>
+  Effect.gen(function* () {
+    const loop = Schema.decodeUnknownSync(LoopFile)({
+      name: "start-dev",
+      trigger: { on: "issue", if: "true" },
+      selector: Option.none(),
+      approval: "none",
+      step: "run",
+      agent: "developer",
+      body: "Implement.",
+      priority: Option.some('item.labels.nodes.exists(l, l.name == "low-priority") ? -1 : 0'),
+    });
+    const engine = makeExpressionEngine();
+    const outOfRange = new LoopFile({
+      ...loop,
+      priority: Option.some(Source.make("9007199254740992")),
+    });
+    const failure = yield* evaluateLoopPriority(engine, outOfRange, {}).pipe(Effect.flip);
+    assert.strictEqual(failure._tag, "ExpressionEvaluationError");
+    assert.include(failure.message, "safe integer");
+    const candidates = yield* Effect.forEach(
+      [["ready-for-agent", "low-priority"], ["ready-for-agent"], ["ready-for-agent"]],
+      (labels, index) =>
+        Effect.gen(function* () {
+          const priority = yield* evaluateLoopPriority(engine, loop, {
+            item: { labels: { nodes: labels.map((name) => ({ name })) } },
+          });
+          return candidate(index + 1, pipelinePosition(priority, lanes, labels));
+        }),
+    );
+    assert.deepStrictEqual(leased(candidates), [2, 3, 1]);
+    const equalPriority = PriorityValue.make(-1);
+    assert.deepStrictEqual(
+      leased([
+        candidate(1, pipelinePosition(equalPriority, lanes, ["ready-for-agent"])),
+        candidate(2, pipelinePosition(equalPriority, lanes, ["ready-to-merge"])),
+        candidate(3, pipelinePosition(PriorityValue.make(0), [], [])),
+      ]),
+      [3, 2, 1],
+    );
+  }),
+);

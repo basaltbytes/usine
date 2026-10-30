@@ -54,7 +54,7 @@ Keys are snake_case. Unknown keys at any level and duplicate keys are errors.
 | `agent` | string | required | The agent that does the loop's runs: the name of a file in `agents/`, without `.md`. |
 | `max_cycles` | integer ≥ 1 | `3` | The loop's cycle budget per item. |
 | `permissions` | `write`, `read` | `write` | What the loop's attempts can do to their repository. |
-| `priority` | integer ≥ 1 | none | Ranks the loop's runs for a free worker slot above runs that lane order ranks. Higher goes first. |
+| `priority` | integer or CEL expression returning `int` | `0` | Ranks waiting runs, higher first. Ties use lane rank, then event arrival. |
 
 ### `trigger`
 
@@ -186,9 +186,9 @@ permissions: read
 When every worker slot is taken, runs wait in a queue. A free slot goes to the first waiting run in this order ([`leaseOrder`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/lease-order.ts)):
 
 1. A run that reattaches an attempt still running on the worker with the free slot.
-2. A run of a loop that sets `priority`, higher first.
+2. The evaluated `priority`, higher first. An omitted priority is `0`.
 3. A run with a lane position, later lane first. The position is the first lane, in the project's [`lanes`](/reference/configuration/usine-yaml/#projectslanes) order, with a `label` source that matches a label the item had when the run's trigger matched. While the run runs, the board shows its card in that lane unless the item's current labels match a lane.
-4. Any other run, such as a schedule run or a run in a project without `lanes`.
+4. Event arrival, oldest first. Within the same priority, runs without a lane follow runs with a lane.
 
 Runs at the same position keep the order in which their events arrived.
 
@@ -211,13 +211,23 @@ projects:
         sources: [{ label: ready-to-merge }]
 ```
 
-Set `priority` for a loop that lane order doesn't rank, or ranks wrong. A loop with `priority` goes before every lane, so to order loops by hand, set `priority` on each of them.
+Set a positive `priority` to run before every default-priority run, or a negative value to run after them. Equal priorities use lane rank even when both loops set a priority.
 
 ```yaml title="projects/widgets/loops/rebase-pr.md"
 priority: 1
 ```
 
-The scheduler reads the stored loop and lanes when a run starts waiting, so a configuration revision doesn't reorder runs that already wait. **Overview** shows a waiting run as `Waiting for a free worker slot, behind 2 runs`. Each lease logs `Worker slot leased in lease order` with the run, the loop, `positionSource` (`priority`, `lane`, or `none`), `position`, and `passed`: the number of waiting runs whose events arrived earlier.
+Use a CEL expression over the stream's `item` and `repo` variables to order individual items:
+
+```yaml
+priority: 'item.labels.nodes.exists(l, l.name == "low-priority") ? -1 : 0'
+```
+
+Quote expressions that contain `: ` so YAML reads them as strings. Expressions must return `int`; booleans, strings, `double`, and `uint` results fail validation. Literal and evaluated values must be safe integers between -9007199254740991 and 9007199254740991.
+
+The scheduler reads the current loop and lanes when a run requests a worker slot. It evaluates priority against the run's saved event snapshot. Configuration revisions don't reorder existing reservations. An item change before an attempt starts supersedes its run, so the replacement uses the new snapshot. If evaluation fails, the run uses `0` and logs a warning with the loop, expression, and error.
+
+**Overview** shows `Waiting for a free worker slot, priority -1, behind 2 runs`. Wait and lease logs include `priority` and lane position; lease logs also include `passed`, the number of waiting runs with earlier events. The loop editor checks priority expressions and shows each matching item's evaluated priority in **Preview**, including errors that use `0`.
 
 ## Prompt template
 

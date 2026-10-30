@@ -1,40 +1,32 @@
 import type { Lane, LaneName } from "@usine/config/board";
 import { canonicalLabelName } from "@usine/config/label";
-import type { LoopPriority } from "@usine/config/loop";
+import type { PriorityValue } from "@usine/config/loop";
 import type { WorkerName } from "@usine/core/worker";
-import { Array as EffectArray, Match, Option, Order } from "effect";
+import { Array as EffectArray, Option, Order } from "effect";
 
-/** Where a queued Run's Item is in the pipeline, which ranks the Run for a free Worker slot. */
-export type PipelinePosition =
-  | { readonly _tag: "Priority"; readonly priority: LoopPriority }
-  | {
-      readonly _tag: "Lane";
-      readonly lane: LaneName;
-      /** The lane's place in the repository's `lanes`, counting from 1. */
-      readonly number: number;
-    }
-  | { readonly _tag: "Unpositioned" };
+/** The evaluated priority and lane used to order a queued run. */
+export interface PipelinePosition {
+  readonly priority: PriorityValue;
+  readonly lane: Option.Option<{ readonly name: LaneName; readonly number: number }>;
+}
 
-/**
- * Returns the position of a Run: its Loop's `priority`, else the first of the repository's `lanes`
- * with a label source among the Item `labels` in the Run's Event, compared ignoring case as GitHub
- * does. While the Run runs, the Board keeps its card in that lane unless the Item's current labels
- * match a lane.
- */
+/** Finds the first lane whose label source matches the event's labels, ignoring case. */
 export const pipelinePosition = (
-  priority: Option.Option<LoopPriority>,
+  priority: PriorityValue,
   lanes: ReadonlyArray<Lane>,
   labels: ReadonlyArray<string>,
 ): PipelinePosition => {
-  if (Option.isSome(priority)) return { _tag: "Priority", priority: priority.value };
   const itemLabels = new Set(labels.map(canonicalLabelName));
   const index = lanes.findIndex(({ sources }) =>
     sources.some((source) => "label" in source && itemLabels.has(canonicalLabelName(source.label))),
   );
-  const lane = lanes[index];
-  return lane === undefined
-    ? { _tag: "Unpositioned" }
-    : { _tag: "Lane", lane: lane.name, number: index + 1 };
+  return {
+    priority,
+    lane: Option.map(Option.fromNullishOr(lanes[index]), (lane) => ({
+      name: lane.name,
+      number: index + 1,
+    })),
+  };
 };
 
 /** The fields of a queued slot reservation that rank it for a free Worker slot. */
@@ -48,22 +40,11 @@ export interface LeaseCandidate {
   readonly order: number;
 }
 
-const TIERS = {
-  Priority: 0,
-  Lane: 1,
-  Unpositioned: 2,
-} as const satisfies Record<PipelinePosition["_tag"], number>;
-
-const rankInTier = (position: PipelinePosition): number =>
-  Match.valueTags(position, {
-    Priority: ({ priority }) => priority,
-    Lane: ({ number }) => number,
-    Unpositioned: () => 0,
-  });
-
 const positionOrder = Order.combineAll([
-  Order.mapInput(Order.Number, (position: PipelinePosition) => TIERS[position._tag]),
-  Order.mapInput(Order.flip(Order.Number), rankInTier),
+  Order.mapInput(Order.flip(Order.Number), (position: PipelinePosition) => position.priority),
+  Order.mapInput(Order.flip(Order.Number), (position: PipelinePosition) =>
+    Option.match(position.lane, { onNone: () => 0, onSome: ({ number }) => number }),
+  ),
 ]);
 
 /** Ranks by Event arrival, then by the order in which the scheduler received the reservations. */
@@ -77,9 +58,8 @@ const eventOrder: Order.Order<LeaseCandidate> = Order.combineAll([
  * furthest-along Item takes it:
  *
  * 1. A reservation that names a Worker, for an Attempt that already runs there (#177).
- * 2. A Run of a Loop with a `priority`, higher first.
- * 3. A Run positioned by lane, later lane first.
- * 4. Any other Run.
+ * 2. The evaluated priority, higher first, defaulting to zero.
+ * 3. The lane rank, later lane first, with unmatched runs last.
  *
  * Event order ranks reservations with the same position.
  */

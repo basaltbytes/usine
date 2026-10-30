@@ -54,6 +54,7 @@ const startupFailure = (workers: (typeof UsineConfig.Encoded)["workers"]) =>
         config,
         [],
       ).pipe(
+        Layer.provide(MarcbachmannCelLayer),
         Layer.provide(credentialLayer),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
         Layer.provide(claudeLoginLockLayer),
@@ -151,6 +152,7 @@ const productionObservation = (
   environment: Record<string, string>,
 ) => {
   const engine = workerEngineLayer(directory, instanceId, config, []).pipe(
+    Layer.provide(MarcbachmannCelLayer),
     Layer.provide(credentialLayer),
     Layer.provide(stubAttemptRuntime(new StubStorage())),
     Layer.provide(claudeLoginLockLayer),

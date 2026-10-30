@@ -59,7 +59,7 @@ see the [expressions reference](https://docs.usine.dev/reference/configuration/e
 
 Issue and pull request loops accept `max_cycles`, a positive integer (default 3): the number of runs each loop can open on an item between operator resets. The first admission past it blocks runs from every loop on the item. Schedule loops are exempt. See [Write review and fix loops](https://docs.usine.dev/guides/review-fix-loops/).
 
-A loop's optional `priority`, a positive integer (`LoopFile.priority`, `LoopPriority`), ranks its runs for a free worker slot before runs that lane order ranks, higher first. See [Loop files](https://docs.usine.dev/reference/configuration/loop-files/#priority).
+A loop's optional `priority` (`LoopFile.priority`, `LoopPriority`) accepts a safe integer or a CEL expression returning `int`. `evaluateLoopPriority` evaluates it over the supplied item and repository context and returns a `PriorityValue`, defaulting to zero. Higher values go first; ties use lane rank and event arrival. The parser checks priority expressions against the trigger stream. See [Loop files](https://docs.usine.dev/reference/configuration/loop-files/#priority).
 
 ## Load an instance
 
