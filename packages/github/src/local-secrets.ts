@@ -1,5 +1,5 @@
 import { InstanceDirectory } from "@usine/core/instance";
-import { Config, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
+import { Config, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
 import { AppCredentials, AppId, GitHubCredentials, RedactedPrivateKey } from "./credentials.ts";
 
 /** The credential file path relative to the instance directory; the file must have mode 0600 (ADR 0011). */
@@ -13,8 +13,8 @@ export class EnvironmentCredentialsError extends Schema.TaggedError<EnvironmentC
   message: Schema.NonEmptyString,
 }) {}
 
-/** A secrets file failure: `read` for inaccessible files, `permissions` for a non-file or mode other than 0600, or `parse` for invalid credentials or JSON. */
-export const SecretsFileReason = Schema.Literals(["read", "permissions", "parse"]);
+/** A secrets file failure: `read` for inaccessible files, `permissions` for a non-file or mode other than 0600, `parse` for invalid credentials or JSON, or `write` for a failed save. */
+export const SecretsFileReason = Schema.Literals(["read", "permissions", "parse", "write"]);
 export type SecretsFileReason = typeof SecretsFileReason.Type;
 
 /** A credential file that cannot be read, does not have mode 0600, or fails JSON or credential validation. */
@@ -41,12 +41,27 @@ const environment = Config.all({
   privateKey: Config.option(Config.schema(RedactedPrivateKey, "USINE_GITHUB_PRIVATE_KEY")),
 });
 
-const AppCredentialsFile = Schema.fromJsonString(
-  Schema.Struct({ appId: AppId, privateKey: RedactedPrivateKey }).pipe(
-    Schema.encodeKeys({ appId: "app_id", privateKey: "private_key" }),
+/** Runtime App credentials, including optional user authorization and webhook secrets. */
+export class GitHubAppSecrets extends Schema.Class<GitHubAppSecrets>("GitHubAppSecrets")({
+  ...AppCredentials.fields,
+  clientId: Schema.OptionFromOptionalKey(Schema.NonEmptyString),
+  clientSecret: Schema.OptionFromOptionalKey(Schema.RedactedFromValue(Schema.NonEmptyString)),
+  webhookSecret: Schema.OptionFromOptionalKey(Schema.RedactedFromValue(Schema.NonEmptyString)),
+}) {}
+
+/** Decodes the runtime file; legacy files can omit user authorization and webhook fields. */
+export const GitHubAppSecretsFromJson = Schema.fromJsonString(
+  GitHubAppSecrets.pipe(
+    Schema.encodeKeys({
+      appId: "app_id",
+      privateKey: "private_key",
+      clientId: "client_id",
+      clientSecret: "client_secret",
+      webhookSecret: "webhook_secret",
+    }),
   ),
 );
-const decodeCredentialsFile = Schema.decodeUnknownEffect(AppCredentialsFile);
+const decodeCredentialsFile = Schema.decodeUnknownEffect(GitHubAppSecretsFromJson);
 
 const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function* (
   root: InstanceDirectory,
@@ -68,7 +83,10 @@ const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function*
   const source = yield* fileSystem.readFileString(secretsPath).pipe(Effect.mapError(unreadable));
   return yield* decodeCredentialsFile(source, { onExcessProperty: "error" }).pipe(
     Effect.mapError(() =>
-      fail("parse", `${secretsPath} is invalid. It must be JSON with only app_id and private_key.`),
+      fail(
+        "parse",
+        `${secretsPath} is invalid. Expected app_id, private_key, and optional client_id, client_secret, and webhook_secret.`,
+      ),
     ),
   );
 });
@@ -78,8 +96,8 @@ const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function*
  * and the file isn't read if both variables are set. `root` is the instance directory containing
  * `.usine/github-app.json`. The overrides are `USINE_GITHUB_APP_ID` and
  * `USINE_GITHUB_PRIVATE_KEY`; an invalid override fails even if the file is valid. When needed,
- * the file must be a regular file with mode 0600 and JSON containing only `app_id` and
- * `private_key`. Failures use `EnvironmentCredentialsError` or `SecretsFileError` (ADR 0011).
+ * the file must be a regular file with mode 0600 and JSON containing `app_id` and
+ * `private_key`, with optional client and webhook fields. Failures use `EnvironmentCredentialsError` or `SecretsFileError` (ADR 0011).
  */
 export const loadLocalCredentials = Effect.fn("GitHubCredentials.loadLocal")(function* (
   root: InstanceDirectory,
@@ -108,3 +126,66 @@ export const localSecretsLayer = (
   root: InstanceDirectory,
 ): Layer.Layer<GitHubCredentials, LocalSecretsError, FileSystem.FileSystem | Path.Path> =>
   Layer.effect(GitHubCredentials, loadLocalCredentials(root));
+
+/** Reads the runtime secrets, returning `None` when the file does not exist. */
+export const loadLocalSecrets = Effect.fn("GitHubCredentials.loadSecrets")(function* (
+  root: InstanceDirectory,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const target = path.join(root, GITHUB_APP_SECRETS_PATH);
+  const exists = yield* fs.exists(target).pipe(
+    Effect.mapError(
+      () =>
+        new SecretsFileError({
+          path: target,
+          reason: "read",
+          message: `Could not read GitHub App secrets at ${target}`,
+        }),
+    ),
+  );
+  return exists ? Option.some(yield* readSecretsFile(root)) : Option.none();
+});
+
+/** Atomically replaces the runtime secrets with a mode 0600 file. */
+export const writeLocalSecrets = Effect.fn("GitHubCredentials.writeSecrets")(function* (
+  root: InstanceDirectory,
+  secrets: GitHubAppSecrets,
+) {
+  yield* Effect.annotateCurrentSpan({ appId: secrets.appId });
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const target = path.join(root, GITHUB_APP_SECRETS_PATH);
+  yield* Effect.scoped(
+    Effect.gen(function* () {
+      yield* fs.makeDirectory(path.dirname(target), { recursive: true });
+      const temporary = yield* fs.makeTempDirectoryScoped({
+        directory: path.dirname(target),
+        prefix: ".github-app-",
+      });
+      const source = path.join(temporary, "secrets.json");
+      yield* fs.writeFileString(
+        source,
+        JSON.stringify({
+          app_id: secrets.appId,
+          private_key: Redacted.value(secrets.privateKey),
+          client_id: Option.getOrUndefined(secrets.clientId),
+          client_secret: Option.getOrUndefined(Option.map(secrets.clientSecret, Redacted.value)),
+          webhook_secret: Option.getOrUndefined(Option.map(secrets.webhookSecret, Redacted.value)),
+        }),
+        { mode: 0o600, flag: "wx" },
+      );
+      yield* fs.rename(source, target);
+    }),
+  ).pipe(
+    Effect.mapError(
+      () =>
+        new SecretsFileError({
+          path: target,
+          reason: "write",
+          message: `Could not save GitHub App secrets at ${target}. Check directory permissions and retry setup.`,
+        }),
+    ),
+  );
+  yield* Effect.logInfo("GitHub App credentials saved", { appId: secrets.appId });
+});

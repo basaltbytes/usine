@@ -20,6 +20,7 @@ export const GitHubOperation = Schema.Literals([
   "poll-repository-changes",
   "poll-webhook-deliveries",
   "read-bot-account",
+  "read-app",
   "update-item-labels",
 ]);
 export type GitHubOperation = typeof GitHubOperation.Type;

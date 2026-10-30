@@ -117,6 +117,8 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
 export class GitHubApp extends Context.Service<
   GitHubApp,
   {
+    /** Returns the installation page for this App, including before its first installation. */
+    readonly installationUrl: () => Effect.Effect<string, GitHubAppError>;
     /** Sets the App's webhook URL and JSON encoding; the App must already have an active webhook. */
     readonly configureWebhook: (url: URL) => Effect.Effect<void, GitHubAppError>;
     /**
@@ -429,6 +431,16 @@ export class GitHubApp extends Context.Service<
       );
 
       return {
+        installationUrl: Effect.fn("GitHubApp.installationUrl")(function* () {
+          yield* Effect.annotateCurrentSpan({ appId: credentials.appId });
+          const jwt = yield* sign();
+          const app = yield* fetchJson(
+            "read-app",
+            HttpClientRequest.get(`${API_ROOT}/app`).pipe(authorized(jwt)),
+            Schema.Struct({ slug: AppSlug }),
+          );
+          return `https://github.com/apps/${encodeURIComponent(app.slug)}/installations/new`;
+        }),
         configureWebhook: Effect.fn("GitHubApp.configureWebhook")(function* (url: URL) {
           yield* Effect.annotateCurrentSpan({ appId: credentials.appId });
           const jwt = yield* sign();

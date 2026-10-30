@@ -1,8 +1,14 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
-import { ConfigProvider, Effect, FileSystem, Layer, Path, Redacted } from "effect";
-import { GITHUB_APP_SECRETS_PATH, loadLocalCredentials } from "../src/local-secrets.ts";
+import { ConfigProvider, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
+import {
+  GITHUB_APP_SECRETS_PATH,
+  GitHubAppSecretsFromJson,
+  loadLocalCredentials,
+  loadLocalSecrets,
+  writeLocalSecrets,
+} from "../src/local-secrets.ts";
 
 const TEST_PRIVATE_KEY = [
   "-----BEGIN PRIVATE KEY-----",
@@ -91,3 +97,33 @@ describe("local GitHub App secrets", () => {
     ),
   );
 });
+
+it.effect("replaces an insecure old file with complete owner-only secrets", () =>
+  withInstance((root) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const target = path.join(root, GITHUB_APP_SECRETS_PATH);
+      yield* fs.writeFileString(target, "old", { mode: 0o644 });
+      const source = JSON.stringify({
+        app_id: 123,
+        private_key: TEST_PRIVATE_KEY,
+        client_id: "Iv1.test",
+        client_secret: "oauth-secret",
+        webhook_secret: "hook-secret",
+      });
+      const secrets = yield* Schema.decodeUnknownEffect(GitHubAppSecretsFromJson)(source);
+      yield* writeLocalSecrets(root, secrets);
+      assert.equal((yield* fs.stat(target)).mode & 0o777, 0o600);
+      assert.deepEqual(JSON.parse(yield* fs.readFileString(target)), JSON.parse(source));
+      const loaded = yield* loadLocalSecrets(root);
+      assert.ok(Option.isSome(loaded));
+      if (Option.isSome(loaded)) {
+        assert.equal(Option.getOrNull(loaded.value.clientId), "Iv1.test");
+        assert.ok(!JSON.stringify(loaded.value).includes("oauth-secret"));
+        assert.ok(!JSON.stringify(loaded.value).includes("hook-secret"));
+      }
+      assert.deepEqual(yield* fs.readDirectory(path.dirname(target)), ["github-app.json"]);
+    }),
+  ),
+);

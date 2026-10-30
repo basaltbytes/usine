@@ -113,6 +113,8 @@ describe("GitHubApp", () => {
       const client = HttpClient.make((request) =>
         Effect.sync(() => {
           requests.push(request);
+          if (request.url.endsWith("/app"))
+            return jsonResponse(request, { slug: "usine-basaltbytes" });
           if (request.url.endsWith("/app/installations?per_page=2")) {
             return jsonResponse(request, [installation]);
           }
@@ -141,6 +143,10 @@ describe("GitHubApp", () => {
 
       return Effect.gen(function* () {
         const app = yield* GitHubApp;
+        assert.equal(
+          yield* app.installationUrl(),
+          "https://github.com/apps/usine-basaltbytes/installations/new",
+        );
         const wide = yield* app.installationToken();
         assert.strictEqual(wide.scope._tag, "InstallationWide");
         assert.strictEqual(Redacted.value(wide.value), "installation-secret");

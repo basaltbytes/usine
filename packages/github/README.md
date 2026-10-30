@@ -116,3 +116,9 @@ It mints both token kinds, posts an issue comment with the repo token, checks th
 Enable the App webhook to record deliveries. A delivery with a failed HTTP status can still request a refresh; no reachable webhook endpoint is needed for deliveries mode.
 
 `GitHubApp.configureWebhook(url)` uses the App JWT to PATCH `/app/hook/config` with the full delivery URL and JSON content type. It preserves the App's webhook secret, active flag, and subscribed events. Enable the webhook in the App settings before using endpoint mode.
+
+## Setup credentials
+
+`GitHubApp.installationUrl()` returns the App's installation page, including before its first installation. It reads the authenticated App metadata and uses the same typed errors as other App requests.
+
+`@usine/github/local-secrets` accepts optional `client_id`, `client_secret`, and `webhook_secret` fields alongside `app_id` and `private_key`. `loadLocalSecrets` returns `None` for an absent file and rejects invalid contents or permissions. `writeLocalSecrets` atomically replaces the runtime file with mode 0600; credential values remain redacted in memory. Legacy files with only the App ID and private key continue to load.

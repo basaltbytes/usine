@@ -34,6 +34,7 @@ export const testAppLayer = Layer.succeed(GitHubApp)({
   repositories: () => Effect.die("unused installation repositories"),
   installationToken: () => Effect.die("the test App mints no installation token"),
   projectAccess: () => Effect.die("the test App reads no project access"),
+  installationUrl: () => Effect.die("unused installation URL"),
   configureWebhook: () => Effect.die("unused webhook configuration"),
   deliveries: () => Effect.die("unused webhook deliveries"),
   workerToken: () => Effect.die("the test App mints no worker token"),
