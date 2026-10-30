@@ -1,3 +1,4 @@
+import { PreflightAction } from "./action";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { WorkerConfigurationView } from "@usine/orchestrator/operator";
 import { FillCell } from "~/components/fill-cell";
@@ -45,6 +46,7 @@ export const WorkerRow = ({ worker }: WorkerRowProps) => {
       </TableCell>
       <FillCell className="whitespace-normal">
         <PreflightState worker={worker} />
+        <PreflightAction worker={worker} />
         {worker.provisioning?.blocked === true && (
           <p className="text-xs text-destructive tabular-nums" title={worker.provisioning.message}>
             {creationFailureTitle(worker.provisioning)}.{" "}

@@ -42,6 +42,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -127,6 +128,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -186,6 +188,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -245,6 +248,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -304,6 +308,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -363,6 +368,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -422,6 +428,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -481,6 +488,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -583,6 +591,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -670,6 +679,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -750,6 +760,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -809,6 +820,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -868,6 +880,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -927,6 +940,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -986,6 +1000,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1045,6 +1060,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1147,6 +1163,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1234,6 +1251,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -1314,6 +1332,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1373,6 +1392,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1432,6 +1452,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1491,6 +1512,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1550,6 +1572,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1609,6 +1632,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1702,6 +1726,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1761,6 +1786,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1820,6 +1846,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1879,6 +1906,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1938,6 +1966,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -1997,6 +2026,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2056,6 +2086,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2115,6 +2146,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2212,6 +2244,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2297,6 +2330,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2356,6 +2390,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2415,6 +2450,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2474,6 +2510,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2533,6 +2570,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2592,6 +2630,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2651,6 +2690,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2755,6 +2795,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2842,6 +2883,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -2922,6 +2964,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -2981,6 +3024,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3040,6 +3084,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3099,6 +3144,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3158,6 +3204,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3217,6 +3264,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3331,6 +3379,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3418,6 +3467,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -3498,6 +3548,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3557,6 +3608,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3616,6 +3668,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3675,6 +3728,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3734,6 +3788,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3793,6 +3848,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3897,6 +3953,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -3982,6 +4039,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4041,6 +4099,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4100,6 +4159,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4159,6 +4219,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4218,6 +4279,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4277,6 +4339,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4336,6 +4399,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4450,6 +4514,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4537,6 +4602,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -4617,6 +4683,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4676,6 +4743,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4735,6 +4803,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4794,6 +4863,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4853,6 +4923,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -4912,6 +4983,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5029,6 +5101,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5116,6 +5189,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -5196,6 +5270,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5255,6 +5330,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5314,6 +5390,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5373,6 +5450,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5432,6 +5510,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5491,6 +5570,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5615,6 +5695,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5702,6 +5783,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -5782,6 +5864,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5841,6 +5924,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5900,6 +5984,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -5959,6 +6044,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6018,6 +6104,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6077,6 +6164,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6191,6 +6279,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6278,6 +6367,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -6358,6 +6448,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6417,6 +6508,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6476,6 +6568,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6535,6 +6628,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6594,6 +6688,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6653,6 +6748,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6805,6 +6901,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6890,6 +6987,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -6949,6 +7047,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7008,6 +7107,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7067,6 +7167,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7126,6 +7227,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7185,6 +7287,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7244,6 +7347,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7344,6 +7448,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7429,6 +7534,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7488,6 +7594,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7547,6 +7654,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7606,6 +7714,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7665,6 +7774,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7724,6 +7834,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7783,6 +7894,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7897,6 +8009,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -7984,6 +8097,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -8064,6 +8178,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8123,6 +8238,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8182,6 +8298,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8241,6 +8358,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8300,6 +8418,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8359,6 +8478,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8473,6 +8593,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8560,6 +8681,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -8640,6 +8762,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8699,6 +8822,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8758,6 +8882,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8817,6 +8942,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8876,6 +9002,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -8935,6 +9062,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9069,6 +9197,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9156,6 +9285,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -9236,6 +9366,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9295,6 +9426,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9354,6 +9486,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9413,6 +9546,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9472,6 +9606,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9531,6 +9666,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9645,6 +9781,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9732,6 +9869,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -9812,6 +9950,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9871,6 +10010,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9930,6 +10070,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -9989,6 +10130,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10048,6 +10190,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10107,6 +10250,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10207,6 +10351,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10292,6 +10437,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10351,6 +10497,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10410,6 +10557,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10469,6 +10617,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10528,6 +10677,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10587,6 +10737,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10646,6 +10797,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10763,6 +10915,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10848,6 +11001,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10907,6 +11061,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -10966,6 +11121,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11025,6 +11181,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11084,6 +11241,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11143,6 +11301,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11202,6 +11361,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11324,6 +11484,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11411,6 +11572,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -11491,6 +11653,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11550,6 +11713,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11609,6 +11773,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11668,6 +11833,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11727,6 +11893,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11786,6 +11953,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -11934,6 +12102,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12021,6 +12190,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -12101,6 +12271,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12160,6 +12331,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12219,6 +12391,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12278,6 +12451,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12337,6 +12511,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12396,6 +12571,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12519,6 +12695,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12606,6 +12783,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -12686,6 +12864,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12745,6 +12924,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12804,6 +12984,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12863,6 +13044,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12922,6 +13104,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -12981,6 +13164,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13112,6 +13296,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13199,6 +13384,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -13279,6 +13465,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13338,6 +13525,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13397,6 +13585,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13456,6 +13645,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13515,6 +13705,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13574,6 +13765,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13648,12 +13840,12 @@
         }
       }
     },
-    "/api/workers/{worker}/discard-leftovers": {
+    "/api/workers/{worker}/preflight": {
       "post": {
         "tags": [
           "Operator"
         ],
-        "operationId": "operator.discardLeftovers",
+        "operationId": "operator.runWorkerPreflight",
         "parameters": [
           {
             "name": "worker",
@@ -13675,25 +13867,11 @@
         ],
         "responses": {
           "200": {
-            "description": "The request was accepted. An asynchronous action may still be running.",
+            "description": "@usine/orchestrator/WorkerPreflightView",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    }
-                  },
-                  "required": [
-                    "ok"
-                  ],
-                  "additionalProperties": false,
-                  "title": "Acknowledgement",
-                  "description": "The request was accepted. An asynchronous action may still be running."
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerPreflightViewEncoded"
                 }
               }
             }
@@ -13708,6 +13886,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13795,6 +13974,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -13875,6 +14055,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13934,6 +14115,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -13993,6 +14175,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14052,6 +14235,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14111,6 +14295,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14170,6 +14355,591 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "description": "Checks one idle worker and replaces its stored capability results, including failures with remediation. Returns 409 while an attempt or another preflight uses the worker.",
+        "summary": "Run worker preflight"
+      }
+    },
+    "/api/workers/{worker}/discard-leftovers": {
+      "post": {
+        "tags": [
+          "Operator"
+        ],
+        "operationId": "operator.discardLeftovers",
+        "parameters": [
+          {
+            "name": "worker",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request was accepted. An asynchronous action may still be running.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false,
+                  "title": "Acknowledgement",
+                  "description": "The request was accepted. An asynchronous action may still be running."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A valid instance token or browser session is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Browser session writes require a valid X-Usine-CSRF header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AuthenticationError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14284,6 +15054,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14371,6 +15142,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -14451,6 +15223,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14510,6 +15283,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14569,6 +15343,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14628,6 +15403,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14687,6 +15463,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14746,6 +15523,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14860,6 +15638,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -14947,6 +15726,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -15027,6 +15807,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15086,6 +15867,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15145,6 +15927,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15204,6 +15987,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15263,6 +16047,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15322,6 +16107,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15439,6 +16225,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15524,6 +16311,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15583,6 +16371,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15642,6 +16431,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15701,6 +16491,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15760,6 +16551,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15819,6 +16611,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15878,6 +16671,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -15968,6 +16762,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -16055,6 +16850,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -16135,6 +16931,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -16208,6 +17005,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -16277,6 +17075,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -16338,6 +17137,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -16397,6 +17197,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -16456,6 +17257,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -16597,6 +17399,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -16684,6 +17487,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -16764,6 +17568,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -16837,6 +17642,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -16906,6 +17712,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -16967,6 +17774,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17026,6 +17834,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17085,6 +17894,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17218,6 +18028,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17303,6 +18114,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17362,6 +18174,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17421,6 +18234,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17480,6 +18294,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17539,6 +18354,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17598,6 +18414,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17657,6 +18474,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17751,6 +18569,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17836,6 +18655,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17895,6 +18715,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -17954,6 +18775,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18013,6 +18835,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18072,6 +18895,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18131,6 +18955,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18190,6 +19015,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18293,6 +19119,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18378,6 +19205,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18437,6 +19265,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18496,6 +19325,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18555,6 +19385,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18614,6 +19445,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18673,6 +19505,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18732,6 +19565,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -18919,6 +19753,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19004,6 +19839,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19063,6 +19899,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19136,6 +19973,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -19205,6 +20043,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -19266,6 +20105,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19325,6 +20165,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19384,6 +20225,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19483,6 +20325,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19568,6 +20411,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19627,6 +20471,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19700,6 +20545,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -19769,6 +20615,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -19830,6 +20677,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19889,6 +20737,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -19948,6 +20797,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20056,6 +20906,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20141,6 +20992,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20200,6 +21052,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20273,6 +21126,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -20342,6 +21196,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -20403,6 +21258,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20462,6 +21318,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20521,6 +21378,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20627,6 +21485,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20714,6 +21573,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -20794,6 +21654,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -20867,6 +21728,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -20936,6 +21798,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -20997,6 +21860,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21056,6 +21920,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21115,6 +21980,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21288,6 +22154,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21375,6 +22242,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -21455,6 +22323,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21528,6 +22397,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -21597,6 +22467,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -21658,6 +22529,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21717,6 +22589,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21776,6 +22649,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21885,6 +22759,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -21972,6 +22847,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -22052,6 +22928,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22125,6 +23002,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -22194,6 +23072,7 @@
                         "error": {
                           "type": "string",
                           "enum": [
+                            "WorkerPreflightRejectedError",
                             "UpgradeError",
                             "ConfigurationNotFound",
                             "ConfigurationStoreError",
@@ -22255,6 +23134,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22314,6 +23194,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22373,6 +23254,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22473,6 +23355,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22558,6 +23441,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22617,6 +23501,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22676,6 +23561,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22735,6 +23621,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22794,6 +23681,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22853,6 +23741,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -22912,6 +23801,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23002,6 +23892,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23087,6 +23978,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23146,6 +24038,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23205,6 +24098,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23264,6 +24158,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23323,6 +24218,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23382,6 +24278,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23441,6 +24338,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23556,6 +24454,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23641,6 +24540,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23700,6 +24600,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23759,6 +24660,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23818,6 +24720,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23877,6 +24780,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23936,6 +24840,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -23995,6 +24900,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -24110,6 +25016,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -24195,6 +25102,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -24254,6 +25162,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -24313,6 +25222,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -24372,6 +25282,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -24431,6 +25342,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -24490,6 +25402,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -24549,6 +25462,7 @@
                     "error": {
                       "type": "string",
                       "enum": [
+                        "WorkerPreflightRejectedError",
                         "UpgradeError",
                         "ConfigurationNotFound",
                         "ConfigurationStoreError",
@@ -31901,6 +32815,9 @@
               }
             ]
           },
+          "preflightRunning": {
+            "type": "boolean"
+          },
           "harnesses": {
             "type": "array",
             "items": {
@@ -31924,6 +32841,7 @@
           "provisioning",
           "slots",
           "prerequisites",
+          "preflightRunning",
           "harnesses"
         ],
         "additionalProperties": false
@@ -33748,6 +34666,57 @@
         "required": [
           "id",
           "name"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_WorkerPreflightViewEncoded": {
+        "type": "object",
+        "properties": {
+          "worker": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "prerequisites": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_PassedCheckViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_DegradedCheckViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_DeferredCheckViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_FailedCheckViewEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "harnesses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/_usine_orchestrator_HarnessPreflightViewEncoded"
+            }
+          },
+          "containerLimits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContainerLimitsEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "worker",
+          "prerequisites",
+          "harnesses",
+          "containerLimits"
         ],
         "additionalProperties": false
       },

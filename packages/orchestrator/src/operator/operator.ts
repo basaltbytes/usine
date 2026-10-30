@@ -1,5 +1,7 @@
 import type { UpgradeDrain } from "@usine/engine/engine";
 import { upgradeAttentionFor } from "./upgrade.ts";
+import { WorkerPreflightView, workerPreflightView } from "./preflight.ts";
+export { WorkerPreflightView } from "./preflight.ts";
 import { WebhookHealth } from "../webhooks.ts";
 import { webhookAttentionFor } from "./webhooks.ts";
 import type { ConfigurationStoreError } from "@usine/config/configuration";
@@ -145,7 +147,11 @@ import { type DeskView, OperatorDesk } from "./desk.ts";
 import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 import { machineView, quotaWaits } from "./machines.ts";
-import { type ProvisioningPause, WorkerStatus } from "../worker-status.ts";
+import {
+  type ProvisioningPause,
+  WorkerStatus,
+  type WorkerPreflightRejectedError,
+} from "../worker-status.ts";
 import { workerAttentionFor } from "./worker-attention.ts";
 
 /** A refused board move, failed label write, or failure to read or record the move. */
@@ -159,6 +165,7 @@ export type BoardMoveError =
   | GitHubAppError;
 /** A failure to observe or change runs, tasks, loop state, or operator acknowledgements. */
 export type OperatorError =
+  | WorkerPreflightRejectedError
   | LoopNotFoundError
   | RosterAgentNotFoundError
   | RunEngineError
@@ -938,6 +945,7 @@ export class OperatorObservation extends Context.Service<
 }
 
 const makeOperator = Effect.gen(function* () {
+  const workerStatus = yield* WorkerStatus;
   const acknowledgements = yield* AttentionAcknowledgements;
   const budgets = yield* CycleBudgets;
   const observation = yield* OperatorObservation;
@@ -1267,6 +1275,8 @@ const makeOperator = Effect.gen(function* () {
     ...observation,
     approve,
     cancel,
+    runWorkerPreflight: (worker: WorkerName) =>
+      workerStatus.runPreflight(worker).pipe(Effect.map(workerPreflightView)),
     discardLeftovers: (worker: WorkerName) => runs.discardLeftovers(worker).pipe(Effect.asVoid),
     moveBoardItem,
     githubChanges: (instance: LoadedInstance, runId: RunId) =>
@@ -1342,6 +1352,10 @@ export class Operator extends Context.Service<
      * closed.
      */
     readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Runs verify-only preflight on one idle worker and returns the stored checks. */
+    readonly runWorkerPreflight: (
+      worker: WorkerName,
+    ) => Effect.Effect<WorkerPreflightView, WorkerPreflightRejectedError>;
     /**
      * Answers an `UnconfiguredWorkerNeed` so startup stops reconciling the Attempts recorded on
      * `worker`. Fails with `LeftoversDiscardRejectedError` if `usine.yaml` declares the Worker or

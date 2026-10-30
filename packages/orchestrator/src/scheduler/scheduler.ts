@@ -937,6 +937,12 @@ export const stepExecutorLayer = (
           Effect.map(([queued, current]) => queuedRuns(queued, current)),
         ),
         preflights: preflight.records,
+        checking: preflight.checking,
+        runPreflight: (worker) =>
+          preflight.run(
+            worker,
+            TxRef.get(pool).pipe(Effect.map((current) => current.get(worker)?.leased ?? 0)),
+          ),
         unavailable: preflight.unavailable,
         machines: machines === undefined ? Effect.succeed([]) : machines.machines,
         provisioning: Effect.gen(function* () {

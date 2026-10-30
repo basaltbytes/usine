@@ -836,6 +836,7 @@ describe("operator HTTP API", () => {
   it("maps typed engine errors onto operator-readable statuses", async () => {
     let moved: BoardMove | undefined;
     const rejecting = Layer.succeed(FactoryBackend)({
+      runWorkerPreflight: () => Effect.die("unused"),
       resolveFailure: () => Effect.void,
       agents: Effect.succeed([]),
       editAndRetry: () => Effect.void,
@@ -1065,6 +1066,7 @@ describe("operator HTTP API", () => {
     });
     const inputs: Array<SessionIntervention> = [];
     const live = Layer.succeed(FactoryBackend)({
+      runWorkerPreflight: () => Effect.die("unused"),
       resolveFailure: (id, attemptId) =>
         attemptId === "attempt/1"
           ? record(`resolve:${id}:${attemptId}`)

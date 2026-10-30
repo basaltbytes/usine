@@ -44,6 +44,7 @@ const operatorFailure = (error: BackendError) => {
         if (error.running === 0)
           return `Could not discard the leftovers on worker "${error.worker}": it is in usine.yaml, or an attempt on it is ending.`;
         return `${error.running} ${error.running === 1 ? "attempt is" : "attempts are"} still running on worker "${error.worker}". Discard its leftovers after they end.`;
+      case "WorkerPreflightRejectedError":
       case "BackendUnavailableError":
       case "RunRetryBlockedError":
       case "RunInterventionRejectedError":
@@ -289,6 +290,9 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     )
     .handle("cancel", ({ params }) =>
       fromBackend((backend) => backend.cancel(params.runId)).pipe(acknowledge),
+    )
+    .handle("runWorkerPreflight", ({ params }) =>
+      fromBackend((backend) => backend.runWorkerPreflight(params.worker)),
     )
     .handle("discardLeftovers", ({ params }) =>
       fromBackend((backend) => backend.discardLeftovers(params.worker)).pipe(acknowledge),

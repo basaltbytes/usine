@@ -1,10 +1,15 @@
+import { Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { ReadyOverview } from "@usine/orchestrator/operator";
+import {
+  ConfigurationView,
+  WorkerConfigurationView,
+  ReadyOverview,
+} from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { page } from "vitest/browser";
+import { commands, page } from "vitest/browser";
 import { overviewQuery } from "~/lib/overview";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { creationFailuresLine, nextCreationLine } from "~/lib/workers/strings";
@@ -36,10 +41,11 @@ afterEach(() => {
   flushSync(() => root.unmount());
   queryClient.clear();
   host.remove();
+  document.documentElement.classList.remove("dark");
 });
 
-const mount = async (path: string, width = 1280) => {
-  await page.viewport(width, 900);
+const mount = async (path: string, width = 1280, height = 900) => {
+  await page.viewport(width, height);
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -154,4 +160,143 @@ it("says on the Workers list that a worker's machine creation is paused", async 
     )
     .toBeVisible();
   await expect.element(row(/^boat-pool/u).getByText("Deferred", { exact: true })).toBeVisible();
+});
+
+declare module "vitest/browser" {
+  interface BrowserCommands {
+    workerPreflightResponses: (configuration: string) => Promise<void>;
+    finishWorkerPreflight: (
+      configuration: string,
+      body: string,
+      status?: number,
+    ) => Promise<{ method: string; path: string }>;
+  }
+}
+
+const encodeConfiguration = Schema.encodeSync(Schema.fromJsonString(ConfigurationView));
+const withPreflight = (check: WorkerConfigurationView["prerequisites"]) =>
+  new ConfigurationView({
+    ...configuration,
+    workers: configuration.workers.map((worker) =>
+      worker.name === "eu-1"
+        ? new WorkerConfigurationView({ ...worker, prerequisites: check })
+        : worker,
+    ),
+  });
+const preflightBody = (updated: ConfigurationView) => {
+  const worker = updated.workers.find(({ name }) => name === "eu-1");
+  if (worker === undefined) throw new Error("Missing worker");
+  return JSON.stringify({
+    worker: worker.name,
+    prerequisites: worker.prerequisites,
+    harnesses: worker.harnesses,
+    containerLimits: worker.containerLimits,
+  });
+};
+
+it("disables preflight for a busy worker and shows the reason", async () => {
+  await mount("/configuration/workers");
+  const busy = page.getByRole("button", { name: "Run preflight on local", exact: true });
+  await expect.element(busy).toBeDisabled();
+  await expect.element(busy).toHaveAccessibleDescription("Available after all attempts end");
+  await expect
+    .element(page.getByRole("button", { name: "Run preflight on eu-1", exact: true }))
+    .toBeEnabled();
+  queryClient.setQueryData(
+    configurationQuery().queryKey,
+    new ConfigurationView({
+      ...configuration,
+      workers: configuration.workers.map((worker) =>
+        worker.name === "eu-1"
+          ? new WorkerConfigurationView({ ...worker, preflightRunning: true })
+          : worker,
+      ),
+    }),
+  );
+  const checking = page.getByRole("button", { name: "Run preflight on eu-1", exact: true });
+  await expect.element(checking).toBeDisabled();
+  await expect.element(checking).toHaveAccessibleDescription("A preflight is already running");
+});
+
+it.each([
+  { device: "desktop", width: 1440, height: 900, theme: "dark" },
+  { device: "desktop", width: 1440, height: 900, theme: "light" },
+  { device: "phone", width: 390, height: 844, theme: "dark" },
+  { device: "phone", width: 390, height: 844, theme: "light" },
+])(
+  "runs preflight, shows remediation, and passes after repair on $device in $theme",
+  async ({ device, width, height, theme }) => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    const failed = withPreflight({
+      _tag: "Failed",
+      checkedAt: "2026-10-30T12:00:00Z",
+      capability: "machine",
+      message: "SSH destination is unreachable. Restore connectivity to the worker.",
+    });
+    await commands.workerPreflightResponses(encodeConfiguration(configuration));
+    await mount("/configuration/workers", width, height);
+    const action = page.getByRole("button", { name: "Run preflight on eu-1", exact: true });
+    await expect.element(action).toBeVisible();
+    await commands.configurationEditorScreenshot(`773-workers-${device}-${theme}`);
+    await action.click();
+    await expect.element(action).toBeDisabled();
+    await expect.element(action).toHaveTextContent("Running preflight…");
+    await commands.configurationEditorScreenshot(`773-running-${device}-${theme}`);
+    const request = await commands.finishWorkerPreflight(
+      encodeConfiguration(failed),
+      preflightBody(failed),
+    );
+    expect(request).toEqual({ method: "POST", path: "/api/workers/eu-1/preflight" });
+    await expect.element(action).toBeEnabled();
+    await expect.element(row(/eu-1/u).getByText("Failed", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "eu-1", exact: true }).click();
+    await expect
+      .element(
+        page.getByRole("cell", {
+          name: /SSH destination is unreachable\. Restore connectivity to the worker\./u,
+        }),
+      )
+      .toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
+    await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+    if (device === "phone")
+      page.getByRole("heading", { name: "Preflight", exact: true }).element().scrollIntoView();
+    await commands.configurationEditorScreenshot(`773-failed-${device}-${theme}`);
+    const passed = withPreflight({ _tag: "Passed", checkedAt: "2026-10-30T12:01:00Z" });
+    await commands.workerPreflightResponses(encodeConfiguration(failed));
+    await action.click();
+    await expect.element(action).toBeDisabled();
+    await commands.finishWorkerPreflight(encodeConfiguration(passed), preflightBody(passed));
+    await expect.element(page.getByRole("row", { name: /Worker.*Passed/u })).toBeVisible();
+    await expect
+      .element(
+        page.getByText("SSH destination is unreachable. Restore connectivity to the worker.", {
+          exact: true,
+        }),
+      )
+      .not.toBeInTheDocument();
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
+    if (device === "phone")
+      page.getByRole("heading", { name: "Preflight", exact: true }).element().scrollIntoView();
+    await commands.configurationEditorScreenshot(`773-passed-${device}-${theme}`);
+  },
+);
+
+it("shows a server busy refusal and keeps the last checks", async () => {
+  await commands.workerPreflightResponses(encodeConfiguration(configuration));
+  await mount("/configuration/workers/eu-1");
+  const action = page.getByRole("button", { name: "Run preflight on eu-1", exact: true });
+  await action.click();
+  await commands.finishWorkerPreflight(
+    encodeConfiguration(configuration),
+    JSON.stringify({
+      error: "WorkerPreflightRejectedError",
+      message: "An attempt started on this worker. Try again after it ends.",
+    }),
+    409,
+  );
+  await expect
+    .element(page.getByRole("alert").filter({ hasText: "An attempt started" }))
+    .toBeVisible();
+  await expect.element(action).toBeEnabled();
 });

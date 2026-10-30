@@ -26,6 +26,7 @@ import {
   ConfigProvider,
   Context,
   DateTime,
+  Deferred,
   Effect,
   Fiber,
   FileSystem,
@@ -49,6 +50,61 @@ import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-
 const unused = () => Effect.die("unused");
 
 describe("Worker scheduler startup", () => {
+  it.effect("releases a canceled manual preflight reservation so a queued attempt can start", () =>
+    withWorkers(localWorkers([["local", 1]]), () =>
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>();
+        let initial = true;
+        const config = Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [],
+          workers: [{ name: "local", kind: "local" }],
+        });
+        const worker = WorkerName.make("local");
+        const executor = Layer.mock(Executor)({
+          kind: "local",
+          preflight: () =>
+            Effect.gen(function* () {
+              if (initial) {
+                initial = false;
+                return fullPreflight;
+              }
+              yield* Deferred.succeed(entered, undefined);
+              return yield* Effect.never;
+            }),
+        });
+        const context = yield* Layer.build(
+          stepExecutorLayer(config, []).pipe(
+            Layer.provide(MarcbachmannCelLayer),
+            Layer.provide(executor),
+            Layer.provide(fixedConfigLayer(config)),
+            Layer.provide(testAppLayer),
+          ),
+        );
+        const status = Context.get(context, WorkerStatus);
+        const steps = Context.get(context, StepExecutor);
+        const check = yield* status.runPreflight(worker).pipe(Effect.forkChild);
+        yield* Deferred.await(entered);
+        const agent = yield* developer;
+        const waiting = yield* steps
+          .reserve(runOf(1), submission(agent, 1), Option.some(worker))
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        assert.isUndefined(waiting.pollUnsafe());
+        assert.strictEqual((yield* status.checking).has(worker), true);
+        yield* Fiber.interrupt(check);
+        const lease = yield* Fiber.join(waiting);
+        assert.strictEqual(lease.worker, worker);
+        assert.strictEqual((yield* status.checking).size, 0);
+        assert.strictEqual(
+          (yield* Effect.flip(status.runPreflight(worker))).reason,
+          "attempt-running",
+        );
+        yield* lease.release;
+      }).pipe(Effect.scoped),
+    ),
+  );
+
   it.effect("fails startup with the worker message when every worker fails preflight", () =>
     Effect.gen(function* () {
       const executor = Layer.succeed(Executor)({

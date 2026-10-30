@@ -336,6 +336,8 @@ The sign-in page supports GitHub user authorization and one-time links from `usi
 
 Endpoint webhook mode shows **No webhook delivery received** in Needs attention after ten minutes without a verified delivery since startup. The entry identifies the public URL and checks for the App webhook active setting and secret. Dismiss and Undo apply. A verified delivery clears it, including a `ping`; polling continues independently. Settings shows the running endpoint mode and last hint time.
 
+**Configuration > Workers** provides **Run preflight** on each worker row and detail page. The action displays progress and refreshed checks, with remediation for failures. It is disabled with a reason while an attempt or preflight runs on the worker. `POST /api/workers/:worker/preflight` returns the stored checks and updates overview and Needs attention without a restart; busy workers return 409 `WorkerPreflightRejectedError`.
+
 Loop forms accept an integer or CEL priority with payload completion. **Preview** shows each matching item’s evaluated priority and any evaluation errors. Overview’s waiting text includes the priority captured when the run requested its worker slot.
 
 

@@ -1,3 +1,4 @@
+import { WorkerPreflightView } from "./preflight.ts";
 import { ProjectId } from "@usine/core/project";
 import { ProjectView } from "./overview.ts";
 import {
@@ -76,6 +77,7 @@ import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 
 const errorStatuses = {
+  WorkerPreflightRejectedError: 409,
   UpgradeError: 409,
   ConfigurationNotFound: 404,
   ConfigurationStoreError: 500,
@@ -417,6 +419,11 @@ const operatorApi = HttpApi.make("OperatorApi")
 /**
  * The operator's HTTP API contract for reads and interventions, shared by server handlers and
  * generated clients. An action's acknowledgement only means the request was accepted.
+ *
+ * `POST /api/workers/:worker/preflight` checks one idle worker and returns its stored
+ * prerequisites, harness checks, and container limits, including failed checks with remediation.
+ * It returns 409 `WorkerPreflightRejectedError` while an attempt or another preflight uses
+ * that worker. The result updates configuration, overview, and desk reads without a restart.
  */
 export const OperatorApi = operatorApi.add(
   HttpApiGroup.make("operator")
@@ -668,6 +675,15 @@ export const OperatorApi = operatorApi.add(
         .annotate(
           OpenApi.Description,
           "Moves the item using the lanes of the project that contains its repository.",
+        ),
+      HttpApiEndpoint.post("runWorkerPreflight", "/api/workers/:worker/preflight", {
+        params: { worker: WorkerName },
+        success: WorkerPreflightView,
+      })
+        .annotate(OpenApi.Summary, "Run worker preflight")
+        .annotate(
+          OpenApi.Description,
+          "Checks one idle worker and replaces its stored capability results, including failures with remediation. Returns 409 while an attempt or another preflight uses the worker.",
         ),
       HttpApiEndpoint.post("discardLeftovers", "/api/workers/:worker/discard-leftovers", {
         params: { worker: WorkerName },

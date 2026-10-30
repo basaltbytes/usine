@@ -240,7 +240,7 @@ export const addLoop = "Choose New to add a loop. New loops start paused.";
 export const addRepository = "Choose New to register a repository.";
 
 export const preflightTiming =
-  "At startup, and when a revision adds workers, slots, or an agent with a new harness, model, or effort";
+  "At startup, on demand, and when a revision changes worker slots or adds a worker or agent brain";
 
 export const formCopy = {
   text: "Edit as text",
@@ -479,3 +479,9 @@ export const webhookStatusCopy = {
 
 export const upgradeCancel = "Cancel pending upgrade";
 export const upgradeTarget = (version: string): string => `Requested version: ${version}`;
+export const runPreflightLabel = "Run preflight";
+export const runningPreflightLabel = "Running preflight…";
+export const preflightBusyReason = "Available after all attempts end";
+export const preflightSetupReason = "Available after GitHub App setup";
+export const preflightRunningReason = "A preflight is already running";
+export const preflightCommand = (worker: string) => `Run preflight on ${worker}`;

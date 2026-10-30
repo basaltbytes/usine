@@ -1,5 +1,64 @@
 # @usine/executor
 
+## 0.5.0
+
+### Minor Changes
+
+- d1fd769: Run Boat workers with gateway-held Claude and ChatGPT subscriptions over Tailscale. Add saved snapshot validation, per-sandbox ephemeral auth keys, gateway name resolution, and tailnet cleanup. Configure a prepared snapshot and Tailscale OAuth environment variables to use a Boat gateway without LLM API keys.
+- a22dc8e: Create provisioned machines after persisting their attempt, with the attempt label present in the creation request. Retry provider failures within the same attempt and release its machine on cancellation. `WorkerMachines.create` now requires the attempt ID; the separate `assign` operation is removed.
+  
+  Resume worker reservations when creation backoff expires, even if the attempt that started the pause was canceled.
+- a22dc8e: Configure provisioner SSH waits, creation backoff bounds, and machine check intervals through `provisioner.timings`, in seconds. Defaults preserve the existing wait and backoff durations, with machine checks every 24 hours.
+
+### Patch Changes
+
+- 8cb790a: Classify Boat plan limits, including paid-plan machine sizes, as quota refusals. Keep temporary API rate limits separate and preserve the provider message.
+- a7692ae: Upgrade the Codex protocol baseline and worker images to 0.164.0, which includes updated TLS certificate roots. Preflight rejects 0.153.4 and accepts 0.159.0 through 0.159.3 for one release while existing worker images upgrade. The gateway model-provider configuration remains compatible. Claude Code stays at 2.1.308.
+- 129d669: Start with healthy workers when another worker fails preflight. Exclude failed workers from scheduling, show their messages in Needs attention, and retry with backoff until they recover. Worker preflight includes address and credential initialization. Startup still fails if every worker fails, and live reload still refuses revisions whose preflight fails.
+- 9ea42f2: Confirm parent stops before releasing reattached checkouts, including read-permission checkouts. Save each checkout's base commit so recovery removes clean checkouts without creating salvage branches, preserves committed work, and harvests comments with a fresh credential when a later stop succeeds.
+  
+  Keep a Cloudflare sandbox when its reattachment closes before launch and the parent stop fails. Revoke its credentials while preserving the checkout for recovery.
+- 06a10bf: Disable Codex plugin and app sync, startup update checks, and analytics in child and preflight commands. Disable Claude Code's claude.ai connectors and nonessential traffic in the attempt environment on every worker kind.
+- 52c76fa: Warn at SSH worker preflight when concurrent container memory limits exceed host memory minus the 1 GiB reserve. Set each container's swap limit equal to its memory limit to prevent attempts from swapping the host.
+- 0f4d653: Report an HTTP 403 on the executor's salvage push as a `GitHubPushFailure` with the repository, refused ref, GitHub's stderr message, and the single-repository installation token scope. The run page and Needs attention show the failure while the checkout remains available for salvage recovery. The failure does not retry the attempt automatically, and a later successful salvage preserves its failure history.
+  
+  `SalvageRetained.pushFailure` records the typed failure. Older salvage records decode this field as `None`. Canceled attempts remain canceled, and questions and blockers retain item suppression.
+- 56e79a7: Settle attempts after confirmed cancellation so a task that completes or fails while its relay fails doesn't trigger repeated cancellation on restart. Preserve terminal delivery state and skip settlement during worker drains.
+- 52c76fa: Show workers with three consecutive unanswered probes in Needs attention, with the last answer time and links to affected runs. Keep worker status visible beyond recent transcript pages, clear recovered workers even after an orchestrator restart, and recheck memory on slot reductions during reload.
+  
+  Distinguish a worker's first confirmed answer from outage recovery in the transcript and its checkpoints.
+- a22dc8e: Sweep a removed provisioned worker's machines before discarding its provider token. Warn at startup about machines for the instance whose worker is no longer configured, and use fresh credentials when a worker is added again.
+  
+  Preserve machines with unrecovered checkouts when their worker is removed and restored. Retain their recovery metadata without retaining the removed worker's credentials.
+- 7247fc9: Share a persistent Turborepo cache between attempt containers alongside the pnpm store. Derive each container's CPU limit from all host CPUs divided by `max_concurrent_attempts`, and pin Node.js 22 for the attempt image and new worker machines.
+- 8e49188: Add `githubBotLogin(kind, appLogin)` to share the GitHub writer mapping between the scheduler and run reader. Local, SSH, and Cloudflare workers use the supplied App login; exe.dev workers use the integration bot declared in the exe.dev adapter.
+- Updated dependencies [d1fd769]
+- Updated dependencies [a7692ae]
+- Updated dependencies [6541e90]
+- Updated dependencies [3fa96e0]
+- Updated dependencies [c3ace3b]
+- Updated dependencies [6d7f66f]
+- Updated dependencies [93bbe77]
+- Updated dependencies [7bf348a]
+- Updated dependencies [a22dc8e]
+- Updated dependencies [a7f5a57]
+- Updated dependencies [06a10bf]
+- Updated dependencies [56d4c04]
+- Updated dependencies [9af38cb]
+- Updated dependencies [f54b3bd]
+- Updated dependencies [0f4d653]
+- Updated dependencies [56e79a7]
+- Updated dependencies [52c76fa]
+- Updated dependencies [98eb9cd]
+- Updated dependencies [2ca5ae8]
+- Updated dependencies [460d50b]
+- Updated dependencies [4f37e20]
+  - @usine/core@0.6.0
+  - @usine/agents@0.6.0
+  - @usine/cloudflare@0.1.1
+  - @usine/durable@0.2.1
+  - @usine/gateway@0.2.1
+
 ## 0.4.0
 
 ### Minor Changes

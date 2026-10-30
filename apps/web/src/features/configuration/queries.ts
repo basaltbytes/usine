@@ -1,3 +1,4 @@
+import type { WorkerName } from "@usine/core/worker";
 import type { RepositoryName } from "@usine/core/repository";
 import {
   ConfigurationEntity,
@@ -19,6 +20,7 @@ import {
   infiniteQueryOptions,
   queryOptions,
   useMutation,
+  useIsMutating,
   useQueryClient,
 } from "@tanstack/react-query";
 import type { LoopName } from "@usine/core/loop";
@@ -198,3 +200,20 @@ export const loopPreviewQuery = (draft: LoopPreviewRequest) =>
     retry: false,
     staleTime: 0,
   });
+
+export const useWorkerPreflight = (worker: WorkerName) => {
+  const client = useQueryClient();
+  const mutationKey = ["worker-preflight", worker];
+  const pending = useIsMutating({ mutationKey }) > 0;
+  const mutation = useMutation({
+    mutationKey,
+    mutationFn: () => api((client) => client.runWorkerPreflight({ params: { worker } })),
+    onSettled: () =>
+      Promise.all(
+        [configurationQuery().queryKey, overviewQuery().queryKey, deskQuery().queryKey].map(
+          (queryKey) => client.invalidateQueries({ queryKey }),
+        ),
+      ),
+  });
+  return { ...mutation, isPending: pending };
+};

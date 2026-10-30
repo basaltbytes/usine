@@ -1,3 +1,4 @@
+import { PreflightAction } from "./action";
 import { preflightTiming } from "~/features/configuration/strings";
 import { entityKey } from "~/features/configuration/lib/entities";
 import { Link } from "@tanstack/react-router";
@@ -84,6 +85,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
         </DetailSection>
         {worker.provisioner !== null && <Machines worker={worker} />}
         <DetailSection title="Preflight" aside={preflightTiming}>
+          <PreflightAction worker={worker} />
           {worker.provisioner !== null && (
             <p className="text-muted-foreground">{provisionedHarnessCheckDescription}</p>
           )}
