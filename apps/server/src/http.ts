@@ -393,6 +393,8 @@ export const staticRoutes = (webRoot: string) => {
       Effect.gen(function* () {
         const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
         const reservedNamespace =
+          pathname === "/webhooks" ||
+          pathname.startsWith("/webhooks/") ||
           pathname === "/api" ||
           pathname.startsWith("/api/") ||
           pathname === "/assets" ||
@@ -425,12 +427,14 @@ export const serverLayer = (
   services:
     | Layer.Layer<ServerUpgrades | ConfigurationEditor | GitHubApp | GitHubPolling>
     | Layer.Layer<never> = Layer.empty,
+  webhooks: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.empty,
 ) => {
   const authenticated = authenticatedRoutes(auth);
   const routes = Layer.mergeAll(
     apiRoutes(origin).pipe(Layer.provide(authenticated.guard.layer)),
     staticRoutes(webRoot),
     authenticated.routes,
+    webhooks,
   ).pipe(HttpRouter.provideRequest(Layer.merge(backend, services)));
   return HttpRouter.serve(routes).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),

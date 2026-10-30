@@ -1,3 +1,5 @@
+import { WebhookHealth } from "../webhooks.ts";
+import { webhookAttentionFor } from "./webhooks.ts";
 import type { ConfigurationStoreError } from "@usine/config/configuration";
 import { groupProjectViews } from "./projects.ts";
 import { readApprovalItems } from "./approval.ts";
@@ -238,6 +240,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const workerStatus = yield* WorkerStatus;
   const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
   const poolAttention = poolAttentionFor(reader, acknowledgements);
+  const webhookAttention = webhookAttentionFor(yield* WebhookHealth, acknowledgements);
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -699,6 +702,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           instance.config.workers.map(({ name }) => name),
         ).pipe(
           Effect.flatMap(poolAttention),
+          Effect.flatMap((view) => webhookAttention(view, instance.config.webhooks)),
           Effect.tap(({ needsYou, dismissedNeeds }) =>
             reports.pollReported && reports.scheduleReported
               ? acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey))
@@ -880,6 +884,7 @@ export class OperatorObservation extends Context.Service<
   static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
     Layer.provide(
       Layer.mergeAll(
+        WebhookHealth.layer,
         TaskReader.layer,
         OperatorDesk.layer,
         LoopMatches.layer,
@@ -1431,6 +1436,7 @@ export {
   UnconfiguredWorkerNeed,
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
+  WebhookSilenceNeed,
   UnconfirmedStopNeed,
   NeedView,
   PoolLimitNeed,

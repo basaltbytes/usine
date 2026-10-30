@@ -22,6 +22,7 @@ const appLayer = Layer.succeed(GitHubApp)({
     ),
   botAccount: () => Effect.die("not used by history tests"),
   projectAccess: () => Effect.die("not used by history tests"),
+  configureWebhook: () => Effect.die("unused webhook configuration"),
   deliveries: () => Effect.die("unused webhook deliveries"),
   workerToken: () => Effect.die("not used by history tests"),
 });

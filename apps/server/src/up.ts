@@ -1,10 +1,13 @@
+import { webhookEndpoint } from "./webhooks.ts";
+import { WebhookHealth } from "@usine/orchestrator/webhooks";
+import { PollingTriggers } from "@usine/orchestrator/polling-triggers";
 import { Authentication, authenticationLayer, seedOperator } from "./auth/authentication.ts";
 import { GitHubSignIn, githubSignInLayer } from "./auth/github.ts";
 import { AuthStore } from "./auth/store.ts";
 import { sqliteAuthLayer } from "./auth/sqlite.ts";
 import { writeAdminToken } from "./auth/local.ts";
 import type { AuthServices } from "./auth/http.ts";
-import { FetchHttpClient } from "effect/http";
+import { FetchHttpClient, type HttpRouter } from "effect/http";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubPolling } from "@usine/github/polling";
@@ -82,6 +85,7 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly upgrades: ServerUpgrades["Service"];
   readonly configurationEditor: ConfigurationEditor["Service"];
   readonly catalog?: Layer.Layer<GitHubApp | GitHubPolling>;
+  readonly webhooks?: Layer.Layer<never, never, HttpRouter.HttpRouter>;
 }) {
   yield* Layer.build(
     serverLayer(
@@ -95,6 +99,7 @@ const serve = Effect.fnUntraced(function* (options: {
         Layer.succeed(ServerUpgrades, options.upgrades),
         Layer.succeed(ConfigurationEditor, options.configurationEditor),
       ),
+      options.webhooks,
     ),
   ).pipe(
     Effect.mapError((error) => serverStartError(options.port, error)),
@@ -209,6 +214,12 @@ const start = Effect.fnUntraced(function* (
     const context = yield* Layer.build(runtime).pipe(
       Effect.provideService(RunEngineShutdown, shutdown),
     );
+    const webhooks = yield* webhookEndpoint(
+      instances,
+      Context.get(context, PollingTriggers),
+      Context.get(context, WebhookHealth),
+      Context.get(context, GitHubApp),
+    );
     const operator = Context.get(context, Operator);
     const orchestrator = Context.get(context, Orchestrator);
     const engine = Context.get(context, RunEngine);
@@ -243,6 +254,7 @@ const start = Effect.fnUntraced(function* (
           origin,
           url,
           openSetupPage: false,
+          webhooks,
           upgrades,
         }),
         orchestrator.run.pipe(

@@ -1,3 +1,4 @@
+import { WebhookHealth } from "../src/webhooks.ts";
 import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements, type AttentionAcknowledgement } from "@usine/engine/attention";
@@ -710,6 +711,55 @@ const testLayer = (
 };
 
 describe("Operator", () => {
+  it.effect(
+    "refreshes endpoint attention outside the cached overview and shares delivery health",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const endpointInstance = new LoadedInstance({
+          ...instance,
+          config: new UsineConfig({
+            ...instance.config,
+            webhooks: {
+              mode: "endpoint",
+              publicUrl: new URL("https://usine.example/webhooks/github"),
+            },
+          }),
+        });
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const health = yield* WebhookHealth;
+          const warnings = operator
+            .overview(endpointInstance)
+            .pipe(
+              Effect.map(({ needsYou }) =>
+                needsYou.filter((need) => need._tag === "WebhookSilenceNeed"),
+              ),
+            );
+          assert.deepStrictEqual(yield* warnings, []);
+          yield* TestClock.adjust("10 minutes");
+          const [need] = yield* warnings;
+          assert(need !== undefined);
+          assert.strictEqual(yield* Ref.get(reads), 1);
+          yield* operator.dismissNeed(endpointInstance, attentionKey(need));
+          assert.deepStrictEqual(yield* warnings, []);
+          yield* operator.undoDismissNeed(attentionKey(need));
+          assert.strictEqual((yield* warnings).length, 1);
+          const readsBeforeDelivery = yield* Ref.get(reads);
+          yield* health.received;
+          assert.deepStrictEqual(yield* warnings, []);
+          assert.strictEqual(yield* Ref.get(reads), readsBeforeDelivery);
+        }).pipe(
+          Effect.provide(
+            Layer.merge(testLayer(approved, moved, reads, revision), WebhookHealth.layer),
+          ),
+        );
+      }),
+  );
+
   it.effect("groups running attempts on one silent worker and removes ended attempts", () =>
     Effect.gen(function* () {
       const original = snapshot.attempts[0];

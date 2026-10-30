@@ -198,6 +198,7 @@ export const failureMessage = (failure: CliFailure): string =>
       `usine up stopped: could not listen on 127.0.0.1:${port}${because(cause)}. Run usine up --port <port> to use another port.`,
     ResourceAttributesError: ({ variable, message }) =>
       `usine up did not start: ${variable} is invalid: ${clause(message)}. Set it to comma-separated key=value pairs with percent-encoded keys and values, or unset it.`,
+    WebhookConfigurationError: ({ message }) => message,
     AuthError: ({ message }) => message,
     ConfigCommandError: ({ message }) => message,
     ConfigurationInvalid: ({ problems }) =>
