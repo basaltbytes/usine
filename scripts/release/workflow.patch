@@ -64,3 +64,39 @@ index 737f8df..0000000
 -  writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
 -  console.log(`${manifest.name} ${manifest.version}`);
 -}
+diff --git a/README.md b/README.md
+index 909662f..bef9f44 100644
+--- a/README.md
++++ b/README.md
+@@ -63,7 +63,7 @@ Tests import other workspace packages from their `dist`, and the `@usine/server`
+ 
+ [Changesets](https://github.com/changesets/changesets) handles releases: add a changeset for each user-visible change. CI opens a **Version Packages** PR. Merging it stages the changed versions for npm's `latest` dist-tag; an npm maintainer approves them before they become installable. 0.x APIs change without notice.
+ 
+-The repository pins pnpm 11.20.0, which supports [`pnpm stage`](https://pnpm.io/11.x/cli/stage) and OIDC trusted publishing. The `release` job uses `pnpm stage publish -r --tag latest --no-git-checks`. The `next` job publishes snapshots directly, so keep **Allow npm publish** enabled on every `@usine` trusted publisher. Both jobs use `release.yml`, the workflow registered with npm.
++The repository pins pnpm 11.20.0, which supports [`pnpm stage`](https://pnpm.io/11.x/cli/stage) and OIDC trusted publishing. The `release` job uses `pnpm stage publish -r --tag latest --no-git-checks`. The `next` job runs `pnpm prerelease:publish <run number> <commit sha> <run attempt>` to publish snapshots directly with provenance, so keep **Allow npm publish** enabled on every `@usine` trusted publisher. Both jobs use `release.yml`, the workflow registered with npm.
+ 
+ ### Approval
+ 
+@@ -91,7 +91,7 @@ gh run rerun <run-id> --job <release-job-id>
+ gh run watch <run-id> --exit-status
+ ```
+ 
+-The rerun skips versions that npm already exposes. The tag step checks every publishable workspace version against the public npm registry before running `changeset git-tag`; Changesets then pushes the tags and creates GitHub releases. A pending approval skips all tags and releases, and a registry error fails the job. Rerunning the original job preserves the source commit. GitHub also reruns dependent jobs; `next` skips snapshot versions that are already public. Do not run `changeset git-tag` directly or dispatch a new release at a newer commit to finalize an older release.
++The rerun skips versions that npm already exposes. The tag step checks every publishable workspace version against the public npm registry before running `changeset git-tag`; Changesets then pushes the tags and creates GitHub releases. A pending approval skips all tags and releases, and a registry error fails the job. Rerunning the original job preserves the source commit. GitHub also reruns dependent jobs; `next` publishes a fresh snapshot for each job rerun. Do not run `changeset git-tag` directly or dispatch a new release at a newer commit to finalize an older release.
+ 
+ If a release fails after staging some packages, inspect its stage IDs and approve the valid artifacts before retrying that job. Use `pnpm stage reject <stage-id> --otp <code>` for artifacts that need replacement. The retry stages any versions that are still absent from the public registry; repeat approval and rerun until all versions are public and the GitHub releases exist.
+ 
+@@ -99,11 +99,9 @@ If the `usine` npm org is unavailable, ADR 0012 moves every package to the `@usi
+ 
+ ### Snapshot publish retries
+ 
+-The retry publisher is `pnpm prerelease:publish <run number> <commit sha> <run attempt>`. To enable it in Release, apply `scripts/release/workflow.patch` with credentials that can update GitHub Actions workflows. The patch replaces the existing snapshot version, build, and publish steps and removes the superseded version script. Until the patch is applied, Release uses the existing direct publish command.
++Each snapshot uses a version such as `0.4.1-next.312.g1a2b3c4.1.2`: workflow run 312, commit `1a2b3c4`, job run attempt 1, and publish attempt 2. The `next` job retries Sigstore transparency-log 409s and previously staged-version conflicts up to three publish attempts, waiting 15 and 30 seconds before retrying. Each retry versions and rebuilds every published package from the original manifests so workspace dependencies refer to the same snapshot. Provenance remains required on every publish.
+ 
+-Each snapshot uses a version such as `0.4.1-next.312.g1a2b3c4.1.2`: workflow run 312, commit `1a2b3c4`, job run attempt 1, and publish attempt 2. The retry publisher retries Sigstore transparency-log 409s and previously staged-version conflicts up to three publish attempts, waiting 15 and 30 seconds before retrying. Each retry versions and rebuilds every published package from the original manifests so workspace dependencies refer to the same snapshot. Provenance remains required on every publish.
+-
+-After an upload succeeds, the publisher checks every snapshot version on the public registry up to six times, ten seconds apart. If versions remain unavailable, it retries with a fresh snapshot. Registry errors and unrelated publish or build errors fail the job immediately. Logs report the snapshot versions, retry reason, delay, and final outcome.
++After an upload succeeds, the job checks every snapshot version on the public registry up to six times, ten seconds apart. If versions remain unavailable, it retries with a fresh snapshot. Registry errors and unrelated publish or build errors fail the job immediately. Logs report the snapshot versions, retry reason, delay, and final outcome.
+ 
+ Retries use fresh versions because a staged version is occupied but absent from public registry metadata. npm requires interactive authentication to approve or reject it; the job's OIDC credentials cannot perform those operations. Failed attempts can leave partial or staged snapshots. An npm maintainer can inspect and reject abandoned stage IDs with the commands above. This retry policy applies to `next`; stable releases keep the approval procedure above.
+ 
