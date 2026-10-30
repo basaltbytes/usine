@@ -1,5 +1,11 @@
-import { Effect, Layer, Option } from "effect";
-import { authFailure, type GitHubUserId, InstanceToken, Member, type TokenId } from "./model.ts";
+import { Clock, Effect, Layer, Option } from "effect";
+import {
+  authFailure,
+  type GitHubUserId,
+  type InstanceToken,
+  Member,
+  type TokenId,
+} from "./model.ts";
 import { AuthStore } from "./store.ts";
 
 export const memoryAuthLayer = Layer.sync(AuthStore, () => {
@@ -62,14 +68,24 @@ export const memoryAuthLayer = Layer.sync(AuthStore, () => {
         if (token === undefined) return Option.none();
         const member = members.get(token.memberId);
         if (member === undefined) return Option.none();
-        const used = new InstanceToken({ ...token, lastUsedAt: now });
-        tokens.set(token.id, used);
+        const used = token.recordUse(now);
+        if (used !== token) tokens.set(token.id, used);
         return Option.some({ member, token: used });
       }),
     ),
-    tokens: Effect.fn("AuthStore.tokens")((id) =>
-      Effect.sync(() => [...tokens.values()].filter((token) => token.memberId === id)),
-    ),
+    tokens: Effect.fn("AuthStore.tokens")(function* (id) {
+      yield* Effect.annotateCurrentSpan({ memberId: id });
+      const now = yield* Clock.currentTimeMillis;
+      let expired = 0;
+      for (const [key, token] of tokens) {
+        if (token.expiresAt <= now) {
+          tokens.delete(key);
+          expired++;
+        }
+      }
+      if (expired > 0) yield* Effect.logInfo("Expired instance tokens deleted", { count: expired });
+      return [...tokens.values()].filter((token) => token.memberId === id);
+    }),
     revoke: Effect.fn("AuthStore.revoke")(function* (member, id) {
       if (tokens.get(id)?.memberId === member) tokens.delete(id);
       yield* Effect.logInfo("Instance token revoked", { memberId: member, tokenId: id });

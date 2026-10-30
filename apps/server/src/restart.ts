@@ -1,3 +1,4 @@
+import { readAdminToken } from "./auth/local.ts";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Console, Effect, Option } from "effect";
 import {
@@ -43,14 +44,14 @@ const operatorPort = Effect.fn("Cli.operatorPort")(function* (
   const ports = yield* listeningPorts(pid);
   const port = yield* Effect.findFirst(ports, (port) =>
     listRuns(port, directory).pipe(
-      Effect.tapError((error) =>
+      Effect.as(true),
+      Effect.catchTag("OperatorApiError", (error) =>
         Effect.logDebug("A port of the instance process doesn't answer the operator API", {
           pid,
           port,
           reason: error.reason,
-        }),
+        }).pipe(Effect.as(false)),
       ),
-      Effect.isSuccess,
     ),
   );
   yield* Effect.annotateCurrentSpan({ pid, ports, port: Option.getOrUndefined(port) });
@@ -91,11 +92,12 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
     );
     return yield* new UnrecordedInstanceError({ command: "restart", directory, pid: state.pid });
   }
+  yield* readAdminToken(directory);
   const pid = state.pid.value;
   yield* Effect.annotateCurrentSpan({ pid });
   const launch = yield* fallback;
   const port = yield* operatorPort(pid, directory).pipe(
-    Effect.tapError((error) =>
+    Effect.tapErrorTag("ListeningPortsError", (error) =>
       Effect.logWarning("Refusing to restart: the ports of the instance process are unknown", {
         pid,
         reason: error.reason,

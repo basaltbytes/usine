@@ -161,9 +161,9 @@ Operator API requests require an instance token or a browser session, including 
 
 `GET /api/version` is an upgrade health endpoint that returns only the running release string. It remains public so helpers copied by releases before member authentication can verify the new server during a managed upgrade. Upgrade status and upgrade requests require authentication.
 
-Start `usine up` and open the printed **Sign in** URL. The link expires after 10 minutes and works once. To print another link, run `usine sign-in-link` in the instance folder. This also works before GitHub user authorization is configured. Keep these URLs private.
+When `usine up` writes to a terminal, open the printed **Sign in** URL. The link expires after 10 minutes and works once. For a detached instance, a system service, or a new link, run `usine sign-in-link` in the instance folder. This also works before GitHub user authorization is configured. Keep these URLs private.
 
-`usine up` writes `.usine/admin-token` with mode `0600` and replaces it on each start. Local status and lifecycle commands read this file. Configuration commands access the local database directly; access to the instance folder is required.
+`usine up` writes `.usine/admin-token` with mode `0600` and replaces it on each start. Local status and lifecycle commands require this file to be owned by the current user, have mode `0600`, and be a regular file rather than a symbolic link. An unreadable or unsafe file fails the command before stop or restart sends a signal. Configuration commands access the local database directly; access to the instance folder is required.
 
 ### GitHub App settings
 
@@ -182,9 +182,9 @@ Add members by GitHub login on **Members**. The last member cannot be removed. R
 
 ### Device tokens
 
-Run `usine sign-in <instance-origin>`, open the GitHub device page, and enter the printed code. After authorization, the CLI prints an instance token once. Store it in a secret manager and send it as `Authorization: Bearer <token>`. The instance stores only its hash. GitHub user tokens are discarded after reading identity.
+Run `usine sign-in <instance-origin>`, open the GitHub device page, and enter the printed code. After authorization, the CLI prints an instance token once. Store it in a secret manager and send it as `Authorization: Bearer <token>`. The instance stores only its hash. After reading identity, usine requests revocation of the GitHub user token and wipes its local copy. A failed revocation logs a warning and preserves the sign-in result.
 
-**Tokens** lists the signed-in member's browsers and devices, creation times, and last use. Revoke an entry to end access. Device tokens remain valid until revoked; browser sessions expire after 30 days. **Sign out** revokes the current browser session.
+**Tokens** lists the signed-in member's browsers and devices, creation times, and last use, updated at most once a minute per token. Listing tokens deletes expired credentials and excludes them from the response. Revoke an entry to end access. Device tokens remain valid until revoked; browser sessions expire after 30 days. **Sign out** revokes the current browser session.
 
 Browser sessions use an `HttpOnly`, `SameSite=Strict` cookie, with `Secure` except for local HTTP origins. Browser writes require `X-Usine-CSRF`. The bundled UI reads its CSRF cookie and sends that header. Health and sign-in endpoints are public; the separate GitHub webhook listener verifies delivery signatures. Sign-in initiation, link issuance, GitHub exchanges, and invalid challenges have separate instance-wide limits of 60 requests per operation per minute. Invalid challenges do not consume the limits for valid sign-ins. Device polls also honor GitHub's interval.
 

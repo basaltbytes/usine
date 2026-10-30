@@ -123,7 +123,7 @@ describe("usine status", () => {
     assert.isTrue(report.running);
     assert.match(report.lines.join("\n"), /runs {6}unavailable: /u);
     const error = await Effect.runPromise(
-      listRuns(port).pipe(Effect.flip, Effect.provide(services)),
+      listRuns(port, directory).pipe(Effect.flip, Effect.provide(services)),
     );
     assert.instanceOf(error, OperatorApiError);
     assert.strictEqual(error.url, `http://127.0.0.1:${port}/api/overview`);

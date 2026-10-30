@@ -1,3 +1,4 @@
+import { readAdminToken } from "./auth/local.ts";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
 import { Config, Console, Duration, Effect, Option, Schema } from "effect";
@@ -80,13 +81,12 @@ export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment"
   directory: InstanceDirectory,
 ) {
   const names = yield* gatewayTokenVariables(port, directory).pipe(
-    Effect.tapError((error) =>
+    Effect.catchTag("OperatorApiError", (error) =>
       Effect.logWarning("Could not read the gateway token variables of the instance", {
         url: error.url,
         reason: error.reason,
-      }),
+      }).pipe(Effect.as<ReadonlyArray<string>>([])),
     ),
-    Effect.orElseSucceed((): ReadonlyArray<string> => []),
   );
   const missing: Array<string> = [];
   for (const name of names) {
@@ -107,13 +107,12 @@ export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment"
 const liveRuns = (port: Port, directory: InstanceDirectory) =>
   listRuns(port, directory).pipe(
     Effect.map((runs) => runs.filter(hasLiveAttempt).map(({ id }) => id)),
-    Effect.tapError((error) =>
+    Effect.catchTag("OperatorApiError", (error) =>
       Effect.logWarning("Could not list the running runs; the drain still waits for them", {
         url: error.url,
         reason: error.reason,
-      }),
+      }).pipe(Effect.as<ReadonlyArray<RunId>>([])),
     ),
-    Effect.orElseSucceed((): ReadonlyArray<RunId> => []),
   );
 
 /**
@@ -186,6 +185,7 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
     force: options.force,
     unit: Option.getOrUndefined(unit),
   });
+  if (Option.isNone(record)) yield* readAdminToken(directory);
   const stopping = Option.exists(record, ({ stoppingSince }) => stoppingSince !== undefined);
   const runs = Option.isSome(record) ? yield* liveRuns(record.value.launch.port, directory) : [];
   if (stopping) {

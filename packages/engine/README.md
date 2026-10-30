@@ -191,7 +191,7 @@ pnpm --filter @usine/engine db:generate --name <migration_name>
 
 ## Member authentication
 
-Operator cancellations persist the authenticated member login. The approval migration converts stored `github-ask` channels to `ui` while preserving the approver and removes that channel from the table constraint.
+Operator cancellations persist the authenticated member login. The approval migration converts stored `github-ask` channels to `ui` while preserving the approver and removes that channel from the table constraint. The migration folder is `20261029101340_member_approval_source`; the SQLite adapter updates its former ledger name before migrating so an existing instance does not apply it again.
 
 ## Test storage
 

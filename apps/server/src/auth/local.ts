@@ -1,5 +1,5 @@
 import { InstanceDirectory } from "@usine/core/instance";
-import { Effect, FileSystem, Redacted, Schema } from "effect";
+import { Effect, FileSystem, Option, Redacted, Schema } from "effect";
 import { authFailure } from "./model.ts";
 import { randomSecret } from "./crypto.ts";
 
@@ -10,20 +10,27 @@ export const readAdminToken = Effect.fn("Authentication.readAdminToken")(functio
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = file(directory);
-  const info = yield* fs
-    .stat(path)
-    .pipe(
-      Effect.mapError(() =>
-        authFailure("The local admin token is missing. Start usine up first.", 503),
-      ),
+  const owner = process.getuid?.();
+  const failure = (reason: string) =>
+    authFailure(
+      `${reason}: ${path}. Expected a regular file owned by uid ${owner ?? "of the current user"} with mode 0600, without a symbolic link.`,
+      503,
     );
-  if (info.type !== "File" || (info.mode & 0o777) !== 0o600)
-    return yield* authFailure("The local admin token must have mode 0600.", 503);
+  yield* Effect.annotateCurrentSpan({ path });
+  const info = yield* fs
+    .lstat(path)
+    .pipe(Effect.mapError(() => failure("Could not inspect the local admin token")));
+  if (
+    info.type !== "File" ||
+    (info.mode & 0o7777) !== 0o600 ||
+    !Option.exists(info.uid, (uid) => uid === owner)
+  )
+    return yield* failure("Unsafe local admin token");
   const raw = yield* fs
     .readFileString(path)
-    .pipe(Effect.mapError(() => authFailure("Could not read the local admin token.", 503)));
+    .pipe(Effect.mapError(() => failure("Could not read the local admin token")));
   const token = yield* Schema.decodeUnknownEffect(Secret)(raw.trim()).pipe(
-    Effect.mapError(() => authFailure("The local admin token is invalid. Restart usine up.", 503)),
+    Effect.mapError(() => failure("Invalid local admin token; restart usine up")),
   );
   return Redacted.make(token);
 });

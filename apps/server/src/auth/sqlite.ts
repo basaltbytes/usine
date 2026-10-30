@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Schema } from "effect";
+import { Clock, Effect, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { make as makeMigrator, fromRecord } from "effect/sql/Migrator";
 import { AuthError, authFailure, InstanceToken, Member } from "./model.ts";
@@ -133,17 +133,35 @@ export const sqliteAuthLayer = Layer.effect(
             yield* sql`SELECT value FROM usine_members WHERE id = ${token.memberId}`;
           const member = (yield* decodeRows(MemberJson, memberRows))[0];
           if (member === undefined) return Option.none();
-          const used = new InstanceToken({ ...token, lastUsedAt: now });
+          yield* Effect.annotateCurrentSpan({ memberId: member.id, tokenId: token.id });
+          const used = token.recordUse(now);
+          if (used === token) {
+            yield* Effect.logDebug("Instance token last use unchanged", { tokenId: token.id });
+            return Option.some({ member, token });
+          }
           const value = yield* Schema.encodeEffect(TokenJson)(used);
-          yield* sql`UPDATE usine_instance_tokens SET value = ${value} WHERE id = ${token.id}`;
-          return Option.some({ member, token: used });
-        }).pipe(transaction, Effect.catch(failure("authenticate"))),
+          const updated =
+            yield* sql`UPDATE usine_instance_tokens SET value = ${value} WHERE id = ${token.id} AND json_extract(value, '$.lastUsedAt') = ${token.lastUsedAt} RETURNING id`;
+          yield* Effect.logDebug("Instance token last use recorded", {
+            memberId: member.id,
+            tokenId: token.id,
+            updated: updated.length > 0,
+          });
+          return Option.some({ member, token: updated.length > 0 ? used : token });
+        }).pipe(Effect.catch(failure("authenticate"))),
       ),
       tokens: Effect.fn("AuthStore.tokens")((id) =>
-        sql`SELECT value FROM usine_instance_tokens WHERE member_id = ${id}`.pipe(
-          Effect.flatMap((rows) => decodeRows(TokenJson, rows)),
-          Effect.catch(failure("list tokens")),
-        ),
+        Effect.gen(function* () {
+          yield* Effect.annotateCurrentSpan({ memberId: id });
+          const now = yield* Clock.currentTimeMillis;
+          const expired =
+            yield* sql`DELETE FROM usine_instance_tokens WHERE expires_at <= ${now} RETURNING id`;
+          if (expired.length > 0)
+            yield* Effect.logInfo("Expired instance tokens deleted", { count: expired.length });
+          return yield* sql`SELECT value FROM usine_instance_tokens WHERE member_id = ${id} AND expires_at > ${now}`.pipe(
+            Effect.flatMap((rows) => decodeRows(TokenJson, rows)),
+          );
+        }).pipe(Effect.catch(failure("list tokens"))),
       ),
       revoke: Effect.fn("AuthStore.revoke")((member, id) =>
         sql`DELETE FROM usine_instance_tokens WHERE id = ${id} AND member_id = ${member}`.pipe(

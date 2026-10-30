@@ -3,6 +3,8 @@ import { OperatorLogin } from "@usine/core/operator";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
+import { TestClock } from "effect/testing";
+import { DatabaseSync } from "node:sqlite";
 import { Effect, FileSystem, Layer, Option } from "effect";
 import { assert, describe, it } from "vitest";
 import { memoryAuthLayer } from "../../src/auth/memory.ts";
@@ -53,9 +55,9 @@ for (const [name, layer] of [
           if (first === undefined) return;
           assert.equal((yield* store.remove(first.id).pipe(Effect.flip)).status, 409);
           assert.lengthOf(yield* store.members, 1);
-        }).pipe(Effect.provide(layer), Effect.scoped),
+        }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
       ));
-    it("updates last use and revokes every credential when a member is removed", async () =>
+    it("revokes every credential when a member is removed", async () =>
       Effect.runPromise(
         Effect.gen(function* () {
           const store = yield* AuthStore;
@@ -75,7 +77,7 @@ for (const [name, layer] of [
           assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("wrong"), 5)));
           const found = yield* store.authenticate(token.hash, 5);
           assert.isTrue(Option.isSome(found));
-          assert.equal((yield* store.tokens(alice.id))[0]?.lastUsedAt, 5);
+          assert.equal((yield* store.tokens(alice.id))[0]?.lastUsedAt, 1);
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 100)));
           yield* store.revoke(bob.id, token.id);
           assert.isTrue(Option.isSome(yield* store.authenticate(token.hash, 6)));
@@ -106,7 +108,7 @@ for (const [name, layer] of [
           );
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 7)));
           assert.deepEqual(yield* store.tokens(alice.id), []);
-        }).pipe(Effect.provide(layer), Effect.scoped),
+        }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
       ));
     it("rejects duplicate logins regardless of case and revokes a member's own token", async () =>
       Effect.runPromise(
@@ -127,6 +129,113 @@ for (const [name, layer] of [
           yield* store.issue(token);
           yield* store.revoke(alice.id, token.id);
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 2)));
-        }).pipe(Effect.provide(layer), Effect.scoped),
+        }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
       ));
   });
+
+for (const [name, layer] of [
+  ["memory", memoryAuthLayer],
+  ["sqlite", sqlLayer],
+] as const)
+  it(`${name} records use once a minute and deletes expired credentials when listing`, async () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* AuthStore;
+        yield* store.add(alice, true);
+        yield* store.add(bob, false);
+        const token = new InstanceToken({
+          id: TokenId.make("active"),
+          memberId: alice.id,
+          name: TokenName.make("Browser"),
+          hash: secretHash("active"),
+          kind: "session",
+          createdAt: 0,
+          lastUsedAt: 0,
+          expiresAt: 120_000,
+        });
+        yield* store.issue(token);
+        yield* store.issue(
+          new InstanceToken({
+            ...token,
+            id: TokenId.make("expired"),
+            hash: secretHash("expired"),
+            expiresAt: 60_000,
+          }),
+        );
+        yield* store.issue(
+          new InstanceToken({
+            ...token,
+            id: TokenId.make("other-member"),
+            memberId: bob.id,
+            hash: secretHash("other-member"),
+            expiresAt: 60_000,
+          }),
+        );
+        for (const now of [1, 59_999]) {
+          assert.equal(
+            Option.getOrNull(yield* store.authenticate(token.hash, now))?.token.lastUsedAt,
+            0,
+          );
+        }
+        yield* Effect.all(
+          Array.from({ length: 5 }, () => store.authenticate(token.hash, 60_000)),
+          { concurrency: "unbounded" },
+        );
+        assert.equal(
+          Option.getOrNull(yield* store.authenticate(token.hash, 60_001))?.token.lastUsedAt,
+          60_000,
+        );
+        yield* TestClock.adjust("60 seconds");
+        assert.deepEqual(
+          (yield* store.tokens(alice.id)).map(({ id, lastUsedAt }) => ({ id, lastUsedAt })),
+          [{ id: token.id, lastUsedAt: 60_000 }],
+        );
+        // Moving time back distinguishes deletion from filtering an expired row.
+        assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("expired"), 1)));
+        assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("other-member"), 1)));
+        assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 120_000)));
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+    ));
+
+it("authenticates recently used SQLite tokens while another connection has the write lock", async () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-auth-lock-",
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const store = yield* AuthStore;
+        yield* store.add(alice, true);
+        const token = new InstanceToken({
+          id: TokenId.make("read-only"),
+          memberId: alice.id,
+          name: TokenName.make("Browser"),
+          hash: secretHash("read-only"),
+          kind: "session",
+          createdAt: 0,
+          lastUsedAt: 0,
+          expiresAt: 120_000,
+        });
+        yield* store.issue(token);
+        const writer = yield* Effect.acquireRelease(
+          Effect.sync(() => new DatabaseSync(`${directory}/.usine/runtime.sqlite`)),
+          (database) => Effect.sync(() => database.close()),
+        );
+        writer.exec("BEGIN IMMEDIATE");
+        assert.isTrue(Option.isSome(yield* store.authenticate(token.hash, 1)));
+        writer.exec("ROLLBACK");
+        writer.exec(
+          "CREATE TABLE auth_updates (token_id TEXT); CREATE TRIGGER count_auth_updates AFTER UPDATE ON usine_instance_tokens BEGIN INSERT INTO auth_updates VALUES (new.id); END",
+        );
+        yield* Effect.all(
+          Array.from({ length: 10 }, () => store.authenticate(token.hash, 60_000)),
+          { concurrency: "unbounded" },
+        );
+        assert.equal(writer.prepare("SELECT count(*) AS count FROM auth_updates").get()?.count, 1);
+      }).pipe(Effect.provide(sqliteAuthLayer.pipe(Layer.provide(localSqliteLayer(directory)))));
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  ));

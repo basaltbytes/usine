@@ -33,7 +33,11 @@ export class InstanceToken extends Schema.Class<InstanceToken>("InstanceToken")(
   lastUsedAt: Schema.Number,
   expiresAt: Schema.Number,
   kind: Schema.Literals(["session", "device"]),
-}) {}
+}) {
+  recordUse(now: number): InstanceToken {
+    return now - this.lastUsedAt < 60_000 ? this : new InstanceToken({ ...this, lastUsedAt: now });
+  }
+}
 export class AuthError extends Schema.TaggedError<AuthError>("AuthError")("AuthError", {
   status: Schema.Literals([400, 401, 403, 409, 429, 500, 502, 503]),
   message: Schema.String,

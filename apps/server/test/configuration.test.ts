@@ -297,6 +297,8 @@ test(
           { timeout: 20_000 },
         )
         .toBe("codex");
+      expect(output).not.toContain("/sign-in#link=");
+      expect(output).toContain("Run usine sign-in-link");
       expect(run(directory, ["log"]).stdout).toContain("Imported from the instance folder");
       expect((await stat(join(directory, ".usine/admin-token"))).mode & 0o777).toBe(0o600);
       expect((await fetch(`${origin}/api/configuration`)).status).toBe(401);
