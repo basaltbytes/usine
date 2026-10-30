@@ -17,14 +17,23 @@ import type { Submission } from "./engine/submission.ts";
 
 /** The saved Event, effective task and Agent, and Step of one Attempt. */
 export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/StepExecution")({
+  /** The saved attempt to execute or reattach, including its worker assignment. */
   attempt: Attempt,
+  /** The run's original event and payload slice; retries retain this input. */
   event: Event,
+  /** The run whose step this attempt tries. */
   run: Run,
+  /** The saved step to execute and record a result for. */
   step: Step,
+  /** The managed repo to check out on the assigned worker. */
   repository: RepositoryName,
+  /** The repository revision to resolve for the checkout when no salvage overrides it. */
   revision: RepositoryRevision,
+  /** The effective task for this attempt, including any edit-and-retry amendment. */
   task: AttemptTask,
+  /** The agent definition for this attempt, including its persona and brain spec. */
   agent: Agent,
+  /** The Pi parent model override, or `None` to use the runtime default. */
   parentModel: Schema.Option(ModelId),
   /** The Attempt's access to `repository`, from the Run's Loop (ADR 0011). */
   permissions: LoopPermissions,
@@ -36,7 +45,9 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
 
 /** A reservation of one Worker slot for an Attempt, freed by `release`. */
 export interface WorkerLease {
+  /** The worker whose capacity is reserved for the attempt. */
   readonly worker: WorkerName;
+  /** Frees the reserved slot after execution or recovery; the lease owner must run this effect. */
   readonly release: Effect.Effect<void>;
 }
 
@@ -47,6 +58,10 @@ export interface WorkerLease {
  * (#180).
  */
 export interface ExecutionSink extends AttemptChannel.Sink {
+  /**
+   * Records that checkout preparation succeeded and the executor is responsible for salvage and
+   * release; run before launching the attempt.
+   */
   readonly checkoutAcquired: Effect.Effect<void>;
 }
 

@@ -29,6 +29,7 @@ const persistence =
 
 /** The options for listing Item projections, newest first. */
 export interface ItemProjectionListOptions {
+  /** The maximum number of projections to return, ordered by item number descending. */
   readonly limit: number;
 }
 
@@ -168,6 +169,10 @@ const makeWriter = Effect.gen(function* () {
   } as const;
 });
 
+/**
+ * Reads the latest stored item snapshots, including items with no run, without fetching from
+ * GitHub.
+ */
 export class ItemProjectionReader extends Context.Service<
   ItemProjectionReader,
   {
@@ -186,9 +191,14 @@ export class ItemProjectionReader extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<ItemNumber>, EnginePersistenceError>;
   }
 >()("@usine/engine/ItemProjectionReader") {
+  /** Reads item snapshots from the supplied runtime database. */
   static readonly layer = Layer.effect(ItemProjectionReader, makeReader);
 }
 
+/**
+ * Stores observed item snapshots and records when GitHub no longer returns an item, independently
+ * of run history.
+ */
 export class ItemProjectionWriter extends Context.Service<
   ItemProjectionWriter,
   {
@@ -204,6 +214,10 @@ export class ItemProjectionWriter extends Context.Service<
     ) => Effect.Effect<boolean, EnginePersistenceError>;
   }
 >()("@usine/engine/ItemProjectionWriter") {
+  /**
+   * Writes item snapshots to the supplied runtime database, invalidating operator projections on
+   * changes.
+   */
   static readonly layer = Layer.effect(ItemProjectionWriter, makeWriter);
 }
 

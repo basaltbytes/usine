@@ -54,6 +54,11 @@ const sqliteClientLayer = (instanceDirectory: InstanceDirectory) =>
     ),
   );
 
+/**
+ * Returns a Node SQLite layer at `<instanceDirectory>/.usine/runtime.sqlite`, creating the
+ * directory and applying engine migrations. Provides `RunDatabase` and its matching `SqlClient`;
+ * reuse the layer to share one connection (ADR 0020).
+ */
 export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
   const sqlClient = sqliteClientLayer(instanceDirectory);
   const database = Layer.effect(
@@ -81,7 +86,12 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
   return database.pipe(Layer.provideMerge(sqlClient));
 };
 
-/** Returns the local runtime layer on `.usine/runtime.sqlite`. */
+/**
+ * Returns the local engine runtime, including startup recovery and periodic reconciliation.
+ *
+ * @param instanceDirectory - The instance folder containing `.usine/runtime.sqlite`.
+ * @param database - A shared, initialized database layer; omit to open and migrate the local file.
+ */
 export const layer = (
   instanceDirectory: InstanceDirectory,
   database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
@@ -102,7 +112,12 @@ export const layer = (
   StepExecutor | TriggerCondition
 > => layerWithDatabase(database).pipe(Layer.provide(NodeServices.layer));
 
-/** Returns the observation layer, which initializes the local database but never recovers Runs or starts Attempts. */
+/**
+ * Returns the observation services without recovering runs or starting attempts.
+ *
+ * @param instanceDirectory - The instance folder containing `.usine/runtime.sqlite`.
+ * @param database - A shared, initialized database layer; omit to open and migrate the local file.
+ */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
   database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
@@ -174,10 +189,18 @@ export const runReaderLayer = (
 export class RuntimeStoreBackupError extends Schema.TaggedError<RuntimeStoreBackupError>(
   "@usine/engine/RuntimeStoreBackupError",
 )("RuntimeStoreBackupError", {
+  /**
+   * The failed phase: `open` checks or opens the source, `stage` prepares a temporary file, `copy`
+   * runs SQLite backup, and `publish` creates the destination hard link.
+   */
   operation: Schema.Literals(["open", "stage", "copy", "publish"]),
+  /** The runtime SQLite file being copied. */
   source: Schema.String,
+  /** The requested backup path; publishing fails if this path already exists. */
   destination: Schema.String,
+  /** The underlying filesystem or SQLite diagnostic, for operator display. */
   reason: Schema.String,
+  /** The original filesystem or SQLite error, retained for diagnostics. */
   cause: Schema.Defect(),
 }) {}
 

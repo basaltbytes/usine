@@ -17,8 +17,16 @@ import { Effect, Option, Predicate, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { EnginePersistenceError } from "../engine/error.ts";
 
+/**
+ * A managed repo and its project assignment, used to qualify stored loop identities during
+ * migration.
+ */
 export class RepositoryProject extends Schema.Class<RepositoryProject>("RepositoryProject")({
+  /**
+   * The managed repo whose stored loop references need the project prefix; matching ignores case.
+   */
   repository: RepositoryName,
+  /** The project ID to prefix to unqualified loop identities. */
   project: ProjectId,
   /** Qualified identities of the project's authored loops. */
   loops: Schema.Array(LoopName),
@@ -47,7 +55,11 @@ const qualifyJson = (
   );
 };
 
-/** Runs inside the caller's configuration transaction, before the engine starts. */
+/**
+ * Qualifies stored loop references using the repository-to-project assignments in `projects`.
+ * Preserves run and event IDs and leaves qualified identities unchanged. Run inside the caller's
+ * configuration transaction, before the engine starts; failures return `EnginePersistenceError`.
+ */
 export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
   function* (projects: ReadonlyArray<RepositoryProject>) {
     const sql = yield* SqlClient.SqlClient;

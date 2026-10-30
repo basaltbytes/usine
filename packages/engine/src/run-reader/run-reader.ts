@@ -181,6 +181,7 @@ export class RunReader extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<LoopSighting>, RunStoreError>;
   }
 >()("@usine/engine/RunReader") {
+  /** Reads the supplied runtime database without starting run recovery or execution. */
   static readonly layer = Layer.effect(RunReader, makeRunReader);
 }
 

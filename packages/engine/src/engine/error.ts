@@ -7,6 +7,7 @@ import { Schema } from "effect";
 export class RunNotFoundError extends Schema.TaggedError<RunNotFoundError>(
   "@usine/engine/RunNotFoundError",
 )("RunNotFoundError", {
+  /** The requested run ID that has no stored record. */
   runId: RunId,
 }) {}
 
@@ -14,8 +15,11 @@ export class RunNotFoundError extends Schema.TaggedError<RunNotFoundError>(
 export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRejectedError>(
   "@usine/engine/RunOperationRejectedError",
 )("RunOperationRejectedError", {
+  /** The run on which the operator requested the action. */
   runId: RunId,
+  /** The requested operator action. */
   operation: Schema.Literals(["approve", "retry", "resolveFailure", "runAgain", "cancel"]),
+  /** The stored run state that does not allow the action. */
   state: Schema.String,
 }) {}
 
@@ -23,8 +27,11 @@ export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRe
 export class RunRetryBlockedError extends Schema.TaggedError<RunRetryBlockedError>(
   "@usine/engine/RunRetryBlockedError",
 )("RunRetryBlockedError", {
+  /** The closed run for which a retry or run-again request was rejected. */
   runId: RunId,
+  /** The other open run of the same loop and item that prevents admission. */
   openRunId: RunId,
+  /** An operator-facing explanation; its wording is not a stable error code. */
   message: Schema.NonEmptyString,
 }) {}
 
@@ -32,7 +39,9 @@ export class RunRetryBlockedError extends Schema.TaggedError<RunRetryBlockedErro
 export class EnginePersistenceError extends Schema.TaggedError<EnginePersistenceError>(
   "@usine/engine/EnginePersistenceError",
 )("EnginePersistenceError", {
+  /** The read, write, or initialization operation that failed. */
   operation: Schema.String,
+  /** The original storage or decoding failure, retained for diagnostics. */
   cause: Schema.Defect(),
 }) {}
 
@@ -40,7 +49,9 @@ export class EnginePersistenceError extends Schema.TaggedError<EnginePersistence
 export class AttemptCancellationError extends Schema.TaggedError<AttemptCancellationError>(
   "@usine/engine/AttemptCancellationError",
 )("AttemptCancellationError", {
+  /** The active attempt whose stop could not be confirmed after its run was canceled. */
   attemptId: AttemptId,
+  /** The executor failure that prevented confirmation of the parent task stop. */
   cause: Schema.Defect(),
 }) {}
 
@@ -58,8 +69,11 @@ export type RunStoreError = typeof RunStoreError.Type;
 export class RunInterventionRejectedError extends Schema.TaggedError<RunInterventionRejectedError>(
   "@usine/engine/RunInterventionRejectedError",
 )("RunInterventionRejectedError", {
+  /** The run targeted by the operator input. */
   runId: RunId,
+  /** The attempt that is inactive or rejected the input. */
   attemptId: AttemptId,
+  /** The reason input could not be delivered, for display to the operator. */
   message: Schema.NonEmptyString,
 }) {}
 
@@ -70,12 +84,13 @@ export class RunInterventionRejectedError extends Schema.TaggedError<RunInterven
 export class LeftoversDiscardRejectedError extends Schema.TaggedError<LeftoversDiscardRejectedError>(
   "@usine/engine/LeftoversDiscardRejectedError",
 )("LeftoversDiscardRejectedError", {
+  /** The configured worker or worker with open attempts whose leftovers cannot be discarded. */
   worker: WorkerName,
   /** The number of open Attempts on `worker`. */
   running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 
-/** The Run store errors plus `AttemptCancellationError`. */
+/** Run store failures plus failures to confirm cancellation or deliver operator input. */
 export const RunEngineError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,

@@ -91,6 +91,7 @@ export class LoopControl extends Context.Service<
     readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/engine/LoopControl") {
+  /** Persists loop pause states in the supplied runtime database. */
   static readonly layer = Layer.effect(LoopControl, makeLoopControl);
 }
 

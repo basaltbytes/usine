@@ -5,6 +5,8 @@ import { Schema } from "effect";
 export class LoopRuntimeState extends Schema.Class<LoopRuntimeState>(
   "@usine/engine/LoopRuntimeState",
 )({
+  /** The qualified loop identity whose runtime pause state was read. */
   loop: LoopName,
+  /** Whether triggers must stop opening new runs; existing runs continue. */
   paused: Schema.Boolean,
 }) {}

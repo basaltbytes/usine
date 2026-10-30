@@ -7,7 +7,12 @@ import { Option, Schema } from "effect";
  * login, and `amendment` is the edit-and-retry task and Agent (ADR 0018).
  */
 export class RetryRequest extends Schema.Class<RetryRequest>("@usine/engine/RetryRequest")({
+  /** The operator who requested the retry, or `None` when no login was recorded. */
   requestedBy: Schema.Option(OperatorLogin),
+  /**
+   * Replacement task and agent context for this and later attempts, or `None` to keep the
+   * effective context (ADR 0018).
+   */
   amendment: Schema.Option(AttemptContext),
 }) {}
 
