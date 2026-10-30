@@ -5,7 +5,7 @@ import {
   UpgradeRecord,
 } from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
-import { Deferred, Effect, Option, Ref, Schema } from "effect";
+import { Deferred, Effect, Logger, Option, Ref, Schema } from "effect";
 import { expect, it } from "vitest";
 import { makeUpgrades, UpgradeError, type UpgradePlatform } from "../../src/upgrade/control.ts";
 
@@ -333,7 +333,7 @@ it.each(["propose", "automatic"] as const)(
           } else {
             yield* Ref.set(ready, false);
             yield* upgrades.check().pipe(Effect.flip);
-            expect((yield* upgrades.status).available).toBeNull();
+            expect((yield* upgrades.status).available).toBe(target);
             expect(yield* Ref.get(drainStarted)).toBe(false);
           }
         }),
@@ -341,6 +341,73 @@ it.each(["propose", "automatic"] as const)(
     );
   },
 );
+
+it("keeps the verified release and install outcome while a newer release is incomplete", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const next = ReleaseVersion.make("1.0.1-next.43.gabcdef1");
+        const candidate = yield* Ref.make(target);
+        const ready = yield* Ref.make(false);
+        const checking = yield* Deferred.make<void>();
+        const finishCheck = yield* Deferred.make<void>();
+        const logged = yield* Deferred.make<ReadonlyArray<unknown>>();
+        const reason = "Waiting for @usine/executor on the registry: E404";
+        const outcome = UpgradeRecord.make({
+          previous,
+          target,
+          status: "rolled-back",
+          failureStage: "install",
+          reason: "Install failed",
+        });
+        yield* Ref.set(f.result, Option.some(outcome));
+        const upgrades = yield* makeUpgrades({
+          running: previous,
+          settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "propose" }),
+          platform: Option.some({
+            ...f.platform,
+            lookup: () => Ref.get(candidate),
+            checkDependencies: (version) =>
+              version === target
+                ? Effect.void
+                : Effect.gen(function* () {
+                    yield* Deferred.succeed(checking, undefined);
+                    yield* Deferred.await(finishCheck);
+                    if (!(yield* Ref.get(ready)))
+                      return yield* new UpgradeError({ message: reason });
+                  }),
+          }),
+          drain: Deferred.await(f.drained),
+        });
+        yield* upgrades.check();
+        yield* Ref.set(candidate, next);
+        const logger = Logger.make<unknown, void>(({ message }) => {
+          if (Array.isArray(message) && message[0] === "Server upgrade check failed") {
+            Deferred.doneUnsafe(logged, Effect.succeed(message));
+          }
+        });
+        yield* upgrades.polling.pipe(Effect.withLogger(logger), Effect.forkScoped);
+        yield* Deferred.await(checking);
+        expect((yield* upgrades.status).available).toBe(target);
+        yield* Deferred.succeed(finishCheck, undefined);
+        expect(yield* Deferred.await(logged)).toEqual([
+          "Server upgrade check failed",
+          { previous, reason },
+        ]);
+        const status = yield* upgrades.status;
+        expect(status.available).toBe(target);
+        expect(status.message).toBeNull();
+        expect(status.outcome).toEqual(outcome);
+        expect(status.phase).toBe("idle");
+        expect(yield* Deferred.isDone(f.launched)).toBe(false);
+        yield* Ref.set(ready, true);
+        yield* upgrades.check();
+        expect((yield* upgrades.status).available).toBe(next);
+      }),
+    ),
+  );
+});
 
 it.each([
   ["install", { status: "rolled-back", reason: "Install failed", failureStage: "install" }],

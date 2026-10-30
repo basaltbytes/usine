@@ -185,7 +185,11 @@ export class BoardProjectNotFoundError extends Schema.TaggedError<BoardProjectNo
 )("BoardProjectNotFoundError", {
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
-}) {}
+}) {
+  override get message() {
+    return `Project "${this.repository}" was not found.`;
+  }
+}
 
 /** The requested Item isn't on the Project's Board. */
 export class BoardItemNotFoundError extends Schema.TaggedError<BoardItemNotFoundError>(
@@ -195,7 +199,11 @@ export class BoardItemNotFoundError extends Schema.TaggedError<BoardItemNotFound
   repository: RepositoryName,
   /** The requested GitHub item number absent from the board. */
   item: ItemNumber,
-}) {}
+}) {
+  override get message() {
+    return `Item ${this.repository}#${this.item} was not found on the board.`;
+  }
+}
 
 /** The requested destination lane isn't on the Project's Board. */
 export class BoardLaneNotFoundError extends Schema.TaggedError<BoardLaneNotFoundError>(
@@ -205,7 +213,11 @@ export class BoardLaneNotFoundError extends Schema.TaggedError<BoardLaneNotFound
   repository: RepositoryName,
   /** The requested destination lane ID. */
   lane: BoardLaneId,
-}) {}
+}) {
+  override get message() {
+    return `Lane "${this.lane}" was not found on the board.`;
+  }
+}
 
 /** The requested destination lane doesn't accept label-based moves. */
 export class BoardLaneReadOnlyError extends Schema.TaggedError<BoardLaneReadOnlyError>(
@@ -215,4 +227,8 @@ export class BoardLaneReadOnlyError extends Schema.TaggedError<BoardLaneReadOnly
   repository: RepositoryName,
   /** The requested destination lane ID. */
   lane: BoardLaneId,
-}) {}
+}) {
+  override get message() {
+    return `Lane "${this.lane}" is read-only. To move items, configure label-backed lanes in usine.yaml.`;
+  }
+}

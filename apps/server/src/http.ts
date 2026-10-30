@@ -50,15 +50,11 @@ const operatorFailure = (error: BackendError) => {
       case "LoopNotFoundError":
         return error.message;
       case "BoardProjectNotFoundError":
-        return `Project "${error.repository}" was not found.`;
       case "BoardItemNotFoundError":
-        return `Item ${error.repository}#${error.item} was not found on the board.`;
       case "BoardLaneNotFoundError":
-        return `Lane "${error.lane}" was not found on the board.`;
+      case "BoardLaneReadOnlyError":
       case "GitHubItemNotFoundError":
         return error.message;
-      case "BoardLaneReadOnlyError":
-        return `Lane "${error.lane}" is read-only. To move items, configure label-backed lanes in usine.yaml.`;
       case "InstallationDiscoveryError":
       case "AppPermissionError":
         return error.message;

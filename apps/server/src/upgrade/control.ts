@@ -59,7 +59,6 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       ),
     );
   const progress = yield* Ref.make<Progress>({ phase: "idle" });
-  const checkError = yield* Ref.make(Option.none<string>());
   const outcome = Option.match(options.platform, {
     onNone: () => Effect.succeed(Option.none<UpgradeRecord>()),
     onSome: (platform) => platform.outcome,
@@ -96,8 +95,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       phase: Option.exists(result, (record) => record.status === "installing")
         ? "installing"
         : state.phase,
-      message:
-        state.phase === "failed" ? state.message : Option.getOrNull(yield* Ref.get(checkError)),
+      message: state.phase === "failed" ? state.message : null,
       outcome: Option.getOrNull(result),
     });
   });
@@ -186,7 +184,6 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       });
       return;
     }
-    yield* Ref.set(available, Option.none());
     const target = yield* options.platform.value.lookup(settings.upgradeChannel);
     yield* Effect.annotateCurrentSpan({
       previous: options.running,
@@ -195,7 +192,6 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     });
     const newer = compareVersions(target, options.running) > 0;
     if (newer) yield* options.platform.value.checkDependencies(target);
-    yield* Ref.set(checkError, Option.none());
     yield* Ref.set(
       available,
       newer
@@ -246,12 +242,9 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
   });
   const polling = check().pipe(
     Effect.catchTag("UpgradeError", (error) =>
-      Effect.gen(function* () {
-        yield* Ref.set(checkError, Option.some(error.message));
-        yield* Effect.logWarning("Server upgrade check failed", {
-          previous: options.running,
-          reason: error.message,
-        });
+      Effect.logWarning("Server upgrade check failed", {
+        previous: options.running,
+        reason: error.message,
       }),
     ),
     Effect.andThen(Effect.sleep("5 minutes")),

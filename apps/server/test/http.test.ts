@@ -56,6 +56,7 @@ import {
   SessionIntervention,
   BoardLaneId,
   BoardLaneReadOnlyError,
+  BoardLaneNotFoundError,
   type BoardMove,
   BoardView,
   ColdTranscriptRequest,
@@ -775,12 +776,17 @@ describe("operator HTTP API", () => {
           new RunOperationRejectedError({ runId: id, operation: "cancel", state: "Failed" }),
         ),
       discardLeftovers: () => Effect.void,
-      moveBoardItem: (move) =>
-        move.toLane === "proposed:ready"
-          ? Effect.fail(
-              new BoardLaneReadOnlyError({ repository: move.repository, lane: move.toLane }),
-            )
-          : Effect.sync(() => void (moved = move)),
+      moveBoardItem: (move) => {
+        if (move.toLane === "Ready")
+          return Effect.fail(
+            new BoardLaneNotFoundError({ repository: move.repository, lane: move.toLane }),
+          );
+        if (move.toLane === "proposed:ready")
+          return Effect.fail(
+            new BoardLaneReadOnlyError({ repository: move.repository, lane: move.toLane }),
+          );
+        return Effect.sync(() => void (moved = move));
+      },
       pause: () => Effect.void,
       unpause: () => Effect.void,
       task: (repository, item) => Effect.fail(new BoardItemNotFoundError({ repository, item })),
@@ -886,6 +892,18 @@ describe("operator HTTP API", () => {
       assert.strictEqual(moved?.repository, repositoryName);
       assert.strictEqual(moved?.item, 31);
       assert.strictEqual(moved?.toLane, "authored:Review");
+      const unknownLane = await rejectingApp.handler(
+        new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ toLane: "Ready" }),
+        }),
+      );
+      assert.strictEqual(unknownLane.status, 404);
+      assert.deepStrictEqual(await unknownLane.json(), {
+        error: "BoardLaneNotFoundError",
+        message: 'Lane "Ready" was not found on the board.',
+      });
       const proposed = await rejectingApp.handler(
         new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
           method: "POST",
