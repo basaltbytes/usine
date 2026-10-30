@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Settings, UsineConfig } from "@usine/config/factory";
@@ -221,6 +222,7 @@ const withGitHubEngine = <A, E, R>(
     const engine = localEngineLayer(instance).pipe(
       Layer.provide(
         stepExecutorLayer(config, []).pipe(
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(executor),
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(testAppLayer),
@@ -245,6 +247,7 @@ describe("local worker", () => {
         const runtime = localLayer(instance, config, [testAgent.brain], {
           harnessReadiness: harnessUnavailable,
         }).pipe(
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(claudeLoginLockLayer),
@@ -432,6 +435,7 @@ describe("local worker", () => {
           settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
         });
         const runtime = stepExecutorLayer(budgetConfig, []).pipe(
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(executor),
           Layer.provide(fixedConfigLayer(budgetConfig)),
           Layer.provide(testAppLayer),
@@ -763,6 +767,7 @@ describe("local worker", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(claudeLoginLockLayer),
@@ -1030,6 +1035,7 @@ describe("local worker", () => {
           }).pipe(
             Effect.provide(
               stepExecutorLayer(single, []).pipe(
+                Layer.provide(MarcbachmannCelLayer),
                 Layer.provide(executor),
                 Layer.provide(fixedConfigLayer(single)),
                 Layer.provide(app),

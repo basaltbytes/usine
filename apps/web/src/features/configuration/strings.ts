@@ -404,6 +404,10 @@ export const workerFormCopy = {
 };
 
 export const loopFormCopy = {
+  priority: "Priority",
+  priorityHint:
+    "An integer or CEL expression returning int. Higher values go first; blank means 0.",
+  evaluatedPriority: (value: number) => `Priority ${value}`,
   stream: "Stream",
   condition: "Condition (CEL)",
   prompt: "Prompt (Markdown)",

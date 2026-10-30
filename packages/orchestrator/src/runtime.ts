@@ -103,6 +103,7 @@ export const runtimeLayer = (
     Layer.provide(app),
     Layer.provide(triggerCondition),
     Layer.provide(attemptRuntime),
+    Layer.provide(MarcbachmannCelLayer),
   );
   const itemWriter = GitHubItemWriter.layer.pipe(
     Layer.provide(app),

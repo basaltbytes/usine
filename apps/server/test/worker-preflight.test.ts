@@ -150,6 +150,7 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         ),
     });
     const scheduler = stepExecutorLayer(instance.config, [submission.agent.brain]).pipe(
+      Layer.provide(MarcbachmannCelLayer),
       Layer.provide(Layer.mergeAll(executor, current, app)),
     );
     const engine = engineLayer(directory).pipe(

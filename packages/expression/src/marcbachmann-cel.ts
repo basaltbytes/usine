@@ -533,6 +533,23 @@ export const makeExpressionEngine = () => {
       checkExpected(runtimes, source, environment, isBooleanType, "bool"),
   );
 
+  const checkInteger = Effect.fn("ExpressionEngine.checkInteger")(
+    (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
+      checkExpected(runtimes, source, environment, (type) => type === "int", "int"),
+  );
+
+  const evaluateInteger = Effect.fn("ExpressionEngine.evaluateInteger")(function* (
+    source: Source,
+    environment: Environment,
+    context: Schema.JsonObject,
+  ) {
+    yield* checkInteger(source, environment);
+    const value = yield* Effect.fromResult(evaluated(runtimes, source, environment, context));
+    return yield* Schema.decodeUnknownEffect(Schema.BigInt)(value).pipe(
+      Effect.mapError(unexpectedResult(source, "an integer")),
+    );
+  });
+
   const checkScalar = Effect.fn("ExpressionEngine.checkScalar")(
     (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
       checkExpected(
@@ -591,6 +608,8 @@ export const makeExpressionEngine = () => {
   return ExpressionEngine.of({
     relatedStringLiterals,
     checkBoolean,
+    checkInteger,
+    evaluateInteger,
     checkScalar,
     evaluateBoolean,
     evaluateBooleanEach,

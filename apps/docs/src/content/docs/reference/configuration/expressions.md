@@ -232,7 +232,7 @@ When an instance loads, usine collects the string literals that a loop's `if` co
 
 An issue is ready, and no open pull request closes it yet:
 
-```yaml title="projects/widgets/loops/start-dev.md"
+```yaml title="widgets/start-dev (export format)"
 if: >-
   item.state == "OPEN" &&
   item.labels.nodes.exists(label, label.name == "ready-for-agent") &&
@@ -326,3 +326,13 @@ Prompt interpolations from the same loops:
 ```markdown title="projects/widgets/loops/rebase-pr.md"
 Pull request #{{ item.number }} is marked `ready-to-merge` but GitHub reports its branch `{{ item.headRefName }}` as conflicting with `{{ item.baseRefName }}`.
 ```
+
+## Priority expressions
+
+A loop's [`priority`](/reference/configuration/loop-files/#priority) accepts an integer or a CEL expression returning `int`, using the same stream-specific `item` and `repo` variables as `trigger.if`:
+
+```yaml
+priority: 'item.labels.nodes.exists(l, l.name == "low-priority") ? -1 : 0'
+```
+
+The scheduler evaluates priority against the saved event snapshot when the run requests a worker slot. Higher values go first; equal values use lane rank and then event arrival. The default is `0`. Evaluation errors, including results outside the safe integer range, use `0` and produce a warning. The editor checks the result type and previews the value for each stored match.

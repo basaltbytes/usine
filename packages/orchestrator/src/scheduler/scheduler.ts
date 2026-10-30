@@ -1,4 +1,5 @@
-import { boardRepositories } from "@usine/config/project";
+import { ExpressionEngine } from "@usine/expression/expression-engine";
+import { positionFor, positionFields } from "./position.ts";
 import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
 import type { LoadedInstance } from "@usine/config/instance";
 import { resolveParentEffort } from "@usine/core/agent";
@@ -8,7 +9,6 @@ import type { AttemptId } from "@usine/core/attempt";
 import { salvageRefFor } from "@usine/core/attempt/salvage";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
-import { canonicalRepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import { ProvisionerTimings, WorkerName } from "@usine/core/worker";
 import {
@@ -22,7 +22,6 @@ import {
   type WorkerCapabilityError,
   type WorkerMachines,
 } from "@usine/executor";
-import type { Submission } from "@usine/engine/engine";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import { GitHubApp, type GitHubAppError, isRefusal } from "@usine/github/github-app";
 import {
@@ -55,15 +54,7 @@ import {
   restartRequired,
   type WorkerReload,
 } from "../current-instance/current-instance.ts";
-import { payloadLabels } from "../board/items.ts";
-import {
-  type LeaseCandidate,
-  aheadCount,
-  leaseOrder,
-  passedCount,
-  type PipelinePosition,
-  pipelinePosition,
-} from "../lease-order.ts";
+import { type LeaseCandidate, aheadCount, leaseOrder, passedCount } from "../lease-order.ts";
 import { type ProvisioningPause, type QueuedRun, WorkerStatus } from "../worker-status.ts";
 
 import { preflightFor } from "./preflight.ts";
@@ -90,13 +81,6 @@ interface Reservation extends LeaseCandidate {
   readonly deferred: Deferred.Deferred<WorkerLease>;
   readonly state: Ref.Ref<ReservationState>;
 }
-
-const positionFields = (position: PipelinePosition) =>
-  Match.valueTags(position, {
-    Priority: ({ priority }) => ({ positionSource: "priority", position: priority }),
-    Lane: ({ lane, number }) => ({ positionSource: "lane", position: number, lane }),
-    Unpositioned: () => ({ positionSource: "none" }),
-  });
 
 interface WorkerSlots {
   /** The maximum concurrent Attempts on the Worker, or zero after a reload removed it. */
@@ -298,13 +282,14 @@ export const stepExecutorLayer = (
 ): Layer.Layer<
   StepExecutor | WorkerStatus,
   ExecutorError | UnsupportedWorkerError,
-  CurrentInstance | Executor | GitHubApp
+  CurrentInstance | Executor | GitHubApp | ExpressionEngine
 > =>
   Layer.effectContext(
     Effect.gen(function* () {
       const schedulerScope = yield* Effect.scope;
       const executor = yield* Executor;
       const instances = yield* CurrentInstance;
+      const positionOf = positionFor(instances, yield* ExpressionEngine);
       const app = yield* GitHubApp;
       const workers = yield* validateWorkers(executor.kind, config.workers);
       const pool = yield* TxRef.make(slotPoolOf(workers, new Map()));
@@ -721,50 +706,6 @@ export const stepExecutorLayer = (
           return yield* makeLease(worker, hold);
         },
       );
-
-      /**
-       * Returns the pipeline position of the Run of `submission`, from the current Loop file and
-       * the lanes of the Run's repository.
-       */
-      const positionOf = Effect.fn("WorkerScheduler.position")(function* (
-        runId: RunId,
-        submission: Submission,
-      ) {
-        yield* Effect.annotateCurrentSpan({ runId, loop: submission.loop });
-        const { config, loops } = yield* instances.get;
-        const loop = loops.find(({ name }) => name === submission.loop);
-        const priority = Option.flatMap(Option.fromNullishOr(loop), ({ priority }) => priority);
-        const lanes =
-          boardRepositories(config).find(
-            ({ name }) =>
-              canonicalRepositoryName(name) === canonicalRepositoryName(submission.repository),
-          )?.lanes ?? [];
-        const stream = loop?.trigger.on;
-        // Only issue and pull request Events record Item labels.
-        if (
-          Option.isSome(priority) ||
-          lanes.length === 0 ||
-          stream === undefined ||
-          stream === "schedule"
-        ) {
-          return pipelinePosition(priority, lanes, []);
-        }
-        const labels = yield* payloadLabels(stream, submission.event.payload).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning(
-              "The Run's Event has no labels to read; the Run waits for a worker slot without a lane position",
-              {
-                runId,
-                loop: submission.loop,
-                eventId: submission.event.id,
-                errorTag: error._tag,
-                message: error.message,
-              },
-            ).pipe(Effect.as([])),
-          ),
-        );
-        return pipelinePosition(priority, lanes, labels);
-      });
 
       const reserve: StepExecutor["Service"]["reserve"] = Effect.fn("WorkerScheduler.reserve")(
         function* (runId, submission, worker) {

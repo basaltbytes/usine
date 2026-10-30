@@ -141,6 +141,7 @@ export const harness = (
           },
         },
       ).pipe(
+        Layer.provide(MarcbachmannCelLayer),
         Layer.provide(currentLayer),
         Layer.provide(
           Layer.succeed(Executor, {

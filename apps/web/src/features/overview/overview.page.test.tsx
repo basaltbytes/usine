@@ -1,3 +1,4 @@
+import { PriorityValue } from "@usine/config/loop";
 import { overviewQuery } from "~/lib/overview";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterContextProvider } from "@tanstack/react-router";
@@ -250,9 +251,21 @@ describe("Desk", () => {
     assert.notInclude(html, "text-destructive");
   });
 
-  it("says a queued Run's machine is being created instead of waiting for a slot", () => {
+  it("shows evaluated priority while waiting for a slot and machine progress during creation", () => {
     const queued = desk.notMoving.find(({ reason }) => reason._tag === "QueuedForWorker");
     if (queued?.reason._tag !== "QueuedForWorker") throw new Error("Expected a queued Run");
+    const waiting = new StalledItemView({
+      ...queued,
+      reason: new QueuedForWorkerView({
+        ...queued.reason,
+        priority: PriorityValue.make(-1),
+        ahead: 2,
+      }),
+    });
+    assert.include(
+      text(render(<NotMoving stalled={[waiting]} now={now} readOnly={false} polled />)),
+      "Waiting for a free worker slot, priority -1, behind 2 runs",
+    );
     const creating = new StalledItemView({
       ...queued,
       reason: new QueuedForWorkerView({

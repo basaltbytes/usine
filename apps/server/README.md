@@ -197,3 +197,5 @@ The SQLite storage, configuration, and export tests use the shared [SQLite fixtu
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
 
 **Configuration > Workers** provides **Run preflight** on each worker row and detail page. The action displays progress and refreshed checks, with remediation for failures. It is disabled with a reason while an attempt or preflight runs on the worker. `POST /api/workers/:worker/preflight` returns the stored checks and updates overview and Needs attention without a restart; busy workers return 409 `WorkerPreflightRejectedError`.
+
+Loop checks at `/api/configuration/loops/check` validate integer CEL priorities. `/api/configuration/loops/preview` returns each matching item’s evaluated `priority`; evaluation errors appear in `failures` and use zero. `/api/desk` includes the scheduler’s captured priority for runs waiting for a worker slot.

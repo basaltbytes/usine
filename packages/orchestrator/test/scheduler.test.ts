@@ -1,3 +1,4 @@
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -74,6 +75,7 @@ describe("Worker scheduler startup", () => {
         });
         const context = yield* Layer.build(
           stepExecutorLayer(config, []).pipe(
+            Layer.provide(MarcbachmannCelLayer),
             Layer.provide(executor),
             Layer.provide(fixedConfigLayer(config)),
             Layer.provide(testAppLayer),
@@ -133,6 +135,7 @@ describe("Worker scheduler startup", () => {
       });
       const failure = yield* Layer.build(
         stepExecutorLayer(config, []).pipe(
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(executor),
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(testAppLayer),
@@ -409,7 +412,11 @@ const schedulerContext = (
       stepExecutorLayer(
         config,
         agents.map(({ agent }) => agent.brain),
-      ).pipe(Layer.provide(recordingExecutor(preflighted, options)), Layer.provide(testAppLayer)),
+      ).pipe(
+        Layer.provide(MarcbachmannCelLayer),
+        Layer.provide(recordingExecutor(preflighted, options)),
+        Layer.provide(testAppLayer),
+      ),
     );
   });
 
@@ -648,6 +655,7 @@ describe("Worker scheduler reservations that name a Worker", () => {
               runId: runOf(2),
               loop: "start-dev",
               itemKey: "basaltbytes/usine#2",
+              priority: 0,
               positionSource: "none",
               queued: 1,
               ahead: 0,
@@ -667,6 +675,7 @@ describe("Worker scheduler reservations that name a Worker", () => {
             runId: runOf(3),
             loop: "start-dev",
             itemKey: "basaltbytes/usine#3",
+            priority: 0,
             positionSource: "none",
             queued: 1,
             ahead: 0,
@@ -711,6 +720,59 @@ ${localWorkers([["local", 2]])}`,
 ] as const;
 
 describe("Worker scheduler lease order", () => {
+  it.live("uses zero and logs when a priority expression fails, preserving lane order", () =>
+    withInstance(
+      pipelineFiles.map(([path, text]) => [
+        path,
+        path === "loops/start-dev.md"
+          ? loopFile("issue", "ready-for-agent", "priority: '1 / 0'\n")
+          : text,
+      ]),
+      () =>
+        Effect.gen(function* () {
+          const lines: Array<ReadonlyArray<unknown>> = [];
+          const context = yield* schedulerContext([]).pipe(Effect.withLogger(logsIn(lines)));
+          const scheduler = Context.get(context, StepExecutor);
+          const status = Context.get(context, WorkerStatus);
+          const agent = yield* developer;
+          const reserve = (n: number, loop: string, label: string) =>
+            scheduler
+              .reserve(runOf(n), submission(agent, n, loop, [label]), Option.none())
+              .pipe(Effect.withLogger(logsIn(lines)));
+          const first = yield* reserve(1, "start-dev", "ready-for-agent");
+          const second = yield* reserve(2, "start-dev", "ready-for-agent");
+          const failing = yield* Effect.forkChild(reserve(3, "start-dev", "ready-for-agent"));
+          const review = yield* Effect.forkChild(reserve(4, "review-pr", "ready-for-review"));
+          yield* assertWaiting(review, "both slots are leased");
+          assert.deepStrictEqual(
+            (yield* status.queue).map(({ runId, position }) => [runId, position.priority]),
+            [
+              [runOf(4), 0],
+              [runOf(3), 0],
+            ],
+          );
+          const warnings = logged(lines, "Priority evaluation failed; using zero");
+          assert.lengthOf(warnings, 3);
+          assert.include(warnings[2], {
+            runId: runOf(3),
+            loop: "start-dev",
+            expression: "1 / 0",
+            errorTag: "ExpressionEvaluationError",
+          });
+          assert.property(warnings[2], "message");
+          yield* first.release;
+          yield* leaseOf(review);
+          yield* assertWaiting(failing, "the later lane takes the freed slot");
+          yield* second.release;
+          yield* leaseOf(failing);
+          assert.include(logged(lines, "Worker slot leased in lease order").at(-1), {
+            priority: 0,
+            loop: "start-dev",
+          });
+        }).pipe(Effect.scoped),
+    ),
+  );
+
   it.live("leases a freed slot to the Run furthest along the lanes, then keeps Event order", () =>
     withInstance(pipelineFiles, () =>
       Effect.gen(function* () {
@@ -759,6 +821,7 @@ describe("Worker scheduler lease order", () => {
             loop: "review-pr",
             itemKey: "basaltbytes/usine#7",
             worker: local,
+            priority: 0,
             positionSource: "lane",
             position: 2,
             lane: "Review",
@@ -769,6 +832,7 @@ describe("Worker scheduler lease order", () => {
             loop: "start-dev",
             itemKey: "basaltbytes/usine#3",
             worker: local,
+            priority: 0,
             positionSource: "lane",
             position: 1,
             lane: "Ready",
@@ -1178,6 +1242,7 @@ const startSshScheduler = (
         config,
         agents.map(({ agent }) => agent.brain),
       ).pipe(
+        Layer.provide(MarcbachmannCelLayer),
         Layer.provide(recordingExecutor(events, { kind: "ssh", failing: options.failing ?? [] })),
         Layer.provide(machines),
         Layer.provide(testAppLayer),
@@ -1486,7 +1551,11 @@ describe("Worker status", () => {
             stepExecutorLayer(
               config,
               agents.map(({ agent }) => agent.brain),
-            ).pipe(Layer.provide(executor), Layer.provide(testAppLayer)),
+            ).pipe(
+              Layer.provide(MarcbachmannCelLayer),
+              Layer.provide(executor),
+              Layer.provide(testAppLayer),
+            ),
           );
           const scheduler = Context.get(context, StepExecutor);
           const status = Context.get(context, WorkerStatus);

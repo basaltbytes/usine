@@ -13,31 +13,20 @@ A factory is one orchestrator process that you start with `usine up` from an ins
 
 You need:
 
-- Node.js 22 or later, pnpm 11, and Git on the orchestrator machine.
+- Node.js 22 or later, npm, and Git on the orchestrator machine.
 - A GitHub account or organization that owns the repositories, where you can create and install a GitHub App.
 - The harnesses that your agents use, logged in on the machine that runs the child sessions: Claude Code with a Claude subscription, or Codex CLI 0.164.0 (or 0.159.0 through 0.159.3 for one release) with a ChatGPT login. With the default local worker, this is the orchestrator machine and the user who runs `usine up`.
 - A model credential in Pi's configuration for the Pi parent of each attempt. See [Pi parent](/guides/write-an-agent/#pi-parent).
 
 ## Install usine
 
-Clone and build the usine repository:
+Install the CLI and web UI from npm:
 
 ```sh title="Orchestrator machine"
-git clone https://github.com/basaltbytes/usine.git
-cd usine
-pnpm install --frozen-lockfile
-pnpm build
+npm install --global @usine/server
 ```
 
-The build writes the CLI to `apps/server/dist/main.js` and the web UI to `apps/server/dist/web`. On this site, `usine` means `node /path/to/usine/apps/server/dist/main.js`. To use the same command, add an alias:
-
-```sh title="~/.zshrc"
-alias usine="node /path/to/usine/apps/server/dist/main.js"
-```
-
-The `@usine/server` package is on npm, but installing it with npm fails at this commit because of a dependency range ([#233](https://github.com/basaltbytes/usine/issues/233)).
-
-To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` again, and run `usine restart` from the instance folder. The server reads the UI files on every request, so after a UI-only rebuild, reload the page.
+The package provides the `usine` command. To update it, run `npm install --global @usine/server@latest`, then run `usine restart` from the instance folder when no attempt is running. For a systemd installation, see [Server upgrades](/guides/run-the-orchestrator-on-a-server/#upgrade-the-server).
 
 ## Create the instance folder
 
@@ -124,7 +113,7 @@ The first start imports the files below into the database as revision 1. Later s
 
    [`usine.yaml`](/reference/configuration/usine-yaml/) lists every key and its default.
 
-3. Copy the [agent example](/guides/write-an-agent/) to `agents/developer.md` and the [loop example](/guides/write-a-loop/) to `projects/widgets/loops/start-dev.md`. These files become stored entities during the first import.
+3. Copy the [agent example](/guides/write-an-agent/) to `agents/developer.md` and the [loop example](/guides/write-a-loop/) to `start-dev.md` in `projects/widgets/loops/`. These files become stored entities during the first import.
 
 4. Keep the runtime state and the [environment file](/reference/configuration/cli/#environment-file) out of git:
 
