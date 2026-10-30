@@ -25,6 +25,7 @@ import { FetchHttpClient, type HttpClient } from "effect/http";
 import { afterEach, assert, describe, it } from "vitest";
 import { LifecycleOptions, Port, SERVER_HOST, UiOrigin, type UpLogLevel } from "../src/cli.ts";
 import { startDetached } from "../src/detach.ts";
+import { writeAdminToken } from "../src/auth/local.ts";
 import { holdInstance } from "../src/instance/lock.ts";
 import { ListeningPortsError } from "../src/instance/ports.ts";
 import {
@@ -377,6 +378,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
               launch: fallback,
             }),
           );
+          yield* writeAdminToken(directory);
           writeFileSync(files.record, "unreadable");
           return yield* restart(directory, options(1), Effect.succeed(fallback)).pipe(Effect.flip);
         }).pipe(Effect.scoped),
