@@ -1,3 +1,5 @@
+import type { UpgradeDrain } from "@usine/engine/engine";
+import { upgradeAttentionFor } from "./upgrade.ts";
 import { WebhookHealth } from "../webhooks.ts";
 import { webhookAttentionFor } from "./webhooks.ts";
 import type { ConfigurationStoreError } from "@usine/config/configuration";
@@ -238,6 +240,12 @@ const makeOperatorObservation = Effect.gen(function* () {
   const cache = yield* SynchronizedRef.make(Option.none<CachedOverview>());
   const usageReader = yield* RunUsageReader;
   const stops = yield* UnconfirmedStops;
+  const engine = yield* Effect.serviceOption(RunEngine);
+  const readUpgrade = Option.match(engine, {
+    onNone: () => Effect.succeed(null),
+    onSome: (runs) => Effect.map(runs.upgradeDrain, Option.getOrNull),
+  });
+  const upgradeAttention = upgradeAttentionFor(readUpgrade, acknowledgements);
   const workerStatus = yield* WorkerStatus;
   const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
   const poolAttention = poolAttentionFor(reader, acknowledgements);
@@ -251,6 +259,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     revision: Option.Option<ProjectionRevision>,
     unconfirmedStops: ReadonlyArray<UnconfirmedStop>,
     provisioning: ReadonlyArray<ProvisioningPause>,
+    upgrade: UpgradeDrain | null,
   ) {
     const [snapshots, states, cycleAsks, workerAttempts] = yield* Effect.all(
       [
@@ -264,7 +273,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
     const waits = quotaWaits(provisioning);
-    const views = snapshots.map((snapshot) => runView(snapshot, paused, access, waits));
+    const views = snapshots.map((snapshot) => runView(snapshot, paused, access, waits, upgrade));
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
       const projectRuns = runsByRepository.get(view.repository) ?? [];
@@ -296,7 +305,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history) {
-            const view = runView(saved, paused, access, waits);
+            const view = runView(saved, paused, access, waits, upgrade);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
@@ -536,7 +545,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     }
     for (const { attemptId, runId, worker } of unconfirmedStops) {
       const run =
-        allRuns.get(runId) ?? runView(yield* reader.inspect(runId), paused, access, waits);
+        allRuns.get(runId) ?? runView(yield* reader.inspect(runId), paused, access, waits, upgrade);
       const attempt = run.attempts.find(({ id }) => id === attemptId);
       if (attempt === undefined) {
         yield* Effect.logWarning(
@@ -624,6 +633,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             ] as const,
             { concurrency: "unbounded" },
           );
+        const upgrade = yield* readUpgrade;
         const reports = {
           pollReported: Option.isSome(latestPoll),
           scheduleReported: Option.isSome(latestSchedule),
@@ -664,6 +674,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             scheduleFailures,
             unconfirmedStops.map(({ attemptId }) => attemptId),
             provisioning,
+            upgrade,
           ]),
         );
         if (Option.isNone(token)) {
@@ -678,6 +689,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             revision,
             unconfirmedStops,
             provisioning,
+            upgrade,
           );
           return [{ ...projected, reports }, Option.none<CachedOverview>()] as const;
         }
@@ -699,6 +711,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           revision,
           unconfirmedStops,
           provisioning,
+          upgrade,
         );
         return [
           { ...projected, reports },
@@ -713,6 +726,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           instance.config.workers.map(({ name }) => name),
         ).pipe(
           Effect.flatMap(poolAttention),
+          Effect.flatMap(upgradeAttention),
           Effect.flatMap((view) => webhookAttention(view, instance.config.webhooks)),
           Effect.tap(({ needsYou, dismissedNeeds }) =>
             reports.pollReported && reports.scheduleReported
@@ -812,6 +826,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         paused,
         workerAccesses(instance.config.workers),
         quotaWaits(provisioning),
+        yield* readUpgrade,
       ),
       agentDefinitionChanged:
         currentAgent !== undefined && !sameAgent(snapshot.agent, currentAgent.agent),
@@ -1468,6 +1483,7 @@ export {
   WorkerPreflightNeed,
   WorkerQuotaNeed,
   WebhookSilenceNeed,
+  UpgradeDrainNeed,
   UnconfirmedStopNeed,
   NeedView,
   PoolLimitNeed,
@@ -1512,6 +1528,7 @@ export {
   CycleBudgetUsedUpView,
   AwaitingApprovalView,
   QueuedForWorkerView,
+  WaitingForUpgradeView,
   AwaitingPollView,
   StallReasonView,
   StalledItemView,

@@ -361,3 +361,10 @@ HTTP actions use the authenticated member for approvals, retries, interventions,
 Polling and statistics SQLite fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Local-worker tests that exercise Git hooks and executable files use the OS temporary directory.
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+
+### Idle upgrade waits
+
+Run views expose `upgradeWait` while attempt admission defers them, and the desk reports `WaitingForUpgrade` with the requested version. Worker rows show the same upgrade wait while free slots remain available after cancellation. Overview refreshes these fields independently of persisted run changes. After ten minutes with deferred runs, `UpgradeDrainNeed` appears in Needs attention and supports dismissal and undo.
+
+`GET /api/upgrade` reports the requested target and explains the waiting phase. `DELETE /api/upgrade` cancels a pending request before installation begins.

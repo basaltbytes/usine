@@ -22,6 +22,12 @@ export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>
 
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {
+    UpgradeDrainNeed: ({ wait, deferredRuns }) => ({
+      title: `Upgrade to ${wait.target} is deferring runs`,
+      detail: `${deferredRuns} ${deferredRuns === 1 ? "run waits" : "runs wait"} for the upgrade restart. Cancel the pending upgrade in Settings to resume attempts.`,
+      repository: null,
+      runId: null,
+    }),
     WebhookSilenceNeed: ({ publicUrl, startedAt }) => ({
       title: "No webhook delivery received",
       detail: `No verified delivery since startup at ${startedAt}. Check ${publicUrl}, the App webhook active setting, and USINE_GITHUB_WEBHOOK_SECRET. Polling continues.`,
@@ -149,6 +155,7 @@ export const attentionBellLabel = (count: number) => `Needs attention (${count})
 
 export const needKindLabel = {
   WebhookSilenceNeed: "Webhook endpoint silent",
+  UpgradeDrainNeed: "Upgrade waiting",
   PoolLimitNeed: "Pool rate window",
   ApprovalNeed: "Approval needed",
   CycleBudgetNeed: "Cycle budget exhausted",

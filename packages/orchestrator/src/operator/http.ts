@@ -403,6 +403,7 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
   HttpApiGroup.make("operator")
     .add(
       HttpApiEndpoint.get("upgradeStatus", "/api/upgrade", { success: UpgradeView }),
+      HttpApiEndpoint.delete("cancelUpgrade", "/api/upgrade", { success: acknowledged }),
       HttpApiEndpoint.get("serverVersion", "/api/version", { success: Schema.String }),
       HttpApiEndpoint.post("requestUpgrade", "/api/upgrade", {
         payload: UpgradeRequest,

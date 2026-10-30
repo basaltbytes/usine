@@ -226,7 +226,9 @@ export default mergeConfig(
                     if (route.request().method() === "GET")
                       return route.fulfill({ contentType: "application/json", body: current });
                     const accepted =
-                      route.request().postDataJSON().timing === timing && rejection === "";
+                      (timing === "cancel"
+                        ? route.request().method() === "DELETE"
+                        : route.request().postDataJSON().timing === timing) && rejection === "";
                     if (accepted) current = after;
                     return route.fulfill({
                       status: accepted ? 200 : 409,

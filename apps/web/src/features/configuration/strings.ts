@@ -476,3 +476,6 @@ export const webhookStatusCopy = {
   hintEffect:
     "The last self-write or webhook hint received since startup. Polling runs independently.",
 };
+
+export const upgradeCancel = "Cancel pending upgrade";
+export const upgradeTarget = (version: string): string => `Requested version: ${version}`;

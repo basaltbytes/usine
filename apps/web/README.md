@@ -337,3 +337,6 @@ The sign-in page supports GitHub user authorization and one-time links from `usi
 Endpoint webhook mode shows **No webhook delivery received** in Needs attention after ten minutes without a verified delivery since startup. The entry identifies the public URL and checks for the App webhook active setting and secret. Dismiss and Undo apply. A verified delivery clears it, including a `ping`; polling continues independently. Settings shows the running endpoint mode and last hint time.
 
 Loop forms accept an integer or CEL priority with payload completion. **Preview** shows each matching item’s evaluated priority and any evaluation errors. Overview’s waiting text includes the priority captured when the run requested its worker slot.
+
+
+Idle upgrade waits show the requested version in run headers, Overview's Running section, and worker rows. Settings offers **Cancel pending upgrade** while an upgrade waits. Needs attention links to Settings after an upgrade has deferred runs for ten minutes.

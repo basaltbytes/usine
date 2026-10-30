@@ -455,6 +455,9 @@ describe("operator HTTP API", () => {
   it("reports the running release and validates upgrade requests before accepting them", async () => {
     const requested: Array<string> = [];
     const upgradeBackend = Layer.succeed(ServerUpgrades, {
+      cancel: Effect.sync(() => {
+        requested.push("cancel");
+      }),
       polling: Effect.never,
       status: Effect.succeed(
         new UpgradeView({
@@ -522,6 +525,14 @@ describe("operator HTTP API", () => {
       );
       assert.strictEqual(accepted.status, 200);
       assert.deepStrictEqual(requested, ["idle"]);
+      const canceled = await upgradeApp.handler(
+        new Request("http://localhost/api/upgrade", {
+          headers: authorization,
+          method: "DELETE",
+        }),
+      );
+      assert.strictEqual(canceled.status, 200);
+      assert.deepStrictEqual(requested, ["idle", "cancel"]);
     } finally {
       await upgradeApp.dispose();
     }

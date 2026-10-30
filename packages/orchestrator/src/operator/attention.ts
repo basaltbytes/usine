@@ -36,6 +36,7 @@ const repositoriesOf = (need: NeedView) =>
     WorkerQuotaNeed: () => [],
     PoolLimitNeed: () => [],
     WebhookSilenceNeed: () => [],
+    UpgradeDrainNeed: () => [],
     UnresponsiveWorkerNeed: ({ attempts }) => attempts.map(({ repository }) => repository),
   });
 

@@ -11,7 +11,7 @@ import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl } from "@usine/engine/loop-control";
-import { type RunStoreError, UnconfirmedStops } from "@usine/engine/engine";
+import { type RunStoreError, RunEngine, UpgradeWait, UnconfirmedStops } from "@usine/engine/engine";
 import { type LoopSighting, RunReader, type RunSummary } from "@usine/engine/run-reader";
 import {
   type TranscriptEntry,
@@ -200,6 +200,14 @@ export class WaitingForStopView extends Schema.TaggedClass<WaitingForStopView>(
   stop: UnconfirmedStopView,
 }) {}
 
+/** The idle upgrade defers this run without reserving worker capacity. */
+export class WaitingForUpgradeView extends Schema.TaggedClass<WaitingForUpgradeView>(
+  "@usine/orchestrator/WaitingForUpgradeView",
+)("WaitingForUpgrade", {
+  run: RunView,
+  wait: UpgradeWait,
+}) {}
+
 /** No Event of the Loop has a Run for the Item's current state yet. The next poll acts on it. */
 export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
   "@usine/orchestrator/AwaitingPollView",
@@ -207,6 +215,7 @@ export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
 
 /** The reason a matched Item has no running Attempt. */
 export const StallReasonView = Schema.Union([
+  WaitingForUpgradeView,
   AwaitingApprovalView,
   SuppressedForOperatorView,
   CycleBudgetUsedUpView,
@@ -258,6 +267,11 @@ export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/Wo
    * the declared `max_concurrent_attempts` with none leased.
    */
   slots: WorkerSlotsView,
+  /** New attempts cannot use free slots while this upgrade waits. */
+  upgradeWait: Schema.NullOr(UpgradeWait).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /**
    * The newest failed check among the Worker's prerequisites and harnesses, or else its degraded
    * prerequisites, or else the newest passed or deferred check. Null before the first preflight.
@@ -335,6 +349,8 @@ const stallReason = ({
     const running = open.attempts.at(-1)?.outcome === null;
     if (Option.isSome(stop) && open.state !== "Waiting" && !running)
       return Option.some(new WaitingForStopView({ run: open, stop: stop.value }));
+    if (open.upgradeWait !== null)
+      return Option.some(new WaitingForUpgradeView({ run: open, wait: open.upgradeWait }));
     switch (open.state) {
       case "Running":
         return Option.none();
@@ -388,6 +404,7 @@ const REASON_ORDER: ReadonlyArray<StallReasonView["_tag"]> = [
   "LoopPaused",
   "WaitingForStop",
   "QueuedForWorker",
+  "WaitingForUpgrade",
   "AwaitingPoll",
 ];
 
@@ -506,6 +523,11 @@ const makeDesk = Effect.gen(function* () {
   const loopMatches = yield* LoopMatches;
   const workerStatus = yield* WorkerStatus;
   const stops = yield* UnconfirmedStops;
+  const engine = yield* Effect.serviceOption(RunEngine);
+  const readUpgrade = Option.match(engine, {
+    onNone: () => Effect.succeed(null),
+    onSome: (runs) => Effect.map(runs.upgradeDrain, Option.getOrNull),
+  });
 
   const recentActivity = Effect.fn("Operator.desk.recentActivity")(function* (
     attempt: AttemptView,
@@ -556,6 +578,7 @@ const makeDesk = Effect.gen(function* () {
       ] as const,
       { concurrency: "unbounded" },
     );
+    const upgrade = yield* readUpgrade;
     const waits = quotaWaits(pauses);
     const machineViews = inFlight.map(machineView);
     const creating = new Map(
@@ -599,7 +622,7 @@ const makeDesk = Effect.gen(function* () {
     const runs = new Map(
       [...summaries, ...history].map((summary) => [
         summary.run.id,
-        runView(summary, paused, access, waits),
+        runView(summary, paused, access, waits, upgrade),
       ]),
     );
     const newestFirst = [...runs.values()].sort(
@@ -660,6 +683,7 @@ const makeDesk = Effect.gen(function* () {
             attemptNumber: stop.attemptNumber,
             worker: stop.worker,
           }),
+          WaitingForUpgrade: ({ run, wait }) => ({ runId: run.id, target: wait.target }),
           QueuedForWorker: ({ run, ahead }) => ({ runId: run.id, ahead }),
           AwaitingPoll: () => ({}),
         }),
@@ -698,7 +722,7 @@ const makeDesk = Effect.gen(function* () {
     const lastOutcomes = closed
       .filter((summary) => !replacedBeforeStart(summary))
       .map((summary) => {
-        const run = runView(summary, paused, access, waits);
+        const run = runView(summary, paused, access, waits, upgrade);
         return new ClosedRunView({
           run,
           item: links.get(run.itemKey) ?? null,
@@ -719,6 +743,7 @@ const makeDesk = Effect.gen(function* () {
       const preflight = preflightByWorker.get(name);
       return new WorkerView({
         name,
+        upgradeWait: upgrade?.wait ?? null,
         slots: new WorkerSlotsView({
           capacity:
             slot?.capacity ??
