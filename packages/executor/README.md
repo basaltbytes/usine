@@ -289,4 +289,4 @@ Durable-session test databases use the shared [SQLite fixture directory helper](
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
 
-`CloudflareWorkers.addWorker(address)` registers a client at runtime. Replacing an address affects later preflights and attempts; prepared attempts keep their sandbox client and shell credentials.
+`CloudflareWorkers.addWorker(address)` registers a client at runtime. Replacing an address affects later preflights and new attempts. Recovery and reattachment use the retained sandbox client and shell credentials, including for attempts that startup kept before preparation.

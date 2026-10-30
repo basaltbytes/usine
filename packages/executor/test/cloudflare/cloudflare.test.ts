@@ -271,7 +271,7 @@ describe("cloudflare Worker", () => {
   );
 
   it.live(
-    "keeps the sandbox for a reattachment, revokes its token, and reattaches after a restart",
+    "reattaches through the original client after a restart and a connection replacement",
     () =>
       Effect.gen(function* () {
         const worker = yield* fakeWorker;
@@ -302,6 +302,18 @@ describe("cloudflare Worker", () => {
         yield* Effect.gen(function* () {
           const cloudflare = yield* Executor;
           assert.isTrue(yield* cloudflare.isLive(request.attemptId));
+          const replacement = yield* fakeWorker;
+          const workers = yield* CloudflareWorkers;
+          yield* workers.addWorker({
+            name: WORKER,
+            workerUrl: replacement.url,
+            accessClientId: Redacted.make(ACCESS_CLIENT_ID),
+            accessClientSecret: Redacted.make(ACCESS_CLIENT_SECRET),
+            image: CloudflareImageName.make("usine"),
+            instanceType: "standard-4",
+            providers: [ANTHROPIC],
+          });
+          yield* cloudflare.preflight(WORKER, [], 1);
           const prepared = yield* cloudflare.prepare(
             new CheckoutRequest({ ...request, reattach: true }),
           );
@@ -736,3 +748,83 @@ it.live(
       }).pipe(Effect.provide(executor(original, mintingProvider())));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+for (const origin of ["startup", "replacement"] as const) {
+  it.live(
+    `recovers a kept ${origin} sandbox through its retained client after a connection change`,
+    () =>
+      Effect.gen(function* () {
+        const initial = yield* fakeWorker;
+        const original = origin === "startup" ? initial : yield* fakeWorker;
+        const replacement = yield* fakeWorker;
+        const storage = new StubStorage();
+        const working = yield* Deferred.make<void>();
+        const blocks: StubParent = () =>
+          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+        const credentials = mintingProvider();
+        const retain = Effect.gen(function* () {
+          const service = yield* Executor;
+          const prepared = yield* service.prepare(request);
+          const running = yield* Effect.forkChild(prepared.launch(sink));
+          yield* Deferred.await(working);
+          yield* Fiber.interrupt(running);
+        }).pipe(Effect.scoped);
+        const address = (worker: { readonly url: URL }) => ({
+          name: WORKER,
+          workerUrl: worker.url,
+          accessClientId: Redacted.make(ACCESS_CLIENT_ID),
+          accessClientSecret: Redacted.make(ACCESS_CLIENT_SECRET),
+          image: CloudflareImageName.make("usine"),
+          instanceType: "standard-4" as const,
+          providers: [ANTHROPIC],
+        });
+        if (origin === "startup")
+          yield* retain.pipe(Effect.provide(executor(original, credentials, blocks, storage)));
+
+        yield* Effect.gen(function* () {
+          const service = yield* Executor;
+          const workers = yield* CloudflareWorkers;
+          if (origin === "replacement") {
+            yield* workers.addWorker(address(original));
+            yield* retain;
+          }
+          const kept = original.state.sandboxes.get(SANDBOX);
+          assert(kept !== undefined);
+          assert.isTrue(kept.held);
+          assert.isTrue(yield* service.isLive(request.attemptId));
+          let committed = false;
+          original.state.respond = (_sandbox, words) => {
+            if (words[0] !== "git") return Option.none();
+            if (words.includes("status"))
+              return Option.some({ stdout: " M src/index.ts\n", exitCode: 0 });
+            if (words.includes("diff"))
+              return Option.some({ stdout: "src/index.ts\0", exitCode: 0 });
+            if (words.includes("commit")) committed = true;
+            return committed && words.includes("HEAD")
+              ? Option.some({ stdout: `${"c".repeat(40)}\n`, exitCode: 0 })
+              : Option.none();
+          };
+          yield* workers.addWorker(address(replacement));
+          yield* service.preflight(WORKER, [], 1);
+          const salvages: Array<AttemptSalvage> = [];
+          yield* service.recover(
+            keptCheckoutRecovery(request),
+            { ...sink, salvage: (salvage) => Effect.sync(() => void salvages.push(salvage)) },
+            Effect.succeed(COMMIT_AUTHOR),
+          );
+          assert.deepStrictEqual(
+            salvages.map(({ _tag }) => _tag),
+            ["Pushed"],
+          );
+          assert.isTrue(
+            kept.commands.some(
+              (line) => line.includes("'push'") && line.includes(request.salvageRef),
+            ),
+          );
+          assert.isFalse(original.state.sandboxes.has(SANDBOX));
+          assert.include(replacement.state.requests, "GET /v1/health");
+          assert.isFalse(replacement.state.requests.some((line) => line.includes(SANDBOX)));
+        }).pipe(Effect.provide(executor(initial, credentials, blocks, storage)));
+      }).pipe(Effect.scoped),
+  );
+}
