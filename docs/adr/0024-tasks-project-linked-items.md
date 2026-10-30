@@ -21,3 +21,7 @@ A loop removes its trigger label first so it doesn't trigger again, so a running
 ## 2026-10-25: a running card follows its item's current lane label first
 
 The trigger's lane also hid the label swap that shows progress. `start-dev` swaps `ready-for-agent` for `agent-in-progress`, and the card stayed in Ready, the lane of a label the issue no longer had, so the board didn't show that the agent had started. While a task's newest open run is `Running` and its current item is open, the first label lane that matches the item's current labels now places the card. The trigger's lane applies only if the current labels match no label lane, which is the case of [#467](https://github.com/basaltbytes/usine/issues/467): a loop that removes its trigger label and sets no other. A label change during a run, by the agent or a board move, therefore applies at once if the new label maps to a lane.
+
+## 2026-10-30: open runs extend the board selection
+
+The 500 highest-numbered stored items excluded older items even when they had waiting or running runs ([#719](https://github.com/basaltbytes/usine/issues/719)). The board now adds stored projections for every item with an open run before grouping tasks. Overview, task detail, and board moves share this selection. Historical reads remain limited to 500 items per repository; items with open runs do not consume that limit. Links join items only when both projections are selected, and each selected item appears once. When its last open run closes, an item outside the history window leaves the selection.
