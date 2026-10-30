@@ -46,6 +46,7 @@ export class ApiKeyCredential extends Schema.TaggedClass<ApiKeyCredential>()("Ap
 export const ProviderCredential = Schema.Union([ApiKeyCredential]);
 export type ProviderCredential = typeof ProviderCredential.Type;
 
+/** A provider and the credential its outbound handler uses to authenticate sandbox requests. */
 export class ProviderGrant extends Schema.Class<ProviderGrant>("@usine/cloudflare/ProviderGrant")({
   provider: CloudflareLlmProvider,
   credential: ProviderCredential,
@@ -83,6 +84,7 @@ export class CreateSandbox extends Schema.Class<CreateSandbox>("@usine/cloudflar
   credentials: SandboxCredentials,
 }) {}
 
+/** A sandbox's identity, container configuration, and current lifecycle flags. */
 export class SandboxSummary extends Schema.Class<SandboxSummary>(
   "@usine/cloudflare/SandboxSummary",
 )({
@@ -106,10 +108,12 @@ export class SandboxSummary extends Schema.Class<SandboxSummary>(
   draining: Schema.Boolean,
 }) {}
 
+/** The sandboxes of one owner whose current state the registry could read. */
 export class SandboxList extends Schema.Class<SandboxList>("@usine/cloudflare/SandboxList")({
   sandboxes: Schema.Array(SandboxSummary),
 }) {}
 
+/** The deployed worker's sandbox protocol version and available image names. */
 export class HealthReport extends Schema.Class<HealthReport>("@usine/cloudflare/HealthReport")({
   protocol: Schema.Literal(SANDBOX_PROTOCOL),
   /** The names in the Worker's `containers[].images`. */
@@ -126,12 +130,15 @@ export class Destroyed extends Schema.Class<Destroyed>("@usine/cloudflare/Destro
   destroyed: Schema.Boolean,
 }) {}
 
+/** A command with a recorded process ID but no readable exit code in its process files. */
 export class ProcessRunning extends Schema.TaggedClass<ProcessRunning>()("Running", {}) {}
 
+/** A command whose process files contain its exit code. */
 export class ProcessExited extends Schema.TaggedClass<ProcessExited>()("Exited", {
   exitCode: Schema.Int,
 }) {}
 
+/** A command's running or exited state, determined from its process files. */
 export const ProcessState = Schema.Union([ProcessRunning, ProcessExited]);
 export type ProcessState = typeof ProcessState.Type;
 
@@ -145,6 +152,7 @@ export class ProcessStatus extends Schema.Class<ProcessStatus>("@usine/cloudflar
   stderrBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 
+/** The requested sandbox has no stored record. The API returns HTTP 404. */
 export class SandboxNotFound extends Schema.TaggedError<SandboxNotFound>()(
   "SandboxNotFound",
   { name: SandboxName },
@@ -172,6 +180,7 @@ export class ImageNotFound extends Schema.TaggedError<ImageNotFound>()(
   { httpApiStatus: 422 },
 ) {}
 
+/** The requested command has no readable process ID in the sandbox. The API returns HTTP 404. */
 export class ProcessNotFound extends Schema.TaggedError<ProcessNotFound>()(
   "ProcessNotFound",
   { name: SandboxName, process: ProcessId },
