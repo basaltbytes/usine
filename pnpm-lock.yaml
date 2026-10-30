@@ -203,6 +203,9 @@ importers:
         specifier: 'catalog:'
         version: 4.0.6
     devDependencies:
+      '@hyperjump/json-schema':
+        specifier: 1.18.0
+        version: 1.18.0(@hyperjump/browser@1.6.0)
       '@usine/executor':
         specifier: workspace:*
         version: link:../../packages/executor
@@ -1799,6 +1802,27 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
+
+  '@hyperjump/browser@1.6.0':
+    resolution: {integrity: sha512-FcD0B9cOTIj8bJCrX7RtsLSnA2CrX43KCdaFOpS2cH9VnNMuKX4EJ3mgSdQFWF6vz/fbXUNYU1LpIYXYn3TTXA==}
+    engines: {node: '>=18.0.0'}
+
+  '@hyperjump/json-pointer@1.1.3':
+    resolution: {integrity: sha512-GVSs+wzefSO5VOEVMuOz118MDJrJtMdm8h+2vlghzMG/5QpboTSQ12gaMKvGQo7S4oPMw9rCyFWNAJ9DUEdA5Q==}
+
+  '@hyperjump/json-schema-formats@1.1.0':
+    resolution: {integrity: sha512-vLMIOwMThlgWgPJBV39Ds7kaTaygK0+UxjvQShTmKB8rRy8HXq472jnHP8/uaik+77HDx2M+W5Bvzhq6zFc2zQ==}
+
+  '@hyperjump/json-schema@1.18.0':
+    resolution: {integrity: sha512-YPLJsCosW6pHhulKrFogUsl1WxQVRy+fY0pROt66FDFygjIWZkMxXyiy8HLRR1JKeAd5OE6NSZs0NVjSBNwb2Q==}
+    peerDependencies:
+      '@hyperjump/browser': ^1.1.0
+
+  '@hyperjump/pact@1.5.1':
+    resolution: {integrity: sha512-AmMAUpM5FzqMo5Ip4r9XQ7P8eAEuRlyeeMaOPqcv9ItS0Gogl+Sbod19CZZlzSO5n16SNPFijFwEwrid1eCY9Q==}
+
+  '@hyperjump/uri@1.3.9':
+    resolution: {integrity: sha512-cxG5vyIdx3gUb/OQD/FDruQQcGNzF2aKTXWJ6LzlAC1kh97YZQSRsF3hL274xlTDJ1nWGJGRtknlW6ZpU3Ch+A==}
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -4984,6 +5008,10 @@ packages:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
 
+  idn-hostname@15.1.19:
+    resolution: {integrity: sha512-pRGRbFpQWCptOBWw9Gn5DXtPdern5/XtdkcXdoEavjd+sh72jNm2eVI1eeysp64UisXPfaqoQrnLUKpSN4hJWw==}
+    engines: {node: '>=20.12.0 <21 || >=22.0.0'}
+
   ignore@5.3.2:
     resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
     engines: {node: '>= 4'}
@@ -5189,6 +5217,9 @@ packages:
 
   jsonfile@6.2.1:
     resolution: {integrity: sha512-zwOTdL3rFQ/lRdBnntKVOX6k5cKJwEc1HdilT71BWEu7J41gXIB2MRp+vxduPSwZJPWBxEzv4yH1wYLJGUHX4Q==}
+
+  just-curry-it@5.3.0:
+    resolution: {integrity: sha512-silMIRiFjUWlfaDhkgSzpuAyQ6EX/o09Eu8ZBfmFwQMbax7+LQzeIU2CBrICT6Ne4l86ITCGvUCBpCubWYy0Yw==}
 
   jwa@2.0.1:
     resolution: {integrity: sha512-hRF04fqJIP8Abbkq5NKGN0Bbr3JxlQ+qhZufXVr0DvujKy93ZCbXZMHDL4EOtodSbCWxOqR8MS1tXA5hwqCXDg==}
@@ -6042,6 +6073,10 @@ packages:
 
   punycode.js@2.3.1:
     resolution: {integrity: sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==}
+    engines: {node: '>=6'}
+
+  punycode@2.3.1:
+    resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
 
   qs@6.16.0:
@@ -8504,6 +8539,34 @@ snapshots:
   '@hono/node-server@2.1.1(hono@4.13.5)':
     dependencies:
       hono: 4.13.5
+
+  '@hyperjump/browser@1.6.0':
+    dependencies:
+      '@hyperjump/json-pointer': 1.1.3
+      '@hyperjump/uri': 1.3.9
+      content-type: 1.0.5
+
+  '@hyperjump/json-pointer@1.1.3': {}
+
+  '@hyperjump/json-schema-formats@1.1.0':
+    dependencies:
+      '@hyperjump/uri': 1.3.9
+      idn-hostname: 15.1.19
+
+  '@hyperjump/json-schema@1.18.0(@hyperjump/browser@1.6.0)':
+    dependencies:
+      '@hyperjump/browser': 1.6.0
+      '@hyperjump/json-pointer': 1.1.3
+      '@hyperjump/json-schema-formats': 1.1.0
+      '@hyperjump/pact': 1.5.1
+      '@hyperjump/uri': 1.3.9
+      content-type: 1.0.5
+      just-curry-it: 5.3.0
+      uuid: 14.0.3
+
+  '@hyperjump/pact@1.5.1': {}
+
+  '@hyperjump/uri@1.3.9': {}
 
   '@iconify/types@2.0.0': {}
 
@@ -11330,6 +11393,10 @@ snapshots:
     dependencies:
       safer-buffer: 2.1.2
 
+  idn-hostname@15.1.19:
+    dependencies:
+      punycode: 2.3.1
+
   ignore@5.3.2: {}
 
   ignore@7.0.8: {}
@@ -11464,6 +11531,8 @@ snapshots:
       universalify: 2.0.1
     optionalDependencies:
       graceful-fs: 4.2.11
+
+  just-curry-it@5.3.0: {}
 
   jwa@2.0.1:
     dependencies:
@@ -12619,6 +12688,8 @@ snapshots:
   proxy-agent-negotiate@1.1.0: {}
 
   punycode.js@2.3.1: {}
+
+  punycode@2.3.1: {}
 
   qs@6.16.0:
     dependencies:

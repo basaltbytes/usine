@@ -52,12 +52,14 @@ See the [CLI reference](https://docs.usine.dev/reference/configuration/cli/) for
 pnpm install
 pnpm build     # turbo: tsc -b per package
 pnpm test      # turbo: vitest per package
-pnpm check     # turbo: typecheck including tests
+pnpm check     # typecheck including tests, and check the committed OpenAPI document
 pnpm lint      # oxlint
 pnpm format    # oxfmt
 ```
 
 Tests import other workspace packages from their `dist`, and the `@usine/server` tests also run its own `dist/main.js`. turbo builds both before it tests. To test one package, run `pnpm turbo run test --filter <package>`; `pnpm --filter <package> test` skips the builds, so it fails or tests stale code until you run `pnpm build`.
+
+API contract changes require regenerating and staging `apps/docs/public/openapi.json` before `pnpm check`. See the [docs README](apps/docs/README.md#operator-http-api-reference) for generation commands.
 
 SQLite storage fixtures use `tooling/test/sqlite.mts` to select writable `/dev/shm` on Linux when it is mounted as tmpfs. On other hosts, they use the OS temporary directory. Fixtures that execute binaries or Git hooks keep using the OS temporary directory because shared memory can be mounted with `noexec`.
 
