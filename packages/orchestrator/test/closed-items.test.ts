@@ -26,6 +26,7 @@ import {
   ItemContentHash,
   ItemProjection,
   ItemProjectionReader,
+  ItemProjectionSource,
   ItemProjectionWriter,
 } from "@usine/engine/item-projection";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
@@ -50,6 +51,7 @@ import {
 } from "@usine/github/polling";
 import { DateTime, Effect, FileSystem, Layer, Option, Schedule, Schema } from "effect";
 import { Operator } from "../src/operator/operator.ts";
+import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
@@ -275,7 +277,13 @@ const withFactory = <A, E>(
       inertLabelReconcilerLayer,
       Layer.succeed(GitHubPolling, fakeGitHub(items)),
       Layer.succeed(GitHubItemWriter)({
-        updateLabels: () => Effect.die("these tests move no Board cards"),
+        updateLabels: (_repository, number, mutation) =>
+          Effect.sync(() => {
+            const [label] = mutation.add;
+            assert(label !== undefined);
+            update(items, number, { label });
+            return mutation.add;
+          }),
       }),
       Layer.succeed(GitHubItemHistory)({
         appChanges: () => Effect.die("these tests read no Item history"),
@@ -442,26 +450,40 @@ describe("Items no Loop acts on", () => {
   );
 
   it.live.each(["issue", "pr"] as const)(
-    "identifies waiting %s items outside the 500-item board window",
+    "keeps waiting %s items on the board outside the 500-item history window",
     (kind) => {
       const label = kind === "issue" ? "ready-for-agent" : "ready-for-review";
       const items = new Map<number, GitHubItem>(
-        [182, 195, ...Array.from({ length: 500 }, (_, index) => index + 203)].map((number) => [
+        [182, 195, ...Array.from({ length: 501 }, (_, index) => index + 202)].map((number) => [
           number,
           {
             kind,
             number,
             state: "OPEN",
-            label: number < 203 ? label : "backlog",
+            label: number < 202 ? label : "backlog",
             round: 1,
           },
         ]),
       );
-      const instance = instanceWith([
-        kind === "issue"
-          ? startDev("required")
-          : new LoopFile({ ...reviewPr, approval: "required" }),
-      ]);
+      const instance = new LoadedInstance({
+        ...instanceWith([
+          kind === "issue"
+            ? startDev("required")
+            : new LoopFile({ ...reviewPr, approval: "required" }),
+        ]),
+        config: Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [
+            {
+              name: repository,
+              lanes: [
+                { name: "Ready", sources: [{ label }] },
+                { name: "Triage", sources: [{ label: "triage" }] },
+              ],
+            },
+          ],
+        }),
+      });
       return withFactory(
         items,
         Effect.gen(function* () {
@@ -472,8 +494,25 @@ describe("Items no Loop acts on", () => {
           const cards = overview.projects.flatMap(({ board }) =>
             board.lanes.flatMap(({ items }) => items),
           );
-          assert.lengthOf(cards, 500);
-          assert(cards.every(({ number }) => number >= 203));
+          assert.lengthOf(cards, 502);
+          assert(cards.some(({ number }) => number === 182));
+          assert(cards.some(({ number }) => number === 195));
+          assert(!cards.some(({ number }) => number === 202));
+          for (const number of [182, 195]) {
+            const task = yield* operator.task(instance, repository, ItemNumber.make(number));
+            assert.strictEqual(task.number, number);
+            assert.strictEqual(task.lane.name, "Ready");
+            assert.strictEqual(task.runs[0]?.state, "Waiting");
+          }
+          yield* operator.moveBoardItem(
+            instance,
+            new BoardMove({
+              repository,
+              item: ItemNumber.make(195),
+              toLane: BoardLaneId.make("authored:Triage"),
+            }),
+          );
+          assert.strictEqual(items.get(195)?.label, "triage");
           const approvals = overview.needsYou.filter((need) => need._tag === "ApprovalNeed");
           assert.lengthOf(approvals, 2);
           assert.deepStrictEqual(approvals.map(({ item }) => item?.number).sort(), [
@@ -495,8 +534,76 @@ describe("Items no Loop acts on", () => {
           }
           const reader = yield* ItemProjectionReader;
           const writer = yield* ItemProjectionWriter;
+          const history = yield* reader.list(repository, { limit: 500 });
+          assert.lengthOf(history, 500);
+          assert(history.every(({ number }) => number >= 203));
           const stored = yield* reader.get(gitHubItemKey(repository, 182));
           assert(Option.isSome(stored));
+          yield* writer.upsert(
+            new ItemProjection({
+              ...stored.value,
+              contentHash: ItemContentHash.make("relabeled"),
+              payload: {
+                ...stored.value.payload,
+                labels: { totalCount: 1, nodes: [{ name: "triage" }] },
+              },
+            }),
+          );
+          const relabeled = yield* operator.task(instance, repository, ItemNumber.make(182));
+          assert.strictEqual(relabeled.lane.name, "Triage");
+          assert.strictEqual(relabeled.runs[0]?.state, "Waiting");
+          if (kind === "issue") {
+            yield* writer.upsert(
+              new ItemProjection({
+                itemKey: gitHubItemKey(repository, 702),
+                repository,
+                source: ItemProjectionSource.make("pr"),
+                number: ItemNumber.make(702),
+                contentHash: ItemContentHash.make("linked-pr"),
+                payload: pullRequestPayload({
+                  kind: "pr",
+                  number: 702,
+                  state: "OPEN",
+                  label: "backlog",
+                  round: 1,
+                }),
+              }),
+            );
+            yield* writer.upsert(
+              new ItemProjection({
+                ...stored.value,
+                contentHash: ItemContentHash.make("linked-issue"),
+                payload: {
+                  ...stored.value.payload,
+                  closedByPullRequestsReferences: {
+                    totalCount: 1,
+                    nodes: [
+                      {
+                        number: 702,
+                        state: "OPEN",
+                        isDraft: false,
+                        url: `https://github.com/${repository}/pull/702`,
+                      },
+                    ],
+                  },
+                },
+              }),
+            );
+            const linked = yield* operator.task(instance, repository, ItemNumber.make(702));
+            assert.deepStrictEqual(
+              linked.items.map(({ number }) => number),
+              [182, 702],
+            );
+            assert.strictEqual(linked.current, stored.value.itemKey);
+            const grouped = (yield* operator.overview(instance)).projects.flatMap(({ board }) =>
+              board.lanes.flatMap(({ items }) => items),
+            );
+            assert.lengthOf(grouped, 501);
+            assert.deepStrictEqual(
+              grouped.find(({ number }) => number === 182)?.items.map(({ number }) => number),
+              [182, 702],
+            );
+          }
           yield* writer.upsert(
             new ItemProjection({
               ...stored.value,
@@ -513,6 +620,19 @@ describe("Items no Loop acts on", () => {
             1,
           );
           assert.strictEqual(refreshed.find(({ item }) => item !== null)?.item?.number, 195);
+          const waiting = approvals.find(({ item }) => item?.number === 195);
+          assert(waiting !== undefined);
+          yield* operator.cancel(waiting.runId);
+          const afterCancel = yield* operator.overview(instance);
+          assert(
+            !afterCancel.projects.some(({ board }) =>
+              board.lanes.some(({ items }) => items.some(({ number }) => number === 195)),
+            ),
+          );
+          const missing = yield* operator
+            .task(instance, repository, ItemNumber.make(195))
+            .pipe(Effect.flip);
+          assert.strictEqual(missing._tag, "BoardItemNotFoundError");
         }),
       );
     },

@@ -72,6 +72,7 @@ import {
   Schema,
   SynchronizedRef,
 } from "effect";
+import { readBoardItems } from "../board/selection.ts";
 import { settledItemState } from "../board/items.ts";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
@@ -173,9 +174,6 @@ export type OperatorObservationError =
 
 /** The number of closed Runs the overview keeps next to the open ones. */
 const OVERVIEW_CLOSED_RUNS = 100;
-
-/** The number of newest Items a Board shows. */
-const OVERVIEW_BOARD_ITEMS = 500;
 
 const sameAgent = Schema.toEquivalence(Agent);
 
@@ -282,10 +280,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             ({ repository: findingRepository }) => findingRepository === name,
           );
           const [boardItems, labelProjection] = yield* Effect.all(
-            [
-              itemReader.list(name, { limit: OVERVIEW_BOARD_ITEMS }),
-              repositoryLabels.get(name),
-            ] as const,
+            [readBoardItems(itemReader, name, snapshots), repositoryLabels.get(name)] as const,
             { concurrency: "unbounded" },
           );
           const [history, matches] = yield* Effect.all(
@@ -1150,7 +1145,9 @@ const makeOperator = Effect.gen(function* () {
       }
       const [storedItems, labelProjection] = yield* Effect.all(
         [
-          items.list(move.repository, { limit: OVERVIEW_BOARD_ITEMS }),
+          reader
+            .list({ closedLimit: 0 })
+            .pipe(Effect.flatMap((runs) => readBoardItems(items, repository.name, runs))),
           repositoryLabels.get(move.repository),
         ] as const,
         { concurrency: "unbounded" },

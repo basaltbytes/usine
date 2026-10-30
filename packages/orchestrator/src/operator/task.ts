@@ -22,6 +22,9 @@ import {
   Result,
   Schema,
 } from "effect";
+import { WorkerStatus } from "../worker-status.ts";
+import { quotaWaits } from "./machines.ts";
+import { readBoardItems } from "../board/selection.ts";
 import { projectedItem } from "../board/items.ts";
 import { projectBoard } from "../board/projection.ts";
 import {
@@ -32,12 +35,6 @@ import {
 } from "./board.ts";
 import { readRunningEvents, runView, workerAccesses } from "./projection.ts";
 import { RunView } from "./run.ts";
-
-import { WorkerStatus } from "../worker-status.ts";
-import { quotaWaits } from "./machines.ts";
-
-/** The number of newest Items the Board considers for Task membership. */
-const TASK_BOARD_ITEMS = 500;
 
 /**
  * One issue or pull request of a Task, with its GitHub state as the Board card shows it.
@@ -188,7 +185,9 @@ const makeTaskReader = Effect.gen(function* () {
     }
     const [stored, labelProjection, states, asks, provisioning] = yield* Effect.all(
       [
-        itemReader.list(managed.name, { limit: TASK_BOARD_ITEMS }),
+        reader
+          .list({ closedLimit: 0 })
+          .pipe(Effect.flatMap((runs) => readBoardItems(itemReader, managed.name, runs))),
         repositoryLabels.get(managed.name),
         controls.states,
         budgets.asks(),
@@ -218,10 +217,11 @@ const makeTaskReader = Effect.gen(function* () {
       .flatMap((lane) => lane.items.map((task) => ({ lane, task })))
       .find(({ task }) => task.items.some((member) => member.number === number));
     if (placed === undefined) {
-      yield* Effect.logInfo(
-        "Task read found no Task; the Item is not among the Project's newest Board Items",
-        { repository: managed.name, item: number, window: TASK_BOARD_ITEMS },
-      );
+      yield* Effect.logInfo("Task read found no task in the selected board items", {
+        repository: managed.name,
+        item: number,
+        selectedItems: stored.length,
+      });
       return yield* new BoardItemNotFoundError({ repository: managed.name, item: number });
     }
     const { lane, task } = placed;
@@ -307,15 +307,14 @@ const makeTaskReader = Effect.gen(function* () {
 });
 
 /**
- * Reads one Task from the Board projection over the Project's newest Items and the saved Runs of
- * those Items.
+ * Reads one task from the board projection over recent items and items with open runs.
  */
 export class TaskReader extends Context.Service<
   TaskReader,
   {
     /**
      * Returns the Task that contains Item `item` of `repository`. Fails if the repository isn't a
-     * Project or the Item isn't among the Board's newest Items.
+     * Project or the item isn't in the board selection.
      */
     readonly read: (
       instance: LoadedInstance,
