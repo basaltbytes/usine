@@ -81,6 +81,26 @@ install_version() {
   done
 }
 
+installed_version() {
+  node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).version' \
+    "$prefix/lib/node_modules/@usine/server/package.json"
+}
+
+restore_previous() {
+  if [ "$failure_stage" = install ] && [ "$(installed_version)" = "$previous" ]; then
+    recovery_status=failed
+    printf 'upgrade recovery version=%s action=restart reason=previous-version-still-installed\n' "$previous"
+    return 0
+  fi
+  if install_version "$previous"; then return 0; fi
+  if [ "$(installed_version)" = "$previous" ]; then
+    recovery_status=failed
+    printf 'upgrade recovery version=%s action=restart reason=rollback-install-failed\n' "$previous"
+    return 0
+  fi
+  return 1
+}
+
 # The lock is outside node_modules and survives replacement of the package.
 exec 9> "$folder/helper.lock"
 flock -n 9 || exit 0
@@ -100,9 +120,15 @@ if install_version "$target"; then
   fi
 fi
 printf 'upgrade rollback previous=%s target=%s failure_stage=%s reason=%s\n' "$previous" "$target" "$failure_stage" "$reason"
-if stop_server && install_version "$previous" && timeout 30s systemctl start "$unit" && healthy "$previous"; then
-  record rolled-back "$reason"
+recovery_status=rolled-back
+if stop_server && restore_previous && timeout 30s systemctl start "$unit" && healthy "$previous"; then
+  record "$recovery_status" "$reason"
+  if [ "$recovery_status" = failed ]; then exit 1; fi
 else
-  record failed 'Rollback failed. Check the upgrade service journal and reinstall the previous version.'
+  installed=$(installed_version) || installed=
+  case "$installed" in
+    "$previous"|"$target") record failed 'Rollback failed. Check the upgrade service journal.';;
+    *) record failed 'Rollback failed. Check the upgrade service journal and reinstall the previous version.';;
+  esac
   exit 1
 fi
