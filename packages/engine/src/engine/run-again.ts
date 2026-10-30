@@ -14,12 +14,17 @@ import { Claimed, CycleBlocked, Submission } from "./submission.ts";
  */
 export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engine/RunAgainRequest")(
   {
+    /** The current loop step name to use for the new run. */
     step: StepName,
+    /** The current loop approval requirement, applied again to the new run. */
     approval: ApprovalRequirement,
     /** The cycle limit, or `None` for a schedule Loop. */
     cycleLimit: Schema.Option(CycleLimit),
+    /** The current loop repository access granted to the new run's attempts. */
     permissions: LoopPermissions,
+    /** The task, agent, and parent model to save as the new run's effective context. */
     context: AttemptContext,
+    /** The operator who requested the new run, or `None` when no login was recorded. */
     requestedBy: Schema.Option(OperatorLogin),
   },
 ) {}

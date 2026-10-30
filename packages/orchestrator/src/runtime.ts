@@ -1,3 +1,4 @@
+import { WebhookHealth } from "./webhooks.ts";
 import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
@@ -133,5 +134,5 @@ export const runtimeLayer = (
     OperatorConfiguration.layer,
     Orchestrator.layer,
   ).pipe(Layer.provide(Layer.mergeAll(dependencies, triggers, itemHistory, app)));
-  return Layer.mergeAll(dependencies, triggers, services, app);
+  return Layer.mergeAll(dependencies, triggers, services, app, WebhookHealth.layer);
 };

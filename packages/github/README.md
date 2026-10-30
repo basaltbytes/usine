@@ -114,3 +114,5 @@ It mints both token kinds, posts an issue comment with the repo token, checks th
 `GitHubApp.deliveries(after)` uses the App JWT to read new summaries from `GET /app/hook/deliveries`. Pass the last recorded `WebhookDeliveryId`, or `Option.none()` on the first read. Each `WebhookDelivery` contains its ID, event, and optional repository ID. The adapter follows pagination until it reaches the recorded ID, the end of the log, or ten pages. It fetches no delivery payloads.
 
 Enable the App webhook to record deliveries. A delivery with a failed HTTP status can still request a refresh; no reachable webhook endpoint is needed for deliveries mode.
+
+`GitHubApp.configureWebhook(url)` uses the App JWT to PATCH `/app/hook/config` with the full delivery URL and JSON content type. It preserves the App's webhook secret, active flag, and subscribed events. Enable the webhook in the App settings before using endpoint mode.

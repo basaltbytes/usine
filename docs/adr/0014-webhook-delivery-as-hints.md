@@ -36,3 +36,11 @@ The deliveries source extends `GitHubApp` for authenticated summary reads and re
 A cycle reads at most ten pages of 100 summaries and coalesces hints by registered repository. Reaching the page limit drops older hints and logs the decision. Each cycle has a 30-second timeout; typed failures retry after 10 seconds or GitHub's later rate-limit deadline. These limits affect freshness only. The normal poll and event ledger retain their existing behavior.
 
 Repository hints use the existing repository cycle, including cursor updates, backoff, projection, and loop evaluation. Item hints continue to fetch a snapshot without advancing a REST cursor. Settings reports the last hint received in the running process; the engine does not use that timestamp for scheduling.
+
+## Endpoint implementation
+
+Issue #679 uses repository hints for endpoint deliveries, matching the deliveries source. This replaces the original item-level endpoint proposal: the registered repository's existing change detection handles every supported payload without a second mapping from webhook events to item streams.
+
+The server verifies HMAC-SHA256 against the raw body before decoding repository identity. It reads `USINE_GITHUB_WEBHOOK_SECRET` through the instance environment provider, requires a nonempty value in endpoint mode, and keeps the route outside operator authentication. Startup updates the App hook URL and JSON content type with the App JWT, with a 30-second timeout. A typed API failure is logged and leaves normal polling and the endpoint running. Mode and URL changes still require a restart.
+
+`GitHubApp` owns hook configuration, and `PollingTriggers.hint` owns refresh scheduling. Neither tracks endpoint reachability: hints also include self-writes and delivery-log reads. The separate `WebhookHealth` layer records verified endpoint receipt for operator observation only. The runtime shares this layer with the server and observation; the ten-minute warning is evaluated on every overview read, outside its projection cache, and supports existing attention acknowledgements. A signed, valid `ping` or delivery for an unregistered repository proves reachability and clears the warning without requesting a refresh.

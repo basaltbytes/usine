@@ -12,11 +12,17 @@ import { Context, Effect, Layer, Schema } from "effect";
  */
 export class UnconfirmedStop extends Schema.Class<UnconfirmedStop>("@usine/engine/UnconfirmedStop")(
   {
+    /** The attempt whose parent task has not been confirmed stopped. */
     attemptId: AttemptId,
+    /** The run that owns the attempt, including runs already closed. */
     runId: RunId,
+    /** The qualified loop identity recorded for the attempt. */
     loop: LoopName,
+    /** The item on which new attempts must wait for this stop. */
     itemKey: ItemKey,
+    /** The worker whose slot remains reserved after a failed stop. */
     worker: WorkerName,
+    /** The stop reason passed to the executor again on each reconciliation. */
     reason: StopReason,
   },
 ) {}

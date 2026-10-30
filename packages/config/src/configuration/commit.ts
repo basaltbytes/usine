@@ -47,7 +47,11 @@ export const configurationWarnings = (
     ),
   );
 
-/** Parses a complete candidate and collects errors before constructing its snapshot. */
+/**
+ * Validates the complete `entities` candidate with `parser`, including schemas, CEL, and
+ * references. Returns a loaded snapshot or `ConfigurationInvalid` with collected diagnostics;
+ * performs no storage writes.
+ */
 export const validateConfiguration = (
   parser: ConfigParser["Service"],
   entities: ReadonlyArray<ConfigurationEntity>,
@@ -180,7 +184,18 @@ export const validateConfiguration = (
     });
   });
 
-/** A deterministic commit; the caller supplies validation, the actor, and the time. */
+/**
+ * Validates and applies changes without storage or clock access (ADR 0031).
+ * Rejects a mismatched revision with `StaleRevision`; invalid before values, positions,
+ * schemas, expressions, or references fail with `ConfigurationInvalid`.
+ *
+ * @param parser - The parser used to validate the candidate configuration.
+ * @param current - The snapshot to which changes apply.
+ * @param expected - The revision number the caller read before preparing changes.
+ * @param changes - Entity changes with expected before values and optional worker positions.
+ * @param metadata - The actor, UTC time, and optional message to record.
+ * @returns The new snapshot and revision with normalized changes, including for an empty diff.
+ */
 export const commit = (
   parser: ConfigParser["Service"],
   current: Configuration,

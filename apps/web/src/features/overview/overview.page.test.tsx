@@ -13,6 +13,7 @@ import {
   WorkerSlotsView,
   WorkerView,
   WorkerPreflightNeed,
+  WebhookSilenceNeed,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
@@ -72,6 +73,20 @@ describe("Desk", () => {
     assert.include(html, "Cycle budget exhausted");
     assert.include(html, "Reset cycle budget");
     assert.notInclude(html, "Nothing needs attention");
+  });
+
+  it("shows the silent webhook endpoint and its recovery instructions", () => {
+    const need = new WebhookSilenceNeed({
+      id: "webhook-silence",
+      startedAt: "2026-10-29T12:00:00.000Z",
+      publicUrl: "https://usine.example/webhooks/github",
+    });
+    const html = text(render(<DeskNeedsYou needs={[need]} polls={desk.polls} now={now} />));
+    assert.include(html, "No webhook delivery received");
+    assert.include(html, "https://usine.example/webhooks/github");
+    assert.include(html, "App webhook active setting");
+    assert.include(html, "USINE_GITHUB_WEBHOOK_SECRET");
+    assert.include(html, "Polling continues");
   });
 
   it("shows a failed worker's preflight message and links to that worker", () => {

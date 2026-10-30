@@ -5,24 +5,31 @@ import type { RepositoryName } from "@usine/core/repository";
 import { Option, type Schema } from "effect";
 import { BLOCKED_MARKER, QUESTION_MARKER } from "./runtime.ts";
 
-/** The trigger context, Agent instructions, and task for the parent prompt. */
+/** The trigger context, agent instructions, and task for the parent prompt. */
 export interface PromptParts {
+  /** The managed repository named in the parent's run context. */
   readonly repository: RepositoryName;
+  /** The trigger payload snapshot, serialized as JSON in the parent prompt. */
   readonly payload: Schema.Json;
+  /** The agent name used in the required GitHub content signature (ADR 0011). */
   readonly agent: AgentName;
+  /** The agent's standing instructions, included before the task. */
   readonly persona: AgentPersona;
+  /** The rendered loop task, including any edit-and-retry replacement (ADR 0018). */
   readonly task: AttemptTask;
-  /** The previous Attempt's salvage checked out in the workspace, if the Run is retrying. */
+  /** The previous attempt's salvage checked out in the workspace, if the run is retrying. */
   readonly resume: Option.Option<SalvagePushed>;
-  /** The previous Attempt's salvage that conflicts with the current revision and is not in the workspace. */
+  /** The previous attempt's salvage that conflicts with the current revision and is not in the workspace. */
   readonly conflictingSalvage: Option.Option<SalvagePushed>;
 }
 
-/** The Agent instructions and delegated task for a child prompt. */
+/** The agent instructions and delegated task for a child prompt. */
 export interface ChildPromptParts {
+  /** The agent name used in the required GitHub content signature (ADR 0011). */
   readonly agent: AgentName;
+  /** The agent's standing instructions, included before the task. */
   readonly persona: AgentPersona;
-  /** Free text written by the parent model, not the rendered Loop task. */
+  /** Free text written by the parent model, not the rendered loop task. */
   readonly task: string;
 }
 

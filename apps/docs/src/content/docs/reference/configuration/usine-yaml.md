@@ -572,12 +572,24 @@ An exe.dev VM with the worker's name ([`ExeDevWorker`](https://github.com/basalt
 
 ## `webhooks`
 
-Sets the source of GitHub hints ([`Webhooks`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L170)). The orchestrator doesn't read it at this commit, and detects GitHub changes only by polling.
+Selects an optional source of early repository refreshes. Polling remains active in every mode, and self-write hints are always enabled. Changes to this block require restarting `usine up`.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `mode` | `off`, `deliveries`, `endpoint` | `off` | The hint source. |
-| `public_url` | URL | required when `mode` is `endpoint` | Not accepted with the other modes. |
+| `public_url` | URL | required when `mode` is `endpoint` | The full public delivery URL, including `/webhooks/github`. Not accepted with the other modes. |
+
+`deliveries` checks the GitHub App's delivery summaries about every ten seconds. It persists the latest delivery ID, ignores `ping` and unregistered repositories, and requires an active App webhook. The configured delivery URL does not need to be reachable in this mode.
+
+`endpoint` accepts signed `POST /webhooks/github` requests on the operator HTTP server. Set `USINE_GITHUB_WEBHOOK_SECRET` in the instance `.env` to the App's webhook secret, keep the App webhook active, and expose the route through an HTTPS reverse proxy. At startup, usine updates the App's hook URL and JSON content type. The endpoint verifies HMAC-SHA256 over the request bytes; it does not require an operator token.
+
+```yaml
+webhooks:
+  mode: endpoint
+  public_url: https://usine.example/webhooks/github
+```
+
+Settings shows the running mode and last hint time. Endpoint mode adds a Needs attention entry after ten minutes without a verified delivery since startup. Check the public URL, webhook active flag, secret, and startup logs. Any verified delivery clears the warning, including `ping`; self-write hints do not clear it.
 
 ## `tracing`
 

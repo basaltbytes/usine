@@ -117,6 +117,8 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
 export class GitHubApp extends Context.Service<
   GitHubApp,
   {
+    /** Sets the App's webhook URL and JSON encoding; the App must already have an active webhook. */
+    readonly configureWebhook: (url: URL) => Effect.Effect<void, GitHubAppError>;
     /**
      * Reads delivery summaries with IDs greater than `after`, newest first. Pass `None` for
      * the first read. Reads at most ten pages of 100 summaries and drops older hints at that
@@ -428,6 +430,20 @@ export class GitHubApp extends Context.Service<
       );
 
       return {
+        configureWebhook: Effect.fn("GitHubApp.configureWebhook")(function* (url: URL) {
+          yield* Effect.annotateCurrentSpan({ appId: credentials.appId });
+          const jwt = yield* sign();
+          yield* fetchResponse(
+            "configure-webhook",
+            HttpClientRequest.patch(`${API_ROOT}/app/hook/config`).pipe(
+              HttpClientRequest.bodyJsonUnsafe({ url: url.href, content_type: "json" }),
+              authorized(jwt),
+            ),
+          );
+          yield* Effect.logInfo("Configured the App webhook endpoint", {
+            appId: credentials.appId,
+          });
+        }),
         deliveries,
         repositories: Effect.fn("GitHubApp.repositories")(function* () {
           const { token, installation } = yield* lease();

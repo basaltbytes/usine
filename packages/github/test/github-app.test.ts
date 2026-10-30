@@ -74,6 +74,37 @@ const appLayer = (client: HttpClient.HttpClient) =>
   );
 
 describe("GitHubApp", () => {
+  it.live("configures the webhook with an App JWT and preserves typed API failures", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request);
+        assert.strictEqual(request.method, "PATCH");
+        assert.strictEqual(request.url, "https://api.github.com/app/hook/config");
+        assert.match(request.headers.authorization ?? "", /^Bearer [^.]+\.[^.]+\.[^.]+$/u);
+        assert.strictEqual(request.body._tag, "Uint8Array");
+        if (request.body._tag === "Uint8Array") {
+          assert.deepStrictEqual(JSON.parse(new TextDecoder().decode(request.body.body)), {
+            url: "https://usine.example/webhooks/github",
+            content_type: "json",
+          });
+        }
+        return jsonResponse(request, {}, requests.length === 1 ? 200 : 403);
+      }),
+    );
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const url = new URL("https://usine.example/webhooks/github");
+      yield* app.configureWebhook(url);
+      const error = yield* app.configureWebhook(url).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "GitHubApiError");
+      if (error._tag === "GitHubApiError") {
+        assert.strictEqual(error.operation, "configure-webhook");
+        assert.deepStrictEqual(error.status, Option.some(403));
+      }
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
   it.live(
     "mints installation-wide and exactly-one-repo tokens while isolating registry drift",
     () => {

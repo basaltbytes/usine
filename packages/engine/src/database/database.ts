@@ -10,9 +10,14 @@ interface RunDatabaseEffect extends QueryEffectHKTBase {
 /** The Effect database client for the Run store, independent of the SQLite driver. */
 export type RunDatabaseClient = SQLiteEffectDatabase<RunDatabaseEffect, unknown>;
 
+/**
+ * The database service for engine records. Adapters must provide atomic SQLite transactions and
+ * apply engine migrations before use (ADR 0020).
+ */
 export class RunDatabase extends Context.Service<RunDatabase, RunDatabaseClient>()(
   "@usine/engine/internal/RunDatabase",
 ) {
+  /** Provides an already initialized database client without opening, migrating, or closing it. */
   static readonly layer = (database: RunDatabaseClient) => Layer.succeed(RunDatabase)(database);
 }
 

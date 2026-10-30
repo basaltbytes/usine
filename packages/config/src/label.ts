@@ -33,7 +33,10 @@ const GitHubLabelDescription = Schema.String.check(
 
 /** A label created in every managed repository. */
 export class DeclaredLabel extends Schema.Class<DeclaredLabel>("@usine/config/DeclaredLabel")({
+  /** The GitHub label name, compared case-insensitively. */
   name: GitHubLabelName,
+  /** Six hex digits without `#`, or `None` to let GitHub choose the color. */
   color: Schema.OptionFromOptionalKey(GitHubLabelColor),
+  /** The label description, at most 100 characters, or `None` to omit it on creation. */
   description: Schema.OptionFromOptionalKey(GitHubLabelDescription),
 }) {}

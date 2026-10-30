@@ -92,9 +92,17 @@ const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
   Schema.encodeKeys({ parentModel: "parent_model", parentEffort: "parent_effort" }),
 );
 
+/**
+ * Serializes `agent` as YAML frontmatter and a Markdown persona, with snake_case keys. The name
+ * remains in the filename.
+ */
 export const formatAgent = (agent: AgentFile): string =>
   `---\n${writeYaml(Schema.encodeSync(AuthoredAgentFrontmatter)(new AgentFrontmatter(agent)))}---\n${agent.persona}`;
 
+/**
+ * Serializes `loop` as YAML frontmatter and a Markdown prompt, with snake_case keys. The name
+ * remains in the filename.
+ */
 export const formatLoop = (loop: LoopFile): string =>
   `---\n${writeYaml(Schema.encodeSync(AuthoredLoopFrontmatter)(new LoopFrontmatter(loop)))}---\n${loop.body}`;
 
@@ -275,6 +283,10 @@ const parseUsineYaml = Effect.fn("ConfigParser.parseUsineYaml")(
     }),
 );
 
+/**
+ * Parses Markdown `source`, deriving the agent name from `file`. Rejects invalid frontmatter,
+ * unknown keys, and an empty persona with `ConfigFileError`.
+ */
 export const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
   (file: InstancePath, source: string): Effect.Effect<AgentFile, ConfigFileError> =>
     Effect.gen(function* () {
@@ -300,7 +312,11 @@ export const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
     }),
 );
 
-/** Parses the export format without checking expressions, for form drafts. */
+/**
+ * Parses Markdown `source` for a loop draft, deriving its name from `file`. Checks frontmatter and
+ * a nonblank prompt but leaves CEL expressions and references unchecked; parse failures return
+ * `ConfigFileError`.
+ */
 export const parseLoopDraft = (file: InstancePath, source: string) =>
   Effect.gen(function* () {
     const name = yield* loopName(file);
@@ -525,17 +541,25 @@ export class ConfigParser extends Context.Service<
       file: InstancePath,
       source: string,
     ) => Effect.Effect<UsineConfig, ConfigFileError>;
-    /** Parses an Agent file, taking the Agent name from `file`. */
+    /** Parses an agent file, taking the agent name from `file`. */
     readonly parseAgentFile: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<AgentFile, ConfigFileError>;
-    /** Parses a Loop file and checks its `if` and prompt expressions, taking the Loop name from `file`. */
+    /**
+     * Parses a loop file and checks its `if` and prompt expressions, taking the loop name from
+     * `file`.
+     */
     readonly parseLoopFile: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<LoopFile, ConfigFileError>;
-    /** Collects schema, expression, template, and reference problems from usable draft fields. */
+    /**
+     * Checks Markdown `input.text` or JSON `input.value` for `file`, collecting independent
+     * schema, CEL, template, and reference problems. `references` supplies known names; `None`
+     * skips reference checks. A parsed loop can coexist with problems; syntax failures use the
+     * error channel.
+     */
     readonly checkLoopDraft: (
       file: InstancePath,
       input: { readonly text: string } | { readonly value: Schema.Json },
@@ -544,18 +568,22 @@ export class ConfigParser extends Context.Service<
       { readonly loop: Option.Option<LoopFile>; readonly problems: ReadonlyArray<ConfigFileError> },
       ConfigFileError
     >;
-    /** Returns warnings for undeclared labels used by Board lanes or Loop conditions. */
+    /** Returns warnings for undeclared labels used by board lanes or loop conditions. */
     readonly configWarnings: (
       config: UsineConfig,
       loops: ReadonlyArray<LoopFile>,
     ) => Effect.Effect<ReadonlyArray<ConfigWarning>, ExpressionCheckError>;
-    /** Evaluates the Loop's `{{ ... }}` expressions with `context.item` as the trigger payload and `context.repo` as the repository. */
+    /**
+     * Evaluates the loop's `{{ ... }}` expressions with `context.item` as the trigger payload and
+     * `context.repo` as the repository.
+     */
     readonly renderPrompt: (
       loop: LoopFile,
       context: Schema.JsonObject,
     ) => Effect.Effect<string, ConfigFileError>;
   }
 >()("@usine/config/ConfigParser") {
+  /** Provides a parser using `ExpressionEngine` for CEL checks and prompt evaluation. */
   static readonly layer = Layer.effect(
     ConfigParser,
     Effect.gen(function* () {

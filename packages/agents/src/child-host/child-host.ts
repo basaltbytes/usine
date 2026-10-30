@@ -9,7 +9,9 @@ export class LocalProcess extends Schema.TaggedClass<LocalProcess>("@usine/agent
 
 /** The local SSH executable and the options before the destination. */
 export const SshCommand = Schema.Struct({
+  /** The SSH executable on the launching machine, resolved through its PATH or an explicit path. */
   command: Schema.NonEmptyString,
+  /** SSH options before the destination, each passed as a separate argument. */
   args: Schema.Array(Schema.String),
 });
 export type SshCommand = typeof SshCommand.Type;
@@ -18,6 +20,7 @@ export type SshCommand = typeof SshCommand.Type;
 export const ShellContainer = Schema.Struct({
   /** The container CLI on the machine, such as `docker`. */
   runtime: Schema.NonEmptyString,
+  /** The existing container name or ID accepted by the container CLI. */
   name: Schema.NonEmptyString,
 });
 export type ShellContainer = typeof ShellContainer.Type;
@@ -26,11 +29,12 @@ export type ShellContainer = typeof ShellContainer.Type;
 export class RemoteShell extends Schema.TaggedClass<RemoteShell>("@usine/agents/RemoteShell")(
   "RemoteShell",
   {
+    /** The local SSH client and connection options used to reach the remote machine. */
     ssh: SshCommand,
     /**
      * The SSH client's process environment: what SSH needs to connect, never the orchestrator's
      * secrets (ADR 0011), plus the variables that `-o SendEnv=` options in `ssh` forward to the
-     * child. Use it for values that must not appear on the command line, such as a Gateway caller
+     * child. Use it for values that must not appear on the command line, such as a gateway caller
      * token. Never log this field.
      */
     sshEnvironment: Schema.Record(Schema.String, Schema.String),
@@ -44,7 +48,7 @@ export class RemoteShell extends Schema.TaggedClass<RemoteShell>("@usine/agents/
   },
 ) {}
 
-/** The host that runs an Attempt's children, chosen by the Worker that prepared its checkout. */
+/** The host that runs an attempt's children, chosen by the worker that prepared its checkout. */
 export const ChildHost = Schema.Union([LocalProcess, RemoteShell]);
 export type ChildHost = typeof ChildHost.Type;
 
@@ -59,7 +63,9 @@ export interface HostInvocation {
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined;
   /** On a remote shell, the file that contains the command's PID while it runs, so cleanup can stop it after the SSH client exits. */
   readonly pidFile?: string | undefined;
+  /** The executable on the target host, resolved there rather than on the orchestrator. */
   readonly command: string;
+  /** Command arguments in order; remote invocation quotes each argument for the shell. */
   readonly args: ReadonlyArray<string>;
 }
 
@@ -134,7 +140,7 @@ const STOP_PID_FILE = `
   rm -f "$pidfile"`;
 
 /**
- * A shell script that stops an Attempt's remaining remote children before its worktree is kept or
+ * A shell script that stops an attempt's remaining remote children before its worktree is kept or
  * removed: for each `<worktree>.child-*.pid`, it sends TERM, waits, then sends KILL. Run it with
  * `sh -c` and the worktree as `$1`; it prints one outcome per PID file. An exited SSH client does
  * not mean that its remote command stopped.

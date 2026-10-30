@@ -19,6 +19,10 @@ export type TriggerRecheck = "matches" | "no-longer-matches" | "item-gone";
 export class TriggerCondition extends Context.Service<
   TriggerCondition,
   {
+    /**
+     * Fetches current trigger input for the queued submission and returns whether it still matches
+     * or the item is gone. Return `matches` when the adapter cannot determine the current state.
+     */
     readonly recheck: (submission: Submission) => Effect.Effect<TriggerRecheck>;
   }
 >()("@usine/engine/TriggerCondition") {}

@@ -22,6 +22,12 @@ export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>
 
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {
+    WebhookSilenceNeed: ({ publicUrl, startedAt }) => ({
+      title: "No webhook delivery received",
+      detail: `No verified delivery since startup at ${startedAt}. Check ${publicUrl}, the App webhook active setting, and USINE_GITHUB_WEBHOOK_SECRET. Polling continues.`,
+      repository: null,
+      runId: null,
+    }),
     PoolLimitNeed: ({ pool, login, window, usedPercent, resetsAt }) => ({
       title: `${poolLabel(pool)}: rate window at ${usedPercent}%`,
       detail: `${Option.getOrElse(login, () => "Login unavailable")} · ${window} window · resets ${DateTime.formatIso(resetsAt)}`,
@@ -136,6 +142,7 @@ export const attentionOverviewLink = "View all on Overview";
 export const attentionBellLabel = (count: number) => `Needs attention (${count})`;
 
 export const needKindLabel = {
+  WebhookSilenceNeed: "Webhook endpoint silent",
   PoolLimitNeed: "Pool rate window",
   ApprovalNeed: "Approval needed",
   CycleBudgetNeed: "Cycle budget exhausted",

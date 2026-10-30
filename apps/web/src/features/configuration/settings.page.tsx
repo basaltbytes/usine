@@ -114,7 +114,7 @@ const groups = (
             {
               key: "webhooks.public_url",
               value: mono(settings.webhooksPublicUrl),
-              effect: "Where GitHub would deliver webhooks.",
+              effect: "The full public webhook URL, including /webhooks/github.",
             },
           ]),
     ],

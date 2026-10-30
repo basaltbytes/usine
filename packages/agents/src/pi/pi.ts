@@ -193,4 +193,5 @@ const makePiChild = Effect.gen(function* () {
   return PiChildBackend.of({ launch });
 });
 
+/** Provides `PiChildBackend` for local child sessions using API keys. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
 export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);

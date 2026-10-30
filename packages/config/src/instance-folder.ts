@@ -21,13 +21,21 @@ const factoryError = (error: ConfigFileError): FactoryConfigError =>
     message: error.message,
   });
 
-/** The service that loads an instance folder. An invalid `usine.yaml` fails the load; an invalid loop is quarantined. */
+/**
+ * The service that loads an instance folder. An invalid `usine.yaml` fails the load; an invalid
+ * loop is quarantined.
+ */
 export class InstanceFolder extends Context.Service<
   InstanceFolder,
   {
+    /**
+     * Reads `root` as one snapshot. Invalid agents and loops become diagnostics; registry,
+     * settings, or directory-read failures fail the load with `FactoryConfigError`.
+     */
     readonly load: (root: InstanceDirectory) => Effect.Effect<LoadedInstance, FactoryConfigError>;
   }
 >()("@usine/config/InstanceFolder") {
+  /** Provides folder inspection using `FileSystem`, `Path`, and `ConfigParser`. */
   static readonly layer = Layer.effect(
     InstanceFolder,
     Effect.gen(function* () {

@@ -24,6 +24,7 @@ import {
   splitPiModel,
 } from "./authentication.ts";
 
+/** A Pi SDK event before conversion to the attempt channel's session events. */
 export type PiSessionEvent = AgentSessionEvent;
 export type PiMessage = Awaited<
   ReturnType<typeof createAgentSession>
@@ -31,45 +32,74 @@ export type PiMessage = Awaited<
 
 /** The subset of an in-process Pi session that the adapter uses. */
 export interface PiSession {
+  /** The session transcript used to read the final assistant answer and token usage. */
   readonly messages: ReadonlyArray<PiMessage>;
+  /** Registers an SDK event listener and returns the function that removes it. */
   readonly subscribe: (listener: (event: PiSessionEvent) => void) => () => void;
+  /** Sends the task text and waits for the turn to settle; SDK failures reject the promise. */
   readonly prompt: (prompt: string) => Promise<void>;
+  /** Queues guidance for the next model call; `handled` means an input hook consumed it. The backend treats `queued` and `void` as awaiting delivery. */
   readonly steer: (message: string) => Promise<"handled" | "queued" | void>;
+  /** Stops the active turn and waits for the agent to become idle. */
   readonly abort: () => Promise<void>;
+  /** Releases SDK resources and listeners when the caller is done with the session. */
   readonly dispose: () => void;
 }
 
+/** The checkout, model, and tool configuration used to start an in-process Pi session. */
 export interface PiStartOptions {
+  /** The checkout directory used by repository tools and session settings. */
   readonly cwd: string;
   /** The complete environment of every command the bash tool runs; `None` inherits this process's environment. */
   readonly environment: Option.Option<Readonly<Record<string, string>>>;
+  /** Trusted inline extensions to register, such as the operator pause gate. */
   readonly extensions: ReadonlyArray<InlineExtension>;
+  /** The requested model in `provider/model` form. */
   readonly model: ModelId;
+  /** Cancels SDK startup and authentication requests. */
   readonly signal: AbortSignal;
+  /** The requested reasoning effort, checked against the active model's supported levels. */
   readonly thinkingLevel: Effort;
 }
 
+/** The result of Pi startup and credential checks. Only `Started` transfers a live session to the caller, which must dispose it. */
 export type PiStartResult =
   | {
+      /** No credential is available for the active model's provider. */
       readonly _tag: "AuthenticationUnavailable";
+      /** The active model after Pi applies its settings, in `provider/model` form. */
       readonly model: ModelId;
     }
   | {
+      /** The provider credential cannot use a supported Pi billing pool. */
       readonly _tag: "UnsupportedAuthentication";
+      /** The rejected OAuth credential category, without credential values. */
       readonly authentication: Extract<PiAuthentication, { readonly _tag: "OAuth" }>;
+      /** The active model after Pi applies its settings, in `provider/model` form. */
       readonly model: ModelId;
     }
-  | { readonly _tag: "UnknownModel" }
   | {
+      /** The model ID is malformed or absent from Pi's registry. */
+      readonly _tag: "UnknownModel";
+    }
+  | {
+      /** The active model does not support the requested reasoning effort. */
       readonly _tag: "UnsupportedEffort";
+      /** The reasoning effort requested at startup. */
       readonly effort: Effort;
+      /** The active model after Pi applies its settings, in `provider/model` form. */
       readonly model: ModelId;
+      /** The reasoning levels accepted by the active model. */
       readonly supported: ReadonlyArray<Effort>;
     }
   | {
+      /** Startup succeeded; the caller must dispose the returned session. */
       readonly _tag: "Started";
+      /** The active model after Pi applies its settings, in `provider/model` form. */
       readonly model: ModelId;
+      /** The billing pool resolved from the active model's credential. */
       readonly pool: PiPool;
+      /** The live in-memory session owned by the caller. */
       readonly session: PiSession;
       /** The names of the tools active in `session`. */
       readonly tools: ReadonlyArray<string>;
@@ -111,9 +141,17 @@ export const piChildTools = (
 /** The service that starts a Pi session with the selected model and its repository tools. */
 export class PiSdk extends Context.Service<
   PiSdk,
-  { readonly start: (options: PiStartOptions) => Promise<PiStartResult> }
+  {
+    /**
+     * Starts a session with `options` and checks its active model and credential. Returns a
+     * rejection variant for an unsupported configuration; SDK failures reject the promise.
+     * The caller owns disposal of a `Started` session, including if startup finishes after cancellation.
+     */
+    readonly start: (options: PiStartOptions) => Promise<PiStartResult>;
+  }
 >()("@usine/agents/pi/PiSdk") {}
 
+/** Provides Pi sessions using the installed SDK and worker-user settings. Project extensions, skills, prompt templates, and themes are disabled; sessions are kept in memory. */
 export const piSdkLive = Layer.succeed(PiSdk)({
   start: async (options) => {
     const modelRuntime = await ModelRuntime.create({ signal: options.signal });

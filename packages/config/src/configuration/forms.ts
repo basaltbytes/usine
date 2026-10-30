@@ -28,10 +28,15 @@ const formSchemas = {
   repository: ManagedRepo,
   settings: SettingsEntity,
 };
+/** The entity kinds supported by configuration forms; labels use the text editor. */
 export const ConfigurationFormKind = Schema.Literals(Record.keys(formSchemas));
 const isFormKind = Schema.is(ConfigurationFormKind);
 
-/** Decodes a form draft with the same schema used when saving the entity. */
+/**
+ * Checks `value` against the entity schema selected by `key` and returns the original JSON object.
+ * Unsupported kinds, unknown fields, or schema failures return `ConfigFileError`; CEL and
+ * reference checks happen separately.
+ */
 export const validateConfigurationForm = (
   key: ConfigurationEntityKey,
   value: Schema.JsonObject,
@@ -55,7 +60,11 @@ export const validateConfigurationForm = (
   );
 };
 
-/** Reads an entity's export format for the form editor. */
+/**
+ * Parses export-format `text` for `key` into form JSON. Allows empty project membership in drafts
+ * and omits repository lanes; loop expressions remain unchecked. Invalid syntax or schema fields
+ * fail with `ConfigFileError`.
+ */
 export const parseConfigurationForm = (key: ConfigurationEntityKey, text: string) => {
   const file = InstancePath.make(key.key);
   if (key.kind === "loop")

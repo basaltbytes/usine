@@ -3,14 +3,19 @@ import { Option, Schema } from "effect";
 import { uniqueRepositoryNames } from "./checks.ts";
 import { RegistryTag, type ManagedRepo } from "./factory.ts";
 
-/** A filter that limits a Loop to registry repositories by name, by any listed tag, or both. */
+/**
+ * Repository names or tags that narrow a loop's project membership. When both are set, both must
+ * match (ADR 0004).
+ */
 export class Selector extends Schema.Class<Selector>("@usine/config/Selector")({
+  /** Repository names to match case-insensitively; `None` imposes no name restriction. */
   repos: Schema.OptionFromOptionalKey(
     Schema.Array(RepositoryName).check(
       Schema.isNonEmpty(),
       uniqueRepositoryNames((name: RepositoryName) => name),
     ),
   ),
+  /** Tags of which a repository must have at least one; `None` imposes no tag restriction. */
   tags: Schema.OptionFromOptionalKey(
     Schema.Array(RegistryTag).check(Schema.isNonEmpty(), Schema.isUnique()),
   ),

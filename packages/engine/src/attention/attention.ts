@@ -15,13 +15,25 @@ const persistence =
 export class AttentionAcknowledgements extends Context.Service<
   AttentionAcknowledgements,
   {
+    /**
+     * Returns all stored dismissals in no specified order, including entries that may no longer be
+     * current.
+     */
     readonly list: () => Effect.Effect<
       ReadonlyArray<AttentionAcknowledgement>,
       EnginePersistenceError
     >;
+    /**
+     * Records a dismissal for this entry ID and revision. Repeating it preserves the first
+     * operator and time; run and ask state stay unchanged.
+     */
     readonly dismiss: (
       acknowledgement: AttentionAcknowledgement,
     ) => Effect.Effect<void, EnginePersistenceError>;
+    /**
+     * Deletes the dismissal matching both `key.id` and `key.revision`; does nothing if no record
+     * matches.
+     */
     readonly undo: (key: AttentionKey) => Effect.Effect<void, EnginePersistenceError>;
     /**
      * Deletes acknowledgements without a matching current ID and revision.
@@ -32,6 +44,9 @@ export class AttentionAcknowledgements extends Context.Service<
     ) => Effect.Effect<void, EnginePersistenceError>;
   }
 >()("@usine/engine/AttentionAcknowledgements") {
+  /**
+   * Persists dismissals in the supplied runtime database; changes invalidate operator projections.
+   */
   static readonly layer = Layer.effect(
     AttentionAcknowledgements,
     Effect.gen(function* () {

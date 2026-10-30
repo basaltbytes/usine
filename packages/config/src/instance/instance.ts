@@ -5,14 +5,23 @@ import { AgentFile, InvalidAgent } from "../agent.ts";
 import { ConfigWarning } from "./diagnostics.ts";
 import { referenceIndex, loopReferenceFailure } from "./references.ts";
 
-/** A snapshot of an instance folder. Construction fails if a loop references an unknown agent or selector entry. */
+/**
+ * A snapshot of an instance folder. Construction fails if a loop references an unknown agent or
+ * selector entry.
+ */
 export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/LoadedInstance")(
   Schema.Struct({
+    /** The decoded registry, projects, settings, and worker definitions. */
     config: UsineConfig,
+    /** Valid agents available to loop references. */
     agents: Schema.Array(AgentFile),
+    /** Agent files rejected during permissive folder loading. */
     invalidAgents: Schema.Array(InvalidAgent),
+    /** Valid loops with resolved agent and selector references. */
     loops: Schema.Array(LoopFile),
+    /** Loops excluded because file parsing or reference validation failed. */
     quarantinedLoops: Schema.Array(QuarantinedLoop),
+    /** Nonblocking diagnostics for undeclared label references. */
     warnings: Schema.Array(ConfigWarning),
   }).check(
     Schema.makeFilter(
