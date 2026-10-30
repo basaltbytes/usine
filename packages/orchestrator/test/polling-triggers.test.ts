@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { noCycleBudgets } from "./support/polling.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
@@ -236,7 +237,10 @@ describe("PollingTriggers", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-mergeability-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-mergeability-",
+        }),
       );
       const loop = new LoopFile({
         ...issueLoop("rebase-pr"),
@@ -392,7 +396,10 @@ describe("PollingTriggers", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-missing-pr-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-missing-pr-",
+        }),
       );
       const instance = instanceWith([
         new LoopFile({
@@ -496,7 +503,10 @@ describe("PollingTriggers", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-finisher-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-finisher-",
+        }),
       );
       const loop = new LoopFile({
         ...issueLoop("finish-pr"),
@@ -767,7 +777,10 @@ describe("PollingTriggers", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-paused-polling-" }),
+          yield* fileSystem.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-paused-polling-",
+          }),
         );
         const loop = issueLoop("paused-issues");
         const payload = issuePayload(["ready"]);
@@ -853,7 +866,10 @@ describe("PollingTriggers", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-polling-",
+        }),
       );
       const catalogFails = yield* Ref.make(false);
       const hash = yield* Ref.make(ContentHash.make("a".repeat(64)));
@@ -977,7 +993,10 @@ describe("PollingTriggers", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-" }),
+          yield* fileSystem.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-polling-",
+          }),
         );
         const state = yield* Ref.make<RemoteState>({
           hash: ContentHash.make("a".repeat(64)),
@@ -1564,7 +1583,10 @@ describe("PollingTriggers", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-multi-" }),
+        yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-polling-multi-",
+        }),
       );
       const multiConfig = Schema.decodeUnknownSync(UsineConfig)({
         version: 2,
@@ -1651,7 +1673,10 @@ describe("PollingTriggers", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-reload-agent-" }),
+          yield* fileSystem.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-reload-agent-",
+          }),
         );
         const agentFile = (model: string) =>
           `---\nharness: codex\nmodel: ${model}\neffort: high\n---\nImplement the issue.\n`;

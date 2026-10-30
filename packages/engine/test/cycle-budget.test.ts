@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
@@ -72,7 +73,10 @@ const withDirectory = <A, E, R>(work: (directory: InstanceDirectory) => Effect.E
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({ prefix: "usine-cycle-budget-" }),
+      yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-cycle-budget-",
+      }),
     );
     return yield* work(directory);
   }).pipe(Effect.provide(NodeServices.layer));

@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -17,7 +18,9 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
+      );
       const previous = new AttentionAcknowledgement({
         id: "unconfigured-worker:local",
         revision: AttentionRevision.make('{"attempts":1,"running":0}'),
@@ -74,7 +77,9 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
+      );
       const acknowledgement = new AttentionAcknowledgement({
         id: "preflight:project:label",
         revision: AttentionRevision.make("first finding"),

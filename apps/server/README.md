@@ -185,3 +185,9 @@ Run `usine sign-in <instance-origin>`, open the GitHub device page, and enter th
 Browser sessions use an `HttpOnly`, `SameSite=Strict` cookie, with `Secure` except for local HTTP origins. Browser writes require `X-Usine-CSRF`. The bundled UI reads its CSRF cookie and sends that header. Health and sign-in endpoints are public; the separate GitHub webhook listener verifies delivery signatures. Sign-in initiation, link issuance, GitHub exchanges, and invalid challenges have separate instance-wide limits of 60 requests per operation per minute. Invalid challenges do not consume the limits for valid sign-ins. Device polls also honor GitHub's interval.
 
 The Overview’s worker utilization uses stored configuration revisions to account for slot changes over the selected window. Revision 1 supplies the slot count before recorded history. Statistics Details also clarifies that repeated successful rebase runs count against first time right.
+
+## Test storage
+
+The SQLite storage, configuration, and export tests use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Export fixture seeding receives the test cancellation signal, and directory removal retries transient filesystem errors.
+
+See [Development](../../README.md#development) for temporary storage selection and worker concurrency.

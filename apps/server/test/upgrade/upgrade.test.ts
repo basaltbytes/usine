@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -108,7 +109,9 @@ const git = (directory: string, ...args: ReadonlyArray<string>) =>
 
 /** Creates an instance that pins @usine/server 1.0.0 and runs the fixture from its node_modules. */
 const pinnedInstance = async () => {
-  const directory = InstanceDirectory.make(mkdtempSync(join(tmpdir(), "usine-upgrade-")));
+  const directory = InstanceDirectory.make(
+    mkdtempSync(join(sqliteTempDirectory(), "usine-upgrade-")),
+  );
   folders.push(directory);
   writeFileSync(
     join(directory, "package.json"),
@@ -189,7 +192,9 @@ describe("usine upgrade", { timeout: SCENARIO_TIMEOUT_MS }, () => {
   });
 
   it("names the checkout that a running engine comes from instead of moving a pin", async () => {
-    const directory = InstanceDirectory.make(mkdtempSync(join(tmpdir(), "usine-upgrade-")));
+    const directory = InstanceDirectory.make(
+      mkdtempSync(join(sqliteTempDirectory(), "usine-upgrade-")),
+    );
     folders.push(directory);
     const launch = new InstanceLaunch({
       node: process.execPath,
@@ -211,7 +216,7 @@ describe("usine upgrade", { timeout: SCENARIO_TIMEOUT_MS }, () => {
   });
 
   it("reports a version that the registry doesn't have, and a command that exits non-zero", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "usine-upgrade-"));
+    const directory = mkdtempSync(join(sqliteTempDirectory(), "usine-upgrade-"));
     folders.push(directory);
     assert.strictEqual(await run(resolveVersion(directory, "@usine/server", "latest")), "2.0.0");
     const missing = await run(
@@ -230,7 +235,9 @@ describe("usine upgrade", { timeout: SCENARIO_TIMEOUT_MS }, () => {
 });
 
 it("authenticates system upgrade checks and requests with the local admin-token file", async () => {
-  const directory = InstanceDirectory.make(mkdtempSync(join(tmpdir(), "usine-system-upgrade-")));
+  const directory = InstanceDirectory.make(
+    mkdtempSync(join(sqliteTempDirectory(), "usine-system-upgrade-")),
+  );
   folders.push(directory);
   mkdirSync(join(directory, ".usine"));
   const token = "u".repeat(43);

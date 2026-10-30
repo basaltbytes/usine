@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { createHash } from "node:crypto";
@@ -256,7 +257,10 @@ const withFactory = <A, E>(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({ prefix: "usine-closed-items-" }),
+      yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-closed-items-",
+      }),
     );
     const engine = localEngineLayer(directory).pipe(
       Layer.provide(executor),

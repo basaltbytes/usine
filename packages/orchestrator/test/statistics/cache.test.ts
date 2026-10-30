@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { configurationLayer } from "../support/configuration.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -145,7 +146,10 @@ describe("Statistics cache", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-statistics-cache-" }),
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-statistics-cache-",
+        }),
       );
       const database = localSqliteLayer(directory);
       const services = RunReader.layer.pipe(Layer.provideMerge(database));
@@ -206,7 +210,10 @@ describe("Statistics cache", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-resolution-statistics-" }),
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-resolution-statistics-",
+        }),
       );
       const worker = WorkerName.make("local");
       const executor = Layer.succeed(StepExecutor)({

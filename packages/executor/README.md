@@ -280,3 +280,9 @@ Boat workers can use gateway subscription credentials over Tailscale. Set `snaps
 Worker liveness notices report the first unanswered SSH probe and the third consecutive unanswered probe, with `unansweredProbes` and `lastAnsweredAt`. A new attempt on a silent worker receives the current count. Recovery emits `WorkerResponsive`; connectivity loss leaves attempts running.
 
 Removing a provisioned worker performs one final sweep before discarding its provider token. A failed final deletion logs the instance and worker labels for manual cleanup. Startup can discover removed workers' machines only in provider accounts accessible through a configured worker's token; restore a removed account's worker configuration to sweep that account.
+
+## Test storage
+
+Durable-session test databases use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Executable fixtures use the OS temporary directory.
+
+See [Development](../../README.md#development) for temporary storage selection and worker concurrency.

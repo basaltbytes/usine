@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -192,7 +193,10 @@ export const withInstance = <A, E, R>(
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const directory = InstanceDirectory.make(
-      yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-engine-" }),
+      yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-engine-",
+      }),
     );
     return yield* use(directory);
   }).pipe(Effect.provide(NodeServices.layer));

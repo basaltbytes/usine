@@ -94,3 +94,9 @@ const attempts = layer({
 Push refusals recorded as `GitHubPushFailure` retain their diagnostic when serialized as a failed task outcome.
 
 A child's provider capacity refusal remains `ProviderCapacityFailure` when the parent relays `[usine:provider-capacity]` or ends without relaying the child's report. The saved child report retains the classification across a restart. Direct Pi parent capacity errors also preserve the provider's message for the engine's delayed retry. The testing stub's `fail` method classifies message-only harness failures in the same way.
+
+## Test storage
+
+Durable storage fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts).
+
+See [Development](../../README.md#development) for temporary storage selection and worker concurrency.

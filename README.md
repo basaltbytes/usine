@@ -59,6 +59,10 @@ pnpm format    # oxfmt
 
 Tests import other workspace packages from their `dist`, and the `@usine/server` tests also run its own `dist/main.js`. turbo builds both before it tests. To test one package, run `pnpm turbo run test --filter <package>`; `pnpm --filter <package> test` skips the builds, so it fails or tests stale code until you run `pnpm build`.
 
+SQLite storage fixtures use `tooling/test/sqlite.mts` to select writable `/dev/shm` on Linux when it is mounted as tmpfs. On other hosts, they use the OS temporary directory. Fixtures that execute binaries or Git hooks keep using the OS temporary directory because shared memory can be mounted with `noexec`.
+
+Set `VITEST_MAX_WORKERS=1 pnpm test` to limit Vitest concurrency on a busy worker. Turbo forwards this variable and includes it in the test cache key. To repeat the tests without reading cached results, run `TURBO_CACHE=local:w pnpm test`.
+
 ## Releases
 
 [Changesets](https://github.com/changesets/changesets) handles releases: add a changeset for each user-visible change. CI opens a **Version Packages** PR. Merging it stages the changed versions for npm's `latest` dist-tag; an npm maintainer approves them before they become installable. 0.x APIs change without notice.

@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { LocalProcess } from "@usine/agents/child-host";
@@ -81,7 +82,9 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
   (scenario) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
+      );
       let calls = 0;
       let leased = false;
       const server = Layer.succeed(CodexAppServer)({

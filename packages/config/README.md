@@ -115,3 +115,9 @@ Loop form drafts use `parseConfigurationForm` and `validateConfigurationForm` fr
 Configuration version 2 stores projects separately from the repository registry. Loops use `project/loop` identities; a short name resolves while it is unique across projects. Selectors narrow the repositories within the owning project.
 
 `migrateProjects` converts version 1 snapshots to one project per registered repository and copies each loop into every project whose repository its selector matched. `ConfigurationFolder.import` accepts the legacy `loops/*.md` layout and converts it. Export writes a `projects` block in `usine.yaml` and `projects/<project>/loops/*.md`. Historical version 1 revisions remain readable. A version 2 store rejects a downgrade to version 1; import legacy files to convert their contents instead.
+
+## Test storage
+
+The SQLite reopen test uses the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). The adapter contract tests use in-memory databases.
+
+See [Development](../../README.md#development) for temporary storage selection and worker concurrency.

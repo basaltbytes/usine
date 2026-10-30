@@ -1,3 +1,4 @@
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { migrateProjects } from "../src/project/operations.ts";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
@@ -591,7 +592,7 @@ it.effect(
 it.live("observes another SQLite connection and preserves history after reopening", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = yield* fs.makeTempDirectoryScoped();
+    const directory = yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() });
     const connection = () =>
       sqliteConfigurationLayer.pipe(
         Layer.provide(parserLayer),
