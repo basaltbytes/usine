@@ -18,6 +18,12 @@ const run = (
     | "good"
     | "bad-api"
     | "bad-install"
+    | "unchanged-install"
+    | "unchanged-unhealthy"
+    | "previous-rollback"
+    | "missing-rollback"
+    | "invalid-rollback"
+    | "other-rollback"
     | "bad-rollback"
     | "bad-stop"
     | "transient-target"
@@ -28,7 +34,13 @@ const run = (
 ) => {
   const root = mkdtempSync(join(tmpdir(), "usine-upgrade-helper-"));
   const folder = join(root, "upgrade");
+  const prefix = join(root, "custom prefix");
+  const packageFolder = join(prefix, "lib/node_modules/@usine/server");
   mkdirSync(folder);
+  mkdirSync(packageFolder, { recursive: true });
+  writeFileSync(join(packageFolder, "package.json"), JSON.stringify({ version: "1.0.0" }));
+  writeFileSync(join(folder, "installed"), "@usine/server@1.0.0");
+  writeFileSync(join(folder, "running"), "@usine/server@1.0.0");
   const command = (name: string, body: string) => {
     const path = join(folder, name);
     writeFileSync(path, `#!/bin/bash\n${body}\n`);
@@ -39,13 +51,15 @@ const run = (
     command(
       "npm",
       `echo "$*" >> "$folder/commands"
+manifest="$4/lib/node_modules/@usine/server/package.json"
 if [ "$5" = @usine/server@2.0.0 ]; then
   count=0
   if [ -f "$folder/installs" ]; then count=$(cat "$folder/installs"); fi
   count=$((count + 1))
   echo "$count" > "$folder/installs"
   case "$scenario" in
-    bad-install) echo 'npm error code EACCES' >&2; exit 1;;
+    bad-install) rm "$manifest"; echo 'npm error code EACCES' >&2; exit 1;;
+    unchanged-install|unchanged-unhealthy) echo 'npm error code EACCES' >&2; exit 1;;
     transient-target|transient-404|missing-target|missing-404)
       if [ "$count" -lt 3 ] || [[ "$scenario" = missing-* ]]; then
         case "$scenario" in
@@ -56,8 +70,17 @@ if [ "$5" = @usine/server@2.0.0 ]; then
       fi;;
   esac
 fi
-if [ "$scenario" = bad-rollback ] && [ "$5" = @usine/server@1.0.0 ]; then exit 1; fi
-echo "$5" > "$folder/installed"`,
+if [ "$5" = @usine/server@1.0.0 ]; then
+  case "$scenario" in
+    bad-rollback) exit 1;;
+    missing-rollback) rm "$manifest"; exit 1;;
+    invalid-rollback) echo '{' > "$manifest"; exit 1;;
+    other-rollback) echo '{"version":"0.9.0"}' > "$manifest"; exit 1;;
+  esac
+fi
+echo "$5" > "$folder/installed"
+printf '{"version":"%s"}' "\${5#@usine/server@}" > "$manifest"
+if [ "$scenario" = previous-rollback ] && [ "$5" = @usine/server@1.0.0 ]; then exit 1; fi`,
     );
     command(
       "systemctl",
@@ -65,6 +88,7 @@ echo "$5" > "$folder/installed"`,
 if [ "$1" = stop ] && [ "$scenario" = bad-stop ]; then exit 1; fi
 if [ "$1" = stop ]; then
   echo inactive > "$folder/state"
+  : > "$folder/running"
   rm -f "$folder/pid-read"
   if [ "$shutdown" != normal ]; then echo deactivating > "$folder/state"; fi
 fi
@@ -82,6 +106,7 @@ if [ "$2" = --property=MainPID ]; then
 fi
 if [ "$1" = start ]; then
   echo active > "$folder/state"
+  cp "$folder/installed" "$folder/running"
   printf '%043d' "$(cat "$folder/installed" | tr -cd '0-9')" > "$folder/../admin-token"
 fi
 if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
@@ -91,13 +116,16 @@ if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
       `read -r authorization
 [ "$authorization" = "Authorization: Bearer $(< "$folder/../admin-token")" ] || exit 1
 installed=$(cat "$folder/installed")
-if [ "$installed" = @usine/server@2.0.0 ] && { [ "$scenario" = bad-api ] || [ "$scenario" = bad-rollback ]; }; then exit 1; fi
+if [ "$scenario" = unchanged-unhealthy ]; then exit 1; fi
+if [ "$installed" = @usine/server@2.0.0 ]; then
+  case "$scenario" in bad-api|*-rollback) exit 1;; esac
+fi
 printf '"%s"' "\${installed#@usine/server@}"`,
     );
     const script = join(folder, "run.sh");
     writeFileSync(
       script,
-      `folder='${folder}'\nprevious=1.0.0\ntarget=2.0.0\nprefix='/opt/custom prefix'\nunit=usine.service\nport=7331\n${helper}`,
+      `folder='${folder}'\nprevious=1.0.0\ntarget=2.0.0\nprefix='${prefix}'\nunit=usine.service\nport=7331\n${helper}`,
     );
     let failed = false;
     try {
@@ -110,6 +138,8 @@ printf '"%s"' "\${installed#@usine/server@}"`,
     }
     return {
       failed,
+      prefix,
+      running: readFileSync(join(folder, "running"), "utf8").trim(),
       record: Schema.decodeUnknownSync(Schema.fromJsonString(UpgradeRecord))(
         readFileSync(join(folder, "result.json"), "utf8"),
       ),
@@ -125,7 +155,7 @@ it("marks a version good only after its API answers, using the original npm pref
   expect(result.failed).toBe(false);
   expect(result.record.status).toBe("good");
   expect(result.commands).toContain(
-    "install --global --prefix /opt/custom prefix @usine/server@2.0.0",
+    `install --global --prefix ${result.prefix} @usine/server@2.0.0`,
   );
   expect(result.commands).not.toContain("@usine/server@1.0.0");
 });
@@ -143,15 +173,56 @@ it.each(["bad-api", "bad-install"] as const)(
     expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(1);
     expect(result.commands).not.toContain("sleep 60");
     expect(result.commands).toContain("@usine/server@1.0.0");
+    expect(result.running).toBe("@usine/server@1.0.0");
   },
 );
 
 it("records a failed rollback and leaves the previous version in the recovery record", () => {
   const result = run("bad-rollback");
   expect(result.failed).toBe(true);
-  expect(result.record.status).toBe("failed");
+  assert(result.record.status === "failed");
   expect(result.record.previous).toBe("1.0.0");
+  expect(result.record.reason).not.toContain("reinstall the previous version");
+  expect(result.running).toBe("");
 });
+
+it("restarts the unchanged previous version after a failed target install without reinstalling", () => {
+  const result = run("unchanged-install");
+  expect(result.failed).toBe(true);
+  assert(result.record.status === "failed");
+  expect(result.record.reason).toBe("The package could not be installed.");
+  expect(result.running).toBe("@usine/server@1.0.0");
+  expect(result.commands).not.toContain("@usine/server@1.0.0");
+});
+
+it("starts the previous version when the rollback install fails with that version on disk", () => {
+  const result = run("previous-rollback");
+  expect(result.failed).toBe(true);
+  assert(result.record.status === "failed");
+  expect(result.record.reason).toBe(
+    "The new server did not answer the operator API within three minutes.",
+  );
+  expect(result.commands).toContain("@usine/server@1.0.0");
+  expect(result.running).toBe("@usine/server@1.0.0");
+});
+
+it("reports recovery failure when the unchanged previous version fails its health check", () => {
+  const result = run("unchanged-unhealthy");
+  expect(result.failed).toBe(true);
+  assert(result.record.status === "failed");
+  expect(result.record.reason).toBe("Rollback failed. Check the upgrade service journal.");
+});
+
+it.each(["missing-rollback", "invalid-rollback", "other-rollback"] as const)(
+  "requests a manual reinstall when neither known version can be identified after %s",
+  (scenario) => {
+    const result = run(scenario);
+    expect(result.failed).toBe(true);
+    assert(result.record.status === "failed");
+    expect(result.record.reason).toContain("reinstall the previous version");
+    expect(result.running).toBe("");
+  },
+);
 
 it("does not replace packages when systemd cannot stop the server", () => {
   const result = run("bad-stop");
@@ -192,15 +263,16 @@ it.each(["transient-target", "transient-404"] as const)(
 );
 
 it.each(["missing-target", "missing-404"] as const)(
-  "rolls back with an install failure after exhausting registry retries for %s",
+  "restarts the unchanged previous version after exhausting registry retries for %s",
   (scenario) => {
     const result = run(scenario);
-    expect(result.failed).toBe(false);
-    assert(result.record.status === "rolled-back");
-    expect(result.record.failureStage).toBe("install");
+    expect(result.failed).toBe(true);
+    assert(result.record.status === "failed");
+    expect(result.record.reason).toBe("The package could not be installed.");
+    expect(result.running).toBe("@usine/server@1.0.0");
     expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
     expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
-    expect(result.commands).toContain("@usine/server@1.0.0");
+    expect(result.commands).not.toContain("@usine/server@1.0.0");
   },
 );
 
