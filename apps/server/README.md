@@ -211,3 +211,11 @@ Route definitions and schema annotations generate the contract. Authentication h
 `POST /api/configuration/loops/check` validates conditional approval as a boolean
 CEL expression in the trigger's environment. Approval diagnostics use the
 `approval` field path. Run and overview responses include the saved decision.
+
+## Public HTTPS access
+
+Publish the loopback listener through Caddy, Cloudflare Tunnel, or Tailscale Serve and set `USINE_ORIGIN` to its HTTPS address. See [Expose an instance over HTTPS](../docs/src/content/docs/guides/expose-an-instance.md) for enrollment, credential permissions, webhook secrets, proxy headers, and examples.
+
+The canonical origin is allowed automatically. Configure additional exact browser origins in the top-level `auth.origins` list through `usine config edit settings instance`, then restart. HTTP origins are limited to loopback; development origins require an explicit entry. Unknown origins receive 403 before handlers run. Allowed origins support credentialed CORS with `GET`, `POST`, `PUT`, and `DELETE`, and the `Authorization`, `Content-Type`, and `X-Usine-CSRF` headers. Cookie writes still require CSRF verification.
+
+One global middleware sets CSP and the security headers on routes, assets, preflights, and errors. HSTS follows the configured canonical HTTPS origin, independent of forwarded request headers.

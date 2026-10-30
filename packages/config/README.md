@@ -122,3 +122,5 @@ Configuration version 2 stores projects separately from the repository registry.
 The SQLite reopen test uses the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). The adapter contract tests use in-memory databases.
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+The top-level `auth.origins` list configures additional trusted browser origins and defaults to an empty list. `UiOrigin`, exported from `@usine/config/factory`, accepts exact HTTPS origins and HTTP origins on loopback, without credentials, paths, queries, or fragments. The server also allows its canonical `--origin` or `USINE_ORIGIN`. Authentication settings are stored with instance settings; changes require a server restart.

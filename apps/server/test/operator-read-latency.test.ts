@@ -234,12 +234,9 @@ describe("operator read latency", () => {
           operator,
           configuration,
         );
-        const server = HttpRouter.serve(
-          apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(backend)),
-          {
-            disableLogger: true,
-          },
-        ).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
+        const server = HttpRouter.serve(apiRoutes().pipe(HttpRouter.provideRequest(backend)), {
+          disableLogger: true,
+        }).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
 
         yield* Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient;
