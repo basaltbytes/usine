@@ -46,7 +46,9 @@ const make = Effect.gen(function* () {
     for (const repository of repositories) yield* polling.hint(repository);
     let newest = after;
     for (const delivery of deliveries) {
-      if (Option.isNone(newest) || delivery.id > newest.value) newest = Option.some(delivery.id);
+      if (Option.isNone(newest) || BigInt(delivery.id) > BigInt(newest.value)) {
+        newest = Option.some(delivery.id);
+      }
     }
     if (Option.isSome(newest)) yield* cursors.write(key, WebhookDeliveryId, newest.value);
     yield* Effect.logInfo("Webhook delivery hints processed", {

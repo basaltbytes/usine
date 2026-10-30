@@ -1,8 +1,8 @@
 import { Schema } from "effect";
 import { RepositoryId } from "./installation.ts";
 
-/** GitHub's positive delivery ID, used as the cursor for newer webhook summaries (ADR 0014). */
-export const WebhookDeliveryId = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+/** GitHub's positive delivery ID as decimal digits. Compare IDs with `BigInt` (ADR 0014). */
+export const WebhookDeliveryId = Schema.String.check(Schema.isPattern(/^[1-9][0-9]*$/u)).pipe(
   Schema.brand("WebhookDeliveryId"),
 );
 export type WebhookDeliveryId = typeof WebhookDeliveryId.Type;
@@ -19,6 +19,11 @@ export class WebhookDelivery extends Schema.Class<WebhookDelivery>("@usine/githu
   },
 ) {}
 
-export const WebhookDeliveryFromApi = WebhookDelivery.pipe(
-  Schema.encodeKeys({ repositoryId: "repository_id" }),
+export const WebhookDeliveriesFromJson = Schema.fromJsonString(
+  Schema.Array(WebhookDelivery.pipe(Schema.encodeKeys({ repositoryId: "repository_id" }))),
+  {
+    // Node 22's reviver source preserves the digits before numeric rounding.
+    reviver: (key: string, value: Schema.Json, context?: { readonly source?: string }) =>
+      key === "id" ? context?.source : value,
+  },
 );
