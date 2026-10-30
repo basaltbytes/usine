@@ -4,7 +4,7 @@ Chromium captures of the command palette browser fixture at 1440 × 900 (desktop
 
 | Screen | Desktop, dark | Desktop, light |
 | --- | --- | --- |
-| Command palette with the second item selected | [Capture](palette-desktop-dark.png) | [Capture](palette-desktop-light.png) |
+| Palette, second item selected | [Capture](palette-desktop-dark.png) | [Capture](palette-desktop-light.png) |
 
 To regenerate from the repository root:
 
