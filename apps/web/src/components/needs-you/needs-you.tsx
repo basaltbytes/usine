@@ -1,3 +1,4 @@
+import { WorkerQuotaAsk } from "./worker-quota-ask";
 import { itemName } from "~/components/item/mark";
 import { usePageCommands } from "~/components/command-palette/context";
 import { Link } from "@tanstack/react-router";
@@ -137,6 +138,8 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
       return <ApprovalAsk need={need} dismiss={dismiss} />;
     case "CycleBudgetNeed":
       return <CycleBudgetAsk need={need} dismiss={dismiss} />;
+    case "WorkerQuotaNeed":
+      return <WorkerQuotaAsk need={need} dismiss={dismiss} />;
     case "WorkerPreflightNeed":
       return (
         <NeedItem

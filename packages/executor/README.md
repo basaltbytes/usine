@@ -188,6 +188,8 @@ A gateway released before that endpoint answers 404: the worker's first such pre
 
 ### Provisioned machines
 
+Boat machine creation distinguishes concurrent sandbox, compute allowance, billing, and size plan limits from transient API rate limits. Quota failures preserve the provider message in `MachineUnavailableError`. Hetzner reports `resource_limit_exceeded` as a quota failure.
+
 A worker whose address has `machine: { _tag: "Provisioned" }` has no machine of its own: it creates a Hetzner Cloud server or a Boat sandbox for each attempt and deletes it afterwards ([#550](https://github.com/basaltbytes/usine/issues/550)). The layer provides `WorkerMachines` for the scheduler:
 
 - `create(worker, runId, attemptId, brains)` creates the machine, tagged with `SshExecutorOptions.instance`, the worker, the run, the persisted attempt, and a random value of this process, and waits up to `machineReadyTimeout` (or `provisioner.timings.sshWait`, 600 seconds by default) until it answers over SSH. It then waits for cloud-init, creates the root, and waits for Docker. The worker's first machine after `provisioner.timings.machineCheckInterval` seconds since its last successful check, and its first after the layer starts, also gets the machine preflight with `brains`, whose failure is a `WorkerCapabilityError`. Each machine runs one attempt, so that preflight derives the unset container limits for one slot, and the worker's machines get them until the next such preflight. The grant's `checked` is then a `MachineCheck` with the brains and the limits. A provider's refusal, no capacity or quota, no answer, or a timeout is a `MachineUnavailableError` with its `reason`. On failure or interruption, the machine is deleted.

@@ -1,3 +1,6 @@
+import { MachineQuotaWait, quotaWaits } from "../src/operator/machines.ts";
+import { workerAttentionFor } from "../src/operator/worker-attention.ts";
+import { ReadyOverview } from "../src/operator/overview.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { Attempt, AttemptId, AttemptNumber } from "@usine/core/attempt";
@@ -36,7 +39,7 @@ import { submission, testAgent } from "./local-worker/support.ts";
 const POOL = WorkerName.make("pool");
 const unused = () => Effect.die("unused");
 
-const configWithTimings = (timings: Record<string, number>) =>
+const configWithTimings = (timings: Record<string, number>, slots = 1) =>
   Schema.decodeUnknownSync(UsineConfig)({
     version: 1,
     repos: [{ name: "acme/demo" }],
@@ -44,7 +47,7 @@ const configWithTimings = (timings: Record<string, number>) =>
       {
         name: "pool",
         kind: "ssh",
-        max_concurrent_attempts: 1,
+        max_concurrent_attempts: slots,
         root: "/srv/usine",
         provisioner: {
           provider: "hetzner",
@@ -250,16 +253,15 @@ describe("Worker scheduler on a provisioned Worker", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.effect(
-    "keeps the same Attempt after a failed creation and retries when the worker pause ends",
-    () =>
+  for (const reason of ["capacity", "unreachable", "provider"] as const) {
+    it.effect(`keeps the same attempt after ${reason} failures without quota attention`, () =>
       Effect.gen(function* () {
         const fake = yield* fakeMachines();
         fake.failures.push(
           new MachineUnavailableError({
             worker: POOL,
             provider: "hetzner",
-            reason: "capacity",
+            reason,
             message: "This product is currently unavailable",
           }),
         );
@@ -276,7 +278,9 @@ describe("Worker scheduler on a provisioned Worker", () => {
         assert.isUndefined(waiting.pollUnsafe(), "the Run waits");
         const [pause] = yield* status.provisioning;
         assert(pause !== undefined, "the Worker is paused");
-        assert.strictEqual(pause.reason, "capacity");
+        assert.strictEqual(pause.reason, reason);
+        assert(Option.isNone(pause.quota));
+        assert.strictEqual(quotaWaits(yield* status.provisioning).size, 0);
         assert.isTrue(pause.blocked);
         assert.strictEqual(pause.failures, 1);
         assert.strictEqual(
@@ -300,6 +304,89 @@ describe("Worker scheduler on a provisioned Worker", () => {
         );
         assert.lengthOf(yield* status.provisioning, 0, "a success ends the pause");
       }).pipe(Effect.scoped),
+    );
+  }
+
+  it.effect(
+    "retains quota attention through transient retries and clears the run wait after creation",
+    () =>
+      Effect.gen(function* () {
+        const fake = yield* fakeMachines();
+        const message = "shared core limit exceeded";
+        const context = yield* scheduler(fake.machines, configWithTimings({}, 2));
+        const steps = Context.get(context, StepExecutor);
+        const status = Context.get(context, WorkerStatus);
+        const readyRun = RunId.make("ready-run");
+        const readyLease = yield* steps.reserve(readyRun, submission(1), Option.none());
+        yield* steps
+          .execute(executionOf(readyRun, AttemptId.make("ready-run/execute/1")), sink)
+          .pipe(Effect.flip);
+        fake.failures.push(
+          new MachineUnavailableError({
+            worker: POOL,
+            provider: "hetzner",
+            reason: "quota",
+            message,
+          }),
+          new MachineUnavailableError({
+            worker: POOL,
+            provider: "hetzner",
+            reason: "unreachable",
+            message: "request timed out",
+          }),
+        );
+
+        const refresh = workerAttentionFor(
+          { transcript: unused },
+          { list: () => Effect.succeed([]) },
+          status,
+        );
+        const overview = new ReadyOverview({ projects: [], loops: [], needsYou: [] });
+        const runId = RunId.make("run-1");
+        const lease = yield* steps.reserve(runId, submission(1), Option.none());
+        const waiting = yield* Effect.forkChild(
+          steps
+            .execute(executionOf(runId, AttemptId.make("run-1/execute/1")), sink)
+            .pipe(Effect.flip),
+        );
+        yield* settle;
+        const assertQuota = Effect.gen(function* () {
+          assert.strictEqual(
+            quotaWaits(yield* status.provisioning).size,
+            1,
+            "the run with a machine does not wait for quota",
+          );
+          const needs = (yield* refresh(overview, [], [POOL])).needsYou;
+          assert.lengthOf(needs, 1);
+          assert.strictEqual(needs[0]?._tag, "WorkerQuotaNeed");
+          assert.deepStrictEqual(
+            quotaWaits(yield* status.provisioning).get(runId),
+            new MachineQuotaWait({
+              worker: POOL,
+              message,
+            }),
+          );
+        });
+        yield* assertQuota;
+        yield* TestClock.adjust("30 seconds");
+        yield* settle;
+        yield* assertQuota;
+        const [pause] = yield* status.provisioning;
+        assert.strictEqual(pause?.reason, "unreachable");
+        assert.strictEqual(pause?.failures, 2);
+        yield* TestClock.adjust("59 seconds");
+        yield* settle;
+        assert.isUndefined(waiting.pollUnsafe());
+        yield* TestClock.adjust("1 second");
+        yield* settle;
+        yield* Fiber.join(waiting);
+        assert.lengthOf(yield* status.provisioning, 0);
+        assert.strictEqual(quotaWaits(yield* status.provisioning).size, 0);
+        assert.lengthOf((yield* refresh(overview, [], [POOL])).needsYou, 0);
+        assert.strictEqual(fake.calls.filter((call) => call.startsWith("create")).length, 4);
+        yield* lease.release;
+        yield* readyLease.release;
+      }).pipe(Effect.scoped),
   );
 
   it.effect("resumes reservations after cancellation during creation backoff", () =>
@@ -309,7 +396,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
         new MachineUnavailableError({
           worker: POOL,
           provider: "hetzner",
-          reason: "capacity",
+          reason: "quota",
           message: "This product is currently unavailable",
         }),
       );
@@ -325,6 +412,15 @@ describe("Worker scheduler on a provisioned Worker", () => {
       yield* Fiber.interrupt(waiting);
       yield* lease.release;
       assert.strictEqual((yield* status.slots)[0]?.leased, 0);
+      assert.strictEqual(
+        quotaWaits(yield* status.provisioning).size,
+        0,
+        "canceling clears the run wait",
+      );
+      assert(
+        Option.isSome((yield* status.provisioning)[0]?.quota ?? Option.none()),
+        "canceling retains worker attention",
+      );
       const next = yield* Effect.forkChild(
         steps.reserve(RunId.make("run-2"), submission(2), Option.none()),
       );

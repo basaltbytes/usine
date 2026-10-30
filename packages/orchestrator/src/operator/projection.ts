@@ -1,3 +1,4 @@
+import type { RunId } from "@usine/core/run";
 import { pendingProviderRetry } from "@usine/core/attempt";
 import type { Worker as ConfigWorker } from "@usine/config/factory";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -43,6 +44,7 @@ import {
   TranscriptPageCursor,
   TranscriptEventView,
 } from "./transcript.ts";
+import type { MachineQuotaWait } from "./machines.ts";
 import { ApprovalView, RunDurationView, RunView } from "./run.ts";
 
 /** The number of newest rows loaded per Attempt when a drawer opens. */
@@ -216,6 +218,7 @@ export const runView = (
   snapshot: RunSummary,
   pausedLoops: ReadonlySet<LoopName>,
   workers: WorkerAccesses,
+  waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
 ): RunView => {
   const actions = RunState.operatorActions(snapshot.run.state);
   const result = Option.getOrNull(snapshot.step.result);
@@ -232,6 +235,7 @@ export const runView = (
     state: snapshot.run.state._tag,
     providerRetry: Option.getOrNull(pendingProviderRetry(snapshot.run.state, snapshot.attempts)),
     loopPaused: pausedLoops.has(snapshot.run.loop),
+    machineWait: actions.canCancel ? (waits.get(snapshot.run.id) ?? null) : null,
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
     closedAt: Option.match(snapshot.closedAt, { onNone: () => null, onSome: DateTime.formatIso }),
     task: snapshot.task,

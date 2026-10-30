@@ -22,6 +22,8 @@ import {
   Result,
   Schema,
 } from "effect";
+import { WorkerStatus } from "../worker-status.ts";
+import { quotaWaits } from "./machines.ts";
 import { readBoardItems } from "../board/selection.ts";
 import { projectedItem } from "../board/items.ts";
 import { projectBoard } from "../board/projection.ts";
@@ -159,6 +161,7 @@ const harvestedComments = (summary: RunSummary): ReadonlyArray<TaskCommentView> 
 
 const makeTaskReader = Effect.gen(function* () {
   const reader = yield* RunReader;
+  const workerStatus = yield* WorkerStatus;
   const controls = yield* LoopControl;
   const itemReader = yield* ItemProjectionReader;
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
@@ -180,7 +183,7 @@ const makeTaskReader = Effect.gen(function* () {
       });
       return yield* new BoardProjectNotFoundError({ repository });
     }
-    const [stored, labelProjection, states, asks] = yield* Effect.all(
+    const [stored, labelProjection, states, asks, provisioning] = yield* Effect.all(
       [
         reader
           .list({ closedLimit: 0 })
@@ -188,6 +191,7 @@ const makeTaskReader = Effect.gen(function* () {
         repositoryLabels.get(managed.name),
         controls.states,
         budgets.asks(),
+        workerStatus.provisioning,
       ] as const,
       { concurrency: "unbounded" },
     );
@@ -195,6 +199,7 @@ const makeTaskReader = Effect.gen(function* () {
     const runEvents = yield* readRunningEvents(reader, summaries);
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
+    const waits = quotaWaits(provisioning);
     const board = yield* projectBoard(
       managed,
       Option.match(labelProjection, {
@@ -202,7 +207,7 @@ const makeTaskReader = Effect.gen(function* () {
         onSome: ({ labels }) => labels.map(({ name }) => name),
       }),
       stored,
-      summaries.map((summary) => runView(summary, paused, access)),
+      summaries.map((summary) => runView(summary, paused, access, waits)),
       asks.map(({ itemKey }) => itemKey),
       new Map(),
       new Map(),

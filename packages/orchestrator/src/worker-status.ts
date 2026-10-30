@@ -110,6 +110,10 @@ export type PreflightCheck =
  * would serve keep waiting.
  */
 export interface ProvisioningPause {
+  /** The last quota refusal, retained until a machine is created. */
+  readonly quota: Option.Option<string>;
+  /** Runs with a lease on this worker that have no machine yet. */
+  readonly waitingRuns: ReadonlyArray<RunId>;
   /** The configured worker name. */
   readonly worker: WorkerName;
   /** Why the creation failed, or `check` if the first machine of the day failed its preflight. */

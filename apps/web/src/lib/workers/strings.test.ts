@@ -15,6 +15,7 @@ describe("machine copy for provisioned workers", () => {
       state: "Queued",
       attempts: [],
       providerRetry: null,
+      machineWait: null,
     } as const;
     assert.strictEqual(
       runStateLine(queued, null, machineFixture({ provider: "boat" })),

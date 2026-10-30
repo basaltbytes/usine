@@ -25,6 +25,7 @@ import { type PreflightCheck, type WorkerPreflight, WorkerStatus } from "../work
 import {
   MachineView,
   machineView,
+  quotaWaits,
   ProvisioningPauseView,
   provisioningPauseView,
 } from "./machines.ts";
@@ -546,6 +547,7 @@ const makeDesk = Effect.gen(function* () {
       ] as const,
       { concurrency: "unbounded" },
     );
+    const waits = quotaWaits(pauses);
     const machineViews = inFlight.map(machineView);
     const creating = new Map(
       machineViews.flatMap((machine) =>
@@ -588,7 +590,7 @@ const makeDesk = Effect.gen(function* () {
     const runs = new Map(
       [...summaries, ...history].map((summary) => [
         summary.run.id,
-        runView(summary, paused, access),
+        runView(summary, paused, access, waits),
       ]),
     );
     const newestFirst = [...runs.values()].sort(
@@ -687,7 +689,7 @@ const makeDesk = Effect.gen(function* () {
     const lastOutcomes = closed
       .filter((summary) => !replacedBeforeStart(summary))
       .map((summary) => {
-        const run = runView(summary, paused, access);
+        const run = runView(summary, paused, access, waits);
         return new ClosedRunView({
           run,
           item: links.get(run.itemKey) ?? null,

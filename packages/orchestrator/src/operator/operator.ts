@@ -142,8 +142,8 @@ import { TaskReader, type TaskReadError, TaskView } from "./task.ts";
 import { type DeskView, OperatorDesk } from "./desk.ts";
 import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
-import { machineView } from "./machines.ts";
-import { WorkerStatus } from "../worker-status.ts";
+import { machineView, quotaWaits } from "./machines.ts";
+import { type ProvisioningPause, WorkerStatus } from "../worker-status.ts";
 import { workerAttentionFor } from "./worker-attention.ts";
 
 /** A refused board move, failed label write, or failure to read or record the move. */
@@ -250,6 +250,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     scheduleFailures: ReadonlyArray<ScheduleFailure>,
     revision: Option.Option<ProjectionRevision>,
     unconfirmedStops: ReadonlyArray<UnconfirmedStop>,
+    provisioning: ReadonlyArray<ProvisioningPause>,
   ) {
     const [snapshots, states, cycleAsks, workerAttempts] = yield* Effect.all(
       [
@@ -262,7 +263,8 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
-    const views = snapshots.map((snapshot) => runView(snapshot, paused, access));
+    const waits = quotaWaits(provisioning);
+    const views = snapshots.map((snapshot) => runView(snapshot, paused, access, waits));
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
       const projectRuns = runsByRepository.get(view.repository) ?? [];
@@ -294,7 +296,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history) {
-            const view = runView(saved, paused, access);
+            const view = runView(saved, paused, access, waits);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
@@ -533,7 +535,8 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
     }
     for (const { attemptId, runId, worker } of unconfirmedStops) {
-      const run = allRuns.get(runId) ?? runView(yield* reader.inspect(runId), paused, access);
+      const run =
+        allRuns.get(runId) ?? runView(yield* reader.inspect(runId), paused, access, waits);
       const attempt = run.attempts.find(({ id }) => id === attemptId);
       if (attempt === undefined) {
         yield* Effect.logWarning(
@@ -610,10 +613,17 @@ const makeOperatorObservation = Effect.gen(function* () {
   const overview = Effect.fn("Operator.overview")((instance: LoadedInstance) =>
     SynchronizedRef.modifyEffect(cache, (cached) =>
       Effect.gen(function* () {
-        const [revision, latestPoll, latestSchedule, unconfirmedStops] = yield* Effect.all(
-          [reader.revision(), polling.latest, schedules.latest, stops.list] as const,
-          { concurrency: "unbounded" },
-        );
+        const [revision, latestPoll, latestSchedule, unconfirmedStops, provisioning] =
+          yield* Effect.all(
+            [
+              reader.revision(),
+              polling.latest,
+              schedules.latest,
+              stops.list,
+              workerStatus.provisioning,
+            ] as const,
+            { concurrency: "unbounded" },
+          );
         const reports = {
           pollReported: Option.isSome(latestPoll),
           scheduleReported: Option.isSome(latestSchedule),
@@ -653,6 +663,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             preflightFindings,
             scheduleFailures,
             unconfirmedStops.map(({ attemptId }) => attemptId),
+            provisioning,
           ]),
         );
         if (Option.isNone(token)) {
@@ -666,6 +677,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             scheduleFailures,
             revision,
             unconfirmedStops,
+            provisioning,
           );
           return [{ ...projected, reports }, Option.none<CachedOverview>()] as const;
         }
@@ -686,6 +698,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           scheduleFailures,
           revision,
           unconfirmedStops,
+          provisioning,
         );
         return [
           { ...projected, reports },
@@ -753,8 +766,14 @@ const makeOperatorObservation = Effect.gen(function* () {
     request: TranscriptRequest = new ColdTranscriptRequest(),
   ) {
     yield* Effect.annotateCurrentSpan({ runId });
-    const [snapshot, states, unconfirmedStops, inFlight] = yield* Effect.all(
-      [reader.inspect(runId), controls.states, stops.list, workerStatus.machines] as const,
+    const [snapshot, states, unconfirmedStops, inFlight, provisioning] = yield* Effect.all(
+      [
+        reader.inspect(runId),
+        controls.states,
+        stops.list,
+        workerStatus.machines,
+        workerStatus.provisioning,
+      ] as const,
       { concurrency: "unbounded" },
     );
     const openAttempt = snapshot.attempts.find((attempt) => Option.isNone(attempt.outcome));
@@ -788,7 +807,12 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
     const currentAgent = instance.agents.find(({ name }) => name === snapshot.agent.name);
     return new RunDetailView({
-      run: runView(snapshot, paused, workerAccesses(instance.config.workers)),
+      run: runView(
+        snapshot,
+        paused,
+        workerAccesses(instance.config.workers),
+        quotaWaits(provisioning),
+      ),
       agentDefinitionChanged:
         currentAgent !== undefined && !sameAgent(snapshot.agent, currentAgent.agent),
       eventDedupKey: snapshot.event.dedupKey,
@@ -1399,6 +1423,7 @@ export {
 } from "./attempt.ts";
 export {
   MachineView,
+  MachineQuotaWait,
   ProvisioningPauseView,
   HetznerProvisionerView,
   BoatProvisionerView,
@@ -1441,6 +1466,7 @@ export {
   UnconfiguredWorkerNeed,
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
+  WorkerQuotaNeed,
   WebhookSilenceNeed,
   UnconfirmedStopNeed,
   NeedView,

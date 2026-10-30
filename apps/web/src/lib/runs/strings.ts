@@ -6,6 +6,7 @@ import type { ApprovalChannel } from "@usine/core/run/approval";
 import type {
   FailureView,
   MachineView,
+  MachineQuotaWait,
   RunView,
   UnconfirmedStopView,
 } from "@usine/orchestrator/operator";
@@ -57,17 +58,18 @@ export const stopWaitLine = (
     ? `Waiting for attempt ${attemptNumber} to stop on ${worker}`
     : `Waiting for attempt ${attemptNumber} of an earlier run to stop on ${worker}`;
 
-/**
- * Returns the Run state as a phrase, for example `Failed after 3 attempts`, `Waiting for approval`,
- * or `Running, attempt 2`. While `unconfirmedStop` keeps an open Run from starting an attempt,
- * returns `stopWaitLine`; while `machine` is being created for a queued Run, says so.
- */
+/** Returns the assigned worker and its provider's quota refusal. */
+export const machineWaitLine = ({ worker, message }: MachineQuotaWait): string =>
+  `Waiting for ${worker}: ${message}`;
+
+/** Returns the run state, including a stop or machine creation that prevents progress. */
 export const runStateLine = (
-  run: Pick<RunView, "id" | "state" | "attempts" | "providerRetry">,
+  run: Pick<RunView, "id" | "state" | "attempts" | "providerRetry" | "machineWait">,
   unconfirmedStop: UnconfirmedStopView | null = null,
   machine: MachineView | null = null,
 ): string => {
   if (unconfirmedStop !== null) return stopWaitLine(run.id, unconfirmedStop);
+  if (run.machineWait !== null) return machineWaitLine(run.machineWait);
   if (run.state === "Queued" && machine?.state === "creating")
     return `Queued, creating a ${providerLabel[machine.provider]} machine`;
   if (run.providerRetry !== null) {

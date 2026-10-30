@@ -211,6 +211,18 @@ export class WorkerPreflightNeed extends Schema.TaggedClass<WorkerPreflightNeed>
   message: Schema.String,
 }) {}
 
+/** A cloud quota refusal that requires a worker configuration or provider account change. */
+export class WorkerQuotaNeed extends Schema.TaggedClass<WorkerQuotaNeed>(
+  "@usine/orchestrator/WorkerQuotaNeed",
+)("WorkerQuotaNeed", {
+  /** The attention entry identity. */
+  id: Schema.String,
+  /** The worker whose provider refused machine creation. */
+  worker: WorkerName,
+  /** The provider's quota refusal. */
+  message: Schema.String,
+}) {}
+
 export const POOL_LIMIT_WARNING_PERCENT = 80;
 
 /**
@@ -256,6 +268,7 @@ export const NeedView = Schema.Union([
   UnconfirmedStopNeed,
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
+  WorkerQuotaNeed,
   PoolLimitNeed,
 ]);
 /** One reason the overview asks for operator attention. */

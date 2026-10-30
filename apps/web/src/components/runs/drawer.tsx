@@ -20,7 +20,7 @@ import {
 import { useNow } from "~/hooks/use-now";
 import { clockLabel, timestampLabel } from "~/lib/strings";
 import { machineCreationLine } from "~/lib/workers/strings";
-import { queuedMessageLabel } from "~/lib/runs/strings";
+import { machineWaitLine, queuedMessageLabel } from "~/lib/runs/strings";
 import { overviewQuery } from "~/lib/overview";
 import { RunHeader } from "~/components/runs/header";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
@@ -105,6 +105,8 @@ type RunSummaryProps = { readonly detail: RunDetailView };
 
 export const RunSummary = ({ detail }: RunSummaryProps) => {
   const run = detail.run;
+  if (run.machineWait !== null)
+    return <p className="text-muted-foreground">{machineWaitLine(run.machineWait)}</p>;
   switch (run.state) {
     case "Pending":
       return <p className="text-muted-foreground">Opened, not scheduled yet</p>;

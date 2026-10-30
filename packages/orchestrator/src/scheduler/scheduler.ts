@@ -157,7 +157,7 @@ const isFree = (pool: SlotPool, worker: WorkerName): boolean => {
  */
 const workerFor = (
   pool: SlotPool,
-  paused: ReadonlyMap<WorkerName, ProvisioningPause>,
+  paused: ReadonlyMap<WorkerName, WorkerPause>,
   reservation: Reservation,
 ): Option.Option<WorkerName> =>
   Option.match(reservation.worker, {
@@ -277,6 +277,13 @@ export interface StepExecutorOptions {
 /** The machine a lease holds, which its release deletes. */
 type LeaseMachine = Ref.Ref<Option.Option<MachineHold>>;
 
+type WorkerPause = Omit<ProvisioningPause, "waitingRuns">;
+
+interface RunMachine {
+  readonly worker: WorkerName;
+  readonly machine: LeaseMachine;
+}
+
 /** The Worker set of an executor that runs any Worker of its kind by name. */
 const anyWorker: ExecutorWorkers = { add: () => Effect.void, remove: () => Effect.void };
 
@@ -321,9 +328,9 @@ export const stepExecutorLayer = (
       const membership = yield* Semaphore.make(1);
       const adding = yield* Ref.make<ReadonlySet<WorkerName>>(new Set());
       const machines = options.machines;
-      const paused = yield* TxRef.make<ReadonlyMap<WorkerName, ProvisioningPause>>(new Map());
+      const paused = yield* TxRef.make<ReadonlyMap<WorkerName, WorkerPause>>(new Map());
       // The machine of each Run's lease, which `execute` gives to the Run's Attempt.
-      const runMachines = yield* Ref.make<ReadonlyMap<RunId, LeaseMachine>>(new Map());
+      const runMachines = yield* Ref.make<ReadonlyMap<RunId, RunMachine>>(new Map());
       const provisions = (worker: WorkerName) =>
         machines === undefined ? Effect.succeed(false) : machines.provisions(worker);
 
@@ -532,12 +539,14 @@ export const stepExecutorLayer = (
         const released = yield* Ref.make(false);
         const machine: LeaseMachine = yield* Ref.make(hold);
         if (Option.isSome(runId))
-          yield* Ref.update(runMachines, (current) => new Map(current).set(runId.value, machine));
+          yield* Ref.update(runMachines, (current) =>
+            new Map(current).set(runId.value, { worker, machine }),
+          );
         const forget = Option.match(runId, {
           onNone: () => Effect.void,
           onSome: (run) =>
             Ref.update(runMachines, (current) => {
-              if (current.get(run) !== machine) return current;
+              if (current.get(run)?.machine !== machine) return current;
               const next = new Map(current);
               next.delete(run);
               return next;
@@ -597,7 +606,11 @@ export const stepExecutorLayer = (
           TxRef.modify(paused, (current) => {
             const failures = (current.get(worker)?.failures ?? 0) + 1;
             const delay = pauseAfter(failures, timings);
-            const next: ProvisioningPause = {
+            const next: WorkerPause = {
+              quota:
+                failure._tag === "MachineUnavailableError" && failure.reason === "quota"
+                  ? Option.some(failure.message)
+                  : (current.get(worker)?.quota ?? Option.none()),
               worker,
               reason: failure._tag === "MachineUnavailableError" ? failure.reason : "check",
               message: failure.message,
@@ -615,6 +628,7 @@ export const stepExecutorLayer = (
             worker,
             reason: pause.reason,
             message: pause.message,
+            quota: pause.quota,
             failures: pause.failures,
             retryAt: DateTime.formatIso(pause.retryAt),
           },
@@ -827,7 +841,7 @@ export const stepExecutorLayer = (
         const attemptId = execution.attempt.id;
         const fields = { runId: execution.run.id, attemptId, worker };
         yield* Effect.annotateCurrentSpan(fields);
-        const machine = (yield* Ref.get(runMachines)).get(execution.run.id);
+        const machine = (yield* Ref.get(runMachines)).get(execution.run.id)?.machine;
         if (execution.reattach) {
           const adopted = yield* machines.adopt(worker, attemptId);
           if (machine !== undefined && Option.isNone(yield* Ref.get(machine)))
@@ -984,7 +998,22 @@ export const stepExecutorLayer = (
         preflights: preflight.records,
         unavailable: preflight.unavailable,
         machines: machines === undefined ? Effect.succeed([]) : machines.machines,
-        provisioning: TxRef.get(paused).pipe(Effect.map((current) => [...current.values()])),
+        provisioning: Effect.gen(function* () {
+          const waiting = yield* Effect.forEach(
+            [...(yield* Ref.get(runMachines))],
+            ([runId, { worker, machine }]) =>
+              Ref.get(machine).pipe(
+                Effect.map((hold) => (Option.isNone(hold) ? [{ runId, worker }] : [])),
+              ),
+          );
+          return [...(yield* TxRef.get(paused)).values()].map((pause): ProvisioningPause => ({
+            ...pause,
+            waitingRuns: waiting
+              .flat()
+              .filter(({ worker }) => worker === pause.worker)
+              .map(({ runId }) => runId),
+          }));
+        }),
       });
 
       const stepExecutor = StepExecutor.of({
