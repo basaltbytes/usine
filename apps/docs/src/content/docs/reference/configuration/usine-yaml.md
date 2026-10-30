@@ -613,3 +613,7 @@ tracing:
   otlp_url: http://localhost:4318/v1/traces
   service_name: usine-eu
 ```
+
+## Browser origins
+
+The top-level `auth.origins` list defaults to `[]`. Add exact HTTPS origins for browser clients, or HTTP origins on loopback for development. The canonical `--origin` or `USINE_ORIGIN` is allowed automatically. Changes require a restart. See [Expose an instance over HTTPS](/guides/expose-an-instance/#browser-origins) for configuration and proxy examples.
