@@ -6,6 +6,7 @@ import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import { sql } from "drizzle-orm";
 import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { CursorStore } from "../cursor/cursor.ts";
 import { ItemProjectionReader, ItemProjectionWriter } from "../item-projection/item-projection.ts";
@@ -65,6 +66,15 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
     RunDatabase,
     Effect.gen(function* () {
       const drizzle = yield* SQLiteDrizzle.makeWithDefaults();
+      const client = yield* SqlClient.SqlClient;
+      const columns =
+        yield* client`SELECT name FROM pragma_table_info('usine_migrations') WHERE name = 'name'`;
+      if (columns.length > 0) {
+        const renamed =
+          yield* client`UPDATE usine_migrations SET name = '20261029101340_member_approval_source' WHERE name = '20261029101340_bored_paladin' RETURNING id`;
+        if (renamed.length > 0)
+          yield* Effect.logInfo("Approval migration ledger name updated", { instanceDirectory });
+      }
       // SQLite ignores `foreign_keys` changes inside a transaction, and Drizzle rebuilds
       // referenced tables while migrating, so enforcement is turned off before migrating and
       // back on even if a migration fails.

@@ -410,6 +410,41 @@ describe("Attempt start migration", () => {
 });
 
 describe("Run approval source migration", () => {
+  it.live("renames an applied approval migration without replaying it", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-approval-rename-",
+        }),
+      );
+      const previous = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`UPDATE usine_migrations SET name = '20261029101340_bored_paladin' WHERE name = '20261029101340_member_approval_source'`;
+          return yield* sql`SELECT id, hash, created_at, applied_at FROM usine_migrations ORDER BY id`;
+        }).pipe(Effect.provide(localSqliteLayer(directory))),
+      );
+      for (let start = 0; start < 2; start++)
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            assert.deepStrictEqual(
+              yield* sql`SELECT id, hash, created_at, applied_at FROM usine_migrations ORDER BY id`,
+              previous,
+            );
+            assert.strictEqual(
+              (yield* sql`SELECT name FROM usine_migrations WHERE name = '20261029101340_member_approval_source'`)
+                .length,
+              1,
+            );
+            assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+          }).pipe(Effect.provide(localSqliteLayer(directory))),
+        );
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
   for (const recorded of [false, true])
     it.live(
       `preserves the approver when upgrading ${recorded ? "a GitHub approval" : "an unrecorded approval"}`,
@@ -430,7 +465,9 @@ describe("Run approval source migration", () => {
           for (const name of yield* fs.readDirectory(source)) {
             if (
               name >=
-              (recorded ? "20261029101340_bored_paladin" : "20261019104043_run_approval_source")
+              (recorded
+                ? "20261029101340_member_approval_source"
+                : "20261019104043_run_approval_source")
             )
               continue;
             yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
