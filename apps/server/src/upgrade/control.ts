@@ -1,7 +1,7 @@
 import type { Settings } from "@usine/config/factory";
 import { ReleaseVersion, UpgradeChannel, type UpgradeRecord } from "@usine/core/upgrade";
 import { UpgradeRequest, UpgradeView } from "@usine/orchestrator/operator/http";
-import { Context, Effect, Layer, Option, Ref, Schema } from "effect";
+import { Context, Effect, Fiber, Layer, Option, Ref, Schema, Semaphore } from "effect";
 import { compareVersions } from "../instance/manifest.ts";
 
 export class UpgradeError extends Schema.TaggedError<UpgradeError>("@usine/server/UpgradeError")(
@@ -21,12 +21,14 @@ interface UpgradeOptions {
   readonly running: string;
   readonly settings: Effect.Effect<Pick<Settings, "upgradeChannel" | "upgradeMode">>;
   readonly platform: Option.Option<UpgradePlatform>;
-  readonly drain: Effect.Effect<void>;
+  readonly drain: (target: ReleaseVersion) => Effect.Effect<void>;
+  readonly resume: Effect.Effect<void>;
 }
 
 export class ServerUpgrades extends Context.Service<
   ServerUpgrades,
   {
+    readonly cancel: Effect.Effect<void, UpgradeError>;
     readonly polling: Effect.Effect<never>;
     readonly status: Effect.Effect<UpgradeView, UpgradeError>;
     readonly request: (request: UpgradeRequest) => Effect.Effect<void, UpgradeError>;
@@ -38,7 +40,12 @@ export class ServerUpgrades extends Context.Service<
 
 type Progress =
   | { readonly phase: "idle" }
-  | { readonly phase: "waiting" | "installing"; readonly target: ReleaseVersion }
+  | {
+      readonly phase: "waiting";
+      readonly target: ReleaseVersion;
+      readonly fiber: Fiber.Fiber<void>;
+    }
+  | { readonly phase: "installing"; readonly target: ReleaseVersion }
   | { readonly phase: "failed"; readonly message: string };
 
 class UpgradeCandidate extends Schema.Class<UpgradeCandidate>("@usine/server/UpgradeCandidate")({
@@ -48,6 +55,8 @@ class UpgradeCandidate extends Schema.Class<UpgradeCandidate>("@usine/server/Upg
 
 export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options: UpgradeOptions) {
   const scope = yield* Effect.scope;
+  const lock = yield* Semaphore.make(1);
+  const canceled = yield* Ref.make(Option.none<ReleaseVersion>());
   const available = yield* Ref.make(Option.none<UpgradeCandidate>());
   const availableFor = (channel: UpgradeChannel) =>
     Ref.get(available).pipe(
@@ -95,83 +104,117 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       phase: Option.exists(result, (record) => record.status === "installing")
         ? "installing"
         : state.phase,
-      message: state.phase === "failed" ? state.message : null,
+      target: state.phase === "waiting" || state.phase === "installing" ? state.target : null,
+      message:
+        state.phase === "failed"
+          ? state.message
+          : state.phase === "waiting"
+            ? `Waiting for admitted attempts to finish before upgrading to ${state.target}. New attempts are deferred and worker slots stay free. Cancel the pending upgrade to resume them.`
+            : null,
       outcome: Option.getOrNull(result),
     });
   });
 
-  const request = Effect.fn("Server.requestUpgrade")(function* (input: UpgradeRequest) {
-    if (Option.isNone(options.platform)) {
-      return yield* new UpgradeError({
-        message: "App upgrades require a global npm install managed by systemd.",
-      });
-    }
-    const platform = options.platform.value;
-    const settings = yield* options.settings;
-    const latest = yield* availableFor(settings.upgradeChannel);
-    const target = Option.orElse(input.version, () => latest);
-    if (Option.isNone(target)) {
-      yield* Effect.logInfo("Server upgrade request rejected without a current channel candidate", {
-        previous: options.running,
-        channel: settings.upgradeChannel,
-        timing: input.timing,
-      });
-      return yield* new UpgradeError({ message: "No newer version is available." });
-    }
-    yield* Effect.annotateCurrentSpan({
-      previous: options.running,
-      target: target.value,
-      timing: input.timing,
-    });
-    const result = yield* outcome;
-    if (Option.exists(result, (record) => record.status === "installing")) {
-      return yield* new UpgradeError({ message: "An upgrade is already in progress." });
-    }
-    const claimed = yield* Ref.modify(progress, (state) =>
-      state.phase === "idle"
-        ? ([true, { phase: "waiting", target: target.value } satisfies Progress] as const)
-        : ([false, state] as const),
-    );
-    if (!claimed)
-      return yield* new UpgradeError({
-        message: "An upgrade was already requested. Restart the service if it failed.",
-      });
-    yield* platform.preflight.pipe(
-      Effect.andThen(platform.checkDependencies(target.value)),
-      Effect.tapError((error) =>
-        Effect.logWarning("Upgrade preflight failed before draining", {
-          previous: options.running,
-          target: target.value,
-          reason: error.message,
-        }).pipe(Effect.andThen(Ref.set(progress, { phase: "idle" }))),
-      ),
-    );
-    const work = Effect.gen(function* () {
-      yield* Effect.logInfo("Server upgrade requested", {
+  const request = Effect.fn("Server.requestUpgrade")(
+    function* (input: UpgradeRequest) {
+      if (Option.isNone(options.platform)) {
+        return yield* new UpgradeError({
+          message: "App upgrades require a global npm install managed by systemd.",
+        });
+      }
+      const platform = options.platform.value;
+      const settings = yield* options.settings;
+      const latest = yield* availableFor(settings.upgradeChannel);
+      const target = Option.orElse(input.version, () => latest);
+      if (Option.isNone(target)) {
+        yield* Effect.logInfo(
+          "Server upgrade request rejected without a current channel candidate",
+          {
+            previous: options.running,
+            channel: settings.upgradeChannel,
+            timing: input.timing,
+          },
+        );
+        return yield* new UpgradeError({ message: "No newer version is available." });
+      }
+      yield* Effect.annotateCurrentSpan({
         previous: options.running,
         target: target.value,
         timing: input.timing,
       });
-      if (input.timing === "idle") yield* options.drain;
-      yield* Ref.set(progress, { phase: "installing", target: target.value });
-      yield* platform.launch(target.value);
-    }).pipe(
-      Effect.catchTag("UpgradeError", (error) =>
-        Effect.gen(function* () {
-          yield* Ref.set(progress, {
-            phase: "failed",
-            message: `${error.message} Restart the service to resume attempt admission.`,
-          });
-          yield* Effect.logError("Server upgrade failed", {
+      const result = yield* outcome;
+      if (Option.exists(result, (record) => record.status === "installing")) {
+        return yield* new UpgradeError({ message: "An upgrade is already in progress." });
+      }
+      if ((yield* Ref.get(progress)).phase !== "idle")
+        return yield* new UpgradeError({
+          message:
+            "An upgrade was already requested. Cancel it in Settings or with DELETE /api/upgrade while it is waiting.",
+        });
+      yield* platform.preflight.pipe(
+        Effect.andThen(platform.checkDependencies(target.value)),
+        Effect.tapError((error) =>
+          Effect.logWarning("Upgrade preflight failed before draining", {
             previous: options.running,
             target: target.value,
             reason: error.message,
-          });
-        }),
-      ),
-    );
-    yield* work.pipe(Effect.forkIn(scope));
-  }, Effect.uninterruptible);
+          }),
+        ),
+      );
+      const work = Effect.gen(function* () {
+        yield* Effect.logInfo("Server upgrade requested", {
+          previous: options.running,
+          target: target.value,
+          timing: input.timing,
+        });
+        if (input.timing === "idle") yield* options.drain(target.value);
+        yield* lock.withPermit(
+          Effect.gen(function* () {
+            yield* Ref.set(progress, { phase: "installing", target: target.value });
+            yield* platform.launch(target.value);
+          }),
+        );
+      }).pipe(
+        Effect.catchTag("UpgradeError", (error) =>
+          Effect.gen(function* () {
+            yield* Ref.set(progress, {
+              phase: "failed",
+              message: `${error.message} Restart the service to resume attempt admission.`,
+            });
+            yield* Effect.logError("Server upgrade failed", {
+              previous: options.running,
+              target: target.value,
+              reason: error.message,
+            });
+          }),
+        ),
+      );
+      const fiber = yield* work.pipe(Effect.interruptible, Effect.forkIn(scope));
+      yield* Ref.set(progress, { phase: "waiting", target: target.value, fiber });
+    },
+    (effect) => lock.withPermit(Effect.uninterruptible(effect)),
+  );
+
+  const cancel = Effect.fn("Server.cancelUpgrade")(
+    function* () {
+      const current = yield* Ref.get(progress);
+      if (current.phase !== "waiting") {
+        yield* Effect.logInfo("Upgrade cancellation rejected", { phase: current.phase });
+        return yield* new UpgradeError({
+          message: "Only a waiting upgrade can be canceled. Installation may already have started.",
+        });
+      }
+      yield* Effect.annotateCurrentSpan({ target: current.target });
+      yield* Fiber.interrupt(current.fiber);
+      yield* options.resume;
+      yield* Ref.set(canceled, Option.some(current.target));
+      yield* Ref.set(progress, { phase: "idle" });
+      yield* Effect.logInfo("Pending server upgrade canceled; deferred runs can resume", {
+        target: current.target,
+      });
+    },
+    (effect) => lock.withPermit(Effect.uninterruptible(effect)),
+  );
 
   const check = Effect.fn("Server.checkUpgrade")(function* () {
     const settings = yield* options.settings;
@@ -218,7 +261,8 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       newer &&
       currentSettings.upgradeMode === "automatic" &&
       (yield* Ref.get(progress)).phase === "idle" &&
-      !blocked
+      !blocked &&
+      !Option.contains(yield* Ref.get(canceled), target)
     ) {
       yield* Effect.logInfo("Automatic server upgrade requested", {
         previous: options.running,
@@ -226,6 +270,8 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
         outcome: result,
       });
       yield* request(new UpgradeRequest({ timing: "idle", version: Option.none() }));
+    } else if (newer && Option.contains(yield* Ref.get(canceled), target)) {
+      yield* Effect.logInfo("Automatic upgrade skipped after operator cancellation", { target });
     } else if (newer && blocked) {
       yield* Effect.logInfo("Automatic upgrade skipped after an unfinished or failed upgrade", {
         previous: options.running,
@@ -250,5 +296,5 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     Effect.andThen(Effect.sleep("5 minutes")),
     Effect.forever,
   );
-  return { status: status(), request, check, polling };
+  return { status: status(), request, cancel: cancel(), check, polling };
 });

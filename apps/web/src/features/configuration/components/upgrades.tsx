@@ -5,6 +5,8 @@ import { Option } from "effect";
 import { CommandButton } from "~/components/command-palette/button";
 import { upgradeQuery } from "~/features/configuration/queries";
 import {
+  upgradeCancel,
+  upgradeTarget,
   upgradeRunningLabel,
   upgradeChannelLabel,
   upgradeModeLabel,
@@ -39,6 +41,10 @@ export const Upgrades = () => {
       ),
     onSuccess: () => queries.invalidateQueries(upgradeQuery()),
   });
+  const cancel = useMutation({
+    mutationFn: () => api((client) => client.cancelUpgrade()),
+    onSuccess: () => queries.invalidateQueries(),
+  });
   const busy = data.phase === "waiting" || data.phase === "installing";
   const compare =
     data.available === null
@@ -72,6 +78,17 @@ export const Upgrades = () => {
                     ? upgradeCurrent
                     : upgradeAvailable(data.available)}
           </p>
+          {data.target !== null && <p>{upgradeTarget(data.target)}</p>}
+          {data.phase === "waiting" && (
+            <CommandButton
+              command={upgradeCancel}
+              variant="outline"
+              disabled={cancel.isPending}
+              onClick={() => cancel.mutate()}
+            >
+              {upgradeCancel}
+            </CommandButton>
+          )}
           {compare !== null && (
             <a
               href={compare}
@@ -120,8 +137,16 @@ export const Upgrades = () => {
         </p>
       )}
       {data.message !== null && (
-        <p role="alert" className="text-destructive">
+        <p
+          role={data.phase === "failed" ? "alert" : "status"}
+          className={data.phase === "failed" ? "text-destructive" : "text-muted-foreground"}
+        >
           {data.message}
+        </p>
+      )}
+      {cancel.isError && (
+        <p role="alert" className="text-destructive">
+          {rejectionMessage(cancel.error)}
         </p>
       )}
       {request.isError && (

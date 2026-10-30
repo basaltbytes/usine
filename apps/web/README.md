@@ -339,3 +339,6 @@ Endpoint webhook mode shows **No webhook delivery received** in Needs attention 
 **Configuration > Workers** provides **Run preflight** on each worker row and detail page. The action displays progress and refreshed checks, with remediation for failures. It is disabled with a reason while an attempt or preflight runs on the worker. `POST /api/workers/:worker/preflight` returns the stored checks and updates overview and Needs attention without a restart; busy workers return 409 `WorkerPreflightRejectedError`.
 
 Loop forms accept an integer or CEL priority with payload completion. **Preview** shows each matching item’s evaluated priority and any evaluation errors. Overview’s waiting text includes the priority captured when the run requested its worker slot.
+
+
+Idle upgrade waits show the requested version in run headers, Overview's Running section, and worker rows. Settings offers **Cancel pending upgrade** while an upgrade waits. Needs attention links to Settings after an upgrade has deferred runs for ten minutes.
