@@ -22,6 +22,7 @@ import { useOpenRun } from "~/hooks/use-open-run";
 import {
   needCopy,
   needKindLabel,
+  needSettingsLabel,
   workerAttemptLabel,
   openWorkerLabel,
 } from "~/lib/needs-you/strings";
@@ -145,7 +146,7 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
               nativeButton={false}
               render={<Link to="/configuration/settings" />}
             >
-              Settings
+              {needSettingsLabel}
             </Button>
           }
         />

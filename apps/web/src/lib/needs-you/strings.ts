@@ -147,6 +147,7 @@ export const workerAttemptLabel = ({
   `${repository} · ${loop} · attempt ${attemptNumber}`;
 
 export const openWorkerLabel = "Open worker";
+export const needSettingsLabel = "Settings";
 
 export const attentionTitle = "Needs attention";
 export const attentionEmpty = "Nothing needs attention";
