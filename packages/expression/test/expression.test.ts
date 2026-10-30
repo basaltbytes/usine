@@ -381,3 +381,20 @@ describe("ExpressionEngine", () => {
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 });
+
+it.effect("checks integer result types and preserves signed integer evaluation", () =>
+  Effect.gen(function* () {
+    const engine = yield* ExpressionEngine;
+    expect(yield* engine.evaluateInteger(source("-1"), issueEnvironment, {})).toBe(-1n);
+    expect(yield* engine.evaluateInteger(source("9007199254740992"), issueEnvironment, {})).toBe(
+      9007199254740992n,
+    );
+    for (const value of ["true", "1.0", "1u", '"1"', "[]"])
+      expect(
+        (yield* engine.checkInteger(source(value), issueEnvironment).pipe(Effect.flip)).code,
+      ).toBe("unexpected_result_type");
+    expect(
+      (yield* engine.evaluateInteger(source("1 / 0"), issueEnvironment, {}).pipe(Effect.flip))._tag,
+    ).toBe("ExpressionEvaluationError");
+  }).pipe(Effect.provide(MarcbachmannCelLayer)),
+);
