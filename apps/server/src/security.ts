@@ -1,6 +1,11 @@
 import { type UiOrigin } from "@usine/config/factory";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+
+export const CrossSiteRequestError = Schema.Struct({
+  error: Schema.Literal("CrossSiteRequestError"),
+  message: Schema.String,
+});
 
 const METHODS = ["GET", "POST", "PUT", "DELETE"];
 const REQUEST_HEADERS = ["authorization", "content-type", "x-usine-csrf"];
@@ -58,7 +63,10 @@ export const securityMiddleware = (options: {
         const refuse = Effect.fn("Http.refuseOrigin")(function* (reason: string) {
           yield* Effect.logWarning("Browser request refused", { reason, method: request.method });
           return HttpServerResponse.jsonUnsafe(
-            { error: "CrossSiteRequestError", message: "Cross-site request is not allowed." },
+            CrossSiteRequestError.make({
+              error: "CrossSiteRequestError",
+              message: "Cross-site request is not allowed.",
+            }),
             { status: 403 },
           );
         });

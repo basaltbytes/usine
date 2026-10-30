@@ -14,7 +14,7 @@ Before enabling public access:
 - Protect the instance folder and `.env`. The `.usine/admin-token` file must belong to the service user, have mode `0600`, and be a regular file. The server replaces it on each start; never publish it or copy it into a browser client.
 - If you use `webhooks.mode: endpoint`, set `USINE_GITHUB_WEBHOOK_SECRET` to the GitHub App's webhook secret and set `webhooks.public_url` to `https://usine.example.com/webhooks/github`. Preserve the signed request bytes. Otherwise, use `off` or `deliveries` and leave the endpoint disabled.
 
-Sign-in operations have separate instance-wide limits of 60 requests per minute. Health, sign-in, and the release-string upgrade health endpoint are public; the webhook endpoint verifies a signature. Other API routes require a session or bearer token.
+Sign-in operations have separate instance-wide limits of 60 requests per minute. Health, sign-in, the OpenAPI schema, and the release-string upgrade health endpoint are public; the webhook endpoint verifies a signature. Other API routes require a session or bearer token.
 
 ## Browser origins
 
@@ -38,7 +38,7 @@ A client on another site should use a [device token](/guides/sign-in/#device-tok
 
 Point the instance DNS name at the server, allow Caddy to receive ports 80 and 443, and add this to the Caddyfile:
 
-```caddyfile
+```text
 usine.example.com {
     reverse_proxy 127.0.0.1:7331
 }

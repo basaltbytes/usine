@@ -1,3 +1,4 @@
+import { securityMiddleware } from "../src/security.ts";
 import { registerSchema, unregisterSchema, validate } from "@hyperjump/json-schema/openapi-3-1";
 import { DocumentationApi, operatorOpenApi } from "../src/openapi.ts";
 import { ConfigurationStoreError } from "@usine/config/configuration";
@@ -406,9 +407,11 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       const services = yield* authFixture();
       const auth = authenticatedRoutes(services);
       const secured = HttpRouter.toWebHandler(
-        Layer.mergeAll(apiRoutes().pipe(Layer.provide(auth.guard.layer)), auth.routes).pipe(
-          HttpRouter.provideRequest(backend),
-        ),
+        Layer.mergeAll(
+          apiRoutes().pipe(Layer.provide(auth.guard.layer)),
+          auth.routes,
+          securityMiddleware(services.authentication),
+        ).pipe(HttpRouter.provideRequest(backend)),
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
@@ -469,8 +472,32 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
         new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
       );
       for (const endpoint of endpoints) {
-        if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
         const path = endpoint.path.replace(/:[^/]+/gu, "test");
+        const schemaPath = encodeURIComponent(
+          endpoint.path.replace(/:([^/]+)/gu, "{$1}").replaceAll("/", "~1"),
+        );
+        const responseSchema = `${schemaId}#/paths/${schemaPath}/${endpoint.method.toLowerCase()}/responses/403/content/application~1json/schema`;
+        const refused = yield* Effect.promise(() =>
+          secured.handler(
+            new Request(`http://127.0.0.1${path}`, {
+              method: endpoint.method,
+              headers: {
+                origin: "https://unknown.example",
+                authorization: `Bearer ${localSecret}`,
+              },
+            }),
+          ),
+        );
+        assert.equal(refused.status, 403);
+        const refusedBody = yield* Effect.promise(() => refused.json());
+        const refusedValidation = yield* Effect.promise(() =>
+          validate(responseSchema, refusedBody),
+        );
+        assert.isTrue(
+          refusedValidation.valid,
+          `${endpoint.method} ${path}: ${JSON.stringify(refusedBody)}`,
+        );
+        if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
         for (const spelling of [
           path,
           path.replace("/api/", "/API/"),
@@ -488,10 +515,6 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
           assert.equal(response.status, 401, `${endpoint.method} ${spelling}`);
         }
         if (endpoint.method !== "GET") {
-          const schemaPath = encodeURIComponent(
-            endpoint.path.replace(/:([^/]+)/gu, "{$1}").replaceAll("/", "~1"),
-          );
-          const responseSchema = `${schemaId}#/paths/${schemaPath}/${endpoint.method.toLowerCase()}/responses/403/content/application~1json/schema`;
           for (const csrf of [undefined, "stale-csrf"]) {
             const headers = new Headers({
               cookie: `usine_session=${Redacted.value(session.secret)}`,
