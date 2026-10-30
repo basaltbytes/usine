@@ -37,3 +37,17 @@ The [`usine config` reference](src/content/docs/reference/configuration/config.m
 The [usine.yaml reference](src/content/docs/reference/configuration/usine-yaml.md#webhooks) documents webhook modes, endpoint secrets, and delivery health.
 
 The [sign-in guide](src/content/docs/guides/sign-in.md) describes terminal-only startup links, local admin token ownership, session expiry, and GitHub token revocation.
+
+## Operator HTTP API reference
+
+The [operator API reference](src/content/docs/reference/operator-api.mdx) renders `public/openapi.json`, a committed OpenAPI 3.1 document generated from the operator and authentication route contracts. Each docs build regenerates it before rendering. Download it from `/openapi.json` on the docs site, or use `/api/openapi.json` on a running instance.
+
+After changing an API contract, build its dependencies and regenerate the document:
+
+```sh
+pnpm turbo run build --filter=@usine/docs^...
+pnpm --filter @usine/docs openapi:generate
+pnpm --filter @usine/docs openapi:check
+```
+
+Commit the updated JSON with the contract change. `openapi:check` compares the file without modifying it. The root `pnpm check` command also checks the git diff after the docs build, so CI regeneration cannot hide a stale committed document. Turborepo includes server contract sources in the docs build inputs and caches the generated JSON with the site.

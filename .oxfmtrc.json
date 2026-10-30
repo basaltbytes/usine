@@ -10,6 +10,7 @@
     "docs/**",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
-    "**/route-tree.gen.ts"
+    "**/route-tree.gen.ts",
+    "apps/docs/public/openapi.json"
   ]
 }
