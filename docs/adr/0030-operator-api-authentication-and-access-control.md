@@ -48,3 +48,11 @@ Amended for [#778](https://github.com/basaltbytes/usine/issues/778) on 2026-10-3
 `GET /api/openapi.json` is public, alongside health and sign-in routes. It contains the generated API contract, without instance configuration or credentials. The server combines the shared `OperatorApi` contract with authentication route declarations; authentication handlers use those declarations for registration and request decoding. Static assets and the separate GitHub webhook listener are outside this contract.
 
 The docs build regenerates a committed OpenAPI document and renders the HTTP reference from it. CI validates the document against the OpenAPI 3.1 schema, checks route coverage and anonymous access, and rejects a committed document that differs from generation.
+
+## Browser transport policy
+
+Issue #777 adds `auth.origins` for additional exact browser origins. The canonical `--origin` or `USINE_ORIGIN` remains the address for sign-in links and callbacks and is always allowed; without it, the canonical address is the loopback listener. Authentication configuration changes require a restart, so an accepted runtime snapshot cannot imply that a new origin policy already applies.
+
+One global HTTP middleware checks origins before route handling and uses Effect's pre-response hook for security and CORS headers, including router errors. The policy refuses unknown origins without any CORS headers and validates preflight methods and headers. The built-in Effect CORS middleware emits credential headers for disallowed origins and does not reject those requests, so the server implements this policy at the same boundary as its response headers.
+
+HSTS follows the configured canonical HTTPS origin; forwarded headers cannot enable it. The bundled UI's CSP allows inline styles for component positioning and syntax highlighting, data-URL fonts bundled by dependencies, and HTTPS images for avatars and Markdown. Scripts and connections remain restricted to the instance origin.

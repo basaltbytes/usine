@@ -100,7 +100,7 @@ import { HttpRouter } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { afterAll, assert, describe, it } from "vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
-import { Port, SERVER_HOST, UiOrigin } from "../src/cli.ts";
+import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
 
 const runId = RunId.make("run-1");
@@ -394,12 +394,9 @@ const backend = needsSetupBackendLayer(
       }),
   },
 );
-const app = HttpRouter.toWebHandler(
-  apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(backend)),
-  {
-    disableLogger: true,
-  },
-);
+const app = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(backend)), {
+  disableLogger: true,
+});
 
 afterAll(() => app.dispose());
 
@@ -409,10 +406,9 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       const services = yield* authFixture();
       const auth = authenticatedRoutes(services);
       const secured = HttpRouter.toWebHandler(
-        Layer.mergeAll(
-          apiRoutes(Option.none()).pipe(Layer.provide(auth.guard.layer)),
-          auth.routes,
-        ).pipe(HttpRouter.provideRequest(backend)),
+        Layer.mergeAll(apiRoutes().pipe(Layer.provide(auth.guard.layer)), auth.routes).pipe(
+          HttpRouter.provideRequest(backend),
+        ),
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
@@ -575,7 +571,7 @@ describe("operator HTTP API", () => {
     });
     const auth = await Effect.runPromise(authFixture().pipe(Effect.scoped));
     const upgradeApp = HttpRouter.toWebHandler(
-      apiRoutes(Option.none()).pipe(
+      apiRoutes().pipe(
         Layer.provide(authenticatedRoutes(auth).guard.layer),
         HttpRouter.provideRequest(Layer.merge(backend, upgradeBackend)),
       ),
@@ -756,72 +752,6 @@ describe("operator HTTP API", () => {
     }
   });
 
-  it("refuses cross-site requests before their side effect while loopback origins pass", async () => {
-    const crossSite = await app.handler(
-      new Request(`http://localhost/api/runs/${runId}/approve`, {
-        method: "POST",
-        headers: { origin: "https://evil.example" },
-      }),
-    );
-    assert.strictEqual(crossSite.status, 403);
-    assert.strictEqual((await crossSite.json()).error, "CrossSiteRequestError");
-    const upgrade = await app.handler(
-      new Request("http://localhost/api/upgrade", {
-        method: "POST",
-        headers: { origin: "https://evil.example" },
-        body: JSON.stringify({ timing: "now" }),
-      }),
-    );
-    assert.strictEqual(upgrade.status, 403);
-
-    // A loopback origin (the Vite dev server) passes the guard; the needs-setup 503 shows the
-    // handler ran.
-    const loopback = await app.handler(
-      new Request(`http://localhost/api/runs/${runId}/approve`, {
-        method: "POST",
-        headers: { origin: "http://localhost:5173" },
-      }),
-    );
-    assert.strictEqual(loopback.status, 503);
-
-    const malformed = await app.handler(
-      new Request("http://localhost/api/projects/a/b/items/0/lane", {
-        method: "POST",
-        headers: { origin: "null" },
-        body: "not JSON",
-      }),
-    );
-    assert.strictEqual(malformed.status, 403);
-    assert.strictEqual((await malformed.json()).error, "CrossSiteRequestError");
-
-    // With --origin, the UI's pages that tailscale serve publishes pass, at that origin only.
-    const proxied = HttpRouter.toWebHandler(
-      apiRoutes(Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net"))).pipe(
-        HttpRouter.provideRequest(backend),
-      ),
-      { disableLogger: true },
-    );
-    try {
-      const approve = (origin: string) =>
-        proxied.handler(
-          new Request(`http://usine-orchestrator.tail1234.ts.net/api/runs/${runId}/approve`, {
-            method: "POST",
-            headers: { origin },
-          }),
-        );
-      assert.strictEqual((await approve("https://usine-orchestrator.tail1234.ts.net")).status, 503);
-      assert.strictEqual((await approve("http://127.0.0.1:7331")).status, 503);
-      assert.strictEqual((await approve("http://usine-orchestrator.tail1234.ts.net")).status, 403);
-      assert.strictEqual(
-        (await approve("https://usine-orchestrator.tail1234.ts.net:8443")).status,
-        403,
-      );
-      assert.strictEqual((await approve("https://other.tail1234.ts.net")).status, 403);
-    } finally {
-      await proxied.dispose();
-    }
-  });
-
   it("maps typed engine errors onto operator-readable statuses", async () => {
     let moved: BoardMove | undefined;
     const rejecting = Layer.succeed(FactoryBackend)({
@@ -897,7 +827,7 @@ describe("operator HTTP API", () => {
       runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
     });
     const rejectingApp = HttpRouter.toWebHandler(
-      apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(rejecting)),
+      apiRoutes().pipe(HttpRouter.provideRequest(rejecting)),
       { disableLogger: true },
     );
     try {
@@ -1125,9 +1055,9 @@ describe("operator HTTP API", () => {
       statistics: (window) => Effect.succeed(statisticsOf(window)),
       runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
     });
-    const server = HttpRouter.serve(
-      apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(live)),
-    ).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
+    const server = HttpRouter.serve(apiRoutes().pipe(HttpRouter.provideRequest(live))).pipe(
+      Layer.provideMerge(NodeHttpServer.layerTest),
+    );
     await Effect.runPromise(
       Effect.gen(function* () {
         const { operator: client } = yield* HttpApiClient.make(OperatorApi);
@@ -1310,7 +1240,7 @@ describe("operator HTTP API", () => {
       writeFile(join(assets, "app.css"), ":root { color-scheme: dark; }"),
     ]);
     const web = HttpRouter.toWebHandler(
-      Layer.mergeAll(apiRoutes(Option.none()), staticRoutes(webRoot)).pipe(
+      Layer.mergeAll(apiRoutes(), staticRoutes(webRoot)).pipe(
         HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer)),
       ),
       { disableLogger: true },
@@ -1360,7 +1290,7 @@ describe("operator HTTP API", () => {
   });
   // Linux routes all of 127.0.0.0/8 to the loopback interface; macOS has only 127.0.0.1.
   it.skipIf(process.platform !== "linux")(
-    "listens on 127.0.0.1 only, also with an origin for a proxy",
+    "listens on 127.0.0.1 only and applies security headers to the assembled server",
     async () => {
       const port = await new Promise<Port>((resolve) => {
         const probe = createServer();
@@ -1374,21 +1304,17 @@ describe("operator HTTP API", () => {
       const webRoot = await mkdtemp(join(tmpdir(), "usine-web-"));
       const overview = (host: string) =>
         Effect.tryPromise(() => fetch(`http://${host}:${port}/api/overview`)).pipe(
-          Effect.map((response) => response.status),
+          Effect.map((response) => {
+            assert.equal(response.headers.get("x-frame-options"), "DENY");
+            assert.equal(response.headers.get("strict-transport-security"), "max-age=31536000");
+            return response.status;
+          }),
           Effect.orElseSucceed(() => "unreachable"),
         );
       try {
         const statuses = await Effect.runPromise(
           Effect.gen(function* () {
-            yield* Layer.build(
-              serverLayer(
-                backend,
-                webRoot,
-                port,
-                Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net")),
-                yield* authFixture(),
-              ),
-            );
+            yield* Layer.build(serverLayer(backend, webRoot, port, yield* authFixture()));
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped),
         );
@@ -1402,7 +1328,7 @@ describe("operator HTTP API", () => {
 
 it("returns a typed server error when statistics cannot read worker configuration history", async () => {
   const failing = HttpRouter.toWebHandler(
-    apiRoutes(Option.none()).pipe(
+    apiRoutes().pipe(
       HttpRouter.provideRequest(
         Layer.mock(FactoryBackend)({
           runStatistics: () =>

@@ -50,9 +50,9 @@ import {
   Result,
 } from "effect";
 import { liveBackendLayer, needsSetupBackendLayer } from "./backend.ts";
+import { UiOrigin } from "@usine/config/factory";
 import {
   type Port,
-  type UiOrigin,
   type UpCommand,
   VolatileInstanceDirectoryError,
   openBrowser,
@@ -79,7 +79,6 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly backend: ReturnType<typeof liveBackendLayer>;
   readonly webRoot: string;
   readonly port: Port;
-  readonly origin: Option.Option<UiOrigin>;
   readonly url: string;
   readonly openSetupPage: boolean;
   readonly upgrades: ServerUpgrades["Service"];
@@ -92,7 +91,6 @@ const serve = Effect.fnUntraced(function* (options: {
       options.backend,
       options.webRoot,
       options.port,
-      options.origin,
       options.auth,
       Layer.mergeAll(
         options.catalog ?? Layer.empty,
@@ -159,7 +157,6 @@ const start = Effect.fnUntraced(function* (
   instanceId: InstanceId,
   instances: CurrentInstance["Service"],
   port: Port,
-  origin: Option.Option<UiOrigin>,
   record: InstanceRecord,
   database: Layer.Layer<RunDatabase, EnginePersistenceError>,
   configurationEditor: ConfigurationEditor["Service"],
@@ -202,7 +199,6 @@ const start = Effect.fnUntraced(function* (
       configurationEditor,
       webRoot,
       port,
-      origin,
       url,
       openSetupPage: true,
       upgrades: Context.get(upgradeContext, ServerUpgrades),
@@ -255,7 +251,6 @@ const start = Effect.fnUntraced(function* (
           ),
           webRoot,
           port,
-          origin,
           url,
           openSetupPage: false,
           webhooks,
@@ -344,7 +339,8 @@ export const up = (command: UpCommand) =>
       const localToken = yield* writeAdminToken(directory).pipe(Effect.provide(NodeServices.layer));
       const authContext = yield* Layer.build(
         authenticationLayer({
-          origin: Option.getOrElse(origin, () => `http://127.0.0.1:${port}`),
+          origin: Option.getOrElse(origin, () => UiOrigin.make(`http://127.0.0.1:${port}`)),
+          origins: config.auth.origins,
           localToken,
         }).pipe(Layer.provide(authDependencies)),
       );
@@ -362,7 +358,6 @@ export const up = (command: UpCommand) =>
         instanceId,
         instances,
         port,
-        origin,
         record,
         database,
         configurationEditor,
