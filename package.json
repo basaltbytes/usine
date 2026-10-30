@@ -19,6 +19,7 @@
     "changeset": "changeset",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "changeset:publish": "pnpm build && pnpm stage publish -r --tag latest --no-git-checks && node scripts/release/tag.mjs",
+    "prerelease:version": "node scripts/prerelease-versions.mjs",
     "prerelease:publish": "node scripts/release/next.mjs"
   },
   "devDependencies": {
