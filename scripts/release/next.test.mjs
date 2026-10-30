@@ -16,7 +16,15 @@ const stagedConflict = {
   code: 1,
   output: '[E409] Cannot publish over previously staged version "1.0.1"',
 };
-const success = { code: 0, output: "Published" };
+const success = { code: 0, output: "Published", lag: 0 };
+const lagging = { code: 0, output: "Published", lag: 4 };
+const neverPublic = { code: 0, output: "Published", lag: Infinity };
+
+function events(t) {
+  const logged = [];
+  t.mock.method(console, "log", (line) => logged.push(JSON.parse(line)));
+  return logged;
+}
 
 async function fixture(t, outcomes) {
   const directory = await mkdtemp(join(tmpdir(), "usine-next-test-"));
@@ -33,6 +41,13 @@ async function fixture(t, outcomes) {
   }
   const visible = new Map();
   const staged = new Set();
+  let unrevealed = [];
+  let lag = 0;
+  const reveal = () => {
+    for (const manifest of unrevealed)
+      visible.set(`/${manifest.name}/${manifest.version}`, manifest);
+    unrevealed = [];
+  };
   const server = createServer((request, response) => {
     const manifest = visible.get(decodeURIComponent(request.url));
     response.writeHead(manifest ? 200 : 404, { "content-type": "application/json" });
@@ -62,9 +77,10 @@ async function fixture(t, outcomes) {
       const [first] = current;
       staged.add(`${first.name}@${first.version}`);
     }
-    if (outcome === success) {
-      for (const manifest of current)
-        visible.set(`/${manifest.name}/${manifest.version}`, manifest);
+    if (outcome.code === 0) {
+      unrevealed = current;
+      lag = outcome.lag;
+      if (lag === 0) reveal();
     }
     return outcome;
   };
@@ -73,6 +89,7 @@ async function fixture(t, outcomes) {
     command,
     wait: async (ms) => {
       delays.push(ms);
+      if (unrevealed.length > 0 && --lag === 0) reveal();
     },
     registry,
   };
@@ -148,20 +165,43 @@ test("a build failure stops before publishing", async (t) => {
   assert.deepEqual(f.publishes, []);
 });
 
-test("replaces a snapshot whose uploads succeed but remain unavailable to installers", async (t) => {
-  const f = await fixture(t, [{ code: 0, output: "Uploaded but staged" }, success]);
+test("waits for a successful upload to become public without republishing", async (t) => {
+  const f = await fixture(t, [lagging]);
+  const logged = events(t);
   await publishNext(f.input, f.services);
-  assert.equal(f.publishes.length, 2);
-  assert.deepEqual(f.delays, [10_000, 10_000, 10_000, 10_000, 10_000, 15_000]);
+  assert.equal(f.publishes.length, 1);
+  assert.deepEqual(f.delays, [10_000, 15_000, 20_000, 25_000]);
   assert.equal(f.visible.size, 2);
+  assert.ok(!logged.some(({ event }) => event === "next_publish_retry"));
+  assert.deepEqual(logged.at(-1), {
+    event: "next_publish_completed",
+    attempt: 1,
+    suffix: "next.312.g1a2b3c4.1.1",
+    check: 5,
+    waitedMs: 70_000,
+  });
 });
 
-test("fails if every replacement remains staged instead of reporting success", async (t) => {
-  const f = await fixture(
-    t,
-    Array.from({ length: 3 }, () => ({ code: 0, output: "Staged" })),
+test("fails without republishing when a successful upload stays private for ten minutes", async (t) => {
+  const f = await fixture(t, [neverPublic]);
+  const logged = events(t);
+  await assert.rejects(publishNext(f.input, f.services), /not public after 10 minutes/);
+  assert.equal(f.publishes.length, 1);
+  assert.deepEqual(f.delays.slice(0, 6), [10_000, 15_000, 20_000, 25_000, 30_000, 30_000]);
+  assert.equal(
+    f.delays.reduce((total, ms) => total + ms, 0),
+    600_000,
   );
-  await assert.rejects(publishNext(f.input, f.services), /failed after 3 attempts/);
-  assert.equal(f.publishes.length, 3);
-  assert.equal(f.visible.size, 0);
+  assert.ok(!logged.some(({ event }) => event === "next_publish_retry"));
+  assert.deepEqual(logged.at(-1), {
+    event: "next_publish_exhausted",
+    attempt: 1,
+    suffix: "next.312.g1a2b3c4.1.1",
+    reason: "versions_not_public",
+    waitedMs: 600_000,
+    packages: [
+      "@usine-test/core@1.0.1-next.312.g1a2b3c4.1.1",
+      "@usine-test/app@2.3.5-next.312.g1a2b3c4.1.1",
+    ],
+  });
 });
