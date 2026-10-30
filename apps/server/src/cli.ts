@@ -1,3 +1,4 @@
+import { UiOrigin } from "@usine/config/factory";
 import { UpgradeChannel } from "@usine/core/upgrade";
 import { ConfigCommand, parseConfigCommand } from "./configuration/command.ts";
 import { createServer } from "node:net";
@@ -21,24 +22,6 @@ export const Port = Schema.Int.check(
 export type Port = typeof Port.Type;
 
 const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
-
-/**
- * The origin of the UI's pages behind a proxy, such as the HTTPS URL at which `tailscale serve`
- * publishes the UI: an `http` or `https` scheme, a host, and a port other than the scheme's
- * default, as a browser writes it in the `Origin` header.
- */
-export const UiOrigin = Schema.String.check(
-  Schema.makeFilter(
-    (origin: string) =>
-      URL.canParse(origin) &&
-      (new URL(origin).protocol === "https:" ||
-        (new URL(origin).protocol === "http:" &&
-          ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname))) &&
-      new URL(origin).origin === origin,
-    { message: "Expected an HTTPS origin, or HTTP on loopback" },
-  ),
-).pipe(Schema.brand("UiOrigin"));
-export type UiOrigin = typeof UiOrigin.Type;
 
 /** The minimum level of the lines `usine up` logs. */
 export const UpLogLevel = Schema.Literals(["Trace", "Debug", "Info", "Warn", "Error"]);

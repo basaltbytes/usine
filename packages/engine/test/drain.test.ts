@@ -1,12 +1,26 @@
 import { assert, describe, it } from "@effect/vitest";
+import { ReleaseVersion } from "@usine/core/upgrade";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { Context, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Scope,
+  TxRef,
+} from "effect";
 import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
 import { runIdFor } from "../src/engine/submission.ts";
 import {
   type AttemptPlan,
   engineLayer,
   executorLayer,
+  slottedExecutor,
   stepResult,
   submission,
   waitFor,
@@ -170,3 +184,70 @@ describe("engine drain", () => {
     ),
   );
 });
+
+it.live(
+  "an idle upgrade leaves three runs without leased slots and cancellation starts all three",
+  () =>
+    withInstance((directory) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* Deferred.make<void>();
+          const finish = yield* Deferred.make<void>();
+          const running = yield* Ref.make(0);
+          const f = yield* slottedExecutor(
+            [
+              Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Deferred.await(finish)),
+                Effect.as(stepResult("first")),
+              ),
+              ...Array.from({ length: 3 }, () =>
+                Ref.update(running, (count) => count + 1).pipe(Effect.andThen(Effect.never)),
+              ),
+            ],
+            4,
+          );
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            yield* engine.submit(submission({ number: 50, item: "active" }));
+            yield* Deferred.await(started);
+            const drain = yield* Effect.forkScoped(
+              engine.waitForUpgrade(ReleaseVersion.make("1.2.3")),
+              { startImmediately: true },
+            );
+            const runs = yield* Effect.forEach([51, 52, 53], (number) =>
+              engine.submit(submission({ number, item: `item-${number}` })),
+            );
+            const status = yield* engine.upgradeDrain.pipe(
+              Effect.repeat({
+                schedule: Schedule.spaced("10 millis"),
+                until: (value) => Option.isSome(value) && value.value.runIds.length === 3,
+              }),
+            );
+            assert(Option.isSome(status));
+            assert.strictEqual(status.value.wait.target, "1.2.3");
+            assert.strictEqual(yield* TxRef.get(f.leased), 1);
+            assert.strictEqual(
+              drain.pollUnsafe(),
+              undefined,
+              "the admitted attempt still blocks installation",
+            );
+            for (const result of runs) {
+              assert(result._tag === "Claimed");
+              assert.strictEqual((yield* engine.inspect(result.runId)).attempts.length, 0);
+            }
+            yield* Fiber.interrupt(drain);
+            yield* engine.cancelUpgrade;
+            yield* Ref.get(running).pipe(
+              Effect.repeat({
+                schedule: Schedule.spaced("10 millis"),
+                until: (count) => count === 3,
+              }),
+            );
+            assert.strictEqual(yield* TxRef.get(f.leased), 4);
+            assert(Option.isNone(yield* engine.upgradeDrain));
+            yield* Deferred.succeed(finish, undefined);
+          }).pipe(Effect.provide(engineLayer(directory, f.executor)));
+        }),
+      ),
+    ),
+);

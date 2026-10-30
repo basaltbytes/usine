@@ -127,6 +127,7 @@ const keepsInFlight = ({ reason }: StalledItemView): boolean =>
     AwaitingApproval: () => true,
     WaitingForStop: () => true,
     QueuedForWorker: () => true,
+    WaitingForUpgrade: () => true,
     SuppressedForOperator: () => true,
     CycleBudgetUsedUp: () => true,
     RunFailed: ({ run }) => run.canResolveFailure,

@@ -6,6 +6,14 @@ The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `Sch
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version.
 
+## Conditional approval
+
+Loop approval accepts `required`, `none`, or a boolean CEL condition over the event
+payload and repository. Polling, schedules, and Run again evaluate the condition
+before submission. Evaluation errors require approval and emit a warning. Run
+views and approval needs include the saved `approvalReason`, including label
+actors when present. Existing runs retain their original decision.
+
 ## Operator
 
 `Operator` provides run and board observation, transcript pages, label-backed board moves, approve, retry, cancel, and loop pause. It returns typed data for consuming apps. Captured executor defects appear as `DefectFailure` with a safe message, without the original cause. `OperatorObservation` gives the same read-only projection without execution services.
@@ -365,6 +373,14 @@ Polling and statistics SQLite fixtures use the shared [SQLite fixture directory 
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
 
+## Idle upgrade waits
+
+Run views expose `upgradeWait` while attempt admission defers them, and the desk reports `WaitingForUpgrade` with the requested version. Worker rows show the same upgrade wait while free slots remain available after cancellation. Overview refreshes these fields independently of persisted run changes. After ten minutes with deferred runs, `UpgradeDrainNeed` appears in Needs attention and supports dismissal and undo.
+
+`GET /api/upgrade` reports the requested target and explains the waiting phase. `DELETE /api/upgrade` cancels a pending request before installation begins.
+
 ## HTTP API reference
 
 `OperatorApi` includes OpenAPI titles and descriptions alongside its route schemas. The server combines it with the sign-in contract and publicly serves the generated document at `GET /api/openapi.json`. The [operator HTTP API reference](https://docs.usine.dev/reference/operator-api/) lists paths, parameters, bodies, and responses. Regenerate `apps/docs/public/openapi.json` after changing the contract; the [docs README](../../apps/docs/README.md#operator-http-api-reference) lists the commands.
+
+Changes to the `auth` block require a restart, like `webhooks` and `tracing`. `CurrentInstance.reload` reports the changed block in `RestartRequiredError` and preserves the running snapshot until restart.

@@ -436,6 +436,12 @@ export const OperatorApi = operatorApi.add(
           OpenApi.Description,
           "Returns the running release, available release, and upgrade progress.",
         ),
+      HttpApiEndpoint.delete("cancelUpgrade", "/api/upgrade", { success: acknowledged })
+        .annotate(OpenApi.Summary, "Cancel a waiting upgrade")
+        .annotate(
+          OpenApi.Description,
+          "Cancels a pending upgrade before installation begins and resumes deferred runs.",
+        ),
       HttpApiEndpoint.get("serverVersion", "/api/version", { success: Schema.String })
         .annotate(OpenApi.Summary, "Read the running release")
         .annotate(

@@ -3,7 +3,7 @@
 Stores versioned configuration and imports and exports the files of a [usine](https://github.com/basaltbytes/usine) instance folder. The [`usine.yaml`](https://docs.usine.dev/reference/configuration/usine-yaml/), [loop file](https://docs.usine.dev/reference/configuration/loop-files/), and [agent file](https://docs.usine.dev/reference/configuration/agent-files/) references describe every key.
 
 - `usine.yaml`: schema version, factory-wide GitHub labels, the managed-repo registry, projects, settings, workers, webhook mode, and operator login.
-- `projects/<project>/loops/*.md`: strict YAML frontmatter and a Markdown prompt. The parser type-checks the trigger and every `{{ CEL expression }}` against the trigger's payload.
+- `projects/<project>/loops/*.md`: strict YAML frontmatter and a Markdown prompt. The parser type-checks trigger, approval, and priority conditions and every `{{ CEL expression }}` against the trigger's payload.
 - `agents/*.md`: harness, model, effort, optional parent model and parent effort, and persona.
 
 `updateYaml` and `updateFrontmatter` change one path in the YAML tree and keep comments, key order, and the Markdown body. Files use snake_case keys (`poll_interval`, `max_concurrent_attempts`); decoded types use camelCase (`pollInterval`, `maxConcurrentAttempts`). The schema does the rename, so edits keep snake_case.
@@ -49,8 +49,9 @@ projects:
 
 Issue and pull request conditions can inspect
 `item.labelEvents["ready-for-agent"].actor.login`, `.actor.type`, and `.createdAt`.
-Check map membership and a non-null actor before reading it. Use separate loops
-with fixed `approval` settings to gate App-set labels and accept human-set labels;
+Set `approval` to a boolean CEL condition to gate App-set labels and accept human-set labels.
+`true` requires approval; `false` permits an automatic start. Missing data or an evaluation
+error requires approval and logs a warning;
 see the [expressions reference](https://docs.usine.dev/reference/configuration/expressions/#label-actors).
 
 ## Settings and workers
@@ -121,3 +122,5 @@ Configuration version 2 stores projects separately from the repository registry.
 The SQLite reopen test uses the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). The adapter contract tests use in-memory databases.
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+The top-level `auth.origins` list configures additional trusted browser origins and defaults to an empty list. `UiOrigin`, exported from `@usine/config/factory`, accepts exact HTTPS origins and HTTP origins on loopback, without credentials, paths, queries, or fragments. The server also allows its canonical `--origin` or `USINE_ORIGIN`. Authentication settings are stored with instance settings; changes require a server restart.

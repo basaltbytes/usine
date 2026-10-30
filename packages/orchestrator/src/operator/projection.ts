@@ -9,7 +9,7 @@ import * as RunState from "@usine/core/run/state";
 import { PullRequest } from "@usine/core/step/result";
 import { SshDestination, type WorkerName } from "@usine/core/worker";
 import { type RunSnapshot, type RunSummary, RunReader } from "@usine/engine/run-reader";
-import type { RunStoreError } from "@usine/engine/engine";
+import type { UpgradeDrain, RunStoreError } from "@usine/engine/engine";
 import {
   type TranscriptEntry,
   TranscriptPageQuery,
@@ -219,6 +219,7 @@ export const runView = (
   pausedLoops: ReadonlySet<LoopName>,
   workers: WorkerAccesses,
   waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
+  upgrade: UpgradeDrain | null = null,
 ): RunView => {
   const actions = RunState.operatorActions(snapshot.run.state);
   const result = Option.getOrNull(snapshot.step.result);
@@ -233,6 +234,8 @@ export const runView = (
     agent: snapshot.agent.name,
     agentBrain: snapshot.agent.brain,
     state: snapshot.run.state._tag,
+    upgradeWait:
+      actions.canCancel && upgrade?.runIds.includes(snapshot.run.id) ? upgrade.wait : null,
     providerRetry: Option.getOrNull(pendingProviderRetry(snapshot.run.state, snapshot.attempts)),
     loopPaused: pausedLoops.has(snapshot.run.loop),
     machineWait: actions.canCancel ? (waits.get(snapshot.run.id) ?? null) : null,
@@ -240,6 +243,7 @@ export const runView = (
     closedAt: Option.match(snapshot.closedAt, { onNone: () => null, onSome: DateTime.formatIso }),
     task: snapshot.task,
     attempts: snapshot.attempts.map((attempt) => attemptView(attempt, workers)),
+    approvalReason: Option.getOrNull(snapshot.approvalReason),
     approval: Option.match(snapshot.approval, {
       onNone: () => null,
       onSome: ({ approvedAt, source }) =>

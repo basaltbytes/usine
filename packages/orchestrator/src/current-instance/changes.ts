@@ -10,7 +10,7 @@ import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository"
 import { WorkerName } from "@usine/core/worker";
 import { Equal, Schema } from "effect";
 
-const RESTART_BLOCKS = ["workers", "tracing"] as const;
+const RESTART_BLOCKS = ["workers", "tracing", "auth"] as const;
 
 /**
  * A `usine.yaml` block with changes that apply only when `usine up` starts, so a reload refuses
@@ -152,7 +152,7 @@ export const agentsWithNewBrains = (
 };
 
 /**
- * Returns the changes in `loaded` that only a restart applies: a changed `tracing`
+ * Returns the changes in `loaded` that only a restart applies: a changed `tracing` or `auth`
  * block, and a changed `workers` block while no Worker runs Attempts, as in setup mode.
  */
 export const restartChanges = (
@@ -163,6 +163,9 @@ export const restartChanges = (
   ...(Equal.equals(running.config.tracing, loaded.config.tracing)
     ? []
     : [{ block: "tracing", field: "tracing", reason: "the tracing block changed" } as const]),
+  ...(Equal.equals(running.config.auth, loaded.config.auth)
+    ? []
+    : [{ block: "auth", field: "auth", reason: "the auth block changed" } as const]),
   ...(workersRun || Equal.equals(running.config.workers, loaded.config.workers)
     ? []
     : [

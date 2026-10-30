@@ -787,7 +787,17 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
   const priority = 'item.labels.nodes.exists(l, l.name == "low-priority") ? -1 : 0';
   await page.getByRole("textbox", { name: "Priority", exact: true }).fill(priority);
   await page.getByRole("checkbox", { name: "basaltbytes/usine", exact: true }).click();
-  await page.getByRole("switch", { name: "Require approval" }).click();
+  await page.getByRole("combobox", { name: "Approval", exact: true }).selectOptions("condition");
+  const approval = 'item.labelEvents["ready-for-agent"].actor.type != "User"';
+  const approvalField = page.getByRole("textbox", {
+    name: "Approval condition (CEL)",
+    exact: true,
+  });
+  await approvalField.fill("item.number");
+  await expect
+    .element(page.getByText("Approval condition must return bool", { exact: true }))
+    .toBeVisible();
+  await approvalField.fill(approval);
   await page
     .getByRole("textbox", { name: "Prompt (Markdown)", exact: true })
     .fill("Implement {{ item.title }}.");
@@ -799,9 +809,11 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
   await expect.element(page.getByText("Priority -1", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Render prompt", exact: true }).nth(1).click();
   await expect.element(page.getByText("Implement Fix issue 2.", { exact: true })).toBeVisible();
-  page.getByRole("heading", { name: "New loop", exact: true }).element().scrollIntoView();
+  approvalField.element().scrollIntoView({ block: "center" });
+  await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
   await commands.configurationEditorScreenshot("loop-mobile-final");
   await page.viewport(1280, 900);
+  approvalField.element().scrollIntoView({ block: "center" });
   await commands.configurationEditorScreenshot("loop-desktop-final");
   await condition.fill("true");
   await expect
@@ -814,7 +826,7 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
     payload: {
       value: {
         name: "usine/draft-loop",
-        approval: "required",
+        approval,
         priority: { _tag: "Some", value: priority },
         selector: { _tag: "Some", value: { repos: ["basaltbytes/usine"] } },
       },

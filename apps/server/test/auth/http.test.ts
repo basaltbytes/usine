@@ -1,3 +1,4 @@
+import { securityMiddleware } from "../../src/security.ts";
 import { TestClock } from "effect/testing";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
@@ -118,7 +119,10 @@ it("enrolls the first admin only after a setup link and a cookie-bound GitHub we
     Effect.gen(function* () {
       const services = yield* authFixture([]);
       const { routes } = authenticatedRoutes(services);
-      const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+      const app = HttpRouter.toWebHandler(
+        Layer.merge(routes, securityMiddleware(services.authentication)),
+        { disableLogger: true },
+      );
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
       const anonymous = yield* Effect.promise(() => request(app, "/api/auth/github"));
       const anonymousState =
@@ -207,7 +211,10 @@ it("limits sign-in attempts globally and refuses cross-site link consumption", a
     Effect.gen(function* () {
       const services = yield* authFixture();
       const { routes } = authenticatedRoutes(services);
-      const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+      const app = HttpRouter.toWebHandler(
+        Layer.merge(routes, securityMiddleware(services.authentication)),
+        { disableLogger: true },
+      );
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
       const token = linkToken(yield* services.authentication.link);
       assert.equal(
@@ -239,7 +246,10 @@ it("restricts link issuance to the local credential and binds links to the origi
     Effect.gen(function* () {
       const services = yield* authFixture([alice, bob], bob);
       const { routes } = authenticatedRoutes(services);
-      const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+      const app = HttpRouter.toWebHandler(
+        Layer.merge(routes, securityMiddleware(services.authentication)),
+        { disableLogger: true },
+      );
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
       const web = yield* services.authentication.startWeb(false);
       const bobSession = yield* services.authentication.finishWeb(

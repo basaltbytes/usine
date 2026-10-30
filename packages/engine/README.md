@@ -28,6 +28,11 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 
 ### Approval and retries
 
+Approval requirements are evaluated before submission. `Submission.approvalReason`
+records the decision with the event; snapshots and summaries return it after a
+restart. Older events return `None`. Repeated submissions and retries preserve
+the original requirement and reason.
+
 - Approval-gated runs wait for an approval event before their first attempt.
 - Infrastructure and provider capacity failures retry automatically, up to three attempts. Capacity retries wait two minutes after attempt 1 and five minutes after attempt 2, without reserving a worker slot. The persisted attempt end time determines the deadline across restarts. Retries resume from the newest pushed salvage, and cancellation stops the wait. Agent, defect, and guard failures wait for an operator retry. A defect escaping `StepExecutor` is saved as `DefectFailure` with its original cause.
 - `RunEngine.retry(runId, request)` takes a `RetryRequest`: the operator login and the task and agent that an edit-and-retry changes.
@@ -104,7 +109,9 @@ A reset records a fresh polling request. Trigger adapters read `CycleBudgets.gen
 
 ## Drain and shutdown
 
-`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Reservations, approval gates, and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md)).
+`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Pending reservations release their slots; approval gates and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md)).
+
+`RunEngine.waitForUpgrade(target)` defers new reservations and waits for admitted attempts to persist their outcomes. `upgradeDrain` reports the target version, start time, and deferred run IDs. `cancelUpgrade` resumes these runs without a restart; it does not reopen admission after process shutdown. Cancel the caller's wait before canceling the upgrade. Repeated waits join the pending drain.
 
 To handle shutdown during startup, provide `RunEngineShutdown` (`/engine`): a fresh `Deferred<void>` allocated before building the runtime. Completing it closes admission at once, recovered work included. After startup, `drain()` waits for admitted outcomes. The server installs this before building its runtime.
 

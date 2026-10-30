@@ -106,6 +106,7 @@ These changes require a restart:
 | Configuration | Fields or changes | Reason |
 | --- | --- | --- |
 | Instance | `tracing` | The exporter belongs to the process-wide Effect context created before the runtime. Existing fibers retain that tracer, and its shutdown flush runs after the runtime closes. Replacing only the exporter layer would leave existing fibers exporting through the old context. |
+| Instance | `auth` | Browser origin restrictions initialize the HTTP middleware at startup. |
 | Existing worker | `kind` or a rename (`name`). | The executor kind is selected at startup, and stored attempt and machine identities use the worker name. |
 | Worker set | Changes while no worker executor is registered, as in setup mode, or adding a worker of another kind. | There is no matching executor to initialize or preflight these workers. |
 | Bootstrap values | GitHub App credentials, `.env` and provider or gateway credential values, listen port, origin, and log level. | These values initialize process services and are outside configuration revisions. Credential references can change live to variables already available to the process. |

@@ -193,7 +193,7 @@ describe("CurrentInstance", () => {
     ),
   );
 
-  it.live("rejects a tracing change while accepting webhook changes independently", () =>
+  it.live("rejects tracing and auth changes while accepting webhook changes independently", () =>
     withFolder((root) =>
       Effect.gen(function* () {
         const instances = yield* CurrentInstance;
@@ -202,13 +202,13 @@ describe("CurrentInstance", () => {
         yield* writeInstanceFiles(root, [
           [
             "usine.yaml",
-            `${usineYaml(2)}webhooks:\n  mode: deliveries\ntracing:\n  otlp_url: http://localhost:4318/v1/traces\n`,
+            `${usineYaml(2)}webhooks:\n  mode: deliveries\ntracing:\n  otlp_url: http://localhost:4318/v1/traces\nauth:\n  origins: [https://client.example]\n`,
           ],
         ]);
         const failure = yield* Effect.flip(instances.reload);
         assert(failure._tag === "RestartRequiredError", failure._tag);
-        assert.deepStrictEqual(failure.fields, ["tracing"]);
-        assert.include(failure.message, "the tracing block changed");
+        assert.deepStrictEqual(failure.fields, ["tracing", "auth"]);
+        assert.include(failure.message, "the tracing block changed; the auth block changed");
         assert.strictEqual(yield* instances.get, running);
       }).pipe(Effect.scoped),
     ),

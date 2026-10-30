@@ -18,6 +18,7 @@ export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engin
     step: StepName,
     /** The current loop approval requirement, applied again to the new run. */
     approval: ApprovalRequirement,
+    approvalReason: Submission.fields.approvalReason,
     /** The cycle limit, or `None` for a schedule Loop. */
     cycleLimit: Schema.Option(CycleLimit),
     /** The current loop repository access granted to the new run's attempts. */
@@ -72,6 +73,7 @@ export const runAgainSubmission = (
     loop: ran.run.loop,
     step: request.step,
     approval: request.approval,
+    approvalReason: request.approvalReason,
     permissions: request.permissions,
     cycleLimit: request.cycleLimit,
     cycleGeneration: identity.generation,

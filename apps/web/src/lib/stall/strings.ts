@@ -2,7 +2,7 @@ import type { RunView, StalledItemView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import { agoLabel } from "~/lib/strings";
 import { machineCreationLine } from "~/lib/workers/strings";
-import { failureReason, stopWaitLine } from "~/lib/runs/strings";
+import { upgradeWaitLine, failureReason, stopWaitLine } from "~/lib/runs/strings";
 import { runActivityAt } from "~/lib/tasks/model";
 
 const isQuestion = (run: RunView): boolean => {
@@ -17,7 +17,7 @@ export const stallNamesLoop = ({ reason }: StalledItemView): boolean =>
 /** Returns a short fragment that states why a matched Item is stalled. */
 export const stallSentence = ({ loop, reason }: StalledItemView, now: number): string =>
   Match.valueTags(reason, {
-    AwaitingApproval: () => "Waiting for approval",
+    AwaitingApproval: ({ run }) => run.approvalReason ?? "Waiting for approval",
     SuppressedForOperator: ({ run }) =>
       isQuestion(run) ? "Question from the agent" : "Blocked by the agent",
     CycleBudgetUsedUp: ({ ask }) => `Cycle budget used, ${ask.limit} rounds`,
@@ -30,6 +30,7 @@ export const stallSentence = ({ loop, reason }: StalledItemView, now: number): s
       `${run.state === "Succeeded" ? "Succeeded" : "Canceled"} ${agoLabel(runActivityAt(run), now)}, unchanged since`,
     LoopPaused: () => `${loop} paused`,
     WaitingForStop: ({ run, stop }) => stopWaitLine(run.id, stop),
+    WaitingForUpgrade: ({ wait }) => upgradeWaitLine(wait),
     QueuedForWorker: ({ ahead, creating, priority }) =>
       creating !== null
         ? machineCreationLine(creating, now)

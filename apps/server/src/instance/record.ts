@@ -1,7 +1,8 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
-import { DEFAULT_LOG_LEVEL, Port, UiOrigin, type UpCommand, UpLogLevel } from "../cli.ts";
+import { UiOrigin } from "@usine/config/factory";
+import { DEFAULT_LOG_LEVEL, Port, type UpCommand, UpLogLevel } from "../cli.ts";
 import { SystemdUnit } from "./systemd.ts";
 
 /** An operating system process ID. */

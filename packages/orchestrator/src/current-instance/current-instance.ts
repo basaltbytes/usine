@@ -172,7 +172,7 @@ export class CurrentInstance extends Context.Service<
     readonly changes: Stream.Stream<LoadedInstance>;
     /**
      * Re-reads the configuration store, one reload at a time, and returns what changed. Fails and keeps
-     * the running snapshot on an unreadable store, a changed `tracing` block, or
+     * the running snapshot on an unreadable store, a changed `tracing` or `auth` block, or
      * a rejected `workers` change.
      */
     readonly reload: Effect.Effect<InstanceReload, InstanceReloadError>;

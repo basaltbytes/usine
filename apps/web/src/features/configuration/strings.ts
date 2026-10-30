@@ -1,6 +1,7 @@
+import type { LoopApproval } from "@usine/config/loop";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
 import type { Harness } from "@usine/core/agent/brain";
-import type { ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
+import type { LoopPermissions } from "@usine/core/loop";
 import { CONTAINER_LIMITS, type ContainerLimit, type WorkerKind } from "@usine/core/worker";
 import type {
   ConfigurationView,
@@ -28,10 +29,8 @@ export const workerKindLabel = {
 export const provisionedHarnessCheckDescription =
   "Harness checks run on the first machine, then on the next machine created after the configured interval since the last successful check.";
 
-export const approvalLabel = {
-  none: "Not required",
-  required: "Required",
-} satisfies Record<ApprovalRequirement, string>;
+export const approvalLabel = (approval: LoopApproval): string =>
+  approval === "none" ? "Not required" : approval === "required" ? "Required" : "Conditional";
 
 export const permissionsLabel = {
   write: "Write: push and merge",
@@ -414,7 +413,13 @@ export const loopFormCopy = {
   repositories: "Repositories",
   tags: "Tags",
   allRepositories: "Leave both selectors empty to include every repository in the project.",
-  approval: "Require approval",
+  approval: "Approval",
+  approvalNone: "Not required",
+  approvalRequired: "Always required",
+  approvalConditional: "When a condition is true",
+  approvalCondition: "Approval condition (CEL)",
+  approvalHint:
+    "A true condition or an evaluation error requires approval. False allows the run to start.",
   step: "Step name",
   agent: "Agent",
   cycles: "Cycle limit",
@@ -477,6 +482,8 @@ export const webhookStatusCopy = {
     "The last self-write or webhook hint received since startup. Polling runs independently.",
 };
 
+export const upgradeCancel = "Cancel pending upgrade";
+export const upgradeTarget = (version: string): string => `Requested version: ${version}`;
 export const runPreflightLabel = "Run preflight";
 export const runningPreflightLabel = "Running preflight…";
 export const preflightBusyReason = "Available after all attempts end";

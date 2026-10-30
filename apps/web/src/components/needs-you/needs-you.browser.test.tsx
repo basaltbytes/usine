@@ -55,6 +55,8 @@ declare module "vitest/browser" {
 const repository = RepositoryName.make("approval/project");
 const runId = RunId.make("approval-run");
 const loop = LoopName.make("start-dev");
+const approvalReason =
+  "Approval required: condition evaluated to true. Label ready-for-agent was set by usine-phildl (Bot)";
 const waiting = new RunView({
   agentBrain: new BrainSpec({
     harness: "codex",
@@ -73,6 +75,7 @@ const waiting = new RunView({
   task: "Complete the issue",
   attempts: [],
   approval: null,
+  approvalReason,
   runAgain: null,
   resultMessage: null,
   pullRequestUrl: null,
@@ -88,6 +91,7 @@ const approvalOf = (id: RunId, number: number, title: string) =>
     id: `approval-${id}`,
     repository,
     runId: id,
+    approvalReason,
     loop,
     item: new BoardItemLink({
       itemKey: ItemKey.make(`github:approval/project:${number}`),
@@ -179,8 +183,12 @@ const entry = (title: string) =>
 
 it("holds the Run's approval in Needs attention while the drawer approves it, and drops it when the approve returns, before the slow overview refresh", async () => {
   const held = entry("#367 Keep Needs attention current");
+  await expect.element(held.getByText(approvalReason, { exact: true })).toBeVisible();
   await held.getByRole("button", { name: /^Actions for/ }).click();
   await page.getByRole("menuitem", { name: "Open run", exact: true }).click();
+  await expect
+    .element(page.getByRole("dialog").getByText(approvalReason, { exact: true }))
+    .toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Approve", exact: true }).click();
   await expect
     .element(held.getByRole("button", { name: "Approving…", includeHidden: true }))

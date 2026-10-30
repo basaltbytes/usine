@@ -7,7 +7,7 @@ sidebar:
 
 `usine config export <folder>` writes `usine.yaml` at the top of the destination folder, next to `projects/` and `agents/`. `usine config import <folder>` reads that format, and `usine config edit` uses it for individual entities. The first start imports these files once; later starts read the configuration store. Use [`usine config edit` or `usine config import`](/reference/configuration/config/) to save changes. The export contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
 
-Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Webhook and worker connection changes also apply live. Changes to `tracing`, worker names, and executor kinds need a restart. See [Live changes and restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements) for the exact fields and the difference between saving a revision and applying it.
+Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Webhook and worker connection changes also apply live. Changes to `tracing`, `auth`, worker names, and executor kinds need a restart. See [Live changes and restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements) for the exact fields and the difference between saving a revision and applying it.
 
 The parser is strict:
 
@@ -614,3 +614,7 @@ tracing:
   otlp_url: http://localhost:4318/v1/traces
   service_name: usine-eu
 ```
+
+## Browser origins
+
+The top-level `auth.origins` list defaults to `[]`. Add exact HTTPS origins for browser clients, or HTTP origins on loopback for development. The canonical `--origin` or `USINE_ORIGIN` is allowed automatically. Changes require a restart. See [Expose an instance over HTTPS](/guides/expose-an-instance/#browser-origins) for configuration and proxy examples.

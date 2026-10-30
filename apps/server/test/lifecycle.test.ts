@@ -23,7 +23,8 @@ import { RunId } from "@usine/core/run";
 import { DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, type HttpClient } from "effect/http";
 import { afterEach, assert, describe, it } from "vitest";
-import { LifecycleOptions, Port, SERVER_HOST, UiOrigin, type UpLogLevel } from "../src/cli.ts";
+import { UiOrigin } from "@usine/config/factory";
+import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
 import { startDetached } from "../src/detach.ts";
 import { writeAdminToken } from "../src/auth/local.ts";
 import { holdInstance } from "../src/instance/lock.ts";
@@ -221,34 +222,38 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.deepStrictEqual(state.stale, Option.none());
   });
 
-  it("refuses stop and restart before signaling when the admin token is unsafe or missing", async () => {
-    const directory = instanceFolder();
-    const first = await startFixture(directory);
-    const path = join(directory, ".usine/admin-token");
-    const expectRefusal = async () => {
-      for (const command of ["stop", "restart"]) {
-        for (const flags of [[], ["--force"]]) {
-          await rejects(runCli(directory, [command, ...flags]), (error: Error) => {
-            assert.include(error.message, path);
-            assert.include(error.message, `uid ${process.getuid?.()}`);
-            assert.include(error.message, "0600");
-            return true;
-          });
-          assert.isTrue(alive(first.pid));
-        }
-      }
-    };
-    chmodSync(path, 0o644);
-    await expectRefusal();
-    chmodSync(path, 0o600);
-    renameSync(path, `${path}.real`);
-    symlinkSync(`${path}.real`, path);
-    await expectRefusal();
-    rmSync(path);
-    await expectRefusal();
-    writeFileSync(instanceFiles(directory).record, "unreadable");
-    await expectRefusal();
-  });
+  it.each([
+    ["stop", []],
+    ["stop", ["--force"]],
+    ["restart", []],
+    ["restart", ["--force"]],
+  ] as const)(
+    "refuses stop and restart before signaling when the admin token is unsafe or missing: %s %j",
+    async (command, flags) => {
+      const directory = instanceFolder();
+      const first = await startFixture(directory);
+      const path = join(directory, ".usine/admin-token");
+      const expectRefusal = async () => {
+        await rejects(runCli(directory, [command, ...flags]), (error: Error) => {
+          assert.include(error.message, path);
+          assert.include(error.message, `uid ${process.getuid?.()}`);
+          assert.include(error.message, "0600");
+          return true;
+        });
+        assert.isTrue(alive(first.pid));
+      };
+      chmodSync(path, 0o644);
+      await expectRefusal();
+      chmodSync(path, 0o600);
+      renameSync(path, `${path}.real`);
+      symlinkSync(`${path}.real`, path);
+      await expectRefusal();
+      rmSync(path);
+      await expectRefusal();
+      writeFileSync(instanceFiles(directory).record, "unreadable");
+      await expectRefusal();
+    },
+  );
 
   it("restarts into a new process with the recorded launch, port, origin, and log level", async () => {
     const directory = instanceFolder();
@@ -451,14 +456,16 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
 
   it("keeps waiting past the timeout while the starting process writes to its log", async () => {
     const directory = instanceFolder();
-    // Six seconds of startup recovery, which logs a line every 500 milliseconds.
-    writeFileSync(join(directory, "fixture-startup"), "12 500");
+    // Allow cold module loading, then require recovery to outlast the silence timeout.
+    writeFileSync(join(directory, "fixture-startup"), "24 500");
 
-    const started = await run(startDetached(directory, await fixtureLaunch(), Duration.seconds(4)));
+    const started = await run(
+      startDetached(directory, await fixtureLaunch(), Duration.seconds(10)),
+    );
     pids.add(started.pid);
 
     const log = readFileSync(instanceFiles(directory).log, "utf8");
-    assert.match(log, /fixture reconciled checkout 12\n[\s\S]*fixture listening/u, log);
+    assert.match(log, /fixture reconciled checkout 24\n[\s\S]*fixture listening/u, log);
     await run(stop(directory, options(20)));
   });
 
