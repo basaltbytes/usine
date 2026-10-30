@@ -26,7 +26,7 @@ import {
   type ResolvedLimits,
   resourcesFromOutput,
 } from "./limits.ts";
-import type { SshMachine } from "./model.ts";
+import type { SshMachine, SshWorkerAddress } from "./model.ts";
 
 /**
  * The image of each Attempt container when `usine.yaml` names none, built from
@@ -107,7 +107,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     },
     (effect, machine) => effect.pipe(cacheLocks.withLock(machine.address.name)),
   );
-  const isolations = yield* Ref.make(new Map<WorkerName, AttemptIsolation>());
+  const isolations = new WeakMap<SshWorkerAddress, AttemptIsolation>();
   // Workers whose earlier containers this process removed. Their containers on a shared machine
   // belong to this process, so another Worker's removal keeps them.
   const reclaimed = yield* Ref.make(new Set<string>());
@@ -190,15 +190,17 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     );
   });
 
-  const record = (worker: WorkerName, isolation: AttemptIsolation) =>
-    Ref.update(isolations, (current) => new Map(current).set(worker, isolation));
+  const record = (machine: SshMachine, isolation: AttemptIsolation) =>
+    Effect.sync(() => {
+      isolations.set(machine.address, isolation);
+    });
 
   /**
    * Records that the machine's Worker runs its Attempts as the SSH user, since the machine has no
    * Docker, and logs it.
    */
   const recordSharedUser = (machine: SshMachine) =>
-    record(machine.address.name, sharedUser).pipe(
+    record(machine, sharedUser).pipe(
       Effect.andThen(
         Effect.logWarning(
           "SSH Worker has no Docker; its Attempts run as the SSH user and can read each other's credentials",
@@ -236,7 +238,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       instanceId,
       hosts,
     };
-    yield* record(worker, { _tag: "Container", settings });
+    yield* record(machine, { _tag: "Container", settings });
     yield* Effect.logInfo("SSH Worker runs each Attempt in its own container", {
       worker,
       host: machine.shell.destination,
@@ -353,13 +355,19 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   });
 
   /**
-   * Returns how new Attempts on the machine run, as the Worker's last preflight found, or detects
-   * and logs it. Before any preflight on the Worker, as for the recovery of a provisioned Worker's
-   * machine, it derives the unset limits for one Attempt on the machine.
+   * Returns the isolation from the last preflight for this connection configuration, or detects
+   * and logs it. Without a preflight for this configuration, it derives unset limits for one
+   * attempt on the machine.
    */
   const isolationOf = Effect.fn("SshExecutor.isolation")(function* (machine: SshMachine) {
-    const recorded = (yield* Ref.get(isolations)).get(machine.address.name);
+    const recorded = isolations.get(machine.address);
+    const fields = { worker: machine.address.name, host: machine.shell.destination };
+    yield* Effect.annotateCurrentSpan(fields);
     if (recorded !== undefined) {
+      yield* Effect.logDebug("Using the SSH connection's checked attempt isolation", {
+        ...fields,
+        isolation: recorded._tag,
+      });
       if (recorded._tag === "Container") yield* prepareCaches(machine, recorded.settings.image);
       return recorded;
     }
