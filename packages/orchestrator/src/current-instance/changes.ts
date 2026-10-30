@@ -10,7 +10,7 @@ import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository"
 import { WorkerName } from "@usine/core/worker";
 import { Equal, Schema } from "effect";
 
-const RESTART_BLOCKS = ["workers", "webhooks", "tracing"] as const;
+const RESTART_BLOCKS = ["workers", "tracing"] as const;
 
 /**
  * A `usine.yaml` block with changes that apply only when `usine up` starts, so a reload refuses
@@ -27,9 +27,9 @@ export type RestartBlock = typeof RestartBlock.Type;
 /** A change to `usine.yaml` that only a restart of `usine up` applies. */
 export interface RestartChange {
   readonly block: RestartBlock;
-  /** The changed field as a path into `usine.yaml`, such as `webhooks` or `workers.build-1.destination`. */
+  /** The changed field as a path into `usine.yaml`, such as `tracing` or `workers.build-1.kind`. */
   readonly field: string;
-  /** An operator-facing clause, such as `the webhooks block changed`. */
+  /** An operator-facing clause, such as `the tracing block changed`. */
   readonly reason: string;
 }
 
@@ -152,7 +152,7 @@ export const agentsWithNewBrains = (
 };
 
 /**
- * Returns the changes in `loaded` that only a restart applies: a changed `webhooks` or `tracing`
+ * Returns the changes in `loaded` that only a restart applies: a changed `tracing`
  * block, and a changed `workers` block while no Worker runs Attempts, as in setup mode.
  */
 export const restartChanges = (
@@ -160,9 +160,6 @@ export const restartChanges = (
   loaded: LoadedInstance,
   workersRun: boolean,
 ): ReadonlyArray<RestartChange> => [
-  ...(Equal.equals(running.config.webhooks, loaded.config.webhooks)
-    ? []
-    : [{ block: "webhooks", field: "webhooks", reason: "the webhooks block changed" } as const]),
   ...(Equal.equals(running.config.tracing, loaded.config.tracing)
     ? []
     : [{ block: "tracing", field: "tracing", reason: "the tracing block changed" } as const]),
@@ -176,9 +173,6 @@ export const restartChanges = (
         } as const,
       ]),
 ];
-
-const yamlKey = (field: string): string =>
-  field.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`);
 
 /**
  * Returns the keys of a Worker entry, other than `name` and `max_concurrent_attempts`, that differ
@@ -195,9 +189,9 @@ const changedWorkerSettings = (
     );
   const previous = settings(before);
   const next = settings(after);
-  return [...new Set([...previous.keys(), ...next.keys()])]
-    .filter((key) => !Equal.equals(previous.get(key), next.get(key)))
-    .map(yamlKey);
+  return [...new Set([...previous.keys(), ...next.keys()])].filter(
+    (key) => !Equal.equals(previous.get(key), next.get(key)),
+  );
 };
 
 /** A Worker that a reload keeps with a new `max_concurrent_attempts`. */
@@ -210,12 +204,11 @@ interface ResizedWorker {
 /** The changes a reload makes to the `workers` block, by Worker name. */
 export interface WorkersChange {
   readonly resized: ReadonlyArray<ResizedWorker>;
+  readonly updated: ReadonlyArray<ConfigWorker>;
   readonly added: ReadonlyArray<ConfigWorker>;
   readonly removed: ReadonlyArray<ConfigWorker>;
   /**
-   * The changes running Workers can't apply: a changed kind or setting other than
-   * `max_concurrent_attempts`, and a rename, which counts as a removal plus an addition with the
-   * same settings.
+   * A changed kind or a rename, which counts as a removal plus an addition with the same settings.
    */
   readonly restart: ReadonlyArray<RestartChange>;
 }
@@ -229,18 +222,17 @@ export const workersChange = (
   const after = new Set(loaded.map(({ name }) => name));
   const restart: Array<RestartChange> = [];
   const resized: Array<ResizedWorker> = [];
+  const updated: Array<ConfigWorker> = [];
   for (const worker of loaded) {
     const previous = before.get(worker.name);
     if (previous === undefined) continue;
     const changed = changedWorkerSettings(previous, worker);
-    for (const key of changed) {
+    if (previous.kind === worker.kind && changed.length > 0) updated.push(worker);
+    if (previous.kind !== worker.kind) {
       restart.push({
         block: "workers",
-        field: `workers.${worker.name}.${key}`,
-        reason:
-          key === "kind"
-            ? `worker "${worker.name}" changed kind from ${previous.kind} to ${worker.kind}`
-            : `worker "${worker.name}" changed ${key}`,
+        field: `workers.${worker.name}.kind`,
+        reason: `worker "${worker.name}" changed kind from ${previous.kind} to ${worker.kind}`,
       });
     }
     if (changed.length === 0 && previous.maxConcurrentAttempts !== worker.maxConcurrentAttempts) {
@@ -258,5 +250,5 @@ export const workersChange = (
       reason: `worker "${previous.name}" was renamed to "${renamed.name}"`,
     });
   }
-  return { resized, added, removed, restart };
+  return { resized, updated, added, removed, restart };
 };

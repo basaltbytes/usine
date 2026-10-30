@@ -68,9 +68,9 @@ After `pnpm build`, reload the page to use the new web bundle; no restart is nee
 
 ## Webhook delivery hints
 
-Set `webhooks.mode: deliveries` in `usine.yaml` and restart `usine up` to check the GitHub App's delivery summaries about every 10 seconds. The App webhook must be active, but it does not need a reachable endpoint. The runtime persists its delivery cursor and uses hints to refresh registered repositories sooner; the normal poll remains active. **Configuration > Settings** shows the running mode and the last hint received since startup.
+Save `webhooks.mode: deliveries` with `usine config edit settings` to check the GitHub App's delivery summaries about every 10 seconds. The App webhook must be active, but it does not need a reachable endpoint. The runtime persists its delivery cursor and uses hints to refresh registered repositories sooner; the normal poll remains active. **Configuration > Settings** shows the running mode and the last hint received since startup.
 
-For endpoint mode, set the full public delivery URL and restart `usine up`:
+For endpoint mode, save the full public delivery URL:
 
 ```yaml
 webhooks:
@@ -78,17 +78,17 @@ webhooks:
   public_url: https://usine.example/webhooks/github
 ```
 
-Set `USINE_GITHUB_WEBHOOK_SECRET` in the instance `.env` to the webhook secret configured for the GitHub App. Endpoint mode requires a nonempty secret. Keep the App webhook **active** and subscribe it to the issue, pull request, comment, review, push, and check events that your loops use. The App's webhook settings control its active flag, secret, and subscriptions; usine updates its URL and JSON content type at startup.
+Set `USINE_GITHUB_WEBHOOK_SECRET` in the instance `.env` to the webhook secret configured for the GitHub App. Endpoint mode requires a nonempty secret. Keep the App webhook **active** and subscribe it to the issue, pull request, comment, review, push, and check events that your loops use. The App's webhook settings control its active flag, secret, and subscriptions; usine updates its URL and JSON content type at startup and after accepted webhook changes.
 
 Expose `POST /webhooks/github` through your HTTPS reverse proxy to the existing operator HTTP server. This route verifies `X-Hub-Signature-256` with HMAC-SHA256 over the exact request bytes and does not require an operator token. Other operator routes still require authentication. The endpoint accepts bodies up to 25 MiB with a ten-second read timeout. It returns 204 for valid deliveries, including ignored `ping` and unregistered repositories; registered repositories request the same early refresh as deliveries mode.
 
-A failed startup hook configuration request is logged; the endpoint and normal polling remain available. **Needs attention** warns after ten minutes with no verified delivery since startup. Check the public URL, active flag, webhook secret, and startup logs. Self-write hints do not clear this warning. **Configuration > Settings** shows the mode and last hint time. Restart after changing the webhook mode, URL, or secret.
+A failed hook configuration request is logged; the endpoint and normal polling remain available. **Needs attention** warns after ten minutes with no verified delivery since endpoint activation or its last configuration change. Check the public URL, active flag, webhook secret, and startup logs. Self-write hints do not clear this warning. **Configuration > Settings** shows the mode and last hint time. Mode and URL changes replace the active source without a restart. Restart after changing the secret in `.env`. Enabling the endpoint without an available secret logs a configuration error and returns 503; normal polling continues.
 
 ## Change the configuration
 
 The web UI edits stored entities in their export format, validates each save, and shows revision history and diffs. Concurrent writes return a conflict; the editor retains the draft while the operator reviews the newer text. Create, delete, and revert actions use the same API as other configuration writes. New loops start paused.
 
-The reload HTTP endpoint has been removed. Revisions apply automatically; `SIGHUP` remains available to explicitly re-read the store without stopping the process. A configuration write that requires a restart or fails worker preflight stores nothing and returns the reason. GitHub credentials are read only at startup.
+The reload HTTP endpoint has been removed. Revisions apply automatically; `SIGHUP` remains available to explicitly re-read the store without stopping the process. A configuration write that requires a restart, or whose added worker or slots fail preflight, stores nothing and returns the reason. A changed connection applies first; a failed preflight disables new scheduling on that worker and retries automatically. GitHub credentials are read only at startup.
 
 ## Back up and export
 

@@ -15,8 +15,7 @@ import {
   sshWorkerRecordsFor,
   SshWorkers,
 } from "@usine/executor/ssh";
-import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
-import { workersChange } from "./current-instance/changes.ts";
+import { Config, ConfigProvider, Effect, Equal, Layer, Option } from "effect";
 import { sshHttpClientLayer } from "./http-client.ts";
 import { type StepExecutorOptions, stepExecutorLayer } from "./scheduler/scheduler.ts";
 
@@ -248,15 +247,7 @@ export const sshStepExecutorLayer = (
             new Error(`The SSH executor cannot run worker "${worker.name}" of kind ${worker.kind}`),
           );
         const previous = initialized.get(worker.name);
-        if (previous !== undefined) {
-          const { restart } = workersChange([previous], [worker]);
-          if (restart.length > 0)
-            return yield* new WorkerCapabilityError({
-              worker: worker.name,
-              capability: "machine",
-              message: `Can't change the settings of SSH worker "${worker.name}" while its attempts run. Reload again after they end.`,
-              cause: restart,
-            });
+        if (previous !== undefined && Equal.equals(previous, worker)) {
           yield* Effect.logDebug("SSH worker credentials are already initialized", {
             worker: worker.name,
           });

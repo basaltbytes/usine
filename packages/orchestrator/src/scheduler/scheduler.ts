@@ -366,11 +366,12 @@ export const stepExecutorLayer = (
         roster: ReadonlyArray<BrainSpec>,
         checked: ReadonlySet<WorkerName>,
       ) {
+        yield* preflight.accept(declared, roster, checked);
+        yield* preflight.refresh(change.updated);
         const before = yield* TxRef.modify(pool, (current) => [
           current,
           slotPoolOf(declared, current),
         ]);
-        yield* preflight.accept(declared, roster, checked);
         const running = (worker: WorkerName) => before.get(worker)?.leased ?? 0;
         yield* Effect.forEach(change.resized, ({ worker, from }) =>
           Effect.logInfo("Worker slots resized by a reload; running Attempts continue", {
@@ -425,7 +426,7 @@ export const stepExecutorLayer = (
           const checks = loaded.config.workers.flatMap((worker) =>
             wholeRoster.has(worker.name)
               ? [{ worker, brains: roster }]
-              : newBrains.length > 0
+              : newBrains.length > 0 && !change.updated.some(({ name }) => name === worker.name)
                 ? [{ worker, brains: blocked.has(worker.name) ? roster : newBrains }]
                 : [],
           );

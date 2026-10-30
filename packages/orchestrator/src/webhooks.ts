@@ -5,6 +5,7 @@ export class WebhookHealth extends Context.Service<
   WebhookHealth,
   {
     readonly startedAt: DateTime.Utc;
+    readonly reset: Effect.Effect<void>;
     readonly received: Effect.Effect<void>;
     readonly silent: Effect.Effect<boolean>;
   }
@@ -12,13 +13,22 @@ export class WebhookHealth extends Context.Service<
   static readonly layer = Layer.effect(
     WebhookHealth,
     Effect.gen(function* () {
-      const startedAt = yield* DateTime.now;
+      let startedAt = yield* DateTime.now;
       const received = yield* Ref.make(false);
       return {
-        startedAt,
+        get startedAt() {
+          return startedAt;
+        },
+        reset: Effect.fn("WebhookHealth.reset")(function* () {
+          startedAt = yield* DateTime.now;
+          yield* Ref.set(received, false);
+          yield* Effect.logInfo("Webhook delivery health reset after configuration change");
+        })(),
         received: Effect.fn("WebhookHealth.received")(function* () {
           if (!(yield* Ref.getAndSet(received, true))) {
-            yield* Effect.logInfo("Received the first verified webhook delivery since startup");
+            yield* Effect.logInfo(
+              "Received the first verified webhook delivery since endpoint activation",
+            );
           }
         })(),
         silent: Effect.gen(function* () {

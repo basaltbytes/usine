@@ -190,8 +190,8 @@ export class RestartRequiredRefusal extends Schema.Error<RestartRequiredRefusal>
     /** The `usine.yaml` blocks that contain the changed fields. */
     blocks: Schema.NonEmptyArray(RestartBlock),
     /**
-     * The changed fields as paths into `usine.yaml`, such as `webhooks` or
-     * `workers.build-1.destination`.
+     * The changed fields as paths into `usine.yaml`, such as `tracing` or
+     * `workers.build-1.kind`.
      */
     fields: Schema.NonEmptyArray(Schema.NonEmptyString),
   },

@@ -7,7 +7,7 @@ sidebar:
 
 `usine config export <folder>` writes `usine.yaml` at the top of the destination folder, next to `projects/` and `agents/`. `usine config import <folder>` reads that format, and `usine config edit` uses it for individual entities. The first start imports these files once; later starts read the configuration store. Use [`usine config edit` or `usine config import`](/reference/configuration/config/) to save changes. The export contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
 
-Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Changes to `webhooks` and `tracing`, and some `workers` changes, need a restart. See [Live changes and restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements) for the exact fields and the difference between saving a revision and applying it.
+Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Webhook and worker connection changes also apply live. Changes to `tracing`, worker names, and executor kinds need a restart. See [Live changes and restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements) for the exact fields and the difference between saving a revision and applying it.
 
 The parser is strict:
 
@@ -280,14 +280,15 @@ An automatically applied [revision](/reference/configuration/config/#live-change
 | --- | --- |
 | A worker's `max_concurrent_attempts` goes up | Runs preflight on the worker with the new count and every harness in the roster. Then the new slots take waiting runs immediately. |
 | A worker's `max_concurrent_attempts` goes down | The worker starts no new attempt until it runs fewer attempts than the new count. Running attempts finish, and usine removes each extra slot when its attempt ends. |
-| A new worker | Runs preflight on it with every harness in the roster. The worker takes attempts after preflight passes. For an `ssh` worker behind a gateway, the reload first reads the variable named by `admin_token_env`, and refuses with `ReloadPreflightError` if it's unset. A new worker shares the admin API forward of a gateway that another worker uses. For a new gateway, usine opens a new forward. A reload can't add a `cloudflare` worker that `usine up` didn't start with, and refuses with `ReloadPreflightError`. |
+| A new worker | Runs preflight on it with every harness in the roster. The worker takes attempts after preflight passes. For an `ssh` worker behind a gateway, the reload first reads the variable named by `admin_token_env`, and refuses with `ReloadPreflightError` if it's unset. A new worker shares the admin API forward of a gateway that another worker uses. For a new gateway, usine opens a new forward. For a `cloudflare` worker, the reload reads its Access and provider credential variables and builds its client before preflight. |
+| A worker connection or runtime setting changes | Accepts the revision and runs preflight with the new settings. Running attempts keep their existing machine and clients. A failed check disables new scheduling on that worker until preflight passes. |
 | A removed worker | The worker starts no new attempt, and its running attempts finish. **Needs attention** shows **Worker not configured** with the number of attempts that still run. After the last one ends, you can select **Discard leftovers**. Then the forward to an `ssh` worker's gateway closes, unless another worker uses that gateway. |
 
-A failed preflight keeps the running configuration unchanged with `ReloadPreflightError`; a revision saved by the CLI remains in the database. These changes need a restart, and a reload refuses them with `RestartRequiredError`, which includes the field, such as `workers.worker-2.destination`:
+A failed preflight for an added worker or a resize keeps the running configuration unchanged with `ReloadPreflightError`; a revision saved by the CLI remains in the database. These changes need a restart, and a reload refuses them with `RestartRequiredError`, which includes the field, such as `workers.worker-2.kind`:
 
-- A worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, `gateway`, `container`, or `provisioner` for `ssh`, and `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, or `llm_providers` for `cloudflare`.
-- A renamed worker: one worker removed and one added with the same `kind` and other keys.
-- A new worker whose `kind` differs from the kind of the running workers.
+- A worker's `kind`, because the process selects its executor at startup.
+- A renamed worker: one worker removed and one added with the same `kind` and other keys. Stored attempt and machine identities use the original name.
+- A new worker whose `kind` differs from the kind of the running workers, because the process has no executor for it.
 
 Preflight divides the worker's memory by `max_concurrent_attempts`, because attempts run the repository's own `pnpm install`, `pnpm build`, and `pnpm test`, which need far more memory than the harnesses. The `memory` check fails if an attempt gets less than 1.5 GiB, or if the worker has no swap and `max_concurrent_attempts` is more than 1. Below 3 GiB per attempt, it logs a warning with a value to use. To fix a failure, lower `max_concurrent_attempts` or add memory or swap. On 2026-10-15, two attempts made a 4 GB worker without swap thrash until sshd stopped responding ([#270](https://github.com/basaltbytes/usine/issues/270)). Local workers on Linux and SSH workers report memory and swap in `/proc/meminfo`. On macOS, preflight reads the physical memory and counts swap as present, because macOS adds swap files when memory runs low. A `cloudflare` worker has no memory check: each attempt gets its own sandbox with the memory of its `instance_type`.
 
@@ -531,7 +532,7 @@ The parser refuses an `ssh` worker that:
 
 Removing a worker keeps its provider token for one final machine sweep, then discards it. If deletion fails, the warning includes the instance and worker labels to use for manual cleanup. At startup, usine also warns about machines with its instance label whose worker is not configured. This discovery uses configured workers' tokens; if the removed worker used a separate provider account, restore its configuration to sweep that account.
 
-A reload refuses a changed `provisioner` with `RestartRequiredError`.
+A changed `provisioner` applies to new machines after preflight. Running attempts retain their machine and the provider client that deletes it.
 
 Preflight creates no machine. It checks the provider token; for Hetzner, the server type in the location, the image, the SSH key, and the network; for Boat, the account's limits, which fail preflight if Boat doesn't offer the account the `size`. Hetzner documents no limits endpoint, so preflight reads none for it. It also checks the gateway's admin API, and that each harness of the roster has a credential that no machine has to keep: for Claude Code, `anthropic` in the gateway's `llm_providers` or `api_keys.anthropic`; for Codex, `openai` in `llm_providers` or `api_keys.openai`. Pi agents fail preflight on a provisioned worker. A Hetzner server type that is out of stock in the location logs a warning, and so does a Boat account that can't start sandboxes now or whose active-sandbox cap is below `max_concurrent_attempts`. The checks that need a machine run on the worker's first machine after `usine up` and after the configured machine check interval.
 
@@ -572,7 +573,7 @@ An exe.dev VM with the worker's name ([`ExeDevWorker`](https://github.com/basalt
 
 ## `webhooks`
 
-Selects an optional source of early repository refreshes. Polling remains active in every mode, and self-write hints are always enabled. Changes to this block require restarting `usine up`.
+Selects an optional source of early repository refreshes. Polling remains active in every mode, and self-write hints are always enabled. Revisions replace the active hint source without restarting `usine up`.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -589,7 +590,7 @@ webhooks:
   public_url: https://usine.example/webhooks/github
 ```
 
-Settings shows the running mode and last hint time. Endpoint mode adds a Needs attention entry after ten minutes without a verified delivery since startup. Check the public URL, webhook active flag, secret, and startup logs. Any verified delivery clears the warning, including `ping`; self-write hints do not clear it.
+Settings shows the running mode and last hint time. Endpoint mode adds a Needs attention entry after ten minutes without a verified delivery since endpoint activation or its last configuration change. Check the public URL, webhook active flag, secret, and startup logs. Any verified delivery clears the warning, including `ping`; self-write hints do not clear it.
 
 ## `tracing`
 
@@ -604,7 +605,7 @@ Exports the spans of the `usine up` process to an OpenTelemetry collector over O
 
 Each poll cycle and each HTTP request is a trace. Each run is a trace of its own, whose root span `RunDriver.drive` lasts as long as the run, attempts included, and links to the span that started the run: a poll cycle, an operator request such as an approval, a reconcile, or the closed run whose item had a queued event. The web UI sends no trace headers, so a request from it starts a new trace. Requests from usine to GitHub and to gateways have client spans but send no trace headers.
 
-At startup, `usine up` logs `Exporting spans over OTLP` with the URL's origin and path, or `Span export is off`. Each failed export request logs `Span export to the OTLP collector failed` with the same URL, the failure reason, and the HTTP status, if any. A failed export, after up to three retries, drops the buffered spans and pauses export for 60 seconds. A changed `tracing` block takes effect only after a restart; a reload refuses it with `RestartRequiredError`. The **Settings** configuration page shows the block that `usine up` runs with.
+At startup, `usine up` logs `Exporting spans over OTLP` with the URL's origin and path, or `Span export is off`. Each failed export request logs `Span export to the OTLP collector failed` with the same URL, the failure reason, and the HTTP status, if any. A failed export, after up to three retries, drops the buffered spans and pauses export for 60 seconds. The exporter is installed in the process-wide Effect context before runtime fibers start, and flushes after those fibers close. Existing fibers retain that tracer. A changed `tracing` block therefore takes effect only after a restart; a reload refuses it with `RestartRequiredError`. The **Settings** configuration page shows the block that `usine up` runs with.
 
 usine sends no authentication headers, and `otlp_url` can't hold a token. To export to a hosted backend, run a collector next to `usine up` that holds the backend's credentials. Span attributes include repository names, URLs, instance folder paths, and SQL statements without their parameter values, so export only to a collector that you control.
 

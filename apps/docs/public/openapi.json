@@ -33267,7 +33267,6 @@
                 "type": "string",
                 "enum": [
                   "workers",
-                  "webhooks",
                   "tracing"
                 ]
               }
@@ -33277,7 +33276,6 @@
               "type": "string",
               "enum": [
                 "workers",
-                "webhooks",
                 "tracing"
               ]
             }

@@ -155,7 +155,7 @@ provisioner:
 
 ### Update the snapshot
 
-Build a new snapshot when a usine release changes the attempt image or `infra/hetzner/cloud-init.yaml`. Its description names the new harness versions, so run `usine config edit worker hetzner-pool`, change `provisioner.image`, and run `usine restart` to apply the saved revision. The running process cannot apply a changed `provisioner` live and logs `RestartRequiredError`. A new snapshot with the same description, from `DESCRIPTION`, needs no restart, because each server is created from the newest one. Delete the old snapshots, which Hetzner bills by size:
+Build a new snapshot when a usine release changes the attempt image or `infra/hetzner/cloud-init.yaml`. Its description names the new harness versions, so run `usine config edit worker hetzner-pool`, change `provisioner.image`, and save the revision. Preflight checks the new image, and later attempts use it without restarting the orchestrator. Running attempts keep their existing machines. A new snapshot with the same description, from `DESCRIPTION`, needs no restart, because each server is created from the newest one. Delete the old snapshots, which Hetzner bills by size:
 
 ```sh title="Orchestrator machine"
 hcloud image list --type snapshot --selector usine=snapshot

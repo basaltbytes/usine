@@ -18,7 +18,17 @@ import {
   WebhookDelivery,
   WebhookDeliveryId,
 } from "@usine/github/github-app";
-import { DateTime, Effect, Fiber, FileSystem, Layer, Option, Schema } from "effect";
+import {
+  DateTime,
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Schema,
+  SubscriptionRef,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { WebhookDeliveries } from "../src/polling/deliveries.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
@@ -179,17 +189,23 @@ describe("Webhook delivery polling", () => {
     );
     return Effect.gen(function* () {
       const source = yield* WebhookDeliveries;
-      const off = yield* source.run(fixedInstance(instance("off"))).pipe(Effect.forkChild);
+      const current = yield* SubscriptionRef.make(instance("off"));
+      const enabled = yield* source
+        .run({ get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) })
+        .pipe(Effect.forkChild);
       yield* TestClock.adjust("30 seconds");
       assert.strictEqual(requests, 0);
-      yield* Fiber.interrupt(off);
-      const enabled = yield* source
-        .run(fixedInstance(instance("deliveries")))
-        .pipe(Effect.forkChild);
+      yield* SubscriptionRef.set(current, instance("deliveries"));
       yield* TestClock.adjust("1 millis");
       assert.strictEqual(requests, 1);
       yield* TestClock.adjust("9999 millis");
       assert.strictEqual(requests, 2);
+      yield* SubscriptionRef.set(current, instance("off"));
+      yield* TestClock.adjust("30 seconds");
+      assert.strictEqual(requests, 2);
+      yield* SubscriptionRef.set(current, instance("deliveries"));
+      yield* TestClock.adjust("1 millis");
+      assert.strictEqual(requests, 3);
       yield* Fiber.interrupt(enabled);
     }).pipe(
       Effect.provide(WebhookDeliveries.layer),
@@ -200,6 +216,7 @@ describe("Webhook delivery polling", () => {
   });
 
   it.effect("honors delivery API rate limits and retries without advancing the cursor", () => {
+    const started = Deferred.makeUnsafe<void>();
     let requests = 0;
     const app = appLayer(() =>
       Effect.suspend(() => {
@@ -211,7 +228,7 @@ describe("Webhook delivery polling", () => {
                 retryAt: DateTime.makeUnsafe(30_000),
                 message: "Wait",
               }),
-            )
+            ).pipe(Effect.tapError(() => Deferred.succeed(started, undefined)))
           : Effect.succeed([]);
       }),
     );
@@ -219,6 +236,7 @@ describe("Webhook delivery polling", () => {
     return Effect.gen(function* () {
       const source = yield* WebhookDeliveries;
       const fiber = yield* source.run(fixedInstance(instance("deliveries"))).pipe(Effect.forkChild);
+      yield* Deferred.await(started);
       yield* TestClock.adjust("29999 millis");
       assert.strictEqual(requests, 1);
       assert.strictEqual(cursors.stored.size, 0);
@@ -233,3 +251,62 @@ describe("Webhook delivery polling", () => {
     );
   });
 });
+
+it.effect(
+  "interrupts an in-flight delivery request on a mode revision and resumes hints from its cursor",
+  () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const stopped = yield* Deferred.make<void>();
+      const received = yield* Deferred.make<void>();
+      const current = yield* SubscriptionRef.make(instance("deliveries"));
+      const cursors = memoryCursorStore();
+      let requests = 0;
+      const app = appLayer(() =>
+        Effect.suspend(() => {
+          requests += 1;
+          return requests === 1
+            ? Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.ensuring(Deferred.succeed(stopped, undefined)),
+              )
+            : Effect.succeed([delivery("42", "issues", 99)]);
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const source = yield* WebhookDeliveries;
+        const running = yield* source
+          .run({ get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        yield* SubscriptionRef.set(current, instance("off"));
+        yield* Deferred.await(stopped);
+        yield* TestClock.adjust("1 minute");
+        assert.strictEqual(requests, 1);
+        yield* SubscriptionRef.set(current, instance("deliveries"));
+        yield* Deferred.await(received);
+        yield* TestClock.adjust("1 millis");
+        assert.strictEqual(requests, 2);
+        assert.deepStrictEqual(
+          yield* cursors.store.read(
+            CursorKey.make(`github-deliveries:${installation.id}`),
+            WebhookDeliveryId,
+          ),
+          Option.some(WebhookDeliveryId.make("42")),
+        );
+        yield* Fiber.interrupt(running);
+      }).pipe(
+        Effect.provide(WebhookDeliveries.layer),
+        Effect.provide(app),
+        Effect.provide(
+          Layer.mock(PollingTriggers)({
+            hint: (hinted) => {
+              assert.strictEqual(hinted, repository);
+              return Deferred.succeed(received, undefined).pipe(Effect.asVoid);
+            },
+          }),
+        ),
+        Effect.provide(Layer.succeed(CursorStore, cursors.store)),
+      );
+    }),
+);

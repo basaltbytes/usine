@@ -41,6 +41,8 @@ import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { ReloadPreflightRefusal, reloadRefusal } from "../src/operator/http.ts";
 import { stepExecutorLayer } from "../src/scheduler/scheduler.ts";
+import { CloudflareWorkers, type CloudflareWorkerAddress } from "@usine/executor/cloudflare";
+import { cloudflareStepExecutorLayer } from "../src/cloudflare.ts";
 import { sshStepExecutorLayer } from "../src/ssh.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
@@ -1167,7 +1169,7 @@ describe("Worker scheduler on reload", () => {
     ),
   );
 
-  it.live("resizes an SSH Worker on reload, and refuses one re-pointed", () =>
+  it.live("preflights an SSH Worker with a changed connection and resizes it on reload", () =>
     withWorkers(sshWorker("build-1", 1), (root) =>
       Effect.gen(function* () {
         const instances = yield* CurrentInstance;
@@ -1177,10 +1179,10 @@ describe("Worker scheduler on reload", () => {
         yield* writeInstanceFiles(root, [
           ["usine.yaml", usineYaml(sshWorker("build-1", 1, "usine@203.0.113.10"))],
         ]);
-        const repointed = yield* Effect.flip(instances.reload);
-        assert(repointed._tag === "RestartRequiredError", repointed._tag);
-        assert.deepStrictEqual(repointed.fields, ["workers.build-1.destination"]);
-        assert.include(repointed.message, 'worker "build-1" changed destination');
+        const repointed = yield* instances.reload;
+        assert.deepStrictEqual(repointed.workers.changed, [WorkerName.make("build-1")]);
+        assert.strictEqual((yield* instances.get).config.workers[0]?.kind, "ssh");
+        assert.include(preflighted, "build-1 x1: gpt-5.6-sol");
 
         preflighted.length = 0;
         yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 3))]]);
@@ -1276,56 +1278,54 @@ const provisionedSshWorker = (name: string, max: number, serverType = "cx33") =>
 `;
 
 describe("SSH Workers on reload", () => {
-  it.live(
-    "adds a provisioned SSH Worker with its provider token and API key read at the reload, and refuses a changed provisioner",
-    () =>
-      withWorkers(sshWorker("build-1", 1), (root) =>
-        Effect.gen(function* () {
-          const instances = yield* CurrentInstance;
-          const events: Array<string> = [];
-          const added: Array<SshWorkerAddress> = [];
-          const environment: Record<string, string> = {};
-          yield* startSshScheduler(events, { added, environment });
+  it.live("adds a provisioned SSH Worker and applies changed provisioner settings", () =>
+    withWorkers(sshWorker("build-1", 1), (root) =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const events: Array<string> = [];
+        const added: Array<SshWorkerAddress> = [];
+        const environment: Record<string, string> = {};
+        yield* startSshScheduler(events, { added, environment });
 
-          yield* writeInstanceFiles(root, [
-            [
-              "usine.yaml",
-              usineYaml(`${sshWorker("build-1", 1)}${provisionedSshWorker("pool", 2)}`),
-            ],
-          ]);
-          const unset = yield* Effect.flip(instances.reload);
-          assert(unset._tag === "ReloadPreflightError", unset._tag);
-          assert.include(
-            unset.message,
-            'The hetzner API token for SSH worker "pool" is missing: USINE_TEST_HCLOUD_TOKEN is not set',
-          );
-          assert.include(unset.message, "set provisioner.token_env to a variable");
+        yield* writeInstanceFiles(root, [
+          ["usine.yaml", usineYaml(`${sshWorker("build-1", 1)}${provisionedSshWorker("pool", 2)}`)],
+        ]);
+        const unset = yield* Effect.flip(instances.reload);
+        assert(unset._tag === "ReloadPreflightError", unset._tag);
+        assert.include(
+          unset.message,
+          'The hetzner API token for SSH worker "pool" is missing: USINE_TEST_HCLOUD_TOKEN is not set',
+        );
+        assert.include(unset.message, "set provisioner.token_env to a variable");
 
-          environment.USINE_TEST_HCLOUD_TOKEN = "hcloud-token";
-          environment.USINE_TEST_ANTHROPIC_KEY = "sk-ant-api-key";
-          const report = yield* instances.reload;
-          assert.deepStrictEqual(report.workers.added, [WorkerName.make("pool")]);
-          const address = added.at(-1);
-          assert(address !== undefined && address.machine._tag === "Provisioned");
-          const { provisioner } = address.machine;
-          assert.strictEqual(provisioner.provider, "hetzner");
-          assert.strictEqual(Redacted.value(provisioner.token), "hcloud-token");
-          assert.deepStrictEqual(
-            Option.map(provisioner.apiKeys.anthropic, Redacted.value),
-            Option.some("sk-ant-api-key"),
-          );
+        environment.USINE_TEST_HCLOUD_TOKEN = "hcloud-token";
+        environment.USINE_TEST_ANTHROPIC_KEY = "sk-ant-api-key";
+        const report = yield* instances.reload;
+        assert.deepStrictEqual(report.workers.added, [WorkerName.make("pool")]);
+        const address = added.at(-1);
+        assert(address !== undefined && address.machine._tag === "Provisioned");
+        const { provisioner } = address.machine;
+        assert.strictEqual(provisioner.provider, "hetzner");
+        assert.strictEqual(Redacted.value(provisioner.token), "hcloud-token");
+        assert.deepStrictEqual(
+          Option.map(provisioner.apiKeys.anthropic, Redacted.value),
+          Option.some("sk-ant-api-key"),
+        );
 
-          yield* writeInstanceFiles(root, [
-            [
-              "usine.yaml",
-              usineYaml(`${sshWorker("build-1", 1)}${provisionedSshWorker("pool", 2, "cpx32")}`),
-            ],
-          ]);
-          const changed = yield* Effect.flip(instances.reload);
-          assert(changed._tag === "RestartRequiredError", changed._tag);
-          assert.deepStrictEqual(changed.fields, ["workers.pool.provisioner"]);
-        }).pipe(Effect.scoped),
-      ),
+        yield* writeInstanceFiles(root, [
+          [
+            "usine.yaml",
+            usineYaml(`${sshWorker("build-1", 1)}${provisionedSshWorker("pool", 2, "cpx32")}`),
+          ],
+        ]);
+        const changed = yield* instances.reload;
+        assert.deepStrictEqual(changed.workers.changed, [WorkerName.make("pool")]);
+        const updated = added.at(-1);
+        assert(updated !== undefined && updated.machine._tag === "Provisioned");
+        assert(updated.machine.provisioner.provider === "hetzner");
+        assert.strictEqual(updated.machine.provisioner.serverType, "cpx32");
+      }).pipe(Effect.scoped),
+    ),
   );
 
   it.live(
@@ -1467,7 +1467,7 @@ describe("SSH Workers on reload", () => {
   );
 
   it.live(
-    "refuses changed settings when re-adding a draining SSH Worker, but accepts unchanged settings and more slots",
+    "re-adds a draining SSH worker with a changed connection and retains its leased slots",
     () =>
       withWorkers(`${sshWorker("build-1", 1)}${sshWorker("build-2", 1)}`, (root) =>
         Effect.gen(function* () {
@@ -1482,7 +1482,6 @@ describe("SSH Workers on reload", () => {
 
           yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 1))]]);
           yield* instances.reload;
-          const running = yield* instances.get;
           yield* writeInstanceFiles(root, [
             [
               "usine.yaml",
@@ -1491,14 +1490,10 @@ describe("SSH Workers on reload", () => {
               ),
             ],
           ]);
-          const failure = yield* instances.reload.pipe(Effect.flip);
-          assert(failure._tag === "ReloadPreflightError", failure._tag);
-          assert(failure.cause._tag === "WorkerCapabilityError", failure.cause._tag);
-          assert.strictEqual(failure.cause.capability, "machine");
-          assert.include(failure.cause.message, "while its attempts run");
-          assert.strictEqual(yield* instances.get, running);
+          yield* instances.reload;
           assert.deepStrictEqual(yield* scheduler.workers, [build1, build2]);
-          assert.deepStrictEqual(events, [], "the retained host is not preflighted or removed");
+          assert.deepStrictEqual(events, ["add build-2", "build-2 x1: gpt-5.6-sol"]);
+          events.length = 0;
           yield* writeInstanceFiles(root, [
             ["usine.yaml", usineYaml(`${sshWorker("build-1", 1)}${sshWorker("build-2", 2)}`)],
           ]);
@@ -1507,7 +1502,7 @@ describe("SSH Workers on reload", () => {
           assert.strictEqual(next.worker, build2);
           yield* next.release;
           yield* onSecond.release;
-          assert.deepStrictEqual(events, ["build-2 x2: gpt-5.6-sol"]);
+          assert.deepStrictEqual(events, ["add build-2", "build-2 x2: gpt-5.6-sol"]);
           assert.deepStrictEqual(yield* scheduler.workers, [build1, build2]);
         }).pipe(Effect.scoped),
       ),
@@ -1588,3 +1583,122 @@ describe("Worker status", () => {
       ),
   );
 });
+
+const cloudflareWorker = (name: string, url = "https://worker.example") => `  - name: ${name}
+    kind: cloudflare
+    worker_url: ${url}
+    access_client_id_env: CF_CLIENT_ID
+    access_client_secret_env: CF_CLIENT_SECRET
+    image: usine
+    instance_type: standard-4
+`;
+
+it.live(
+  "accepts a new Cloudflare worker and changed connections, resolving each client's credentials before preflight",
+  () =>
+    withWorkers(cloudflareWorker("cf-one"), (root) =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const { config, agents } = yield* instances.get;
+        const addresses = new Map<WorkerName, CloudflareWorkerAddress>();
+        const checked: string[] = [];
+        const context = yield* Layer.build(
+          cloudflareStepExecutorLayer(
+            config,
+            agents.map(({ agent }) => agent.brain),
+          ).pipe(
+            Layer.provide(MarcbachmannCelLayer),
+            Layer.provide(
+              Layer.mock(Executor)({
+                kind: "cloudflare",
+                preflight: (worker) =>
+                  Effect.sync(() => {
+                    const address = addresses.get(worker);
+                    assert(address !== undefined);
+                    checked.push(address.workerUrl.href);
+                    assert.strictEqual(Redacted.value(address.accessClientSecret), "secret");
+                    return fullPreflight;
+                  }),
+              }),
+            ),
+            Layer.provide(
+              Layer.succeed(CloudflareWorkers, {
+                addWorker: (address) =>
+                  Effect.sync(() => {
+                    addresses.set(address.name, address);
+                  }),
+              }),
+            ),
+            Layer.provide(testAppLayer),
+            Layer.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown({ CF_CLIENT_ID: "id", CF_CLIENT_SECRET: "secret" }),
+              ),
+            ),
+          ),
+        );
+        const scheduler = Context.get(context, StepExecutor);
+        yield* writeInstanceFiles(root, [
+          [
+            "usine.yaml",
+            usineYaml(
+              cloudflareWorker("cf-one") + cloudflareWorker("cf-two", "https://second.example"),
+            ),
+          ],
+        ]);
+        const added = yield* instances.reload;
+        assert.deepStrictEqual(added.workers.added, [WorkerName.make("cf-two")]);
+        yield* writeInstanceFiles(root, [
+          [
+            "usine.yaml",
+            usineYaml(
+              cloudflareWorker("cf-one", "https://changed.example") +
+                cloudflareWorker("cf-two", "https://second.example"),
+            ),
+          ],
+        ]);
+        yield* instances.reload;
+        assert.deepStrictEqual(checked, [
+          "https://worker.example/",
+          "https://second.example/",
+          "https://changed.example/",
+        ]);
+        assert.deepStrictEqual(yield* scheduler.workers, [
+          WorkerName.make("cf-one"),
+          WorkerName.make("cf-two"),
+        ]);
+      }).pipe(Effect.scoped),
+    ),
+);
+
+it.live(
+  "accepts an unavailable replacement connection and blocks new slots until a corrected revision passes preflight",
+  () =>
+    withWorkers(sshWorker("build-1", 1), (root) =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const environment: Record<string, string> = {};
+        const scheduler = yield* startSshScheduler([], { environment });
+        const agent = yield* developer;
+        const running = yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
+        yield* writeInstanceFiles(root, [
+          ["usine.yaml", usineYaml(gatewaySshWorker("build-1", 2, TOKEN_ENV))],
+        ]);
+        yield* instances.reload;
+        assert.strictEqual((yield* instances.get).config.workers[0]?.maxConcurrentAttempts, 2);
+        const waiting = yield* scheduler
+          .reserve(runOf(2), submission(agent, 2), Option.none())
+          .pipe(Effect.forkChild);
+        yield* assertWaiting(waiting, "failed connection preflight blocks new attempts");
+        environment[TOKEN_ENV] = "admin-token";
+        yield* writeInstanceFiles(root, [
+          ["usine.yaml", usineYaml(gatewaySshWorker("build-1", 3, TOKEN_ENV))],
+        ]);
+        yield* instances.reload;
+        const next = yield* Fiber.join(waiting);
+        assert.strictEqual(next.worker, running.worker);
+        yield* next.release;
+        yield* running.release;
+      }).pipe(Effect.scoped),
+    ),
+);

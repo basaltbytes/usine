@@ -193,7 +193,7 @@ describe("CurrentInstance", () => {
     ),
   );
 
-  it.live("rejects a reload whose webhooks or tracing block changed while Workers run", () =>
+  it.live("rejects a tracing change while accepting webhook changes independently", () =>
     withFolder((root) =>
       Effect.gen(function* () {
         const instances = yield* CurrentInstance;
@@ -207,8 +207,8 @@ describe("CurrentInstance", () => {
         ]);
         const failure = yield* Effect.flip(instances.reload);
         assert(failure._tag === "RestartRequiredError", failure._tag);
-        assert.deepStrictEqual(failure.fields, ["webhooks", "tracing"]);
-        assert.include(failure.message, "the webhooks block changed; the tracing block changed");
+        assert.deepStrictEqual(failure.fields, ["tracing"]);
+        assert.include(failure.message, "the tracing block changed");
         assert.strictEqual(yield* instances.get, running);
       }).pipe(Effect.scoped),
     ),

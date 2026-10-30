@@ -97,18 +97,22 @@ The running orchestrator observes the revision log automatically. A saved revisi
 
 The next poll or schedule tick uses the new loops and registry. Changes to settings, labels, repositories, projects, agents, and loop definitions apply live. Workers can be added, removed, or resized within the running executor's capabilities. A removed worker starts no new attempts, and its running attempts finish.
 
+Webhook revisions replace the active hint source. Switching away from `deliveries` interrupts its current request or backoff; switching to it resumes from the stored delivery cursor. Endpoint mode updates the App URL and replaces the HTTP handler. **Settings** shows the accepted mode and the next hint received. The endpoint health interval starts again after a webhook change.
+
+Worker connection changes apply to new work, including SSH connection, gateway, container, and provisioner settings, and Cloudflare URL, credentials references, image, instance type, and provider settings. Existing attempts retain their machine, gateway, and provider client. A changed connection runs preflight after acceptance; if it fails, the revision stays applied, that worker starts no new attempts, and preflight retries automatically. A new Cloudflare worker resolves its credential references and builds its client before preflight, without a restart.
+
 These changes require a restart:
 
-| Configuration | Fields or changes |
-| --- | --- |
-| Instance | `webhooks`, `tracing`. |
-| Existing worker | `kind`, a rename (`name`), or any setting other than `max_concurrent_attempts`. For SSH workers: `destination`, `identity_file`, `port`, `root`, `gateway`, `container`, `provisioner`. For Cloudflare workers: `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, `llm_providers`. |
-| Worker set | Changes while no worker executor is registered, as in setup mode, or switching the executor kind. Adding a Cloudflare worker that was not present at startup also needs a restart. |
-| Bootstrap values | GitHub App credentials, `.env` and provider or gateway credentials, listen port, origin, and log level. These are outside configuration revisions. |
+| Configuration | Fields or changes | Reason |
+| --- | --- | --- |
+| Instance | `tracing` | The exporter belongs to the process-wide Effect context created before the runtime. Existing fibers retain that tracer, and its shutdown flush runs after the runtime closes. Replacing only the exporter layer would leave existing fibers exporting through the old context. |
+| Existing worker | `kind` or a rename (`name`). | The executor kind is selected at startup, and stored attempt and machine identities use the worker name. |
+| Worker set | Changes while no worker executor is registered, as in setup mode, or adding a worker of another kind. | There is no matching executor to initialize or preflight these workers. |
+| Bootstrap values | GitHub App credentials, `.env` and provider or gateway credential values, listen port, origin, and log level. | These values initialize process services and are outside configuration revisions. Credential references can change live to variables already available to the process. |
 
 A CLI write can succeed while the running process refuses to apply it with `RestartRequiredError` or `ReloadPreflightError`. The revision remains saved, and the complete running configuration stays unchanged. Check the orchestrator log for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`.
 
-After saving a change to startup-only fields, run `usine restart` when no attempt is running. For a failed preflight, correct the worker or save another revision, then apply the saved configuration again with a restart or [an explicit store reread](/reference/configuration/cli/#reload). A successful CLI exit reports a saved revision, not successful application by the running process.
+After saving a change to startup-only fields, run `usine restart` when no attempt is running. For a refused addition or resize, correct the worker or save another revision, then apply the saved configuration again with a restart or [an explicit store reread](/reference/configuration/cli/#reload). A successful CLI exit reports a saved revision, not successful application by the running process.
 
 ## Exit status
 
