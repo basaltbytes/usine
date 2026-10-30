@@ -1,6 +1,6 @@
 {
   "name": "@usine/server",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The usine orchestrator as a headless server: a thin CLI over @usine/orchestrator that serves the web UI.",
   "license": "AGPL-3.0-only",
   "repository": {

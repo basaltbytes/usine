@@ -1,5 +1,17 @@
 # @usine/engine
 
+## 0.7.0
+
+### Minor Changes
+
+- 25728fa: Allow a boolean CEL condition to require approval per run. Save and display the
+  approval decision, require approval when evaluation fails, and validate conditions
+  in the loop editor and configuration API.
+
+### Patch Changes
+
+- 45bb9cb: Keep worker slots free while an idle upgrade defers new attempts. Show the requested version on deferred runs and worker rows, and report prolonged waits in Needs attention. Cancel a pending upgrade from Settings or with `DELETE /api/upgrade` to resume attempts without restarting.
+
 ## 0.6.0
 
 ### Minor Changes

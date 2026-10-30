@@ -1,5 +1,14 @@
 # @usine/config
 
+## 0.6.0
+
+### Minor Changes
+
+- 25728fa: Allow a boolean CEL condition to require approval per run. Save and display the
+  approval decision, require approval when evaluation fails, and validate conditions
+  in the loop editor and configuration API.
+- a7bd195: Add an exact browser origin allowlist with credentialed CORS and security headers on all server responses. Configure additional origins in `auth.origins` and restart; loopback browser origins now require an explicit entry unless they are the canonical server origin. Document public HTTPS deployment with Caddy, Cloudflare Tunnel, and Tailscale Serve.
+
 ## 0.5.0
 
 ### Minor Changes

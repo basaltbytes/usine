@@ -1,6 +1,6 @@
 {
   "name": "@usine/orchestrator",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The embeddable usine composition: the full engine as an Effect layer, startable in-process.",
   "license": "AGPL-3.0-only",
   "repository": {

@@ -1,5 +1,11 @@
 # @usine/github
 
+## 0.5.0
+
+### Minor Changes
+
+- 13bdef9: Store optional OAuth client and webhook credentials alongside the App signing key. Add atomic owner-only credential writes and an installation-page lookup that works before the App has an installation.
+
 ## 0.4.0
 
 ### Minor Changes
