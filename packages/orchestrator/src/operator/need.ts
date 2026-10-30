@@ -17,9 +17,13 @@ import { BoardItemLink, BoardProjectionError } from "./board.ts";
 export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
   "@usine/orchestrator/ApprovalNeed",
 )("ApprovalNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The run waiting for operator approval. */
   runId: RunId,
+  /** The project-qualified loop name. */
   loop: LoopName,
   /**
    * The run's item, read from its board card or the item store. Null if no readable item is
@@ -35,10 +39,15 @@ export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
 export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
   "@usine/orchestrator/RunFailureNeed",
 )("RunFailureNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The run associated with this entry. */
   runId: RunId,
+  /** The project-qualified loop name. */
   loop: LoopName,
+  /** The unresolved failure from the latest failed attempt. */
   failure: FailureView,
 }) {}
 
@@ -46,7 +55,9 @@ export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
 export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
   "@usine/orchestrator/PollFailureNeed",
 )("PollFailureNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The repository polling failure retained after sibling repositories continued. */
   failure: RepositoryPollFailure,
 }) {}
 
@@ -54,7 +65,9 @@ export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
 export class PreflightFindingNeed extends Schema.TaggedClass<PreflightFindingNeed>(
   "@usine/orchestrator/PreflightFindingNeed",
 )("PreflightFindingNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The declared label that could not be created. */
   finding: LabelPreflightFinding,
 }) {}
 
@@ -62,7 +75,9 @@ export class PreflightFindingNeed extends Schema.TaggedClass<PreflightFindingNee
 export class BoardProjectionNeed extends Schema.TaggedClass<BoardProjectionNeed>(
   "@usine/orchestrator/BoardProjectionNeed",
 )("BoardProjectionNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The malformed stored item excluded from the board. */
   failure: BoardProjectionError,
 }) {}
 
@@ -70,7 +85,9 @@ export class BoardProjectionNeed extends Schema.TaggedClass<BoardProjectionNeed>
 export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>(
   "@usine/orchestrator/ScheduleFailureNeed",
 )("ScheduleFailureNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The schedule failure retained after sibling loops continued. */
   failure: ScheduleFailure,
 }) {}
 
@@ -81,21 +98,32 @@ export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>
 export class ConfigFileNeed extends Schema.TaggedClass<ConfigFileNeed>(
   "@usine/orchestrator/ConfigFileNeed",
 )("ConfigFileNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** Whether the invalid file defines a loop or an agent. */
   kind: Schema.Literals(["loop", "agent"]),
+  /** The file path, parse stage, and validation diagnostic. */
   error: ConfigFileError,
 }) {}
 
 /**
  * Attempts recorded on a Worker that `usine.yaml` no longer declares, which startup doesn't
  * reconcile. Discarding their leftovers fails while `running` is above 0.
+ *
+ * @property _tag - The discriminator for attempts on a worker absent from configuration.
+ * @property id - The attention entry identity for this removed worker.
+ * @property worker - The worker no longer declared by the instance.
+ * @property attempts - The number of recorded attempts that startup would otherwise reconcile.
+ * @property running - The number of those attempts with no recorded outcome; at most `attempts`.
  */
 export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorkerNeed>(
   "@usine/orchestrator/UnconfiguredWorkerNeed",
 )(
   "UnconfiguredWorkerNeed",
   Schema.Struct({
+    /** The attention entry identity used to distinguish this condition from other entries. */
     id: Schema.String,
+    /** The configured worker name. */
     worker: WorkerName,
     /** The number of Attempts recorded on the Worker that startup would otherwise reconcile. */
     attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -115,20 +143,33 @@ export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorke
 export class UnconfirmedStopNeed extends Schema.TaggedClass<UnconfirmedStopNeed>(
   "@usine/orchestrator/UnconfirmedStopNeed",
 )("UnconfirmedStopNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The run associated with this entry. */
   runId: RunId,
+  /** The project-qualified loop name. */
   loop: LoopName,
+  /** The one-based attempt number within the run. */
   attemptNumber: AttemptNumber,
+  /** The configured worker name. */
   worker: WorkerName,
 }) {}
 
+/** A worker with running attempts that has stopped answering liveness checks. */
 export class UnresponsiveWorkerNeed extends Schema.TaggedClass<UnresponsiveWorkerNeed>(
   "@usine/orchestrator/UnresponsiveWorkerNeed",
 )("UnresponsiveWorkerNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The configured worker name. */
   worker: WorkerName,
+  /** The last successful worker response time as an ISO 8601 timestamp. */
   lastAnsweredAt: Schema.String,
+  /**
+   * The running attempts affected by the unresponsive worker, with their run and loop identities.
+   */
   attempts: Schema.Array(
     Schema.Struct({
       attemptId: AttemptId,
@@ -144,9 +185,16 @@ export class UnresponsiveWorkerNeed extends Schema.TaggedClass<UnresponsiveWorke
 export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(
   "CycleBudgetNeed",
   {
+    /** The attention entry identity used to distinguish this condition from other entries. */
     id: Schema.String,
+    /** The unanswered cycle-budget ask that prevents another run. */
     ask: CycleBudgetAsk,
+    /**
+     * The repository and item number for display, or the stored item key when it cannot be
+     * decoded.
+     */
     itemLabel: Schema.String,
+    /** The GitHub item URL, or null when the item key cannot be decoded. */
     itemUrl: Schema.NullOr(Schema.String),
   },
 ) {}
@@ -155,21 +203,33 @@ export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleB
 export class WorkerPreflightNeed extends Schema.TaggedClass<WorkerPreflightNeed>(
   "@usine/orchestrator/WorkerPreflightNeed",
 )("WorkerPreflightNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The configured worker name. */
   worker: WorkerName,
+  /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
 export const POOL_LIMIT_WARNING_PERCENT = 80;
 
+/**
+ * A billing pool usage window at or above 80 percent of its allowance, with its next reset time.
+ */
 export class PoolLimitNeed extends Schema.TaggedClass<PoolLimitNeed>(
   "@usine/orchestrator/PoolLimitNeed",
 )("PoolLimitNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
+  /** The billing source for this usage. */
   pool: BillingPool,
+  /** The provider account login, or `None` if unavailable; encoded as null. */
   login: Schema.OptionFromNullOr(PoolLogin),
+  /** The provider usage window approaching or at its limit. */
   window: Schema.Literals(["primary", "secondary"]),
+  /** The used share of the window allowance, as a percentage. */
   usedPercent: Schema.Number.check(Schema.isGreaterThanOrEqualTo(POOL_LIMIT_WARNING_PERCENT)),
+  /** The UTC time when the provider usage window resets. */
   resetsAt: Schema.DateTimeUtcFromString,
 }) {}
 
@@ -189,4 +249,5 @@ export const NeedView = Schema.Union([
   WorkerPreflightNeed,
   PoolLimitNeed,
 ]);
+/** One reason the overview asks for operator attention. */
 export type NeedView = typeof NeedView.Type;

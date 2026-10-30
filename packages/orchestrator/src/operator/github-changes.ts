@@ -28,7 +28,12 @@ import { LabelView } from "./board.ts";
  */
 export class LabelAddedView extends Schema.TaggedClass<LabelAddedView>(
   "@usine/orchestrator/LabelAddedView",
-)("LabelAdded", { at: Schema.String, label: LabelView }) {}
+)("LabelAdded", {
+  /** The change time as an ISO 8601 timestamp. */
+  at: Schema.String,
+  /** The current GitHub label definition, including its name, color, and description. */
+  label: LabelView,
+}) {}
 
 /**
  * A label that an Attempt's Agent removed from the Run's Item, with GitHub's current label
@@ -36,17 +41,34 @@ export class LabelAddedView extends Schema.TaggedClass<LabelAddedView>(
  */
 export class LabelRemovedView extends Schema.TaggedClass<LabelRemovedView>(
   "@usine/orchestrator/LabelRemovedView",
-)("LabelRemoved", { at: Schema.String, label: LabelView }) {}
+)("LabelRemoved", {
+  /** The change time as an ISO 8601 timestamp. */
+  at: Schema.String,
+  /** The current GitHub label definition, including its name, color, and description. */
+  label: LabelView,
+}) {}
 
 /** A comment that an Attempt's Agent posted on the Run's Item. */
 export class CommentedView extends Schema.TaggedClass<CommentedView>(
   "@usine/orchestrator/CommentedView",
-)("Commented", { at: Schema.String, url: Schema.String }) {}
+)("Commented", {
+  /** The change time as an ISO 8601 timestamp. */
+  at: Schema.String,
+  /** The GitHub URL of the comment or review. */
+  url: Schema.String,
+}) {}
 
 /** A review that an Attempt's Agent submitted on the Run's pull request, with its current state. */
 export class ReviewedView extends Schema.TaggedClass<ReviewedView>(
   "@usine/orchestrator/ReviewedView",
-)("Reviewed", { at: Schema.String, url: Schema.String, state: ReviewState }) {}
+)("Reviewed", {
+  /** The change time as an ISO 8601 timestamp. */
+  at: Schema.String,
+  /** The GitHub URL of the comment or review. */
+  url: Schema.String,
+  /** The review state GitHub recorded, such as approved or changes requested. */
+  state: ReviewState,
+}) {}
 
 /**
  * An operator move of the Run's Item between Board lanes during an Attempt. `at` is when the
@@ -54,7 +76,14 @@ export class ReviewedView extends Schema.TaggedClass<ReviewedView>(
  */
 export class BoardMovedView extends Schema.TaggedClass<BoardMovedView>(
   "@usine/orchestrator/BoardMovedView",
-)("BoardMoved", { at: Schema.String, fromLane: LaneName, toLane: LaneName }) {}
+)("BoardMoved", {
+  /** The change time as an ISO 8601 timestamp. */
+  at: Schema.String,
+  /** The lane name before the operator move. */
+  fromLane: LaneName,
+  /** The lane name after the operator move. */
+  toLane: LaneName,
+}) {}
 
 /**
  * A change on the Run's GitHub Item during an Attempt: one made by the Agent, or an operator Board
@@ -67,12 +96,21 @@ export const GitHubChangeView = Schema.Union([
   ReviewedView,
   BoardMovedView,
 ]);
+/**
+ * A change on the run's GitHub item during an attempt: one made by the agent, or an operator board
+ * move.
+ */
 export type GitHubChangeView = typeof GitHubChangeView.Type;
 
 /** The changes on the Run's GitHub Item during one Attempt, oldest first. */
 export class AttemptGitHubChangesView extends Schema.Class<AttemptGitHubChangesView>(
   "@usine/orchestrator/AttemptGitHubChangesView",
-)({ attemptId: AttemptId, changes: Schema.Array(GitHubChangeView) }) {}
+)({
+  /** The attempt associated with this entry. */
+  attemptId: AttemptId,
+  /** GitHub writes attributed to this attempt, in chronological order. */
+  changes: Schema.Array(GitHubChangeView),
+}) {}
 
 /**
  * The GitHub changes of each of a Run's Attempts, in Attempt order. Empty for a Run without a
@@ -80,7 +118,10 @@ export class AttemptGitHubChangesView extends Schema.Class<AttemptGitHubChangesV
  */
 export class RunGitHubChangesView extends Schema.Class<RunGitHubChangesView>(
   "@usine/orchestrator/RunGitHubChangesView",
-)({ attempts: Schema.Array(AttemptGitHubChangesView) }) {}
+)({
+  /** Changes grouped by the run attempts. */
+  attempts: Schema.Array(AttemptGitHubChangesView),
+}) {}
 
 export type RunGitHubChangesError = RunStoreError | GitHubAppError | GitHubItemNotFoundError;
 

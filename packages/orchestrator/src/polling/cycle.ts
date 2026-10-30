@@ -15,8 +15,11 @@ import { configFileErrorLogFields } from "../trigger-submission.ts";
 export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
   "@usine/orchestrator/RepositoryPollFailure",
 )({
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The failure tag for callers to classify the error. */
   errorTag: Schema.NonEmptyString,
+  /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
@@ -24,7 +27,9 @@ export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
 export class RepositoryPoll extends Schema.Class<RepositoryPoll>(
   "@usine/orchestrator/RepositoryPoll",
 )({
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
+  /** The time polling last completed for this repository. */
   completedAt: Schema.DateTimeUtc,
 }) {}
 
@@ -37,13 +42,19 @@ export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/Poll
   repositoryPolls: Schema.Array(RepositoryPoll).pipe(
     Schema.withConstructorDefault(Effect.succeed([])),
   ),
+  /** The number of watched repositories evaluated in this cycle. */
   repositories: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The number of changed items processed by the cycle. */
   changedItems: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Run engine results for trigger submissions, including duplicates and refusals. */
   submissions: Schema.Array(SubmissionResult),
   /** The number of Runs this cycle revoked because their Item stopped matching. */
   revokedRuns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Repository failures retained while other repositories continue. */
   failures: Schema.Array(RepositoryPollFailure),
+  /** Declared labels that could not be created; trigger evaluation continues. */
   preflightFindings: Schema.Array(LabelPreflightFinding),
+  /** The earliest permitted next poll after GitHub backoff, or `None` without backoff. */
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
 

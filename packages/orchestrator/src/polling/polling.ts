@@ -176,6 +176,10 @@ export class PollingTriggers extends Context.Service<
     readonly lastHint: Effect.Effect<Option.Option<DateTime.Utc>>;
   }
 >()("@usine/orchestrator/PollingTriggers") {
+  /**
+   * Provides polling, hint handling, and trigger submission using the supplied GitHub and engine
+   * services.
+   */
   static readonly layer = Layer.effect(
     PollingTriggers,
     Effect.gen(function* () {

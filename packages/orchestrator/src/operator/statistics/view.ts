@@ -18,10 +18,12 @@ const UtcDay = Schema.String.check(
 
 /** The span the statistics cover: today and the 6 or 29 UTC days before it, or every stored Run. */
 export const StatisticsWindow = Schema.Literals(["7d", "30d", "all"]);
+/** The span the statistics cover: today and the 6 or 29 UTC days before it, or every stored run. */
 export type StatisticsWindow = typeof StatisticsWindow.Type;
 
 /** The length of the periods in a time series: a UTC day, or a UTC week from Monday. */
 export const StatisticsBucket = Schema.Literals(["day", "week"]);
+/** The length of the periods in a time series: a UTC day, or a UTC week from Monday. */
 export type StatisticsBucket = typeof StatisticsBucket.Type;
 
 /**
@@ -30,10 +32,16 @@ export type StatisticsBucket = typeof StatisticsBucket.Type;
  * closed after it. The wait between the last Run and the merge is left out.
  */
 export class TaskDoneView extends Schema.Class<TaskDoneView>("@usine/orchestrator/TaskDoneView")({
+  /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The task's first issue, or its first pull request if it has no issue. */
   number: ItemNumber,
+  /** The pull request merge time as an ISO 8601 timestamp. */
   mergedAt: Schema.String,
+  /**
+   * The measured task duration in milliseconds, excluding the wait from its last closed run to
+   * merge.
+   */
   durationMillis: Milliseconds,
 }) {}
 
@@ -41,22 +49,39 @@ export class TaskDoneView extends Schema.Class<TaskDoneView>("@usine/orchestrato
 export class TaskPeriodView extends Schema.Class<TaskPeriodView>(
   "@usine/orchestrator/TaskPeriodView",
 )({
+  /** The first UTC day of the period as `YYYY-MM-DD`. */
   start: UtcDay,
+  /** The number of tasks whose pull request merged in this period. */
   tasks: Count,
+  /** The median task duration in milliseconds, or null without a task. */
   medianMillis: Schema.NullOr(Milliseconds),
+  /** The tasks where no loop succeeded twice on the same item. */
   firstTimeRight: Count,
+  /** The approvals, retries, failure resolutions, and cycle-budget resets for these tasks. */
   operatorActions: Count,
 }) {}
 
 /** A Loop's share of the measured tasks' time or tokens, averaged over the tasks. */
 export class LoopShareView extends Schema.Class<LoopShareView>("@usine/orchestrator/LoopShareView")(
-  { loop: LoopName, share: Share },
+  {
+    /** The project-qualified loop name. */
+    loop: LoopName,
+    /** The average share of measured task time or tokens, from 0 to 1. */
+    share: Share,
+  },
 ) {}
 
 /** The median wall time of a Loop's closed Runs on the measured tasks, summed over Attempts. */
 export class LoopRunTimeView extends Schema.Class<LoopRunTimeView>(
   "@usine/orchestrator/LoopRunTimeView",
-)({ loop: LoopName, runs: PositiveCount, medianMillis: Milliseconds }) {}
+)({
+  /** The project-qualified loop name. */
+  loop: LoopName,
+  /** The number of closed runs included in this median. */
+  runs: PositiveCount,
+  /** The median summed attempt wall time per closed run, in milliseconds. */
+  medianMillis: Milliseconds,
+}) {}
 
 /**
  * The time of the tasks done whose Attempts all have a recorded end. Each share is the part of a
@@ -64,9 +89,13 @@ export class LoopRunTimeView extends Schema.Class<LoopRunTimeView>(
  * and the time between Runs), averaged over the tasks.
  */
 export class TaskTimeView extends Schema.Class<TaskTimeView>("@usine/orchestrator/TaskTimeView")({
+  /** The number of tasks with complete attempt end times. */
   tasks: PositiveCount,
+  /** The average share per loop of measured task duration. */
   loops: Schema.Array(LoopShareView),
+  /** The average fraction of task duration with no attempt running, from 0 to 1. */
   waiting: Share,
+  /** Per-loop counts and median summed attempt time for closed runs. */
   runs: Schema.Array(LoopRunTimeView),
 }) {}
 
@@ -75,8 +104,11 @@ export class TaskTimeView extends Schema.Class<TaskTimeView>("@usine/orchestrato
  * a session of a priced task is in the Claude or ChatGPT plan.
  */
 export class TaskCostView extends Schema.Class<TaskCostView>("@usine/orchestrator/TaskCostView")({
+  /** The number of measured tasks with a price for every session. */
   tasks: PositiveCount,
+  /** The median total cost per priced task in US dollars. */
   medianUsd: UsdAmount,
+  /** Whether any priced task includes subscription-plan usage estimated at API rates. */
   estimate: Schema.Boolean,
 }) {}
 
@@ -87,9 +119,13 @@ export class TaskCostView extends Schema.Class<TaskCostView>("@usine/orchestrato
 export class TaskTokensView extends Schema.Class<TaskTokensView>(
   "@usine/orchestrator/TaskTokensView",
 )({
+  /** The number of tasks with token reports for every run that has an attempt. */
   tasks: PositiveCount,
+  /** The median total reported tokens per measured task. */
   medianTokens: TokenCount,
+  /** The average share per loop of measured task tokens. */
   loops: Schema.Array(LoopShareView),
+  /** Cost statistics for fully priced measured tasks, or null without one. */
   cost: Schema.NullOr(TaskCostView),
 }) {}
 
@@ -99,7 +135,12 @@ export class TaskTokensView extends Schema.Class<TaskTokensView>(
  */
 export class UntimedTasksView extends Schema.Class<UntimedTasksView>(
   "@usine/orchestrator/UntimedTasksView",
-)({ tasks: PositiveCount, before: UtcDay }) {}
+)({
+  /** The number of tasks excluded from time statistics because an attempt has no recorded end. */
+  tasks: PositiveCount,
+  /** The UTC day after the latest start of an attempt with no recorded end, as `YYYY-MM-DD`. */
+  before: UtcDay,
+}) {}
 
 /**
  * The tasks done in `window`: a task is done when its pull request merges, and counts if it has a
@@ -108,11 +149,13 @@ export class UntimedTasksView extends Schema.Class<UntimedTasksView>(
 export class StatisticsView extends Schema.Class<StatisticsView>(
   "@usine/orchestrator/StatisticsView",
 )({
+  /** The requested UTC date window. */
   window: StatisticsWindow,
   /** The window's start: midnight UTC of its first day. */
   from: Schema.String,
   /** The time the statistics were computed. */
   to: Schema.String,
+  /** The daily or Monday-based weekly grouping used by time series. */
   bucket: StatisticsBucket,
   /**
    * The Loops of the window's tasks in the order they first run in a task: by mean rank, from 0
@@ -132,8 +175,11 @@ export class StatisticsView extends Schema.Class<StatisticsView>(
    * tasks' Runs and Items.
    */
   operatorActions: Count,
+  /** Time statistics for tasks with complete attempt durations, or null without one. */
   time: Schema.NullOr(TaskTimeView),
+  /** Token statistics for fully metered tasks, or null without one. */
   tokens: Schema.NullOr(TaskTokensView),
+  /** Tasks excluded from duration statistics, or null when all tasks have recorded attempt ends. */
   untimed: Schema.NullOr(UntimedTasksView),
   /** The tasks with a Run that has an Attempt but no token report, left out of `tokens`. */
   unmetered: Count,
@@ -142,17 +188,34 @@ export class StatisticsView extends Schema.Class<StatisticsView>(
 /** The median of at least one duration. */
 export class DurationSummaryView extends Schema.Class<DurationSummaryView>(
   "@usine/orchestrator/DurationSummaryView",
-)({ count: PositiveCount, medianMillis: Milliseconds }) {}
+)({
+  /** The number of durations included in the median. */
+  count: PositiveCount,
+  /** The median duration in milliseconds. */
+  medianMillis: Milliseconds,
+}) {}
 
 /** Closed Runs or ended Attempts counted by outcome. */
 export class OutcomeCountsView extends Schema.Class<OutcomeCountsView>(
   "@usine/orchestrator/OutcomeCountsView",
-)({ succeeded: Count, failed: Count, canceled: Count }) {}
+)({
+  /** The number of successful terminal outcomes. */
+  succeeded: Count,
+  /** The number of failed terminal outcomes. */
+  failed: Count,
+  /** The number of canceled terminal outcomes. */
+  canceled: Count,
+}) {}
 
 /** The tokens used in one billing pool. */
 export class PoolTokensView extends Schema.Class<PoolTokensView>(
   "@usine/orchestrator/PoolTokensView",
-)({ pool: BillingPool, tokens: TokenCount }) {}
+)({
+  /** The billing source for this usage. */
+  pool: BillingPool,
+  /** The total reported tokens, summed once per session. */
+  tokens: TokenCount,
+}) {}
 
 /**
  * The cost of the priced Runs or Attempts: those with a price for each session. `estimate` is true
@@ -161,9 +224,13 @@ export class PoolTokensView extends Schema.Class<PoolTokensView>(
 export class CostSummaryView extends Schema.Class<CostSummaryView>(
   "@usine/orchestrator/CostSummaryView",
 )({
+  /** The total cost of fully priced entries in US dollars. */
   usd: UsdAmount,
+  /** The mean cost per fully priced run or attempt in US dollars. */
   meanUsd: UsdAmount,
+  /** Whether any included cost estimates subscription-plan usage. */
   estimate: Schema.Boolean,
+  /** The number of entries with a price for every session. */
   priced: PositiveCount,
 }) {}
 
@@ -174,11 +241,15 @@ export class CostSummaryView extends Schema.Class<CostSummaryView>(
 export class UsageSummaryView extends Schema.Class<UsageSummaryView>(
   "@usine/orchestrator/UsageSummaryView",
 )({
+  /** The number of entries with at least one attempt. */
   measured: Count,
+  /** The total reported tokens, summed once per session. */
   tokens: TokenCount,
+  /** Mean reported tokens per measured entry, or null without a measured entry. */
   meanTokens: Schema.NullOr(TokenCount),
   /** In the order API keys, Claude plan, ChatGPT plan; unused pools are absent. */
   pools: Schema.Array(PoolTokensView),
+  /** Costs for fully priced entries, or null without one. */
   cost: Schema.NullOr(CostSummaryView),
 }) {}
 
@@ -189,35 +260,88 @@ const groupFields = {
   usage: UsageSummaryView,
 };
 
-/** The closed Runs of one Loop. */
+/**
+ * The closed Runs of one Loop.
+ *
+ * @property outcomes - Terminal outcomes counted for this group.
+ * @property time - Run time for a loop or agent, or attempt time for a brain, in milliseconds; null
+ * without a measured entry.
+ * @property usage - Reported tokens and priced costs for this group.
+ */
 export class LoopStatisticsView extends Schema.Class<LoopStatisticsView>(
   "@usine/orchestrator/LoopStatisticsView",
-)({ loop: LoopName, ...groupFields }) {}
+)({
+  /** The project-qualified loop name. */
+  loop: LoopName,
+  ...groupFields,
+}) {}
 
-/** The closed Runs whose effective Agent is `agent`. */
+/**
+ * The closed Runs whose effective Agent is `agent`.
+ *
+ * @property outcomes - Terminal outcomes counted for this group.
+ * @property time - Run time for a loop or agent, or attempt time for a brain, in milliseconds; null
+ * without a measured entry.
+ * @property usage - Reported tokens and priced costs for this group.
+ */
 export class AgentStatisticsView extends Schema.Class<AgentStatisticsView>(
   "@usine/orchestrator/AgentStatisticsView",
-)({ agent: AgentName, ...groupFields }) {}
+)({
+  /** The referenced agent name. */
+  agent: AgentName,
+  ...groupFields,
+}) {}
 
-/** The ended Attempts of closed Runs that ran with one harness, model, and effort. */
+/**
+ * The ended Attempts of closed Runs that ran with one harness, model, and effort.
+ *
+ * @property outcomes - Terminal outcomes counted for this group.
+ * @property time - Run time for a loop or agent, or attempt time for a brain, in milliseconds; null
+ * without a measured entry.
+ * @property usage - Reported tokens and priced costs for this group.
+ */
 export class BrainStatisticsView extends Schema.Class<BrainStatisticsView>(
   "@usine/orchestrator/BrainStatisticsView",
-)({ brain: BrainSpec, ...groupFields }) {}
+)({
+  /** The harness, model, and reasoning effort shared by the grouped attempts. */
+  brain: BrainSpec,
+  ...groupFields,
+}) {}
 
-/** The Runs that closed in one period, by outcome. */
+/**
+ * The Runs that closed in one period, by outcome.
+ *
+ * @property succeeded - The number of successful terminal outcomes.
+ * @property failed - The number of failed terminal outcomes.
+ * @property canceled - The number of canceled terminal outcomes.
+ */
 export class ThroughputPeriodView extends Schema.Class<ThroughputPeriodView>(
   "@usine/orchestrator/ThroughputPeriodView",
-)({ start: UtcDay, ...OutcomeCountsView.fields }) {}
+)({
+  /** The first UTC day of this period as `YYYY-MM-DD`. */
+  start: UtcDay,
+  ...OutcomeCountsView.fields,
+}) {}
 
 /** The time from a Run's opening, or its approval, to its first Attempt's start on `worker`. */
 export class WorkerQueueWaitView extends Schema.Class<WorkerQueueWaitView>(
   "@usine/orchestrator/WorkerQueueWaitView",
-)({ worker: WorkerName, wait: DurationSummaryView }) {}
+)({
+  /** The configured worker name. */
+  worker: WorkerName,
+  /** Durations from run opening or approval to the first attempt start. */
+  wait: DurationSummaryView,
+}) {}
 
 /** The number of closed Runs that took `attempts` Attempts. */
 export class AttemptCountView extends Schema.Class<AttemptCountView>(
   "@usine/orchestrator/AttemptCountView",
-)({ attempts: PositiveCount, runs: Count }) {}
+)({
+  /** The number of attempts taken by each run in this group. */
+  attempts: PositiveCount,
+  /** The number of closed runs with this attempt count. */
+  runs: Count,
+}) {}
 
 /**
  * Attempt time as a share of the worker's slot-time capacity over the window. Configuration
@@ -226,16 +350,27 @@ export class AttemptCountView extends Schema.Class<AttemptCountView>(
 export class WorkerUtilizationView extends Schema.Class<WorkerUtilizationView>(
   "@usine/orchestrator/WorkerUtilizationView",
 )({
+  /** The configured worker name. */
   worker: WorkerName,
+  /** The currently configured slot count; historical revisions determine the denominator. */
   slots: PositiveCount,
+  /** The attempt time overlapping the window, summed across occupied slots in milliseconds. */
   occupiedMillis: Milliseconds,
+  /** Occupied attempt time divided by historical slot-time capacity, from 0 to 1. */
   share: Share,
 }) {}
 
 /** The Needs attention entries raised in one period. */
 export class NeedsAttentionPeriodView extends Schema.Class<NeedsAttentionPeriodView>(
   "@usine/orchestrator/NeedsAttentionPeriodView",
-)({ start: UtcDay, approvals: Count, failures: Count }) {}
+)({
+  /** The first UTC day of the period as `YYYY-MM-DD`. */
+  start: UtcDay,
+  /** The number of approval requests raised in this period. */
+  approvals: Count,
+  /** The number of failed attempts without an automatic retry raised in this period. */
+  failures: Count,
+}) {}
 
 /**
  * The approvals asked for and the failed Attempts that no automatic retry followed, with their
@@ -246,12 +381,22 @@ export class NeedsAttentionPeriodView extends Schema.Class<NeedsAttentionPeriodV
 export class NeedsAttentionView extends Schema.Class<NeedsAttentionView>(
   "@usine/orchestrator/NeedsAttentionView",
 )({
+  /** The number of approval requests in the window. */
   approvals: Count,
+  /** The number of failed attempts without an automatic retry in the window. */
   failures: Count,
+  /** Attention counts by period, oldest first. */
   periods: Schema.Array(NeedsAttentionPeriodView),
+  /** Waits from run opening to approval, or null without a recorded approval. */
   approvalWait: Schema.NullOr(DurationSummaryView),
+  /** Waits from failure to an operator retry as the first answer, or null without one. */
   retryWait: Schema.NullOr(DurationSummaryView),
+  /** Waits from failure to a recorded resolution as the first answer, or null without one. */
   resolutionWait: Schema.NullOr(DurationSummaryView),
+  /**
+   * Waits from failure to the first operator retry or timestamped resolution, counting each
+   * answered failure once; null without one.
+   */
   failureWait: Schema.NullOr(DurationSummaryView),
 }) {}
 
@@ -263,12 +408,15 @@ export class NeedsAttentionView extends Schema.Class<NeedsAttentionView>(
 export class RunStatisticsView extends Schema.Class<RunStatisticsView>(
   "@usine/orchestrator/RunStatisticsView",
 )({
+  /** The requested UTC date window. */
   window: StatisticsWindow,
   /** The window's start: midnight UTC of its first day. */
   from: Schema.String,
   /** The time the statistics were computed. */
   to: Schema.String,
+  /** The daily or Monday-based weekly grouping used by time series. */
   bucket: StatisticsBucket,
+  /** Closed runs counted by terminal outcome. */
   runs: OutcomeCountsView,
   /** From each closed Run's opening to its close. */
   runTime: Schema.NullOr(DurationSummaryView),
@@ -280,7 +428,9 @@ export class RunStatisticsView extends Schema.Class<RunStatisticsView>(
   throughput: Schema.Array(ThroughputPeriodView),
   /** By closed Run count, highest first. */
   loops: Schema.Array(LoopStatisticsView),
+  /** Statistics grouped by effective agent, ordered by closed run count. */
   agents: Schema.Array(AgentStatisticsView),
+  /** Statistics grouped by attempt harness, model, and effort. */
   brains: Schema.Array(BrainStatisticsView),
   /** For Runs whose first Attempt started in the window, by Worker name. */
   queueWait: Schema.Array(WorkerQueueWaitView),
@@ -288,5 +438,6 @@ export class RunStatisticsView extends Schema.Class<RunStatisticsView>(
   attemptsPerRun: Schema.Array(AttemptCountView),
   /** For the Workers that `usine.yaml` declares, in declaration order. */
   utilization: Schema.Array(WorkerUtilizationView),
+  /** Approval and failure counts with the waits for recorded operator answers. */
   needsAttention: NeedsAttentionView,
 }) {}

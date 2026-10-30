@@ -45,6 +45,7 @@ import {
 export class RestartRequiredError extends Schema.TaggedError<RestartRequiredError>(
   "@usine/orchestrator/RestartRequiredError",
 )("RestartRequiredError", {
+  /** The configuration blocks whose changes require an orchestrator restart. */
   blocks: Schema.NonEmptyArray(RestartBlock),
   /**
    * The changed fields as paths into `usine.yaml`, such as `webhooks` or
@@ -87,6 +88,7 @@ export class ReloadPreflightError extends Schema.TaggedError<ReloadPreflightErro
    * configuration is kept.
    */
   message: Schema.NonEmptyString,
+  /** The worker or credential failure that prevented the reload. */
   cause: ExecutorError,
 }) {}
 
