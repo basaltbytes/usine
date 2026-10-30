@@ -14,7 +14,7 @@ The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `Sch
 
 `Operator.overview(instance)` keeps the latest polling and schedule failures visible after sibling work continues. Concurrent reads at one durable revision share a computation.
 
-Approval needs include the item's number, title, and GitHub link even when the item is outside the board's 500-item window. The overview reads those details from the stored item using the run's item key. Schedule runs and items without a readable stored projection have no item link.
+Approval needs include the item's number, title, and GitHub link even when it has no board card. The overview reads those details from the stored item using the run's item key. Schedule runs and items without a readable stored projection have no item link.
 
 `Operator.statistics(instance, window)` and `Operator.runStatistics(instance, window)` cache their computed views in memory for up to five minutes, separately for `7d`, `30d`, and `all`. Concurrent requests for the same view and window share a computation. Each request checks the store's projection revision: run closure, retry, failure resolution, and close-time changes invalidate cached views, as do item and budget changes. Reloading the instance also invalidates them. If the revision record is missing, requests bypass the cache. Debug logs report cache hits and misses with the window.
 
@@ -26,7 +26,7 @@ First time right counts merged tasks where no loop succeeded twice on the same i
 
 ### Overview and board
 
-The overview joins the latest 500 polled items into task cards in each repo's authored lanes. Same-repo issue-closing links and saved run PR results join an issue to a PR. Repos without lanes get proposals from the label catalog, including unused labels and repos without items. Items matching no source go to a read-only `Unmapped` lane; label matches beat state sources. Each card keeps every saved run on its items, oldest first.
+The overview joins the 500 highest-numbered stored items and every stored item with an open run into task cards in each repo's authored lanes. Task detail and board moves use the same selection. Items with open runs do not count against the history limit; linked items join when both projections are in this selection. Same-repo issue-closing links and saved run PR results join an issue to a PR. Repos without lanes get proposals from the label catalog, including unused labels and repos without items. Items matching no source go to a read-only `Unmapped` lane; label matches beat state sources. Each card keeps every saved run on its items, oldest first.
 
 The newest open run sets the current item; between runs, an open PR, then the latest settled PR, replaces the issue. Its labels and state pick the lane, so a task whose PR is in review stays put when the issue loses its trigger label. While the newest open run is `Running` on an open item, the card goes to the first label lane matching the item's current labels; if none matches, to the first label lane matching the labels in that run's event payload (`RunReader.events`), until the run ends; if neither matches, the item's state decides. `Operator.task` places tasks the same way, and `Operator.moveBoardItem` records the lane the card left (ADR 0024).
 
