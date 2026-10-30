@@ -4,8 +4,8 @@ import { DateTime, Effect, Schema } from "effect";
 import { Base64Url } from "effect/encoding";
 
 /**
- * The ID of an attachment, unchanged by renewals. A new attach for the same Worker and
- * repository gets a new ID, so an earlier caller token is never accepted again.
+ * The ID of an attachment, unchanged by renewals. A new attachment uses a new ID, so it cannot
+ * reactivate a caller token from a detached or expired attachment.
  */
 export const AttachmentId = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9_-]{22}$/u, { message: "Expected a 22-character attachment ID" }),
@@ -17,10 +17,13 @@ export const newAttachmentId = Effect.sync(() =>
   AttachmentId.make(Base64Url.encode(crypto.getRandomValues(new Uint8Array(16)))),
 );
 
-/** A GitHub App installation token added to the Worker's requests for the repository. */
+/** A GitHub App installation token added to the worker's requests for the repository. */
 export class InstallationCredential extends Schema.TaggedClass<InstallationCredential>()(
   "InstallationCredential",
-  { token: Schema.Redacted(Schema.NonEmptyString) },
+  {
+    /** The GitHub App installation token for the attached repository, redacted in diagnostics. */
+    token: Schema.Redacted(Schema.NonEmptyString),
+  },
 ) {}
 
 /**
@@ -32,21 +35,26 @@ export class AnonymousCredential extends Schema.TaggedClass<AnonymousCredential>
   {},
 ) {}
 
-/** The credential added to a Worker's GitHub requests for an attached repository. */
+/** The credential added to a worker's GitHub requests for an attached repository. */
 export const AttachmentCredential = Schema.Union([InstallationCredential, AnonymousCredential]);
 export type AttachmentCredential = typeof AttachmentCredential.Type;
 
 /**
- * A grant to one Worker VM for one repository. Until `expiresAt`, the Gateway adds `credential`
+ * An attachment for one worker and repository. Until `expiresAt`, the gateway adds `credential`
  * to the VM's requests for that repository and accepts the attachment's caller token.
- * `expiresAt` is the token's expiry. A Worker and repository can have several attachments, one
- * per Attempt.
+ * `expiresAt` is the token's expiry. A worker and repository can have several attachments, one
+ * per attempt.
  */
 export class Attachment extends Schema.Class<Attachment>("@usine/gateway/Attachment")({
+  /** The identifier used for renewal, lookup, detach, and caller-token verification. */
   id: AttachmentId,
+  /** The worker allowed to use this attachment. */
   worker: WorkerName,
+  /** The repository authorized by this attachment, in owner/name form. */
   repository: RepositoryName,
+  /** The credential to add to GitHub requests, or anonymous access. */
   credential: AttachmentCredential,
+  /** The UTC instant at which this attachment stops authorizing requests. */
   expiresAt: Schema.DateTimeUtc,
 }) {
   /** Returns whether the attachment grants access at `now`. */
@@ -57,13 +65,15 @@ export class Attachment extends Schema.Class<Attachment>("@usine/gateway/Attachm
 
 /**
  * A lookup result for an active attachment. `newNames` are the names GitHub's permanent
- * redirects gave the attached repository after a rename or transfer.
+ * redirects indicated after a rename or transfer, confirmed with GitHub's API (ADR 0027).
  */
 export class LiveAttachment extends Schema.TaggedClass<LiveAttachment>()("LiveAttachment", {
+  /** The active attachment, including its credential and expiry. */
   attachment: Attachment,
+  /** Repository names confirmed after a rename or transfer; valid until detach or expiry (ADR 0027). */
   newNames: Schema.Array(RepositoryName),
 }) {
-  /** Returns whether `repository` is the attached repository, by its attached name or a new name. */
+  /** Checks `repository` against the attached name and confirmed new names, ignoring case. */
   serves(repository: RepositoryName): boolean {
     const wanted = canonicalRepositoryName(repository);
     return [this.attachment.repository, ...this.newNames].some(
@@ -75,31 +85,57 @@ export class LiveAttachment extends Schema.TaggedClass<LiveAttachment>()("LiveAt
 /** A lookup result for an attachment whose token expired without renewal. */
 export class ExpiredAttachment extends Schema.TaggedClass<ExpiredAttachment>()(
   "ExpiredAttachment",
-  { expiredAt: Schema.DateTimeUtc },
+  {
+    /** The UTC instant when the stored attachment stopped authorizing requests. */
+    expiredAt: Schema.DateTimeUtc,
+  },
 ) {}
 
-/** A lookup result for an ID that isn't in the store because it was detached or never attached on this Gateway. */
+/**
+ * A lookup result for an ID that isn't in the store because it was detached or never attached on
+ * this gateway.
+ */
 export class MissingAttachment extends Schema.TaggedClass<MissingAttachment>()(
   "MissingAttachment",
   {},
 ) {}
 
+/** The result of looking up an attachment by ID: active, expired, or absent. */
 export type AttachmentLookup = LiveAttachment | ExpiredAttachment | MissingAttachment;
 
 /** The error when an attach request has an expired token. */
 export class AttachmentAlreadyExpired extends Schema.TaggedError<AttachmentAlreadyExpired>()(
   "AttachmentAlreadyExpired",
-  { worker: WorkerName, repository: RepositoryName, expiresAt: Schema.DateTimeUtc },
+  {
+    /** The worker in the rejected attach or renewal request. */
+    worker: WorkerName,
+    /** The repository in the rejected request. */
+    repository: RepositoryName,
+    /** The requested UTC expiry, at or before the time of the request. */
+    expiresAt: Schema.DateTimeUtc,
+  },
 ) {}
 
-/** The error when a renewal uses an attachment ID that belongs to another Worker or repository. */
+/** The error when a renewal uses an attachment ID that belongs to another worker or repository. */
 export class AttachmentConflict extends Schema.TaggedError<AttachmentConflict>()(
   "AttachmentConflict",
-  { id: AttachmentId, worker: WorkerName, repository: RepositoryName },
+  {
+    /** The attachment ID already assigned to a different worker or repository. */
+    id: AttachmentId,
+    /** The worker in the rejected renewal, which leaves the stored attachment unchanged. */
+    worker: WorkerName,
+    /** The repository in the rejected renewal; comparison ignores case. */
+    repository: RepositoryName,
+  },
 ) {}
 
 /** A snapshot could not be read or replaced. Diagnostics exclude credentials and file contents. */
 export class AttachmentPersistenceError extends Schema.TaggedError<AttachmentPersistenceError>()(
   "AttachmentPersistenceError",
-  { operation: Schema.Literals(["read", "write"]), message: Schema.String },
+  {
+    /** Whether loading or replacing the attachment snapshot failed. */
+    operation: Schema.Literals(["read", "write"]),
+    /** A diagnostic explanation that excludes credentials and snapshot contents. */
+    message: Schema.String,
+  },
 ) {}

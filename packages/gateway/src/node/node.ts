@@ -39,10 +39,17 @@ export {
 export { EgressProxyListenError } from "./egress-proxy.ts";
 export { GatewayReload } from "./reload.ts";
 
-/** The bound addresses of the Gateway's three servers, with any port 0 replaced by the assigned port. */
+/** The bound addresses of the gateway's three servers, with any port 0 replaced by the assigned port. */
 export class GatewayAddresses extends Context.Service<
   GatewayAddresses,
-  { readonly proxy: Listener; readonly egress: Listener; readonly admin: Listener }
+  {
+    /** The bound reverse-proxy address with any requested port zero replaced by the assigned port. */
+    readonly proxy: Listener;
+    /** The bound forward-proxy address with any requested port zero replaced by the assigned port. */
+    readonly egress: Listener;
+    /** The bound admin API address with any requested port zero replaced by the assigned port. */
+    readonly admin: Listener;
+  }
 >()("@usine/gateway/node/GatewayAddresses") {}
 
 const boundTo = (address: NetAddress.SocketAddress, requested: Listener): Listener =>
@@ -114,10 +121,16 @@ const serveAdmin = Effect.fn("GatewayNode.serveAdmin")(function* (listener: List
 });
 
 /**
- * The Gateway on Node: the reverse proxy, forward proxy, and admin API on their listeners,
+ * The gateway on Node: the reverse proxy, forward proxy, and admin API on their listeners,
  * sharing one attachment store, caller token signer, settings, and ChatGPT logins. Upstream
  * requests use undici, which doesn't change `content-encoding`, so compressed bodies pass
  * through unchanged. ChatGPT logins read and write their auth files with Node's file system.
+ * Closing the layer closes listeners and active client connections, including tunnels (ADR 0027).
+ *
+ * @param listeners - Addresses to bind. Port zero selects an available port.
+ * @param attachments - The shared attachment layer; defaults to an empty in-memory store.
+ * @returns A scoped layer with gateway services and the bound addresses. Fails if attachment
+ * restoration or a listener fails.
  */
 export const gatewayLayer = (
   listeners: GatewayListeners,
@@ -145,9 +158,11 @@ export const gatewayLayer = (
   );
 
 /**
- * The Gateway configured from its environment files, the process environment, and its
+ * The gateway configured from its environment files, the process environment, and its
  * allowlist file, as run by the `usine-gateway` command. On SIGHUP, reloads the egress
- * allowlist and LLM providers with `GatewayReload`.
+ * allowlist and LLM providers with `GatewayReload`. Restores encrypted attachments before
+ * opening listeners, using `STATE_DIRECTORY` or `/var/lib/usine-gateway` and the caller key.
+ * A corrupt snapshot or changed key fails startup without replacing the snapshot (ADR 0027).
  */
 export const gatewayFromEnvironment = Layer.unwrap(
   Effect.gen(function* () {

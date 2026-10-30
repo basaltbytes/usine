@@ -29,16 +29,26 @@ const upstream = (name: string, fallback: string) =>
 /** The error when two credentials are set for one provider, such as an API key and a subscription token. */
 export class ConflictingProviderCredentials extends Schema.TaggedError<ConflictingProviderCredentials>()(
   "ConflictingProviderCredentials",
-  { provider: LlmProviderName, message: Schema.String },
+  {
+    /** The provider for which both an API key and a subscription credential were configured. */
+    provider: LlmProviderName,
+    /** The conflicting variable names and the configuration change required to select one credential. */
+    message: Schema.String,
+  },
 ) {}
 
 /** The error when a file listed in `USINE_GATEWAY_ENVIRONMENT_FILES` can't be read. */
 export class EnvironmentFileError extends Schema.TaggedError<EnvironmentFileError>()(
   "EnvironmentFileError",
-  { path: Schema.String, message: Schema.String },
+  {
+    /** The file from `USINE_GATEWAY_ENVIRONMENT_FILES` that could not be read. */
+    path: Schema.String,
+    /** The file-system diagnostic for the failed read. */
+    message: Schema.String,
+  },
 ) {}
 
-/** The Gateway's settings source: its environment files layered over the process environment. */
+/** The gateway's settings source: its environment files layered over the process environment. */
 export interface SettingsSource {
   /** The environment files in read order; empty if none is listed. */
   readonly files: ReadonlyArray<string>;
@@ -89,7 +99,7 @@ const onlyOne = <A, B>(
 /**
  * The LLM providers and credentials from the settings. A ChatGPT login's auth file is read and
  * parsed, and its directory checked for writing, so an unusable file fails here, before the
- * Gateway listens or a reload applies it.
+ * gateway listens or a reload applies it.
  */
 export const llmProviders = Effect.gen(function* () {
   const anthropicKey = yield* Config.option(Config.schema(Secret, "ANTHROPIC_API_KEY"));
@@ -171,15 +181,21 @@ export const readEgressAllowlist = Effect.fn("GatewayNode.readEgressAllowlist")(
   return yield* Effect.fromResult(parseEgressAllowlist(text));
 });
 
+/** A TCP listen address; port zero requests an available port when starting an embedded gateway. */
 export interface Listener {
+  /** The address or host name to bind; a wildcard address listens on all matching interfaces. */
   readonly host: string;
+  /** The requested TCP port, or zero to let the operating system assign one. */
   readonly port: number;
 }
 
 /** The listeners for the reverse proxy (GitHub and LLMs), the forward proxy (allowlisted hosts), and the admin API (executor). */
 export interface GatewayListeners {
+  /** The reverse-proxy listener for GitHub and LLM requests from workers. */
   readonly proxy: Listener;
+  /** The forward-proxy listener for allowlisted HTTP requests and HTTPS tunnels. */
   readonly egress: Listener;
+  /** The executor admin API listener; bind to a loopback or private address. */
   readonly admin: Listener;
 }
 
@@ -190,7 +206,7 @@ const listener = (prefix: string, host: string, port: number) =>
   });
 
 /**
- * Listeners from the environment. The proxies default to loopback, so an unconfigured Gateway
+ * Listeners from the environment. The proxies default to loopback, so an unconfigured gateway
  * is unreachable; the VM's unit sets its private address.
  */
 export const listenersFromEnvironment = Config.all({
@@ -231,8 +247,8 @@ const startupSettings = Effect.gen(function* () {
 });
 
 /**
- * Reads the Gateway's settings from `source`. Fails on a missing secret, an invalid value, an
- * unreadable allowlist, or an unusable ChatGPT auth file, so the Gateway stops before it listens.
+ * Reads the gateway's settings from `source`. Fails on a missing secret, an invalid value, an
+ * unreadable allowlist, or an unusable ChatGPT auth file, so the gateway stops before it listens.
  */
 export const readStartupSettings = Effect.fn("GatewayNode.readStartupSettings")(function* (
   source: SettingsSource,
@@ -244,7 +260,7 @@ export const readStartupSettings = Effect.fn("GatewayNode.readStartupSettings")(
 });
 
 /**
- * The Gateway's settings, read once at startup from the files in
+ * The gateway's settings, read once at startup from the files in
  * `USINE_GATEWAY_ENVIRONMENT_FILES` over the process environment, plus the egress allowlist
  * file. Fails on a missing secret, an invalid value, or an unreadable or unusable file.
  */

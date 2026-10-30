@@ -57,7 +57,14 @@ class Unresolvable extends Schema.TaggedError<Unresolvable>()("Unresolvable", {
 /** The error when the forward proxy can't listen on its address. */
 export class EgressProxyListenError extends Schema.TaggedError<EgressProxyListenError>()(
   "EgressProxyListenError",
-  { host: Schema.String, port: Schema.Int, message: Schema.String },
+  {
+    /** The local address on which the forward proxy failed to listen. */
+    host: Schema.String,
+    /** The requested local TCP port. */
+    port: Schema.Int,
+    /** The diagnostic explanation of the listen failure. */
+    message: Schema.String,
+  },
 ) {}
 
 /** The error when the upstream connection can't be opened or its response doesn't finish. */
@@ -190,7 +197,7 @@ const pinnedServerName = (
 /** The log fields that identify a forward proxy request's caller. */
 type CallerFields = { readonly worker: WorkerName } | { readonly caller: "none" | "invalid-token" };
 
-/** The connection target for a request: the Gateway's reverse proxy, or an allowed host's address. */
+/** The connection target for a request: the gateway's reverse proxy, or an allowed host's address. */
 interface Destination {
   readonly address: string;
   readonly port: number;
@@ -231,7 +238,7 @@ const statusLine = (status: number, reason: string, body: string, refusal: Optio
   ].join("\r\n");
 
 /**
- * Serves the forward proxy that Workers use for package registries and other allowlisted
+ * Serves the forward proxy that workers use for package registries and other allowlisted
  * hosts: `CONNECT host:443` for HTTPS, and absolute-form requests (`GET http://host/...`) for
  * plain HTTP mirrors such as apt.
  *
@@ -240,7 +247,7 @@ const statusLine = (status: number, reason: string, body: string, refusal: Optio
  * - Requests for `git.<domain>` and `llm.<domain>` on port 80 go to the reverse proxy at
  *   `gateway`, so a client that proxies everything (Claude Code with `HTTPS_PROXY`) still
  *   connects to them.
- * - A caller token in `Proxy-Authorization` is optional and only identifies the Worker in logs.
+ * - A caller token in `Proxy-Authorization` is optional and only identifies the worker in logs.
  * - Each refusal is logged with the host, reason, and client address.
  * - Each request is checked against the allowlist current at arrival, so an open tunnel stays
  *   open after a reload removes its host.
@@ -257,7 +264,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
   const scope = yield* Effect.scope;
   const context = yield* Effect.context<never>();
 
-  /** Returns the log fields for a request's caller: the Worker from a valid caller token, if any. */
+  /** Returns the log fields for a request's caller: the worker from a valid caller token, if any. */
   const caller = (value: string | undefined): Effect.Effect<CallerFields> =>
     Option.fromNullishOr(value).pipe(
       Option.flatMap(tokenFromAuthorization),
@@ -309,7 +316,10 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       return decision._tag === "EgressRefused" ? Effect.fail(decision) : Effect.succeed(decision);
     });
 
-  /** Returns the target for `host` on `port`: the reverse proxy for the Gateway's own names, otherwise the resolved allowed host. */
+  /**
+   * Returns the target for `host` on `port`: the reverse proxy for the gateway's own names,
+   * otherwise the resolved allowed host.
+   */
   const destination = (
     host: string,
     port: number,

@@ -39,8 +39,8 @@ import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
 import { endToEndHeaders, forwardRequest } from "./forward.ts";
 
 /**
- * The reason the Gateway refused a request. Each refusal is logged at warning level with the
- * reason, host, and Worker (if known), and returned in `x-usine-gateway-refusal`.
+ * The reason the gateway refused a request. Each refusal is logged at warning level with the
+ * reason, host, and worker (if known), and returned in `x-usine-gateway-refusal`.
  */
 export const RefusalReason = Schema.Literals([
   "unknown-host",
@@ -124,7 +124,7 @@ const requestTarget = (
 };
 
 /**
- * The reverse proxy for Worker VMs on the private network. `git.<domain>` serves GitHub with
+ * The reverse proxy for worker VMs on the private network. `git.<domain>` serves GitHub with
  * the attached installation token, and `llm.<domain>` serves the LLM providers with the
  * current credentials. Every request must have a caller token for an active attachment; other
  * hosts are refused.
@@ -132,7 +132,7 @@ const requestTarget = (
 export class GatewayProxy extends Context.Service<
   GatewayProxy,
   {
-    /** Forwards one Worker request with the attached credential, or refuses and logs it. */
+    /** Forwards one worker request with the attached credential, or refuses and logs it. */
     readonly handle: Effect.Effect<
       HttpServerResponse.HttpServerResponse,
       never,
@@ -140,6 +140,11 @@ export class GatewayProxy extends Context.Service<
     >;
   }
 >()("@usine/gateway/GatewayProxy") {
+  /**
+   * Creates the handler from the shared gateway services and an HTTP client. The client must
+   * return redirects without following them and preserve compressed response bytes and headers.
+   * This layer does not open a listener.
+   */
   static readonly layer = Layer.effect(
     GatewayProxy,
     Effect.gen(function* () {
