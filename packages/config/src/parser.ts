@@ -29,7 +29,7 @@ import {
   UndeclaredLaneLabelWarning,
   UndeclaredTriggerLabelWarning,
 } from "./instance/diagnostics.ts";
-import { LoopFile, loopPath, LoopPriority, PromptTemplate } from "./loop.ts";
+import { LoopFile, loopPath, LoopApproval, LoopPriority, PromptTemplate } from "./loop.ts";
 import { AgentPersona, AgentName } from "@usine/core/agent";
 import { IssueTrigger, PullRequestTrigger, ScheduleTrigger, Stream } from "./trigger.ts";
 import { UsineConfig } from "./factory.ts";
@@ -69,7 +69,7 @@ const TriggerFromYaml = Schema.Union([
 class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopFrontmatter")({
   trigger: TriggerFromYaml,
   selector: Schema.OptionFromOptionalKey(ValidSelector),
-  approval: ApprovalRequirement.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
+  approval: LoopApproval.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
   step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
   agent: AgentName,
   maxCycles: LoopFile.fields.maxCycles,
@@ -347,6 +347,7 @@ const checkExpressions = (
   condition: Option.Option<Source>,
   body: Option.Option<PromptTemplate>,
   priority: Option.Option<LoopPriority>,
+  approval: Option.Option<LoopApproval>,
 ) =>
   Effect.gen(function* () {
     const failures: Array<ConfigFileError> = [];
@@ -365,6 +366,11 @@ const checkExpressions = (
       const checked = yield* engine.checkInteger(priority.value, environment).pipe(Effect.result);
       if (Result.isFailure(checked))
         failures.push(expressionError(file, checked.failure, ["priority"]));
+    }
+    if (Option.isSome(approval) && !Schema.is(ApprovalRequirement)(approval.value)) {
+      const checked = yield* engine.checkBoolean(approval.value, environment).pipe(Effect.result);
+      if (Result.isFailure(checked))
+        failures.push(expressionError(file, checked.failure, ["approval"]));
     }
     for (const { source } of prompt.expressions) {
       const checked = yield* engine.checkScalar(source, environment).pipe(Effect.result);
@@ -458,6 +464,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
           : Schema.toCodecJson(LoopFile.fields.priority),
       }),
     )(value);
+    const approval = Schema.decodeUnknownOption(Schema.Struct({ approval: LoopApproval }))(value);
     problems.push(
       ...(yield* checkExpressions(
         engine,
@@ -466,6 +473,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
         Option.map(condition, ({ trigger }) => trigger.if),
         Option.map(body, ({ body }) => body),
         Option.flatMap(priority, ({ priority }) => priority),
+        Option.map(approval, ({ approval }) => approval),
       )),
     );
     const agent = Schema.decodeUnknownOption(Schema.Struct({ agent: AgentName }))(value);
@@ -506,6 +514,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
           Option.some(loop.trigger.if),
           Option.some(loop.body),
           loop.priority,
+          Option.some(loop.approval),
         );
         if (Arr.isArrayNonEmpty(failures)) return yield* expressionFailures(file, failures);
         return loop;

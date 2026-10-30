@@ -339,3 +339,7 @@ Endpoint webhook mode shows **No webhook delivery received** in Needs attention 
 **Configuration > Workers** provides **Run preflight** on each worker row and detail page. The action displays progress and refreshed checks, with remediation for failures. It is disabled with a reason while an attempt or preflight runs on the worker. `POST /api/workers/:worker/preflight` returns the stored checks and updates overview and Needs attention without a restart; busy workers return 409 `WorkerPreflightRejectedError`.
 
 Loop forms accept an integer or CEL priority with payload completion. **Preview** shows each matching item’s evaluated priority and any evaluation errors. Overview’s waiting text includes the priority captured when the run requested its worker slot.
+
+Loop forms offer fixed approval modes and an **Approval condition (CEL)** field
+with payload completion and server diagnostics. Run headers, Needs attention,
+and overview rows show the saved approval decision and available label actors.

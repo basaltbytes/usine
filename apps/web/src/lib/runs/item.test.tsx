@@ -829,6 +829,16 @@ describe("drawer summary", () => {
 });
 
 describe("Run approval", () => {
+  it("shows the saved approval decision in both page and drawer headers", () => {
+    for (const approvalReason of [
+      "Approval required: condition evaluated to true",
+      "Approval not required: condition evaluated to false",
+    ]) {
+      for (const placement of ["page", "drawer"] as const) {
+        assert.include(header(run({ approvalReason }), { placement }), approvalReason);
+      }
+    }
+  });
   const approvedAt = "2026-09-01T11:59:30.000Z";
   const approved = (source: ApprovalView["source"]) =>
     run({ approval: new ApprovalView({ approvedAt, source }) });

@@ -30,6 +30,11 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   step: StepName,
   /** Whether the run must wait for an operator approval before execution. */
   approval: ApprovalRequirement,
+  /** The decision at event submission, or None for older events. */
+  approvalReason: Schema.Option(Schema.NonEmptyString).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
   /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed("write" as const)),

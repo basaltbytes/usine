@@ -2149,6 +2149,7 @@ describe("Operator", () => {
               new RunAgainRequest({
                 step: loop.step,
                 approval: "required",
+                approvalReason: Option.some("Approval required: the loop requires approval"),
                 cycleLimit: Option.some(CycleLimit.make(5)),
                 permissions: "read",
                 context: new AttemptContext({
@@ -2160,6 +2161,18 @@ describe("Operator", () => {
               }),
             ],
           ]);
+          for (const [approval, expected] of [
+            ['item.number == 99 && repo.owner == "basaltbytes"', "none"],
+            ['item.labelEvents["ready-for-agent"].actor.type != "User"', "required"],
+          ] as const) {
+            const conditional = new LoadedInstance({
+              ...configured,
+              loops: [new LoopFile({ ...loop, approval: Source.make(approval) })],
+            });
+            yield* operator.runAgain(conditional, runId, edit);
+            assert.strictEqual(requests.at(-1)?.[1].approval, expected);
+            assert(Option.isSome(requests.at(-1)?.[1].approvalReason ?? Option.none()));
+          }
           const unknownAgent = yield* Effect.flip(
             operator.runAgain(
               configured,
@@ -2172,7 +2185,7 @@ describe("Operator", () => {
             operator.runAgain(new LoadedInstance({ ...configured, loops: [] }), runId, edit),
           );
           assert.strictEqual(retired._tag, "LoopNotFoundError");
-          assert.strictEqual(requests.length, 1);
+          assert.strictEqual(requests.length, 3);
         }).pipe(
           Effect.provide(
             testLayer(approved, moved, reads, revision, snapshot, noCycleBudgets, {

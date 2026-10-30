@@ -81,7 +81,15 @@ export const loopEditorResponses = async (
                 position: 5,
               },
             ]
-          : [],
+          : draft.value.approval === "item.number"
+            ? [
+                {
+                  path: ["approval"],
+                  message: "Approval condition must return bool",
+                  expression: "item.number",
+                },
+              ]
+            : [],
       }),
     });
   });

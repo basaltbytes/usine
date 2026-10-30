@@ -1,3 +1,5 @@
+import type { ExpressionEngine } from "@usine/expression/expression-engine";
+import { approvalFor } from "./approval.ts";
 import type { ConfigFileError } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { LoopFile } from "@usine/config/loop";
@@ -97,8 +99,18 @@ export const cycleLimitOf = (loop: LoopFile): Option.Option<CycleLimit> =>
   loop.trigger.on === "schedule" ? Option.none() : Option.some(loop.maxCycles);
 
 /** Builds the Submission that every trigger stream sends to the engine. */
-export const triggerSubmission = (options: TriggerSubmissionOptions): Submission =>
-  new Submission({
+export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function* (
+  expressions: ExpressionEngine["Service"],
+  options: TriggerSubmissionOptions,
+) {
+  yield* Effect.annotateCurrentSpan({ eventId: options.dedupKey, itemKey: options.itemKey });
+  const decision = yield* approvalFor(
+    expressions,
+    options.loop,
+    options.repository,
+    options.payload,
+  );
+  return new Submission({
     event: new Event({
       id: EventId.make(options.dedupKey),
       dedupKey: options.dedupKey,
@@ -109,7 +121,7 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     cycleGeneration: options.cycleGeneration,
     loop: options.loop.name,
     step: options.loop.step,
-    approval: options.loop.approval,
+    ...decision,
     permissions: options.loop.permissions,
     cycleLimit: cycleLimitOf(options.loop),
     repository: options.repository.name,
@@ -118,6 +130,7 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     agent: options.agent,
     parentModel: options.parentModel,
   });
+});
 
 /**
  * Returns the log fields for a submission outcome: the Run ID for a claim or suppression, the

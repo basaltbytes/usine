@@ -1,3 +1,5 @@
+import { ExpressionEngine } from "@usine/expression/expression-engine";
+import { approvalFor } from "../approval.ts";
 import { WorkerPreflightView, workerPreflightView } from "./preflight.ts";
 export { WorkerPreflightView } from "./preflight.ts";
 import { WebhookHealth } from "../webhooks.ts";
@@ -452,6 +454,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             id: `approval:${run.id}`,
             repository: run.repository,
             runId: run.id,
+            approvalReason: run.approvalReason,
             loop: run.loop,
             item: approvalItems.get(run.itemKey) ?? null,
           }),
@@ -930,6 +933,7 @@ export class OperatorObservation extends Context.Service<
 }
 
 const makeOperator = Effect.gen(function* () {
+  const expressions = yield* ExpressionEngine;
   const workerStatus = yield* WorkerStatus;
   const acknowledgements = yield* AttentionAcknowledgements;
   const budgets = yield* CycleBudgets;
@@ -1078,7 +1082,12 @@ const makeOperator = Effect.gen(function* () {
       runId,
       new RunAgainRequest({
         step: loop.step,
-        approval: loop.approval,
+        ...(yield* approvalFor(
+          expressions,
+          loop,
+          { name: current.repository },
+          current.event.payload,
+        )),
         cycleLimit: cycleLimitOf(loop),
         permissions: loop.permissions,
         context: new AttemptContext({

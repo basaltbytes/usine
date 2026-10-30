@@ -120,6 +120,11 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
    * `approval: none`.
    */
   approval: Schema.NullOr(ApprovalView),
+  /** The saved approval decision, or null for older events. */
+  approvalReason: Schema.NullOr(Schema.NonEmptyString).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /**
    * The closed Run that the operator ran again to open this one, and who asked, or null for a
    * trigger-opened Run. Its time is `openedAt`.

@@ -28,6 +28,11 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 
 ### Approval and retries
 
+Approval requirements are evaluated before submission. `Submission.approvalReason`
+records the decision with the event; snapshots and summaries return it after a
+restart. Older events return `None`. Repeated submissions and retries preserve
+the original requirement and reason.
+
 - Approval-gated runs wait for an approval event before their first attempt.
 - Infrastructure and provider capacity failures retry automatically, up to three attempts. Capacity retries wait two minutes after attempt 1 and five minutes after attempt 2, without reserving a worker slot. The persisted attempt end time determines the deadline across restarts. Retries resume from the newest pushed salvage, and cancellation stops the wait. Agent, defect, and guard failures wait for an operator retry. A defect escaping `StepExecutor` is saved as `DefectFailure` with its original cause.
 - `RunEngine.retry(runId, request)` takes a `RetryRequest`: the operator login and the task and agent that an edit-and-retry changes.

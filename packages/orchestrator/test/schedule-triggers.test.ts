@@ -226,11 +226,14 @@ describe("ScheduleTriggers", () => {
         { name: "basaltbytes/two", tags: ["active"] },
         { name: "basaltbytes/idle", tags: ["inactive"] },
       ]);
-      const loop = scheduleLoop(config, {
-        cron: "0 9 * * *",
-        tz: "Europe/Warsaw",
-        selectedTag: "active",
-        expression: 'item.tick.tz == "Europe/Warsaw" && repo.owner == "basaltbytes"',
+      const loop = new LoopFile({
+        ...scheduleLoop(config, {
+          cron: "0 9 * * *",
+          tz: "Europe/Warsaw",
+          selectedTag: "active",
+          expression: 'item.tick.tz == "Europe/Warsaw" && repo.owner == "basaltbytes"',
+        }),
+        approval: Source.make('item.tick.tz == "Europe/Warsaw" && repo.name == "basaltbytes/two"'),
       });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       yield* TestClock.setTime(Date.parse("2026-08-31T08:45:30.000Z"));
@@ -240,6 +243,10 @@ describe("ScheduleTriggers", () => {
         const cycle = yield* schedules.tick(instanceWith(config, [loop]));
         const captured = yield* Ref.get(submissions);
         assert(captured.every((submission) => submission.revision === "HEAD"));
+        assert.deepStrictEqual(
+          captured.map(({ approval }) => approval),
+          ["none", "required"],
+        );
 
         assert.strictEqual(cycle.loops, 1);
         assert.strictEqual(cycle.fanout, 2);
