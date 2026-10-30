@@ -10,7 +10,7 @@ import { salvageRefFor } from "@usine/core/attempt/salvage";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
-import { ProvisionerTimings, WorkerName } from "@usine/core/worker";
+import { WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
   Executor,
@@ -18,8 +18,6 @@ import {
   fullPreflight,
   githubBotLogin,
   type MachineHold,
-  type MachineUnavailableError,
-  type WorkerCapabilityError,
   type WorkerMachines,
 } from "@usine/executor";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
@@ -29,7 +27,6 @@ import {
   Context,
   DateTime,
   Deferred,
-  Duration,
   Effect,
   Exit,
   Layer,
@@ -58,6 +55,7 @@ import { type LeaseCandidate, aheadCount, leaseOrder, passedCount } from "../lea
 import { type ProvisioningPause, type QueuedRun, WorkerStatus } from "../worker-status.ts";
 
 import { preflightFor } from "./preflight.ts";
+import { provisioningPausesFor, type WorkerPause } from "./provisioning.ts";
 
 /** A worker kind for which the scheduler has no configured executor. */
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
@@ -153,15 +151,6 @@ const workerFor = (
       ),
     onSome: (worker) => (isFree(pool, worker) ? Option.some(worker) : Option.none()),
   });
-
-/** Returns the capped delay after consecutive machine creation failures. */
-const pauseAfter = (failures: number, timings: ProvisionerTimings): Duration.Duration =>
-  Duration.seconds(
-    Math.min(
-      timings.creationBackoffMin * 2 ** Math.min(failures - 1, 52),
-      timings.creationBackoffMax,
-    ),
-  );
 
 const withLeased = (pool: SlotPool, worker: WorkerName, change: number): SlotPool => {
   const slots = pool.get(worker);
@@ -261,8 +250,6 @@ export interface StepExecutorOptions {
 /** The machine a lease holds, which its release deletes. */
 type LeaseMachine = Ref.Ref<Option.Option<MachineHold>>;
 
-type WorkerPause = Omit<ProvisioningPause, "waitingRuns">;
-
 interface RunMachine {
   readonly worker: WorkerName;
   readonly machine: LeaseMachine;
@@ -286,7 +273,6 @@ export const stepExecutorLayer = (
 > =>
   Layer.effectContext(
     Effect.gen(function* () {
-      const schedulerScope = yield* Effect.scope;
       const executor = yield* Executor;
       const instances = yield* CurrentInstance;
       const positionOf = positionFor(instances, yield* ExpressionEngine);
@@ -313,7 +299,7 @@ export const stepExecutorLayer = (
       const membership = yield* Semaphore.make(1);
       const adding = yield* Ref.make<ReadonlySet<WorkerName>>(new Set());
       const machines = options.machines;
-      const paused = yield* TxRef.make<ReadonlyMap<WorkerName, WorkerPause>>(new Map());
+      const provisioning = yield* provisioningPausesFor(instances);
       // The machine of each Run's lease, which `execute` gives to the Run's Attempt.
       const runMachines = yield* Ref.make<ReadonlyMap<RunId, RunMachine>>(new Map());
       const provisions = (worker: WorkerName) =>
@@ -368,6 +354,9 @@ export const stepExecutorLayer = (
       ) {
         yield* preflight.accept(declared, roster, checked);
         yield* preflight.refresh(change.updated);
+        for (const worker of change.updated) {
+          if (!(yield* provisions(worker.name))) yield* provisioning.clear(worker.name);
+        }
         const before = yield* TxRef.modify(pool, (current) => [
           current,
           slotPoolOf(declared, current),
@@ -559,7 +548,7 @@ export const stepExecutorLayer = (
         Effect.gen(function* () {
           const current = yield* TxRef.get(pool);
           const available = yield* availablePool;
-          const pauses = yield* TxRef.get(paused);
+          const pauses = yield* provisioning.current;
           const waiting = yield* TxPriorityQueue.toArray(pending);
           const next = EffectArray.findFirst(waiting, (reservation) =>
             Option.map(workerFor(available, pauses, reservation), (worker) => ({
@@ -574,71 +563,6 @@ export const stepExecutorLayer = (
           return { worker, reservation, passed: passedCount(waiting, reservation) };
         }),
       );
-
-      /** Pauses machine creation on `worker` after `failure`, and resumes it when the pause ends. */
-      const pauseWorker = Effect.fn("WorkerScheduler.pauseWorker")(function* (
-        worker: WorkerName,
-        failure: MachineUnavailableError | WorkerCapabilityError,
-      ) {
-        const { config } = yield* instances.get;
-        const configured = config.workers.find(({ name }) => name === worker);
-        const timings =
-          configured?.kind === "ssh" && Option.isSome(configured.provisioner)
-            ? configured.provisioner.value.timings
-            : new ProvisionerTimings({});
-        yield* Effect.annotateCurrentSpan({ worker });
-        const failedAt = yield* DateTime.now;
-        const pause = yield* Effect.tx(
-          TxRef.modify(paused, (current) => {
-            const failures = (current.get(worker)?.failures ?? 0) + 1;
-            const delay = pauseAfter(failures, timings);
-            const next: WorkerPause = {
-              quota:
-                failure._tag === "MachineUnavailableError" && failure.reason === "quota"
-                  ? Option.some(failure.message)
-                  : (current.get(worker)?.quota ?? Option.none()),
-              worker,
-              reason: failure._tag === "MachineUnavailableError" ? failure.reason : "check",
-              message: failure.message,
-              failures,
-              failedAt,
-              retryAt: DateTime.addDuration(failedAt, delay),
-              blocked: true,
-            };
-            return [next, new Map(current).set(worker, next)] as const;
-          }),
-        );
-        yield* Effect.logWarning(
-          "A provisioned Worker could not create a machine; its Attempts wait and it tries again after a pause",
-          {
-            worker,
-            reason: pause.reason,
-            message: pause.message,
-            quota: pause.quota,
-            failures: pause.failures,
-            retryAt: DateTime.formatIso(pause.retryAt),
-          },
-        );
-        yield* Effect.sleep(DateTime.distance(failedAt, pause.retryAt)).pipe(
-          Effect.andThen(
-            Effect.tx(
-              TxRef.update(paused, (current) => {
-                const latest = current.get(worker);
-                return latest === undefined || latest.failures !== pause.failures
-                  ? current
-                  : new Map(current).set(worker, { ...latest, blocked: false });
-              }),
-            ),
-          ),
-          Effect.andThen(
-            Effect.logInfo("A provisioned Worker's pause ended; it creates machines again", {
-              worker,
-              failures: pause.failures,
-            }),
-          ),
-          Effect.forkIn(schedulerScope),
-        );
-      }, Effect.uninterruptible);
 
       const dispatch = Effect.forever(
         Effect.gen(function* () {
@@ -798,11 +722,15 @@ export const stepExecutorLayer = (
         const { agents } = yield* instances.get;
         const roster = EffectArray.dedupe(agents.map(({ agent }) => agent.brain));
         while (true) {
-          yield* Effect.tx(
-            Effect.gen(function* () {
-              if ((yield* TxRef.get(paused)).get(worker)?.blocked === true) yield* Effect.txRetry;
-            }),
-          );
+          yield* provisioning.wait(worker);
+          if (!(yield* provisions(worker))) {
+            yield* provisioning.clear(worker);
+            yield* Effect.logInfo(
+              "Attempt uses the fixed connection after provisioning stopped",
+              fields,
+            );
+            return;
+          }
           const created = yield* Effect.uninterruptibleMask((restore) =>
             restore(machines.create(worker, execution.run.id, attemptId, roster)).pipe(
               Effect.tap((grant) => Ref.set(machine, Option.some(grant.hold))),
@@ -810,17 +738,20 @@ export const stepExecutorLayer = (
             ),
           );
           if (Result.isFailure(created)) {
+            if (!(yield* provisions(worker))) {
+              yield* Effect.logInfo(
+                "Machine creation failed after provisioning stopped; using the fixed connection",
+                { ...fields, message: created.failure.message },
+              );
+              continue;
+            }
             if (created.failure._tag === "WorkerCapabilityError")
               yield* preflight.record(worker, roster, Exit.fail(created.failure));
-            yield* pauseWorker(worker, created.failure);
+            yield* provisioning.pause(worker, created.failure);
             yield* Effect.logInfo("Attempt waits to retry machine creation", fields);
             continue;
           }
-          yield* TxRef.update(paused, (current) => {
-            const next = new Map(current);
-            next.delete(worker);
-            return next;
-          });
+          yield* provisioning.clear(worker);
           if (Option.isSome(created.success.checked)) {
             const { brains, containerLimits } = created.success.checked.value;
             yield* preflight.record(
@@ -954,7 +885,7 @@ export const stepExecutorLayer = (
                 Effect.map((hold) => (Option.isNone(hold) ? [{ runId, worker }] : [])),
               ),
           );
-          return [...(yield* TxRef.get(paused)).values()].map((pause): ProvisioningPause => ({
+          return [...(yield* provisioning.current).values()].map((pause): ProvisioningPause => ({
             ...pause,
             waitingRuns: waiting
               .flat()

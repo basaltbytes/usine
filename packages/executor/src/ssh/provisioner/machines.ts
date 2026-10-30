@@ -1,6 +1,9 @@
 import { boatTailnetsFor } from "./tailnet/bootstrap.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
+import type { AttemptRecovery } from "@usine/core/attempt/salvage";
+import { safeSegment } from "@usine/core/repository";
+import type { RemoteLeftovers } from "../../remote/machine.ts";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import type {
@@ -1002,15 +1005,34 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     });
   });
 
-  /**
-   * Returns the machine of an Attempt that startup recovery reconciles, or `None` if it has
-   * none. `recovered` deletes a machine that no lease holds.
-   */
-  const recoveryMachine = (worker: WorkerName, attemptId: AttemptId) =>
-    locate(worker, attemptId, "recovery").pipe(
-      Effect.map((located) => Option.flatMap(located, ({ machine }) => machine)),
+  const leftovers = Effect.fn("SshExecutor.recoveryLeftovers")(function* (
+    attempt: AttemptRecovery,
+    listed: Effect.Effect<RemoteLeftovers<SshMachine>, ExecutorError>,
+  ) {
+    const { worker, attemptId } = attempt;
+    yield* Effect.annotateCurrentSpan({ worker, attemptId });
+    const existing = yield* byAttempt(attemptId);
+    if (Option.isNone(existing) && !(yield* provisions(worker))) {
+      yield* Effect.logDebug("Recovering attempt on the configured fixed SSH machine", {
+        worker,
+        attemptId,
+      });
+      return Option.some(yield* listed);
+    }
+    const located = yield* locate(worker, attemptId, "recovery").pipe(
       Effect.mapError(operationError("cleanup")),
     );
+    const machine = Option.flatMap(located, ({ machine }) => machine);
+    yield* Effect.logInfo("Resolved retained SSH machine for attempt recovery", {
+      worker,
+      attemptId,
+      found: Option.isSome(machine),
+    });
+    return Option.map(machine, (machine) => ({
+      machine,
+      checkouts: new Set([`${machine.workerDirectory}/attempts/${safeSegment(attemptId)}`]),
+    }));
+  });
 
   /**
    * Deletes the machine of `attemptId` after its recovery succeeded, unless a lease holds it.
@@ -1095,7 +1117,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     }),
     retire,
     attemptMachine,
-    recoveryMachine,
+    leftovers,
     recovered,
     checkoutHeld,
     verifyProvisioned,
