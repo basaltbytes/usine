@@ -35,6 +35,8 @@ ssh-keygen -t ed25519 -f ~/.ssh/usine_worker -C usine-worker
 
 The arguments are the worker name, the location, the IPv4 address that the orchestrator connects from, and the public key. `HCLOUD_SERVER_TYPE` sets the server type (default `cpx32`, 4 vCPU and 8 GB). A worker needs 8 GB, because the repo's lint and knip gates reserve a 6 GiB virtual buffer ([#270](https://github.com/basaltbytes/usine/issues/270)). `cx` types are often out of stock; check `hcloud server-type list`. The script registers the public key with Hetzner once (otherwise Hetzner emails a root password), creates the firewall `usine-<name>`, and creates the server.
 
+arm64 servers work too, such as the Ampere `cax` types: CI builds the attempt image for linux/amd64 and linux/arm64 under the same tag, and Docker pulls the one for the machine. A `cax21` has 4 vCPUs and 8 GB. A snapshot creates servers of its own architecture only, and `snapshot.sh` builds it on a `cx23` by default (`SERVER_TYPE`), so build the snapshot for `cax` workers on a `cax` type, such as `SERVER_TYPE=cax11`; see [Build the snapshot](#build-the-snapshot).
+
 cloud-init takes a minute or two after boot. The orchestrator's batch-mode SSH refuses unknown host keys, so connect once from the orchestrator machine to record the key, and wait for cloud-init:
 
 ```sh

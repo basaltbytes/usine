@@ -1,10 +1,13 @@
 name: Worker image
 
 # Builds infra/worker-image/Dockerfile, the image of each attempt's container on
-# an SSH worker with Docker, and pushes it to GHCR from main. The tag names the
-# Claude Code and Codex versions that the Dockerfile pins, which is the tag of
-# the SSH executor's default image (ATTEMPT_IMAGE in
-# packages/executor/src/ssh/container.ts). A pull request only builds it.
+# an SSH worker with Docker, for linux/amd64 and linux/arm64, each on a runner
+# of that architecture, and prints the version of each tool in it. On main, each
+# build pushes its image by digest, and the publish job tags both digests as one
+# multi-platform image. The tag names the Claude Code and Codex versions that
+# the Dockerfile pins, which is the tag of the SSH executor's default image
+# (ATTEMPT_IMAGE in packages/executor/src/ssh/container.ts). A pull request only
+# builds and checks both images.
 
 on:
   push:
@@ -30,8 +33,20 @@ env:
   IMAGE: ghcr.io/basaltbytes/usine-worker
 
 jobs:
-  image:
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    outputs:
+      tag: ${{ steps.pins.outputs.tag }}
+      digest_amd64: ${{ steps.push.outputs.digest_amd64 }}
+      digest_arm64: ${{ steps.push.outputs.digest_arm64 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Read the harness versions
@@ -41,20 +56,57 @@ jobs:
           tag="claude-$(pin CLAUDE_CODE_VERSION)-codex-$(pin CODEX_VERSION)"
           [[ "$tag" =~ ^claude-[0-9.]+-codex-[0-9.]+$ ]] || { echo "Unexpected tag: $tag" >&2; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build
         env:
-          TAG: ${{ steps.pins.outputs.tag }}
+          PLATFORM: ${{ matrix.platform }}
+        run: docker buildx build --platform "$PLATFORM" --load --tag usine-worker:smoke infra/worker-image
+      - name: Smoke test
         run: |
-          docker build \
-            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --tag "${IMAGE}:${TAG}" \
-            --tag "${IMAGE}:sha-${GITHUB_SHA::12}" \
-            infra/worker-image
-      - name: Push
+          docker run --rm usine-worker:smoke bash -euc '
+            uname -m
+            for tool in node pnpm gh claude codex chromium; do
+              printf "%s: " "$tool"
+              "$tool" --version
+            done'
+      # Rebuilds from the build cache of the Build step.
+      - name: Push by digest
+        id: push
         if: github.event_name != 'pull_request'
         env:
+          PLATFORM: ${{ matrix.platform }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          docker push --all-tags "$IMAGE"
+          docker buildx build --platform "$PLATFORM" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file "$RUNNER_TEMP/metadata.json" \
+            infra/worker-image
+          digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Unexpected digest: $digest" >&2; exit 1; }
+          echo "digest_${PLATFORM#linux/}=$digest" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Tag both platforms
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          AMD64_DIGEST: ${{ needs.build.outputs.digest_amd64 }}
+          ARM64_DIGEST: ${{ needs.build.outputs.digest_arm64 }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --annotation "index:org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${IMAGE}:${TAG}" \
+            --tag "${IMAGE}:sha-${GITHUB_SHA::12}" \
+            "${IMAGE}@${AMD64_DIGEST}" "${IMAGE}@${ARM64_DIGEST}"
+          docker buildx imagetools inspect "${IMAGE}:${TAG}"
