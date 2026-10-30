@@ -312,6 +312,8 @@ export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationVie
    * before any preflight. Degraded for an SSH Worker without Docker.
    */
   prerequisites: Schema.NullOr(PreflightCheckView),
+  /** Whether a preflight is queued or running for this worker. */
+  preflightRunning: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** In harness name order; empty before any harness check. */
   harnesses: Schema.Array(HarnessPreflightView),
 }) {}
@@ -577,7 +579,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
 
   const view = Effect.fn("OperatorConfiguration.view")(function* (instance: LoadedInstance) {
     const { config } = instance;
-    const [states, latestPoll, slots, preflights, inFlight, pauses] = yield* Effect.all(
+    const [states, latestPoll, slots, preflights, inFlight, pauses, checking] = yield* Effect.all(
       [
         controls.states,
         polling.latest,
@@ -585,6 +587,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         workerStatus.preflights,
         workerStatus.machines,
         workerStatus.provisioning,
+        workerStatus.checking,
       ] as const,
       { concurrency: "unbounded" },
     );
@@ -661,6 +664,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       const preflight = preflightBy.get(worker.name);
       return new WorkerConfigurationView({
         name: worker.name,
+        preflightRunning: checking.has(worker.name),
         kind: worker.kind,
         maxConcurrentAttempts: worker.maxConcurrentAttempts,
         ...workerConnection(worker),

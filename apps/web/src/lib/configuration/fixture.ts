@@ -53,7 +53,12 @@ const deferredHarness = (harness: string, checkedAt: string) => ({
 });
 
 /** A worker without a provisioner, as every kind but a provisioned SSH Worker has. */
-const unprovisioned = { provisioner: null, machines: [], provisioning: null };
+const unprovisioned = {
+  preflightRunning: false,
+  provisioner: null,
+  machines: [],
+  provisioning: null,
+};
 
 /**
  * The configuration view JSON, with loaded and quarantined Loops, a roster with an invalid Agent, a
@@ -233,6 +238,7 @@ export const configurationJson = {
     },
     {
       name: "hz-pool",
+      preflightRunning: false,
       kind: "ssh",
       maxConcurrentAttempts: 3,
       destination: null,
@@ -305,6 +311,7 @@ export const configurationJson = {
     },
     {
       name: "boat-pool",
+      preflightRunning: false,
       kind: "ssh",
       maxConcurrentAttempts: 2,
       destination: null,

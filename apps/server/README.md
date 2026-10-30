@@ -195,3 +195,5 @@ The Overview’s worker utilization uses stored configuration revisions to accou
 The SQLite storage, configuration, and export tests use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Export fixture seeding receives the test cancellation signal, and directory removal retries transient filesystem errors.
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+**Configuration > Workers** provides **Run preflight** on each worker row and detail page. The action displays progress and refreshed checks, with remediation for failures. It is disabled with a reason while an attempt or preflight runs on the worker. `POST /api/workers/:worker/preflight` returns the stored checks and updates overview and Needs attention without a restart; busy workers return 409 `WorkerPreflightRejectedError`.

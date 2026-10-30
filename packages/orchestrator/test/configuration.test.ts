@@ -226,6 +226,8 @@ const claudeLoggedOut = new WorkerCapabilityError({
 });
 
 const workers = Layer.succeed(WorkerStatus)({
+  checking: Effect.succeed(new Set()),
+  runPreflight: () => Effect.die("unused"),
   unavailable: Effect.succeed([]),
   slots: Effect.succeed([
     { worker: local, capacity: 2, leased: 1 },

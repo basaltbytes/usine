@@ -1,3 +1,4 @@
+import { WorkerPreflightView } from "./preflight.ts";
 import { ProjectId } from "@usine/core/project";
 import { ProjectView } from "./overview.ts";
 import {
@@ -70,6 +71,7 @@ import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 
 const errorStatuses = {
+  WorkerPreflightRejectedError: 409,
   UpgradeError: 409,
   ConfigurationNotFound: 404,
   ConfigurationStoreError: 500,
@@ -398,6 +400,11 @@ const statisticsQuery = Schema.Struct({
 /**
  * The operator's HTTP API contract for reads and interventions, shared by server handlers and
  * generated clients. An action's acknowledgement only means the request was accepted.
+ *
+ * `POST /api/workers/:worker/preflight` checks one idle worker and returns its stored
+ * prerequisites, harness checks, and container limits, including failed checks with remediation.
+ * It returns 409 `WorkerPreflightRejectedError` while an attempt or another preflight uses
+ * that worker. The result updates configuration, overview, and desk reads without a restart.
  */
 export const OperatorApi = HttpApi.make("OperatorApi").add(
   HttpApiGroup.make("operator")
@@ -499,6 +506,10 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         },
         payload: Schema.Struct({ toLane: BoardLaneId }),
         success: acknowledged,
+      }),
+      HttpApiEndpoint.post("runWorkerPreflight", "/api/workers/:worker/preflight", {
+        params: { worker: WorkerName },
+        success: WorkerPreflightView,
       }),
       HttpApiEndpoint.post("discardLeftovers", "/api/workers/:worker/discard-leftovers", {
         params: { worker: WorkerName },

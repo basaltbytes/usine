@@ -19,6 +19,8 @@ usine config import ./config-export --message "Add a worker"
 
 The revision applies live after preflight. An existing worker's connection settings require a restart; `max_concurrent_attempts` applies live. See [Restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements). The YAML examples below are export-format fragments.
 
+After fixing a login, package, or connection on a worker, select **Run preflight** in **Configuration > Workers** or on the worker's detail page. The action checks the running configuration and updates the last checks and remediation messages without a restart. It is unavailable while any attempt or another preflight runs on that worker. A failed check stops new attempts on the worker and appears in Needs attention; a passing check restores scheduling. For provisioned workers, harness checks remain deferred until a machine is available. Changes to an existing worker's connection settings still require a restart.
+
 ## Worker kinds
 
 | `kind`                   | Where children run                                                                         | GitHub credential on the machine                                             |

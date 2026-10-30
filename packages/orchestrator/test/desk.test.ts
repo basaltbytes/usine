@@ -416,6 +416,8 @@ const deskLayer = (
     ahead,
   });
   const slots = Layer.succeed(WorkerStatus)({
+    checking: Effect.succeed(new Set()),
+    runPreflight: () => Effect.die("unused"),
     unavailable: Effect.succeed([]),
     slots: Effect.succeed([
       { worker: WorkerName.make("local"), capacity: 2, leased: 1 },
