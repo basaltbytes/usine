@@ -10,7 +10,7 @@ FROM debian:trixie-slim
 # ../hetzner/render-cloud-init.sh puts it in ../hetzner/cloud-init.yaml.
 ARG NODE_MAJOR=22
 ARG PNPM_VERSION=11.20.0
-ARG CLAUDE_CODE_VERSION=2.1.308
+ARG CLAUDE_CODE_VERSION=2.1.311
 ARG CODEX_VERSION=0.164.0
 # The worker's SSH user ID, so that files the attempt writes in its mounted
 # checkout belong to that user. Preflight compares the two.
