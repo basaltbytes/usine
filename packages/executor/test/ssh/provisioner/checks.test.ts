@@ -1,11 +1,13 @@
 import { assert, it } from "@effect/vitest";
+import { RemoteShell } from "@usine/agents/child-host";
+import { completes, type StubParent } from "@usine/durable/testing";
 import { ContainerImage, ProvisionerSeconds, ProvisionerTimings } from "@usine/core/worker";
 import { Effect, Fiber, Option } from "effect";
 import { AttemptId } from "@usine/core/attempt";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
-import { Executor, WorkerMachines } from "../../../src/executor.ts";
-import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
-import { boatAddress, hetznerAddress, RUN, runtimeOf } from "./fixtures.ts";
+import { CheckoutRequest, Executor, WorkerMachines } from "../../../src/executor.ts";
+import { ADDRESS, DESTINATION, fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
+import { boatAddress, hetznerAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 import { hetznerSettings } from "./support.ts";
 
@@ -89,3 +91,39 @@ it.live(
     }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
   },
 );
+
+it.live("keeps an allocated machine when its worker becomes fixed before preparation", () => {
+  const machine = fakeMachine();
+  const providers = fakeProviders();
+  const destinations: string[] = [];
+  const parent: StubParent = (context) => {
+    assert(context.request.host instanceof RemoteShell);
+    destinations.push(context.request.host.destination);
+    return completes(context);
+  };
+  return Effect.gen(function* () {
+    const machines = yield* WorkerMachines;
+    const workers = yield* SshWorkers;
+    const executor = yield* Executor;
+    const original = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+    const [server] = providers.hetzner.servers.values();
+    assert(server?.publicIp !== undefined);
+    yield* workers.addWorker(ADDRESS);
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* (yield* executor.prepare(request)).launch(sink);
+      }),
+    );
+    assert.deepStrictEqual(destinations, [`usine@${server.publicIp}`]);
+    yield* machines.release(original.hold);
+    assert.strictEqual(providers.hetzner.servers.size, 0);
+
+    const next = new CheckoutRequest({ ...request, attemptId: AttemptId.make("fixed-attempt") });
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* (yield* executor.prepare(next)).launch(sink);
+      }),
+    );
+    assert.deepStrictEqual(destinations, [`usine@${server.publicIp}`, DESTINATION]);
+  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress, { parent })));
+});

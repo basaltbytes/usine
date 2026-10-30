@@ -154,6 +154,7 @@ export interface ProvisionedMachinesOptions {
   readonly instance: string;
   readonly commands: RemoteCommands;
   readonly workerFor: (worker: WorkerName) => Effect.Effect<SshWorkerEntry, ExecutorError>;
+  readonly machineFor: (worker: WorkerName) => Effect.Effect<SshMachine, ExecutorError>;
   readonly entries: Effect.Effect<ReadonlyArray<SshWorkerEntry>>;
   readonly machineAt: (
     entry: SshWorkerEntry,
@@ -970,11 +971,30 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     worker: WorkerName,
     attemptId: AttemptId,
   ) {
+    yield* Effect.annotateCurrentSpan({ worker, attemptId });
+    const existing = yield* byAttempt(attemptId);
+    if (Option.isNone(existing)) {
+      const entry = yield* options.workerFor(worker);
+      if (Option.isNone(provisionerOf(entry))) {
+        yield* Effect.logDebug("Preparing attempt on the configured fixed SSH machine", {
+          worker,
+          attemptId,
+        });
+        return yield* options.machineFor(worker);
+      }
+    }
     const located = yield* locate(worker, attemptId, "lease").pipe(
       Effect.mapError(operationError("prepare")),
     );
     const machine = Option.flatMap(located, ({ machine }) => machine);
-    if (Option.isSome(machine)) return machine.value;
+    if (Option.isSome(machine)) {
+      yield* Effect.logDebug("Preparing attempt on its retained provisioned SSH machine", {
+        worker,
+        attemptId,
+        host: machine.value.shell.destination,
+      });
+      return machine.value;
+    }
     return yield* new ExecutorOperationError({
       operation: "prepare",
       message: `Worker "${worker}" has no machine for the attempt`,
