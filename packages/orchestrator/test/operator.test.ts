@@ -988,6 +988,11 @@ describe("Operator", () => {
             (yield* operator.detail(instance, current.run.id)).run.machineWait?.message,
             refusal.message,
           );
+          const task = yield* operator.task(instance, repository, ItemNumber.make(31));
+          assert.strictEqual(
+            task.runs.find(({ id }) => id === current.run.id)?.machineWait?.message,
+            refusal.message,
+          );
           const need = (yield* operator.overview(instance)).needsYou.find(
             (need) => need._tag === "WorkerQuotaNeed",
           );
