@@ -11,11 +11,11 @@ Create a loop in **Configuration > Loops > New**, selecting the project before e
 
 ## Create a minimal loop
 
-For a CLI import, export the current configuration with `usine config export ./config-export`. Ensure the `widgets` project and `developer` agent exist, then write the example below to `config-export/projects/widgets/loops/start-dev.md`. Run `usine config import ./config-export --message "Add start-dev loop"`. Keep the other exported entities; import replaces the complete configuration. To change the loop later, run `EDITOR=vi usine config edit loop widgets/start-dev`.
+For a CLI import, export the current configuration with `usine config export ./config-export`. Ensure the `widgets` project and `developer` agent exist, then write the example below to `start-dev.md` in `config-export/projects/widgets/loops/`. Run `usine config import ./config-export --message "Add start-dev loop"`. Keep the other exported entities; import replaces the complete configuration. To change the loop later, run `EDITOR=vi usine config edit loop widgets/start-dev`.
 
 Choose **New**, enter a `project/loop` name, and edit the template below. A short name also works when the configuration has one project. Save the loop, then select **Resume** after reviewing it; new loops start paused.
 
-```markdown title="projects/widgets/loops/start-dev.md"
+```markdown title="widgets/start-dev (export format)"
 ---
 trigger:
   on: issue
@@ -58,7 +58,7 @@ If an expression reads a field that the payload doesn't have, or `if:` isn't a b
 
 ## Limit the repositories
 
-```yaml title="projects/widgets/loops/start-dev.md"
+```yaml title="widgets/start-dev (export format)"
 selector:
   repos: [acme/widgets]
   tags: [backend]
@@ -102,7 +102,7 @@ Remove the trigger label first because the agent's comments and commits change t
 
 2. Write the first loop's task so that it changes the labels. This is `start-dev` from the factory that runs usine on its own repository. It also requires approval and skips issues that an open pull request already closes:
 
-   ```markdown title="projects/widgets/loops/start-dev.md"
+   ```markdown title="widgets/start-dev (export format)"
    ---
    trigger:
      on: issue

@@ -108,7 +108,7 @@ Docker refuses to remove a volume while a container references it, including a s
 
 ### Create a worker on Hetzner Cloud
 
-The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs Docker, with `usine` in the `docker` group, and Git, gh, Node.js 22, pnpm 11.20.0, Claude Code 2.1.308, Codex 0.164.0, and Chromium, which the logins use. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
+The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs Docker, with `usine` in the `docker` group, and Git, gh, Node.js 22, pnpm 11.20.0, Claude Code at the version pinned in `cloud-init.yaml`, Codex 0.164.0, and Chromium, which the logins use. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
 
 Workers can also be arm64 machines, such as Hetzner's Ampere `cax` types: the attempt image has linux/amd64 and linux/arm64 builds under the same tag, and Docker pulls the one for the machine. A `cax21` has 4 vCPUs and 8 GB of memory; set `HCLOUD_SERVER_TYPE=cax21`. A Hetzner snapshot creates servers of its own architecture only, and `infra/hetzner/snapshot.sh` builds it on a `cx23` by default, so for a [provisioned worker](/guides/add-a-provisioned-worker/) on `cax` servers, set `SERVER_TYPE` to a `cax` type, such as `cax11`.
 

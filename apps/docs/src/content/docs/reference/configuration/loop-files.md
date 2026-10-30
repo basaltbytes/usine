@@ -13,7 +13,7 @@ The schema is [`LoopFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c
 
 ## Example
 
-```markdown title="projects/widgets/loops/start-dev.md"
+```markdown title="widgets/start-dev (export format)"
 ---
 trigger:
   on: issue
@@ -234,7 +234,7 @@ Everything after the closing `---` line is the prompt template, and it must not 
 
 Values render as text: integers as decimal digits, booleans as `true` or `false`, and doubles in JavaScript number form ([`render`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L155)). To insert a list, reduce it to a string:
 
-```markdown title="projects/widgets/loops/start-dev.md"
+```markdown title="widgets/start-dev (export format)"
 Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 ```
 

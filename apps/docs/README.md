@@ -18,6 +18,8 @@ The [Operate runs guide](src/content/docs/guides/operate-runs.md) documents proj
 
 The [review and fix loops guide](src/content/docs/guides/review-fix-loops.md) documents conflict findings for read-only reviewers, base-branch merges before pushing fixes, and CI checks before changing outcome labels.
 
+The [Run a factory guide](src/content/docs/guides/index.mdx) documents installation and updates with npm.
+
 The [server guide](src/content/docs/guides/run-the-orchestrator-on-a-server.mdx) documents npm channel upgrades, idle and immediate restarts, the independent rollback helper, and setup for existing systemd installations. The CLI and `usine.yaml` reference pages describe the corresponding command and settings.
 
 TypeDoc generates `reference/api/` on every `build`, `dev`, and `check`, from the declaration files of the public subpaths of each `@usine/*` package in this package's `devDependencies`. The folder isn't committed. Build those packages first with `pnpm build` from the repository root, or `pnpm turbo run build --filter=@usine/docs^...` before `dev`. The TypeDoc plugin in `typedoc/` makes one page per package and per subpath, and shortens some Effect types; `typedoc/plugin.mjs` lists its changes.
