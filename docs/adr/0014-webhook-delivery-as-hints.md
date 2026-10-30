@@ -33,6 +33,8 @@ Board label writes queue bounded, coalesced item hints in the poller, even after
 
 The deliveries source extends `GitHubApp` for authenticated summary reads and reuses `CursorStore` for the last delivery ID, scoped to the installation. The `WebhookDeliveries` service owns the polling cadence and repository routing; it adds no transport or storage adapter. `Orchestrator` runs it beside polling and schedule triggers. The mode is read at startup, while each delivery cycle reads the current registry.
 
+Delivery IDs are branded decimal strings because GitHub returns integers above JavaScript's safe integer range. The decoder reads response text and uses the standard JSON reviver source context to preserve each ID's original digits; this is available at the Node 22 runtime floor. Cursor comparisons use `BigInt`, and the existing cursor store persists the string as JSON text. Numeric cursors from earlier versions use the store's logged reset behavior, repeating hints once without changing event deduplication.
+
 A cycle reads at most ten pages of 100 summaries and coalesces hints by registered repository. Reaching the page limit drops older hints and logs the decision. Each cycle has a 30-second timeout; typed failures retry after 10 seconds or GitHub's later rate-limit deadline. These limits affect freshness only. The normal poll and event ledger retain their existing behavior.
 
 Repository hints use the existing repository cycle, including cursor updates, backoff, projection, and loop evaluation. Item hints continue to fetch a snapshot without advancing a REST cursor. Settings reports the last hint received in the running process; the engine does not use that timestamp for scheduling.

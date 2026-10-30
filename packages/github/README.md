@@ -111,7 +111,7 @@ It mints both token kinds, posts an issue comment with the repo token, checks th
 
 ## Webhook delivery summaries
 
-`GitHubApp.deliveries(after)` uses the App JWT to read new summaries from `GET /app/hook/deliveries`. Pass the last recorded `WebhookDeliveryId`, or `Option.none()` on the first read. Each `WebhookDelivery` contains its ID, event, and optional repository ID. The adapter follows pagination until it reaches the recorded ID, the end of the log, or ten pages. It fetches no delivery payloads.
+`GitHubApp.deliveries(after)` uses the App JWT to read new summaries from `GET /app/hook/deliveries`. Pass the last recorded `WebhookDeliveryId`, or `Option.none()` on the first read. Each `WebhookDelivery` contains its ID, event, and optional repository ID. `WebhookDeliveryId` is a branded decimal string that preserves 64-bit IDs exactly; construct it with `WebhookDeliveryId.make("3851199271760044123")` and compare IDs with `BigInt`. Summary decoding reads the original JSON number token through the standard JSON reviver source context, supported by Node 22 and newer. The adapter follows pagination until it reaches the recorded ID, the end of the log, or ten pages. It fetches no delivery payloads.
 
 Enable the App webhook to record deliveries. A delivery with a failed HTTP status can still request a refresh; no reachable webhook endpoint is needed for deliveries mode.
 

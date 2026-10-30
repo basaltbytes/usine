@@ -5,7 +5,7 @@ import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RepositoryName } from "@usine/core/repository";
-import { CursorStore } from "@usine/engine/cursor";
+import { CursorKey, CursorStore } from "@usine/engine/cursor";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
 import {
   AppSlug,
@@ -54,7 +54,7 @@ const instance = (mode: "off" | "deliveries") =>
     quarantinedLoops: [],
     warnings: [],
   });
-const delivery = (id: number, event: string, repositoryId: number | null) =>
+const delivery = (id: string, event: string, repositoryId: number | null) =>
   Schema.decodeUnknownSync(WebhookDelivery)({ id, event, repositoryId });
 
 const appLayer = (deliveries: GitHubApp["Service"]["deliveries"]) =>
@@ -65,9 +65,9 @@ const appLayer = (deliveries: GitHubApp["Service"]["deliveries"]) =>
   });
 
 describe("Webhook delivery polling", () => {
-  it.live(
-    "ignores ping and unknown repositories and resumes its cursor after reopening SQLite",
-    () =>
+  it.live.each(["absent", "legacy number"])(
+    "persists the exact newest ID and resumes after reopening SQLite with an initially %s cursor",
+    (initialCursor) =>
       Effect.gen(function* () {
         const directory = InstanceDirectory.make(
           yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
@@ -81,11 +81,12 @@ describe("Webhook delivery polling", () => {
           Effect.sync(() => {
             seen.push(after);
             return [
-              delivery(4, "ping", null),
-              delivery(3, "issues", 100),
-              delivery(2, "issues", 99),
-              delivery(1, "pull_request", 99),
-            ].filter(({ id }) => Option.isNone(after) || id > after.value);
+              delivery("9", "ping", null),
+              delivery("3851199271760044123", "ping", null),
+              delivery("3851199271760044122", "issues", 100),
+              delivery("3851199271760044121", "issues", 99),
+              delivery("3851199271760044120", "pull_request", 99),
+            ].filter(({ id }) => Option.isNone(after) || BigInt(id) > BigInt(after.value));
           }),
         );
         const polling = Layer.mock(PollingTriggers)({
@@ -94,8 +95,16 @@ describe("Webhook delivery polling", () => {
               hints.push(name);
             }),
         });
+        const key = CursorKey.make(`github-deliveries:${installation.id}`);
+        if (initialCursor === "legacy number") {
+          yield* Effect.gen(function* () {
+            yield* (yield* CursorStore).write(key, Schema.Int, 9);
+          }).pipe(Effect.provide(CursorStore.layer), Effect.provide(localSqliteLayer(directory)));
+        }
         const cycle = Effect.gen(function* () {
           yield* (yield* WebhookDeliveries).poll(instance("deliveries"));
+          const stored = yield* (yield* CursorStore).read(key, Schema.String);
+          assert.deepStrictEqual(stored, Option.some("3851199271760044123"));
         }).pipe(
           Effect.provide(WebhookDeliveries.layer),
           Effect.provide(app),
@@ -106,7 +115,10 @@ describe("Webhook delivery polling", () => {
         assert.deepStrictEqual(hints, [repository]);
         yield* cycle.pipe(Effect.provide(localSqliteLayer(directory)));
         assert.deepStrictEqual(hints, [repository]);
-        assert.deepStrictEqual(seen, [Option.none(), Option.some(WebhookDeliveryId.make(4))]);
+        assert.deepStrictEqual(seen, [
+          Option.none(),
+          Option.some(WebhookDeliveryId.make("3851199271760044123")),
+        ]);
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -132,7 +144,7 @@ describe("Webhook delivery polling", () => {
         Layer.provideMerge(polling),
         Layer.provide(
           appLayer((after) =>
-            Effect.succeed(Option.isSome(after) ? [] : [delivery(1, "issues", 99)]),
+            Effect.succeed(Option.isSome(after) ? [] : [delivery("1", "issues", 99)]),
           ),
         ),
         Layer.provide(Layer.succeed(CursorStore)(cursors.store)),

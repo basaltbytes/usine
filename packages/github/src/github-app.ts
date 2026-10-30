@@ -53,7 +53,7 @@ import {
   type TokenScope,
 } from "./installation.ts";
 
-import { WebhookDelivery, WebhookDeliveryId, WebhookDeliveryFromApi } from "./delivery.ts";
+import { WebhookDelivery, WebhookDeliveryId, WebhookDeliveriesFromJson } from "./delivery.ts";
 
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
 /** The margin for clock skew between GitHub and this machine when checking token expiry, in milliseconds. */
@@ -228,13 +228,12 @@ export class GitHubApp extends Context.Service<
             "poll-webhook-deliveries",
             HttpClientRequest.get(next.value).pipe(authorized(jwt)),
           );
-          const summaries = yield* HttpClientResponse.schemaBodyJson(
-            Schema.Array(WebhookDeliveryFromApi),
-          )(response).pipe(
+          const summaries = yield* response.text.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(WebhookDeliveriesFromJson)),
             Effect.mapError((error) => invalidResponse("poll-webhook-deliveries", error.message)),
           );
           const fresh = summaries.filter(
-            (delivery) => Option.isNone(after) || delivery.id > after.value,
+            (delivery) => Option.isNone(after) || BigInt(delivery.id) > BigInt(after.value),
           );
           found.push(...fresh);
           if (fresh.length < summaries.length) return found;

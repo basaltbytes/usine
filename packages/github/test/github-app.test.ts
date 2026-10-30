@@ -502,6 +502,36 @@ describe("GitHubApp", () => {
 });
 
 describe("GitHubApp webhook deliveries", () => {
+  it.live("preserves adjacent 64-bit IDs and filters strictly after the exact cursor", () => {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          new Response(`[
+            {"id":3851199271760044123,"event":"issues","repository_id":99},
+            {"id":3851199271760044122,"event":"pull_request","repository_id":99},
+            {"id":3851199271760044121,"event":"ping","repository_id":null}
+          ]`),
+        ),
+      ),
+    );
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const summaries = yield* app.deliveries(Option.none());
+      assert.deepStrictEqual(
+        summaries.map(({ id }) => id),
+        ["3851199271760044123", "3851199271760044122", "3851199271760044121"],
+      );
+      const cursor = summaries[1];
+      if (cursor === undefined) return assert.fail("missing delivery cursor");
+      const fresh = yield* app.deliveries(Option.some(cursor.id));
+      assert.deepStrictEqual(
+        fresh.map(({ id }) => id),
+        ["3851199271760044123"],
+      );
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
   it.live("uses an App JWT and summary pagination until the persisted delivery ID", () => {
     const requests: Array<string> = [];
     const client = HttpClient.make((request) =>
@@ -521,12 +551,12 @@ describe("GitHubApp webhook deliveries", () => {
             JSON.stringify(
               first
                 ? [
-                    { id: 15, event: "ping", repository_id: null },
-                    { id: 14, event: "issues", repository_id: 99 },
+                    { id: 12, event: "ping", repository_id: null },
+                    { id: 11, event: "issues", repository_id: 99 },
                   ]
                 : [
-                    { id: 13, event: "pull_request", repository_id: 99 },
-                    { id: 12, event: "issues", repository_id: 99 },
+                    { id: 10, event: "pull_request", repository_id: 99 },
+                    { id: 9, event: "issues", repository_id: 99 },
                   ],
             ),
             {
@@ -543,19 +573,37 @@ describe("GitHubApp webhook deliveries", () => {
     );
     return Effect.gen(function* () {
       const app = yield* GitHubApp;
-      const summaries = yield* app.deliveries(Option.some(WebhookDeliveryId.make(12)));
+      const summaries = yield* app.deliveries(Option.some(WebhookDeliveryId.make("9")));
       assert.deepStrictEqual(
         summaries.map(({ id }) => id),
-        [15, 14, 13],
+        ["12", "11", "10"],
       );
       assert(Option.isNone(summaries[0]?.repositoryId ?? Option.some(RepositoryId.make(1))));
       assert.strictEqual(requests.length, 2);
     }).pipe(Effect.provide(appLayer(client)));
   });
 
-  it.live("rejects malformed delivery summaries through the typed response error", () => {
+  it.live.each(["0", "-1", "1.5", "1e3", '"01"', '"bad"', "null", "true"])(
+    "rejects delivery ID %s through the typed response error",
+    (id) => {
+      const client = HttpClient.make((request) =>
+        Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(`[{"id":${id},"event":"issues","repository_id":99}]`),
+          ),
+        ),
+      );
+      return Effect.gen(function* () {
+        const error = yield* (yield* GitHubApp).deliveries(Option.none()).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "InvalidGitHubResponseError");
+      }).pipe(Effect.provide(appLayer(client)));
+    },
+  );
+
+  it.live("rejects malformed JSON through the typed response error", () => {
     const client = HttpClient.make((request) =>
-      Effect.succeed(jsonResponse(request, [{ id: 0, event: "issues", repository_id: 99 }])),
+      Effect.succeed(HttpClientResponse.fromWeb(request, new Response('[{"id":'))),
     );
     return Effect.gen(function* () {
       const error = yield* (yield* GitHubApp).deliveries(Option.none()).pipe(Effect.flip);
