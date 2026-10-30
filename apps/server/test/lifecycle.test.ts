@@ -1,6 +1,9 @@
+import { rejects } from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
   chmodSync,
+  symlinkSync,
+  renameSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -215,6 +218,35 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     const state = await run(probeInstance(directory));
     assert(state._tag === "Stopped");
     assert.deepStrictEqual(state.stale, Option.none());
+  });
+
+  it("refuses stop and restart before signaling when the admin token is unsafe or missing", async () => {
+    const directory = instanceFolder();
+    const first = await startFixture(directory);
+    const path = join(directory, ".usine/admin-token");
+    const expectRefusal = async () => {
+      for (const command of ["stop", "restart"]) {
+        for (const flags of [[], ["--force"]]) {
+          await rejects(runCli(directory, [command, ...flags]), (error: Error) => {
+            assert.include(error.message, path);
+            assert.include(error.message, `uid ${process.getuid?.()}`);
+            assert.include(error.message, "0600");
+            return true;
+          });
+          assert.isTrue(alive(first.pid));
+        }
+      }
+    };
+    chmodSync(path, 0o644);
+    await expectRefusal();
+    chmodSync(path, 0o600);
+    renameSync(path, `${path}.real`);
+    symlinkSync(`${path}.real`, path);
+    await expectRefusal();
+    rmSync(path);
+    await expectRefusal();
+    writeFileSync(instanceFiles(directory).record, "unreadable");
+    await expectRefusal();
   });
 
   it("restarts into a new process with the recorded launch, port, origin, and log level", async () => {

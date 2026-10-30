@@ -45,14 +45,16 @@ const getJson = <A, I>(
   return Effect.gen(function* () {
     const token = yield* readAdminToken(directory);
     const client = yield* HttpClient.HttpClient;
-    return yield* HttpClient.filterStatusOk(client).get(url, {
-      headers: { authorization: `Bearer ${Redacted.value(token)}` },
-    });
-  }).pipe(
-    Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
-    Effect.timeout(OPERATOR_API_TIMEOUT),
-    Effect.mapError((error) => new OperatorApiError({ url, reason: error.message })),
-  );
+    return yield* HttpClient.filterStatusOk(client)
+      .get(url, {
+        headers: { authorization: `Bearer ${Redacted.value(token)}` },
+      })
+      .pipe(
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
+        Effect.timeout(OPERATOR_API_TIMEOUT),
+        Effect.mapError((error) => new OperatorApiError({ url, reason: error.message })),
+      );
+  });
 };
 
 /** Lists the Runs of the instance that listens on `port`, with one `GET /api/overview`. */

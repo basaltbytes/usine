@@ -111,19 +111,23 @@ const serve = Effect.fnUntraced(function* (options: {
       ? `usine is running in setup mode at ${options.url}`
       : `usine is running at ${options.url}`,
   );
-  const signInLink = yield* options.auth.authentication.link;
-  yield* Console.log(`Sign in: ${signInLink}`);
-  if (options.openSetupPage) {
-    yield* openBrowser(signInLink).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning("The setup page could not be opened automatically", {
-          command: error.command,
-          cause: error.cause,
-          url: options.url,
-        }),
-      ),
-      Effect.ignore,
-    );
+  if (process.stdout.isTTY) {
+    const signInLink = yield* options.auth.authentication.link;
+    yield* Console.log(`Sign in: ${signInLink}`);
+    if (options.openSetupPage) {
+      yield* openBrowser(signInLink).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("The setup page could not be opened automatically", {
+            command: error.command,
+            cause: error.cause,
+            url: options.url,
+          }),
+        ),
+        Effect.ignore,
+      );
+    }
+  } else {
+    yield* Console.log("Run usine sign-in-link in the instance folder to sign in.");
   }
   return yield* Effect.never;
 });

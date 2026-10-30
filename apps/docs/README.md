@@ -35,3 +35,5 @@ The [worker guide](src/content/docs/guides/add-a-worker.mdx) describes shared pn
 The [`usine config` reference](src/content/docs/reference/configuration/config.md) documents editing stored configuration, bulk import and export, revision history, and restart requirements. The guides use configuration revisions after the first-start import; YAML and Markdown files are the bootstrap and export formats.
 
 The [usine.yaml reference](src/content/docs/reference/configuration/usine-yaml.md#webhooks) documents webhook modes, endpoint secrets, and delivery health.
+
+The [sign-in guide](src/content/docs/guides/sign-in.md) describes terminal-only startup links, local admin token ownership, session expiry, and GitHub token revocation.

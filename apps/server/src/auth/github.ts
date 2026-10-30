@@ -63,13 +63,42 @@ export const githubSignInLayer = Layer.effect(
             authFailure("GitHub authorization failed. Try signing in again.", 502),
           ),
         );
+    const revoke = Effect.fn("GitHubSignIn.revoke")(function* (token: Redacted.Redacted<string>) {
+      const { id, secret } = yield* credentials;
+      yield* Effect.annotateCurrentSpan({ clientId: id });
+      yield* client
+        .execute(
+          HttpClientRequest.delete(
+            `https://api.github.com/applications/${encodeURIComponent(id)}/token`,
+          ).pipe(
+            HttpClientRequest.basicAuth(id, secret),
+            HttpClientRequest.setHeaders({
+              accept: "application/vnd.github+json",
+              "user-agent": "usine",
+            }),
+            HttpClientRequest.bodyJsonUnsafe({ access_token: Redacted.value(token) }),
+          ),
+        )
+        .pipe(Effect.timeout("15 seconds"));
+      yield* Effect.logDebug("GitHub user token revoked", { clientId: id });
+    });
     const identity = (token: Redacted.Redacted<string>) =>
       request(
         HttpClientRequest.get("https://api.github.com/user").pipe(
           HttpClientRequest.bearerToken(token),
         ),
         GitHubIdentity,
-      ).pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(token))));
+      ).pipe(
+        Effect.ensuring(
+          revoke(token).pipe(
+            Effect.interruptible,
+            Effect.catch((error) =>
+              Effect.logWarning("Could not revoke the GitHub user token", { reason: error._tag }),
+            ),
+            Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(token))),
+          ),
+        ),
+      );
     const exchange = (fields: Record<string, string>) =>
       request(
         HttpClientRequest.post("https://github.com/login/oauth/access_token").pipe(
