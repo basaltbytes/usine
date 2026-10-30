@@ -138,7 +138,7 @@ describe("encrypted attachments", () => {
         for (const bytes of [
           Buffer.alloc(0),
           Buffer.from("invalid snapshot"),
-          Buffer.from(original).fill(0, 28, 29),
+          Buffer.from(original).fill(original.readUInt8(28) ^ 1, 28, 29),
         ]) {
           yield* Effect.promise(() => writeFile(snapshot, bytes));
           const corrupt = yield* Effect.void.pipe(Effect.provide(persisted(path)), Effect.flip);

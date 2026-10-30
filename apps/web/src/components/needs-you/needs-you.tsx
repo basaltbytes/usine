@@ -22,6 +22,7 @@ import { useOpenRun } from "~/hooks/use-open-run";
 import {
   needCopy,
   needKindLabel,
+  needSettingsLabel,
   workerAttemptLabel,
   openWorkerLabel,
 } from "~/lib/needs-you/strings";
@@ -67,6 +68,7 @@ const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
     <>
       <NeedItem
         copy={copy}
+        description={need.approvalReason}
         loop={need.loop}
         heading={need.loop}
         item={origin}
@@ -134,6 +136,22 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
       const copy = needCopy(need);
       return <NeedItem copy={copy} heading={copy.title} dismiss={dismiss} />;
     }
+    case "UpgradeDrainNeed":
+      return (
+        <NeedItem
+          copy={needCopy(need)}
+          dismiss={dismiss}
+          actions={
+            <Button
+              variant="ghost"
+              nativeButton={false}
+              render={<Link to="/configuration/settings" />}
+            >
+              {needSettingsLabel}
+            </Button>
+          }
+        />
+      );
     case "ApprovalNeed":
       return <ApprovalAsk need={need} dismiss={dismiss} />;
     case "CycleBudgetNeed":

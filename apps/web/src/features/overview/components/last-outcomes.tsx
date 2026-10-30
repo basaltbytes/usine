@@ -37,7 +37,7 @@ const OutcomeRow = ({ closed, overview, now }: OutcomeRowProps) => {
   );
   return (
     <RunRow run={run}>
-      <FillCell className="py-3">
+      <FillCell className="py-3 whitespace-normal">
         <RunPageLink run={run}>
           {origin === null ? (
             <span className="block truncate text-sm font-medium">
@@ -52,6 +52,9 @@ const OutcomeRow = ({ closed, overview, now }: OutcomeRowProps) => {
             />
           )}
         </RunPageLink>
+        {run.approvalReason !== null && (
+          <p className="mt-0.5 text-xs text-muted-foreground wrap-anywhere">{run.approvalReason}</p>
+        )}
         <p className="mt-0.5 truncate text-xs text-muted-foreground md:hidden">{run.loop}</p>
       </FillCell>
       <TableCell className="py-3 max-md:hidden">{run.loop}</TableCell>

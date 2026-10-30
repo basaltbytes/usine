@@ -10,7 +10,7 @@ import { RunAgain } from "@usine/core/run/again";
 import { RunApproval } from "@usine/core/run/approval";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { TranscriptEntry } from "../transcript.ts";
 
 /** The full durable view of a Run. */
@@ -34,6 +34,11 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   closedAt: Schema.Option(Schema.DateTimeUtc),
   /** The approval the Run consumed, or `None` before approval and for Loops with `approval: none`. */
   approval: Schema.Option(RunApproval),
+  /** The saved approval decision, or None for events recorded before decision explanations. */
+  approvalReason: Schema.Option(Schema.NonEmptyString).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
   /** The run-again origin, or `None` for a Run opened by its trigger. */
   runAgain: Schema.Option(RunAgain),
   /** The managed repo checked out for this run. */
@@ -85,6 +90,8 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
   closedAt: Schema.Option(Schema.DateTimeUtc),
   /** The approval the Run consumed, or `None` before approval and for Loops with `approval: none`. */
   approval: Schema.Option(RunApproval),
+  /** The saved approval decision, or None for events recorded before decision explanations. */
+  approvalReason: RunSnapshot.fields.approvalReason,
   /** The run-again origin, or `None` for a Run opened by its trigger. */
   runAgain: Schema.Option(RunAgain),
   /** The managed repo checked out for this run. */

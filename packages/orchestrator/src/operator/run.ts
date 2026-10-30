@@ -1,3 +1,4 @@
+import { UpgradeWait } from "@usine/engine/engine";
 import { SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec } from "@usine/core/agent/brain";
@@ -92,6 +93,11 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   agentBrain: BrainSpec,
   /** The current lifecycle state. */
   state: RunStateTag,
+  /** The idle upgrade deferring this run before it reserves a worker slot. */
+  upgradeWait: Schema.NullOr(UpgradeWait).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /** The pending provider-capacity retry, or null when none is scheduled. */
   providerRetry: Schema.NullOr(ProviderRetry).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
@@ -120,6 +126,11 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
    * `approval: none`.
    */
   approval: Schema.NullOr(ApprovalView),
+  /** The saved approval decision, or null for older events. */
+  approvalReason: Schema.NullOr(Schema.NonEmptyString).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /**
    * The closed Run that the operator ran again to open this one, and who asked, or null for a
    * trigger-opened Run. Its time is `openedAt`.

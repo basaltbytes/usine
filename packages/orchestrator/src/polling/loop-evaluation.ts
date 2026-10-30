@@ -101,6 +101,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     repository: repository.name,
     item: item.number,
   });
+  const expressions = yield* ExpressionEngine;
   const config = yield* ConfigParser;
   const runs = yield* RunEngine;
   const loops = resolved.filter(({ loop }) => loop.trigger.on === item.source);
@@ -186,7 +187,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
       continue;
     }
     const submitted = yield* runs.submit(
-      triggerSubmission({
+      yield* triggerSubmission(expressions, {
         dedupKey,
         cycleGeneration,
         itemKey: item.itemKey,

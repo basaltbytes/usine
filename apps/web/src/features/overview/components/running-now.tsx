@@ -1,3 +1,4 @@
+import { upgradeWaitLine } from "~/lib/runs/strings";
 import { WarningIcon } from "@phosphor-icons/react";
 import type { FactoryOverview, RunningAttemptView, WorkerView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
@@ -56,6 +57,9 @@ const RunningRow = ({ running, overview, now }: RunningRowProps) => {
             />
           )}
         </RunPageLink>
+        {run.approvalReason !== null && (
+          <p className="mt-0.5 text-xs text-muted-foreground wrap-anywhere">{run.approvalReason}</p>
+        )}
         <p className="mt-0.5 truncate text-xs text-muted-foreground lg:hidden">
           <span className="md:hidden">
             <RunningMark />
@@ -120,27 +124,37 @@ type RunningNowProps = {
 
 export const RunningNow = ({ running, workers, now }: RunningNowProps) => {
   const overview = useOverview();
-  return running.length === 0 ? (
-    <EmptyLine>{nothingRunning(workers)}</EmptyLine>
-  ) : (
-    <div className="-mx-2">
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead>Item</TableHead>
-            <TableHead className="max-md:hidden">Loop</TableHead>
-            <TableHead className="max-lg:hidden">Agent</TableHead>
-            <TableHead className="max-lg:hidden">Worker</TableHead>
-            <TableHead className="max-sm:hidden">Started</TableHead>
-            <TableHead className="text-right">Last activity</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {running.map((entry) => (
-            <RunningRow key={entry.attempt.id} running={entry} overview={overview} now={now} />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+  const upgrade = workers.find((worker) => worker.upgradeWait !== null)?.upgradeWait;
+  return (
+    <>
+      {upgrade != null && (
+        <p role="status" className="mb-3 text-sm text-muted-foreground">
+          {upgradeWaitLine(upgrade)}
+        </p>
+      )}
+      {running.length === 0 ? (
+        <EmptyLine>{nothingRunning(workers)}</EmptyLine>
+      ) : (
+        <div className="-mx-2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Item</TableHead>
+                <TableHead className="max-md:hidden">Loop</TableHead>
+                <TableHead className="max-lg:hidden">Agent</TableHead>
+                <TableHead className="max-lg:hidden">Worker</TableHead>
+                <TableHead className="max-sm:hidden">Started</TableHead>
+                <TableHead className="text-right">Last activity</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {running.map((entry) => (
+                <RunningRow key={entry.attempt.id} running={entry} overview={overview} now={now} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </>
   );
 };

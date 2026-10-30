@@ -158,6 +158,7 @@ An evaluation failure leaves the stored loop definition unchanged:
 - **`if` of an `issue` or `pr` loop.** usine opens no run for that loop on that item and leaves the item's queued runs as they are. Other loops, other items, and the poll cursor continue. **Needs attention** shows the failure with the loop and the item while it lasts, and usine logs it once per loop, item, and content hash ([`evaluation-failures.ts`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/polling/evaluation-failures.ts)). The first poll after a restart or an applied revision fetches failing items again, so a fixed loop evaluates them without waiting for a change.
 - **`if` of a `schedule` loop.** The tick fails for that repository, and usine evaluates it again at the next wake.
 - **The recheck before a queued run opens.** usine logs a warning, and the run opens as if the check had passed ([`TriggerCondition.recheck`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-condition.ts#L87)).
+- **An `approval` condition.** The run requires approval and logs a warning. The saved decision explains the evaluation failure.
 - **A `{{ ... }}` interpolation.** See [Render failures](/reference/configuration/loop-files/#render-failures).
 
 ## Language
@@ -239,40 +240,23 @@ if: >-
   !item.closedByPullRequestsReferences.nodes.exists(pr, pr.state == "OPEN")
 ```
 
-Require approval when the factory App applied `ready-for-agent`. Replace
-`your-app-slug` with the App's slug, without `[bot]`:
+Start human-labeled issues automatically and require approval for bot-set labels:
 
-```yaml title="projects/widgets/loops/start-app-labeled.md"
+```yaml title="projects/widgets/loops/start-dev.md"
 trigger:
   on: issue
   if: >-
     item.state == "OPEN" &&
-    "ready-for-agent" in item.labelEvents &&
-    item.labelEvents["ready-for-agent"].actor != null &&
-    item.labelEvents["ready-for-agent"].actor.type == "Bot" &&
-    item.labelEvents["ready-for-agent"].actor.login == "your-app-slug"
-approval: required
+    item.labels.nodes.exists(label, label.name == "ready-for-agent")
+approval: 'item.labelEvents["ready-for-agent"].actor.type != "User"'
 agent: developer
 ```
 
-`approval` is a fixed loop setting. To start human-labeled issues automatically,
-use a separate loop with `approval: none` and this condition:
-
-```yaml title="projects/widgets/loops/start-human-labeled.md"
-trigger:
-  on: issue
-  if: >-
-    item.state == "OPEN" &&
-    "ready-for-agent" in item.labelEvents &&
-    item.labelEvents["ready-for-agent"].actor != null &&
-    item.labelEvents["ready-for-agent"].actor.type == "User"
-approval: none
-agent: developer
-```
-
-These conditions skip unknown actors and missing history. Keep other loops that
-start the same work equally restrictive. Use `on: pr` for the same policy on pull
-requests. Each loop's existing `max_cycles` limit still applies.
+The approval expression returns `false` for a `User` actor and `true` for other
+actor types. Missing history or a null actor causes an evaluation error, which
+requires approval and logs a warning. A board move uses the App identity and
+requires approval under this condition. Use `on: pr` for the same policy on pull
+requests. The loop's `max_cycles` limit still applies.
 
 A pull request is ready for review, and no outcome label is present:
 

@@ -1,3 +1,5 @@
+import { ReleaseVersion } from "@usine/core/upgrade";
+import { UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
 import { WebhookHealth } from "../src/webhooks.ts";
 import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
@@ -433,6 +435,7 @@ const testLayer = (
     readonly schedule?: ScheduleTriggers["Service"]["latest"];
   } = {},
   workerStatus: Layer.Layer<WorkerStatus> = WorkerStatus.idle,
+  upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>> = Effect.succeed(Option.none()),
 ) => {
   const acknowledged: Array<AttentionAcknowledgement> = [];
   const readTranscript = (query: TranscriptQuery) =>
@@ -474,6 +477,9 @@ const testLayer = (
     inspect: () => Effect.succeed(runSnapshot),
     reconcile: () => Effect.void,
     drain: () => Effect.void,
+    waitForUpgrade: () => Effect.void,
+    cancelUpgrade: Effect.void,
+    upgradeDrain,
     retry: commands.retry,
     revoke: () => Effect.succeed([]),
     runAgain: commands.runAgain,
@@ -2149,6 +2155,7 @@ describe("Operator", () => {
               new RunAgainRequest({
                 step: loop.step,
                 approval: "required",
+                approvalReason: Option.some("Approval required: the loop requires approval"),
                 cycleLimit: Option.some(CycleLimit.make(5)),
                 permissions: "read",
                 context: new AttemptContext({
@@ -2160,6 +2167,18 @@ describe("Operator", () => {
               }),
             ],
           ]);
+          for (const [approval, expected] of [
+            ['item.number == 99 && repo.owner == "basaltbytes"', "none"],
+            ['item.labelEvents["ready-for-agent"].actor.type != "User"', "required"],
+          ] as const) {
+            const conditional = new LoadedInstance({
+              ...configured,
+              loops: [new LoopFile({ ...loop, approval: Source.make(approval) })],
+            });
+            yield* operator.runAgain(conditional, runId, edit);
+            assert.strictEqual(requests.at(-1)?.[1].approval, expected);
+            assert(Option.isSome(requests.at(-1)?.[1].approvalReason ?? Option.none()));
+          }
           const unknownAgent = yield* Effect.flip(
             operator.runAgain(
               configured,
@@ -2172,7 +2191,7 @@ describe("Operator", () => {
             operator.runAgain(new LoadedInstance({ ...configured, loops: [] }), runId, edit),
           );
           assert.strictEqual(retired._tag, "LoopNotFoundError");
-          assert.strictEqual(requests.length, 1);
+          assert.strictEqual(requests.length, 3);
         }).pipe(
           Effect.provide(
             testLayer(approved, moved, reads, revision, snapshot, noCycleBudgets, {
@@ -2889,3 +2908,95 @@ describe("Operator", () => {
     },
   );
 });
+
+it.effect(
+  "refreshes upgrade waits on cached runs and clears deferred attention when canceled",
+  () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const drain = yield* Ref.make(Option.none<UpgradeDrain>());
+      const current = new RunSnapshot({
+        ...snapshot,
+        run: new Run({ ...snapshot.run, state: new RunState.Queued() }),
+        attempts: [],
+      });
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const wait = new UpgradeWait({
+          target: ReleaseVersion.make("1.2.3"),
+          since: yield* DateTime.now,
+        });
+        const runWaits = Effect.map(operator.overview(instance), (view) =>
+          view.projects.flatMap(({ runs }) =>
+            runs.filter(({ id }) => id === current.run.id).map(({ upgradeWait }) => upgradeWait),
+          ),
+        );
+        assert((yield* runWaits).every((value) => value === null));
+        yield* Ref.set(drain, Option.some(new UpgradeDrain({ wait, runIds: [current.run.id] })));
+        assert.deepStrictEqual(yield* runWaits, [wait]);
+        assert.deepStrictEqual(
+          (yield* operator.detail(instance, current.run.id)).run.upgradeWait,
+          wait,
+        );
+        const desk = yield* operator.desk(instance);
+        assert(desk.workers.every(({ upgradeWait }) => upgradeWait?.target === wait.target));
+        assert(
+          desk.notMoving.some(
+            ({ reason }) => reason._tag === "WaitingForUpgrade" && reason.run.id === current.run.id,
+          ),
+        );
+        yield* TestClock.adjust("599 seconds");
+        assert(
+          !(yield* operator.overview(instance)).needsYou.some(
+            ({ _tag }) => _tag === "UpgradeDrainNeed",
+          ),
+        );
+        yield* TestClock.adjust("1 second");
+        const warning = (yield* operator.overview(instance)).needsYou.find(
+          ({ _tag }) => _tag === "UpgradeDrainNeed",
+        );
+        assert(warning?._tag === "UpgradeDrainNeed");
+        assert.strictEqual(warning.deferredRuns, 1);
+        yield* operator.dismissNeed(instance, attentionKey(warning));
+        assert(
+          (yield* operator.overview(instance)).dismissedNeeds.some(
+            ({ _tag }) => _tag === "UpgradeDrainNeed",
+          ),
+        );
+        yield* Ref.set(drain, Option.none());
+        assert((yield* runWaits).every((value) => value === null));
+        assert.strictEqual(
+          (yield* operator.detail(instance, current.run.id)).run.upgradeWait,
+          null,
+        );
+        const canceled = yield* operator.overview(instance);
+        assert(
+          ![...canceled.needsYou, ...canceled.dismissedNeeds].some(
+            ({ _tag }) => _tag === "UpgradeDrainNeed",
+          ),
+        );
+      }).pipe(
+        Effect.provide(
+          testLayer(
+            approved,
+            moved,
+            reads,
+            revision,
+            current,
+            undefined,
+            undefined,
+            [],
+            [],
+            [],
+            undefined,
+            {},
+            undefined,
+            Ref.get(drain),
+          ),
+        ),
+      );
+    }),
+);

@@ -165,6 +165,7 @@ const fromUpgrades = <A>(
 const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
   routes
     .handle("upgradeStatus", () => fromUpgrades((upgrades) => upgrades.status))
+    .handle("cancelUpgrade", () => fromUpgrades((upgrades) => upgrades.cancel).pipe(acknowledge))
     .handle("serverVersion", () =>
       fromUpgrades((upgrades) => upgrades.status.pipe(Effect.map((status) => status.running))),
     )

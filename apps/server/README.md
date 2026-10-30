@@ -135,9 +135,11 @@ After the first poll cycle and schedule check finish, refreshing the overview re
 
 A global npm installation managed by systemd checks for upgrades every five minutes. Run `usine config edit settings instance` to configure `settings.upgrade_channel: latest` or `next` and `settings.upgrade_mode: off`, `propose`, or `automatic`. The defaults are `latest` and `propose`. Before offering an upgrade or draining attempts, the server checks that every `@usine/*` dependency, including transitive dependencies, resolves on the registry. If a package is unavailable, the server keeps admitting attempts and checks again in the next cycle.
 
-Upgrade status retains the last fully verified version for the selected channel while a check is running or a newer release is incomplete. Registry probe details stay in the server log; the status message reports upgrade failures.
+Upgrade status retains the last fully verified version for the selected channel while a check is running or a newer release is incomplete. Registry probe details stay in the server log; the status message explains pending upgrade waits and upgrade failures.
 
 In **Configuration → Settings**, select **Upgrade when idle** to stop admitting attempts and wait for active attempts to finish, or **Upgrade now** to restart and reattach running attempts. `usine upgrade [<version> | --channel <latest|next>]` requests the same operation; `--force` selects immediate restart, and `--check` only reports versions. The CLI prints when the request is accepted; Settings and the helper journal report its outcome.
+
+While an idle upgrade waits, deferred runs keep worker slots free. Settings shows the requested version and offers **Cancel pending upgrade**; authenticated clients can send `DELETE /api/upgrade`. Cancellation resumes deferred runs without a restart and prevents automatic mode from requesting that version again in this process. A manual request can retry it. Cancellation is rejected once installation starts. An upgrade wait with deferred runs appears in Needs attention after ten minutes.
 
 Install the helper service and polkit rule in the [server guide](https://docs.usine.dev/guides/run-the-orchestrator-on-a-server/) before using app upgrades. The independent helper installs into the same npm prefix and restores the previous version if installation or the new operator API fails. Its result is in `.usine/upgrade/result.json`; inspect `journalctl -u usine-upgrade.service` for progress. For npm `ETARGET` or `E404` errors, the helper tries installation up to three times, 60 seconds apart. After a successful rollback from an install failure, automatic mode can retry that version. A version that failed its health check, or whose rollback record does not identify the failure stage, requires a manual retry. Rollback restores packages; maintain database backups for releases with incompatible storage changes.
 
@@ -205,6 +207,10 @@ Loop checks at `/api/configuration/loops/check` validate integer CEL priorities.
 `GET /api/openapi.json` publicly serves the generated OpenAPI 3.1 contract, including sign-in, members, and tokens. It describes request and response schemas and authentication requirements without reading instance state. See the [HTTP API reference](https://docs.usine.dev/reference/operator-api/) for endpoint descriptions and the downloadable document.
 
 Route definitions and schema annotations generate the contract. Authentication handlers use the paths and request schemas in `src/auth/api.ts`; the server combines those definitions with `OperatorApi` in `src/openapi.ts`. After changing a contract, regenerate and commit `apps/docs/public/openapi.json` as described in the [docs README](../docs/README.md#operator-http-api-reference).
+
+`POST /api/configuration/loops/check` validates conditional approval as a boolean
+CEL expression in the trigger's environment. Approval diagnostics use the
+`approval` field path. Run and overview responses include the saved decision.
 
 ## Public HTTPS access
 

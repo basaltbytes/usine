@@ -49,7 +49,7 @@ Keys are snake_case. Unknown keys at any level and duplicate keys are errors.
 | --- | --- | --- | --- |
 | `trigger` | [trigger](#trigger) | required | The loop's stream and the condition that selects items. |
 | `selector` | [selector](#selector) | every repository in the project | The repositories that the loop applies to. |
-| `approval` | `none`, `required` | `none` | Whether each new run waits for the operator's approval. |
+| `approval` | `none`, `required`, or boolean CEL expression | `none` | Whether each new run waits for the operator's approval. |
 | `step` | string | `run` | The name of the run's single step. |
 | `agent` | string | required | The agent that does the loop's runs: the name of a file in `agents/`, without `.md`. |
 | `max_cycles` | integer ≥ 1 | `3` | The loop's cycle budget per item. |
@@ -137,7 +137,26 @@ selector:
 
 ### `approval`
 
-With `required`, each new run waits in `Waiting` until the operator approves it in the UI. usine records the approval as an event. With the default `none`, runs start without an approval ([`ApprovalRequirement`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/loop.ts#L9)). If the item changes while a run waits and still matches, usine opens a new waiting run for the new state and cancels the older one as superseded. If it no longer matches, usine revokes the waiting run.
+With `required`, each new run waits in `Waiting` until the operator approves it in the UI. usine records the approval as an event. With the default `none`, runs start without an approval ([`ApprovalRequirement`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/loop.ts#L9)). If the item changes while a run waits and still matches, usine opens a new run for the new state, evaluates approval again, and cancels the older one as superseded. If it no longer matches, usine revokes the waiting run.
+
+A CEL expression can decide approval for each event. `true` requires approval;
+`false` permits an automatic start. The expression uses the same `item` and `repo`
+environment as `trigger.if`. The loop form and `/api/configuration/loops/check`
+check that the result is boolean.
+
+```yaml
+approval: 'item.labelEvents["ready-for-agent"].actor.type != "User"'
+```
+
+This condition starts runs for human-set labels immediately and requires approval
+for bot-set labels. Missing label history, a null actor, or another evaluation
+error also requires approval and logs a warning. `User` identifies a human GitHub
+account; it does not check instance membership.
+
+The run reader and overview show the saved decision and label actors from the
+event snapshot. Editing the loop does not change an existing run's decision.
+**Run again** evaluates the current condition against the saved event payload;
+a retry retains the existing decision.
 
 ### `step`
 

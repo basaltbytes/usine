@@ -6,6 +6,14 @@ The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `Sch
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version.
 
+## Conditional approval
+
+Loop approval accepts `required`, `none`, or a boolean CEL condition over the event
+payload and repository. Polling, schedules, and Run again evaluate the condition
+before submission. Evaluation errors require approval and emit a warning. Run
+views and approval needs include the saved `approvalReason`, including label
+actors when present. Existing runs retain their original decision.
+
 ## Operator
 
 `Operator` provides run and board observation, transcript pages, label-backed board moves, approve, retry, cancel, and loop pause. It returns typed data for consuming apps. Captured executor defects appear as `DefectFailure` with a safe message, without the original cause. `OperatorObservation` gives the same read-only projection without execution services.
@@ -363,6 +371,12 @@ HTTP actions use the authenticated member for approvals, retries, interventions,
 Polling and statistics SQLite fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Local-worker tests that exercise Git hooks and executable files use the OS temporary directory.
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+## Idle upgrade waits
+
+Run views expose `upgradeWait` while attempt admission defers them, and the desk reports `WaitingForUpgrade` with the requested version. Worker rows show the same upgrade wait while free slots remain available after cancellation. Overview refreshes these fields independently of persisted run changes. After ten minutes with deferred runs, `UpgradeDrainNeed` appears in Needs attention and supports dismissal and undo.
+
+`GET /api/upgrade` reports the requested target and explains the waiting phase. `DELETE /api/upgrade` cancels a pending request before installation begins.
 
 ## HTTP API reference
 

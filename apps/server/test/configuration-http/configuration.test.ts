@@ -289,7 +289,10 @@ it("applies API changes to the configuration view and running scheduler, and pau
       expect(
         (yield* request("PUT", "/entities/loop/acme-project%2Freview", {
           expected: 2,
-          text: loopText,
+          text: loopText.replace(
+            "agent: developer",
+            `approval: 'item.labelEvents["ready-for-agent"].actor.type != "User"'\nagent: developer`,
+          ),
         })).status,
       ).toBe(200);
       expect(yield* controls.isPaused(LoopName.make("acme-project/review"))).toBe(true);
@@ -297,9 +300,13 @@ it("applies API changes to the configuration view and running scheduler, and pau
         status: 200,
         body: {
           loops: expect.arrayContaining(
-            [{ name: "acme-project/review", paused: true }].map((value) =>
-              expect.objectContaining(value),
-            ),
+            [
+              {
+                name: "acme-project/review",
+                paused: true,
+                approval: 'item.labelEvents["ready-for-agent"].actor.type != "User"',
+              },
+            ].map((value) => expect.objectContaining(value)),
           ),
         },
       });
@@ -662,12 +669,12 @@ it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop
           maxCycles: 0,
           permissions: "invalid",
           step: "run",
-          approval: "none",
+          approval: "item.number",
           selector: { _tag: "Some", value: { repos: ["acme/missing"] } },
           priority: { _tag: "Some", value: "true" },
         };
         const text =
-          '---\nname: different-name\ntrigger: { on: issue, if: "item.unknown == 1" }\nagent: missing\npriority: "true"\nmax_cycles: 0\npermissions: invalid\nselector: { repos: [acme/missing] }\n---\n{{ }} {{ item.nope }}';
+          '---\nname: different-name\ntrigger: { on: issue, if: "item.unknown == 1" }\nagent: missing\napproval: item.number\npriority: "true"\nmax_cycles: 0\npermissions: invalid\nselector: { repos: [acme/missing] }\n---\n{{ }} {{ item.nope }}';
         const draft = format === "text" ? { text } : { value };
         const checked = yield* request("POST", "/loops/check", {
           name: "acme-project/draft",
@@ -679,6 +686,7 @@ it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop
             expect.objectContaining({ path: [format === "text" ? "max_cycles" : "maxCycles"] }),
             expect.objectContaining({ path: ["permissions"] }),
             expect.objectContaining({ path: ["priority"], expression: "true" }),
+            expect.objectContaining({ path: ["approval"], expression: "item.number" }),
             expect.objectContaining({ path: ["name"] }),
             expect.objectContaining({ path: ["trigger", "if"], position: expect.any(Number) }),
             expect.objectContaining({ path: ["body"], expression: "item.nope" }),

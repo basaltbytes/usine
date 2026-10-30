@@ -609,23 +609,19 @@ export class RunDriver extends Context.Service<
               return;
             }
           }
-          // Only the slot wait is interruptible, so a cancel can stop a Run in `reserve`; the
-          // scheduler releases or reoffers the slot on interrupt. `releaseSlot` runs once the
-          // lease exists.
-          outcome = yield* Effect.uninterruptibleMask((restore) =>
-            slotFor(runId, submission, open, restore).pipe(
-              Effect.tap(({ lease }) =>
-                Ref.update(slots, (held) => new Map(held).set(runId, lease)),
-              ),
-              Effect.flatMap(({ lease, open: current }) =>
-                restore(
-                  admission.withAttempt(
-                    runId,
-                    executeAttempt(runId, submission, lease.worker, current),
+          outcome = yield* admission.withAttempt(
+            runId,
+            Effect.uninterruptibleMask((restore) =>
+              Effect.acquireRelease(
+                slotFor(runId, submission, open, restore).pipe(
+                  Effect.tap(({ lease }) =>
+                    Ref.update(slots, (held) => new Map(held).set(runId, lease)),
                   ),
-                ).pipe(Effect.ensuring(releaseSlot(runId, lease))),
+                ),
+                ({ lease }) => releaseSlot(runId, lease),
               ),
             ),
+            ({ lease, open: current }) => executeAttempt(runId, submission, lease.worker, current),
           );
         } while (outcome === "RetryAttempt");
 
