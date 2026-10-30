@@ -123,7 +123,7 @@ export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorke
   Schema.Struct({
     /** The attention entry identity used to distinguish this condition from other entries. */
     id: Schema.String,
-    /** The configured worker name. */
+    /** The worker name no longer declared by the instance. */
     worker: WorkerName,
     /** The number of Attempts recorded on the Worker that startup would otherwise reconcile. */
     attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),

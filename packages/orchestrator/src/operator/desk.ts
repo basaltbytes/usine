@@ -70,7 +70,7 @@ export class ProviderRetryingView extends Schema.TaggedClass<ProviderRetryingVie
   agent: AgentName,
   /** The diagnostic text to show to the operator. */
   message: Schema.NonEmptyString,
-  /** The number of provider-capacity retries already recorded. */
+  /** The number of provider retries reported in the current session turn. */
   retries: ProviderRetries,
   /** The start of the provider retry period as an ISO 8601 timestamp. */
   since: Schema.String,
