@@ -97,7 +97,7 @@ import {
 import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
-import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
+import { DateTime, Effect, Layer, Logger, Match, Option, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
@@ -2373,6 +2373,7 @@ describe("Operator", () => {
     "rejects Board moves onto unknown destinations and read-only lanes before writing labels",
     () =>
       Effect.gen(function* () {
+        const logs: Array<ReadonlyArray<unknown>> = [];
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
         const overviewReads = yield* Ref.make(0);
@@ -2421,7 +2422,52 @@ describe("Operator", () => {
             .pipe(Effect.flip);
           assert.strictEqual(proposedLane._tag, "BoardLaneReadOnlyError");
           assert.strictEqual(yield* Ref.get(movedLabels), null);
+          assert.deepStrictEqual(logs, [
+            [
+              "Board move rejected",
+              {
+                errorTag: "BoardProjectNotFoundError",
+                message: 'Project "basaltbytes/elsewhere" was not found.',
+              },
+            ],
+            [
+              "Board move rejected",
+              {
+                errorTag: "BoardItemNotFoundError",
+                message: "Item basaltbytes/usine#404 was not found on the board.",
+              },
+            ],
+            [
+              "Board move rejected",
+              {
+                errorTag: "BoardLaneNotFoundError",
+                message: 'Lane "authored:Nowhere" was not found on the board.',
+              },
+            ],
+            [
+              "Board move rejected",
+              {
+                errorTag: "BoardLaneReadOnlyError",
+                message:
+                  'Lane "fallback:unmapped" is read-only. To move items, configure label-backed lanes in usine.yaml.',
+              },
+            ],
+            [
+              "Board move rejected",
+              {
+                errorTag: "BoardLaneReadOnlyError",
+                message:
+                  'Lane "proposed:ready-for-review" is read-only. To move items, configure label-backed lanes in usine.yaml.',
+              },
+            ],
+          ]);
         }).pipe(
+          Effect.withLogger(
+            Logger.make<unknown, void>(({ message }) => {
+              if (Array.isArray(message) && message[0] === "Board move rejected")
+                logs.push(message);
+            }),
+          ),
           Effect.provide(testLayer(approved, movedLabels, overviewReads, projectionRevision)),
         );
       }),

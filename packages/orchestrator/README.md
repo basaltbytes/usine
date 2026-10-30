@@ -8,7 +8,7 @@ The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `Sch
 
 ## Operator
 
-`Operator` provides run and board observation, transcript pages, label-backed board moves, approve, retry, cancel, and loop pause. It returns typed data, and consuming apps own the wording. Captured executor defects appear as `DefectFailure` with a safe message, without the original cause. `OperatorObservation` gives the same read-only projection without execution services.
+`Operator` provides run and board observation, transcript pages, label-backed board moves, approve, retry, cancel, and loop pause. It returns typed data for consuming apps. Captured executor defects appear as `DefectFailure` with a safe message, without the original cause. `OperatorObservation` gives the same read-only projection without execution services.
 
 `OperatorConfiguration.view(instance)` returns the instance folder as already parsed: each loop, agent, worker, registered repo with its lanes, and the settings; every quarantined loop and invalid agent with its error; each loop's pause; each worker's slots, last preflight per harness, and Attempt container limits (from `WorkerStatus`); and each repo's labels as polling last read them. A gateway's admin token appears only as its variable name.
 
@@ -35,6 +35,8 @@ A card also has `pullRequest` (the open PR, else the newest merged one) and `usa
 A malformed item projection is quarantined and reported on the board and the needs-attention strip; valid items stay visible. A failed declared-label creation is a repo preflight finding and doesn't block triggers.
 
 `Operator.moveBoardItem(instance, move)` accepts authored label-backed lanes, adds the target lane's labels, and removes only labels the authored map owns, even with a stale snapshot or truncated label connection. Proposed lanes are read-only (`BoardLaneReadOnlyError`); define [`repos[].lanes`](https://docs.usine.dev/reference/configuration/usine-yaml/) and reload to enable moves. Every attempted label write, including an uncertain or partial failure, queues an item hint: the poller fetches the snapshot, places it, and evaluates its loops at once unless GitHub requested backoff.
+
+Board move rejection errors derive diagnostic messages from their repository, item, or lane fields. The server uses these messages in both rejection logs and HTTP responses.
 
 ### Run detail
 
