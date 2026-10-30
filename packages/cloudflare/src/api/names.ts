@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
  * whose headers don't match the token it's configured with.
  */
 export const ACCESS_CLIENT_ID_HEADER = "cf-access-client-id";
+/** The request header for the secret of the Cloudflare Access service token. */
 export const ACCESS_CLIENT_SECRET_HEADER = "cf-access-client-secret";
 
 /**
