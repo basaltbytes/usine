@@ -91,11 +91,8 @@ const search = async (text: string) => {
   await page.getByRole("button", { name: "Open commands", exact: true }).click();
   await dialog().getByRole("combobox").fill(text);
 };
-
-it("navigates to project boards, task lists, and configuration pages with keyboard selection", async () => {
-  await page.screenshot({ path: "../../../../../.impeccable/review/operator-count-refresh.png" });
-  await search("Product board");
-  await expect
+const settled = () =>
+  expect
     .poll(
       () =>
         dialog()
@@ -104,10 +101,29 @@ it("navigates to project boards, task lists, and configuration pages with keyboa
           .filter((animation) => animation.playState === "running").length,
     )
     .toBe(0);
+const selection = () =>
+  dialog()
+    .getByRole("option")
+    .elements()
+    .map((option) => option.getAttribute("data-selected"));
+
+it("navigates to project boards, task lists, and configuration pages with keyboard selection", async () => {
+  await page.screenshot({ path: "../../../../../.impeccable/review/operator-count-refresh.png" });
+  await search("Product board");
+  await settled();
   await page.screenshot({ path: "../../../../../.impeccable/review/commands-desktop.png" });
   await expect
     .element(dialog().getByRole("option", { name: "Product · Board", exact: true }))
     .toHaveAttribute("aria-selected", "true");
+  await userEvent.keyboard("{ArrowDown}");
+  await expect
+    .element(dialog().getByRole("option").nth(1))
+    .toHaveAttribute("data-selected", "true");
+  expect(selection()).toEqual(selection().map((_, index) => String(index === 1)));
+  await userEvent.keyboard("{ArrowUp}");
+  await expect
+    .element(dialog().getByRole("option", { name: "Product · Board", exact: true }))
+    .toHaveAttribute("data-selected", "true");
   await userEvent.keyboard("{Enter}");
   await expect
     .poll(() => router.state.location.pathname, { timeout: 5_000 })
@@ -128,6 +144,22 @@ it("navigates to project boards, task lists, and configuration pages with keyboa
   await expect
     .poll(() => router.state.location.pathname, { timeout: 5_000 })
     .toBe("/configuration/loops");
+});
+
+it("highlights only the selected command in dark and light themes", async () => {
+  for (const theme of ["dark", "light"]) {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    await page.getByRole("button", { name: "Open commands", exact: true }).click();
+    await settled();
+    await userEvent.keyboard("{ArrowDown}");
+    await expect
+      .element(dialog().getByRole("option").nth(1))
+      .toHaveAttribute("data-selected", "true");
+    expect(selection()).toEqual(selection().map((_, index) => String(index === 1)));
+    await commands.configurationEditorScreenshot(`765-palette-desktop-${theme}`);
+    await userEvent.keyboard("{Escape}");
+    await expect.element(dialog()).not.toBeInTheDocument();
+  }
 });
 
 it("finds a secondary repository task by a linked pull request and preserves its repository", async () => {
@@ -156,15 +188,7 @@ it("finds related runs by item number and can select a run by its identifier", a
 it("shows no-results feedback and keeps the palette within a phone viewport", async () => {
   await page.viewport(390, 844);
   await search("board-test/repo");
-  await expect
-    .poll(
-      () =>
-        dialog()
-          .element()
-          .getAnimations()
-          .filter((animation) => animation.playState === "running").length,
-    )
-    .toBe(0);
+  await settled();
   await page.screenshot({ path: "../../../../../.impeccable/review/commands-mobile.png" });
   await dialog().getByRole("combobox").fill("no-such-command");
   await expect.element(dialog().getByText("No matching commands", { exact: true })).toBeVisible();
