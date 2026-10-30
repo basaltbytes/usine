@@ -221,9 +221,9 @@ const botAccountFailure = (error: GitHubAppError) => {
 };
 
 /**
- * Why the scheduler removes a Worker from its executor: `Removed` for a Worker that a reload
- * removed, which ran Attempts, or `Refused` for one added by a reload whose preparation or
- * persistence failed. A `Refused` Worker can be one that an earlier reload accepted and removed.
+ * Why the scheduler removes a Worker from its executor: `Removed` for a Worker that startup or an
+ * accepted reload gave the scheduler, which can have run Attempts, or `Refused` for one that only
+ * reloads whose preparation or persistence failed have added.
  */
 export type WorkerRemoval = "Removed" | "Refused";
 
@@ -319,6 +319,11 @@ export const stepExecutorLayer = (
       // addition.
       const membership = yield* Semaphore.make(1);
       const adding = yield* Ref.make<ReadonlySet<WorkerName>>(new Set());
+      // The Workers that startup or an accepted reload gave the scheduler, whose removal is never
+      // `Refused`.
+      const accepted = yield* Ref.make<ReadonlySet<WorkerName>>(
+        new Set(workers.map(({ name }) => name)),
+      );
       const machines = options.machines;
       const paused = yield* TxRef.make<ReadonlyMap<WorkerName, WorkerPause>>(new Map());
       // The machine of each Run's lease, which `execute` gives to the Run's Attempt.
@@ -343,6 +348,13 @@ export const stepExecutorLayer = (
             { worker, scheduled, added },
           );
           return;
+        }
+        if (removal === "Refused" && (yield* Ref.get(accepted)).has(worker)) {
+          yield* Effect.logInfo(
+            "The Worker leaves the executor as removed, because the scheduler accepted it before this refused reload",
+            { worker },
+          );
+          return yield* executorWorkers.remove(worker, "Removed");
         }
         yield* executorWorkers.remove(worker, removal);
       });
@@ -414,6 +426,10 @@ export const stepExecutorLayer = (
                 "Worker removed by a reload; it takes no new Attempt, and its running Attempts finish",
                 { worker: name, running: running(name) },
               ),
+        );
+        yield* Ref.update(
+          accepted,
+          (current) => new Set([...current, ...change.added.map(({ name }) => name)]),
         );
         yield* settleAdded(
           new Set(change.added.map(({ name }) => name)),

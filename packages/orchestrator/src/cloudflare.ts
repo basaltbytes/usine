@@ -117,8 +117,6 @@ export const cloudflareStepExecutorLayer = (
           .filter(({ name }) => options.initializedWorkers?.includes(name))
           .map((worker) => [worker.name, worker]),
       );
-      // Workers whose client a startup or an accepted reload used, which keep it.
-      const retained = new Set(initialized.keys());
       const add = Effect.fn("Orchestrator.addCloudflareWorker")(function* (worker: ConfigWorker) {
         yield* Effect.annotateCurrentSpan({ worker: worker.name });
         if (worker.kind !== "cloudflare")
@@ -157,8 +155,7 @@ export const cloudflareStepExecutorLayer = (
         removal: WorkerRemoval,
       ) {
         yield* Effect.annotateCurrentSpan({ worker, removal });
-        if (removal === "Removed" || retained.has(worker)) {
-          retained.add(worker);
+        if (removal === "Removed") {
           yield* Effect.logDebug(
             "The Cloudflare worker keeps its client, because the scheduler accepted it",
             { worker, removal },
