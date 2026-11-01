@@ -1,4 +1,3 @@
-import { administratorPermissions } from "@usine/core/access";
 import {
   workerPreflightResponses,
   finishWorkerPreflight,
@@ -90,6 +89,7 @@ export default mergeConfig(
               ),
               commands: {
                 sessionPermissions: async ({ page }) => {
+                  const { administratorPermissions } = await import("@usine/core/access");
                   await page.route("**/api/auth/session", (route) =>
                     route.fulfill({ json: { permissions: administratorPermissions } }),
                   );
