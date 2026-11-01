@@ -42,7 +42,7 @@ stop_server() {
 }
 
 healthy() {
-  local wanted=$1 token started=$SECONDS deadline=$((SECONDS+180)) remaining request_timeout
+  local wanted=$1 check=$2 token started=$SECONDS deadline=$((SECONDS+180)) remaining request_timeout readiness
   while [ "$SECONDS" -lt "$deadline" ]; do
     remaining=$((deadline-SECONDS))
     if [ "$remaining" -le 0 ]; then break; fi
@@ -55,7 +55,17 @@ healthy() {
     else
       printf 'upgrade health-check version=%s elapsed_seconds=%s reason=admin-token-unavailable\n' "$wanted" "$((SECONDS-started))"
     fi
-    if [ "$actual" = "\"$wanted\"" ]; then return 0; fi
+    if [ "$actual" = "\"$wanted\"" ]; then
+      if [ "$check" = version ]; then return 0; fi
+      remaining=$((deadline-SECONDS))
+      if [ "$remaining" -le 0 ]; then break; fi
+      if [ "$remaining" -lt "$request_timeout" ]; then request_timeout=$remaining; fi
+      readiness=$(curl --silent --max-time "$request_timeout" --output /dev/null \
+        --write-out '%{http_code}' "http://127.0.0.1:$port/api/ready") || readiness=unavailable
+      printf 'upgrade health-check version=%s check=ready status=%s elapsed_seconds=%s\n' \
+        "$wanted" "$readiness" "$((SECONDS-started))"
+      if [ "$readiness" = 200 ] && [ "$SECONDS" -le "$deadline" ]; then return 0; fi
+    fi
     state=$(systemctl show --property=ActiveState --value "$unit") || return 1
     if [ "$state" = failed ] || [ "$state" = inactive ]; then
       printf 'upgrade health-check version=%s reason=service-stopped state=%s\n' "$wanted" "$state"
@@ -155,9 +165,9 @@ fi
 reason='The package could not be installed.'
 failure_stage=install
 if install_version "$target"; then
-  reason='The new server did not answer the operator API within three minutes.'
+  reason='The new server did not become ready within three minutes.'
   failure_stage=health-check
-  if timeout 30s systemctl start "$unit" && healthy "$target"; then
+  if timeout 30s systemctl start "$unit" && healthy "$target" ready; then
     record good ''
     exit 0
   fi
@@ -165,7 +175,7 @@ fi
 printf 'upgrade rollback previous=%s target=%s failure_stage=%s reason=%s\n' "$previous" "$target" "$failure_stage" "$reason"
 recovery_status=rolled-back
 recovery_reason=
-if stop_server && restore_previous && restore_data && timeout 30s systemctl start "$unit" && healthy "$previous"; then
+if stop_server && restore_previous && restore_data && timeout 30s systemctl start "$unit" && healthy "$previous" version; then
   record "$recovery_status" "$reason"
   if [ "$recovery_status" = failed ]; then exit 1; fi
 else

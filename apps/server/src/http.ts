@@ -206,6 +206,7 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle("serverVersion", () =>
       fromUpgrades((upgrades) => upgrades.status.pipe(Effect.map((status) => status.running))),
     )
+    .handle("serverReady", () => acknowledge(Effect.void))
     .handle("requestUpgrade", ({ payload }) =>
       fromUpgrades((upgrades) => upgrades.request(payload)).pipe(acknowledge),
     )

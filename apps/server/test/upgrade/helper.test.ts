@@ -46,6 +46,9 @@ const run = (
     | "missing-404"
     | "migrated-api"
     | "migrated-good"
+    | "migrated-startup-exit"
+    | "migrated-startup-wait"
+    | "migrated-startup-deadline"
     | "migrated-no-durable"
     | "bad-backup"
     | "missing-backup"
@@ -165,9 +168,29 @@ if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
     );
     command(
       "curl",
-      `read -r authorization
-[ "$authorization" = "Authorization: Bearer $(< "$folder/../admin-token")" ] || exit 1
+      `url=\${!#}
+echo "curl $url" >> "$folder/commands"
 installed=$(cat "$folder/installed")
+if [[ "$url" = */api/ready ]]; then
+  if [ "$installed" = @usine/server@2.0.0 ]; then
+    case "$scenario" in
+      migrated-startup-exit)
+        echo failed > "$folder/state"
+        : > "$folder/running"
+        printf '503'; exit 0;;
+      migrated-startup-deadline) printf '503'; exit 0;;
+      migrated-startup-wait)
+        if [ ! -f "$folder/readiness-checked" ]; then
+          touch "$folder/readiness-checked"
+          printf '503'; exit 0
+        fi;;
+    esac
+  fi
+  printf '200'
+  exit 0
+fi
+read -r authorization
+[ "$authorization" = "Authorization: Bearer $(< "$folder/../admin-token")" ] || exit 1
 if [ "$scenario" = unchanged-unhealthy ]; then exit 1; fi
 if [ "$installed" = @usine/server@2.0.0 ]; then
   case "$scenario" in bad-api|*-rollback|migrated-api|migrated-no-durable|missing-*backup) exit 1;; esac
@@ -281,6 +304,40 @@ it.each(["migrated-api", "migrated-no-durable"] as const)(
   },
 );
 
+it.each(["migrated-startup-exit", "migrated-startup-deadline"] as const)(
+  "restores the package and both databases when the version answers but readiness fails: %s",
+  slowCli,
+  (scenario) => {
+    const result = run(scenario);
+    expect(result.failed, result.output).toBe(false);
+    expect(result.migrated).toBe(true);
+    assert(result.record.status === "rolled-back");
+    expect(result.record.failureStage).toBe("health-check");
+    expect(result.running).toBe("@usine/server@1.0.0");
+    expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
+    expect(result.durable).toEqual([{ value: "before" }]);
+    expect(result.output).toContain(
+      scenario === "migrated-startup-exit" ? "reason=service-stopped" : "reason=deadline-exceeded",
+    );
+    if (scenario === "migrated-startup-deadline") {
+      const elapsed = Number(
+        result.output.match(/reason=deadline-exceeded elapsed_seconds=(\d+)/u)?.[1],
+      );
+      expect(elapsed).toBeGreaterThanOrEqual(180);
+      expect(elapsed).toBeLessThan(183);
+    }
+  },
+);
+
+it("waits for recovery after the target version answers before recording good", slowCli, () => {
+  const result = run("migrated-startup-wait");
+  expect(result.failed, result.output).toBe(false);
+  expect(result.record.status).toBe("good");
+  expect(result.commands).toContain("sleep 3");
+  expect(result.configuration).toContainEqual({ kind: "binding", value: "new" });
+  expect(result.durable).toEqual([{ value: "new", migrated: null }]);
+});
+
 it("keeps migrated data and a private backup after a successful upgrade", slowCli, () => {
   const result = run("migrated-good");
   expect(result.failed, result.output).toBe(false);
@@ -327,7 +384,7 @@ it("waits for 180 elapsed seconds when health requests fail immediately", slowCl
 });
 
 it(
-  "marks a version good only after its API answers, using the original npm prefix",
+  "marks a version good only after startup recovery finishes, using the original npm prefix",
   slowCli,
   () => {
     const result = run("good");
@@ -391,9 +448,7 @@ it(
     const result = run("previous-rollback");
     expect(result.failed).toBe(true);
     assert(result.record.status === "failed");
-    expect(result.record.reason).toBe(
-      "The new server did not answer the operator API within three minutes.",
-    );
+    expect(result.record.reason).toBe("The new server did not become ready within three minutes.");
     expect(result.commands).toContain("@usine/server@1.0.0");
     expect(result.running).toBe("@usine/server@1.0.0");
   },
@@ -498,7 +553,10 @@ it.each(["legacy", "current"])("supports %s upgrade health checks", async (gener
             "GET",
             "/api/version",
             Effect.sync(() => HttpServerResponse.jsonUnsafe(versions.shift())),
-          ).pipe(Layer.provide(guard.layer)),
+          ).pipe(
+            Layer.merge(HttpRouter.add("GET", "/api/ready", HttpServerResponse.json({ ok: true }))),
+            Layer.provide(guard.layer),
+          ),
           { disableLogger: true },
         );
         yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
@@ -538,20 +596,20 @@ folder=$1
 port=$2
 unit=usine.service
 printf '%s' '${localSecret}' > "$folder/../admin-token"
-healthy 2.0.0
+healthy 2.0.0 ready
 printf '%s' '${Redacted.value(session.secret)}' > "$folder/../admin-token"
-healthy 1.0.0
+healthy 1.0.0 version
 `,
         );
         const output = yield* Effect.promise(() =>
           promisify(execFile)("bash", [script, folder, String(port)]),
         );
-        assert.deepEqual(statuses, [200, 200]);
+        assert.deepEqual(statuses, generation === "legacy" ? [200, 200] : [200, 200, 200]);
         assert.deepEqual(
           authorizations,
           generation === "legacy"
             ? [undefined, undefined]
-            : [`Bearer ${localSecret}`, `Bearer ${Redacted.value(session.secret)}`],
+            : [`Bearer ${localSecret}`, undefined, `Bearer ${Redacted.value(session.secret)}`],
         );
         assert.notInclude(output.stdout + output.stderr, localSecret);
         assert.notInclude(output.stdout + output.stderr, Redacted.value(session.secret));

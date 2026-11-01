@@ -442,6 +442,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       const publicRoutes = new Set([
         "GET /api/health",
         "GET /api/version",
+        "GET /api/ready",
         "GET /api/openapi.json",
         "GET /api/auth/info",
         "GET /api/auth/github",
@@ -486,6 +487,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       );
       assert.deepEqual(generated.paths["/api/openapi.json"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/version"]?.get?.security, []);
+      assert.deepEqual(generated.paths["/api/ready"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/setup/callback"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/overview"]?.get?.security, [
         { bearer: [] },
