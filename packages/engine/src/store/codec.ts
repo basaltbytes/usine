@@ -18,7 +18,7 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ApprovalRequirement, LoopName, LoopPermissions } from "@usine/core/loop";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { OperatorLogin } from "@usine/core/operator";
+import { OperatorActor } from "@usine/core/operator";
 import { RunId, Run } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import { ApprovalChannel, ApprovalSource, RunApproval } from "@usine/core/run/approval";
@@ -72,9 +72,9 @@ export const RunRow = Schema.Struct({
   approvalReason: Schema.NullOr(Schema.NonEmptyString),
   approvedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   approvalChannel: Schema.NullOr(ApprovalChannel),
-  approver: Schema.NullOr(OperatorLogin),
+  approver: Schema.NullOr(OperatorActor),
   againFrom: Schema.NullOr(RunId),
-  againRequestedBy: Schema.NullOr(OperatorLogin),
+  againRequestedBy: Schema.NullOr(OperatorActor),
 });
 export type RunRow = typeof RunRow.Type;
 

@@ -1,3 +1,4 @@
+import { useCan } from "~/lib/permissions";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type {
   ConfigurationEntityKey,
@@ -11,9 +12,9 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { configurationDiff } from "~/features/configuration/lib/diff";
-import { entityHref, entityKey } from "~/features/configuration/lib/entities";
+import { entityHref } from "~/features/configuration/lib/entities";
 import {
-  entityQuery,
+  configurationHeadQuery,
   revisionQuery,
   revisionsQuery,
   useConfigurationWrite,
@@ -28,7 +29,21 @@ type RevisionDetailProps = {
 
 const RevisionDetail = ({ number, entity }: RevisionDetailProps) => {
   const revision = useQuery(revisionQuery(number));
-  const current = useQuery(entityQuery(entityKey("settings", "instance")));
+  const current = useQuery(configurationHeadQuery());
+  const admin = useCan("admin");
+  const maintain = useCan(
+    "maintain",
+    entity?.kind === "project"
+      ? entity.identifier
+      : entity?.kind === "loop"
+        ? entity.identifier.split("/")[0]
+        : undefined,
+  );
+  const canRevert =
+    admin ||
+    (maintain &&
+      entity !== undefined &&
+      revision.data?.entities.every((key) => key.key === entity.key));
   const [confirm, setConfirm] = useState(false);
   const [message, setMessage] = useState("");
   const write = useConfigurationWrite();
@@ -53,7 +68,7 @@ const RevisionDetail = ({ number, entity }: RevisionDetailProps) => {
           </div>
         ))}
       {current.isError && <ErrorAlert message={current.error.message} />}
-      {revision.data !== undefined && (
+      {canRevert && revision.data !== undefined && (
         <div>
           <Button variant="outline" onClick={() => setConfirm(!confirm)}>
             {editorCopy.revert}

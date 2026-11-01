@@ -1,3 +1,5 @@
+import { AccessDenied, InstanceScope, requirePermission } from "@usine/core/access";
+import { filterOverview, loopScope, repositoryScope } from "./access.ts";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { approvalFor } from "../approval.ts";
 import type { UpgradeDrain } from "@usine/engine/engine";
@@ -158,6 +160,7 @@ import { workerAttentionFor } from "./worker-attention.ts";
 
 /** A refused board move, failed label write, or failure to read or record the move. */
 export type BoardMoveError =
+  | AccessDenied
   | BoardItemNotFoundError
   | BoardLaneNotFoundError
   | BoardLaneReadOnlyError
@@ -167,6 +170,7 @@ export type BoardMoveError =
   | GitHubAppError;
 /** A failure to observe or change runs, tasks, loop state, or operator acknowledgements. */
 export type OperatorError =
+  | AccessDenied
   | WorkerPreflightRejectedError
   | LoopNotFoundError
   | RosterAgentNotFoundError
@@ -179,6 +183,7 @@ export type OperatorError =
   | ConfigurationStoreError;
 /** A failure to read stored operator views or locate a requested transcript attempt. */
 export type OperatorObservationError =
+  | AccessDenied
   | RunStoreError
   | TranscriptAttemptNotFoundError
   | ConfigurationStoreError;
@@ -800,6 +805,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       ] as const,
       { concurrency: "unbounded" },
     );
+    yield* requirePermission("read", repositoryScope(instance, snapshot.repository));
     const openAttempt = snapshot.attempts.find((attempt) => Option.isNone(attempt.outcome));
     // The machines are oldest first, so the last is the newest Attempt's.
     const machine = [...inFlight]
@@ -864,13 +870,22 @@ const makeOperatorObservation = Effect.gen(function* () {
     item: ItemNumber,
   ) {
     yield* Effect.annotateCurrentSpan({ repository, item });
+    yield* requirePermission("read", repositoryScope(instance, repository));
     const [view, current] = yield* Effect.all(
       [tasks.read(instance, repository, item), overview(instance)],
       { concurrency: "unbounded" },
     );
     return new TaskView({ ...view, needsYou: taskNeedsAttention(view, current.needsYou) });
   });
-  return { detail, overview, task, desk, statistics, runStatistics } as const;
+  return {
+    detail,
+    overview: (instance: LoadedInstance) =>
+      overview(instance).pipe(Effect.flatMap((view) => filterOverview(instance, view))),
+    task,
+    desk,
+    statistics,
+    runStatistics,
+  } as const;
 });
 
 /** The read-only operator surface, which needs no trigger execution. */
@@ -903,7 +918,7 @@ export class OperatorObservation extends Context.Service<
       instance: LoadedInstance,
       repository: RepositoryName,
       item: ItemNumber,
-    ) => Effect.Effect<TaskView, TaskReadError>;
+    ) => Effect.Effect<TaskView, TaskReadError | AccessDenied>;
     /**
      * Builds the instance's desk: running Attempts, matched Items with no running Attempt, recently
      * closed Runs, Worker slots and preflights, and poll times.
@@ -967,6 +982,7 @@ const makeOperator = Effect.gen(function* () {
     instance: LoadedInstance,
     key: AttentionKey,
   ) {
+    yield* requirePermission("admin", new InstanceScope());
     yield* Effect.annotateCurrentSpan({ needId: key.id });
     yield* acknowledgements.dismiss(
       new AttentionAcknowledgement({
@@ -977,11 +993,22 @@ const makeOperator = Effect.gen(function* () {
     );
   });
   const undoDismissNeed = Effect.fn("Operator.undoDismissNeed")(function* (key: AttentionKey) {
+    yield* requirePermission("admin", new InstanceScope());
     yield* Effect.annotateCurrentSpan({ needId: key.id });
     yield* acknowledgements.undo(key);
   });
 
+  const requireRunOperation = Effect.fn("Operator.requireRunOperation")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+  ) {
+    const { repository } = yield* reader.inspect(runId);
+    yield* Effect.annotateCurrentSpan({ runId, repository });
+    yield* requirePermission("operate", repositoryScope(instance, repository));
+  });
+
   const approve = Effect.fn("Operator.approve")(function* (instance: LoadedInstance, runId: RunId) {
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId });
     const current = yield* runs.inspect(runId);
     if (current.run.state._tag !== "Waiting") {
@@ -1018,11 +1045,13 @@ const makeOperator = Effect.gen(function* () {
     runId: RunId,
     attemptId: AttemptId,
   ) {
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
     yield* runs.resolveFailure(runId, attemptId, yield* requestActor(instance.config.operator));
   });
 
   const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.retry(
       runId,
@@ -1039,6 +1068,7 @@ const makeOperator = Effect.gen(function* () {
     runId: RunId,
     edit: EditAndRetry,
   ) {
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId, agent: edit.agent });
     const file = instance.agents.find(({ name }) => name === edit.agent);
     if (file === undefined)
@@ -1068,6 +1098,7 @@ const makeOperator = Effect.gen(function* () {
     runId: RunId,
     edit: EditAndRetry,
   ) {
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId, agent: edit.agent });
     const current = yield* runs.inspect(runId);
     const loop = instance.loops.find(({ name }) => name === current.run.loop);
@@ -1128,6 +1159,7 @@ const makeOperator = Effect.gen(function* () {
     runId: RunId,
     input: SessionIntervention,
   ) {
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({
       runId,
       attemptId: input.attemptId,
@@ -1147,23 +1179,27 @@ const makeOperator = Effect.gen(function* () {
     );
   });
 
-  const cancel = Effect.fn("Operator.cancel")(function* (runId: RunId) {
+  const cancel = Effect.fn("Operator.cancel")(function* (instance: LoadedInstance, runId: RunId) {
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.cancel(runId);
     yield* Effect.logInfo("Operator canceled Run", { runId });
   });
 
   const pause = Effect.fn("Operator.pause")(function* (loop: LoopName) {
+    yield* requirePermission("operate", loopScope(loop));
     yield* Effect.annotateCurrentSpan({ loop });
     return yield* controls.pause(loop);
   });
   const unpause = Effect.fn("Operator.unpause")(function* (loop: LoopName) {
+    yield* requirePermission("operate", loopScope(loop));
     yield* Effect.annotateCurrentSpan({ loop });
     return yield* controls.unpause(loop);
   });
 
   const moveBoardItem = Effect.fn("Operator.moveBoardItem")(
     function* (instance: LoadedInstance, move: BoardMove) {
+      yield* requirePermission("operate", repositoryScope(instance, move.repository));
       yield* Effect.annotateCurrentSpan({
         repository: move.repository,
         item: move.item,
@@ -1265,8 +1301,14 @@ const makeOperator = Effect.gen(function* () {
   );
 
   const resetCycleBudget = Effect.fn("Operator.resetCycleBudget")(function* (
+    instance: LoadedInstance,
     askId: CycleBudgetAskId,
   ) {
+    const ask = (yield* budgets.asks()).find((ask) => ask.id === askId);
+    yield* requirePermission(
+      "operate",
+      ask === undefined ? new InstanceScope() : repositoryScope(instance, ask.repository),
+    );
     yield* Effect.annotateCurrentSpan({ askId });
     const key = `cycle-budget-reset:${askId}`;
     yield* budgets.reset(
@@ -1285,11 +1327,22 @@ const makeOperator = Effect.gen(function* () {
     approve,
     cancel,
     runWorkerPreflight: (worker: WorkerName) =>
-      workerStatus.runPreflight(worker).pipe(Effect.map(workerPreflightView)),
-    discardLeftovers: (worker: WorkerName) => runs.discardLeftovers(worker).pipe(Effect.asVoid),
+      requirePermission("admin", new InstanceScope())
+        .pipe(Effect.andThen(workerStatus.runPreflight(worker)))
+        .pipe(Effect.map(workerPreflightView)),
+    discardLeftovers: (worker: WorkerName) =>
+      requirePermission("admin", new InstanceScope()).pipe(
+        Effect.andThen(runs.discardLeftovers(worker)),
+        Effect.asVoid,
+      ),
     moveBoardItem,
     githubChanges: (instance: LoadedInstance, runId: RunId) =>
-      githubChanges.read(instance.config.workers, runId),
+      reader.inspect(runId).pipe(
+        Effect.flatMap((snapshot) =>
+          requirePermission("read", repositoryScope(instance, snapshot.repository)),
+        ),
+        Effect.andThen(githubChanges.read(instance.config.workers, runId)),
+      ),
     pause,
     retry,
     resolveFailure,
@@ -1317,7 +1370,10 @@ export class Operator extends Context.Service<
     /** Removes the acknowledgement of this revision. */
     readonly undoDismissNeed: (key: AttentionKey) => Effect.Effect<void, OperatorError>;
     /** Answers the current cycle-budget ask and requests fresh polling. */
-    readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, OperatorError>;
+    readonly resetCycleBudget: (
+      instance: LoadedInstance,
+      askId: CycleBudgetAskId,
+    ) => Effect.Effect<void, OperatorError>;
     /**
      * Records the operator's approval of a waiting Run, attributed to the operator login in
      * `usine.yaml` if one is set. Execution still waits for Worker capacity.
@@ -1360,11 +1416,11 @@ export class Operator extends Context.Service<
      * Cancels an open Run and interrupts its current Attempt. Does nothing if the Run is already
      * closed.
      */
-    readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    readonly cancel: (instance: LoadedInstance, runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Runs verify-only preflight on one idle worker and returns the stored checks. */
     readonly runWorkerPreflight: (
       worker: WorkerName,
-    ) => Effect.Effect<WorkerPreflightView, WorkerPreflightRejectedError>;
+    ) => Effect.Effect<WorkerPreflightView, WorkerPreflightRejectedError | AccessDenied>;
     /**
      * Answers an `UnconfiguredWorkerNeed` so startup stops reconciling the Attempts recorded on
      * `worker`. Fails with `LeftoversDiscardRejectedError` if `usine.yaml` declares the Worker or
@@ -1386,11 +1442,15 @@ export class Operator extends Context.Service<
     readonly githubChanges: (
       instance: LoadedInstance,
       runId: RunId,
-    ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
+    ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError | AccessDenied>;
     /** Pauses new work for a Loop; its existing Runs continue. */
-    readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    readonly pause: (
+      loop: LoopName,
+    ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError | AccessDenied>;
     /** Lets the Loop's triggers open new Runs again. */
-    readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    readonly unpause: (
+      loop: LoopName,
+    ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError | AccessDenied>;
   }
 >()("@usine/orchestrator/Operator") {
   /** Provides operator observations and mutations using the run engine and GitHub writers. */

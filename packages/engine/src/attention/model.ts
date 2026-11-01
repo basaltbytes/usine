@@ -1,4 +1,4 @@
-import { OperatorLogin } from "@usine/core/operator";
+import { OperatorActor } from "@usine/core/operator";
 import { Schema } from "effect";
 
 /**
@@ -27,7 +27,7 @@ export class AttentionAcknowledgement extends Schema.Class<AttentionAcknowledgem
 )({
   ...AttentionKey.fields,
   /** The operator login, or `None` when no login was recorded. */
-  dismissedBy: Schema.OptionFromNullOr(OperatorLogin),
+  dismissedBy: Schema.OptionFromNullOr(OperatorActor),
   /** The UTC time of the first dismissal for this entry ID and revision. */
   dismissedAt: Schema.DateTimeUtcFromString,
 }) {}

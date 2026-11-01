@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { OperatorLogin } from "../operator.ts";
+import { OperatorActor } from "../operator.ts";
 
 /** A start by the Run's Event, as for every Run's first Attempt. */
 export class StartedByEvent extends Schema.TaggedClass<StartedByEvent>("AttemptStart/Event")(
@@ -12,7 +12,7 @@ export class StartedByRetry extends Schema.TaggedClass<StartedByRetry>("AttemptS
   "OperatorRetry",
   {
     /** The operator who requested the retry, or `None` if no login was recorded. */
-    operator: Schema.OptionFromNullOr(OperatorLogin),
+    operator: Schema.OptionFromNullOr(OperatorActor),
   },
 ) {}
 
@@ -24,7 +24,7 @@ export class StartedByEditAndRetry extends Schema.TaggedClass<StartedByEditAndRe
   "AttemptStart/EditAndRetry",
 )("EditAndRetry", {
   /** The operator who changed the task or agent and requested the retry, or `None` if unavailable. */
-  operator: Schema.OptionFromNullOr(OperatorLogin),
+  operator: Schema.OptionFromNullOr(OperatorActor),
 }) {}
 
 /** An automatic retry after the previous Attempt's `InfraFailure` (ADR 0002). */

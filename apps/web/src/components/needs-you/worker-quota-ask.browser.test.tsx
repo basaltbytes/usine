@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { RunId } from "@usine/core/run";
@@ -104,6 +106,7 @@ it.each([1440, 390])(
     );
     await commands.githubChangesResponse('{"attempts":[]}');
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
     const router = createRouter({
       routeTree,
       context: { queryClient: client },
@@ -117,9 +120,11 @@ it.each([1440, 390])(
       await router.load();
       flushSync(() =>
         root.render(
-          <QueryClientProvider client={client}>
-            <RouterProvider router={router} />
-          </QueryClientProvider>,
+          <PermissionsContext.Provider value={administratorPermissions}>
+            <QueryClientProvider client={client}>
+              <RouterProvider router={router} />
+            </QueryClientProvider>
+          </PermissionsContext.Provider>,
         ),
       );
       for (const theme of ["dark", "light"]) {

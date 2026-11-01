@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import type { SetupState } from "@usine/orchestrator/operator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Suspense } from "react";
@@ -74,11 +76,13 @@ it.each([
     try {
       flushSync(() =>
         root.render(
-          <QueryClientProvider client={client}>
-            <Suspense fallback={null}>
-              <SetupPage />
-            </Suspense>
-          </QueryClientProvider>,
+          <PermissionsContext.Provider value={administratorPermissions}>
+            <QueryClientProvider client={client}>
+              <Suspense fallback={null}>
+                <SetupPage />
+              </Suspense>
+            </QueryClientProvider>
+          </PermissionsContext.Provider>,
         ),
       );
       await expect

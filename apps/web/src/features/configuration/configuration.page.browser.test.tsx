@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { ReadyOverview } from "@usine/orchestrator/operator";
@@ -38,6 +40,7 @@ afterEach(() => {
 
 const mount = async (path: string, width: number) => {
   await page.viewport(width, 900);
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -49,9 +52,11 @@ const mount = async (path: string, width: number) => {
   flushSync(() => root.render(null));
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(page.getByRole("table").last()).toBeVisible();

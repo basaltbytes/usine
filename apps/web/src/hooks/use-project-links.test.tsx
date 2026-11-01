@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ProjectId } from "@usine/core/project";
@@ -42,11 +44,13 @@ it("links a second repository directly to its project and keeps its task identit
     }),
   );
   const html = renderToStaticMarkup(
-    <QueryClientProvider client={client}>
-      <WithRouter>
-        <Links />
-      </WithRouter>
-    </QueryClientProvider>,
+    <PermissionsContext.Provider value={administratorPermissions}>
+      <QueryClientProvider client={client}>
+        <WithRouter>
+          <Links />
+        </WithRouter>
+      </QueryClientProvider>
+    </PermissionsContext.Provider>,
   );
   expect(html).toContain('href="/projects/product"');
   expect(html).toContain('href="/projects/product/tasks/42?repository=Other%2FAPI"');

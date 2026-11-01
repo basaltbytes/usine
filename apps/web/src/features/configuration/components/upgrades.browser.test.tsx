@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReleaseVersion, UpgradeRecord, type UpgradeTiming } from "@usine/core/upgrade";
 import { UpgradeView } from "@usine/orchestrator/operator/http";
@@ -51,11 +53,13 @@ it.each(["idle", "now"] satisfies ReadonlyArray<UpgradeTiming>)(
     try {
       flushSync(() =>
         root.render(
-          <QueryClientProvider client={client}>
-            <Suspense>
-              <Upgrades />
-            </Suspense>
-          </QueryClientProvider>,
+          <PermissionsContext.Provider value={administratorPermissions}>
+            <QueryClientProvider client={client}>
+              <Suspense>
+                <Upgrades />
+              </Suspense>
+            </QueryClientProvider>
+          </PermissionsContext.Provider>,
         ),
       );
       for (const width of [1280, 390]) {
@@ -116,11 +120,13 @@ it("keeps the rollback reason visible and explains a refused retry", async () =>
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={client}>
-          <Suspense>
-            <Upgrades />
-          </Suspense>
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={client}>
+            <Suspense>
+              <Upgrades />
+            </Suspense>
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     await expect.element(page.getByText(/Restored 1.0.1-next.41.gabcdef0/)).toBeVisible();
@@ -151,11 +157,13 @@ it("cancels a waiting upgrade and reports a cancellation rejected after installa
     );
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={client}>
-          <Suspense>
-            <Upgrades />
-          </Suspense>
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={client}>
+            <Suspense>
+              <Upgrades />
+            </Suspense>
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     await expect

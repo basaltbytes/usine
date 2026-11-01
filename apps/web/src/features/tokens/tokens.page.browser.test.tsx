@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
@@ -21,6 +23,7 @@ it("distinguishes tokens with the same name and confirms revocation through the 
     createdAt: 0,
     lastUsedAt: 0,
     kind: "browser",
+    scopes: administratorPermissions,
   }));
   client.setQueryData(tokensQuery().queryKey, tokens);
   const requests: string[] = [];
@@ -37,16 +40,18 @@ it("distinguishes tokens with the same name and confirms revocation through the 
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={client}>
-          <WithRouter>
-            <PageCommandsProvider>
-              <CommandPalette
-                overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })}
-              />
-              <TokensPage />
-            </PageCommandsProvider>
-          </WithRouter>
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={client}>
+            <WithRouter>
+              <PageCommandsProvider>
+                <CommandPalette
+                  overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })}
+                />
+                <TokensPage />
+              </PageCommandsProvider>
+            </WithRouter>
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     await page.getByRole("button", { name: "Open commands" }).click();

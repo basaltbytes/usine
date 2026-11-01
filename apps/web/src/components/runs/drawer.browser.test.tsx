@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
 import { SessionEvent } from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
@@ -164,6 +166,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     attemptId,
   );
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     context: { queryClient },
@@ -176,9 +179,11 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     await page
@@ -277,6 +282,7 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
   );
   await commands.failureResolutionResponses(overview, overview, detail, detail, attemptId);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     context: { queryClient },
@@ -289,9 +295,11 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     const drawer = page.getByRole("dialog");
@@ -389,6 +397,7 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
     new DeskView({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
   );
   const options = runDetailQuery(queryClient, id);
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     context: { queryClient },
@@ -405,9 +414,11 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
     ).toEqual([3, 4]);
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     const drawer = page.getByRole("dialog");
@@ -517,6 +528,7 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
     attemptId,
   );
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     context: { queryClient },
@@ -529,9 +541,11 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     await page.getByRole("button", { name: "Needs attention (1)", exact: true }).click();

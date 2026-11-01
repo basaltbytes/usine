@@ -1,3 +1,5 @@
+import { PermissionGrant, ProjectScope } from "@usine/core/access";
+import { ProjectId } from "@usine/core/project";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { OperatorLogin } from "@usine/core/operator";
 import { NodeServices } from "@effect/platform-node";
@@ -55,6 +57,39 @@ for (const [name, layer] of [
           if (first === undefined) return;
           assert.equal((yield* store.remove(first.id).pipe(Effect.flip)).status, 409);
           assert.lengthOf(yield* store.members, 1);
+        }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+      ));
+    it("changes only owned token scopes and preserves them when recording use", async () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const store = yield* AuthStore;
+          yield* store.add(alice, true);
+          yield* store.add(bob, false);
+          const token = new InstanceToken({
+            id: TokenId.make("scoped"),
+            memberId: alice.id,
+            name: TokenName.make("Scoped"),
+            hash: secretHash("scoped-secret"),
+            kind: "device",
+            createdAt: 0,
+            lastUsedAt: 0,
+            expiresAt: 1000000,
+          });
+          yield* store.issue(token);
+          const scopes = [
+            new PermissionGrant({
+              permission: "read",
+              scope: new ProjectScope({ project: ProjectId.make("alpha") }),
+            }),
+          ];
+          assert.equal(
+            (yield* store.setScopes(bob.id, token.id, scopes).pipe(Effect.flip)).status,
+            403,
+          );
+          yield* store.setScopes(alice.id, token.id, scopes);
+          const access = yield* store.authenticate(token.hash, 61000);
+          assert.deepEqual(Option.getOrNull(access)?.token.scopes, scopes);
+          assert.deepEqual((yield* store.tokens(alice.id))[0]?.scopes, scopes);
         }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
       ));
     it("revokes every credential when a member is removed", async () =>

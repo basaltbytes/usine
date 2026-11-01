@@ -2,7 +2,7 @@ import { AttemptContext } from "@usine/core/attempt";
 import { type CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
-import { OperatorLogin } from "@usine/core/operator";
+import { OperatorActor } from "@usine/core/operator";
 import { StepName } from "@usine/core/step";
 import { type DateTime, Schema } from "effect";
 import type { RunSnapshot } from "../run-reader/model.ts";
@@ -26,7 +26,7 @@ export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engin
     /** The task, agent, and parent model to save as the new run's effective context. */
     context: AttemptContext,
     /** The operator who requested the new run, or `None` when no login was recorded. */
-    requestedBy: Schema.Option(OperatorLogin),
+    requestedBy: Schema.Option(OperatorActor),
   },
 ) {}
 

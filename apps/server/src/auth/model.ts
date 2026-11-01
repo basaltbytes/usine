@@ -1,10 +1,8 @@
-import { OperatorLogin } from "@usine/core/operator";
-import { Schema } from "effect";
+import { GitHubUserId, PermissionGrant, administratorPermissions } from "@usine/core/access";
+import { OperatorActor, OperatorLogin } from "@usine/core/operator";
+import { Effect, Schema } from "effect";
 
-export const GitHubUserId = Schema.Int.check(Schema.isGreaterThan(0)).pipe(
-  Schema.brand("GitHubUserId"),
-);
-export type GitHubUserId = typeof GitHubUserId.Type;
+export { GitHubUserId } from "@usine/core/access";
 export class GitHubIdentity extends Schema.Class<GitHubIdentity>("GitHubIdentity")({
   login: OperatorLogin,
   id: GitHubUserId,
@@ -12,7 +10,7 @@ export class GitHubIdentity extends Schema.Class<GitHubIdentity>("GitHubIdentity
 export class Member extends Schema.Class<Member>("Member")({
   ...GitHubIdentity.fields,
   addedAt: Schema.Number,
-  addedBy: OperatorLogin,
+  addedBy: OperatorActor,
 }) {}
 export const TokenId = Schema.NonEmptyString.pipe(Schema.brand("TokenId"));
 export type TokenId = typeof TokenId.Type;
@@ -32,6 +30,12 @@ export class InstanceToken extends Schema.Class<InstanceToken>("InstanceToken")(
   createdAt: Schema.Number,
   lastUsedAt: Schema.Number,
   expiresAt: Schema.Number,
+  scopes: Schema.Array(PermissionGrant).pipe(
+    Schema.withDecodingDefaultKey(
+      Effect.succeed([{ permission: "admin", scope: { _tag: "Instance" } }]),
+    ),
+    Schema.withConstructorDefault(Effect.succeed(administratorPermissions)),
+  ),
   kind: Schema.Literals(["session", "device"]),
 }) {
   recordUse(now: number): InstanceToken {

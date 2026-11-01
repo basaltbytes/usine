@@ -491,6 +491,14 @@ export const preflightSetupReason = "Available after GitHub App setup";
 export const preflightRunningReason = "A preflight is already running";
 export const preflightCommand = (worker: string) => `Run preflight on ${worker}`;
 
+export const bindingCopy = {
+  title: "Role bindings",
+  description:
+    "Grant a member instance admin access or a role on one project. Use the member's numeric GitHub ID from Members.",
+  member: "Member",
+  instance: "Instance",
+};
+
 export const machineReuseCopy = {
   idle: "Idle",
   limits: "Reuse stops at the configured attempt or age limit",

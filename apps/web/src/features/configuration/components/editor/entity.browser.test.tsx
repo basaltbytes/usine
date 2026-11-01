@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { ProjectId } from "@usine/core/project";
 import { taskOverview } from "~/lib/tasks/fixture";
 import { RegistryTag } from "@usine/config/factory";
@@ -77,6 +79,7 @@ const mount = async (
   await commands.configurationEditorResponses(rejections, JSON.stringify(configurationJson));
   await commands.loopEditorResponses(JSON.stringify(configurationJson), resumeRejections);
   await page.viewport(390, 844);
+  client.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     context: { queryClient: client },
@@ -85,9 +88,11 @@ const mount = async (
   await router.load();
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={client}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   return router;
@@ -122,6 +127,35 @@ it("shows entity history as export-format diffs, reverts with a message, and loa
   await button("Older revisions").click();
   await expect.element(button("Revision 1")).toBeVisible();
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+});
+
+it("refreshes the head after a stale revert and after a successful write", async () => {
+  await mount(undefined, [
+    {
+      status: 409,
+      body: JSON.stringify({
+        error: "StaleRevision",
+        message: "Configuration changed",
+        expected: 2,
+        current: 3,
+      }),
+    },
+  ]);
+  await button("Revision 2").click();
+  await button("Revert").click();
+  await button("Confirm revert").click();
+  await expect.element(button("Revision 3")).toBeVisible();
+  await button("Revision 3").click();
+  await button("Revert").click();
+  await button("Confirm revert").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(2);
+  expect((await commands.configurationEditorRequests())[1]?.payload).toMatchObject({ expected: 3 });
+  await expect.element(button("Revision 4")).toBeVisible();
+  await button("Revision 4").click();
+  await button("Revert").click();
+  await button("Confirm revert").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(3);
+  expect((await commands.configurationEditorRequests())[2]?.payload).toMatchObject({ expected: 4 });
 });
 
 it("keeps invalid text and lists every field problem under the editor before saving", async () => {

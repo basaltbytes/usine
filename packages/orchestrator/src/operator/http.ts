@@ -77,6 +77,7 @@ import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 
 const errorStatuses = {
+  AccessDenied: 403,
   WorkerPreflightRejectedError: 409,
   UpgradeError: 409,
   ConfigurationNotFound: 404,
@@ -746,6 +747,15 @@ export const OperatorApi = operatorApi.add(
           OpenApi.Description,
           "Evaluates the proposed loop against stored GitHub items without making GitHub requests or saving a revision.",
         ),
+      HttpApiEndpoint.get("configurationHead", "/api/configuration/head", {
+        success: Schema.Struct({ number: ConfigurationRevisionNumber }),
+        error: configurationWriteErrors,
+      })
+        .annotate(OpenApi.Summary, "Read the current configuration revision")
+        .annotate(
+          OpenApi.Description,
+          "Returns the revision number used to detect stale configuration writes.",
+        ),
       HttpApiEndpoint.get("configurationCapabilities", "/api/configuration/capabilities", {
         success: Schema.Struct({
           harnesses: Schema.Array(Harness),
@@ -897,3 +907,55 @@ export const OperatorApi = operatorApi.add(
     .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
     .middleware(OperatorHttpPolicy),
 );
+
+/** Minimum route permissions; resource-specific checks run in the operator and configuration editor. */
+export const operatorPermissions = {
+  serverVersion: "public",
+  upgradeStatus: "admin",
+  cancelUpgrade: "admin",
+  requestUpgrade: "admin",
+  overview: "read",
+  project: "read",
+  projectTask: "read",
+  task: "read",
+  detail: "read",
+  githubChanges: "read",
+  desk: "read",
+  statistics: "read",
+  runStatistics: "read",
+  agents: "read",
+  dismissNeed: "admin",
+  undoDismissNeed: "admin",
+  resetCycleBudget: "operate",
+  editAndRetry: "operate",
+  runAgain: "operate",
+  intervene: "operate",
+  approve: "operate",
+  resolveFailure: "operate",
+  retry: "operate",
+  cancel: "operate",
+  moveProjectItem: "operate",
+  moveBoardItem: "operate",
+  pauseProjectLoop: "operate",
+  unpauseProjectLoop: "operate",
+  pause: "operate",
+  unpause: "operate",
+  runWorkerPreflight: "admin",
+  discardLeftovers: "admin",
+  checkLoop: "maintain",
+  previewLoop: "read",
+  configurationCapabilities: "read",
+  configurationHead: "read",
+  configurationRepositories: "admin",
+  configurationLabels: "read",
+  configurationRevisions: "read",
+  configurationRevision: "read",
+  configurationEntity: "read",
+  replaceConfigurationEntity: "maintain",
+  deleteConfigurationEntity: "maintain",
+  revertConfigurationRevision: "maintain",
+  configuration: "read",
+} as const satisfies Record<
+  keyof typeof OperatorApi.groups.operator.endpoints,
+  "public" | "read" | "operate" | "maintain" | "admin"
+>;

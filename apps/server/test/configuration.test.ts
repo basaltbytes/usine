@@ -117,8 +117,8 @@ test(
       expect(revisions()).toHaveLength(3);
       const history = run(directory, ["log", "loop", "implement"]);
       expect(history.status, history.stderr).toBe(0);
-      expect(history.stdout).toContain("1\toperator\t");
-      expect(history.stdout).not.toMatch(/[23]\toperator\t/);
+      expect(history.stdout).toContain("1\tlocal admin\t");
+      expect(history.stdout).not.toMatch(/[23]\tlocal admin\t/);
       expect(run(directory, ["import", exported]).stdout).toContain("No configuration changes.");
       expect(revisions()).toHaveLength(3);
     } finally {
@@ -151,7 +151,7 @@ test(
       expect(imported.status, imported.stderr).toBe(0);
       expect(imported.stdout).toContain(`Revision ${revision}:`);
       expect(run(directory, ["log", "worker", "preferred"]).stdout).toContain(
-        `${revision}\toperator\t`,
+        `${revision}\tlocal admin\t`,
       );
       const result = run(directory, ["export", exported]);
       expect(result.status, result.stderr).toBe(0);
@@ -177,7 +177,7 @@ test(
   async ({ directory }) => {
     const first = run(directory, ["log"]);
     expect(first.status, first.stderr).toBe(0);
-    expect(first.stdout).toContain("1\toperator\t");
+    expect(first.stdout).toContain("1\tlocal admin\t");
     expect(first.stdout).toContain("Imported from the instance folder");
     const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
     const count = () =>
@@ -206,7 +206,7 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
     expect(edited.status, edited.stderr).toBe(0);
     expect(edited.stdout).toContain("Changed agent developer");
     expect(count()).toBe(2);
-    expect(run(directory, ["log", "agent", "developer"]).stdout).toContain("2\toperator\t");
+    expect(run(directory, ["log", "agent", "developer"]).stdout).toContain("2\tlocal admin\t");
 
     await writeFile(join(exported, "agents/developer.md"), "invalid");
     await writeFile(join(exported, "projects/acme-project/loops/implement.md"), "invalid");

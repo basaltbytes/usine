@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { closedStruct } from "../closed-struct.ts";
-import { OperatorLogin } from "../operator.ts";
+import { OperatorActor } from "../operator.ts";
 import { RunId } from "./run.ts";
 
 /**
@@ -12,6 +12,6 @@ export class RunAgain extends Schema.Class<RunAgain>("RunAgain")(
     /** The succeeded or canceled run that the operator requested to run again. */
     from: RunId,
     /** The requesting operator's login, or `None` if none was recorded. */
-    requestedBy: Schema.OptionFromNullOr(OperatorLogin),
+    requestedBy: Schema.OptionFromNullOr(OperatorActor),
   }),
 ) {}

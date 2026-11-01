@@ -61,3 +61,13 @@ export const SetupApi = HttpApiGroup.make("setup")
       .annotate(OpenApi.Summary, "Check runtime readiness")
       .annotate(OpenApi.Description, "Returns true when the instance serves the active runtime."),
   );
+
+/** Setup accepts instance admins and the initial bootstrap session. */
+export const setupPermissions = {
+  status: "setup",
+  manifest: "setup",
+  callback: "public",
+  restore: "setup",
+  activate: "setup",
+  runtime: "setup",
+} as const satisfies Record<keyof typeof SetupApi.endpoints, "setup" | "public">;

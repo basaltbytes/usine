@@ -1,3 +1,5 @@
+import { RequestPermissions, permits, InstanceScope } from "@usine/core/access";
+import { visibleRepository } from "./access.ts";
 import { PriorityValue } from "@usine/config/loop";
 import type { LoadedInstance } from "@usine/config/instance";
 import { AgentName } from "@usine/core/agent";
@@ -550,6 +552,8 @@ const makeDesk = Effect.gen(function* () {
   });
 
   const desk = Effect.fn("Operator.desk")(function* (instance: LoadedInstance) {
+    const grants = yield* RequestPermissions;
+    const visible = (repository: RepositoryName) => visibleRepository(instance, grants, repository);
     const [
       summaries,
       closed,
@@ -565,7 +569,16 @@ const makeDesk = Effect.gen(function* () {
     ] = yield* Effect.all(
       [
         reader.list({ closedLimit: 0 }),
-        reader.closed({ limit: CLOSED_RUNS_READ }),
+        reader.closed(
+          permits(grants, "read", new InstanceScope())
+            ? { limit: CLOSED_RUNS_READ }
+            : {
+                limit: CLOSED_RUNS_READ,
+                repositories: instance.config.repos
+                  .filter(({ name }) => visible(name))
+                  .map(({ name }) => name),
+              },
+        ),
         controls.states,
         budgets.asks(),
         workerStatus.slots,
@@ -720,7 +733,7 @@ const makeDesk = Effect.gen(function* () {
     );
 
     const lastOutcomes = closed
-      .filter((summary) => !replacedBeforeStart(summary))
+      .filter((summary) => visible(summary.repository) && !replacedBeforeStart(summary))
       .map((summary) => {
         const run = runView(summary, paused, access, waits, upgrade);
         return new ClosedRunView({
@@ -786,11 +799,11 @@ const makeDesk = Effect.gen(function* () {
       workers: workers.length,
     });
     return new DeskView({
-      running,
-      notMoving: [...notMoving].sort(stalledOrder),
+      running: running.filter(({ run }) => visible(run.repository)),
+      notMoving: [...notMoving].filter(({ repository }) => visible(repository)).sort(stalledOrder),
       lastOutcomes,
-      workers,
-      polls,
+      workers: permits(grants, "admin", new InstanceScope()) ? workers : [],
+      polls: polls.filter(({ repository }) => visible(repository)),
     });
   });
 

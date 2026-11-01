@@ -1,3 +1,4 @@
+import { useCanOperateLoop, useCanOperateRepository } from "~/lib/permissions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { LoopName } from "@usine/core/loop";
 import type { CycleBudgetUsedUpView, RunView, StalledItemView } from "@usine/orchestrator/operator";
@@ -175,7 +176,10 @@ type StallActionProps = {
 
 /** Renders the action that unblocks a stalled Item, or nothing if there is none or `readOnly` is set. */
 export const StallAction = ({ stalled, readOnly, appearance }: StallActionProps) => {
-  if (readOnly) return null;
+  const operateLoop = useCanOperateLoop(stalled.loop);
+  const operateRepository = useCanOperateRepository(stalled.repository);
+  const permitted = stalled.reason._tag === "LoopPaused" ? operateLoop : operateRepository;
+  if (readOnly || !permitted) return null;
   const reason = stalled.reason;
   switch (reason._tag) {
     case "AwaitingApproval":

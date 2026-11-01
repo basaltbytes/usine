@@ -2,6 +2,7 @@ import { Context, type DateTime, Effect, Layer, Option, Schema } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { attemptTranscripts } from "../database/schema.ts";
+import type { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
 import { RunDatabase } from "../database/database.ts";
@@ -54,9 +55,24 @@ const makeRunReader = Effect.gen(function* () {
   const list = Effect.fn("RunReader.list")((options: { readonly closedLimit: number }) =>
     queries.runSummaries(options.closedLimit).pipe(persistence("list runs")),
   );
-  const closed = Effect.fn("RunReader.closed")((options: { readonly limit: number }) =>
-    queries.closedRunSummaries(options.limit).pipe(persistence("list closed runs")),
-  );
+  const closed = Effect.fn("RunReader.closed")(function* (options: {
+    readonly limit: number;
+    readonly repositories?: ReadonlyArray<RepositoryName>;
+  }) {
+    yield* Effect.annotateCurrentSpan({
+      limit: options.limit,
+      repositories: options.repositories ?? "all",
+    });
+    const summaries = yield* queries
+      .closedRunSummaries(options.limit, options.repositories)
+      .pipe(persistence("list closed runs"));
+    yield* Effect.logDebug("Read closed runs", {
+      limit: options.limit,
+      repositories: options.repositories ?? "all",
+      runs: summaries.length,
+    });
+    return summaries;
+  });
   const closedSince = Effect.fn("RunReader.closedSince")((since: Option.Option<DateTime.Utc>) =>
     queries.closedRunSummariesSince(since).pipe(persistence("list runs closed since a time")),
   );
@@ -143,9 +159,10 @@ export class RunReader extends Context.Service<
     readonly list: (options: {
       readonly closedLimit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
-    /** Returns the `limit` most recently closed Runs, by close time, newest first. */
+    /** Returns the newest closed runs within `repositories`, or all repositories when omitted. */
     readonly closed: (options: {
       readonly limit: number;
+      readonly repositories?: ReadonlyArray<RepositoryName>;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
     /**
      * Returns every Run that closed at or after `since`, or every closed Run for `None`, by close

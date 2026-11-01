@@ -1,3 +1,4 @@
+import { useCan } from "~/lib/permissions";
 import { proposedLanesHint } from "~/features/projects/strings";
 import {
   DndContext,
@@ -58,7 +59,15 @@ type ProjectBoardProps = {
  * `stalled` is the desk's list of stalled Items, whose reasons are shown on their cards; `disabled`
  * turns off moves and actions during setup.
  */
-export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: ProjectBoardProps) => {
+export const ProjectBoard = ({
+  project,
+  loops,
+  stalled,
+  disabled: readOnly,
+  openRun,
+}: ProjectBoardProps) => {
+  const permitted = useCan("operate", project.id);
+  const disabled = readOnly || !permitted;
   const [active, setActive] = useState<DragSource | null>(null);
   const [over, setOver] = useState<BoardLaneId | null>(null);
   const { moves, moveItem, isPending, error } = useBoardMoves(project);

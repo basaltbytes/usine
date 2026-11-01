@@ -126,3 +126,7 @@ See [Development](../../README.md#development) for temporary storage selection a
 The top-level `auth.origins` list configures additional trusted browser origins and defaults to an empty list. `UiOrigin`, exported from `@usine/config/factory`, accepts exact HTTPS origins and HTTP origins on loopback, without credentials, paths, queries, or fragments. The server also allows its canonical `--origin` or `USINE_ORIGIN`. Authentication settings are stored with instance settings; changes require a server restart.
 
 SSH provisioners accept optional `reuse: { attempts: 5, max_age: 2h }` for Hetzner and Boat. Both limits are required; omitting `reuse` keeps one machine per attempt. Reuse requires Docker. The YAML boundary maps `max_age` to the domain field `maxAge`.
+
+## Access control
+
+Role bindings are named `binding` configuration entities with revision history. Admin roles require instance scope; other roles require an existing project. Import and export preserve bindings.

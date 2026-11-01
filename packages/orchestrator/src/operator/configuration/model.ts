@@ -4,7 +4,7 @@ import {
   ConfigurationRevisionNumber,
   type ConfigurationRevision,
 } from "@usine/config/configuration";
-import { OperatorLogin } from "@usine/core/operator";
+import { OperatorActor } from "@usine/core/operator";
 import { Option, Schema } from "effect";
 
 export class ConfigurationEntityRequest extends Schema.Class<ConfigurationEntityRequest>(
@@ -70,7 +70,7 @@ export class ConfigurationRevisionSummary extends Schema.Class<ConfigurationRevi
   "ConfigurationRevisionSummary",
 )({
   number: ConfigurationRevisionNumber,
-  actor: Schema.NullOr(OperatorLogin),
+  actor: Schema.NullOr(OperatorActor),
   time: Schema.DateTimeUtc,
   message: Schema.NullOr(Schema.String),
   entities: Schema.Array(ConfigurationEntityKey),

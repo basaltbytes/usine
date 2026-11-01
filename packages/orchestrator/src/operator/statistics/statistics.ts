@@ -1,3 +1,5 @@
+import { RequestPermissions, permits, InstanceScope } from "@usine/core/access";
+import { visibleInstance } from "../access.ts";
 import { WorkerStatus } from "../../worker-status.ts";
 import { ConfigurationStore, type ConfigurationStoreError } from "@usine/config/configuration";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -167,14 +169,23 @@ const makeStatistics = Effect.gen(function* () {
       [reader.closedSince(windowStart(window, now)), reader.list({ closedLimit: 0 })] as const,
       { concurrency: "unbounded" },
     );
-    const open = listed.filter(({ run }) => RunState.isOpen(run.state));
+    const grants = yield* RequestPermissions;
+    const admin = permits(grants, "admin", new InstanceScope());
+    const repositories = new Set(instance.config.repos.map(({ name }) => name.toLowerCase()));
+    const visibleClosed = closed.filter(
+      ({ repository }) => admin || repositories.has(repository.toLowerCase()),
+    );
+    const open = listed.filter(
+      ({ run, repository }) =>
+        RunState.isOpen(run.state) && (admin || repositories.has(repository.toLowerCase())),
+    );
     const view = runStatisticsView({
       window,
       now,
-      runs: [...closed, ...open],
-      usage: yield* usageOf(closed),
+      runs: [...visibleClosed, ...open],
+      usage: yield* usageOf(visibleClosed),
       workers: yield* Effect.forEach(
-        instance.config.workers,
+        permits(grants, "admin", new InstanceScope()) ? instance.config.workers : [],
         (worker) => readWorkerCapacity(configuration, worker),
         { concurrency: 4 },
       ),
@@ -187,16 +198,22 @@ const makeStatistics = Effect.gen(function* () {
     });
     return new RunStatisticsView({
       ...view,
-      machineStarts: (yield* workerStatus.machineStarts).filter(
+      machineStarts: (admin ? yield* workerStatus.machineStarts : []).filter(
         ({ day }) =>
           (window === "all" || day >= view.from.slice(0, 10)) && day <= view.to.slice(0, 10),
       ),
     });
   });
 
+  const cachedStatistics = cacheStatistics(reader.revision, statistics);
+  const cachedRuns = cacheStatistics(reader.revision, runStatistics);
   return {
-    statistics: cacheStatistics(reader.revision, statistics),
-    runStatistics: cacheStatistics(reader.revision, runStatistics),
+    statistics: (instance: LoadedInstance, window: StatisticsWindow) =>
+      visibleInstance(instance).pipe(
+        Effect.flatMap((visible) => cachedStatistics(visible, window)),
+      ),
+    runStatistics: (instance: LoadedInstance, window: StatisticsWindow) =>
+      visibleInstance(instance).pipe(Effect.flatMap((visible) => cachedRuns(visible, window))),
   };
 });
 

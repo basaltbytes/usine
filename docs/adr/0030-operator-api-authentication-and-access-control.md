@@ -56,3 +56,18 @@ Issue #777 adds `auth.origins` for additional exact browser origins. The canonic
 One global HTTP middleware checks origins before route handling and uses Effect's pre-response hook for security and CORS headers, including router errors. The policy refuses unknown origins without any CORS headers and validates preflight methods and headers. The built-in Effect CORS middleware emits credential headers for disallowed origins and does not reject those requests, so the server implements this policy at the same boundary as its response headers.
 
 HSTS follows the configured canonical HTTPS origin; forwarded headers cannot enable it. The bundled UI's CSP allows inline styles for component positioning and syntax highlighting, data-URL fonts bundled by dependencies, and HTTPS images for avatars and Markdown. Scripts and connections remain restricted to the instance origin.
+
+
+## Roles, scoped tokens, and the local actor
+
+Amended for [#776](https://github.com/basaltbytes/usine/issues/776) on 2026-11-01:
+
+Role bindings are named configuration entities owned by `@usine/core/access`. They bind a stable numeric GitHub member ID to instance admin or to a project viewer, operator, or maintainer role. Configuration validates project references and scope/role combinations. Bindings can precede membership so imports do not depend on GitHub availability; an unenrolled identity cannot authenticate. Members added through the API receive no implicit role.
+
+A separate SQL migration ledger grants existing members instance admin once. First enrollment records membership and its admin binding in one transaction. Member removal deletes credentials and bindings in one transaction and refuses removal of the last enrolled admin. Configuration edits can deliberately remove all admin bindings; the local actor remains available for recovery.
+
+Every operator endpoint declares its minimum permission. Resource handlers check project scope, and list results are filtered after shared caches. Configuration history exposes only revisions whose changed entities are all readable. Shared agents and non-secret runtime settings are readable to project viewers; workers, bindings, instance attention controls, and administrative configuration entities require admin. Internal services retain trusted instance permissions by default; the HTTP boundary always replaces them with authenticated grants.
+
+A token stores a permission ceiling. New sign-ins snapshot current grants, and token creation and scope editing reject permissions wider than the caller's. Each request intersects the ceiling with current bindings. Legacy tokens decode with a full-member ceiling for compatibility. Non-admin device tokens cannot manage tokens, while browser sessions can manage their own credentials. Role changes therefore apply on the next request without token revocation.
+
+The built-in local actor has instance admin access and no GitHub member. Store its attribution as the reserved string `local admin`, which cannot be a valid GitHub login. This preserves existing audit fields and historical logins without inventing a GitHub account. Local API writes and direct configuration CLI revisions use this actor. Filesystem permissions protect the CLI's direct database access. Local one-time links continue to issue member browser sessions and do not expose the local credential to browsers.

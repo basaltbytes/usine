@@ -1,3 +1,7 @@
+import { configurationQuery } from "~/lib/configuration/queries";
+import { configurationFixture } from "~/lib/configuration/fixture";
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
@@ -15,6 +19,7 @@ it("offers enabled member actions, preserves pending states, and confirms remova
   const client = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
   });
+  client.setQueryData(configurationQuery().queryKey, configurationFixture());
   let members = [
     { id: 1, login: "operator", addedAt: 0, addedBy: "operator" },
     { id: 2, login: "developer", addedAt: 0, addedBy: "operator" },
@@ -40,16 +45,18 @@ it("offers enabled member actions, preserves pending states, and confirms remova
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={client}>
-          <WithRouter>
-            <PageCommandsProvider>
-              <CommandPalette
-                overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })}
-              />
-              <MembersPage />
-            </PageCommandsProvider>
-          </WithRouter>
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={client}>
+            <WithRouter>
+              <PageCommandsProvider>
+                <CommandPalette
+                  overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })}
+                />
+                <MembersPage />
+              </PageCommandsProvider>
+            </WithRouter>
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     const search = async (text: string) => {

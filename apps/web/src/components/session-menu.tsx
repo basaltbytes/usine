@@ -1,3 +1,4 @@
+import { useCan } from "~/lib/permissions";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { KeyIcon, SignOutIcon, UsersIcon } from "@phosphor-icons/react";
 import { useState } from "react";
@@ -8,6 +9,7 @@ import { rejectionMessage } from "~/lib/api";
 import { membersLabel, tokensPageLabel, signOutLabel } from "~/lib/strings";
 
 export const SessionMenu = () => {
+  const admin = useCan("admin");
   const matchRoute = useMatchRoute();
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
@@ -25,15 +27,17 @@ export const SessionMenu = () => {
     <>
       {error !== undefined && <ErrorAlert message={error} />}
       <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            isActive={matchRoute({ to: "/members" }) !== false}
-            render={<Link to="/members" />}
-          >
-            <UsersIcon aria-hidden="true" />
-            {membersLabel}
-          </SidebarMenuButton>
-        </SidebarMenuItem>
+        {admin && (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={matchRoute({ to: "/members" }) !== false}
+              render={<Link to="/members" />}
+            >
+              <UsersIcon aria-hidden="true" />
+              {membersLabel}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
         <SidebarMenuItem>
           <SidebarMenuButton
             isActive={matchRoute({ to: "/tokens" }) !== false}

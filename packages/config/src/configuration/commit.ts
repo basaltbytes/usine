@@ -76,6 +76,7 @@ export const validateConfiguration = (
           repos: values("repository"),
           labels: values("label"),
           projects: values("project"),
+          bindings: values("binding"),
         }),
       )
       .pipe(Effect.result);
@@ -86,15 +87,17 @@ export const validateConfiguration = (
         for (const detail of error.details) {
           const [group, index, ...path] = detail.path;
           const kind =
-            group === "projects"
-              ? "project"
-              : group === "workers"
-                ? "worker"
-                : group === "repos"
-                  ? "repository"
-                  : group === "labels"
-                    ? "label"
-                    : "settings";
+            group === "bindings"
+              ? "binding"
+              : group === "projects"
+                ? "project"
+                : group === "workers"
+                  ? "worker"
+                  : group === "repos"
+                    ? "repository"
+                    : group === "labels"
+                      ? "label"
+                      : "settings";
           const entity =
             kind === "settings"
               ? settings

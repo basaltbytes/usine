@@ -1,3 +1,4 @@
+import { useCanOperateRepository } from "~/lib/permissions";
 import { usePageCommands } from "~/components/command-palette/context";
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
@@ -57,6 +58,7 @@ type RowActionsProps = {
 
 /** While an action is pending, shows its progress instead of the actions. */
 export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) => {
+  const permitted = useCanOperateRepository(run.repository);
   const action = useRunAction();
   const again = useRunAgain();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -108,7 +110,7 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
       select: () => setConfirmingCancel(true),
     });
   usePageCommands(
-    action.isPending || again.isPending || confirmingCancel
+    !permitted || action.isPending || again.isPending || confirmingCancel
       ? []
       : [
           ...(primary === null
@@ -120,6 +122,7 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
           run: select,
         })),
   );
+  if (!permitted) return null;
   if (action.isPending && action.variables !== undefined)
     return (
       <span role="status" className="text-xs text-muted-foreground">

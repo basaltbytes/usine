@@ -622,7 +622,7 @@ describe("Items no Loop acts on", () => {
           assert.strictEqual(refreshed.find(({ item }) => item !== null)?.item?.number, 195);
           const waiting = approvals.find(({ item }) => item?.number === 195);
           assert(waiting !== undefined);
-          yield* operator.cancel(waiting.runId);
+          yield* operator.cancel(instance, waiting.runId);
           const afterCancel = yield* operator.overview(instance);
           assert(
             !afterCancel.projects.some(({ board }) =>

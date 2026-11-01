@@ -111,3 +111,8 @@ export const refreshCopy = {
   failed: (sources: string) =>
     ` · Refresh failing for over a minute: ${sources}. Showing last available data.`,
 };
+
+export const accountLabel = "Account";
+export const noAccessTitle = "No project access";
+export const noAccessDescription =
+  "Ask an instance admin to grant you a role. You can still manage your tokens or sign out.";

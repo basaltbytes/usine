@@ -1,3 +1,5 @@
+import { permits, ProjectScope } from "@usine/core/access";
+import { useCan, usePermissions } from "~/lib/permissions";
 import { ProjectId } from "@usine/core/project";
 import { NativeSelect } from "~/components/ui/native-select";
 import { projectCopy } from "~/features/configuration/strings";
@@ -13,7 +15,7 @@ import { CommandButton } from "~/components/command-palette/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { entityHref, entityKey, entityTemplate } from "~/features/configuration/lib/entities";
-import { entityQuery } from "~/features/configuration/queries";
+import { entityQuery, configurationHeadQuery } from "~/features/configuration/queries";
 import { editorCopy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { rejectionMessage } from "~/lib/api";
@@ -24,6 +26,7 @@ type CreateEntityProps = { readonly kind: ConfigurationEntityKind };
 type CreationFormProps = CreateEntityProps & { readonly cancel: () => void };
 
 const CreationForm = ({ kind, cancel }: CreationFormProps) => {
+  const grants = usePermissions();
   const [project, setProject] = useState("");
   const [name, setName] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -31,7 +34,7 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
   const [checking, setChecking] = useState(false);
   const client = useQueryClient();
   const navigate = useNavigate();
-  const current = useQuery(entityQuery(entityKey("settings", "instance")));
+  const current = useQuery(configurationHeadQuery());
   const configuration = useQuery(configurationQuery());
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -78,11 +81,15 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
                 onChange={(event) => setProject(event.target.value)}
               >
                 <option value="">{projectCopy.chooseProject}</option>
-                {configuration.data?.projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
+                {configuration.data?.projects
+                  .filter(({ id }) =>
+                    permits(grants, "maintain", new ProjectScope({ project: id })),
+                  )
+                  .map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
               </NativeSelect>
             </Label>
           )}
@@ -148,7 +155,11 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
 };
 
 export const CreateEntity = ({ kind }: CreateEntityProps) => {
+  const admin = useCan("admin");
+  const grants = usePermissions();
   const [open, setOpen] = useState(false);
+  if (!admin && !(kind === "loop" && grants.some(({ permission }) => permission === "maintain")))
+    return null;
   return open ? (
     <CreationForm kind={kind} cancel={() => setOpen(false)} />
   ) : (

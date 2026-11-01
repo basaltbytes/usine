@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterContextProvider } from "@tanstack/react-router";
 import {
@@ -85,11 +87,13 @@ it.each([
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={queries}>
-          <RouterContextProvider router={router}>
-            <Attention />
-          </RouterContextProvider>
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queries}>
+            <RouterContextProvider router={router}>
+              <Attention />
+            </RouterContextProvider>
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     if (need._tag === "PoolLimitNeed") {

@@ -1,4 +1,4 @@
-import { OperatorLogin } from "@usine/core/operator";
+import { OperatorActor } from "@usine/core/operator";
 import { Context, type Effect, type Option, type Stream } from "effect";
 import {
   Configuration,
@@ -18,7 +18,7 @@ export interface ConfigurationCommit {
   /** The proposed entity changes, including expected before values and any worker positions. */
   readonly changes: ReadonlyArray<ConfigurationChange>;
   /** The operator login to attribute to the revision, or `None` when unavailable. */
-  readonly actor: Option.Option<OperatorLogin>;
+  readonly actor: Option.Option<OperatorActor>;
   /** The optional description to record with the revision. */
   readonly message: Option.Option<string>;
 }

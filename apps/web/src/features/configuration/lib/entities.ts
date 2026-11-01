@@ -25,6 +25,8 @@ export const entityReferences = (
 ): readonly string[] => {
   const identifier: string = key.identifier;
   switch (key.kind) {
+    case "binding":
+      return [];
     case "agent":
       return (
         configuration.agents
@@ -62,6 +64,8 @@ export const entityTemplate = (
   agent: string,
 ): string => {
   switch (kind) {
+    case "binding":
+      return `name: ${JSON.stringify(identifier)}\nmember: 1\nrole: viewer\nscope:\n  _tag: Project\n  project: example\n`;
     case "agent":
       return "---\nharness: codex\nmodel: gpt-6-astra\neffort: medium\n---\n\nComplete one repository task at a time. Follow the repository instructions, run the required checks, and record any blocker on the issue or pull request.\n";
     case "loop":

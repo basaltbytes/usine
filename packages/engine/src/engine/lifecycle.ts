@@ -1,4 +1,4 @@
-import type { OperatorLogin } from "@usine/core/operator";
+import type { OperatorActor } from "@usine/core/operator";
 import {
   Attempt,
   AttemptId,
@@ -219,7 +219,7 @@ type CancelDecision =
 /** Returns the cancel decision for an open Run and its open Attempt, if any. */
 export const cancelRun = (
   current: RunProgress,
-  by: Option.Option<OperatorLogin> = Option.none(),
+  by: Option.Option<OperatorActor> = Option.none(),
 ): CancelDecision => {
   if (current.run.state._tag === "Canceled") return { _tag: "AlreadyClosed" };
   if (!RunState.isOpen(current.run.state)) return { _tag: "CancelRejected" };

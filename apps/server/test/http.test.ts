@@ -1,3 +1,11 @@
+import {
+  RequestPermissions,
+  RoleBinding,
+  InstanceScope,
+  ProjectScope,
+  GitHubUserId,
+} from "@usine/core/access";
+import { operatorPermissions } from "@usine/orchestrator/operator/http";
 import { SetupApi } from "../src/setup/api.ts";
 import { setupRoutes } from "../src/setup/http.ts";
 import { securityMiddleware } from "../src/security.ts";
@@ -1405,5 +1413,51 @@ it("returns a typed server error when statistics cannot read worker configuratio
     });
   } finally {
     await failing.dispose();
+  }
+});
+
+it("checks the declared permission for every operator route and each role", async () => {
+  const roles = ["viewer", "operator", "maintainer", "admin"] as const;
+  for (const role of roles) {
+    const binding = new RoleBinding({
+      name: role,
+      member: GitHubUserId.make(1),
+      role,
+      scope:
+        role === "admin"
+          ? new InstanceScope()
+          : new ProjectScope({ project: ProjectId.make("alpha") }),
+    });
+    const secured = HttpRouter.toWebHandler(
+      apiRoutes().pipe(
+        HttpRouter.provideRequest(
+          Layer.merge(backend, Layer.succeed(RequestPermissions, binding.permissions)),
+        ),
+      ),
+      { disableLogger: true },
+    );
+    try {
+      for (const endpoint of Object.values(OperatorApi.groups.operator.endpoints)) {
+        const permission = operatorPermissions[endpoint.identifier];
+        const allowed =
+          permission === "public" ||
+          role === "admin" ||
+          binding.permissions.some((grant) => grant.permission === permission);
+        const path = endpoint.path.replace(/:project\b/g, "alpha").replace(/:[A-Za-z]+/g, "sample");
+        const request: RequestInit = { method: endpoint.method };
+        if (endpoint.method !== "GET") {
+          request.body = "{}";
+          request.headers = { "content-type": "application/json" };
+        }
+        const response = await secured.handler(new Request(`http://localhost${path}`, request));
+        assert.equal(
+          response.status === 403,
+          !allowed,
+          `${role}: ${endpoint.method} ${endpoint.path} returned ${response.status}`,
+        );
+      }
+    } finally {
+      await secured.dispose();
+    }
   }
 });

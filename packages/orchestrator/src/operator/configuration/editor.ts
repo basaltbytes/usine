@@ -1,3 +1,11 @@
+import {
+  AccessDenied,
+  InstanceScope,
+  RequestPermissions,
+  permits,
+  requirePermission,
+} from "@usine/core/access";
+import { entityPermission, loopScope } from "../access.ts";
 import { repositoryEditorEntity, repositoryEditorChanges } from "./repositories.ts";
 import { requestActor } from "@usine/core/operator";
 import { configurationLoopOperations } from "./loops/operations.ts";
@@ -27,7 +35,7 @@ import {
 } from "@usine/config/configuration";
 import { formatConfigurationEntity, parseConfigurationEntity } from "@usine/config/folder-codec";
 import { ConfigParser } from "@usine/config/parser";
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, Equal, Layer, Option, Schema } from "effect";
 import {
   CurrentInstance,
   type InstanceReloadError,
@@ -45,6 +53,7 @@ import {
 
 /** A configuration lookup, validation, revision conflict, persistence, or reload failure. */
 export type ConfigurationEditorError =
+  | AccessDenied
   | ConfigurationInvalid
   | ConfigurationStoreError
   | StaleRevision
@@ -76,6 +85,7 @@ export class ConfigurationEditor extends Context.Service<
      * Validates the JSON or Markdown in `input` against the current configuration and returns
      * problems without writing.
      */
+    readonly head: Effect.Effect<ConfigurationRevisionNumber, ConfigurationEditorError>;
     readonly checkLoop: (input: LoopDraft) => Effect.Effect<LoopCheck, ConfigurationEditorError>;
     /**
      * Evaluates `input` against stored items and optionally renders a prompt. It does not submit
@@ -153,6 +163,7 @@ export class ConfigurationEditor extends Context.Service<
           return yield* new ConfigurationNotFound({
             message: `Configuration revision ${number} was not found.`,
           });
+        for (const { key } of found.value.changes) yield* entityPermission(key, "read");
         return found.value;
       });
       const snapshotFor = (expected: ConfigurationRevisionNumber) =>
@@ -168,14 +179,31 @@ export class ConfigurationEditor extends Context.Service<
         input: ConfigurationWrite,
         changes: ReadonlyArray<ConfigurationChange>,
       ) =>
-        Effect.flatMap(requestActor(snapshot.actor), (actor) =>
-          current.commit({
+        Effect.gen(function* () {
+          const grants = yield* RequestPermissions;
+          for (const change of changes) {
+            yield* entityPermission(change.key, "maintain");
+            if (change.key.kind !== "project" || permits(grants, "admin", new InstanceScope()))
+              continue;
+            // A maintainer edits lanes; project membership and identity require an admin.
+            const withoutLanes = (value: Option.Option<Schema.Json>) =>
+              Option.flatMap(value, Schema.decodeUnknownOption(Schema.JsonObject)).pipe(
+                Option.map(({ lanes: _lanes, ...fields }) => fields),
+              );
+            if (
+              Option.isNone(change.before) ||
+              Option.isNone(change.after) ||
+              !Equal.equals(withoutLanes(change.before), withoutLanes(change.after))
+            )
+              return yield* new AccessDenied({ permission: "admin" });
+          }
+          return yield* current.commit({
             expected: input.expected,
             changes,
-            actor,
+            actor: yield* requestActor(snapshot.actor),
             message: Option.fromUndefinedOr(input.message),
-          }),
-        );
+          });
+        });
       const resolveKey = (snapshot: Configuration, key: ConfigurationEntityKey) =>
         Option.match(resolveConfigurationEntityKey(entitiesOf(snapshot), key), {
           onSome: Effect.succeed,
@@ -198,7 +226,15 @@ export class ConfigurationEditor extends Context.Service<
       };
 
       return ConfigurationEditor.of({
-        ...loops,
+        head: Effect.map(store.read, ({ number }) => number),
+        checkLoop: (input) =>
+          requirePermission("maintain", loopScope(input.name)).pipe(
+            Effect.andThen(loops.checkLoop(input)),
+          ),
+        previewLoop: (input) =>
+          requirePermission("read", loopScope(input.name)).pipe(
+            Effect.andThen(loops.previewLoop(input)),
+          ),
         revision,
         list: Effect.fn("ConfigurationEditor.list")(function* (query) {
           if (query.kind !== undefined)
@@ -218,7 +254,13 @@ export class ConfigurationEditor extends Context.Service<
                 )).identifier
               : query.identifier;
           const history = yield* store.list(Option.none());
-          const filtered = history
+          const allowed = yield* Effect.filter(history, (revision) =>
+            Effect.forEach(revision.changes, ({ key }) => entityPermission(key, "read")).pipe(
+              Effect.as(true),
+              Effect.catchTag("AccessDenied", () => Effect.succeed(false)),
+            ),
+          );
+          const filtered = allowed
             .filter(
               ({ number, changes }) =>
                 (query.before === undefined || number < query.before) &&
@@ -248,6 +290,7 @@ export class ConfigurationEditor extends Context.Service<
           const snapshot = yield* store.read;
           const key = yield* resolveKey(snapshot, yield* entityKey(request));
           yield* Effect.annotateCurrentSpan({ entity: key.key });
+          yield* entityPermission(key, "read");
           const entity = repositoryEditorEntity(snapshot, yield* findEntity(snapshot, key));
           return new ConfigurationEntityView({
             ...entity,
@@ -259,6 +302,7 @@ export class ConfigurationEditor extends Context.Service<
           const snapshot = yield* snapshotFor(input.expected);
           const key = yield* resolveKey(snapshot, yield* entityKey(request));
           yield* Effect.annotateCurrentSpan({ entity: key.key, expectedRevision: input.expected });
+          yield* entityPermission(key, "maintain");
           const parsed =
             input.text !== undefined
               ? yield* parseConfigurationEntity(parser, key, input.text)

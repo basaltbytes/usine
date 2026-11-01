@@ -1,3 +1,4 @@
+import { MemberAccess } from "../../src/auth/access.ts";
 import { securityMiddleware } from "../../src/security.ts";
 import { TestClock } from "effect/testing";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
@@ -202,7 +203,7 @@ it("issues a device token once, refuses non-members, and expires one-time links"
         401,
       );
       const local = yield* services.authentication.authenticate(localSecret);
-      assert.equal(Option.getOrNull(local.member)?.login, alice.login);
+      assert.isTrue(Option.isNone(local.member));
     }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
   ));
 
@@ -366,6 +367,11 @@ it("defers operator enrollment when GitHub is unavailable and retries on the nex
       const services = yield* authFixture([]);
       const seed = seedOperator(Option.some(alice.login)).pipe(
         Effect.provideService(AuthStore, services.store),
+        Effect.provideService(MemberAccess, {
+          permissions: () => Effect.succeed([]),
+          enroll: (member) => services.store.add(member, true),
+          remove: services.store.remove,
+        }),
       );
       yield* seed.pipe(
         Effect.provideService(GitHubSignIn, {

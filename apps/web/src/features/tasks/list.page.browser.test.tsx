@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { BoardView, DeskView, ProjectView, ReadyOverview } from "@usine/orchestrator/operator";
@@ -63,6 +65,7 @@ afterEach(() => {
 // The default width fits every column next to the sidebar.
 const mount = async (path: string, width = 1440) => {
   await page.viewport(width, 900);
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -71,9 +74,11 @@ const mount = async (path: string, width = 1440) => {
   await router.load();
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(page.getByRole("heading", { name: "Tasks", level: 1 })).toBeVisible();

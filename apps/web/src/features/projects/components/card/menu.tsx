@@ -72,6 +72,7 @@ const RunHistory = ({ runs, openRun }: RunHistoryProps) => (
 );
 
 type CardMenuProps = {
+  readonly readOnly: boolean;
   readonly item: BoardTaskView;
   /** The Run shown on the card, or `null` if none. */
   readonly run: RunView | null;
@@ -85,6 +86,7 @@ type CardMenuProps = {
 
 /** Renders only the actions that currently apply. */
 export const CardMenu = ({
+  readOnly,
   item,
   run,
   moves,
@@ -131,7 +133,7 @@ export const CardMenu = ({
   const sending = action.isPending || again.isPending;
   const offered =
     ended !== null || (run !== null && (run.canApprove || run.canRetry || run.canCancel));
-  if (!sending && offered)
+  if (!readOnly && !sending && offered)
     groups.push({
       key: "actions",
       content: (
@@ -167,7 +169,7 @@ export const CardMenu = ({
         </>
       ),
     });
-  if (!moves.disabled && moves.targets.length > 0)
+  if (!readOnly && !moves.disabled && moves.targets.length > 0)
     groups.push({
       key: "move",
       content: (

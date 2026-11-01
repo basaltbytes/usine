@@ -88,7 +88,7 @@ export const CardFace = ({
           {onFailure && stall?.reason._tag === "SuppressedForOperator" ? (
             stallAction
           ) : (
-            <RetryButton failure={failure} action={action} />
+            <RetryButton failure={failure} action={readOnly ? null : action} />
           )}
         </FailureNote>
       )}

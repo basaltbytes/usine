@@ -1,3 +1,4 @@
+import { useCanOperateRepository } from "~/lib/permissions";
 import { usePageCommands } from "~/components/command-palette/context";
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
@@ -41,6 +42,7 @@ export const ContextualActions = ({
   className,
 }: ContextualActionsProps) => {
   const { run, agentDefinitionChanged } = detail;
+  const permitted = useCanOperateRepository(run.repository);
   const retryDescriptionId = useId();
   const mutation = useRunAction();
   const again = useRunAgain();
@@ -65,7 +67,7 @@ export const ContextualActions = ({
     });
   const { primary, secondary, more } = actionPlan(run);
   usePageCommands(
-    busy || confirmCancel
+    !permitted || busy || confirmCancel
       ? []
       : [primary, secondary, ...more].flatMap((action) =>
           action === null
@@ -73,6 +75,7 @@ export const ContextualActions = ({
             : [{ label: `${actionLabel(action)} · ${run.id}`, run: () => select(action) }],
         ),
   );
+  if (!permitted) return null;
   if (primary === null && secondary === null && more.length === 0) return null;
   return (
     <div className={cn("max-w-sm space-y-2", className)}>

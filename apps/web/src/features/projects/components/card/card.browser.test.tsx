@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
 import {
   CycleBudgetAsk,
@@ -109,9 +111,11 @@ beforeEach(async () => {
   await router.load();
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(lane("Backlog")).toBeVisible();
@@ -541,4 +545,31 @@ it("tints only the column a keyboard drag is over", async () => {
   await expect.poll(tinted).toEqual(["In progress"]);
   await userEvent.keyboard("{Escape}");
   await expect.poll(tinted).toEqual([]);
+});
+
+it("keeps board links available while hiding mutation controls from viewers", async () => {
+  flushSync(() =>
+    root.render(
+      <PermissionsContext.Provider value={[]}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
+    ),
+  );
+  await expect
+    .element(page.getByRole("button", { name: "Retry", exact: true }))
+    .not.toBeInTheDocument();
+  await actions(18).click();
+  const menu = page.getByRole("menu");
+  await expect
+    .element(menu.getByRole("menuitem", { name: "Retry", exact: true }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(menu.getByRole("menuitem", { name: "Move to", exact: true }))
+    .not.toBeInTheDocument();
+  await expect.element(menu.getByRole("menuitem", { name: /Run again/u })).not.toBeInTheDocument();
+  await expect
+    .element(menu.getByRole("menuitem", { name: "Run history", exact: true }))
+    .toBeVisible();
 });

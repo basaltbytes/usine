@@ -1,8 +1,9 @@
+import { RequestPermissions, InstanceScope, ProjectScope, permits } from "@usine/core/access";
 import { DocumentationApi, operatorOpenApi } from "./openapi.ts";
 import { setupRoutes } from "./setup/http.ts";
 import type { Setup } from "./setup/control.ts";
 import { securityMiddleware } from "./security.ts";
-import { type ProjectId } from "@usine/core/project";
+import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { authenticatedRoutes, type AuthServices } from "./auth/http.ts";
 import { HARNESSES, EFFORTS } from "@usine/core/agent/brain";
@@ -20,6 +21,7 @@ import {
   OperatorApi,
   OperatorHttpError,
   OperatorHttpPolicy,
+  operatorPermissions,
 } from "@usine/orchestrator/operator/http";
 import { Effect, Layer, Option, Schema, type Types } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -30,6 +32,8 @@ import { type Port, SERVER_HOST } from "./cli.ts";
 const operatorFailure = (error: BackendError) => {
   const message = (() => {
     switch (error._tag) {
+      case "AccessDenied":
+        return "You do not have permission for this operation.";
       case "RunNotFoundError":
         return `Run ${error.runId} was not found.`;
       case "RunOperationRejectedError":
@@ -96,6 +100,30 @@ const requireProjectRepository = (project: ProjectId, repository: RepositoryName
 
 const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
   Effect.gen(function* () {
+    const requirement = Object.entries(operatorPermissions).find(
+      ([name]) => name === endpoint.identifier,
+    )?.[1];
+    if (requirement !== "public") {
+      const grants = yield* RequestPermissions;
+      const params = yield* HttpRouter.params;
+      const project = Schema.decodeUnknownOption(ProjectId)(params.project);
+      const allowed =
+        requirement !== undefined &&
+        (permits(grants, "admin", new InstanceScope()) ||
+          (Option.isSome(project)
+            ? permits(grants, requirement, new ProjectScope({ project: project.value }))
+            : grants.some(({ permission }) => permission === requirement)));
+      if (!allowed) {
+        yield* Effect.logWarning("Operator route permission refused", {
+          route: endpoint.identifier,
+          permission: requirement,
+        });
+        return yield* new OperatorHttpError({
+          error: "AccessDenied",
+          message: "You do not have permission for this operation.",
+        });
+      }
+    }
     const request = yield* HttpServerRequest.HttpServerRequest;
     const decoded =
       endpoint.payload.size === 0
@@ -296,11 +324,31 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle("previewLoop", ({ payload }) =>
       fromConfiguration((editor) => editor.previewLoop(payload)),
     )
+    .handle("configurationHead", () =>
+      fromConfiguration((editor) => editor.head).pipe(Effect.map((number) => ({ number }))),
+    )
     .handle("configurationCapabilities", () =>
       Effect.succeed({ harnesses: HARNESSES, efforts: EFFORTS }),
     )
     .handle("configurationRepositories", () => configurationRepositories())
-    .handle("configurationLabels", ({ params }) => configurationLabels(params.repository))
+    .handle("configurationLabels", ({ params }) =>
+      Effect.gen(function* () {
+        const grants = yield* RequestPermissions;
+        if (permits(grants, "admin", new InstanceScope()))
+          return yield* configurationLabels(params.repository);
+        const view = yield* fromBackend((backend) => backend.configuration);
+        if (
+          !view.repositories.some(
+            ({ name }) => name.toLowerCase() === params.repository.toLowerCase(),
+          )
+        )
+          return yield* new OperatorHttpError({
+            error: "AccessDenied",
+            message: "You do not have access to this repository.",
+          });
+        return yield* configurationLabels(params.repository);
+      }),
+    )
     .handle("configurationRevisions", ({ query }) =>
       fromConfiguration((editor) => editor.list(query)),
     )

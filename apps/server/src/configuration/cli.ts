@@ -1,6 +1,4 @@
-import { AuthStore } from "../auth/store.ts";
-import { sqliteAuthLayer } from "../auth/sqlite.ts";
-import { readAdminToken } from "../auth/local.ts";
+import { localActor } from "@usine/core/operator";
 import { resolve } from "node:path";
 import {
   StaleRevision,
@@ -43,11 +41,7 @@ export const runConfigCommand = Effect.fn("Cli.config")(
             }),
           ),
       });
-    const members = yield* Effect.flatMap(AuthStore, (auth) => auth.members);
-    const firstMember = members[0];
-    if (firstMember !== undefined) yield* readAdminToken(directory);
-    const actor =
-      firstMember === undefined ? (yield* store.read).actor : Option.some(firstMember.login);
+    const actor = Option.some(localActor);
     const save = (
       expected: ConfigurationRevisionNumber,
       changes: ReadonlyArray<ConfigurationChange>,
@@ -156,10 +150,6 @@ export const runConfigCommand = Effect.fn("Cli.config")(
 
 export const configCommand = (directory: InstanceDirectory, command: ConfigCommand) =>
   runConfigCommand(directory, command).pipe(
-    Effect.provide(
-      Layer.mergeAll(configurationLayer, sqliteAuthLayer).pipe(
-        Layer.provide(localSqliteLayer(directory)),
-      ),
-    ),
+    Effect.provide(configurationLayer.pipe(Layer.provide(localSqliteLayer(directory)))),
     Effect.scoped,
   );

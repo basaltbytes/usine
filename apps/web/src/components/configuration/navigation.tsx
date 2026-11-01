@@ -1,4 +1,6 @@
+import { useCan } from "~/lib/permissions";
 import {
+  UsersIcon,
   ArrowsClockwiseIcon,
   KanbanIcon,
   BookBookmarkIcon,
@@ -27,6 +29,7 @@ export const CONFIGURATION_PAGES = [
   { to: "/configuration/projects", label: "Projects", icon: KanbanIcon },
   { to: "/configuration/repositories", label: "Repositories", icon: BookBookmarkIcon },
   { to: "/configuration/labels", label: "Labels", icon: TagIcon },
+  { to: "/configuration/bindings", label: "Role bindings", icon: UsersIcon },
   { to: "/configuration/history", label: "History", icon: ClockCounterClockwiseIcon },
   { to: "/configuration/settings", label: "Settings", icon: GearSixIcon },
 ] as const;
@@ -35,10 +38,13 @@ type ConfigurationMenuProps = { readonly inSection: boolean };
 
 /** The open page's entry is active only when `inSection` is true. */
 export const ConfigurationMenu = ({ inSection }: ConfigurationMenuProps) => {
+  const admin = useCan("admin");
   const matchRoute = useMatchRoute();
   return (
     <SidebarMenu>
-      {CONFIGURATION_PAGES.map(({ to, label, icon: Glyph }) => (
+      {CONFIGURATION_PAGES.filter(
+        ({ to }) => admin || to === "/configuration/projects" || to === "/configuration/loops",
+      ).map(({ to, label, icon: Glyph }) => (
         <SidebarMenuItem key={to}>
           <SidebarMenuButton
             isActive={inSection && matchRoute({ to, fuzzy: true }) !== false}
@@ -63,7 +69,13 @@ export const ConfigurationCrumbs = () => {
       ? `${params.owner}/${params.name}`
       : undefined;
   const entry =
-    params.loop ?? params.agent ?? params.worker ?? params.label ?? params.project ?? repository;
+    params.binding ??
+    params.loop ??
+    params.agent ??
+    params.worker ??
+    params.label ??
+    params.project ??
+    repository;
   return (
     <>
       <BreadcrumbItem>

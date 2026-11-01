@@ -227,3 +227,8 @@ Publish the loopback listener through Caddy, Cloudflare Tunnel, or Tailscale Ser
 The canonical origin is allowed automatically. Configure additional exact browser origins in the top-level `auth.origins` list through `usine config edit settings instance`, then restart. HTTP origins are limited to loopback; development origins require an explicit entry. Unknown origins receive 403 before handlers run. Allowed origins support credentialed CORS with `GET`, `POST`, `PUT`, and `DELETE`, and the `Authorization`, `Content-Type`, and `X-Usine-CSRF` headers. Cookie writes still require CSRF verification.
 
 One global middleware sets CSP and the security headers on routes, assets, preflights, and errors. HSTS follows the configured canonical HTTPS origin, independent of forwarded request headers.
+
+
+## Access control
+
+Members receive access through configuration role bindings. Requests intersect current bindings with the token permission ceiling. The first member and migrated members receive instance admin bindings; later members need explicit grants. Local admin credentials and configuration CLI writes use `local admin` attribution. See the sign-in guide for roles and scoped token management.

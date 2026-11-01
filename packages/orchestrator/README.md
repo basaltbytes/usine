@@ -390,3 +390,7 @@ Run views expose `upgradeWait` while attempt admission defers them, and the desk
 Changes to the `auth` block require a restart, like `tracing`. `CurrentInstance.reload` reports the changed block in `RestartRequiredError` and preserves the running snapshot until restart.
 
 Provisioned SSH workers can reuse machines with `provisioner.reuse`. Worker status includes idle machines, their assignment counts, and creation times. Run statistics include acknowledged machine starts by worker, provider, and UTC day, persisted across restarts in `.usine/known-hosts/machine-starts.json`.
+
+## Access control
+
+The operator API declares minimum route permissions and checks project scope before reading or changing resources. Overview, desk, statistics, configuration, and revision lists filter by request permissions after shared caches. Internal callers are trusted; HTTP adapters must supply authenticated `RequestPermissions`.

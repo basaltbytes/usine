@@ -1,5 +1,5 @@
 import { AttemptContext } from "@usine/core/attempt";
-import { OperatorLogin } from "@usine/core/operator";
+import { OperatorActor } from "@usine/core/operator";
 import { Option, Schema } from "effect";
 
 /**
@@ -8,7 +8,7 @@ import { Option, Schema } from "effect";
  */
 export class RetryRequest extends Schema.Class<RetryRequest>("@usine/engine/RetryRequest")({
   /** The operator who requested the retry, or `None` when no login was recorded. */
-  requestedBy: Schema.Option(OperatorLogin),
+  requestedBy: Schema.Option(OperatorActor),
   /**
    * Replacement task and agent context for this and later attempts, or `None` to keep the
    * effective context (ADR 0018).

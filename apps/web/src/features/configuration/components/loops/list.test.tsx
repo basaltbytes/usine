@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { ProjectDetail } from "~/features/configuration/components/projects/detail";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -37,9 +39,11 @@ const render = async (page: () => ReactNode): Promise<string> => {
   });
   await router.load();
   return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
+    <PermissionsContext.Provider value={administratorPermissions}>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </PermissionsContext.Provider>,
   );
 };
 

@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { ConfigurationView, ReadyOverview } from "@usine/orchestrator/operator";
@@ -37,6 +39,7 @@ it.each([
       overviewQuery().queryKey,
       new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
     );
+    client.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
     const router = createRouter({
       routeTree,
       context: { queryClient: client },
@@ -49,9 +52,11 @@ it.each([
       await router.load();
       flushSync(() =>
         root.render(
-          <QueryClientProvider client={client}>
-            <RouterProvider router={router} />
-          </QueryClientProvider>,
+          <PermissionsContext.Provider value={administratorPermissions}>
+            <QueryClientProvider client={client}>
+              <RouterProvider router={router} />
+            </QueryClientProvider>
+          </PermissionsContext.Provider>,
         ),
       );
       await expect

@@ -1,3 +1,4 @@
+import { useCan } from "~/lib/permissions";
 import type { ConfigurationEntityView } from "@usine/orchestrator/operator/http";
 import { useQuery } from "@tanstack/react-query";
 import type { ConfigurationEntityKey } from "@usine/config/configuration";
@@ -22,12 +23,22 @@ type EntityMode =
 type EntityEditorProps = { readonly entity: ConfigurationEntityKey; readonly children: ReactNode };
 
 export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
+  const canEdit = useCan(
+    entity.kind === "loop" || entity.kind === "project" ? "maintain" : "admin",
+    entity.kind === "project"
+      ? entity.identifier
+      : entity.kind === "loop"
+        ? entity.identifier.split("/")[0]
+        : undefined,
+  );
+  const admin = useCan("admin");
   const current = useQuery(entityQuery(entity));
   const configuration = useQuery(configurationQuery());
   const [mode, setMode] = useState<EntityMode>({ _tag: "read" });
   const [message, setMessage] = useState("");
   const [saved, setSaved] = useState(false);
   const write = useConfigurationWrite();
+  if (!canEdit) return children;
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2">
@@ -42,17 +53,19 @@ export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
         >
           {editorCopy.edit}
         </CommandButton>
-        <CommandButton
-          command={editorCopy.delete}
-          variant="ghost"
-          disabled={current.data === undefined || current.isError || mode._tag !== "read"}
-          onClick={() => {
-            write.reset();
-            if (current.data !== undefined) setMode({ _tag: "delete", initial: current.data });
-          }}
-        >
-          {editorCopy.delete}
-        </CommandButton>
+        {(admin || entity.kind !== "project") && (
+          <CommandButton
+            command={editorCopy.delete}
+            variant="ghost"
+            disabled={current.data === undefined || current.isError || mode._tag !== "read"}
+            onClick={() => {
+              write.reset();
+              if (current.data !== undefined) setMode({ _tag: "delete", initial: current.data });
+            }}
+          >
+            {editorCopy.delete}
+          </CommandButton>
+        )}
         {current.isPending && <span role="status">{editorCopy.loading}</span>}
         {saved && <span role="status">{editorCopy.saved}</span>}
         {write.isSuccess && current.isError && <span role="status">{editorCopy.deleted}</span>}

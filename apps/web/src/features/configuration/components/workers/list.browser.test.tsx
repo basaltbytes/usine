@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
@@ -46,6 +48,7 @@ afterEach(() => {
 
 const mount = async (path: string, width = 1280, height = 900) => {
   await page.viewport(width, height);
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -54,9 +57,11 @@ const mount = async (path: string, width = 1280, height = 900) => {
   await router.load();
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
 };

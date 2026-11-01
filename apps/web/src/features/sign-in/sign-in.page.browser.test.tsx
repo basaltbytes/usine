@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -23,9 +25,11 @@ it("consumes a link opened while the sign-in page is already mounted and removes
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={queries}>
-          <SignInPage error={undefined} />
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queries}>
+            <SignInPage error={undefined} />
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     await expect.element(page.getByRole("heading", { name: "Sign in to usine" })).toBeVisible();
@@ -60,9 +64,11 @@ it.each([
     try {
       flushSync(() =>
         root.render(
-          <QueryClientProvider client={queries}>
-            <SignInPage error={undefined} />
-          </QueryClientProvider>,
+          <PermissionsContext.Provider value={administratorPermissions}>
+            <QueryClientProvider client={queries}>
+              <SignInPage error={undefined} />
+            </QueryClientProvider>
+          </PermissionsContext.Provider>,
         ),
       );
       await expect.element(page.getByRole("heading", { name: "Sign in to usine" })).toBeVisible();

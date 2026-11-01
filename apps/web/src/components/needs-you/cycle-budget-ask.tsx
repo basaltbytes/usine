@@ -1,3 +1,4 @@
+import { useCanOperateRepository } from "~/lib/permissions";
 import { type ReactNode, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CycleBudgetNeed } from "@usine/orchestrator/operator";
@@ -29,6 +30,7 @@ type CycleBudgetAskProps = {
 
 /** Renders the cycle budget Ask of an Item; resetting the budget does not create a Run. */
 export const CycleBudgetAsk = ({ need, dismiss }: CycleBudgetAskProps) => {
+  const permitted = useCanOperateRepository(need.ask.repository);
   const [showDetails, setShowDetails] = useState(false);
   const queries = useQueryClient();
   const reset = useMutation({
@@ -64,14 +66,16 @@ export const CycleBudgetAsk = ({ need, dismiss }: CycleBudgetAskProps) => {
           </>
         }
         actions={
-          <CommandButton
-            command={`Reset cycle budget · ${need.itemLabel}`}
-            variant="outline"
-            disabled={reset.isPending}
-            onClick={() => reset.mutate()}
-          >
-            {reset.isPending ? "Resetting…" : "Reset cycle budget"}
-          </CommandButton>
+          permitted && (
+            <CommandButton
+              command={`Reset cycle budget · ${need.itemLabel}`}
+              variant="outline"
+              disabled={reset.isPending}
+              onClick={() => reset.mutate()}
+            >
+              {reset.isPending ? "Resetting…" : "Reset cycle budget"}
+            </CommandButton>
+          )
         }
       />
       <Dialog open={showDetails} onOpenChange={setShowDetails}>

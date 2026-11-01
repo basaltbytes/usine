@@ -1,3 +1,4 @@
+import { memberAccessLayer } from "./auth/access.ts";
 import { Setup } from "./setup/control.ts";
 import { webhookEndpoint } from "./webhooks.ts";
 import { WebhookHealth } from "@usine/orchestrator/webhooks";
@@ -356,14 +357,27 @@ export const up = (command: UpCommand) =>
         Layer.succeedContext(authStoreContext),
         Layer.succeedContext(githubContext),
       );
-      yield* seedOperator(config.operator).pipe(Effect.provide(authDependencies));
+      const accessContext = yield* Layer.build(
+        memberAccessLayer.pipe(
+          Layer.provide(authDependencies),
+          Layer.provide(Layer.succeedContext(configurationContext)),
+          Layer.provide(database),
+        ),
+      );
+      yield* seedOperator(config.operator).pipe(
+        Effect.provide(authDependencies),
+        Effect.provide(Layer.succeedContext(accessContext)),
+      );
       const localToken = yield* writeAdminToken(directory).pipe(Effect.provide(NodeServices.layer));
       const authContext = yield* Layer.build(
         authenticationLayer({
           origin: Option.getOrElse(origin, () => UiOrigin.make(`http://127.0.0.1:${port}`)),
           origins: config.auth.origins,
           localToken,
-        }).pipe(Layer.provide(authDependencies)),
+        }).pipe(
+          Layer.provide(authDependencies),
+          Layer.provide(Layer.succeedContext(accessContext)),
+        ),
       );
       const auth = {
         authentication: Context.get(authContext, Authentication),

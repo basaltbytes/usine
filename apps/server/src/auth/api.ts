@@ -1,3 +1,4 @@
+import { PermissionGrant } from "@usine/core/access";
 import { OperatorLogin } from "@usine/core/operator";
 import { Schema, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api";
@@ -31,6 +32,9 @@ const error = AuthError.fields.status.literals.map((status) =>
   }),
 );
 
+export const TokenScopes = Schema.Struct({ scopes: Schema.Array(PermissionGrant) });
+export const CreateToken = Schema.Struct({ name: TokenName, ...TokenScopes.fields });
+
 export const AuthApi = HttpApiGroup.make("authentication")
   .annotate(OpenApi.Title, "Sign-in and members")
   .annotate(
@@ -47,7 +51,11 @@ export const AuthApi = HttpApiGroup.make("authentication")
       .annotate(OpenApi.Summary, "Read sign-in availability")
       .annotate(OpenApi.Description, "Reports whether GitHub sign-in is configured."),
     HttpApiEndpoint.get("session", "/api/auth/session", {
-      success: Schema.Struct({ member: Schema.NullOr(Member), csrf: Schema.String }),
+      success: Schema.Struct({
+        member: Schema.NullOr(Member),
+        permissions: Schema.Array(PermissionGrant),
+        csrf: Schema.String,
+      }),
       error,
     })
       .annotate(OpenApi.Summary, "Read the current session")
@@ -149,7 +157,14 @@ export const AuthApi = HttpApiGroup.make("authentication")
     HttpApiEndpoint.get("tokens", "/api/tokens", {
       success: Schema.Array(
         Schema.Struct(
-          Struct.pick(InstanceToken.fields, ["id", "name", "createdAt", "lastUsedAt", "kind"]),
+          Struct.pick(InstanceToken.fields, [
+            "id",
+            "name",
+            "createdAt",
+            "lastUsedAt",
+            "kind",
+            "scopes",
+          ]),
         ),
       ),
       error,
@@ -158,6 +173,27 @@ export const AuthApi = HttpApiGroup.make("authentication")
       .annotate(
         OpenApi.Description,
         "Returns the current member devices and browser sessions, excluding expired credentials and token secrets.",
+      ),
+    HttpApiEndpoint.post("createToken", "/api/tokens", {
+      payload: CreateToken,
+      success: Schema.Struct({ token: Schema.String }),
+      error,
+    })
+      .annotate(OpenApi.Summary, "Create a scoped token")
+      .annotate(
+        OpenApi.Description,
+        "Creates a token whose scopes are a subset of the caller's effective permissions. The secret is returned once.",
+      ),
+    HttpApiEndpoint.put("setScopes", "/api/tokens/:id/scopes", {
+      params: { id: TokenId },
+      payload: TokenScopes,
+      success: acknowledged,
+      error,
+    })
+      .annotate(OpenApi.Summary, "Set token scopes")
+      .annotate(
+        OpenApi.Description,
+        "Sets the scope ceiling for one of the member's tokens. Requests also check the member's current role bindings.",
       ),
     HttpApiEndpoint.delete("revokeToken", "/api/tokens/:id", {
       params: { id: TokenId },
@@ -170,3 +206,27 @@ export const AuthApi = HttpApiGroup.make("authentication")
         "Revokes a device or browser session belonging to the current member.",
       ),
   );
+
+/** Credential requirements for every sign-in and member endpoint. */
+export const authPermissions = {
+  health: "public",
+  info: "public",
+  consumeLink: "public",
+  github: "public",
+  callback: "public",
+  device: "public",
+  pollDevice: "public",
+  session: "session",
+  signOut: "session",
+  link: "local",
+  members: "admin",
+  addMember: "admin",
+  removeMember: "admin",
+  tokens: "tokens",
+  createToken: "tokens",
+  setScopes: "tokens",
+  revokeToken: "tokens",
+} as const satisfies Record<
+  keyof typeof AuthApi.endpoints,
+  "public" | "session" | "local" | "admin" | "tokens"
+>;
