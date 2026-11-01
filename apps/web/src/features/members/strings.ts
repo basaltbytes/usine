@@ -8,3 +8,9 @@ export const removeMember = "Remove";
 export const confirmRemove = "Confirm removal";
 export const keepMember = "Keep member";
 export const addedBy = "Added by";
+
+export const memberTitle = "Member";
+export const bindingsTitle = "Bindings";
+export const actionsTitle = "Actions";
+export const noBindings = "No bindings";
+export const instanceScope = "Instance";

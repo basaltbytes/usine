@@ -1,3 +1,4 @@
+import { accessResponses } from "./src/features/members/browser-fixture.ts";
 import {
   workerPreflightResponses,
   finishWorkerPreflight,
@@ -88,6 +89,7 @@ export default mergeConfig(
                 executablePath === undefined ? {} : { launchOptions: { executablePath } },
               ),
               commands: {
+                accessResponses,
                 sessionPermissions: async ({ page }) => {
                   const { administratorPermissions } = await import("@usine/core/access");
                   await page.route("**/api/auth/session", (route) =>

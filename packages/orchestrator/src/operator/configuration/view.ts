@@ -763,6 +763,13 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         visibleRepository(instance, grants, name),
       ),
       loops: configuration.loops.filter(({ name }) => visibleLoop(grants, name)),
+      agents: configuration.agents.map(
+        (agent) =>
+          new AgentFileView({
+            ...agent,
+            loops: agent.loops.filter((name) => visibleLoop(grants, name)),
+          }),
+      ),
     });
   });
 

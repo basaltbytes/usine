@@ -1,3 +1,13 @@
+import { Link } from "@tanstack/react-router";
+import { configurationQuery } from "~/lib/configuration/queries";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "~/components/ui/table";
 import { CommandButton } from "~/components/command-palette/button";
 import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -19,11 +29,17 @@ import {
   confirmRemove,
   keepMember,
   addedBy,
+  bindingsTitle,
+  memberTitle,
+  actionsTitle,
+  noBindings,
+  instanceScope,
 } from "./strings";
 
 export const MembersPage = () => {
   const queryClient = useQueryClient();
   const { data } = useSuspenseQuery(membersQuery());
+  const { data: configuration } = useSuspenseQuery(configurationQuery());
   const [login, setLogin] = useState("");
   const [removing, setRemoving] = useState<number>();
   const [pending, setPending] = useState(false);
@@ -73,45 +89,84 @@ export const MembersPage = () => {
           {pending ? adding : addMember}
         </CommandButton>
       </form>
-      <ul className="divide-y divide-border">
-        {data.map((member) => (
-          <li key={member.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-            <div>
-              <p className="text-sm font-medium">{member.login}</p>
-              <p className="text-xs text-muted-foreground">
-                GitHub ID: {member.id} · {addedBy} {member.addedBy} ·{" "}
-                {new Date(member.addedAt).toLocaleDateString()}
-              </p>
-            </div>
-            <div className="flex gap-2">
-              {removing === member.id ? (
-                <>
-                  <Button
-                    variant="destructive"
-                    disabled={pending}
-                    onClick={() => void save(`/api/members/${member.id}`, "DELETE")}
-                  >
-                    {confirmRemove}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setRemoving(undefined)}>
-                    {keepMember}
-                  </Button>
-                </>
-              ) : (
-                <CommandButton
-                  command={`${removeMember} · ${member.login}`}
-                  variant="ghost"
-                  disabled={pending || data.length === 1}
-                  onClick={() => setRemoving(member.id)}
-                  aria-label={`${removeMember} ${member.login}`}
-                >
-                  {removeMember}
-                </CommandButton>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">{memberTitle}</TableHead>
+            <TableHead scope="col">{bindingsTitle}</TableHead>
+            <TableHead scope="col">
+              <span className="sr-only">{actionsTitle}</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {data.map((member) => (
+            <TableRow key={member.id}>
+              <TableCell className="whitespace-normal">
+                <div>
+                  <p className="text-sm font-medium">{member.login}</p>
+                  <p className="text-xs text-muted-foreground">
+                    GitHub ID: {member.id} · {addedBy} {member.addedBy} ·{" "}
+                    {new Date(member.addedAt).toLocaleDateString()}
+                  </p>
+                </div>
+              </TableCell>
+              <TableCell className="whitespace-normal">
+                {configuration.bindings.some((binding) => binding.member === member.id) ? (
+                  <ul className="space-y-1">
+                    {configuration.bindings
+                      .filter((binding) => binding.member === member.id)
+                      .map((binding) => (
+                        <li key={binding.name}>
+                          <Link
+                            to="/configuration/bindings/$binding"
+                            params={{ binding: binding.name }}
+                            className="text-primary hover:underline"
+                          >
+                            {binding.role} ·{" "}
+                            {binding.scope._tag === "Instance"
+                              ? instanceScope
+                              : binding.scope.project}
+                          </Link>
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <span className="text-muted-foreground">{noBindings}</span>
+                )}
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {removing === member.id ? (
+                    <>
+                      <Button
+                        variant="destructive"
+                        disabled={pending}
+                        onClick={() => void save(`/api/members/${member.id}`, "DELETE")}
+                      >
+                        {confirmRemove}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setRemoving(undefined)}>
+                        {keepMember}
+                      </Button>
+                    </>
+                  ) : (
+                    <CommandButton
+                      command={`${removeMember} · ${member.login}`}
+                      variant="ghost"
+                      disabled={pending || data.length === 1}
+                      onClick={() => setRemoving(member.id)}
+                      aria-label={`${removeMember} ${member.login}`}
+                    >
+                      {removeMember}
+                    </CommandButton>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </section>
   );
 };

@@ -22,6 +22,8 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
             repositories: [{ name: "acme/project" }],
             workers: [],
             bindings: [],
+            loops: [{ name: "acme-project/implement" }],
+            agents: [{ name: "developer", loops: ["acme-project/implement"] }],
           },
         });
         const own = yield* request("GET", "/entities/project/acme-project");
@@ -69,5 +71,27 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
             body: { revisions: [{ number: 3 }, { number: 2 }] },
           });
         }
+      }).pipe(Effect.scoped),
+    ));
+
+for (const role of ["viewer", "operator", "maintainer"] as const)
+  it(`${role} cannot read another project's nested agent loop references`, () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const grants = new RoleBinding({
+          name: role,
+          member: GitHubUserId.make(1),
+          role,
+          scope: new ProjectScope({ project: ProjectId.make("acme-other") }),
+        }).permissions;
+        const { request } = yield* harness(Layer.succeed(RequestPermissions, grants));
+        expect(yield* request("GET", "")).toMatchObject({
+          status: 200,
+          body: {
+            projects: [{ id: "acme-other" }],
+            loops: [],
+            agents: [{ name: "developer", loops: [] }],
+          },
+        });
       }).pipe(Effect.scoped),
     ));
