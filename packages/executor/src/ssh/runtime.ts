@@ -159,6 +159,14 @@ export const detectRuntime = Effect.fn("SshExecutor.detectContainerRuntime")(fun
   return Option.some(runtime);
 });
 
+export const PODMAN_LIMITS_SCRIPT = String.raw`
+read quota period < /sys/fs/cgroup/cpu.max
+awk -v q="$quota" -v p="$period" -v cpus="$1" 'BEGIN { exit !(q != "max" && p > 0 && q == int(cpus * p)) }'
+[ "$(cat /sys/fs/cgroup/memory.max)" = "$2" ]
+[ "$(cat /sys/fs/cgroup/memory.swap.max)" = 0 ]
+[ "$(cat /sys/fs/cgroup/pids.max)" = "$3" ]
+`;
+
 /** Reads the limits from the same cgroup used by exec and OOM accounting. */
 export const verifyPodmanLimits = Effect.fn("SshExecutor.verifyPodmanLimits")(function* (
   commands: RemoteCommands,
@@ -169,13 +177,7 @@ export const verifyPodmanLimits = Effect.fn("SshExecutor.verifyPodmanLimits")(fu
   yield* Effect.annotateCurrentSpan({ worker, host: shell.destination });
   const checked = yield* commands.inspect("preflight", shell, "sh", [
     "-ec",
-    String.raw`
-read quota period < /sys/fs/cgroup/cpu.max
-awk -v q="$quota" -v p="$period" -v cpus="$1" 'BEGIN { exit !(q != "max" && p > 0 && q / p == cpus) }'
-[ "$(cat /sys/fs/cgroup/memory.max)" = "$2" ]
-[ "$(cat /sys/fs/cgroup/memory.swap.max)" = 0 ]
-[ "$(cat /sys/fs/cgroup/pids.max)" = "$3" ]
-`,
+    PODMAN_LIMITS_SCRIPT,
     "sh",
     String(limits.cpus),
     String(limits.memoryMib * 1024 ** 2),

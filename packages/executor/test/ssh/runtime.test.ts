@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { onTestFinished } from "vitest";
 import { STOP_CHILDREN_SCRIPT } from "../../src/remote/container.ts";
-import { DETECT_SCRIPT } from "../../src/ssh/runtime.ts";
+import { DETECT_SCRIPT, PODMAN_LIMITS_SCRIPT } from "../../src/ssh/runtime.ts";
 
 const run = promisify(execFile);
 
@@ -50,5 +50,39 @@ it.each(["Error: No such container: usine-gone", "Error: no such container usine
       });
     assert.strictEqual((await invoke(message)).stdout, "no-container\n");
     await assert.rejects(invoke("permission denied"), /permission denied/u);
+  },
+);
+
+it.each([
+  { cpus: 0.57, cpuMax: "56999 100000", accepted: true },
+  { cpus: 1.5, cpuMax: "150000 100000", accepted: true },
+  { cpus: 1, cpuMax: "100000 100000", accepted: true },
+  { cpus: 0.57, cpuMax: "56998 100000", accepted: false },
+  { cpus: 0.57, cpuMax: "58000 100000", accepted: false },
+  { cpus: 0.57, cpuMax: "max 100000", accepted: false },
+  { cpus: 0.57, cpuMax: "56999 0", accepted: false },
+])(
+  "checks Podman's integer CPU quota: $cpus CPUs, cpu.max=$cpuMax",
+  async ({ cpus, cpuMax, accepted }) => {
+    const directory = await mkdtemp("/tmp/usine-cgroup-");
+    onTestFinished(() => rm(directory, { recursive: true, force: true }));
+    for (const [file, value] of Object.entries({
+      "cpu.max": cpuMax,
+      "memory.max": "268435456",
+      "memory.swap.max": "0",
+      "pids.max": "64",
+    })) {
+      await writeFile(join(directory, file), `${value}\n`);
+    }
+    const probe = run("sh", [
+      "-ec",
+      PODMAN_LIMITS_SCRIPT.replaceAll("/sys/fs/cgroup", directory),
+      "sh",
+      String(cpus),
+      "268435456",
+      "64",
+    ]);
+    if (accepted) await probe;
+    else await assert.rejects(probe);
   },
 );
