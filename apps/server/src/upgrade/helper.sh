@@ -42,21 +42,60 @@ stop_server() {
 }
 
 healthy() {
-  local wanted=$1 token
-  for ((i=0; i<36; i++)); do
+  local wanted=$1 token started=$SECONDS deadline=$((SECONDS+180)) remaining request_timeout
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    remaining=$((deadline-SECONDS))
+    if [ "$remaining" -le 0 ]; then break; fi
+    request_timeout=2
+    if [ "$remaining" -lt "$request_timeout" ]; then request_timeout=$remaining; fi
     actual=
     if token=$(cat "$folder/../admin-token") && [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
       actual=$(printf 'Authorization: Bearer %s\n' "$token" |
-        curl --silent --fail --max-time 2 --header @- "http://127.0.0.1:$port/api/version") || actual=
+        curl --silent --fail --max-time "$request_timeout" --header @- "http://127.0.0.1:$port/api/version") || actual=
     else
-      printf 'upgrade health-check version=%s attempt=%s reason=admin-token-unavailable\n' "$wanted" "$i"
+      printf 'upgrade health-check version=%s elapsed_seconds=%s reason=admin-token-unavailable\n' "$wanted" "$((SECONDS-started))"
     fi
     if [ "$actual" = "\"$wanted\"" ]; then return 0; fi
     state=$(systemctl show --property=ActiveState --value "$unit") || return 1
-    if [ "$state" = failed ] || [ "$state" = inactive ]; then return 1; fi
-    sleep 3
+    if [ "$state" = failed ] || [ "$state" = inactive ]; then
+      printf 'upgrade health-check version=%s reason=service-stopped state=%s\n' "$wanted" "$state"
+      return 1
+    fi
+    remaining=$((deadline-SECONDS))
+    if [ "$remaining" -le 0 ]; then break; fi
+    if [ "$remaining" -gt 3 ]; then remaining=3; fi
+    sleep "$remaining"
   done
+  printf 'upgrade health-check version=%s reason=deadline-exceeded elapsed_seconds=%s\n' "$wanted" "$((SECONDS-started))"
   return 1
+}
+
+backup_data() {
+  snapshot=$(mktemp -d "$folder/backup.XXXXXXXX") || return 1
+  printf 'upgrade backup previous=%s target=%s snapshot=%s\n' "$previous" "$target" "$snapshot"
+  (cd "$folder/../.." && timeout 5m node "$prefix/lib/node_modules/@usine/server/dist/main.js" backup "$snapshot/runtime.sqlite") || return 1
+  durable_snapshot=
+  if [ -f "$snapshot/runtime.durable.sqlite" ]; then durable_snapshot="$snapshot/runtime.durable.sqlite"; fi
+}
+
+restore_data() {
+  local database
+  recovery_reason='Rollback failed: could not restore the databases. The service is stopped. Check the upgrade service journal and restore the backup in .usine/upgrade/backup.*.'
+  printf 'upgrade restore previous=%s snapshot=%s\n' "$previous" "$snapshot"
+  cp "$snapshot/runtime.sqlite" "$snapshot/runtime.restore" || return 1
+  if [ -n "$durable_snapshot" ]; then
+    cp "$durable_snapshot" "$snapshot/durable.restore" || return 1
+  fi
+  for database in runtime durable; do
+    rm -f "$folder/../$database.sqlite-wal" "$folder/../$database.sqlite-shm" || return 1
+    if [ -f "$snapshot/$database.restore" ]; then
+      mv "$snapshot/$database.restore" "$folder/../$database.sqlite" || return 1
+    else
+      rm -f "$folder/../$database.sqlite" || return 1
+    fi
+  done
+  recovery_reason=
+  printf 'upgrade restore previous=%s status=complete snapshot=%s\n' "$previous" "$snapshot"
 }
 
 install_version() {
@@ -105,6 +144,10 @@ restore_previous() {
 exec 9> "$folder/helper.lock"
 flock -n 9 || exit 0
 record installing ''
+if ! backup_data; then
+  record failed 'Could not back up the databases; the server and packages were not changed. Check the upgrade service journal.'
+  exit 1
+fi
 if ! stop_server; then
   record failed 'Could not stop the server; no package was changed.'
   exit 1
@@ -121,10 +164,19 @@ if install_version "$target"; then
 fi
 printf 'upgrade rollback previous=%s target=%s failure_stage=%s reason=%s\n' "$previous" "$target" "$failure_stage" "$reason"
 recovery_status=rolled-back
-if stop_server && restore_previous && timeout 30s systemctl start "$unit" && healthy "$previous"; then
+recovery_reason=
+if stop_server && restore_previous && restore_data && timeout 30s systemctl start "$unit" && healthy "$previous"; then
   record "$recovery_status" "$reason"
   if [ "$recovery_status" = failed ]; then exit 1; fi
 else
+  if ! stop_server; then
+    record failed 'Rollback failed and the service could not be stopped. Stop it manually and check the upgrade service journal.'
+    exit 1
+  fi
+  if [ -n "$recovery_reason" ]; then
+    record failed "$recovery_reason"
+    exit 1
+  fi
   installed=$(installed_version) || installed=
   case "$installed" in
     "$previous"|"$target") record failed 'Rollback failed. Check the upgrade service journal.';;

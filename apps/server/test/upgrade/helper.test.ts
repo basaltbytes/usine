@@ -1,9 +1,23 @@
-import { execFile, execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { UpgradeRecord } from "@usine/core/upgrade";
 import { Effect, Layer, Redacted, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
@@ -29,23 +43,54 @@ const run = (
     | "transient-target"
     | "transient-404"
     | "missing-target"
-    | "missing-404",
+    | "missing-404"
+    | "migrated-api"
+    | "migrated-good"
+    | "migrated-no-durable"
+    | "bad-backup"
+    | "missing-backup"
+    | "missing-durable-backup",
   shutdown: "normal" | "exit-term" | "exit-kill" | "stuck" = "normal",
 ) => {
-  const root = mkdtempSync(join(tmpdir(), "usine-upgrade-helper-"));
-  const folder = join(root, "upgrade");
+  const root = mkdtempSync(join(sqliteTempDirectory(), "usine-upgrade-helper-"));
+  const executables = mkdtempSync(join(tmpdir(), "usine-upgrade-commands-"));
+  const storage = join(root, ".usine");
+  const folder = join(storage, "upgrade");
   const prefix = join(root, "custom prefix");
   const packageFolder = join(prefix, "lib/node_modules/@usine/server");
-  mkdirSync(folder);
-  mkdirSync(packageFolder, { recursive: true });
+  mkdirSync(folder, { recursive: true });
+  mkdirSync(join(packageFolder, "dist"), { recursive: true });
+  symlinkSync(
+    fileURLToPath(new URL("../../dist/main.js", import.meta.url)),
+    join(packageFolder, "dist/main.js"),
+  );
   writeFileSync(join(packageFolder, "package.json"), JSON.stringify({ version: "1.0.0" }));
   writeFileSync(join(folder, "installed"), "@usine/server@1.0.0");
   writeFileSync(join(folder, "running"), "@usine/server@1.0.0");
+  writeFileSync(join(folder, "commands"), "");
   const command = (name: string, body: string) => {
-    const path = join(folder, name);
+    const path = join(executables, name);
     writeFileSync(path, `#!/bin/bash\n${body}\n`);
     chmodSync(path, 0o700);
   };
+  const query = (file: string, sql: string) => {
+    const database = new DatabaseSync(file);
+    try {
+      return database.prepare(sql).all();
+    } finally {
+      database.close();
+    }
+  };
+  const runtime = new DatabaseSync(join(storage, "runtime.sqlite"));
+  runtime.exec("CREATE TABLE configuration (kind TEXT, value TEXT)");
+  runtime.exec("INSERT INTO configuration VALUES ('settings', 'before')");
+  runtime.close();
+  if (scenario !== "migrated-no-durable") {
+    const durable = new DatabaseSync(join(storage, "durable.sqlite"));
+    durable.exec("CREATE TABLE evidence (value TEXT); INSERT INTO evidence VALUES ('before')");
+    durable.close();
+  }
+  if (scenario === "bad-backup") writeFileSync(join(storage, "runtime.sqlite"), "not SQLite");
   try {
     command("sleep", 'echo "sleep $*" >> "$folder/commands"');
     command(
@@ -108,6 +153,13 @@ if [ "$1" = start ]; then
   echo active > "$folder/state"
   cp "$folder/installed" "$folder/running"
   printf '%043d' "$(cat "$folder/installed" | tr -cd '0-9')" > "$folder/../admin-token"
+  if [ "$(cat "$folder/installed")" = @usine/server@2.0.0 ]; then
+    case "$scenario" in
+      migrated-*|missing-*backup) node "$folder/database.cjs" migrate;;
+    esac
+    if [ "$scenario" = missing-backup ]; then rm -f "$folder"/backup.*/runtime.sqlite; fi
+    if [ "$scenario" = missing-durable-backup ]; then rm -f "$folder"/backup.*/runtime.durable.sqlite; fi
+  fi
 fi
 if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
     );
@@ -118,27 +170,85 @@ if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
 installed=$(cat "$folder/installed")
 if [ "$scenario" = unchanged-unhealthy ]; then exit 1; fi
 if [ "$installed" = @usine/server@2.0.0 ]; then
-  case "$scenario" in bad-api|*-rollback) exit 1;; esac
+  case "$scenario" in bad-api|*-rollback|migrated-api|migrated-no-durable|missing-*backup) exit 1;; esac
+else
+  node "$folder/database.cjs" read || exit 1
 fi
 printf '"%s"' "\${installed#@usine/server@}"`,
+    );
+    writeFileSync(
+      join(folder, "database.cjs"),
+      `const { DatabaseSync } = require("node:sqlite");
+const { existsSync, writeFileSync } = require("node:fs");
+const folder = process.env.folder;
+const runtime = new DatabaseSync(folder + "/../runtime.sqlite");
+if (process.argv[2] === "migrate") {
+  runtime.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0");
+  runtime.exec("INSERT INTO configuration VALUES ('binding', 'new')");
+  const durable = new DatabaseSync(folder + "/../durable.sqlite");
+  durable.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0");
+  durable.exec("CREATE TABLE IF NOT EXISTS evidence (value TEXT)");
+  durable.exec("DELETE FROM evidence; INSERT INTO evidence VALUES ('new')");
+  durable.exec("ALTER TABLE evidence ADD COLUMN migrated TEXT");
+  writeFileSync(folder + "/migrated", "binding");
+  process.exit(0);
+}
+if (runtime.prepare("SELECT kind FROM configuration WHERE kind != 'settings'").all().length) {
+  process.exit(1);
+}
+runtime.close();
+if (existsSync(folder + "/../durable.sqlite")) {
+  const durable = new DatabaseSync(folder + "/../durable.sqlite");
+  if (durable.prepare("PRAGMA table_info(evidence)").all().length !== 1) process.exit(1);
+  durable.close();
+}`,
     );
     const script = join(folder, "run.sh");
     writeFileSync(
       script,
-      `folder='${folder}'\nprevious=1.0.0\ntarget=2.0.0\nprefix='${prefix}'\nunit=usine.service\nport=7331\n${helper}`,
+      `folder='${folder}'\nprevious=1.0.0\ntarget=2.0.0\nprefix='${prefix}'\nunit=usine.service\nport=7331
+unset SECONDS
+SECONDS=0
+sleep() { command sleep "$@"; SECONDS=$((SECONDS+$1)); }
+${helper}`,
     );
-    let failed = false;
-    try {
-      execFileSync("bash", [script], {
-        env: { ...process.env, PATH: `${folder}:${process.env.PATH}`, folder, scenario, shutdown },
-        stdio: "pipe",
-      });
-    } catch {
-      failed = true;
-    }
+    const result = spawnSync("bash", [script], {
+      cwd: root,
+      env: {
+        ...process.env,
+        PATH: `${executables}:${process.env.PATH}`,
+        folder,
+        scenario,
+        shutdown,
+      },
+      encoding: "utf8",
+      timeout: 20_000,
+    });
+    assert.ifError(result.error);
+    const snapshot = readdirSync(folder).find((name) => name.startsWith("backup."));
+    const snapshotPath = snapshot === undefined ? undefined : join(folder, snapshot);
     return {
-      failed,
+      failed: result.status !== 0,
+      output: result.stdout + result.stderr,
       prefix,
+      migrated: existsSync(join(folder, "migrated")),
+      configuration:
+        scenario === "bad-backup"
+          ? []
+          : query(join(storage, "runtime.sqlite"), "SELECT * FROM configuration ORDER BY kind"),
+      durable: existsSync(join(storage, "durable.sqlite"))
+        ? query(join(storage, "durable.sqlite"), "SELECT * FROM evidence")
+        : [],
+      snapshot:
+        snapshotPath !== undefined && existsSync(join(snapshotPath, "runtime.sqlite"))
+          ? {
+              mode: statSync(join(snapshotPath, "runtime.sqlite")).mode & 0o777,
+              configuration: query(
+                join(snapshotPath, "runtime.sqlite"),
+                "SELECT * FROM configuration",
+              ),
+            }
+          : undefined,
       running: readFileSync(join(folder, "running"), "utf8").trim(),
       record: Schema.decodeUnknownSync(Schema.fromJsonString(UpgradeRecord))(
         readFileSync(join(folder, "result.json"), "utf8"),
@@ -147,21 +257,92 @@ printf '"%s"' "\${installed#@usine/server@}"`,
     };
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(executables, { recursive: true, force: true });
   }
 };
 
-it("marks a version good only after its API answers, using the original npm prefix", () => {
-  const result = run("good");
-  expect(result.failed).toBe(false);
+const slowCli = { timeout: 30_000 };
+
+it.each(["migrated-api", "migrated-no-durable"] as const)(
+  "restores the previous stores before its API answers after %s",
+  slowCli,
+  (scenario) => {
+    const result = run(scenario);
+    expect(result.migrated).toBe(true);
+    expect(result.failed, result.output).toBe(false);
+    expect(result.record.status).toBe("rolled-back");
+    expect(result.running).toBe("@usine/server@1.0.0");
+    expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
+    expect(result.durable).toEqual(scenario === "migrated-api" ? [{ value: "before" }] : []);
+    expect(result.snapshot).toEqual({
+      mode: 0o600,
+      configuration: [{ kind: "settings", value: "before" }],
+    });
+  },
+);
+
+it("keeps migrated data and a private backup after a successful upgrade", slowCli, () => {
+  const result = run("migrated-good");
+  expect(result.failed, result.output).toBe(false);
   expect(result.record.status).toBe("good");
-  expect(result.commands).toContain(
-    `install --global --prefix ${result.prefix} @usine/server@2.0.0`,
-  );
-  expect(result.commands).not.toContain("@usine/server@1.0.0");
+  expect(result.configuration).toContainEqual({ kind: "binding", value: "new" });
+  expect(result.durable).toEqual([{ value: "new", migrated: null }]);
+  expect(result.snapshot?.configuration).toEqual([{ kind: "settings", value: "before" }]);
 });
+
+it("leaves the running version untouched when a database backup fails", slowCli, () => {
+  const result = run("bad-backup");
+  expect(result.failed).toBe(true);
+  assert(result.record.status === "failed");
+  expect(result.record.reason).toContain("back up");
+  expect(result.running).toBe("@usine/server@1.0.0");
+  expect(result.commands).not.toContain("stop");
+  expect(result.commands).not.toContain("install");
+});
+
+it.each(["missing-backup", "missing-durable-backup"] as const)(
+  "leaves the service stopped with a database recovery error after %s",
+  slowCli,
+  (scenario) => {
+    const result = run(scenario);
+    expect(result.failed).toBe(true);
+    assert(result.record.status === "failed");
+    expect(result.record.reason).toContain("restore the databases");
+    expect(result.running).toBe("");
+  },
+);
+
+it("waits for 180 elapsed seconds when health requests fail immediately", slowCli, () => {
+  const result = run("bad-api");
+  expect(result.failed, result.output).toBe(false);
+  const elapsed = Number(
+    result.output.match(/reason=deadline-exceeded elapsed_seconds=(\d+)/u)?.[1],
+  );
+  expect(elapsed).toBeGreaterThanOrEqual(180);
+  expect(elapsed).toBeLessThan(183);
+  const retryDelays = (result.commands.match(/^sleep \d+$/gmu) ?? []).map((line) =>
+    Number(line.slice(6)),
+  );
+  expect(retryDelays.reduce((total, delay) => total + delay, 0)).toBeGreaterThan(160);
+});
+
+it(
+  "marks a version good only after its API answers, using the original npm prefix",
+  slowCli,
+  () => {
+    const result = run("good");
+    expect(result.failed).toBe(false);
+    expect(result.record.status).toBe("good");
+    expect(result.commands).toContain(
+      `install --global --prefix ${result.prefix} @usine/server@2.0.0`,
+    );
+    expect(result.commands).not.toContain("@usine/server@1.0.0");
+  },
+);
 
 it.each(["bad-api", "bad-install"] as const)(
   "reinstalls and starts the previous version after %s",
+  slowCli,
   (scenario) => {
     const result = run(scenario);
     expect(result.failed).toBe(false);
@@ -177,44 +358,62 @@ it.each(["bad-api", "bad-install"] as const)(
   },
 );
 
-it("records a failed rollback and leaves the previous version in the recovery record", () => {
-  const result = run("bad-rollback");
-  expect(result.failed).toBe(true);
-  assert(result.record.status === "failed");
-  expect(result.record.previous).toBe("1.0.0");
-  expect(result.record.reason).not.toContain("reinstall the previous version");
-  expect(result.running).toBe("");
-});
+it(
+  "records a failed rollback and leaves the previous version in the recovery record",
+  slowCli,
+  () => {
+    const result = run("bad-rollback");
+    expect(result.failed).toBe(true);
+    assert(result.record.status === "failed");
+    expect(result.record.previous).toBe("1.0.0");
+    expect(result.record.reason).not.toContain("reinstall the previous version");
+    expect(result.running).toBe("");
+  },
+);
 
-it("restarts the unchanged previous version after a failed target install without reinstalling", () => {
-  const result = run("unchanged-install");
-  expect(result.failed).toBe(true);
-  assert(result.record.status === "failed");
-  expect(result.record.reason).toBe("The package could not be installed.");
-  expect(result.running).toBe("@usine/server@1.0.0");
-  expect(result.commands).not.toContain("@usine/server@1.0.0");
-});
+it(
+  "restarts the unchanged previous version after a failed target install without reinstalling",
+  slowCli,
+  () => {
+    const result = run("unchanged-install");
+    expect(result.failed).toBe(true);
+    assert(result.record.status === "failed");
+    expect(result.record.reason).toBe("The package could not be installed.");
+    expect(result.running).toBe("@usine/server@1.0.0");
+    expect(result.commands).not.toContain("@usine/server@1.0.0");
+  },
+);
 
-it("starts the previous version when the rollback install fails with that version on disk", () => {
-  const result = run("previous-rollback");
-  expect(result.failed).toBe(true);
-  assert(result.record.status === "failed");
-  expect(result.record.reason).toBe(
-    "The new server did not answer the operator API within three minutes.",
-  );
-  expect(result.commands).toContain("@usine/server@1.0.0");
-  expect(result.running).toBe("@usine/server@1.0.0");
-});
+it(
+  "starts the previous version when the rollback install fails with that version on disk",
+  slowCli,
+  () => {
+    const result = run("previous-rollback");
+    expect(result.failed).toBe(true);
+    assert(result.record.status === "failed");
+    expect(result.record.reason).toBe(
+      "The new server did not answer the operator API within three minutes.",
+    );
+    expect(result.commands).toContain("@usine/server@1.0.0");
+    expect(result.running).toBe("@usine/server@1.0.0");
+  },
+);
 
-it("reports recovery failure when the unchanged previous version fails its health check", () => {
-  const result = run("unchanged-unhealthy");
-  expect(result.failed).toBe(true);
-  assert(result.record.status === "failed");
-  expect(result.record.reason).toBe("Rollback failed. Check the upgrade service journal.");
-});
+it(
+  "reports recovery failure when the unchanged previous version fails its health check",
+  slowCli,
+  () => {
+    const result = run("unchanged-unhealthy");
+    expect(result.failed).toBe(true);
+    assert(result.record.status === "failed");
+    expect(result.record.reason).toBe("Rollback failed. Check the upgrade service journal.");
+    expect(result.running).toBe("");
+  },
+);
 
 it.each(["missing-rollback", "invalid-rollback", "other-rollback"] as const)(
   "requests a manual reinstall when neither known version can be identified after %s",
+  slowCli,
   (scenario) => {
     const result = run(scenario);
     expect(result.failed).toBe(true);
@@ -224,7 +423,7 @@ it.each(["missing-rollback", "invalid-rollback", "other-rollback"] as const)(
   },
 );
 
-it("does not replace packages when systemd cannot stop the server", () => {
+it("does not replace packages when systemd cannot stop the server", slowCli, () => {
   const result = run("bad-stop");
   expect(result.failed).toBe(true);
   expect(result.commands).not.toContain("install");
@@ -232,6 +431,7 @@ it("does not replace packages when systemd cannot stop the server", () => {
 
 it.each(["exit-term", "exit-kill"] as const)(
   "finishes upgrades and rollback when the server disappears before %s",
+  slowCli,
   (shutdown) => {
     const upgraded = run("good", shutdown);
     expect(upgraded.failed).toBe(false);
@@ -243,7 +443,7 @@ it.each(["exit-term", "exit-kill"] as const)(
   },
 );
 
-it("does not install after failed signals when the unit remains deactivating", () => {
+it("does not install after failed signals when the unit remains deactivating", slowCli, () => {
   const result = run("good", "stuck");
   expect(result.failed).toBe(true);
   expect(result.record.status).toBe("failed");
@@ -252,6 +452,7 @@ it("does not install after failed signals when the unit remains deactivating", (
 
 it.each(["transient-target", "transient-404"] as const)(
   "installs after delayed registry propagation for %s without rollback",
+  slowCli,
   (scenario) => {
     const result = run(scenario);
     expect(result.failed).toBe(false);
@@ -264,6 +465,7 @@ it.each(["transient-target", "transient-404"] as const)(
 
 it.each(["missing-target", "missing-404"] as const)(
   "restarts the unchanged previous version after exhausting registry retries for %s",
+  slowCli,
   (scenario) => {
     const result = run(scenario);
     expect(result.failed).toBe(true);
