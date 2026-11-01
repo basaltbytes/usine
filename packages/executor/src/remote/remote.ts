@@ -963,7 +963,20 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 attemptId: request.attemptId,
                 worker: request.worker,
                 shell: machine.shell,
+                machine: machine.provisioned,
+                probe: machine.probe,
                 report: (notice) => runtime.notify(request.attemptId, notice),
+                lost: (reason) =>
+                  session.drain(request.attemptId, reason).pipe(
+                    Effect.tapError((error) =>
+                      Effect.logError("Could not drain the attempt after its machine disappeared", {
+                        attemptId: request.attemptId,
+                        worker: request.worker,
+                        message: error.message,
+                      }),
+                    ),
+                    Effect.ignore,
+                  ),
               });
               return yield* session.launch(prepared, io, {
                 host: shell,

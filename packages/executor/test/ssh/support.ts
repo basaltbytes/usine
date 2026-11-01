@@ -144,6 +144,7 @@ interface FakeMachineState {
   /** The token in each credential directory on the machine, by path. */
   readonly credentials: Map<string, string>;
   reachable: boolean;
+  readonly closedSshEndpoints: Set<string>;
   /** Whether the machine accepts TCP but its SSH server never responds, so a new command neither runs nor fails. */
   stalled: boolean;
   rootWritable: boolean;
@@ -312,6 +313,7 @@ export const fakeMachine = () => {
     calls: [],
     credentials: new Map(),
     reachable: true,
+    closedSshEndpoints: new Set(),
     stalled: false,
     rootWritable: true,
     memoryGib: 7.7,
@@ -512,6 +514,19 @@ export const fakeMachine = () => {
     return undefined;
   };
   const respond = (command: StandardCommand, line: string, input: string) => {
+    const configIndex = command.args.indexOf("-F");
+    const config = state.localFiles.get(command.args[configIndex + 1] ?? "") ?? "";
+    const destination = command.args[command.args.indexOf("--") - 1] ?? "";
+    const host = /^  HostName (\S+)$/mu.exec(config)?.[1] ?? destination.split("@").at(-1);
+    const portIndex = command.args.indexOf("-p");
+    const port =
+      portIndex < 0 ? (/^  Port (\d+)$/mu.exec(config)?.[1] ?? "22") : command.args[portIndex + 1];
+    if (state.closedSshEndpoints.has(`${host}:${port}`))
+      return oneShotHandle(
+        "",
+        255,
+        `ssh: connect to host ${host} port ${port}: Connection refused`,
+      );
     if (state.stalled) return stalledHandle;
     if (!state.reachable)
       return oneShotHandle(

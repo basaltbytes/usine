@@ -42,6 +42,7 @@ import {
   type SshWorkerEntry,
 } from "../workers.ts";
 import { machineDriversFor } from "./drivers.ts";
+import { machineConnections } from "./connection.ts";
 import {
   attemptTag,
   type ListedMachine,
@@ -110,6 +111,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   const { instance, commands, settings } = options;
   const tailnets = yield* boatTailnetsFor(commands);
   const fs = yield* FileSystem.FileSystem;
+  const connectionFor = yield* machineConnections;
   const path = yield* Path.Path;
   const holds = yield* machineHolds;
   const { held, register, update, unregister, entryOf, byAttempt, retireIdle } = holds;
@@ -147,7 +149,11 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   ) {
     yield* Effect.annotateCurrentSpan({ worker, machine: id, provider: driver.provider });
     yield* driver.remove(id);
-    yield* fs.remove(knownHostsFile(driver.provider, id), { force: true }).pipe(
+    yield* Effect.forEach(
+      [knownHostsFile(driver.provider, id), `${knownHostsFile(driver.provider, id)}.ssh-config`],
+      (file) => fs.remove(file, { force: true }),
+      { discard: true },
+    ).pipe(
       Effect.tapError((error) =>
         Effect.logWarning("Could not remove the host key file of a deleted machine", {
           worker,
@@ -301,7 +307,8 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         reason: "provider",
         message: `usine has no SSH host key for ${driver.provider} machine ${id} of worker "${worker}": the provider reported none, and ${pinned.file} doesn't exist. usine doesn't trust the host key of a first connection.`,
       });
-    return options.machineAt(entry, id, endpoint, pinned);
+    const connect = (endpoint: MachineEndpoint) => options.machineAt(entry, id, endpoint, pinned);
+    return yield* connectionFor(id, endpoint, driver, pinned, connect);
   });
 
   const checkMachine = checks.check;

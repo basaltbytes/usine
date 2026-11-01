@@ -100,6 +100,10 @@ export interface MachineDriver {
     id: MachineId,
     interval: Effect.Effect<void>,
   ) => Effect.Effect<MachineEndpoint, MachineUnavailableError>;
+  /** Reads a mutable SSH endpoint without waiting; `None` means the machine stopped or was deleted. */
+  readonly refreshEndpoint?: (
+    id: MachineId,
+  ) => Effect.Effect<Option.Option<MachineEndpoint>, ProviderApiError>;
   /** Deletes the machine. A machine that is already gone counts as deleted. */
   readonly remove: (id: MachineId) => Effect.Effect<void, ProviderApiError>;
   /** Lists machines tagged with `instance`, optionally limited to one Worker. */

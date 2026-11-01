@@ -100,6 +100,7 @@ interface BoatState {
   hostKey: string | undefined;
   /** Boat's SSH forward, or `undefined` for a machine address of its own. */
   sshEndpoint: string | undefined;
+  readFails: CannedError | undefined;
   createFails: CannedError | undefined;
   provisioningReads: number;
   limits: BoatLimits;
@@ -189,6 +190,7 @@ export const fakeProviders = () => {
     sshEndpoint: undefined,
     createFails: undefined,
     provisioningReads: 1,
+    readFails: undefined,
     limits: {
       canStart: true,
       activeSandboxes: 0,
@@ -351,6 +353,8 @@ export const fakeProviders = () => {
     createdAt: sandbox.createdAt,
     desktopAvailable: false,
     snapshotAvailable: false,
+    ip: "198.51.100.20",
+    sshEndpoint: boat.sshEndpoint ?? null,
   });
 
   const handleBoat = (call: ProviderCall): readonly [number, Schema.Json] => {
@@ -412,8 +416,9 @@ export const fakeProviders = () => {
       if (sandbox === undefined)
         return [404, boatError({ status: 404, code: "not_found", message: "Not found" })];
       if (call.method === "GET" && segments.length === 2) {
+        if (boat.readFails !== undefined) return [boat.readFails.status, boatError(boat.readFails)];
         if (sandbox.provisioningReads > 0) sandbox.provisioningReads -= 1;
-        else sandbox.state = "ready";
+        else if (sandbox.state === "provisioning") sandbox.state = "ready";
         return [200, { ok: true, type: "sandbox.info", sandbox: sandboxJson(sandbox) }];
       }
       if (call.method === "POST" && segments[2] === "sshkey") {

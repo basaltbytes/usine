@@ -15,6 +15,7 @@ import type {
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteCommands } from "./commands.ts";
 import type { AttemptIsolation } from "./container.ts";
+import type { ProbeConnection } from "./liveness.ts";
 
 /** A machine with checkouts left for reconciliation. */
 interface RemoteLeftovers<M extends RemoteMachine> {
@@ -25,6 +26,8 @@ interface RemoteLeftovers<M extends RemoteMachine> {
 
 export interface RemoteMachine {
   readonly shell: RemoteShell;
+  /** Follows provider endpoint changes and detects machine loss during a liveness probe. */
+  readonly probe?: ProbeConnection;
   /** The Worker directory on the machine, with cached clones under `repos` and checkouts under `attempts`. */
   readonly workerDirectory: string;
   /** The provider's ID of a machine created for one Attempt, or `None` for a long-lived machine. */
