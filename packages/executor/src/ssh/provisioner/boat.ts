@@ -6,12 +6,13 @@ import {
   WorkerCapabilityError,
 } from "../../executor.ts";
 import type { BoatProvisioner } from "../model.ts";
-import { failureText, type ProviderFailure, providerApiFor } from "./http.ts";
+import { failureText, type ProviderFailure, providerApiFor, ProviderUnanswered } from "./http.ts";
 import {
   attemptTag,
   attemptsFromTag,
   type ListedMachine,
   type MachineDriver,
+  type MachineEndpoint,
   type MachineTags,
   ProviderApiError,
   tagValue,
@@ -52,6 +53,14 @@ const SshKey = Schema.Struct({
   sshUser: Schema.optionalKey(Schema.String),
   sshEndpoint: Schema.optionalKey(Schema.NullOr(Schema.String)),
   hostKey: Schema.optionalKey(Schema.String),
+});
+
+const SandboxConnection = Schema.Struct({
+  sandbox: Schema.Struct({
+    state: Schema.String,
+    ip: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    sshEndpoint: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  }),
 });
 
 const Limits = Schema.Struct({
@@ -130,6 +139,29 @@ const destinationOf = (
     port: Option.none(),
   }));
 };
+
+const endpointOf = (
+  answer: typeof SshKey.Type,
+): Effect.Effect<MachineEndpoint, ProviderUnanswered> =>
+  Effect.gen(function* () {
+    const target = destinationOf(answer);
+    if (Option.isNone(target))
+      return yield* new ProviderUnanswered({
+        detail: "Boat reported no SSH address for the sandbox",
+      });
+    const destination = yield* Schema.decodeUnknownEffect(SshDestination)(
+      `${answer.sshUser ?? "user"}@${target.value.host}`,
+    ).pipe(
+      Effect.mapError(
+        () => new ProviderUnanswered({ detail: "Boat reported an invalid SSH destination" }),
+      ),
+    );
+    return {
+      destination,
+      port: target.value.port,
+      hostKey: Option.fromUndefinedOr(answer.hostKey),
+    };
+  });
 
 /**
  * Returns the Boat driver for `worker`'s sandboxes (#550). Each sandbox is created with none of
@@ -303,15 +335,7 @@ export const boatDriverFor = (
         const answer = yield* api
           .send("POST", `/sandboxes/${id}/sshkey`, { body: { key: publicKey } })
           .pipe(Effect.flatMap(api.decode(SshKey, "add the SSH key")));
-        const target = destinationOf(answer);
-        if (Option.isNone(target))
-          return yield* unavailable("provider", "Boat reported no SSH address for the new sandbox");
-        const user = answer.sshUser ?? "user";
-        return {
-          destination: SshDestination.make(`${user}@${target.value.host}`),
-          port: target.value.port,
-          hostKey: Option.fromUndefinedOr(answer.hostKey),
-        };
+        return yield* endpointOf(answer);
       },
       (effect) =>
         effect.pipe(
@@ -330,6 +354,44 @@ export const boatDriverFor = (
                   failure.status === 404
                     ? "Boat removed the new sandbox before it was ready"
                     : `Boat couldn't ready the new sandbox: ${failureText(failure)}`,
+                ),
+              ),
+          }),
+        ),
+    );
+
+    const refreshEndpoint = Effect.fn("BoatDriver.refreshEndpoint")(
+      function* (id: MachineId) {
+        yield* Effect.annotateCurrentSpan({ worker, machine: id });
+        return yield* Effect.gen(function* () {
+          const { sandbox } = yield* api
+            .send("GET", `/sandboxes/${id}`)
+            .pipe(Effect.flatMap(api.decode(SandboxConnection, "read the sandbox connection")));
+          if (ENDED.has(sandbox.state)) return Option.none<MachineEndpoint>();
+          if (!RUNNING.has(sandbox.state))
+            return yield* new ProviderUnanswered({ detail: `Boat sandbox is ${sandbox.state}` });
+          return Option.some(
+            yield* endpointOf({
+              machineIp: sandbox.ip ?? null,
+              sshEndpoint: sandbox.sshEndpoint ?? null,
+            }),
+          );
+        }).pipe(
+          Effect.catchIf(
+            (failure) => failure._tag === "ProviderRefused" && failure.status === 404,
+            () => Effect.succeedNone,
+          ),
+          Effect.mapError(apiError("refresh the sandbox connection")),
+        );
+      },
+      (effect) =>
+        effect.pipe(
+          Effect.timeoutOrElse({
+            duration: "30 seconds",
+            orElse: () =>
+              Effect.fail(
+                apiError("refresh the sandbox connection")(
+                  new ProviderUnanswered({ detail: "lookup did not finish within 30 seconds" }),
                 ),
               ),
           }),
@@ -406,6 +468,7 @@ export const boatDriverFor = (
       verify,
       create,
       endpoint,
+      refreshEndpoint,
       assign,
       remove,
       list,

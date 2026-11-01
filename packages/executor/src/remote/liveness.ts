@@ -6,7 +6,7 @@ import {
   WorkerUnresponsive,
   WORKER_UNRESPONSIVE_PROBES,
 } from "@usine/core/attempt/channel";
-import type { WorkerName } from "@usine/core/worker";
+import type { MachineId, WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Fiber, Match, Option, Ref, type Scope, Semaphore } from "effect";
 import type { RemoteCommands } from "./commands.ts";
 
@@ -16,9 +16,16 @@ const CONNECT_TIMEOUT_SECONDS = 20;
 /** The timeout for a whole probe, in seconds. A session that opens but never runs the command counts as unanswered. */
 const PROBE_TIMEOUT_SECONDS = 45;
 
-type Probe =
+export type Probe =
   | { readonly _tag: "Answered" }
   | { readonly _tag: "Unanswered"; readonly reason: string };
+
+export type ConnectionProbe = Probe | { readonly _tag: "Gone"; readonly reason: string };
+
+/** Checks alternate endpoints before reporting an unanswered probe or confirmed machine loss. */
+export type ProbeConnection = (
+  probe: (shell: RemoteShell) => Effect.Effect<Probe>,
+) => Effect.Effect<ConnectionProbe>;
 
 type Liveness =
   | {
@@ -137,12 +144,15 @@ interface WorkerWatcher {
   readonly attemptId: AttemptId;
   /** Records a notice in the Attempt's transcript. */
   readonly report: (notice: WorkerNotice) => Effect.Effect<void>;
+  readonly lost: (reason: string) => Effect.Effect<void>;
 }
 
 interface WorkerWatch extends WorkerWatcher {
   readonly worker: WorkerName;
+  readonly machine: Option.Option<MachineId>;
   /** The machine's shell, without Attempt secrets. */
   readonly shell: RemoteShell;
+  readonly probe?: ProbeConnection | undefined;
 }
 
 /** The liveness watches of one executor, one per machine with a running Attempt. */
@@ -151,7 +161,7 @@ export interface WorkerWatches {
    * Adds the Attempt to its Worker's watch until the caller's scope closes. Every minute, the
    * watch runs `true` on the machine over a new SSH connection; when the machine stops or resumes
    * responding, it calls `report` for each Attempt and logs a line. Never stops or fails an
-   * Attempt (ADR 0013).
+   * Attempt for an unanswered probe (ADR 0013). Confirmed provider loss calls `lost`.
    */
   readonly watch: (watch: WorkerWatch) => Effect.Effect<void, never, Scope.Scope>;
 }
@@ -165,42 +175,47 @@ const watchWorker = (
   commands: RemoteCommands,
   worker: WorkerName,
   machineShell: RemoteShell,
+  connection: ProbeConnection | undefined,
   lock: Semaphore.Semaphore,
   liveness: Ref.Ref<Liveness>,
   watchers: () => ReadonlyArray<WorkerWatcher>,
 ): Effect.Effect<never> =>
   Effect.gen(function* () {
     const host = machineShell.destination;
-    const shell = new RemoteShell({
-      ssh: {
-        command: machineShell.ssh.command,
-        args: [...machineShell.ssh.args, "-o", `ConnectTimeout=${CONNECT_TIMEOUT_SECONDS}`],
-      },
-      sshEnvironment: machineShell.sshEnvironment,
-      destination: machineShell.destination,
-    });
+    const probe = (machineShell: RemoteShell): Effect.Effect<Probe> => {
+      const shell = new RemoteShell({
+        ssh: {
+          command: machineShell.ssh.command,
+          args: [...machineShell.ssh.args, "-o", `ConnectTimeout=${CONNECT_TIMEOUT_SECONDS}`],
+        },
+        sshEnvironment: machineShell.sshEnvironment,
+        destination: machineShell.destination,
+      });
 
-    const probe: Effect.Effect<Probe> = commands.inspect("launch", shell, "true", []).pipe(
-      Effect.timeoutOption(`${PROBE_TIMEOUT_SECONDS} seconds`),
-      Effect.map(
-        Option.match({
-          onNone: (): Probe => ({
-            _tag: "Unanswered",
-            reason: `No answer within ${PROBE_TIMEOUT_SECONDS} seconds`,
+      return commands.inspect("launch", shell, "true", []).pipe(
+        Effect.timeoutOption(`${PROBE_TIMEOUT_SECONDS} seconds`),
+        Effect.map(
+          Option.match({
+            onNone: (): Probe => ({
+              _tag: "Unanswered",
+              reason: `No answer within ${PROBE_TIMEOUT_SECONDS} seconds`,
+            }),
+            onSome: (result): Probe =>
+              result.exitCode === 0
+                ? { _tag: "Answered" }
+                : {
+                    _tag: "Unanswered",
+                    reason: [`ssh exited with code ${result.exitCode}`, lastLine(result.stderr)]
+                      .filter((part) => part !== "")
+                      .join(": "),
+                  },
           }),
-          onSome: (result): Probe =>
-            result.exitCode === 0
-              ? { _tag: "Answered" }
-              : {
-                  _tag: "Unanswered",
-                  reason: [`ssh exited with code ${result.exitCode}`, lastLine(result.stderr)]
-                    .filter((part) => part !== "")
-                    .join(": "),
-                },
-        }),
-      ),
-      Effect.catch((error) => Effect.succeed<Probe>({ _tag: "Unanswered", reason: error.message })),
-    );
+        ),
+        Effect.catch((error) =>
+          Effect.succeed<Probe>({ _tag: "Unanswered", reason: error.message }),
+        ),
+      );
+    };
 
     const decide = (result: Probe) =>
       Effect.gen(function* () {
@@ -254,7 +269,17 @@ const watchWorker = (
     // Root span: the watch can run longer than the Attempt that started it.
     const check = Effect.fn("RemoteExecutor.probeWorker", { root: true })(function* () {
       yield* Effect.annotateCurrentSpan({ worker, host });
-      const result = yield* probe;
+      const result = yield* connection === undefined ? probe(machineShell) : connection(probe);
+      if (result._tag === "Gone") {
+        yield* Effect.logWarning("The provider reports that the worker's machine is gone", {
+          worker,
+          host,
+          reason: result.reason,
+        });
+        return yield* Effect.forEach(watchers(), ({ lost }) => lost(result.reason), {
+          discard: true,
+        });
+      }
       yield* Semaphore.withPermit(lock, decide(result));
     });
 
@@ -277,9 +302,10 @@ export const workerWatchesFor = (
   Effect.gen(function* () {
     const scope = yield* Effect.scope;
     const lock = yield* Semaphore.make(1);
-    // Keyed by Worker and destination, since a provisioned Worker has one machine per Attempt.
+    // Boat sandboxes can share a destination host while using different forwarded ports.
     const watched = new Map<string, Watched>();
-    const keyOf = (watch: WorkerWatch) => `${watch.worker} ${watch.shell.destination}`;
+    const keyOf = (watch: WorkerWatch) =>
+      `${watch.worker} ${Option.getOrElse(watch.machine, () => `${watch.shell.destination} ${JSON.stringify(watch.shell.ssh)}`)}`;
 
     const join = (watch: WorkerWatch) =>
       Semaphore.withPermit(
@@ -322,6 +348,7 @@ export const workerWatchesFor = (
             commands,
             watch.worker,
             watch.shell,
+            watch.probe,
             lock,
             liveness,
             () => [...watchers.values()],

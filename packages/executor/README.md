@@ -196,6 +196,12 @@ A gateway released before that endpoint answers 404: the worker's first such pre
 
 ### Provisioned machines
 
+Boat SSH endpoints can change while an attempt runs. After an unanswered liveness probe, the executor reads the sandbox's current endpoint and tries it before reporting an outage. It retains the previous working endpoint and tries both on later failures. A successful connection updates the machine's OpenSSH config atomically, so existing attempt shells use it for later commands. The pinned host key uses a stable machine alias that applies to both addresses.
+
+A sandbox that Boat reports as stopped or deleted fails the attempt with a retryable `InfraFailure`; the next attempt uses a fresh machine and the latest pushed salvage. A running sandbox that answers at neither endpoint retains the unresponsive-worker notices. Provider API errors are logged and do not count as proof that a sandbox was deleted.
+
+Boat creation explicitly sends `ttlSeconds: null` to disable auto-stop. The [Boat REST reference](https://docs.boat.dev/api/reference/sandboxes/create-sandbox) defines `null` as disabling auto-stop; omitting the field defaults to one hour. Paid Boat accounts are required to disable auto-stop.
+
 Boat machine creation distinguishes concurrent sandbox, compute allowance, billing, and size plan limits from transient API rate limits. Quota failures preserve the provider message in `MachineUnavailableError`. Hetzner reports `resource_limit_exceeded` as a quota failure.
 
 A worker whose address has `machine: { _tag: "Provisioned" }` has no machine of its own: it creates a Hetzner Cloud server or a Boat sandbox for each attempt and deletes it afterwards by default ([#550](https://github.com/basaltbytes/usine/issues/550)). The layer provides `WorkerMachines` for the scheduler:

@@ -81,3 +81,26 @@ whose readiness or preflight later fails, and survive machine deletion and orche
 restarts. A provider creation whose response is lost cannot be counted from that response.
 The overview and worker page show assigned attempts and machine age; statistics show daily
 starts. These records contain no credentials.
+
+## Amendment (2026-11-01, #808): mutable Boat SSH endpoints
+
+An unanswered SSH liveness probe on a Boat machine triggers `GET /sandboxes/<id>`.
+The executor tries the reported endpoint and retains the previous working endpoint,
+because either address can be temporarily unreachable. A successful connection updates
+a per-machine OpenSSH config file through an atomic rename. Attempt shells retain the
+config path, so later child, harvest, and cleanup commands use the selected endpoint.
+The existing machine alias in `known_hosts` pins the same host key across address changes;
+reconnection does not trust a new key from the SSH server.
+Liveness watches use the machine ID, so sandboxes with the same SSH host and different
+forwarded ports have independent probes and failure handling.
+
+A 404 or terminal sandbox state drains the durable session as a retryable infrastructure
+failure. The engine can start a new attempt on a fresh machine from the latest pushed
+salvage. A running sandbox with no reachable endpoint continues to produce the existing
+unresponsive-worker notices. An unavailable provider API is logged and does not prove
+machine loss.
+
+The [Boat create API](https://docs.boat.dev/api/reference/sandboxes/create-sandbox), checked
+on 2026-11-01, defines `ttlSeconds: null` as disabling auto-stop. The driver already sends
+that explicit setting. Omitting the field applies the one-hour default; trial accounts
+require an auto-stop of at most two hours and cannot use this worker lifetime.
