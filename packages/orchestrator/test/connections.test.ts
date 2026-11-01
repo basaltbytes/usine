@@ -122,6 +122,11 @@ for (const restart of [false, true]) {
               yield* Fiber.interrupt(launch);
             }),
           );
+          const persisted = yield* fs.readFileString(
+            `${root}/.usine/attempt-connections/remote-run_execute_1.json`,
+          );
+          assert.include(persisted, "original-host");
+          assert(!credentials.minted.some((token) => persisted.includes(token)));
           if (!restart) yield* verify(executor);
         }).pipe(Effect.scoped, Effect.provide(reloadableInstanceLayer(root)));
         if (restart)
@@ -130,13 +135,7 @@ for (const restart of [false, true]) {
             Effect.scoped,
             Effect.provide(reloadableInstanceLayer(root)),
           );
-        const files = yield* fs.readDirectory(`${root}/.usine/attempt-connections`);
-        assert.isAtLeast(files.length, 2);
-        const persisted = yield* fs.readFileString(
-          `${root}/.usine/attempt-connections/remote-run_execute_1.json`,
-        );
-        assert.include(persisted, "original-host");
-        assert(!credentials.minted.some((token) => persisted.includes(token)));
+        assert.deepStrictEqual(yield* fs.readDirectory(`${root}/.usine/attempt-connections`), []);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 }

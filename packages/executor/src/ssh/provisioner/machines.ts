@@ -58,8 +58,9 @@ export interface ProvisionedMachinesOptions {
   readonly attemptEntry: (
     worker: WorkerName,
     attemptId: AttemptId,
+    purpose?: "prepare" | "recovery",
   ) => Effect.Effect<SshWorkerEntry, WorkerCapabilityError>;
-  readonly forgetConnection: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
+  readonly forgetConnection: (attemptId: AttemptId) => Effect.Effect<void>;
   readonly entries: Effect.Effect<ReadonlyArray<SshWorkerEntry>>;
   readonly machineAt: (
     entry: SshWorkerEntry,
@@ -247,6 +248,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       return;
     }
     yield* unregister(hold);
+    yield* Effect.forEach(Option.toArray(found.attemptId), options.forgetConnection);
     yield* Effect.logInfo("Deleted the machine", { ...fields, machine: id.value });
   });
 
@@ -466,19 +468,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       });
     },
     (effect, _worker, _runId, attemptId) =>
-      effect.pipe(
-        Effect.tapError(() =>
-          options.forgetConnection(attemptId).pipe(
-            Effect.tapError((error) =>
-              Effect.logWarning("Could not remove the failed creation's connection record", {
-                attemptId,
-                message: error.message,
-              }),
-            ),
-            Effect.ignore,
-          ),
-        ),
-      ),
+      effect.pipe(Effect.tapError(() => options.forgetConnection(attemptId))),
   );
 
   /**
@@ -532,7 +522,11 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const entry = Option.isSome(existing)
       ? existing.value
       : yield* Effect.gen(function* () {
-          const workerEntry = yield* options.attemptEntry(worker, attemptId);
+          const workerEntry = yield* options.attemptEntry(
+            worker,
+            attemptId,
+            holder === "recovery" ? "recovery" : "prepare",
+          );
           const driver = yield* drivers.forEntry(workerEntry);
           return yield* register({
             worker,
@@ -858,7 +852,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const existing = yield* byAttempt(attemptId);
     protectedAttempts.add(attemptId);
     if (Option.isNone(existing)) {
-      const entry = yield* options.attemptEntry(worker, attemptId);
+      const entry = yield* options.attemptEntry(worker, attemptId, "recovery");
       if (Option.isSome(entry.machine)) {
         protectedAttempts.delete(attemptId);
         const machine = entry.machine.value;

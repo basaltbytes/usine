@@ -24,22 +24,28 @@ export const workerLeftoversFor = <M extends RemoteMachine, E>(
   listedOncePerWorker(
     Effect.fn("RemoteExecutor.listWorkerLeftovers")(function* (worker: WorkerName) {
       const machine = yield* machineFor(worker);
-      const host = machine.shell.destination;
-      yield* Effect.annotateCurrentSpan({ worker, host });
       yield* reclaim(worker);
-      const checkouts = new Set(
-        yield* attemptPathsOn(
-          commands,
-          "cleanup",
-          machine.shell,
-          `${machine.workerDirectory}/attempts`,
-        ),
-      );
-      yield* Effect.logInfo("Listed remote checkouts left for reconciliation", {
-        worker,
-        host,
-        checkouts: checkouts.size,
-      });
-      return { machine, checkouts } satisfies WorkerLeftovers<M>;
+      return yield* listMachineLeftovers(commands, worker, machine);
     }),
   );
+
+export const listMachineLeftovers = Effect.fn("RemoteExecutor.listMachineLeftovers")(function* <
+  M extends RemoteMachine,
+>(commands: RemoteCommands, worker: WorkerName, machine: M) {
+  const host = machine.shell.destination;
+  yield* Effect.annotateCurrentSpan({ worker, host });
+  const checkouts = new Set(
+    yield* attemptPathsOn(
+      commands,
+      "cleanup",
+      machine.shell,
+      `${machine.workerDirectory}/attempts`,
+    ),
+  );
+  yield* Effect.logInfo("Listed remote checkouts left for reconciliation", {
+    worker,
+    host,
+    checkouts: checkouts.size,
+  });
+  return { machine, checkouts } satisfies WorkerLeftovers<M>;
+});

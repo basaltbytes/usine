@@ -95,6 +95,8 @@ export interface RemoteWorker<M extends RemoteMachine> {
     attempt: AttemptRecovery,
     listed: Effect.Effect<RemoteLeftovers<M>, ExecutorError>,
   ) => Effect.Effect<Option.Option<RemoteLeftovers<M>>, ExecutorError>;
+  /** Runs after the attempt's scoped cleanup, including container and credential finalizers. */
+  readonly released?: (attemptId: AttemptId, machine: M) => Effect.Effect<void>;
   /** Runs after `recover` reconciled `attempt`'s machine, with whether it succeeded. */
   readonly recovered?: (attempt: AttemptRecovery, succeeded: boolean) => Effect.Effect<void>;
   /**

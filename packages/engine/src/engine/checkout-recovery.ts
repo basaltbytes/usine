@@ -161,11 +161,28 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     }
     // Runs before Run recovery, so a retry starts only after the previous Attempt's work is
     // recorded. A failed recovery leaves the checkout on disk.
+    yield* Effect.logInfo("Startup checkout reconciliation started", {
+      attempts: reconcilable.length,
+    });
+    let completed = 0;
     const unstopped = yield* Effect.forEach(reconcilable, (attempt) =>
-      attempt.open
+      (attempt.open
         ? recoverOpen(attempt).pipe(Effect.as(Option.none<SalvageCandidate>()))
-        : recoverClosed(attempt),
+        : recoverClosed(attempt)
+      ).pipe(
+        Effect.tap(() =>
+          Effect.gen(function* () {
+            completed += 1;
+            if (completed % 50 === 0)
+              yield* Effect.logInfo("Startup checkout reconciliation progressed", {
+                completed,
+                attempts: reconcilable.length,
+              });
+          }),
+        ),
+      ),
     );
+    yield* Effect.logInfo("Startup checkout reconciliation finished", { completed });
     return EffectArray.getSomes(unstopped);
   });
 

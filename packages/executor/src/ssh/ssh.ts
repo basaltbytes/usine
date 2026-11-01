@@ -1,4 +1,5 @@
-import { attemptPathsOn } from "../remote/sweep.ts";
+import { listMachineLeftovers } from "../remote/leftovers.ts";
+import { safeSegment } from "@usine/core/repository";
 import type { AttemptId } from "@usine/core/attempt";
 import { attemptConnectionsFor } from "../attempt-connections.ts";
 import type { RemoteShell } from "@usine/agents/child-host";
@@ -7,7 +8,7 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Context, Effect, FileSystem, Layer, Option, type Path } from "effect";
+import { Cache, Context, Effect, FileSystem, Layer, Option, type Path } from "effect";
 import type { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import {
@@ -53,9 +54,18 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       commands,
     );
     const connections = yield* attemptConnectionsFor(options.attemptConnections);
-    const attemptEntry = (worker: WorkerName, attemptId: AttemptId) =>
+    const attemptEntry = (
+      worker: WorkerName,
+      attemptId: AttemptId,
+      purpose: "prepare" | "recovery" = "prepare",
+    ) =>
       connections
-        .resolve(worker, attemptId, workerFor(worker).pipe(Effect.map(({ address }) => address)))
+        .resolve(
+          worker,
+          attemptId,
+          workerFor(worker).pipe(Effect.map(({ address }) => address)),
+          purpose,
+        )
         .pipe(
           Effect.flatMap(entryFor),
           Effect.mapError((cause) =>
@@ -109,12 +119,26 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     );
     const containers = yield* sshContainersFor(commands, options.instance, options.instanceId);
     const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, logins, containers);
+    const forgetConnection = Effect.fn("SshExecutor.forgetReleasedConnection")(function* (
+      attemptId: AttemptId,
+    ) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      yield* connections.forget(attemptId).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("Could not remove a finished attempt connection", {
+            attemptId,
+            message: error.message,
+          }),
+        ),
+        Effect.ignore,
+      );
+    });
     const provisioned = yield* provisionedMachinesFor({
       instance: options.instance,
       commands,
       workerFor,
       attemptEntry,
-      forgetConnection: connections.forget,
+      forgetConnection,
       entries,
       machineAt,
       verifyMachine,
@@ -209,38 +233,88 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       );
     });
 
+    const fixedLeftovers = yield* Cache.make({
+      capacity: Number.POSITIVE_INFINITY,
+      lookup: (machine: SshMachine) =>
+        reclaimMachine(machine).pipe(
+          Effect.andThen(listMachineLeftovers(commands, machine.address.name, machine)),
+          Effect.tapError((error) =>
+            Effect.logWarning(
+              "Could not list leftover checkouts; this connection is not reconciled until the next start",
+              {
+                worker: machine.address.name,
+                host: machine.shell.destination,
+                message: error.message,
+              },
+            ),
+          ),
+        ),
+    });
+
+    const checkoutStates = new Map<AttemptId, "held" | "removed">();
     const executor = yield* remoteExecutorFor<SshMachine>({
       kind: "ssh",
       spanPrefix: "SshExecutor",
       label: "SSH",
       commands,
       machineFor,
-      attemptMachine: provisioned.attemptMachine,
+      attemptMachine: (worker, attemptId) =>
+        provisioned.attemptMachine(worker, attemptId).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              checkoutStates.set(attemptId, "held");
+            }),
+          ),
+        ),
       leftovers: (attempt) =>
         provisioned.leftovers(attempt).pipe(
           Effect.flatMap((located) =>
             Effect.transposeOption(
               Option.map(located, (leftovers) =>
-                Effect.gen(function* () {
-                  const { machine } = leftovers;
-                  yield* reclaimMachine(machine);
-                  if (Option.isSome(machine.provisioned)) return leftovers;
-                  const checkouts = new Set(
-                    yield* attemptPathsOn(
-                      commands,
-                      "cleanup",
-                      machine.shell,
-                      `${machine.workerDirectory}/attempts`,
-                    ),
-                  );
-                  return { machine, checkouts };
-                }),
+                Option.isSome(leftovers.machine.provisioned) ||
+                checkoutStates.get(attempt.attemptId) === "held"
+                  ? reclaimMachine(leftovers.machine).pipe(Effect.as(leftovers))
+                  : Cache.get(fixedLeftovers, leftovers.machine),
               ),
             ),
           ),
+          Effect.tap((located) =>
+            Option.match(located, {
+              onNone: () => Effect.void,
+              onSome: ({ machine, checkouts }) =>
+                checkouts.has(
+                  `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`,
+                )
+                  ? connections
+                      .resolve(attempt.worker, attempt.attemptId, Effect.succeed(machine.address))
+                      .pipe(Effect.asVoid)
+                  : Effect.void,
+            }),
+          ),
         ),
       recovered: (attempt, succeeded) => provisioned.recovered(attempt.attemptId, succeeded),
-      checkoutHeld: provisioned.checkoutHeld,
+      checkoutHeld: (attemptId, held) =>
+        provisioned.checkoutHeld(attemptId, held).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              checkoutStates.set(attemptId, held ? "held" : "removed");
+            }),
+          ),
+        ),
+      released: Effect.fn("SshExecutor.releaseConnection")(function* (
+        attemptId: AttemptId,
+        machine: SshMachine,
+      ) {
+        yield* Effect.annotateCurrentSpan({ attemptId, worker: machine.address.name });
+        if (checkoutStates.get(attemptId) !== "removed") return;
+        checkoutStates.delete(attemptId);
+        if (Option.isSome(machine.provisioned)) return;
+        if (reset.cleanupSucceeded(machine.shell)) return yield* forgetConnection(attemptId);
+        yield* Effect.logInfo("Kept the attempt connection after incomplete resource cleanup", {
+          attemptId,
+          worker: machine.address.name,
+        });
+      }),
       preflight: sshPreflightFor(workerFor, verifyMachine, provisioned.verifyProvisioned),
       harnessProbe,
       isolation: containers.isolation,

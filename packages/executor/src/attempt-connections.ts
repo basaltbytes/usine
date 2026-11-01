@@ -22,6 +22,7 @@ export const attemptConnectionsFor = <A extends { readonly name: WorkerName }>(
         worker: WorkerName,
         attemptId: AttemptId,
         current: Effect.Effect<A, ExecutorError>,
+        purpose: "prepare" | "recovery" = "prepare",
       ) {
         yield* Effect.annotateCurrentSpan({ worker, attemptId });
         const cached = addresses.get(attemptId);
@@ -34,9 +35,10 @@ export const attemptConnectionsFor = <A extends { readonly name: WorkerName }>(
             message: "The recorded attempt connection belongs to another worker",
             cause: new Error(`Attempt ${attemptId} belongs to ${address.name}, not ${worker}`),
           });
-        if (Option.isNone(saved) && store !== undefined) yield* store.write(attemptId, address);
-        addresses.set(attemptId, address);
-        yield* Effect.logDebug("Recorded the attempt's worker connection", {
+        if (purpose === "prepare" && Option.isNone(saved) && store !== undefined)
+          yield* store.write(attemptId, address);
+        if (purpose === "prepare" || Option.isSome(saved)) addresses.set(attemptId, address);
+        yield* Effect.logDebug("Resolved the attempt's worker connection", {
           worker,
           attemptId,
           restored: Option.isSome(saved),
