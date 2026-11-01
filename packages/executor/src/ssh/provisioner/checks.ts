@@ -91,7 +91,7 @@ export const machineChecksFor = (
       return Option.none<MachineCheck>();
     }
     yield* Effect.logInfo(
-      "Checking a provisioned Worker machine: Git, memory, the Gateway, Docker, the container limits, and the harnesses",
+      "Checking a provisioned Worker machine: Git, memory, the Gateway, the container runtime, the container limits, and the harnesses",
       { worker, host: machine.shell.destination, brains: brains.length },
     );
     const report = yield* verify(machine, brains, 1).pipe(
@@ -132,7 +132,7 @@ export const machineChecksFor = (
       return yield* new WorkerCapabilityError({
         worker,
         capability: "container",
-        message: "Machine reuse requires Docker isolation",
+        message: "Machine reuse requires container isolation",
         cause: new Error(report.degraded.value),
       });
     const checkedAt = DateTime.toEpochMillis(yield* DateTime.now);
@@ -145,14 +145,18 @@ export const machineChecksFor = (
 
 /**
  * A script that waits for cloud-init to finish, if the machine has it, creates the Worker root
- * `$1`, and waits up to a minute for Docker to answer, if the machine has it.
+ * `$1`, and waits up to a minute for the container runtime to answer, if the machine has it.
  */
 const READY_SCRIPT = String.raw`
 if command -v cloud-init >/dev/null 2>&1; then cloud-init status --wait >/dev/null 2>&1 || true; fi
 mkdir -p "$1" || exit 1
-if command -v docker >/dev/null 2>&1; then
+runtime=docker
+if [ -f /etc/usine/container-runtime ]; then runtime=$(cat /etc/usine/container-runtime)
+elif command -v podman >/dev/null 2>&1; then runtime=podman; fi
+case "$runtime" in podman|docker) ;; *) exit 1 ;; esac
+if command -v "$runtime" >/dev/null 2>&1; then
   tries=0
-  until docker version >/dev/null 2>&1; do
+  until "$runtime" info >/dev/null 2>&1; do
     tries=$((tries + 1))
     [ "$tries" -ge 30 ] && break
     sleep 2

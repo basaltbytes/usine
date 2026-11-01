@@ -1,10 +1,11 @@
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { InstanceId } from "@usine/core/instance";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { ExecutorOperationError } from "../../executor.ts";
 import type { RemoteCommands } from "../../remote/commands.ts";
 import { containersFor } from "../../remote/container.ts";
 import type { SshMachine } from "../model.ts";
+import { detectRuntime } from "../runtime.ts";
 
 /** Records cleanup errors before finalizers suppress them, and resets an unused machine. */
 export const machineResetFor = (raw: RemoteCommands, instance: string, instanceId: InstanceId) => {
@@ -32,7 +33,26 @@ export const machineResetFor = (raw: RemoteCommands, instance: string, instanceI
         message: "The previous attempt's cleanup failed; the machine must be retired",
         cause: new Error("incomplete attempt cleanup"),
       });
-    const removed = yield* containers.sweep(machine.shell, instance, instanceId, worker, new Set());
+    const runtime = yield* detectRuntime(commands, machine).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ExecutorOperationError({ operation: "cleanup", message: cause.message, cause }),
+      ),
+    );
+    if (Option.isNone(runtime))
+      return yield* new ExecutorOperationError({
+        operation: "cleanup",
+        message: "The machine has no container runtime; it must be retired",
+        cause: new Error("missing container runtime during reset"),
+      });
+    const removed = yield* containers.sweep(
+      machine.shell,
+      instance,
+      instanceId,
+      worker,
+      new Set(),
+      runtime.value,
+    );
     if (removed.length > 0)
       return yield* new ExecutorOperationError({
         operation: "cleanup",
