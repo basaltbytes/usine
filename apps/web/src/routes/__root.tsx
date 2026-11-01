@@ -1,5 +1,5 @@
 import { MemberShell } from "~/components/member-shell";
-import { sessionQuery } from "~/lib/permissions";
+import { canReadOverview, sessionQuery } from "~/lib/permissions";
 import { CommandPalette } from "~/components/command-palette/palette";
 import { PageCommandsProvider, PageCommandsScope } from "~/components/command-palette/context";
 import { RefreshProvider } from "~/components/refresh/provider";
@@ -283,7 +283,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   loader: async ({ context: { queryClient }, deps: { run }, location }) => {
     if (location.pathname === "/sign-in" || location.pathname === "/setup") return;
     const session = await queryClient.ensureQueryData(sessionQuery());
-    if (session.permissions.length === 0) return;
+    if (!canReadOverview(session.permissions)) return;
     await Promise.all([
       queryClient.ensureQueryData(overviewQuery()),
       // A rejected drawer query is displayed inside the drawer.

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { SessionMenu } from "~/components/session-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import { SidebarProvider } from "~/components/ui/sidebar";
-import { PermissionsContext, sessionQuery } from "~/lib/permissions";
+import { PermissionsContext, canReadOverview, sessionQuery } from "~/lib/permissions";
 import { accountLabel, noAccessDescription, noAccessTitle } from "~/lib/strings";
 
 type MemberShellProps = { readonly children: ReactNode };
@@ -14,7 +14,7 @@ export const MemberShell = ({ children }: MemberShellProps) => {
   const matchRoute = useMatchRoute();
   return (
     <PermissionsContext.Provider value={session.permissions}>
-      {session.permissions.length > 0 ? (
+      {canReadOverview(session.permissions) ? (
         children
       ) : (
         <SidebarProvider className="flex-col">

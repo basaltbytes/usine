@@ -22,6 +22,8 @@ export const sessionQuery = () =>
     refetchInterval: 15_000,
   });
 export const PermissionsContext = createContext<ReadonlyArray<PermissionGrant>>([]);
+export const canReadOverview = (grants: ReadonlyArray<PermissionGrant>) =>
+  grants.some(({ permission }) => permission === "read" || permission === "admin");
 export const usePermissions = () => useContext(PermissionsContext);
 export const useCan = (permission: Permission, project?: string) => {
   const grants = usePermissions();
