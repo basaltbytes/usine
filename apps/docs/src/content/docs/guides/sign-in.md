@@ -3,9 +3,9 @@ title: Sign in to an instance
 description: Configure GitHub sign-in, enroll members, and manage instance tokens.
 ---
 
-Operator API requests require an instance token or a browser session, including requests from loopback. Health and sign-in endpoints are public. Every member has instance admin access.
+Operator API requests require an instance token or a browser session, including requests from loopback. Health and sign-in endpoints are public. Role bindings determine which projects a member can read and which actions they can take.
 
-`GET /api/version` is an upgrade health endpoint that returns only the running release string. It remains public so helpers copied by releases before member authentication can verify the new server during a managed upgrade. Upgrade status and upgrade requests require authentication.
+`GET /api/version` is an upgrade health endpoint that returns only the running release string. It remains public so helpers copied by releases before member authentication can verify the new server during a managed upgrade. Upgrade status and upgrade requests require instance admin access.
 
 When `usine up` writes to a terminal, open the printed **Sign in** URL. The link expires after 10 minutes and works once. For a detached instance, a system service, or a new link, run `usine sign-in-link` in the instance folder. This also works before GitHub user authorization is configured. Keep these URLs private.
 
@@ -24,7 +24,7 @@ Use HTTPS for remote access through a reverse proxy. See [Expose an instance ove
 
 On upgrade, the configured `operator` becomes the first member after the instance resolves that login to a GitHub user ID. If GitHub is unavailable, the instance logs a warning and retries enrollment on the next start; the local sign-in link remains available. On a new instance, open the one-time link after configuring the App's user authorization and complete GitHub sign-in to become the first member. A public sign-in cannot enroll the first member.
 
-Add members by GitHub login on **Members**. The last member cannot be removed. Removing a member revokes that member's tokens. GitHub identity checks use the numeric user ID; a different GitHub account cannot sign in by reusing a member's former login.
+Add members by GitHub login on **Members**. Removing the last member or last member with an admin binding is refused. Removing a member revokes their tokens and deletes their bindings atomically. GitHub identity checks use the numeric user ID; a different GitHub account cannot sign in by reusing a member's former login.
 
 ### Device tokens
 
@@ -33,3 +33,41 @@ Run `usine sign-in <instance-origin>`, open the GitHub device page, and enter th
 **Tokens** lists the signed-in member's browsers and devices, creation times, and last use, updated at most once a minute per token. Listing tokens deletes expired credentials and excludes them from the response. Revoke an entry to end access. Device tokens remain valid until revoked; browser sessions expire after 30 days. **Sign out** revokes the current browser session.
 
 Browser sessions use an `HttpOnly`, `SameSite=Strict` cookie, with `Secure` except for local HTTP origins. Browser writes require `X-Usine-CSRF`. The bundled UI reads its CSRF cookie and sends that header. Health and sign-in endpoints are public; the separate GitHub webhook listener verifies delivery signatures. Sign-in initiation, link issuance, GitHub exchanges, and invalid challenges have separate instance-wide limits of 60 requests per operation per minute. Invalid challenges do not consume the limits for valid sign-ins. Device polls also honor GitHub's interval.
+
+
+### Roles and bindings
+
+An instance admin manages members, bindings, workers, repository membership, settings, and upgrades. Project roles are cumulative:
+
+| Role | Project access |
+| --- | --- |
+| viewer | Read tasks, runs, transcripts, loops, and lanes. |
+| operator | Viewer access, plus approve, retry, cancel, message, pause loops, reset cycle budgets, and move cards. |
+| maintainer | Operator access, plus edit loops and project lanes. |
+
+The first member receives instance admin access. The upgrade migration grants every existing member an instance admin binding once. Members added afterward have no access until an admin grants a binding.
+
+Open **Configuration > Role bindings** to create or edit a binding. Use the numeric GitHub ID shown on **Members**. For example:
+
+```yaml
+name: alice-alpha
+member: 12345
+role: maintainer
+scope:
+  _tag: Project
+  project: alpha
+```
+
+An admin binding uses `role: admin` and `scope: {_tag: Instance}`. Project roles require a project scope. Binding names are unique; projects must exist. Bindings identify GitHub accounts by numeric ID and can be prepared before enrollment. They grant nothing until the account is enrolled.
+
+Bindings are configuration entities with revision history. Local commands support `usine config edit binding alice-alpha`, import, export, and revert. If an edit removes all admin bindings, use the instance machine's configuration CLI to restore access.
+
+Lists omit projects without read access, including their runs and attention items. Worker status and instance attention controls require admin access. Shared agent definitions and non-secret runtime settings remain readable to members with project read access.
+
+### Token scopes and local access
+
+**Tokens** shows each credential's permission ceiling. Create a token with selected permissions or edit an existing token's scopes. The secret is shown once. The server refuses scopes wider than the caller's effective permissions. Every request intersects the token ceiling with current bindings, so removing a binding takes effect on the next request. Adding a role does not expand newly issued tokens; sign in again or edit the scopes.
+
+Device sign-in and browser sign-in snapshot the member's current permissions. Tokens issued before role bindings retain a full-member ceiling for compatibility, still limited by current bindings. Read, operate, and maintain scopes are independent: include read when a client needs to fetch data before acting. Non-admin device tokens cannot manage other tokens; use a browser session.
+
+The local admin token represents the built-in local actor, displayed as **local admin**. It has instance admin access and no member identity. Local API writes and configuration CLI revisions record **local admin**, even when no member is enrolled. The actor cannot sign in through GitHub or own member tokens. A one-time sign-in link still opens a member browser session when members exist.

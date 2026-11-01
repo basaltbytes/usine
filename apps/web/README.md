@@ -332,7 +332,7 @@ A project board combines tasks from all project repositories. Cards show a repos
 
 ## Member authentication
 
-The sign-in page supports GitHub user authorization and one-time links from `usine sign-in-link`. **Members** adds and removes instance admins. **Tokens** lists and revokes the signed-in member’s browsers and devices. **Sign out** ends the current session. All browser writes include the session’s CSRF token.
+The sign-in page supports GitHub user authorization and one-time links from `usine sign-in-link`. **Members** adds and removes members; role bindings grant their access. **Tokens** lists and revokes the signed-in member’s browsers and devices. **Sign out** ends the current session. All browser writes include the session’s CSRF token.
 
 Endpoint webhook mode shows **No webhook delivery received** in Needs attention after ten minutes without a verified delivery since startup or the last webhook configuration change. The entry identifies the public URL and checks for the App webhook active setting and secret. Dismiss and Undo apply. A verified delivery clears it, including a `ping`; polling continues independently. Settings shows the running endpoint mode and last hint time.
 
@@ -349,3 +349,8 @@ Idle upgrade waits show the requested version in run headers, Overview's Running
 ## GitHub App setup
 
 `/setup` resumes App creation, credential recovery, installation discovery, and repository selection. A one-time sign-in link opens the setup session. The page posts a prepared manifest to GitHub and supports restoring existing credential JSON. After installation, GitHub sign-in enrolls the first admin and ends the setup session. **Add repositories** opens the existing installation repository picker.
+
+
+## Access control
+
+The session permissions control action visibility. Project viewers read data, operators act on runs and boards, and maintainers edit loops and lanes. Instance admins manage role bindings under Configuration. Tokens shows and edits permission ceilings and displays a new token secret once.

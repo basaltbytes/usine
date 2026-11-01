@@ -205,3 +205,8 @@ Operator cancellations persist the authenticated member login. The approval migr
 File-backed SQLite fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts), including migration, transcript, and run-reader tests.
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+
+## Access control
+
+Operator audit fields accept `OperatorActor`: a GitHub login or the reserved `local admin` actor. Existing stored logins retain their meaning.
