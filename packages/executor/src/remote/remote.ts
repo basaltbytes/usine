@@ -147,6 +147,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           machine.shell,
           attemptContainerName(attemptId),
           worktree,
+          isolation.settings.runtime,
         );
       const outcome = yield* commands.run(operation, machine.shell, "sh", [
         "-c",
@@ -186,8 +187,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
       if (contained === (isolation._tag === "Container")) return isolation;
       const message = contained
-        ? `The checkout ${worktree} was mounted in an attempt container, and the machine no longer has Docker, so usine runs no command in it as the SSH user. Install Docker, or salvage and remove the checkout by hand.`
-        : `The checkout ${worktree} is from before the machine had Docker, and the SSH user can use Docker, so usine runs no command in it as that user. Salvage and remove the checkout by hand.`;
+        ? `The checkout ${worktree} was mounted in an attempt container, and the machine no longer has a container runtime, so usine runs no command in it as the SSH user. Install Podman or Docker, or salvage and remove the checkout by hand.`
+        : `The checkout ${worktree} is from before the machine used containers, and the machine now requires containers, so usine runs no command in it as that user. Salvage and remove the checkout by hand.`;
       yield* Effect.logError("Refused to run commands in the checkout", {
         attemptId,
         host,
@@ -198,7 +199,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       return yield* new ExecutorOperationError({
         operation,
         message,
-        cause: new Error(contained ? "container marker without Docker" : "no container marker"),
+        cause: new Error(contained ? "container marker without a runtime" : "no container marker"),
       });
     });
 
@@ -399,7 +400,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           commands.run("cleanup", machine.shell, "git", args);
         yield* reconcile(git, removeCheckout(git));
         if (isolation._tag === "Container")
-          yield* containers.remove(machine.shell, attemptContainerName(attempt.attemptId));
+          yield* containers.remove(
+            machine.shell,
+            attemptContainerName(attempt.attemptId),
+            isolation.settings.runtime,
+          );
         return;
       }
       const author = yield* commitAuthor;

@@ -188,6 +188,13 @@ interface FakeMachineState {
    * Whether the machine has Docker, and whether its daemon answers the SSH user. With
    * `socket-only`, the SSH user is in the docker group, but the machine has no docker CLI.
    */
+  podmanInfo: string | undefined;
+  rootlessSessionError: string | undefined;
+  limitsEnforced: boolean;
+  runtimeExitCode: number;
+  memoryEvents: "counted" | "unreadable" | "empty";
+  hostGroupId: string;
+  imageGroupId: string;
   docker: "absent" | "running" | "unusable" | "socket-only";
   /** Whether `docker pull` of the Attempt image fails, and whether the image is on the machine anyway. */
   pullFails: boolean;
@@ -328,6 +335,13 @@ export const fakeMachine = () => {
     codexHomes: new Map(),
     gatewayAcceptsSsh: true,
     forwards: [],
+    podmanInfo: undefined,
+    rootlessSessionError: undefined,
+    limitsEnforced: true,
+    runtimeExitCode: 0,
+    memoryEvents: "counted",
+    hostGroupId: "1000",
+    imageGroupId: "1000",
     docker: "absent",
     pullFails: false,
     imageOnMachine: true,
@@ -345,9 +359,12 @@ export const fakeMachine = () => {
     localWrites: [],
   };
   /** Answers the commands that manage Docker containers, or returns `undefined` for others. */
-  const respondToDocker = (line: string, input: string) => {
+  const respondToDocker = (commandLine: string, input: string) => {
+    const line = commandLine.replace(/^exec 'podman'/u, "exec 'docker'");
     const words = remoteWords(line);
-    if (line.includes("version -f"))
+    if (line.includes("version -f")) {
+      if (state.podmanInfo !== undefined)
+        return oneShotHandle(`podman\n${state.podmanInfo}\n`, state.runtimeExitCode);
       return state.docker === "absent"
         ? oneShotHandle("", 3)
         : state.docker === "socket-only"
@@ -358,7 +375,14 @@ export const fakeMachine = () => {
                 1,
                 "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock",
               )
-            : oneShotHandle("27.5.1\n", 0);
+            : oneShotHandle("docker\n27.5.1\n", 0);
+    }
+    if (line.includes("loginctl show-user"))
+      return state.rootlessSessionError === undefined
+        ? oneShotHandle("", 0)
+        : oneShotHandle(state.rootlessSessionError, 1);
+    if (line.includes("/sys/fs/cgroup/cpu.max"))
+      return oneShotHandle("", state.limitsEnforced ? 0 : 1);
     if (line.startsWith("exec 'docker' 'pull' "))
       return state.pullFails
         ? oneShotHandle("", 1, "Error response from daemon: Get https://ghcr.io/v2/: timeout")
@@ -375,7 +399,10 @@ export const fakeMachine = () => {
         : oneShotHandle("", 0);
     if (words.includes("du")) return oneShotHandle(`${state.storeSizeKiB}\t/store\n`, 0);
     if (line.includes("--entrypoint"))
-      return oneShotHandle(`${state.hostUserId} ${state.imageUserId}\n`, 0);
+      return oneShotHandle(
+        `${state.hostUserId} ${state.hostGroupId} ${state.imageUserId} ${state.imageGroupId}\n`,
+        0,
+      );
     if (line.includes("absolute=$3")) {
       // sh -c <script> sh docker <name> <count> <absolute paths...> <home files...>
       const [, , , , , name = "", count = "0", ...rest] = words;
@@ -430,6 +457,9 @@ export const fakeMachine = () => {
       const name = words.at(-1) ?? "";
       const container = state.containers.get(name);
       if (container === undefined) return oneShotHandle("", 1, `Error: No such container: ${name}`);
+      if (state.memoryEvents === "unreadable")
+        return oneShotHandle("", 1, "memory.events: permission denied");
+      if (state.memoryEvents === "empty") return oneShotHandle(`container ${container.id}\n`, 0);
       return oneShotHandle(
         `container ${container.id}\n` +
           (container.running
@@ -450,6 +480,8 @@ export const fakeMachine = () => {
       );
     }
     if (line.includes("ps --all")) {
+      if (words[4] !== (state.podmanInfo === undefined ? "docker" : "podman"))
+        return oneShotHandle("", 127, "selected container runtime is not installed");
       // sh -c <script> sh docker <label> <label>; a container must have both, as with docker ps.
       const filters = words.slice(5, 7).map((label) => label.split("="));
       const listed = [...state.containers].filter(([, container]) =>
@@ -666,7 +698,7 @@ export const fakeMachine = () => {
         return yield* startForward(command);
       }
       // Runs a `docker exec` line's command as if inside the container.
-      if (line.startsWith("exec 'docker' 'exec' '-i' ")) {
+      if (/^exec '(?:docker|podman)' 'exec' '-i' /u.test(line)) {
         const [, , , container = "", , , inner = ""] = remoteWords(line);
         state.calls.push({ command, line: inner, input, container });
         const running = state.containers.get(container)?.running;

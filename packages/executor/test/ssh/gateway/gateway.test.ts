@@ -736,7 +736,11 @@ describe("SSH Worker behind a Gateway", () => {
         );
         for (const line of lines)
           for (const mutating of ["mkdir", "rm", "mv", "clone", "find", "http_unix_socket"])
-            assert.notInclude(line, mutating, `preflight ran ${mutating}`);
+            assert.notMatch(
+              line,
+              new RegExp(`\\b${mutating}\\b`, "u"),
+              `preflight ran ${mutating}`,
+            );
 
         machine.state.droppedSentVariables.add("GH_TOKEN");
         const missingGitHubToken = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);

@@ -12,6 +12,12 @@ set -eu
 [ "$#" -eq 1 ] || [ "$#" -eq 2 ] || { echo "Usage: render-cloud-init.sh <JSON list of public keys> [<cloud-init file>]" >&2; exit 64; }
 here=$(cd "$(dirname "$0")" && pwd)
 template=${2:-$here/cloud-init.yaml}
+USINE_CONTAINER_RUNTIME=${USINE_CONTAINER_RUNTIME:-podman}
+case "$USINE_CONTAINER_RUNTIME" in
+  podman|docker) ;;
+  *) echo "USINE_CONTAINER_RUNTIME must be podman or docker" >&2; exit 64 ;;
+esac
+export USINE_CONTAINER_RUNTIME
 dockerfile=$here/../worker-image/Dockerfile
 node_major=$(sed -n 's/^ARG NODE_MAJOR=//p' "$dockerfile")
 case "$node_major" in
@@ -23,5 +29,5 @@ AUTHORIZED_KEYS=$1 NODE_MAJOR=$node_major awk '
   BEGIN { placeholder = "\"@AUTHORIZED_KEYS@\"" }
   /^[[:space:]]*#/ { print; next }
   (at = index($0, placeholder)) { $0 = substr($0, 1, at - 1) ENVIRON["AUTHORIZED_KEYS"] substr($0, at + length(placeholder)) }
-  { gsub(/@NODE_MAJOR@/, ENVIRON["NODE_MAJOR"]); print }
+  { gsub(/@NODE_MAJOR@/, ENVIRON["NODE_MAJOR"]); gsub(/@CONTAINER_RUNTIME@/, ENVIRON["USINE_CONTAINER_RUNTIME"]); print }
 ' "$template"

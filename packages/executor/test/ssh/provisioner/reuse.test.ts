@@ -43,10 +43,25 @@ for (const address of [hetznerAddress, boatAddress]) {
   assert(address.machine._tag === "Provisioned");
   const provider = address.machine.provisioner.provider;
   describe(`${provider} machine reuse`, () => {
-    it.live(
-      "reuses only a released machine, updates its attempt identity, and retires it at the attempt limit",
-      () => {
+    it.live.each(["docker", "podman"])(
+      "reuses only a released %s machine, updates its attempt identity, and retires it at the attempt limit",
+      (containerRuntime) => {
         const machine = machineFixture();
+        if (containerRuntime === "podman") {
+          machine.state.docker = "absent";
+          machine.state.podmanInfo = JSON.stringify({
+            version: { Version: "5.4.2" },
+            host: {
+              security: { rootless: true },
+              serviceIsRemote: false,
+              cgroupVersion: "v2",
+              cgroupManager: "systemd",
+              cgroupControllers: ["cpu", "memory", "pids"],
+              kernel: "6.12.43+deb13-amd64",
+              ociRuntime: { name: "crun", version: "crun version 1.21" },
+            },
+          });
+        }
         const providers = fakeProviders();
         return Effect.gen(function* () {
           const machines = yield* WorkerMachines;

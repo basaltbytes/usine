@@ -90,7 +90,7 @@ export const machineChecksFor = (
         return Option.none<MachineCheck>();
       }
       yield* Effect.logInfo(
-        "Checking a provisioned Worker machine: Git, memory, the Gateway, Docker, the container limits, and the harnesses",
+        "Checking a provisioned Worker machine: Git, memory, the Gateway, the container runtime, the container limits, and the harnesses",
         { worker, host: machine.shell.destination, brains: brains.length },
       );
       const report = yield* verify(machine, brains, 1).pipe(
@@ -131,7 +131,7 @@ export const machineChecksFor = (
         return yield* new WorkerCapabilityError({
           worker,
           capability: "container",
-          message: "Machine reuse requires Docker isolation",
+          message: "Machine reuse requires container isolation",
           cause: new Error(report.degraded.value),
         });
       const checkedAt = DateTime.toEpochMillis(yield* DateTime.now);

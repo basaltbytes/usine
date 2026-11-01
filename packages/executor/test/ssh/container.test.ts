@@ -177,9 +177,14 @@ describe("SSH Worker with Docker", () => {
           `dev.usine.attempt=${request.attemptId}`,
         ]);
         assert.strictEqual(words.at(-1), ATTEMPT_IMAGE);
+        assert.deepStrictEqual(
+          words.flatMap((word, index) => (words[index - 1] === "--volume" ? [word] : [])),
+          [
+            "usine-pnpm-store:/home/usine/.local/share/pnpm/store:nocopy",
+            "usine-turbo-cache:/home/usine/.cache/turbo:nocopy",
+          ],
+        );
         assert.deepStrictEqual(mountsOf(words), [
-          "type=volume,source=usine-pnpm-store,destination=/home/usine/.local/share/pnpm/store,volume-nocopy",
-          "type=volume,source=usine-turbo-cache,destination=/home/usine/.cache/turbo,volume-nocopy",
           `type=tmpfs,"destination=${WORKER_ROOT}/attempts",tmpfs-mode=1777`,
           `type=bind,"source=${WORKTREE}","destination=${WORKTREE}"`,
           `type=bind,"source=${CACHE}","destination=${CACHE}",readonly`,
@@ -470,9 +475,9 @@ describe("SSH Worker with Docker", () => {
         const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         assert.include(
           Option.getOrElse(report.degraded, () => ""),
-          "Docker isn't installed",
+          "Neither Podman nor Docker is installed",
         );
-        assert.include(logs.lines.join("\n"), "SSH Worker has no Docker");
+        assert.include(logs.lines.join("\n"), "SSH Worker has no Docker or Podman");
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
         assert(given !== undefined && given.host instanceof RemoteShell);
@@ -1006,8 +1011,8 @@ describe("SSH Worker with Docker", () => {
           assert.include(
             failure.message,
             change === "docker-installed"
-              ? "is from before the machine had Docker"
-              : "no longer has Docker",
+              ? "is from before the machine used containers"
+              : "no longer has a container runtime",
           );
           const calls = machine.state.calls.slice(before);
           assert(!calls.some(({ line }) => line.startsWith("exec 'docker' 'run' ")));

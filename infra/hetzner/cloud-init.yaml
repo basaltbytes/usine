@@ -1,7 +1,7 @@
 #cloud-config
 # A usine SSH Worker on Debian: the `usine` user with Git, gh, Node.js, pnpm,
-# Claude Code, Codex, Chromium, and Docker, and SSH that admits only that user
-# by key. With Docker, each attempt runs in its own container from the image
+# Claude Code, Codex, Chromium, and a container runtime, and SSH that admits only that user
+# by key. Each attempt runs in its own container from the image
 # of ../worker-image; the harnesses here serve the logins.
 # For create-worker.sh, snapshot.sh, and `gateway/gateway.sh worker-user-data`,
 # render-cloud-init.sh replaces "@AUTHORIZED_KEYS@" with the public keys to
@@ -28,8 +28,6 @@ packages:
   - ca-certificates
   - chromium
   - curl
-  - docker.io
-  - docker-cli
   - git
   - gnupg
   - jq
@@ -41,6 +39,11 @@ swap:
   size: 2G
 
 write_files:
+  - path: /etc/usine/container-runtime
+    permissions: "0644"
+    content: |
+      @CONTAINER_RUNTIME@
+
   - path: /etc/ssh/sshd_config.d/10-usine.conf
     permissions: "0644"
     content: |
@@ -108,8 +111,41 @@ write_files:
       # Applies the overcommit setting of /etc/sysctl.d now, not at the next boot.
       sysctl --system
       install -d -o usine -g usine -m 0700 /home/usine/.usine /home/usine/.cache /home/usine/.cache/turbo
-      # The executor starts and removes the attempt containers as usine.
-      usermod -aG docker usine
+      case "$(cat /etc/usine/container-runtime)" in
+        podman)
+          DEBIAN_FRONTEND=noninteractive apt-get install -y podman crun uidmap dbus-user-session libpam-systemd
+          # useradd usually allocates these ranges. Allocate only when none exists.
+          for kind in uid gid; do
+            file=/etc/sub$kind
+            touch "$file"
+            if ! awk -F: '$1 == "usine" { found=1 } END { exit !found }' "$file"; then
+              first=$(awk -F: 'BEGIN { next_id=100000 } { if ($2+$3 > next_id) next_id=$2+$3 } END { print next_id }' "$file")
+              usermod "--add-sub${kind}s" "$first-$((first + 65535))" usine
+            fi
+          done
+          if id -nG usine | tr ' ' '\n' | grep -qx docker; then gpasswd -d usine docker; fi
+          rm -f /etc/systemd/system/docker.service.d/http-proxy.conf /etc/docker/daemon.json
+          install -d -m 0755 /etc/systemd/system/user@.service.d /etc/containers/containers.conf.d
+          printf '[Service]\nDelegate=cpu cpuset io memory pids\n' > /etc/systemd/system/user@.service.d/delegate.conf
+          printf '[engine]\ncgroup_manager="systemd"\nruntime="crun"\n' > /etc/containers/containers.conf.d/90-usine.conf
+          systemctl daemon-reload
+          loginctl enable-linger usine
+          systemctl restart "user@$(id -u usine).service"
+          ;;
+        docker)
+          DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-cli
+          usermod -aG docker usine
+          if [ -f /usr/local/share/usine/docker-proxy.conf ]; then
+            install -D -m 0644 /usr/local/share/usine/docker-proxy.conf /etc/systemd/system/docker.service.d/http-proxy.conf
+            install -d -m 0755 /etc/docker
+            printf '{"iptables":false,"ip6tables":false}\n' > /etc/docker/daemon.json
+          fi
+          systemctl daemon-reload
+          systemctl enable docker
+          systemctl restart docker
+          ;;
+        *) echo 'Unknown container runtime' >&2; exit 1 ;;
+      esac
       systemctl enable --now nftables
       systemctl restart ssh
 
