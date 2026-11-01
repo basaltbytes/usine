@@ -101,9 +101,9 @@ it("lists a Hetzner worker's machines oldest first under its last failed creatio
     .toBeVisible();
 
   expect(machineRows()).toEqual([
-    "52341001 | Deleting | 1h | Attempt 7c1d2e3f, found after a restart",
-    "52341896 | Ready | 12m | Run 1a2b3c4d",
-    "No ID yet | Creating | 1m | Run 9f8e7d6c",
+    "52341001 | Deleting | 1 | 1h | Attempt 7c1d2e3f, found after a restart",
+    "52341896 | Ready | 1 | 12m | Run 1a2b3c4d",
+    "No ID yet | Creating | 1 | 1m | Run 9f8e7d6c",
   ]);
   await expect
     .element(row(/52341896/u).getByRole("link", { name: "Run 1a2b3c4d" }))
@@ -117,9 +117,9 @@ it("folds what each machine is for under its ID on a phone, without scrolling si
   await mount("/configuration/workers/hz-pool", 390);
   await expect.element(row(/52341896/u)).toBeVisible();
   expect(machineRows()).toEqual([
-    "52341001 Attempt 7c1d2e3f, found after a restart | Deleting | 1h",
-    "52341896 Run 1a2b3c4d | Ready | 12m",
-    "No ID yet Run 9f8e7d6c | Creating | 1m",
+    "52341001 Attempt 7c1d2e3f, found after a restart | Deleting | 1 | 1h",
+    "52341896 Run 1a2b3c4d | Ready | 1 | 12m",
+    "No ID yet Run 9f8e7d6c | Creating | 1 | 1m",
   ]);
   const container = page.getByRole("table").first().element().parentElement;
   expect(container?.scrollWidth).toBeLessThanOrEqual(container?.clientWidth ?? 0);

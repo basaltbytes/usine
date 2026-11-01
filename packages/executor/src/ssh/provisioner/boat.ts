@@ -9,6 +9,7 @@ import type { BoatProvisioner } from "../model.ts";
 import { failureText, type ProviderFailure, providerApiFor } from "./http.ts";
 import {
   attemptTag,
+  attemptsFromTag,
   type ListedMachine,
   type MachineDriver,
   type MachineTags,
@@ -85,9 +86,10 @@ const nameOf = (tags: MachineTags): string =>
     NAME_PREFIX,
     tagValue(tags.instance, 24),
     tagValue(tags.worker, 24),
-    tagValue(tags.run, 32),
+    tagValue(tags.run, 24),
     tagValue(tags.process, 12),
     attemptTag(tags.attempt),
+    String(tags.attempts),
   ].join(" ");
 
 /** Returns the reason a creation failure is retried, by Boat's documented statuses. */
@@ -334,6 +336,13 @@ export const boatDriverFor = (
         ),
     );
 
+    const assign = Effect.fn("BoatDriver.assign")(function* (id: MachineId, tags: MachineTags) {
+      yield* Effect.annotateCurrentSpan({ worker, machine: id, attemptId: tags.attempt });
+      yield* api
+        .send("PATCH", `/sandboxes/${id}`, { body: { name: nameOf(tags) } })
+        .pipe(Effect.asVoid, Effect.mapError(apiError("assign the machine to the attempt")));
+    });
+
     const remove = Effect.fn("BoatDriver.remove")(function* (id: MachineId) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
       yield* api
@@ -370,10 +379,11 @@ export const boatDriverFor = (
           );
         for (const sandbox of page.sandboxes) {
           if (!sandbox.name.startsWith(prefix)) continue;
-          const [, , workerTag = "", run = "", process = "", attempt = "-"] =
+          const [, , workerTag = "", run = "", process = "", attempt = "-", attempts] =
             sandbox.name.split(" ");
           machines.push({
             id: MachineId.make(sandbox.id),
+            attempts: attemptsFromTag(attempts),
             tags: {
               worker: workerTag,
               run,
@@ -396,6 +406,7 @@ export const boatDriverFor = (
       verify,
       create,
       endpoint,
+      assign,
       remove,
       list,
     } satisfies MachineDriver;

@@ -3,12 +3,13 @@ import type { RunId } from "@usine/core/run";
 import {
   type MachineId,
   MachineProvider,
+  MachineAttemptLimit,
   type SshDestination,
   type SshPort,
   type WorkerName,
 } from "@usine/core/worker";
-import type { DateTime, Effect, Option } from "effect";
-import { Schema } from "effect";
+import type { DateTime, Effect } from "effect";
+import { Option, Schema } from "effect";
 import type { MachineUnavailableError, WorkerCapabilityError } from "../../executor.ts";
 
 /**
@@ -21,6 +22,7 @@ export interface MachineTags {
   readonly run: RunId;
   readonly process: string;
   readonly attempt: AttemptId;
+  readonly attempts: number;
 }
 
 /** The tags of a machine as its provider lists them, each encoded by `tagValue`. */
@@ -37,6 +39,7 @@ export interface ListedMachine {
   readonly id: MachineId;
   readonly tags: ListedTags;
   readonly createdAt: DateTime.Utc;
+  readonly attempts: number;
 }
 
 /** Where the executor reaches a machine over SSH. */
@@ -90,6 +93,8 @@ export interface MachineDriver {
     name: string,
     tags: MachineTags,
   ) => Effect.Effect<CreatedMachine, MachineUnavailableError>;
+  /** Updates the attempt identity before a reused machine starts work. */
+  readonly assign: (id: MachineId, tags: MachineTags) => Effect.Effect<void, ProviderApiError>;
   /** Waits until the machine runs and has an SSH address. Polls every `interval`. */
   readonly endpoint: (
     id: MachineId,
@@ -135,3 +140,9 @@ export const machineName = (worker: WorkerName, suffix: string): string => {
   const head = `usine-${worker}`.slice(0, 63 - suffix.length - 1).replace(/-+$/u, "");
   return `${head}-${suffix}`;
 };
+
+const decodeAttempts = Schema.decodeUnknownOption(MachineAttemptLimit);
+
+/** Zero means the provider has no valid count from this release. Such machines aren't reused. */
+export const attemptsFromTag = (value: string | undefined): number =>
+  Option.getOrElse(decodeAttempts(Number(value)), () => 0);

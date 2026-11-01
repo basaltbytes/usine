@@ -309,18 +309,20 @@ export const containersFor = (commands: RemoteCommands) => {
     name: string,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, container: name });
-    yield* commands.run("cleanup", shell, CONTAINER_RUNTIME, ["rm", "--force", name]).pipe(
-      Effect.tap(() =>
-        Effect.logInfo("Removed the container", { host: shell.destination, container: name }),
-      ),
-      Effect.tapError((error) =>
-        Effect.logWarning(
-          "Could not remove the container; the next process that uses the Worker removes it",
-          { host: shell.destination, container: name, message: error.message },
+    yield* commands
+      .run("cleanup", shell, CONTAINER_RUNTIME, ["rm", "--force", "--volumes", name])
+      .pipe(
+        Effect.tap(() =>
+          Effect.logInfo("Removed the container", { host: shell.destination, container: name }),
         ),
-      ),
-      Effect.ignore,
-    );
+        Effect.tapError((error) =>
+          Effect.logWarning(
+            "Could not remove the container; the next process that uses the Worker removes it",
+            { host: shell.destination, container: name, message: error.message },
+          ),
+        ),
+        Effect.ignore,
+      );
   });
 
   /**
@@ -645,7 +647,12 @@ export const containersFor = (commands: RemoteCommands) => {
       });
       return left;
     }
-    yield* commands.run("cleanup", shell, CONTAINER_RUNTIME, ["rm", "--force", ...left]);
+    yield* commands.run("cleanup", shell, CONTAINER_RUNTIME, [
+      "rm",
+      "--force",
+      "--volumes",
+      ...left,
+    ]);
     yield* Effect.logInfo("Removed the containers an earlier process left on the machine", {
       worker,
       host: shell.destination,

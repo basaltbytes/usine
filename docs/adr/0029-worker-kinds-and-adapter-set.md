@@ -48,3 +48,35 @@ A container mounts the SSH user's Claude Code and Codex login files read-write, 
 ## Amendment (2026-10-28, #647): Boat gateway credentials
 
 Boat workers can use the gateway over a Tailscale tailnet as described in ADR 0027's amendment for #647. Their GitHub and harness credentials stay on the gateway. The consequence above about a token on each Boat machine applies only to workers without a gateway; Boat's direct internet access remains unchanged.
+
+## Amendment (2026-11-01, #802): bounded machine reuse
+
+A provisioned SSH worker can enable `provisioner.reuse: { attempts: 5, max_age: 2h }`.
+Both limits are required. The attempt limit includes the first attempt. The age limit starts
+at machine creation; an active attempt can finish after that limit. Without this setting,
+the provisioner deletes the machine after each attempt.
+
+Reuse requires Docker. Each attempt gets its own container and checkout. Before making a
+machine idle, the executor checks cleanup results, sweeps leftover containers, and removes
+attempt checkouts, credential directories, Codex homes, and gateway configuration files.
+Container removal includes anonymous volumes. The attempt image, shared pnpm and Turbo
+volumes, and host caches remain. A failed cleanup or gateway detach retires the machine.
+Checkouts retained for salvage or reattachment remain on their original machine and prevent reuse.
+
+A new attempt atomically claims an idle machine of the same worker, updates its provider
+identity and attempt count, and runs preflight. Assignment or preflight failure retires the
+machine. Machines retire at either limit, when their worker connection is removed, or when
+the orchestrator stops while they are idle. An age timer never interrupts an active attempt.
+Changing existing connection fields still requires a restart as documented for #801.
+
+Provider labels (Hetzner) or the sandbox name (Boat) identify the current attempt and its
+machine's attempt count, so restart recovery uses the correct machine. Startup reconciliation
+deletes idle machines left by a crashed process. Machines created by releases without an
+attempt count are recovered but not reused.
+
+The executor records acknowledged machine creations by worker, provider, and UTC day in
+`machine-starts.json` under the persistent SSH host-key directory. Counts include machines
+whose readiness or preflight later fails, and survive machine deletion and orchestrator
+restarts. A provider creation whose response is lost cannot be counted from that response.
+The overview and worker page show assigned attempts and machine age; statistics show daily
+starts. These records contain no credentials.

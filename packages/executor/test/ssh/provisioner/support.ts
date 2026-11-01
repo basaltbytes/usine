@@ -25,6 +25,7 @@ export const hetznerSettings = (
   labels: { team: "platform" },
   apiKeys: { anthropic: Option.none(), openai: Option.none() },
   timings: new ProvisionerTimings({}),
+  reuse: Option.none(),
   ...overrides,
 });
 
@@ -37,5 +38,6 @@ export const boatSettings = (overrides: Partial<BoatProvisioner> = {}): BoatProv
   tailnet: Option.none(),
   apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
   timings: new ProvisionerTimings({}),
+  reuse: Option.none(),
   ...overrides,
 });
