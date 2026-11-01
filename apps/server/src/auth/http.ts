@@ -1,4 +1,6 @@
-import { ActingMember } from "@usine/core/operator";
+import { SetupApi, setupPermissions } from "../setup/api.ts";
+import { permits, InstanceScope, RequestPermissions } from "@usine/core/access";
+import { ActingMember, localActor } from "@usine/core/operator";
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Authentication, type Access, type IssuedToken } from "./authentication.ts";
@@ -6,11 +8,14 @@ import { GitHubSignIn } from "./github.ts";
 import { AuthError, authFailure, GitHubUserId, Member, TokenId } from "./model.ts";
 import {
   AuthApi,
+  authPermissions,
   publicAuthPaths,
   ConsumeLink,
   StartDevice,
   PollDevice,
   AddMember,
+  CreateToken,
+  TokenScopes,
 } from "./api.ts";
 import { publicOperatorPaths } from "../openapi.ts";
 import { AuthStore } from "./store.ts";
@@ -86,7 +91,11 @@ export const authenticatedRoutes = (services: AuthServices) => {
       AuthApi.endpoints.session.path,
       Effect.gen(function* () {
         const access = yield* accessEffect;
-        return json({ member: Option.getOrNull(access.member), csrf: access.csrf });
+        return json({
+          member: Option.getOrNull(access.member),
+          csrf: access.csrf,
+          permissions: access.permissions,
+        });
       }),
     ),
     HttpRouter.route(
@@ -188,23 +197,24 @@ export const authenticatedRoutes = (services: AuthServices) => {
     HttpRouter.route(
       AuthApi.endpoints.members.method,
       AuthApi.endpoints.members.path,
-      Effect.asVoid(member).pipe(
-        Effect.andThen(store.members),
-        Effect.map((members) => json(members)),
-      ),
+      store.members.pipe(Effect.map((members) => json(members))),
     ),
     HttpRouter.route(
       AuthApi.endpoints.addMember.method,
       AuthApi.endpoints.addMember.path,
       Effect.gen(function* () {
-        const actor = yield* member;
+        const access = yield* accessEffect;
+        const actor =
+          access.credential === "local"
+            ? localActor
+            : yield* Effect.map(member, ({ login }) => login);
         const { login } = yield* body(AddMember);
         const identity = yield* github.lookup(login);
         yield* store.add(
           new Member({
             ...identity,
             addedAt: yield* Clock.currentTimeMillis,
-            addedBy: actor.login,
+            addedBy: actor,
           }),
           false,
         );
@@ -215,12 +225,11 @@ export const authenticatedRoutes = (services: AuthServices) => {
       AuthApi.endpoints.removeMember.method,
       AuthApi.endpoints.removeMember.path,
       Effect.gen(function* () {
-        yield* member;
         const { id } = yield* HttpRouter.params;
         const parsed = yield* Schema.decodeUnknownEffect(
           Schema.NumberFromString.pipe(Schema.decodeTo(GitHubUserId)),
         )(id).pipe(Effect.mapError(() => authFailure("Invalid member ID.", 400)));
-        yield* store.remove(parsed);
+        yield* auth.removeMember(parsed);
         return json({ ok: true });
       }),
     ),
@@ -231,14 +240,39 @@ export const authenticatedRoutes = (services: AuthServices) => {
         const actor = yield* member;
         const tokens = yield* store.tokens(actor.id);
         return json(
-          tokens.map(({ id, name, createdAt, lastUsedAt, kind }) => ({
+          tokens.map(({ id, name, createdAt, lastUsedAt, kind, scopes }) => ({
             id,
             name,
             createdAt,
             lastUsedAt,
             kind,
+            scopes,
           })),
         );
+      }),
+    ),
+    HttpRouter.route(
+      AuthApi.endpoints.createToken.method,
+      AuthApi.endpoints.createToken.path,
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const input = yield* body(CreateToken);
+        const issued = yield* auth.createToken(secretOf(request), input.name, input.scopes);
+        return json({ token: Redacted.value(issued.secret) });
+      }),
+    ),
+    HttpRouter.route(
+      AuthApi.endpoints.setScopes.method,
+      AuthApi.endpoints.setScopes.path,
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const { id } = yield* HttpRouter.params;
+        const tokenId = yield* Schema.decodeUnknownEffect(TokenId)(id).pipe(
+          Effect.mapError(() => authFailure("Invalid token ID.", 400)),
+        );
+        const { scopes } = yield* body(TokenScopes);
+        yield* auth.setScopes(secretOf(request), tokenId, scopes);
+        return json({ ok: true });
       }),
     ),
     HttpRouter.route(
@@ -264,6 +298,42 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }
       const request = yield* HttpServerRequest.HttpServerRequest;
       const access = yield* auth.authenticate(secretOf(request));
+      const authEndpoint = Object.values(AuthApi.endpoints).find(
+        (endpoint) => endpoint.method === route.method && endpoint.path === route.path,
+      );
+      const setupEndpoint = Object.values(SetupApi.endpoints).find(
+        (endpoint) => endpoint.method === route.method && endpoint.path === route.path,
+      );
+      const requirement =
+        authEndpoint === undefined
+          ? setupEndpoint === undefined
+            ? undefined
+            : setupPermissions[setupEndpoint.identifier]
+          : authPermissions[authEndpoint.identifier];
+      if (requirement === "local" && access.credential !== "local")
+        return yield* authFailure("Run usine sign-in-link on the instance machine.", 403);
+      if (requirement === "admin" && !permits(access.permissions, "admin", new InstanceScope()))
+        return yield* authFailure("Instance admin access is required.", 403);
+      if (
+        requirement === "setup" &&
+        access.credential !== "bootstrap" &&
+        !permits(access.permissions, "admin", new InstanceScope())
+      )
+        return yield* authFailure("Instance admin access is required.", 403);
+      if (
+        access.credential === "bootstrap" &&
+        requirement !== "setup" &&
+        route.path !== "/api/auth/session" &&
+        route.path !== "/api/auth/sign-out"
+      )
+        return yield* authFailure("Complete setup before using the operator API.", 403);
+      if (
+        requirement === "tokens" &&
+        Option.isSome(access.token) &&
+        access.token.value.kind === "device" &&
+        !permits(access.permissions, "admin", new InstanceScope())
+      )
+        return yield* authFailure("Sign in with a browser session to manage tokens.", 403);
       const bearer = request.headers.authorization?.startsWith("Bearer ") === true;
       if (!bearer && request.method !== "GET" && request.headers["x-usine-csrf"] !== access.csrf)
         return yield* authFailure(
@@ -271,10 +341,13 @@ export const authenticatedRoutes = (services: AuthServices) => {
           403,
         );
       return yield* handler.pipe(
+        Effect.provideService(RequestPermissions, access.permissions),
         Effect.provideService(RequestAccess, Option.some(access)),
         Effect.provideService(
           ActingMember,
-          Option.map(access.member, ({ login }) => login),
+          access.credential === "local"
+            ? Option.some(localActor)
+            : Option.map(access.member, ({ login }) => login),
         ),
       );
     }).pipe(

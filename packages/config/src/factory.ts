@@ -1,3 +1,4 @@
+import { RoleBinding } from "@usine/core/access";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -543,6 +544,10 @@ export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineC
      * 0031).
      */
     version: Schema.Literals([1, 2]),
+    bindings: Schema.Array(RoleBinding).pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed([])),
+      Schema.withConstructorDefault(Effect.succeed([])),
+    ),
     /**
      * Projects with disjoint registered repository membership; decoding defaults to none and
      * version 1 requires none.
@@ -582,6 +587,15 @@ export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineC
       Tracing.pipe(Schema.encodeKeys({ otlpUrl: "otlp_url", serviceName: "service_name" })),
     ),
   }).check(
+    Schema.makeFilter(
+      ({ bindings, projects }) =>
+        new Set(bindings.map(({ name }) => name)).size === bindings.length &&
+        bindings.every(
+          ({ scope }) =>
+            scope._tag === "Instance" || projects.some(({ id }) => id === scope.project),
+        ),
+      { message: "Role bindings require unique names and existing projects" },
+    ),
     Schema.makeFilter(
       ({ version, projects, repos }) => {
         if (version === 1) return projects.length === 0;

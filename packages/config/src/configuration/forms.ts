@@ -9,6 +9,7 @@ import type { ConfigurationEntityKey } from "./model.ts";
 import { AgentJson, LoopJson } from "./entities.ts";
 
 const {
+  bindings: _bindings,
   workers: _workers,
   repos: _repos,
   labels: _labels,

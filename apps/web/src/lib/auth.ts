@@ -9,7 +9,7 @@ export const csrfToken = () =>
 
 export interface AuthRequestOptions {
   readonly method?: string;
-  body?: Readonly<Record<string, string>>;
+  body?: Readonly<Record<string, Schema.Json>>;
 }
 
 export const authRequest = async <A, I>(

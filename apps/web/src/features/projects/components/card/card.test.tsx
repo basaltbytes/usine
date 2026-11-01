@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { RunLine } from "./run-line";
 import { MachineQuotaWait } from "@usine/orchestrator/operator";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -402,56 +404,58 @@ describe("Board card stall note", () => {
   });
   const render = (disabled: boolean) =>
     renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <WithRouter>
-          <ProjectBoard
-            project={
-              new ProjectView({
-                repository,
-                status: "needs-you",
-                runs: [],
-                labels: [],
-                preflightFindings: [],
-                board: new BoardView({
-                  failures: [],
-                  lanes: [
-                    new ReadOnlyBoardLaneView({
-                      id: BoardLaneId.make("authored:Backlog"),
-                      name: LaneName.make("Backlog"),
-                      sources: [],
-                      origin: "authored",
-                      items: [suppressed, canceled, paused],
-                    }),
-                  ],
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={new QueryClient()}>
+          <WithRouter>
+            <ProjectBoard
+              project={
+                new ProjectView({
+                  repository,
+                  status: "needs-you",
+                  runs: [],
+                  labels: [],
+                  preflightFindings: [],
+                  board: new BoardView({
+                    failures: [],
+                    lanes: [
+                      new ReadOnlyBoardLaneView({
+                        id: BoardLaneId.make("authored:Backlog"),
+                        name: LaneName.make("Backlog"),
+                        sources: [],
+                        origin: "authored",
+                        items: [suppressed, canceled, paused],
+                      }),
+                    ],
+                  }),
+                })
+              }
+              loops={[]}
+              stalled={[
+                new StalledItemView({
+                  repository,
+                  loop: LoopName.make("review"),
+                  item: issueLink(33, "Board lanes"),
+                  reason: new SuppressedForOperatorView({ run: suppressingRun }),
                 }),
-              })
-            }
-            loops={[]}
-            stalled={[
-              new StalledItemView({
-                repository,
-                loop: LoopName.make("review"),
-                item: issueLink(33, "Board lanes"),
-                reason: new SuppressedForOperatorView({ run: suppressingRun }),
-              }),
-              new StalledItemView({
-                repository,
-                loop: LoopName.make("start-dev"),
-                item: canceledLink,
-                reason: new ClosedUnchangedView({ run: canceledRun }),
-              }),
-              new StalledItemView({
-                repository,
-                loop: LoopName.make("review-fix"),
-                item: pausedLink,
-                reason: new LoopPausedView(),
-              }),
-            ]}
-            disabled={disabled}
-            openRun={() => {}}
-          />
-        </WithRouter>
-      </QueryClientProvider>,
+                new StalledItemView({
+                  repository,
+                  loop: LoopName.make("start-dev"),
+                  item: canceledLink,
+                  reason: new ClosedUnchangedView({ run: canceledRun }),
+                }),
+                new StalledItemView({
+                  repository,
+                  loop: LoopName.make("review-fix"),
+                  item: pausedLink,
+                  reason: new LoopPausedView(),
+                }),
+              ]}
+              disabled={disabled}
+              openRun={() => {}}
+            />
+          </WithRouter>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     );
 
   it("answers a suppressing Run's question from its failure note, and runs a canceled one again from the reason", () => {
@@ -501,17 +505,19 @@ describe("Board drag targets", () => {
         }),
       });
       return renderToStaticMarkup(
-        <QueryClientProvider client={new QueryClient()}>
-          <WithRouter>
-            <ProjectBoard
-              project={project}
-              loops={[]}
-              stalled={[]}
-              disabled={false}
-              openRun={() => {}}
-            />
-          </WithRouter>
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={new QueryClient()}>
+            <WithRouter>
+              <ProjectBoard
+                project={project}
+                loops={[]}
+                stalled={[]}
+                disabled={false}
+                openRun={() => {}}
+              />
+            </WithRouter>
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       );
     };
     const proposed = render("proposed", ["ready", "review"]);
@@ -605,17 +611,19 @@ describe("Board card link", () => {
       }),
     });
     const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <WithRouter>
-          <ProjectBoard
-            project={project}
-            loops={[]}
-            stalled={[]}
-            disabled={false}
-            openRun={() => {}}
-          />
-        </WithRouter>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={new QueryClient()}>
+          <WithRouter>
+            <ProjectBoard
+              project={project}
+              loops={[]}
+              stalled={[]}
+              disabled={false}
+              openRun={() => {}}
+            />
+          </WithRouter>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     );
     const titleLinks = [...markup.matchAll(/<h3[^>]*><a[^>]*href="([^"]+)"/gu)].map(
       ([, href]) => href,

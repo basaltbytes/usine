@@ -1,4 +1,4 @@
-import { OperatorLogin } from "../operator.ts";
+import { OperatorActor } from "../operator.ts";
 import { Effect, Option, Schema } from "effect";
 import { EventId } from "../event.ts";
 
@@ -8,7 +8,7 @@ export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(
   "CancelReason/OperatorCanceled",
 )("OperatorCanceled", {
   /** The canceling operator's login, or `None` if none was recorded. */
-  by: Schema.OptionFromNullOr(OperatorLogin).pipe(
+  by: Schema.OptionFromNullOr(OperatorActor).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),
@@ -154,7 +154,7 @@ export const retry = (_state: Failed): Running => new Running();
 /** Returns a canceled state for an open run, recording `by` when an operator login is available. Does not stop the running attempt itself. */
 export const cancelByOperator = (
   _state: Open,
-  by: Option.Option<OperatorLogin> = Option.none(),
+  by: Option.Option<OperatorActor> = Option.none(),
 ): Canceled => new Canceled({ reason: new OperatorCanceled({ by }) });
 
 /**

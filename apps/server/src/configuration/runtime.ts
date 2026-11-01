@@ -1,3 +1,4 @@
+import { localActor } from "@usine/core/operator";
 import { LoadedInstance } from "@usine/config/instance";
 import { InstancePath } from "@usine/config/file";
 import { NodeServices } from "@effect/platform-node";
@@ -90,7 +91,7 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
     yield* store
       .commit({
         expected: current.number,
-        actor: current.actor,
+        actor: Option.some(localActor),
         message: Option.some("Migrated repositories and loops to projects"),
         changes: configurationDiff(
           configurationEntities(current.instance.value),
@@ -139,7 +140,7 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
   yield* store
     .commit({
       expected: current.number,
-      actor: imported.config.operator,
+      actor: Option.some(localActor),
       message: Option.some(
         hasFiles ? "Imported from the instance folder" : "Initialized empty configuration",
       ),

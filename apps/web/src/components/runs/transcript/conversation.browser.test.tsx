@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { Option, Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
@@ -134,23 +136,25 @@ const mount = (
   const cursors = history.earlier === undefined ? [] : [history.earlier];
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <RunWorkspace
-          key={id}
-          detail={
-            new RunDetailView({
-              agentDefinitionChanged: false,
-              run: runView(id, attempts),
-              eventDedupKey: '["implement","basaltbytes/usine",7]',
-              eventPayload: { tick: "scheduled" },
-              transcript,
-              sessionState: [],
-              earlierTranscript: cursors,
-            })
-          }
-          history={{ cursors, loading: history.loading, error: null, load: history.load }}
-        />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <RunWorkspace
+            key={id}
+            detail={
+              new RunDetailView({
+                agentDefinitionChanged: false,
+                run: runView(id, attempts),
+                eventDedupKey: '["implement","basaltbytes/usine",7]',
+                eventPayload: { tick: "scheduled" },
+                transcript,
+                sessionState: [],
+                earlierTranscript: cursors,
+              })
+            }
+            history={{ cursors, loading: history.loading, error: null, load: history.load }}
+          />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
 };

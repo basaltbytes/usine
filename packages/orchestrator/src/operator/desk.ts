@@ -1,3 +1,5 @@
+import { RequestPermissions, permits, InstanceScope } from "@usine/core/access";
+import { visibleRepository } from "./access.ts";
 import { PriorityValue } from "@usine/config/loop";
 import type { LoadedInstance } from "@usine/config/instance";
 import { AgentName } from "@usine/core/agent";
@@ -785,12 +787,14 @@ const makeDesk = Effect.gen(function* () {
       lastOutcomes: lastOutcomes.length,
       workers: workers.length,
     });
+    const grants = yield* RequestPermissions;
+    const visible = (repository: RepositoryName) => visibleRepository(instance, grants, repository);
     return new DeskView({
-      running,
-      notMoving: [...notMoving].sort(stalledOrder),
-      lastOutcomes,
-      workers,
-      polls,
+      running: running.filter(({ run }) => visible(run.repository)),
+      notMoving: [...notMoving].filter(({ repository }) => visible(repository)).sort(stalledOrder),
+      lastOutcomes: lastOutcomes.filter(({ run }) => visible(run.repository)),
+      workers: permits(grants, "admin", new InstanceScope()) ? workers : [],
+      polls: polls.filter(({ repository }) => visible(repository)),
     });
   });
 

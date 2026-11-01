@@ -27,11 +27,12 @@ const entity = (kind: ConfigurationEntityKind, identifier: string, value: Schema
 export const configurationEntities = (
   instance: LoadedInstance,
 ): ReadonlyArray<ConfigurationEntity> => {
-  const { workers, repos, labels, projects, ...settings } = Schema.encodeSync(UsineConfig)(
-    instance.config,
-  );
+  const { workers, repos, labels, projects, bindings, ...settings } = Schema.encodeSync(
+    UsineConfig,
+  )(instance.config);
   return [
     entity("settings", "instance", settings),
+    ...(bindings ?? []).map((value) => entity("binding", value.name, value)),
     ...(workers ?? []).map((value) => entity("worker", value.name, value)),
     ...repos.map(({ lanes, ...value }) =>
       entity(

@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { overviewQuery } from "~/lib/overview";
 import { LaneName, type SettledItemState } from "@usine/config/board";
@@ -853,11 +855,13 @@ describe("Run approval", () => {
       overviewWith([member(33, "issue", "issue-open")]),
     );
     const html = renderToStaticMarkup(
-      <QueryClientProvider client={client}>
-        <WithRouter>
-          <EventDocument detail={detail(view)} />
-        </WithRouter>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={client}>
+          <WithRouter>
+            <EventDocument detail={detail(view)} />
+          </WithRouter>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     );
     client.clear();
     return html;

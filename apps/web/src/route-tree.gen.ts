@@ -21,6 +21,8 @@ import { Route as ConfigurationSettingsRouteImport } from './routes/configuratio
 import { Route as ProjectsProjectRouteImport } from './routes/projects/$project'
 import { Route as ConfigurationAgentsIndexRouteImport } from './routes/configuration/agents/index'
 import { Route as ConfigurationAgentsAgentRouteImport } from './routes/configuration/agents/$agent'
+import { Route as ConfigurationBindingsIndexRouteImport } from './routes/configuration/bindings/index'
+import { Route as ConfigurationBindingsBindingRouteImport } from './routes/configuration/bindings/$binding'
 import { Route as ConfigurationLabelsIndexRouteImport } from './routes/configuration/labels/index'
 import { Route as ConfigurationLabelsLabelRouteImport } from './routes/configuration/labels/$label'
 import { Route as ConfigurationLoopsIndexRouteImport } from './routes/configuration/loops/index'
@@ -101,6 +103,18 @@ const ConfigurationAgentsAgentRoute =
   ConfigurationAgentsAgentRouteImport.update({
     id: '/agents/$agent',
     path: '/agents/$agent',
+    getParentRoute: () => ConfigurationRouteRoute,
+  } as any)
+const ConfigurationBindingsIndexRoute =
+  ConfigurationBindingsIndexRouteImport.update({
+    id: '/bindings/',
+    path: '/bindings/',
+    getParentRoute: () => ConfigurationRouteRoute,
+  } as any)
+const ConfigurationBindingsBindingRoute =
+  ConfigurationBindingsBindingRouteImport.update({
+    id: '/bindings/$binding',
+    path: '/bindings/$binding',
     getParentRoute: () => ConfigurationRouteRoute,
   } as any)
 const ConfigurationLabelsIndexRoute =
@@ -225,12 +239,14 @@ export interface FileRoutesByFullPath {
   '/projects/$project': typeof ProjectsProjectRouteWithChildren
   '/configuration/': typeof ConfigurationIndexRoute
   '/configuration/agents/$agent': typeof ConfigurationAgentsAgentRoute
+  '/configuration/bindings/$binding': typeof ConfigurationBindingsBindingRoute
   '/configuration/labels/$label': typeof ConfigurationLabelsLabelRoute
   '/configuration/loops/$loop': typeof ConfigurationLoopsLoopRoute
   '/configuration/projects/$project': typeof ConfigurationProjectsProjectRoute
   '/configuration/workers/$worker': typeof ConfigurationWorkersWorkerRoute
   '/projects/$project/$name': typeof ProjectsProjectNameRouteWithChildren
   '/configuration/agents/': typeof ConfigurationAgentsIndexRoute
+  '/configuration/bindings/': typeof ConfigurationBindingsIndexRoute
   '/configuration/labels/': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops/': typeof ConfigurationLoopsIndexRoute
   '/configuration/projects/': typeof ConfigurationProjectsIndexRoute
@@ -256,11 +272,13 @@ export interface FileRoutesByTo {
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/configuration': typeof ConfigurationIndexRoute
   '/configuration/agents/$agent': typeof ConfigurationAgentsAgentRoute
+  '/configuration/bindings/$binding': typeof ConfigurationBindingsBindingRoute
   '/configuration/labels/$label': typeof ConfigurationLabelsLabelRoute
   '/configuration/loops/$loop': typeof ConfigurationLoopsLoopRoute
   '/configuration/projects/$project': typeof ConfigurationProjectsProjectRoute
   '/configuration/workers/$worker': typeof ConfigurationWorkersWorkerRoute
   '/configuration/agents': typeof ConfigurationAgentsIndexRoute
+  '/configuration/bindings': typeof ConfigurationBindingsIndexRoute
   '/configuration/labels': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops': typeof ConfigurationLoopsIndexRoute
   '/configuration/projects': typeof ConfigurationProjectsIndexRoute
@@ -289,12 +307,14 @@ export interface FileRoutesById {
   '/projects/$project': typeof ProjectsProjectRouteWithChildren
   '/configuration/': typeof ConfigurationIndexRoute
   '/configuration/agents/$agent': typeof ConfigurationAgentsAgentRoute
+  '/configuration/bindings/$binding': typeof ConfigurationBindingsBindingRoute
   '/configuration/labels/$label': typeof ConfigurationLabelsLabelRoute
   '/configuration/loops/$loop': typeof ConfigurationLoopsLoopRoute
   '/configuration/projects/$project': typeof ConfigurationProjectsProjectRoute
   '/configuration/workers/$worker': typeof ConfigurationWorkersWorkerRoute
   '/projects/$project/$name': typeof ProjectsProjectNameRouteWithChildren
   '/configuration/agents/': typeof ConfigurationAgentsIndexRoute
+  '/configuration/bindings/': typeof ConfigurationBindingsIndexRoute
   '/configuration/labels/': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops/': typeof ConfigurationLoopsIndexRoute
   '/configuration/projects/': typeof ConfigurationProjectsIndexRoute
@@ -324,12 +344,14 @@ export interface FileRouteTypes {
     | '/projects/$project'
     | '/configuration/'
     | '/configuration/agents/$agent'
+    | '/configuration/bindings/$binding'
     | '/configuration/labels/$label'
     | '/configuration/loops/$loop'
     | '/configuration/projects/$project'
     | '/configuration/workers/$worker'
     | '/projects/$project/$name'
     | '/configuration/agents/'
+    | '/configuration/bindings/'
     | '/configuration/labels/'
     | '/configuration/loops/'
     | '/configuration/projects/'
@@ -355,11 +377,13 @@ export interface FileRouteTypes {
     | '/configuration/settings'
     | '/configuration'
     | '/configuration/agents/$agent'
+    | '/configuration/bindings/$binding'
     | '/configuration/labels/$label'
     | '/configuration/loops/$loop'
     | '/configuration/projects/$project'
     | '/configuration/workers/$worker'
     | '/configuration/agents'
+    | '/configuration/bindings'
     | '/configuration/labels'
     | '/configuration/loops'
     | '/configuration/projects'
@@ -387,12 +411,14 @@ export interface FileRouteTypes {
     | '/projects/$project'
     | '/configuration/'
     | '/configuration/agents/$agent'
+    | '/configuration/bindings/$binding'
     | '/configuration/labels/$label'
     | '/configuration/loops/$loop'
     | '/configuration/projects/$project'
     | '/configuration/workers/$worker'
     | '/projects/$project/$name'
     | '/configuration/agents/'
+    | '/configuration/bindings/'
     | '/configuration/labels/'
     | '/configuration/loops/'
     | '/configuration/projects/'
@@ -503,6 +529,20 @@ declare module '@tanstack/react-router' {
       path: '/agents/$agent'
       fullPath: '/configuration/agents/$agent'
       preLoaderRoute: typeof ConfigurationAgentsAgentRouteImport
+      parentRoute: typeof ConfigurationRouteRoute
+    }
+    '/configuration/bindings/': {
+      id: '/configuration/bindings/'
+      path: '/bindings'
+      fullPath: '/configuration/bindings/'
+      preLoaderRoute: typeof ConfigurationBindingsIndexRouteImport
+      parentRoute: typeof ConfigurationRouteRoute
+    }
+    '/configuration/bindings/$binding': {
+      id: '/configuration/bindings/$binding'
+      path: '/bindings/$binding'
+      fullPath: '/configuration/bindings/$binding'
+      preLoaderRoute: typeof ConfigurationBindingsBindingRouteImport
       parentRoute: typeof ConfigurationRouteRoute
     }
     '/configuration/labels/': {
@@ -646,11 +686,13 @@ interface ConfigurationRouteRouteChildren {
   ConfigurationSettingsRoute: typeof ConfigurationSettingsRoute
   ConfigurationIndexRoute: typeof ConfigurationIndexRoute
   ConfigurationAgentsAgentRoute: typeof ConfigurationAgentsAgentRoute
+  ConfigurationBindingsBindingRoute: typeof ConfigurationBindingsBindingRoute
   ConfigurationLabelsLabelRoute: typeof ConfigurationLabelsLabelRoute
   ConfigurationLoopsLoopRoute: typeof ConfigurationLoopsLoopRoute
   ConfigurationProjectsProjectRoute: typeof ConfigurationProjectsProjectRoute
   ConfigurationWorkersWorkerRoute: typeof ConfigurationWorkersWorkerRoute
   ConfigurationAgentsIndexRoute: typeof ConfigurationAgentsIndexRoute
+  ConfigurationBindingsIndexRoute: typeof ConfigurationBindingsIndexRoute
   ConfigurationLabelsIndexRoute: typeof ConfigurationLabelsIndexRoute
   ConfigurationLoopsIndexRoute: typeof ConfigurationLoopsIndexRoute
   ConfigurationProjectsIndexRoute: typeof ConfigurationProjectsIndexRoute
@@ -664,11 +706,13 @@ const ConfigurationRouteRouteChildren: ConfigurationRouteRouteChildren = {
   ConfigurationSettingsRoute: ConfigurationSettingsRoute,
   ConfigurationIndexRoute: ConfigurationIndexRoute,
   ConfigurationAgentsAgentRoute: ConfigurationAgentsAgentRoute,
+  ConfigurationBindingsBindingRoute: ConfigurationBindingsBindingRoute,
   ConfigurationLabelsLabelRoute: ConfigurationLabelsLabelRoute,
   ConfigurationLoopsLoopRoute: ConfigurationLoopsLoopRoute,
   ConfigurationProjectsProjectRoute: ConfigurationProjectsProjectRoute,
   ConfigurationWorkersWorkerRoute: ConfigurationWorkersWorkerRoute,
   ConfigurationAgentsIndexRoute: ConfigurationAgentsIndexRoute,
+  ConfigurationBindingsIndexRoute: ConfigurationBindingsIndexRoute,
   ConfigurationLabelsIndexRoute: ConfigurationLabelsIndexRoute,
   ConfigurationLoopsIndexRoute: ConfigurationLoopsIndexRoute,
   ConfigurationProjectsIndexRoute: ConfigurationProjectsIndexRoute,

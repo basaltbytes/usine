@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, queryOptions, useQuery } from "@tanstack/react-query";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -45,11 +47,13 @@ beforeEach(() => {
   root = createRoot(host);
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={client}>
-        <RefreshProvider>
-          <PollingPage />
-        </RefreshProvider>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={client}>
+          <RefreshProvider>
+            <PollingPage />
+          </RefreshProvider>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
 });
@@ -100,11 +104,13 @@ it("excludes cached queries from pages that are no longer mounted", async () => 
   };
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={client}>
-        <RefreshProvider>
-          <NextPage />
-        </RefreshProvider>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={client}>
+          <RefreshProvider>
+            <NextPage />
+          </RefreshProvider>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await client.refetchQueries(secondary());
@@ -130,11 +136,13 @@ it("tracks the newest poll, ignores static and disabled observers, and drops que
   };
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={client}>
-        <RefreshProvider>
-          <ConditionalPage />
-        </RefreshProvider>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={client}>
+          <RefreshProvider>
+            <ConditionalPage />
+          </RefreshProvider>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   vi.setSystemTime(new Date(start.getTime() + 5_000));

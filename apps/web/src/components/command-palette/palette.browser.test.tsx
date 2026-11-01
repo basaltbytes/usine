@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { DeskView, ReadyOverview, ProjectView, RunDetailView } from "@usine/orchestrator/operator";
@@ -66,6 +68,7 @@ beforeEach(async () => {
     }),
   );
   client.setQueryData(configurationQuery().queryKey, configurationFixture());
+  client.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   router = createRouter({
     routeTree,
     context: { queryClient: client },
@@ -74,9 +77,11 @@ beforeEach(async () => {
   await router.load();
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={client}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(page.getByRole("heading", { name: "Tasks", level: 1 })).toBeVisible();

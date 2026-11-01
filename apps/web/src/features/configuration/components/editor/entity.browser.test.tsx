@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { ProjectId } from "@usine/core/project";
 import { taskOverview } from "~/lib/tasks/fixture";
 import { RegistryTag } from "@usine/config/factory";
@@ -77,6 +79,7 @@ const mount = async (
   await commands.configurationEditorResponses(rejections, JSON.stringify(configurationJson));
   await commands.loopEditorResponses(JSON.stringify(configurationJson), resumeRejections);
   await page.viewport(390, 844);
+  client.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     context: { queryClient: client },
@@ -85,9 +88,11 @@ const mount = async (
   await router.load();
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={client}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   return router;

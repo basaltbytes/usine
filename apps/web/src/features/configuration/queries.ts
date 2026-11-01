@@ -217,3 +217,9 @@ export const useWorkerPreflight = (worker: WorkerName) => {
   });
   return { ...mutation, isPending: pending };
 };
+
+export const configurationHeadQuery = () =>
+  queryOptions({
+    queryKey: ["configuration-head"],
+    queryFn: () => api((client) => client.configurationHead({})),
+  });

@@ -1,3 +1,11 @@
+import {
+  RequestPermissions,
+  RoleBinding,
+  ProjectScope,
+  GitHubUserId,
+  administratorPermissions,
+} from "@usine/core/access";
+import { ProjectId } from "@usine/core/project";
 import { ReleaseVersion } from "@usine/core/upgrade";
 import { UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
 import { WebhookHealth } from "../src/webhooks.ts";
@@ -40,7 +48,7 @@ import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate, QuarantinedLoop } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
 import { LocalWorker, UsineConfig } from "@usine/config/factory";
-import { ActingMember, OperatorLogin } from "@usine/core/operator";
+import { ActingMember, OperatorLogin, type OperatorActor } from "@usine/core/operator";
 import {
   AgentSessionId,
   ChildSession,
@@ -2014,7 +2022,7 @@ describe("Operator", () => {
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const edits: Array<AttemptContext> = [];
-        const retriedBy: Array<Option.Option<OperatorLogin>> = [];
+        const retriedBy: Array<Option.Option<OperatorActor>> = [];
         const inputs: Array<AttemptChannel.Intervention> = [];
         const replacement = new AgentFile({
           ...agentFile,
@@ -2999,4 +3007,77 @@ it.effect(
         ),
       );
     }),
+);
+
+it.effect("filters cached project lists and refuses actions outside a project binding", () =>
+  Effect.gen(function* () {
+    const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+    const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+    const reads = yield* Ref.make(0);
+    const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+    const alphaLoop = LoopName.make("alpha/review");
+    const betaLoop = LoopName.make("beta/review");
+    const loaded = new LoadedInstance({
+      ...instance,
+      config: Schema.decodeUnknownSync(UsineConfig)({
+        version: 2,
+        repos: [{ name: repository }, { name: "acme/hidden" }],
+        projects: [
+          { id: "alpha", name: "Alpha", repositories: [repository] },
+          { id: "beta", name: "Beta", repositories: ["acme/hidden"] },
+        ],
+        bindings: [
+          {
+            name: "beta-reader",
+            member: 2,
+            role: "viewer",
+            scope: { _tag: "Project", project: "beta" },
+          },
+        ],
+      }),
+      loops: [
+        new LoopFile({ ...loop, name: alphaLoop }),
+        new LoopFile({ ...loop, name: betaLoop }),
+      ],
+    });
+    const grants = new RoleBinding({
+      name: "alpha-operator",
+      member: GitHubUserId.make(1),
+      role: "operator",
+      scope: new ProjectScope({ project: ProjectId.make("alpha") }),
+    }).permissions;
+    yield* Effect.gen(function* () {
+      const operator = yield* Operator;
+      assert.lengthOf((yield* operator.overview(loaded)).projects, 2);
+      const scoped = yield* operator
+        .overview(loaded)
+        .pipe(Effect.provideService(RequestPermissions, grants));
+      assert.deepEqual(
+        scoped.projects.map(({ repository }) => repository),
+        [repository],
+      );
+      assert.deepEqual(
+        scoped.loops.map(({ name }) => name),
+        [alphaLoop],
+      );
+      assert.lengthOf(
+        (yield* operator
+          .overview(loaded)
+          .pipe(Effect.provideService(RequestPermissions, administratorPermissions))).projects,
+        2,
+      );
+      const refusal = yield* operator
+        .pause(betaLoop)
+        .pipe(Effect.provideService(RequestPermissions, grants), Effect.flip);
+      assert.equal(refusal._tag, "AccessDenied");
+      yield* operator.pause(alphaLoop).pipe(Effect.provideService(RequestPermissions, grants));
+      const viewer = grants.filter(({ permission }) => permission === "read");
+      assert.equal(
+        (yield* operator
+          .pause(alphaLoop)
+          .pipe(Effect.provideService(RequestPermissions, viewer), Effect.flip))._tag,
+        "AccessDenied",
+      );
+    }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
+  }),
 );

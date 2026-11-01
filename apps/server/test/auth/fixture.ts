@@ -1,3 +1,5 @@
+import { MemberAccess } from "../../src/auth/access.ts";
+import { administratorPermissions, type PermissionGrant } from "@usine/core/access";
 import { UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
 import { ConfigProvider, Context, Effect, Layer, Redacted } from "effect";
@@ -21,7 +23,11 @@ export const bob = new Member({
   addedAt: 2,
   addedBy: alice.login,
 });
-export const authFixture = (initial: ReadonlyArray<Member> = [alice], identity = alice) =>
+export const authFixture = (
+  initial: ReadonlyArray<Member> = [alice],
+  identity = alice,
+  permissions: () => ReadonlyArray<PermissionGrant> = () => administratorPermissions,
+) =>
   Effect.gen(function* () {
     const seen: Array<string> = [];
     const client = HttpClient.make((request) => {
@@ -64,6 +70,13 @@ export const authFixture = (initial: ReadonlyArray<Member> = [alice], identity =
         localToken: Redacted.make(localSecret),
       }).pipe(
         Layer.provide(Layer.succeed(AuthStore, store)),
+        Layer.provide(
+          Layer.succeed(MemberAccess, {
+            permissions: () => Effect.sync(permissions),
+            remove: store.remove,
+            enroll: (member) => store.add(member, true),
+          }),
+        ),
         Layer.provide(Layer.succeed(GitHubSignIn, github)),
       ),
     );

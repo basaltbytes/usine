@@ -1,3 +1,4 @@
+import { MemberAccess } from "../../src/auth/access.ts";
 import { Effect, Option } from "effect";
 import { assert, it } from "vitest";
 import { seedOperator } from "../../src/auth/authentication.ts";
@@ -12,6 +13,11 @@ it("enrolls the existing operator once without looking up GitHub on later starts
       const seed = (login: typeof alice.login | undefined) =>
         seedOperator(Option.fromUndefinedOr(login)).pipe(
           Effect.provideService(AuthStore, services.store),
+          Effect.provideService(MemberAccess, {
+            permissions: () => Effect.succeed([]),
+            enroll: (member) => services.store.add(member, true),
+            remove: services.store.remove,
+          }),
           Effect.provideService(GitHubSignIn, services.github),
         );
       yield* seed(undefined);

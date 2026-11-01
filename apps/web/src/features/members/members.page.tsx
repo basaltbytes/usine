@@ -79,7 +79,8 @@ export const MembersPage = () => {
             <div>
               <p className="text-sm font-medium">{member.login}</p>
               <p className="text-xs text-muted-foreground">
-                {addedBy} {member.addedBy} · {new Date(member.addedAt).toLocaleDateString()}
+                GitHub ID: {member.id} · {addedBy} {member.addedBy} ·{" "}
+                {new Date(member.addedAt).toLocaleDateString()}
               </p>
             </div>
             <div className="flex gap-2">

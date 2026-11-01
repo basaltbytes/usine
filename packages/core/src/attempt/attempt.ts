@@ -2,7 +2,7 @@ import { Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { closedStruct } from "../closed-struct.ts";
-import { OperatorLogin } from "../operator.ts";
+import { OperatorActor } from "../operator.ts";
 import type { RunState } from "../run/state.ts";
 import { RunId } from "../run/run.ts";
 import { Comment } from "../step/result.ts";
@@ -56,7 +56,7 @@ export class FailureResolution extends Schema.Class<FailureResolution>("FailureR
     /** The time the operator marked the attempt's failure resolved. */
     resolvedAt: Schema.DateTimeUtcFromString,
     /** The operator login attributed to the resolution, or `None` if unavailable. */
-    operator: Schema.OptionFromNullOr(OperatorLogin),
+    operator: Schema.OptionFromNullOr(OperatorActor),
   }),
 ) {}
 

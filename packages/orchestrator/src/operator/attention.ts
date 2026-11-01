@@ -19,7 +19,7 @@ export const attentionKey = (need: NeedView): AttentionKey =>
     revision: AttentionRevision.make(JSON.stringify(encodeNeed(need))),
   });
 
-const repositoriesOf = (need: NeedView) =>
+export const needRepositories = (need: NeedView) =>
   Match.valueTags(need, {
     ApprovalNeed: ({ repository }) => [repository],
     RunFailureNeed: ({ repository }) => [repository],
@@ -60,7 +60,7 @@ export const projectAttention = (
   projects: ReadonlyArray<ProjectView>,
   needsYou: ReadonlyArray<NeedView>,
 ): ReadonlyArray<ProjectView> => {
-  const repositories = new Set(needsYou.flatMap(repositoriesOf));
+  const repositories = new Set(needsYou.flatMap(needRepositories));
   return projects.map(
     (project) =>
       new ProjectView({

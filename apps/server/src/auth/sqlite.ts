@@ -1,3 +1,4 @@
+import { PermissionGrant } from "@usine/core/access";
 import { Clock, Effect, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { make as makeMigrator, fromRecord } from "effect/sql/Migrator";
@@ -139,15 +140,15 @@ export const sqliteAuthLayer = Layer.effect(
             yield* Effect.logDebug("Instance token last use unchanged", { tokenId: token.id });
             return Option.some({ member, token });
           }
-          const value = yield* Schema.encodeEffect(TokenJson)(used);
           const updated =
-            yield* sql`UPDATE usine_instance_tokens SET value = ${value} WHERE id = ${token.id} AND json_extract(value, '$.lastUsedAt') = ${token.lastUsedAt} RETURNING id`;
+            yield* sql`UPDATE usine_instance_tokens SET value = json_set(value, '$.lastUsedAt', ${used.lastUsedAt}) WHERE id = ${token.id} AND json_extract(value, '$.lastUsedAt') = ${token.lastUsedAt} RETURNING value`;
+          const current = (yield* decodeRows(TokenJson, updated))[0];
           yield* Effect.logDebug("Instance token last use recorded", {
             memberId: member.id,
             tokenId: token.id,
             updated: updated.length > 0,
           });
-          return Option.some({ member, token: updated.length > 0 ? used : token });
+          return Option.some({ member, token: current ?? token });
         }).pipe(Effect.catch(failure("authenticate"))),
       ),
       tokens: Effect.fn("AuthStore.tokens")((id) =>
@@ -162,6 +163,21 @@ export const sqliteAuthLayer = Layer.effect(
             Effect.flatMap((rows) => decodeRows(TokenJson, rows)),
           );
         }).pipe(Effect.catch(failure("list tokens"))),
+      ),
+      setScopes: Effect.fn("AuthStore.setScopes")((member, id, scopes) =>
+        Effect.gen(function* () {
+          const encoded = yield* Schema.encodeEffect(
+            Schema.fromJsonString(Schema.Array(PermissionGrant)),
+          )(scopes);
+          const rows =
+            yield* sql`UPDATE usine_instance_tokens SET value = json_set(value, '$.scopes', json(${encoded})) WHERE id = ${id} AND member_id = ${member} RETURNING id`;
+          if (rows.length === 0) return yield* authFailure("Token not found.", 403);
+          yield* Effect.logInfo("Token scopes changed", { memberId: member, tokenId: id });
+        }).pipe(
+          Effect.catch((error) =>
+            error instanceof AuthError ? Effect.fail(error) : failure("set token scopes")(error),
+          ),
+        ),
       ),
       revoke: Effect.fn("AuthStore.revoke")((member, id) =>
         sql`DELETE FROM usine_instance_tokens WHERE id = ${id} AND member_id = ${member}`.pipe(

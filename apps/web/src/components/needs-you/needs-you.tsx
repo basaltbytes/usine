@@ -1,3 +1,4 @@
+import { useCanOperateLoop } from "~/lib/permissions";
 import { WorkerQuotaAsk } from "./worker-quota-ask";
 import { itemName } from "~/components/item/mark";
 import { usePageCommands } from "~/components/command-palette/context";
@@ -42,6 +43,7 @@ type ApprovalAskProps = {
  * because the Run changed state, shows no error.
  */
 const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
+  const permitted = useCanOperateLoop(need.loop);
   const openRun = useOpenRun();
   const action = useRunAction();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -51,7 +53,7 @@ const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
   const copy = needCopy(need);
   const subject = origin === undefined ? need.runId.slice(0, 8) : itemName(origin);
   usePageCommands(
-    sent !== undefined || confirmingCancel
+    !permitted || sent !== undefined || confirmingCancel
       ? []
       : [
           {
@@ -80,21 +82,25 @@ const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
             : action.error.message
         }
         actions={
-          <Button
-            disabled={sent !== undefined}
-            onClick={() => action.mutate({ runId: need.runId, request: { action: "approve" } })}
-          >
-            {sent === "approve" ? runActionProgress.approve : runActionLabel.approve}
-          </Button>
+          permitted && (
+            <Button
+              disabled={sent !== undefined}
+              onClick={() => action.mutate({ runId: need.runId, request: { action: "approve" } })}
+            >
+              {sent === "approve" ? runActionProgress.approve : runActionLabel.approve}
+            </Button>
+          )
         }
         menu={
-          <DropdownMenuItem
-            variant="destructive"
-            disabled={sent !== undefined}
-            onClick={() => setConfirmingCancel(true)}
-          >
-            {sent === "cancel" ? runActionProgress.cancel : runActionLabel.cancel}
-          </DropdownMenuItem>
+          permitted && (
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={sent !== undefined}
+              onClick={() => setConfirmingCancel(true)}
+            >
+              {sent === "cancel" ? runActionProgress.cancel : runActionLabel.cancel}
+            </DropdownMenuItem>
+          )
         }
       />
       <AlertDialog open={confirmingCancel} onOpenChange={setConfirmingCancel}>

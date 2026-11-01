@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { PriorityValue } from "@usine/config/loop";
 import { overviewQuery } from "~/lib/overview";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -41,9 +43,11 @@ const render = (node: ReactNode) => {
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>
-      <RouterContextProvider router={router}>{node}</RouterContextProvider>
-    </QueryClientProvider>,
+    <PermissionsContext.Provider value={administratorPermissions}>
+      <QueryClientProvider client={queryClient}>
+        <RouterContextProvider router={router}>{node}</RouterContextProvider>
+      </QueryClientProvider>
+    </PermissionsContext.Provider>,
   );
 };
 

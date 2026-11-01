@@ -1,3 +1,10 @@
+import { MemberAccess } from "./access.ts";
+import {
+  administratorPermissions,
+  intersectPermissions,
+  permits,
+  type PermissionGrant,
+} from "@usine/core/access";
 import { type UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
 import { Clock, Context, Effect, Layer, Option, Redacted } from "effect";
@@ -21,6 +28,7 @@ export interface Access {
   readonly member: Option.Option<Member>;
   readonly token: Option.Option<InstanceToken>;
   readonly csrf: string;
+  readonly permissions: ReadonlyArray<PermissionGrant>;
 }
 export interface IssuedToken {
   readonly secret: Redacted.Redacted<string>;
@@ -43,6 +51,17 @@ const SESSION_LIFETIME = 30 * 24 * 60 * 60 * 1000;
 export class Authentication extends Context.Service<
   Authentication,
   {
+    readonly createToken: (
+      secret: string,
+      name: TokenName,
+      scopes: ReadonlyArray<PermissionGrant>,
+    ) => Effect.Effect<IssuedToken, AuthError>;
+    readonly setScopes: (
+      secret: string,
+      id: TokenId,
+      scopes: ReadonlyArray<PermissionGrant>,
+    ) => Effect.Effect<void, AuthError>;
+    readonly removeMember: (id: GitHubUserId) => Effect.Effect<void, AuthError>;
     readonly origin: UiOrigin;
     readonly origins: ReadonlyArray<UiOrigin>;
     readonly githubAvailable: Effect.Effect<boolean>;
@@ -80,6 +99,7 @@ export const authenticationLayer = (options: {
     Authentication,
     Effect.gen(function* () {
       const store = yield* AuthStore;
+      const access = yield* MemberAccess;
       const github = yield* GitHubSignIn;
       const links = new Map<
         TokenHash,
@@ -107,6 +127,7 @@ export const authenticationLayer = (options: {
         member: Member,
         kind: InstanceToken["kind"],
         name: TokenName,
+        requestedScopes: Option.Option<ReadonlyArray<PermissionGrant>> = Option.none(),
       ) {
         yield* Effect.annotateCurrentSpan({ memberId: member.id, kind });
         const secret = randomSecret();
@@ -116,6 +137,10 @@ export const authenticationLayer = (options: {
           memberId: member.id,
           hash: secretHash(Redacted.value(secret)),
           name,
+          scopes: yield* Option.match(requestedScopes, {
+            onNone: () => access.permissions(member.id),
+            onSome: Effect.succeed,
+          }),
           kind,
           createdAt: now,
           lastUsedAt: now,
@@ -143,7 +168,7 @@ export const authenticationLayer = (options: {
             addedAt: yield* Clock.currentTimeMillis,
             addedBy: identity.login,
           });
-          yield* store.add(first, true);
+          yield* access.enroll(first);
           bootstrapSessions.clear();
           return first;
         }
@@ -160,12 +185,13 @@ export const authenticationLayer = (options: {
         prune(now);
         const hash = secretHash(secret);
         if (hash === localHash || bootstrapSessions.has(hash)) {
-          const member = Option.fromUndefinedOr((yield* store.members)[0]);
+          const member = Option.none<Member>();
           return {
             credential: hash === localHash ? ("local" as const) : ("bootstrap" as const),
             member,
             token: Option.none(),
             csrf: csrf(secret),
+            permissions: hash === localHash ? administratorPermissions : [],
           };
         }
         const found = yield* store.authenticate(hash, now);
@@ -175,6 +201,10 @@ export const authenticationLayer = (options: {
           member: Option.some(found.value.member),
           token: Option.some(found.value.token),
           csrf: csrf(secret),
+          permissions: intersectPermissions(
+            yield* access.permissions(found.value.member.id),
+            found.value.token.scopes,
+          ),
         };
       });
       const limit = Effect.fn("Authentication.limit")(function* (endpoint: string) {
@@ -192,6 +222,23 @@ export const authenticationLayer = (options: {
         limits.set(endpoint, { ...window, count: window.count + 1 });
       });
       return Authentication.of({
+        createToken: Effect.fn("Authentication.createToken")(function* (secret, name, scopes) {
+          const caller = yield* authenticate(secret);
+          if (Option.isNone(caller.member))
+            return yield* authFailure("Sign in as a member to create a token.", 403);
+          if (!scopes.every((grant) => permits(caller.permissions, grant.permission, grant.scope)))
+            return yield* authFailure("Token scopes exceed your permissions.", 403);
+          return yield* issue(caller.member.value, "device", name, Option.some(scopes));
+        }),
+        setScopes: Effect.fn("Authentication.setScopes")(function* (secret, id, scopes) {
+          const caller = yield* authenticate(secret);
+          if (Option.isNone(caller.member))
+            return yield* authFailure("Sign in as a member to change token scopes.", 403);
+          if (!scopes.every((grant) => permits(caller.permissions, grant.permission, grant.scope)))
+            return yield* authFailure("Token scopes exceed your permissions.", 403);
+          yield* store.setScopes(caller.member.value.id, id, scopes);
+        }),
+        removeMember: access.remove,
         origin: options.origin,
         origins: [options.origin, ...options.origins],
         githubAvailable: github.available,
@@ -340,12 +387,11 @@ export const seedOperator = Effect.fn("Authentication.seedOperator")(function* (
     ),
   );
   if (Option.isNone(identity)) return;
-  yield* store.add(
+  yield* (yield* MemberAccess).enroll(
     new Member({
       ...identity.value,
       addedBy: identity.value.login,
       addedAt: yield* Clock.currentTimeMillis,
     }),
-    true,
   );
 });

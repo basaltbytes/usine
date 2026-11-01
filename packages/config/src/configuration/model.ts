@@ -1,4 +1,4 @@
-import { OperatorLogin } from "@usine/core/operator";
+import { OperatorActor } from "@usine/core/operator";
 import { Option, Schema } from "effect";
 import { ConfigFileError } from "../file.ts";
 import { LoadedInstance } from "../instance/instance.ts";
@@ -18,6 +18,7 @@ export const ConfigurationEntityKind = Schema.Literals([
   "label",
   "loop",
   "agent",
+  "binding",
 ]);
 export type ConfigurationEntityKind = typeof ConfigurationEntityKind.Type;
 
@@ -89,7 +90,7 @@ export class Configuration extends Schema.Class<Configuration>("@usine/config/Co
    * Returns the configured operator login, or `None` before initialization or when no operator is
    * configured.
    */
-  get actor(): Option.Option<OperatorLogin> {
+  get actor(): Option.Option<OperatorActor> {
     return Option.flatMap(this.instance, ({ config }) => config.operator);
   }
 
@@ -107,7 +108,7 @@ export class ConfigurationRevision extends Schema.Class<ConfigurationRevision>(
   /** The positive, increasing revision number assigned by commit. */
   number: ConfigurationRevisionNumber.check(Schema.isGreaterThan(0)),
   /** The operator login attributed to this change, or `None` when unavailable. */
-  actor: Schema.Option(OperatorLogin),
+  actor: Schema.Option(OperatorActor),
   /** The UTC time of the commit, supplied by the caller or store clock. */
   time: Schema.DateTimeUtc,
   /** The optional operator description of the change. */

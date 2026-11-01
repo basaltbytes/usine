@@ -1,4 +1,12 @@
 import {
+  RoleBinding,
+  RequestPermissions,
+  InstanceScope,
+  ProjectScope,
+  permits,
+} from "@usine/core/access";
+import { visibleRepository, visibleLoop } from "../access.ts";
+import {
   AgentPersona,
   AgentName,
   resolveParentEffort,
@@ -431,6 +439,10 @@ export class ConfigurationView extends Schema.Class<ConfigurationView>(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
     Schema.withConstructorDefault(Effect.succeed([])),
   ),
+  bindings: Schema.Array(RoleBinding).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
   /** The labels declared for creation in managed repositories. */
   labels: Schema.Array(DeclaredLabel),
   /** The valid loaded loops with runtime pause state. */
@@ -692,6 +704,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
     });
     const { settings, webhooks, tracing } = config;
     const configuration = new ConfigurationView({
+      bindings: config.bindings,
       projects: config.projects,
       labels: instance.config.labels,
       loops,
@@ -733,7 +746,24 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       runningWorkers: slots.length,
       repositories: repositories.length,
     });
-    return configuration;
+    const grants = yield* RequestPermissions;
+    if (permits(grants, "admin", new InstanceScope())) return configuration;
+    return new ConfigurationView({
+      ...configuration,
+      bindings: [],
+      workers: [],
+      removedWorkers: [],
+      invalidAgents: [],
+      quarantinedLoops: [],
+      labels: [],
+      projects: configuration.projects.filter(({ id }) =>
+        permits(grants, "read", new ProjectScope({ project: id })),
+      ),
+      repositories: configuration.repositories.filter(({ name }) =>
+        visibleRepository(instance, grants, name),
+      ),
+      loops: configuration.loops.filter(({ name }) => visibleLoop(grants, name)),
+    });
   });
 
   return { view } as const;

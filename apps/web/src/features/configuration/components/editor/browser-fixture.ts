@@ -118,6 +118,10 @@ export const configurationEditorResponses = async (
       });
       return;
     }
+    if (last === "head") {
+      await route.fulfill({ json: { number } });
+      return;
+    }
     if (last === "capabilities") {
       await route.fulfill({
         contentType: "application/json",

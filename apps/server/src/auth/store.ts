@@ -1,3 +1,4 @@
+import type { PermissionGrant } from "@usine/core/access";
 import { Context, type Effect, type Option } from "effect";
 import {
   AuthError,
@@ -25,6 +26,11 @@ export class AuthStore extends Context.Service<
       AuthError
     >;
     readonly tokens: (id: GitHubUserId) => Effect.Effect<ReadonlyArray<InstanceToken>, AuthError>;
+    readonly setScopes: (
+      member: GitHubUserId,
+      token: TokenId,
+      scopes: ReadonlyArray<PermissionGrant>,
+    ) => Effect.Effect<void, AuthError>;
     readonly revoke: (member: GitHubUserId, token: TokenId) => Effect.Effect<void, AuthError>;
   }
 >()("@usine/server/AuthStore") {}

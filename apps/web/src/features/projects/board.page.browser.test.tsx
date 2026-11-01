@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { LaneName } from "@usine/config/board";
@@ -101,6 +103,7 @@ afterEach(() => {
 
 const mountBoard = async (width: number) => {
   await page.viewport(width, 800);
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/projects/basaltbytes/usine"] }),
@@ -109,9 +112,11 @@ const mountBoard = async (width: number) => {
   await router.load();
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(page.getByText("Backlog", { exact: true })).toBeVisible();

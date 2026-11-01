@@ -1,3 +1,4 @@
+import { administratorPermissions } from "@usine/core/access";
 import {
   workerPreflightResponses,
   finishWorkerPreflight,
@@ -74,6 +75,7 @@ export default mergeConfig(
           optimizeDeps: { force: true },
           test: {
             name: "browser",
+            setupFiles: ["./src/lib/testing/session.ts"],
             include: ["src/**/*.browser.test.tsx"],
             // Locator actions wait up to the test timeout; Chromium is slow on a busy machine.
             testTimeout: 30_000,
@@ -87,6 +89,11 @@ export default mergeConfig(
                 executablePath === undefined ? {} : { launchOptions: { executablePath } },
               ),
               commands: {
+                sessionPermissions: async ({ page }) => {
+                  await page.route("**/api/auth/session", (route) =>
+                    route.fulfill({ json: { permissions: administratorPermissions } }),
+                  );
+                },
                 workerPreflightResponses,
                 finishWorkerPreflight,
                 signInResponses,

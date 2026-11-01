@@ -1,3 +1,5 @@
+import { TokenScopes, scopeLabel } from "~/features/tokens/components/scopes";
+import { scopeCopy } from "./strings";
 import { CommandButton } from "~/components/command-palette/button";
 import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -21,6 +23,7 @@ import {
 export const TokensPage = () => {
   const { data } = useSuspenseQuery(tokensQuery());
   const queryClient = useQueryClient();
+  const [editing, setEditing] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -45,6 +48,7 @@ export const TokensPage = () => {
         <PageHeading title={title} />
         <p className="mt-2 text-sm text-muted-foreground">{description}</p>
       </div>
+      <TokenScopes />
       {error !== undefined && <ErrorAlert message={error} />}
       {data.length === 0 ? (
         <p className="text-sm text-muted-foreground">{empty}</p>
@@ -54,12 +58,19 @@ export const TokensPage = () => {
             <li key={token.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
               <div>
                 <p className="text-sm font-medium">{token.name}</p>
+                <p>{token.scopes.map(scopeLabel).join(", ") || scopeCopy.none}</p>
                 <p className="text-xs text-muted-foreground">
                   {created} {new Date(token.createdAt).toLocaleDateString()} · {lastUsed}{" "}
                   {new Date(token.lastUsedAt).toLocaleString()}
                 </p>
               </div>
+              {editing === token.id && (
+                <TokenScopes token={token} close={() => setEditing(undefined)} />
+              )}
               <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setEditing(token.id)}>
+                  {scopeCopy.edit}
+                </Button>
                 {selected === token.id ? (
                   <>
                     <Button

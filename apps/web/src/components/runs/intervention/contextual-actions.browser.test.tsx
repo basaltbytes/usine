@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { CommandPalette } from "~/components/command-palette/palette";
 import { PageCommandsProvider } from "~/components/command-palette/context";
 import { WithRouter } from "~/lib/testing/memory-router";
@@ -85,7 +87,11 @@ let root: Root;
 let client: QueryClient;
 const mount = (children: ReactNode) =>
   flushSync(() =>
-    root.render(<QueryClientProvider client={client}>{children}</QueryClientProvider>),
+    root.render(
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      </PermissionsContext.Provider>,
+    ),
   );
 beforeEach(async () => {
   await commands.interventionResponses(200);
@@ -389,4 +395,17 @@ it("offers the run's overflow actions in the palette and retains cancellation co
     .element(page.getByRole("button", { name: "Confirm cancel", exact: true }))
     .toBeVisible();
   expect(await commands.recordedInterventions()).toEqual([]);
+});
+
+it("hides run mutations from a member without operate permission", () => {
+  mount(
+    <PermissionsContext.Provider value={[]}>
+      <ContextualActions
+        detail={{ run: failedRun, agentDefinitionChanged: false }}
+        onEdit={() => undefined}
+        openRun={() => undefined}
+      />
+    </PermissionsContext.Provider>,
+  );
+  expect(host.querySelector("button")).toBeNull();
 });

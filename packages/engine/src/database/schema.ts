@@ -13,7 +13,7 @@ import {
   LOOP_PERMISSIONS,
   type LoopPermissions,
 } from "@usine/core/loop";
-import { OperatorLogin } from "@usine/core/operator";
+import { OperatorActor } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { APPROVAL_CHANNELS, type ApprovalChannel } from "@usine/core/run/approval";
@@ -348,7 +348,7 @@ export const approvals = snakeCase.table(
       .unique()
       .references(() => events.eventId),
     channel: text({ enum: APPROVAL_CHANNELS }).$type<ApprovalChannel>(),
-    approver: text().$type<OperatorLogin>(),
+    approver: text().$type<OperatorActor>(),
   },
   (table) => [
     check(
@@ -371,7 +371,7 @@ export const runAgainEvents = snakeCase.table("usine_run_again_events", {
     .$type<RunId>()
     .notNull()
     .references(() => runs.runId),
-  requestedBy: text().$type<OperatorLogin>(),
+  requestedBy: text().$type<OperatorActor>(),
 });
 
 export const ignoredEvents = snakeCase.table(
@@ -473,7 +473,7 @@ export const attentionAcknowledgements = snakeCase.table(
   {
     id: text().notNull(),
     revision: text().$type<AttentionRevision>().notNull(),
-    dismissedBy: text().$type<OperatorLogin>(),
+    dismissedBy: text().$type<OperatorActor>(),
     dismissedAt: text().notNull(),
   },
   (table) => [primaryKey({ columns: [table.id, table.revision] })],

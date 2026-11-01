@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
@@ -40,16 +42,18 @@ it("offers enabled member actions, preserves pending states, and confirms remova
   try {
     flushSync(() =>
       root.render(
-        <QueryClientProvider client={client}>
-          <WithRouter>
-            <PageCommandsProvider>
-              <CommandPalette
-                overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })}
-              />
-              <MembersPage />
-            </PageCommandsProvider>
-          </WithRouter>
-        </QueryClientProvider>,
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={client}>
+            <WithRouter>
+              <PageCommandsProvider>
+                <CommandPalette
+                  overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })}
+                />
+                <MembersPage />
+              </PageCommandsProvider>
+            </WithRouter>
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
       ),
     );
     const search = async (text: string) => {

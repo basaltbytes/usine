@@ -1,3 +1,4 @@
+import { useCan } from "~/lib/permissions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   attentionKey,
@@ -19,6 +20,7 @@ type DismissNeedProps = {
 };
 
 export const DismissNeed = ({ need, action }: DismissNeedProps) => {
+  const admin = useCan("admin");
   const queries = useQueryClient();
   const key = attentionKey(need);
   const mutation = useMutation({
@@ -47,6 +49,7 @@ export const DismissNeed = ({ need, action }: DismissNeedProps) => {
       await queries.invalidateQueries({ queryKey: overviewQuery().queryKey });
     },
   });
+  if (!admin) return null;
   return (
     <span className="flex flex-col items-end gap-1">
       {action === "dismissNeed" ? (

@@ -1,3 +1,4 @@
+import { useCanOperateLoop } from "~/lib/permissions";
 import { useState } from "react";
 import { ResumeLoop } from "./resume";
 import { PauseIcon, PlayIcon } from "@phosphor-icons/react";
@@ -13,8 +14,10 @@ type PauseButtonProps = {
 
 /** Renders nothing when operator actions are unavailable, as in setup mode. */
 export const PauseButton = ({ loop, pause, variant }: PauseButtonProps) => {
+  const permitted = useCanOperateLoop(loop.name);
   const [resuming, setResuming] = useState(false);
   const sending = pause.isPending && pause.variables.loop === loop.name;
+  if (!permitted) return null;
   return (
     <>
       <CommandButton

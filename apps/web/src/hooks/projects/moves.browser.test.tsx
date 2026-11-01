@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
 import { LabelLaneSource, LaneName } from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
@@ -141,11 +143,13 @@ beforeEach(async () => {
   root = createRoot(host);
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <WithRouter>
-          <Board />
-        </WithRouter>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <WithRouter>
+            <Board />
+          </WithRouter>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(taskIn("Backlog")).toBeVisible();
@@ -219,11 +223,13 @@ it("finishes an in-flight move in its original project after navigating to anoth
   await expectMovable(2, false);
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <WithRouter>
-          <Board selected={other} />
-        </WithRouter>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <WithRouter>
+            <Board selected={other} />
+          </WithRouter>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(page.getByRole("heading", { name: other })).toBeVisible();
@@ -232,11 +238,13 @@ it("finishes an in-flight move in its original project after navigating to anoth
   await expect.poll(() => queryClient.isMutating()).toBe(0);
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <WithRouter>
-          <Board />
-        </WithRouter>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <WithRouter>
+            <Board />
+          </WithRouter>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(taskIn("Ready")).toBeVisible();
@@ -285,11 +293,13 @@ it("keeps a saved destination when the project is reopened before GitHub is obse
   flushSync(() => root.render(null));
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <WithRouter>
-          <Board />
-        </WithRouter>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <WithRouter>
+            <Board />
+          </WithRouter>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await expect.element(taskIn("Ready")).toBeVisible();

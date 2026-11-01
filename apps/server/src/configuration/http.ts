@@ -36,6 +36,11 @@ const problemEntity = (file: string) => {
 
 const refusal = (error: ConfigurationEditorError) => {
   switch (error._tag) {
+    case "AccessDenied":
+      return new OperatorHttpError({
+        error: "AccessDenied",
+        message: "You do not have permission for this configuration entity.",
+      });
     case "StaleRevision":
       return new StaleRevisionRefusal({
         error: error._tag,

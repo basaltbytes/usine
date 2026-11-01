@@ -14,7 +14,7 @@ import { Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { CycleGeneration } from "@usine/core/cycle-budget";
-import type { OperatorLogin } from "@usine/core/operator";
+import type { OperatorActor } from "@usine/core/operator";
 import { RunId, Run } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
@@ -637,7 +637,7 @@ const makeRunStore = Effect.gen(function* () {
   const resolveFailure = Effect.fn("RunStore.resolveFailure")(function* (
     runId: RunId,
     attemptId: AttemptId,
-    operator: Option.Option<OperatorLogin>,
+    operator: Option.Option<OperatorActor>,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
     return yield* database.transaction((transaction) =>
@@ -1129,7 +1129,7 @@ export class RunStore extends Context.Service<
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,
-      operator: Option.Option<OperatorLogin>,
+      operator: Option.Option<OperatorActor>,
     ) => Effect.Effect<boolean, RunStoreError>;
     /**
      * Reopens a failed Run for its next Attempt and returns whether this call reopened it. Fails

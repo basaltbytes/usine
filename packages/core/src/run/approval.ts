@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { closedStruct } from "../closed-struct.ts";
-import { OperatorLogin } from "../operator.ts";
+import { OperatorActor } from "../operator.ts";
 
 /** The approval channel for authenticated operator actions. */
 export const APPROVAL_CHANNELS = ["ui"] as const;
@@ -14,7 +14,7 @@ export class ApprovalSource extends Schema.Class<ApprovalSource>("ApprovalSource
     /** The authenticated channel through which approval arrived. */
     channel: ApprovalChannel,
     /** The approving operator's login, or `None` for older approvals without attribution. */
-    approver: Schema.OptionFromNullOr(OperatorLogin),
+    approver: Schema.OptionFromNullOr(OperatorActor),
   }),
 ) {}
 

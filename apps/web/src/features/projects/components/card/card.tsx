@@ -102,6 +102,7 @@ export const BoardCard = ({
         />
       </Card>
       <CardMenu
+        readOnly={readOnly}
         item={item}
         run={currentRun(item)}
         moves={moves}

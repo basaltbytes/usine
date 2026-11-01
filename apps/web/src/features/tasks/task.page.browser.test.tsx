@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -74,6 +76,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
 const mount = async (number: number | string, width = 1280, repository = taskRepository) => {
   await page.viewport(width, 900);
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
   router = createRouter({
     routeTree,
     history: createMemoryHistory({
@@ -86,9 +89,11 @@ const mount = async (number: number | string, width = 1280, repository = taskRep
   const loaded = router.load();
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
   await loaded;

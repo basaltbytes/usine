@@ -1,3 +1,5 @@
+import { administratorPermissions } from "@usine/core/access";
+import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WorkerName } from "@usine/core/worker";
 import { UnconfiguredWorkerNeed } from "@usine/orchestrator/operator";
@@ -30,11 +32,13 @@ const removedWorker = (running: number) =>
 const renderNeeds = (need: UnconfiguredWorkerNeed) =>
   flushSync(() =>
     root.render(
-      <QueryClientProvider client={queryClient}>
-        <WithRouter>
-          <NeedsYou needs={[need]} />
-        </WithRouter>
-      </QueryClientProvider>,
+      <PermissionsContext.Provider value={administratorPermissions}>
+        <QueryClientProvider client={queryClient}>
+          <WithRouter>
+            <NeedsYou needs={[need]} />
+          </WithRouter>
+        </QueryClientProvider>
+      </PermissionsContext.Provider>,
     ),
   );
 

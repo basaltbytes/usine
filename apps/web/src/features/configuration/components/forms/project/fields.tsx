@@ -1,3 +1,4 @@
+import { useCan } from "~/lib/permissions";
 import { useQuery } from "@tanstack/react-query";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
@@ -15,6 +16,7 @@ import { configurationQuery } from "~/lib/configuration/queries";
 import { ProjectLanes } from "./lanes";
 
 export const ProjectFields = (fields: FormFieldsProps) => {
+  const admin = useCan("admin");
   const configuration = useQuery(configurationQuery());
   const repositories = arrayValue(fields.value.repositories).filter(Schema.is(RepositoryName));
   const assigned = new Set(
@@ -35,9 +37,9 @@ export const ProjectFields = (fields: FormFieldsProps) => {
   return (
     <div className="min-w-0 space-y-5">
       <FormField {...fields} path="id" label={projectCopy.id} readOnly />
-      <FormField {...fields} path="name" label={projectCopy.name} />
+      <FormField {...fields} path="name" label={projectCopy.name} readOnly={!admin} />
       {configuration.isError && <ErrorAlert message={configuration.error.message} />}
-      <fieldset className="min-w-0 space-y-3">
+      <fieldset disabled={!admin} className="min-w-0 space-y-3">
         <legend className="mb-2 font-medium">{projectCopy.repositories}</legend>
         <ol className="space-y-2">
           {repositories.map((repository, index) => (
