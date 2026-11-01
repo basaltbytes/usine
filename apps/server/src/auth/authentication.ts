@@ -224,18 +224,52 @@ export const authenticationLayer = (options: {
       return Authentication.of({
         createToken: Effect.fn("Authentication.createToken")(function* (secret, name, scopes) {
           const caller = yield* authenticate(secret);
-          if (Option.isNone(caller.member))
+          if (Option.isNone(caller.member)) {
+            yield* Effect.logWarning("Token creation refused for a non-member credential", {
+              credential: caller.credential,
+            });
             return yield* authFailure("Sign in as a member to create a token.", 403);
-          if (!scopes.every((grant) => permits(caller.permissions, grant.permission, grant.scope)))
+          }
+          yield* Effect.annotateCurrentSpan({ memberId: caller.member.value.id });
+          if (Option.isSome(caller.token))
+            yield* Effect.annotateCurrentSpan({ callerTokenId: caller.token.value.id });
+          if (
+            !scopes.every((grant) => permits(caller.permissions, grant.permission, grant.scope))
+          ) {
+            yield* Effect.logWarning("Token creation refused: scopes exceed caller permissions", {
+              memberId: caller.member.value.id,
+              requestedScopeCount: scopes.length,
+            });
             return yield* authFailure("Token scopes exceed your permissions.", 403);
+          }
           return yield* issue(caller.member.value, "device", name, Option.some(scopes));
         }),
         setScopes: Effect.fn("Authentication.setScopes")(function* (secret, id, scopes) {
+          yield* Effect.annotateCurrentSpan({ tokenId: id });
           const caller = yield* authenticate(secret);
-          if (Option.isNone(caller.member))
+          if (Option.isNone(caller.member)) {
+            yield* Effect.logWarning("Token scope change refused for a non-member credential", {
+              credential: caller.credential,
+              tokenId: id,
+            });
             return yield* authFailure("Sign in as a member to change token scopes.", 403);
-          if (!scopes.every((grant) => permits(caller.permissions, grant.permission, grant.scope)))
+          }
+          yield* Effect.annotateCurrentSpan({ memberId: caller.member.value.id });
+          if (Option.isSome(caller.token))
+            yield* Effect.annotateCurrentSpan({ callerTokenId: caller.token.value.id });
+          if (
+            !scopes.every((grant) => permits(caller.permissions, grant.permission, grant.scope))
+          ) {
+            yield* Effect.logWarning(
+              "Token scope change refused: scopes exceed caller permissions",
+              {
+                memberId: caller.member.value.id,
+                tokenId: id,
+                requestedScopeCount: scopes.length,
+              },
+            );
             return yield* authFailure("Token scopes exceed your permissions.", 403);
+          }
           yield* store.setScopes(caller.member.value.id, id, scopes);
         }),
         removeMember: access.remove,

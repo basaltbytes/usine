@@ -157,6 +157,7 @@ export const memberAccessLayer = Layer.effect(
       ),
       enroll: Effect.fn("MemberAccess.enroll")((member) =>
         Effect.gen(function* () {
+          yield* Effect.annotateCurrentSpan({ memberId: member.id });
           yield* store.add(member, true);
           yield* grantAdministrators([member]);
         }).pipe(
