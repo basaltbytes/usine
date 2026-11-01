@@ -12,13 +12,14 @@ import {
 import { CreationFailure } from "~/features/configuration/components/workers/creation-failure";
 import { MachineFor } from "~/features/configuration/components/workers/machine-for";
 import { DetailSection } from "~/features/configuration/components/section";
+import { machineReuseCopy } from "~/features/configuration/strings";
 import { useNow } from "~/hooks/use-now";
 import { elapsedLabel, timestampLabel } from "~/lib/strings";
 
 const machineState = {
   creating: { state: "Queued", label: "Creating" },
   ready: { state: "live", label: "Ready" },
-  idle: { state: "Waiting", label: "Idle" },
+  idle: { state: "Waiting", label: machineReuseCopy.idle },
   deleting: { state: "Canceled", label: "Deleting" },
 } as const satisfies Record<MachineView["state"], { state: string; label: string }>;
 
@@ -28,7 +29,7 @@ type MachinesProps = { readonly worker: WorkerConfigurationView };
 export const Machines = ({ worker }: MachinesProps) => {
   const now = useNow(15_000);
   return (
-    <DetailSection title="Machines" aside="Reuse stops at the configured attempt or age limit">
+    <DetailSection title="Machines" aside={machineReuseCopy.limits}>
       {worker.provisioning !== null && <CreationFailure pause={worker.provisioning} now={now} />}
       {worker.machines.length === 0 ? (
         <p className="text-muted-foreground">No machines</p>
@@ -39,7 +40,7 @@ export const Machines = ({ worker }: MachinesProps) => {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="max-sm:w-full">Machine</TableHead>
                 <TableHead>State</TableHead>
-                <TableHead className="text-right">Attempts</TableHead>
+                <TableHead className="text-right">{machineReuseCopy.attempts}</TableHead>
                 <TableHead className="text-right">Age</TableHead>
                 <TableHead className="max-sm:hidden">For</TableHead>
               </TableRow>

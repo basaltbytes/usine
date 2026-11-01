@@ -1,7 +1,8 @@
 import { upgradeWaitLine } from "~/lib/runs/strings";
 import type { ProvisioningPauseView, WorkerView } from "@usine/orchestrator/operator";
 import { StateMark } from "~/components/status-badge";
-import { agoLabel, elapsedLabel, timestampLabel } from "~/lib/strings";
+import { machineReuseLine } from "~/features/overview/strings";
+import { agoLabel, timestampLabel } from "~/lib/strings";
 import { creationFailureTitle, nextCreationLine } from "~/lib/workers/strings";
 
 const outcome = {
@@ -63,9 +64,7 @@ export const WorkersLine = ({ workers, now }: WorkersLineProps) => (
         </span>
         {worker.machines.map((machine) => (
           <span key={machine.id ?? machine.since} className="tabular-nums">
-            {machine.id ?? "Creating"}: {machine.attempts}{" "}
-            {machine.attempts === 1 ? "attempt" : "attempts"}, {elapsedLabel(machine.since, now)}{" "}
-            old{machine.state === "idle" ? ", idle" : ""}
+            {machineReuseLine(machine, now)}
           </span>
         ))}
         {worker.upgradeWait !== null && <span>{upgradeWaitLine(worker.upgradeWait)}</span>}

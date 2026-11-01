@@ -29,6 +29,7 @@ import { runStatisticsQuery } from "~/features/overview/queries";
 import {
   countLabel,
   firstTimeRightDetails,
+  machineStartsCopy,
   workerUtilizationDetails,
   medianFailureWait,
   medianRetryWait,
@@ -77,15 +78,15 @@ const RunDetails = ({ statistics }: RunDetailsProps) => {
     <div className="flex flex-col gap-7">
       <p className="text-sm text-muted-foreground">{firstTimeRightDetails}</p>
       {statistics.machineStarts.length > 0 && (
-        <section aria-label="Machine starts per day">
-          <h3 className="text-sm font-medium">Machine starts per day (UTC)</h3>
+        <section aria-label={machineStartsCopy.label}>
+          <h3 className="text-sm font-medium">{machineStartsCopy.title}</h3>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Day</TableHead>
-                <TableHead>Worker</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead className="text-right">Starts</TableHead>
+                <TableHead>{machineStartsCopy.day}</TableHead>
+                <TableHead>{machineStartsCopy.worker}</TableHead>
+                <TableHead>{machineStartsCopy.provider}</TableHead>
+                <TableHead className="text-right">{machineStartsCopy.starts}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
