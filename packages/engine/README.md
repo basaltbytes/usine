@@ -212,3 +212,7 @@ See [Development](../../README.md#development) for temporary storage selection a
 ## Access control
 
 Operator audit fields accept `OperatorActor`: a GitHub login or the reserved `local admin` actor. Existing stored logins retain their meaning.
+
+## CI waits
+
+`Submission.ciFailureHead` identifies CI fix events for queued-head rechecks. `Submission.ciPolicy` saves the loop's requirement with the event. A successful result with a verified CI handoff, or a harvested pushed PR under a required policy, ends the attempt in `AwaitingCi` and releases its worker. These open runs reserve no slot and start no fiber after restart. `RunEngine.awaitingCi()` reads the durable waits; `settleCi(runId, expectedHead, resolution)` atomically updates their run and attempt outcomes, preserves the session end time, and ignores stale observations. Operator cancel also cancels the waiting attempt.

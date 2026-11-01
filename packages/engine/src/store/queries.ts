@@ -1,3 +1,4 @@
+import { CiPolicy } from "@usine/core/ci";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import type { Agent } from "@usine/core/agent";
@@ -118,6 +119,8 @@ const eventRouteSelection = {
   approval: triggerEvents.approval,
   approvalReason: triggerEvents.approvalReason,
   permissions: triggerEvents.permissions,
+  ciPolicy: triggerEvents.ciPolicyJson,
+  ciFailureHead: triggerEvents.ciFailureHead,
   cycleLimit: triggerEvents.cycleLimit,
   cycleGeneration: triggerEvents.cycleGeneration,
   repository: triggerEvents.repository,
@@ -263,7 +266,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       return decoded.map(({ number, outcome, salvage, ...attempt }) => ({
         ...attempt,
         ref: salvageRefFor(attempt.runId, number),
-        succeeded: outcome === "Succeeded",
+        succeeded: outcome === "Succeeded" || outcome === "AwaitingCi",
         open: outcome === "",
         rejected: salvage?._tag === "Rejected" ? Option.some(salvage) : Option.none(),
       }));
@@ -318,6 +321,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       agent: storedRun.agent,
       parentModel: Option.fromNullishOr(storedRun.parentModel),
       permissions: route.permissions,
+      ciPolicy: Option.fromNullishOr(route.ciPolicy),
     });
   });
 
@@ -624,6 +628,22 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
+  const settleCiAttempt = Effect.fn("RunStoreQueries.settleCiAttempt")(function* (
+    runId: RunId,
+    outcome: AttemptOutcome,
+  ) {
+    yield* database
+      .update(attempts)
+      .set({ outcomeJson: encodeOutcome(outcome) })
+      .where(
+        and(
+          eq(attempts.runId, runId),
+          sql`json_extract(${attempts.outcomeJson}, '$._tag') = 'AwaitingCi'`,
+        ),
+      )
+      .execute();
+  });
+
   const amend = Effect.fn("RunStoreQueries.amend")(function* (
     runId: RunId,
     context: AttemptContext,
@@ -877,6 +897,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
           approval: submission.approval,
           approvalReason: Option.getOrNull(submission.approvalReason),
           permissions: submission.permissions,
+          ciFailureHead: Option.getOrNull(submission.ciFailureHead),
+          ciPolicyJson: Option.match(submission.ciPolicy, {
+            onNone: () => null,
+            onSome: Schema.encodeSync(CiPolicy),
+          }),
           cycleLimit: Option.getOrNull(submission.cycleLimit),
           cycleGeneration: submission.cycleGeneration,
           repository: submission.repository,
@@ -941,7 +966,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const rows = yield* database
       .select({ runId: runs.runId })
       .from(runs)
-      .where(and(openState, ne(storedStateTag, waiting)))
+      .where(and(openState, ne(storedStateTag, waiting), ne(storedStateTag, "AwaitingCi")))
       .execute();
     return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
@@ -1065,6 +1090,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     approvalExists,
     blockingRun,
     closeAttempt,
+    settleCiAttempt,
     createRun,
     eventRouteByRun,
     ignoredEvent,

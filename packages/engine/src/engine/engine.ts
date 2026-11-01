@@ -1,3 +1,5 @@
+import type { CiResolution } from "@usine/core/ci";
+import type { CommitSha } from "@usine/core/repository";
 import type { ReleaseVersion } from "@usine/core/upgrade";
 import type { UpgradeDrain } from "./upgrade.ts";
 import { AttentionAcknowledgements } from "../attention/attention.ts";
@@ -14,6 +16,7 @@ import { Context, Crypto, type Duration, Effect, Layer, Match, Option, Result } 
 import { RunDatabase } from "../database/database.ts";
 import {
   AttemptCancellationError,
+  type EnginePersistenceError,
   LeftoversDiscardRejectedError,
   RunInterventionRejectedError,
   type RunEngineError,
@@ -284,7 +287,17 @@ const makeRunEngine = Effect.gen(function* () {
     Effect.forkScoped,
   );
 
+  const settleCi = Effect.fn("RunEngine.settleCi")(function* (
+    runId: RunId,
+    head: CommitSha,
+    resolution: CiResolution,
+  ) {
+    if (yield* store.settleCi(runId, head, resolution)) yield* driver.continueWithNewest(runId);
+  }, Effect.uninterruptible);
+
   return {
+    awaitingCi: store.awaitingCi,
+    settleCi,
     approve,
     cancel,
     discardLeftovers,
@@ -308,6 +321,14 @@ const makeRunEngine = Effect.gen(function* () {
 export class RunEngine extends Context.Service<
   RunEngine,
   {
+    /** Returns persisted CI waits without reserving workers. */
+    readonly awaitingCi: () => Effect.Effect<ReadonlyArray<RunSnapshot>, EnginePersistenceError>;
+    /** Settles this head once; stale observations leave the run unchanged. */
+    readonly settleCi: (
+      runId: RunId,
+      head: CommitSha,
+      resolution: CiResolution,
+    ) => Effect.Effect<void, RunEngineError>;
     /** Stops admitting Attempts, including retries, and waits for admitted Attempts to finish. Admission stays closed until restart. */
     readonly drain: () => Effect.Effect<void>;
     /** Defers reservations and new attempts while admitted attempts finish. */

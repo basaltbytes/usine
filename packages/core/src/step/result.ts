@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { CommitSha } from "../repository.ts";
 
 /** A commit between the workspace base and the final HEAD. */
@@ -17,6 +17,10 @@ export class PullRequest extends Schema.TaggedClass<PullRequest>("StepResult/Pul
     number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
     /** The GitHub pull request URL, encoded as a string for storage. */
     url: Schema.URLFromString,
+    /** The pushed head, or `None` for facts recorded before CI handoffs. */
+    head: Schema.OptionFromOptionalKey(CommitSha).pipe(
+      Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    ),
   },
 ) {}
 

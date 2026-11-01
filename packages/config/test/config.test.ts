@@ -9,7 +9,7 @@ import { InstancePath } from "../src/file.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
 import { loopReferenceFailure, referenceIndex } from "../src/instance/references.ts";
 import { ManagedRepo } from "../src/factory.ts";
-import { ConfigParser } from "../src/parser.ts";
+import { formatLoop, ConfigParser } from "../src/parser.ts";
 import { issueEnvironment, pullRequestEnvironment } from "../src/payload-slices.ts";
 import { matchesSelector } from "../src/selector.ts";
 import { updateFrontmatter, updateYaml, YamlEdit } from "../src/yaml/writer.ts";
@@ -856,6 +856,31 @@ describe("ConfigParser", () => {
       expect((yield* parse("max_cycles: 5\n")).maxCycles).toBe(5);
       for (const invalid of ["max_cycles: 0\n", "max_cycles: 1.5\n", "maxCycles: 5\n"]) {
         expect((yield* parse(invalid).pipe(Effect.flip)).stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("parses CI policies with authored keys and rejects invalid deadlines", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const source = (ci: string) =>
+        `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${ci}---\nFix CI.`;
+      const parse = (ci: string) =>
+        parser.parseLoopFile(InstancePath.make("loops/fix.md"), source(ci));
+      expect(Option.isNone((yield* parse("")).ci)).toBe(true);
+      const configured = yield* parse("ci:\n  fix_loop: widgets/fix\n  timeout_seconds: 3600\n");
+      expect(Option.isSome(configured.ci) && configured.ci.value.fixLoop).toBe("widgets/fix");
+      const roundtrip = yield* parser.parseLoopFile(
+        InstancePath.make("loops/fix.md"),
+        formatLoop(configured),
+      );
+      expect(roundtrip.ci).toEqual(configured.ci);
+      expect(formatLoop(configured)).toContain("fix_loop: widgets/fix");
+      for (const ci of [
+        "ci:\n  fix_loop: fix\n  timeout_seconds: 0\n",
+        "ci:\n  fixLoop: fix\n  timeout_seconds: 30\n",
+      ]) {
+        expect((yield* parse(ci).pipe(Effect.flip)).stage).toBe("schema");
       }
     }).pipe(Effect.provide(parserLayer)),
   );

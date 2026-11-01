@@ -357,3 +357,7 @@ Provisioned machines on Overview and Configuration > Workers show their assigned
 The session permissions control action visibility. Project viewers read data, operators act on runs and boards, and maintainers edit loops and lanes. Instance admins manage role bindings under Configuration. Tokens shows and edits permission ceilings and displays a new token secret once.
 
 Members without role bindings can still open Tokens and sign out. Other pages explain that an instance admin must grant access.
+
+## CI waits
+
+The run header, drawer, and board card show **Waiting for CI** as a link to the pushed PR's checks. CI waits remain in flight in task lists and do not appear as attempts waiting for a worker. The ended session retains its transcript while the orchestrator observes checks.

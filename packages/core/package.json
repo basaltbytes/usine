@@ -126,6 +126,10 @@
     "./access": {
       "types": "./dist/access.d.ts",
       "default": "./dist/access.js"
+    },
+    "./ci": {
+      "types": "./dist/ci.d.ts",
+      "default": "./dist/ci.js"
     }
   },
   "publishConfig": {

@@ -477,6 +477,8 @@ const testLayer = (
       }),
     );
   const runs = Layer.succeed(RunEngine)({
+    awaitingCi: () => Effect.succeed([]),
+    settleCi: () => Effect.void,
     resolveFailure: () => Effect.void,
     intervene: commands.intervene,
     approve: (id, event, source) =>

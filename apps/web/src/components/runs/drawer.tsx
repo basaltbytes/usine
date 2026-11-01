@@ -1,3 +1,4 @@
+import { CiWaitLine } from "~/components/runs/ci";
 import { useProjectLinks } from "~/hooks/use-project-links";
 import { ArrowsOutSimpleIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -120,6 +121,8 @@ export const RunSummary = ({ detail }: RunSummaryProps) => {
       ) : (
         <p className="text-muted-foreground">Approved, waiting for a free worker</p>
       );
+    case "AwaitingCi":
+      return <CiWaitLine run={run} />;
     case "Running":
       return <LiveSummary detail={detail} />;
     case "Succeeded":

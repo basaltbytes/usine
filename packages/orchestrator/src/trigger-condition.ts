@@ -4,7 +4,12 @@ import { canonicalRepositoryName } from "@usine/core/repository";
 import type { Submission } from "@usine/engine/engine";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
-import { ChangedIssue, ChangedPullRequest, GitHubPolling } from "@usine/github/polling";
+import {
+  ChangedIssue,
+  ChangedPullRequest,
+  GitHubPolling,
+  PullRequestSnapshot,
+} from "@usine/github/polling";
 import { Effect, Layer, Option, Schema } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { repositoryFailureLogFields } from "./polling/cycle.ts";
@@ -66,6 +71,20 @@ export const triggerConditionLayer: Layer.Layer<
           ? new ChangedPullRequest({ number, updatedAt: submission.event.receivedAt })
           : new ChangedIssue({ number, updatedAt: submission.event.receivedAt });
       const snapshot = yield* github.snapshot(repository.name, changed);
+      if (Option.isSome(submission.ciFailureHead)) {
+        const holds =
+          snapshot instanceof PullRequestSnapshot &&
+          snapshot.payload.state === "OPEN" &&
+          snapshot.payload.headRefOid === submission.ciFailureHead.value &&
+          (snapshot.payload.statusCheckRollup?.state === "FAILURE" ||
+            snapshot.payload.statusCheckRollup?.state === "ERROR");
+        yield* Effect.logInfo("Queued CI fix rechecked against its failed head", {
+          ...fields,
+          head: submission.ciFailureHead.value,
+          holds,
+        });
+        return holds ? "matches" : "no-longer-matches";
+      }
       const holds = yield* expressions.evaluateBoolean(
         loop.trigger.if,
         environmentFor(loop.trigger.on),

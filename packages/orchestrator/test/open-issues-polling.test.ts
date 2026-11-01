@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -132,7 +133,10 @@ const processLayer = (directory: InstanceDirectory, github: GitHubPolling["Servi
     inertLabelReconcilerLayer,
     Layer.succeed(GitHubPolling, github),
   );
-  return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
+  return Layer.merge(
+    dependencies,
+    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
+  );
 };
 
 const waitForState = Effect.fn("test.waitForState")(function* (

@@ -130,3 +130,7 @@ SSH provisioners accept optional `reuse: { attempts: 5, max_age: 2h }` for Hetzn
 ## Access control
 
 Role bindings are named `binding` configuration entities with revision history. Admin roles require instance scope; other roles require an existing project. Import and export preserve bindings.
+
+## CI policy
+
+A loop can set `ci: { fix_loop: widgets/fix, timeout_seconds: 3600 }` to require CI after a successful push. `LoopFile.ci` contains the decoded `CiPolicy`; import and export use snake_case keys. The timeout must be an integer from 1 to 86,400 seconds. See [CI waits](https://docs.usine.dev/guides/review-fix-loops/#ci-waits) for the agent handoff and completion actions.

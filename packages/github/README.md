@@ -13,7 +13,7 @@ The 0.x APIs can change between minor releases.
 
 ## Set up the App
 
-[Run a factory](https://docs.usine.dev/guides/) gives the steps under Connect a GitHub App: an App installable only on your account, with an active webhook for deliveries mode, with Contents, Issues, and Pull requests read and write, Checks and Metadata read-only, and **No access** for everything else, including Workflows, Administration, and all organization and account permissions.
+[Run a factory](https://docs.usine.dev/guides/) gives the steps under Connect a GitHub App: an App installable only on your account, with an active webhook for deliveries mode, with Contents, Issues, and Pull requests read and write, Checks and Metadata read-only, optionally Actions read-only for CI job logs, and **No access** for everything else, including Workflows, Administration, and all organization and account permissions.
 
 GitHub grants Metadata read access automatically. Contents lets installation tokens use Git over HTTPS; with Workflows off, worker tokens can't edit `.github/workflows/`. User authorization isn't required. Install the App once, on the account that owns the managed repos, for every repo in `usine.yaml`; a factory expects one installation. GitHub's references are [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app) and [Choosing permissions for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app).
 
@@ -122,3 +122,9 @@ Enable the App webhook to record deliveries. A delivery with a failed HTTP statu
 `GitHubApp.installationUrl()` returns the App's installation page, including before its first installation. It reads the authenticated App metadata and uses the same typed errors as other App requests.
 
 `@usine/github/local-secrets` accepts optional `client_id`, `client_secret`, and `webhook_secret` fields alongside `app_id` and `private_key`. `loadLocalSecrets` returns `None` for an absent file and rejects invalid contents or permissions. `writeLocalSecrets` atomically replaces the runtime file with mode 0600; credential values remain redacted in memory. Legacy files with only the App ID and private key continue to load.
+
+## CI checks
+
+`GitHubChecks` from `/checks` reads the live PR head and aggregate check state. Missing checks stay pending. Failure diagnostics include failed check names and up to 12,000 characters from the ends of four Actions job logs; legacy commit statuses provide their context and description. Grant the App **Actions: read-only** to read job logs. Without this optional permission, diagnostics use the check output. Rate limits propagate to the caller's polling backoff. `GitHubChecks.layer` needs `GitHubApp` and an Effect HTTP client.
+
+`ItemLabelMutation.add` and `remove` can each be empty. Removal-only actions send no additions request, and repeated removals ignore missing labels.

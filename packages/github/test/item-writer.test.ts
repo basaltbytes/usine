@@ -128,3 +128,28 @@ describe("GitHubItemWriter", () => {
     }).pipe(Effect.provide(layer));
   });
 });
+
+it.effect("removes labels without sending an empty additions request", () => {
+  const methods: Array<string> = [];
+  const client = HttpClient.make((request) => {
+    methods.push(request.method);
+    return Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response("[]", { headers: { "content-type": "application/json" } }),
+      ),
+    );
+  });
+  const layer = GitHubItemWriter.layer.pipe(
+    Layer.provide(appLayer),
+    Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
+  );
+  return Effect.gen(function* () {
+    yield* (yield* GitHubItemWriter).updateLabels(
+      repository,
+      ItemNumber.make(815),
+      new ItemLabelMutation({ add: [], remove: ["agent-in-progress"] }),
+    );
+    assert.deepStrictEqual(methods, ["DELETE"]);
+  }).pipe(Effect.provide(layer));
+});

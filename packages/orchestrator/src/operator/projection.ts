@@ -19,6 +19,7 @@ import { DateTime, Effect, Match, Option } from "effect";
 import {
   AgentFailureView,
   AttemptView,
+  AwaitingCiAttemptView,
   BlockedFailureView,
   CanceledAttemptView,
   ChildSessionBudgetFailureView,
@@ -69,6 +70,7 @@ export const failureView = (failure: AttemptFailure): FailureView =>
 const attemptOutcomeView = (outcome: AttemptOutcome) =>
   Match.valueTags(outcome, {
     Succeeded: () => new SucceededAttemptView(),
+    AwaitingCi: () => new AwaitingCiAttemptView(),
     Failed: ({ failure }) => new FailedAttemptView({ failure: failureView(failure) }),
     Canceled: () => new CanceledAttemptView(),
   });
@@ -234,6 +236,7 @@ export const runView = (
     agent: snapshot.agent.name,
     agentBrain: snapshot.agent.brain,
     state: snapshot.run.state._tag,
+    ciWait: snapshot.run.state._tag === "AwaitingCi" ? snapshot.run.state.handoff : null,
     upgradeWait:
       actions.canCancel && upgrade?.runIds.includes(snapshot.run.id) ? upgrade.wait : null,
     providerRetry: Option.getOrNull(pendingProviderRetry(snapshot.run.state, snapshot.attempts)),

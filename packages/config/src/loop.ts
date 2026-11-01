@@ -1,3 +1,4 @@
+import { CiPolicy } from "@usine/core/ci";
 import { AgentName } from "@usine/core/agent";
 import { CycleLimit, DEFAULT_CYCLE_LIMIT } from "@usine/core/cycle-budget";
 import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
@@ -62,6 +63,11 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   maxCycles: CycleLimit.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
     Schema.withConstructorDefault(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
+  ),
+  /** The CI requirement for successful pushes, or `None` for loops that finish in the session. */
+  ci: Schema.Option(CiPolicy).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),
   /** The repository access of the loop's attempts. */
   permissions: LoopPermissions.pipe(

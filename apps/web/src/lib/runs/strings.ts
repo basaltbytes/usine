@@ -18,6 +18,8 @@ import type { QueuedFor } from "~/lib/runs/transcript/model";
 import { timestampLabel } from "~/lib/strings";
 import { providerLabel } from "~/lib/workers/strings";
 
+export const waitingForCi = "Waiting for CI";
+
 export const runActionLabel = {
   approve: "Approve",
   retry: "Retry",
@@ -91,6 +93,8 @@ export const runStateLine = (
       return "Waiting for approval";
     case "Queued":
       return "Queued, no free worker";
+    case "AwaitingCi":
+      return waitingForCi;
     case "Running":
       return `Running, attempt ${run.attempts.at(-1)?.number ?? 1}`;
     case "Succeeded":

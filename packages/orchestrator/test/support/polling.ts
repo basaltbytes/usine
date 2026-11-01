@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "./ci.ts";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import { ConfigParser } from "@usine/config/parser";
 import { CursorStore } from "@usine/engine/cursor";
@@ -155,6 +156,8 @@ export const pollingTestLayer = (
     evaluateScalar: () => Effect.die("unused"),
   });
   const runs = Layer.succeed(RunEngine)({
+    awaitingCi: () => Effect.succeed([]),
+    settleCi: () => Effect.void,
     resolveFailure: () => Effect.void,
     intervene: () => Effect.void,
     approve: () => Effect.die("unused"),
@@ -189,5 +192,5 @@ export const pollingTestLayer = (
     loopControlLayer(states),
     Layer.succeed(GitHubPolling, github),
   );
-  return PollingTriggers.layer.pipe(Layer.provide(dependencies));
+  return PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies));
 };

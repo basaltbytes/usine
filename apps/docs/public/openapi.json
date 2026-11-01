@@ -35342,9 +35342,83 @@
               "Waiting",
               "Queued",
               "Running",
+              "AwaitingCi",
               "Succeeded",
               "Failed",
               "Canceled"
+            ]
+          },
+          "ciWait": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "pullRequest": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "head": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
+                  "fixLoop": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "timeoutSeconds": {
+                    "type": "integer",
+                    "maximum": 86400,
+                    "exclusiveMinimum": 0
+                  },
+                  "onGreen": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "item": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "add": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true
+                        },
+                        "remove": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "item",
+                        "add",
+                        "remove"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "pullRequest",
+                  "head",
+                  "fixLoop",
+                  "timeoutSeconds",
+                  "onGreen"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "upgradeWait": {
@@ -35729,6 +35803,9 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/_usine_orchestrator_SucceededAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_AwaitingCiAttemptViewEncoded"
               },
               {
                 "$ref": "#/components/schemas/_usine_orchestrator_FailedAttemptViewEncoded"
@@ -36383,6 +36460,21 @@
         "required": [
           "_tag",
           "message"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_AwaitingCiAttemptViewEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "AwaitingCi"
+            ]
+          }
+        },
+        "required": [
+          "_tag"
         ],
         "additionalProperties": false
       },
@@ -41333,6 +41425,10 @@
           },
           "url": {
             "type": "string"
+          },
+          "head": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
           }
         },
         "required": [

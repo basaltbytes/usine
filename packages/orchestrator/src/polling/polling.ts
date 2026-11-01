@@ -1,3 +1,4 @@
+import { CiMonitor } from "../ci.ts";
 import type { DeclaredLabel } from "@usine/config/label";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { ManagedRepo } from "@usine/config/factory";
@@ -183,6 +184,7 @@ export class PollingTriggers extends Context.Service<
   static readonly layer = Layer.effect(
     PollingTriggers,
     Effect.gen(function* () {
+      const ci = yield* CiMonitor;
       const cursors = yield* CursorStore;
       const budgets = yield* CycleBudgets;
       const github = yield* GitHubPolling;
@@ -527,9 +529,11 @@ export class PollingTriggers extends Context.Service<
           const resolved = (yield* resolveTriggerLoops(instance)).filter(
             ({ loop }) => !paused.has(loop.name),
           );
+          const ciCycle = yield* ci.reconcile(instance, Option.none());
+          yield* hints.defer(ciCycle.nextPollAt);
           const watched = watchedRepositories(instance, resolved);
           const settled = yield* Effect.forEach(
-            watched,
+            Option.isSome(ciCycle.nextPollAt) ? [] : watched,
             (repository) =>
               Effect.result(pollRepository(repository)).pipe(
                 Effect.map((result) => ({ repository, result }) as const),
@@ -538,8 +542,8 @@ export class PollingTriggers extends Context.Service<
           );
 
           const cycles: Array<RepositoryCycle> = [];
-          const failures: Array<RepositoryPollFailure> = [];
-          const backoffs: Array<Option.Option<DateTime.Utc>> = [];
+          const failures: Array<RepositoryPollFailure> = [...ciCycle.failures];
+          const backoffs: Array<Option.Option<DateTime.Utc>> = [ciCycle.nextPollAt];
           const preflightFindings: Array<LabelPreflightFinding> = [];
           const completedAt = yield* DateTime.now;
           for (const { repository, result } of settled) {
@@ -631,6 +635,9 @@ export class PollingTriggers extends Context.Service<
             });
             return;
           }
+          const ciCycle = yield* ci.reconcile(instance, Option.some(hint.repository));
+          yield* hints.defer(ciCycle.nextPollAt);
+          if (Option.isSome(ciCycle.nextPollAt)) return;
           if (Option.isNone(hint.item)) {
             const cycle = yield* pollRepository(watched).pipe(
               Effect.catch((failure) => {
