@@ -15,7 +15,7 @@ import {
 } from "@usine/durable/testing";
 
 import { Effect, Layer, Option, Redacted } from "effect";
-import { claudeLoginLockLayer } from "../../../src/executor.ts";
+import { claudeLoginLockLayer, type AttemptConnections } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 
 import { layer as sshLayer } from "../../../src/ssh/ssh.ts";
@@ -25,6 +25,7 @@ import {
   fakeMachine,
   INSTANCE,
   INSTANCE_ID,
+  LOCAL_TEMPORARY_DIRECTORY,
   mintingProvider,
 } from "../support.ts";
 import { boatSettings, hetznerSettings } from "./support.ts";
@@ -76,10 +77,19 @@ export const runtimeOf = (
   machine: ReturnType<typeof fakeMachine>,
   providers: ReturnType<typeof fakeProviders>,
   address: SshWorkerAddress,
-  options: { readonly parent?: StubParent; readonly storage?: StubStorage } = {},
+  {
+    parent = completes,
+    storage = new StubStorage(),
+    ...connectionOptions
+  }: {
+    readonly parent?: StubParent;
+    readonly storage?: StubStorage;
+    readonly attemptConnections?: AttemptConnections<SshWorkerAddress>;
+  } = {},
 ) =>
   sshLayer({
     workers: [address],
+    ...connectionOptions,
     instance: INSTANCE,
     instanceId: INSTANCE_ID,
     interruptGrace: "2 seconds",
@@ -88,11 +98,16 @@ export const runtimeOf = (
   }).pipe(
     Layer.provide(machine.layer),
     Layer.provide(mintingProvider().layer),
-    Layer.provide(
-      stubAttemptRuntime(options.storage ?? new StubStorage(), options.parent ?? completes),
-    ),
+    Layer.provide(stubAttemptRuntime(storage, parent)),
     Layer.provide(claudeLoginLockLayer),
     Layer.provide(providers.layer),
+  );
+
+/** Records the host key that an earlier process pinned for a Hetzner machine. */
+export const pinnedEarlier = (machine: ReturnType<typeof fakeMachine>, id: number) =>
+  machine.state.localFiles.set(
+    `${LOCAL_TEMPORARY_DIRECTORY}/hetzner-${String(id)}`,
+    `usine-hetzner-${String(id)} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEarlierHostKeyForTests\n`,
   );
 
 /** Returns the executor for `address` behind `gateway`. */

@@ -1,3 +1,4 @@
+import type { AttemptConnections } from "../attempt-connections.ts";
 import type { SshCommand } from "@usine/agents/child-host";
 import type { InstanceId } from "@usine/core/instance";
 import type {
@@ -123,6 +124,8 @@ export type SshWorkerMachine =
   | { readonly _tag: "Provisioned"; readonly provisioner: SshProvisioner };
 
 export interface SshWorkerAddress {
+  /** Slots used to derive fixed-machine container limits during recovery; defaults to one. */
+  readonly maxConcurrentAttempts?: number;
   /**
    * The Worker's name in `usine.yaml`; its state is in `workers/<name>` under `root`. A request
    * for a Worker without an address fails with a `machine` capability error.
@@ -143,6 +146,8 @@ export interface SshWorkerAddress {
 
 export interface SshExecutorOptions {
   readonly workers: ReadonlyArray<SshWorkerAddress>;
+  /** Restores attempt connections after a restart. Omit for an in-memory executor. */
+  readonly attemptConnections?: AttemptConnections<SshWorkerAddress>;
   /**
    * The identity of this usine instance on the Workers' machines, which the instances that share
    * a GitHub App share too. It labels each Attempt container, and tags each provisioned machine.

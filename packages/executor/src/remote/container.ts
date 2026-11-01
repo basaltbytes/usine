@@ -13,13 +13,11 @@ import {
 import { Effect, Option, Redacted, Ref, Schema } from "effect";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import type { RemoteCommands } from "./commands.ts";
-
-/** The container CLI on the machine. */
-export const CONTAINER_RUNTIME = "docker";
+import { type ContainerRuntime, runtimeOptions } from "./runtime.ts";
 
 export const PNPM_STORE_VOLUME = "usine-pnpm-store";
 export const PNPM_STORE_PATH = "/home/usine/.local/share/pnpm/store";
-export const PNPM_STORE_MOUNT = `type=volume,source=${PNPM_STORE_VOLUME},destination=${PNPM_STORE_PATH},volume-nocopy`;
+export const PNPM_STORE_MOUNT = `${PNPM_STORE_VOLUME}:${PNPM_STORE_PATH}:nocopy`;
 
 const SHARED_CACHES = [
   { volume: PNPM_STORE_VOLUME, path: PNPM_STORE_PATH },
@@ -30,29 +28,33 @@ const SHARED_CACHES = [
 ].map(({ volume, path }) => ({
   volume,
   path,
-  mount: `type=volume,source=${volume},destination=${path},volume-nocopy`,
+  mount: `${volume}:${path}:nocopy`,
 }));
 
 /** Initializes volume `$3` using runtime `$1`, image `$2`, mount `$4`, and path `$5`. */
 export const PREPARE_CACHE_SCRIPT = String.raw`
 set -eu
 "$1" volume create "$3" >/dev/null
-exec "$1" run --rm --network none --user 0 --mount "$4" --entrypoint sh "$2" -ec '
+runtime=$1 image=$2 volume=$3 mount=$4 path=$5
+shift 5
+if [ "$runtime" = podman ]; then set -- --userns=keep-id --cgroupns=private --http-proxy=false; fi
+exec "$runtime" run --rm --network none "$@" --user 0 --volume "$mount" --entrypoint sh "$image" -ec '
   owner=$(id -u usine)
   current=$(stat -c %u "$1")
   if [ "$current" = "$owner" ]; then exit 0; fi
   if [ "$current" != 0 ] || [ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-    echo "Cache volume $2 belongs to UID $current, but the image usine user has UID $owner. Remove containers that reference it, then run: docker volume rm $2" >&2
+    echo "Cache volume $2 belongs to UID $current, but the image usine user has UID $owner. Remove containers that reference it, then run: $3 volume rm $2" >&2
     exit 1
   fi
   chmod 0755 "$1"
   chown -h "$owner" "$1"
-' sh "$5" "$3"
+' sh "$path" "$volume" "$runtime"
 `.trim();
 
 /** The labels on each container, so a later process finds the ones it left. */
 const INSTANCE_LABEL = "dev.usine.instance";
 const INSTANCE_ID_LABEL = "dev.usine.instance-id";
+const PROCESS_LABEL = "dev.usine.process";
 const WORKER_LABEL = "dev.usine.worker";
 const ATTEMPT_LABEL = "dev.usine.attempt";
 /** The label of a preflight's container, which removes itself and never needs a sweep. */
@@ -67,6 +69,9 @@ const SEED_DIRECTORY = "/usr/local/share/usine/seed";
 
 /** The image and limits of each Attempt container on a Worker. */
 export interface ContainerSettings {
+  /** Identifies the executor that started the container across connection aliases. */
+  readonly process: string;
+  readonly runtime: ContainerRuntime;
   readonly hosts: Readonly<Record<string, string>>;
   readonly image: ContainerImage;
   readonly limits: ContainerLimits;
@@ -159,10 +164,10 @@ done
  * kill script `$3`. Prints `no-container` if the container doesn't exist and
  * `container-stopped` if it doesn't run, since then no child can run in it.
  */
-const STOP_CHILDREN_SCRIPT = String.raw`
+export const STOP_CHILDREN_SCRIPT = String.raw`
 if ! state=$("$1" container inspect --format '{{.State.Running}}' "$2" 2>&1); then
   case "$state" in
-    *"No such"*) echo no-container; exit 0 ;;
+    *"No such"*|*"no such container"*) echo no-container; exit 0 ;;
   esac
   printf '%s\n' "$state" >&2
   exit 1
@@ -185,6 +190,7 @@ echo "container $3"
 case "$4 $5" in
   "true "*) exec "$1" exec "$2" cat /sys/fs/cgroup/memory.events ;;
   *" true") echo "oom_kill 1" ;;
+  *) echo "oom_kill 0" ;;
 esac
 `.trim();
 
@@ -197,12 +203,12 @@ const OOM_KILL_LINE = /^oom_kill (\d+)$/mu;
 const decodeContainerId = Schema.decodeUnknownEffect(ContainerId);
 
 /**
- * A script that lists the containers with both labels `$2` and `$3`, one `<name> <worker>` line
+ * A script that lists the containers with both labels `$2` and `$3`, one `<name> <process>` line
  * each. Prints nothing if the machine has no container CLI.
  */
 const LIST_SCRIPT = String.raw`
 command -v "$1" >/dev/null 2>&1 || exit 0
-exec "$1" ps --all --filter "label=$2" --filter "label=$3" --format '{{.Names}} {{.Label "dev.usine.worker"}}'
+exec "$1" ps --all --filter "label=$2" --filter "label=$3" --format '{{.Names}} {{.Label "dev.usine.process"}}'
 `.trim();
 
 /**
@@ -249,6 +255,7 @@ const containerFields = (shell: RemoteShell, spec: ContainerSpec) => ({
   host: shell.destination,
   container: spec.name,
   image: spec.settings.image,
+  runtime: spec.settings.runtime,
   ...Option.match(spec.attemptId, {
     onNone: () => ({}),
     onSome: (attemptId) => ({ attemptId }),
@@ -256,8 +263,12 @@ const containerFields = (shell: RemoteShell, spec: ContainerSpec) => ({
 });
 
 /** Returns the shell that runs commands in the container `name` on the machine of `shell`. */
-const containerShell = (shell: RemoteShell, name: string): RemoteShell => {
-  const container: ShellContainer = { runtime: CONTAINER_RUNTIME, name };
+const containerShell = (
+  shell: RemoteShell,
+  name: string,
+  runtime: ContainerRuntime,
+): RemoteShell => {
+  const container: ShellContainer = { runtime, name };
   return new RemoteShell({
     ssh: shell.ssh,
     sshEnvironment: shell.sshEnvironment,
@@ -277,6 +288,7 @@ export const containersFor = (commands: RemoteCommands) => {
     shell: RemoteShell,
     image: ContainerImage,
     worker: WorkerName,
+    runtime: ContainerRuntime,
   ) {
     const fields = { worker, host: shell.destination, image };
     yield* Effect.annotateCurrentSpan(fields);
@@ -285,7 +297,7 @@ export const containersFor = (commands: RemoteCommands) => {
         "-c",
         PREPARE_CACHE_SCRIPT,
         "sh",
-        CONTAINER_RUNTIME,
+        runtime,
         image,
         volume,
         mount,
@@ -307,22 +319,21 @@ export const containersFor = (commands: RemoteCommands) => {
   const remove = Effect.fn("RemoteExecutor.removeContainer")(function* (
     shell: RemoteShell,
     name: string,
+    runtime: ContainerRuntime,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, container: name });
-    yield* commands
-      .run("cleanup", shell, CONTAINER_RUNTIME, ["rm", "--force", "--volumes", name])
-      .pipe(
-        Effect.tap(() =>
-          Effect.logInfo("Removed the container", { host: shell.destination, container: name }),
+    yield* commands.run("cleanup", shell, runtime, ["rm", "--force", "--volumes", name]).pipe(
+      Effect.tap(() =>
+        Effect.logInfo("Removed the container", { host: shell.destination, container: name }),
+      ),
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not remove the container; the next process that uses the Worker removes it",
+          { host: shell.destination, container: name, message: error.message },
         ),
-        Effect.tapError((error) =>
-          Effect.logWarning(
-            "Could not remove the container; the next process that uses the Worker removes it",
-            { host: shell.destination, container: name, message: error.message },
-          ),
-        ),
-        Effect.ignore,
-      );
+      ),
+      Effect.ignore,
+    );
   });
 
   /**
@@ -344,7 +355,7 @@ export const containersFor = (commands: RemoteCommands) => {
       "-c",
       PREPARE_SCRIPT,
       "sh",
-      CONTAINER_RUNTIME,
+      spec.settings.runtime,
       spec.name,
       String(spec.readOnly.length + spec.writable.length),
       ...spec.readOnly,
@@ -383,6 +394,7 @@ export const containersFor = (commands: RemoteCommands) => {
           `${INSTANCE_LABEL}=${spec.settings.instance}`,
           `${INSTANCE_ID_LABEL}=${spec.settings.instanceId}`,
           `${WORKER_LABEL}=${spec.worker}`,
+          `${PROCESS_LABEL}=${spec.settings.process}`,
           `${ATTEMPT_LABEL}=${attemptId}`,
         ],
         options: [],
@@ -390,7 +402,6 @@ export const containersFor = (commands: RemoteCommands) => {
       }),
     });
     const mounts = [
-      ...SHARED_CACHES.map(({ mount }) => mount),
       ...Option.match(spec.checkout, {
         onNone: () => [],
         onSome: ({ path, parent }) => [
@@ -410,6 +421,7 @@ export const containersFor = (commands: RemoteCommands) => {
     // of the container (ADR 0027, amended 2026-10-25).
     const args = [
       "run",
+      ...runtimeOptions(spec.settings.runtime),
       "--detach",
       "--name",
       spec.name,
@@ -431,17 +443,18 @@ export const containersFor = (commands: RemoteCommands) => {
       String(spec.settings.limits.pids),
       "--env-file",
       "/dev/stdin",
+      ...SHARED_CACHES.flatMap(({ mount }) => ["--volume", mount]),
       ...mounts.flatMap((mount) => ["--mount", mount]),
       spec.settings.image,
       ...lifetime.command,
     ];
-    yield* Effect.addFinalizer(() => remove(shell, spec.name));
+    yield* Effect.addFinalizer(() => remove(shell, spec.name, spec.settings.runtime));
     yield* commands
       .runWithInput(
         operation,
         shell,
         "sh",
-        ["-c", PIPED_STDIN_SCRIPT, "sh", CONTAINER_RUNTIME, ...args],
+        ["-c", PIPED_STDIN_SCRIPT, "sh", spec.settings.runtime, ...args],
         envFile,
       )
       .pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(envFile))));
@@ -450,7 +463,7 @@ export const containersFor = (commands: RemoteCommands) => {
       logins: found.map(({ file }) => file).join(","),
       readOnly: readOnly.join(","),
     });
-    return containerShell(shell, spec.name);
+    return containerShell(shell, spec.name, spec.settings.runtime);
   });
 
   /**
@@ -462,13 +475,14 @@ export const containersFor = (commands: RemoteCommands) => {
     shell: RemoteShell,
     name: string,
     worktree: string,
+    runtime: ContainerRuntime,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, container: name, worktree });
     const outcome = yield* commands.run(operation, shell, "sh", [
       "-c",
       STOP_CHILDREN_SCRIPT,
       "sh",
-      CONTAINER_RUNTIME,
+      runtime,
       name,
       CHILD_KILL_SCRIPT,
       worktree,
@@ -496,7 +510,7 @@ export const containersFor = (commands: RemoteCommands) => {
     const [status = "", exitCode = "", oomKilled = ""] = (yield* commands.run(
       operation,
       shell,
-      CONTAINER_RUNTIME,
+      spec.settings.runtime,
       ["container", "inspect", "--format", STATE_FORMAT, spec.name],
     ))
       .trim()
@@ -511,7 +525,7 @@ export const containersFor = (commands: RemoteCommands) => {
       exitCode,
       oomKilled,
     });
-    yield* commands.run(operation, shell, CONTAINER_RUNTIME, ["start", spec.name]);
+    yield* commands.run(operation, shell, spec.settings.runtime, ["start", spec.name]);
     return oomKilled === "true";
   });
 
@@ -532,7 +546,7 @@ export const containersFor = (commands: RemoteCommands) => {
       "-c",
       MEMORY_EVENTS_SCRIPT,
       "sh",
-      CONTAINER_RUNTIME,
+      spec.settings.runtime,
       spec.name,
     ]);
     const container = yield* decodeContainerId(CONTAINER_LINE.exec(events)?.[1]).pipe(
@@ -545,7 +559,14 @@ export const containersFor = (commands: RemoteCommands) => {
           }),
       ),
     );
-    const kills = Number(OOM_KILL_LINE.exec(events)?.[1] ?? 0);
+    const count = OOM_KILL_LINE.exec(events)?.[1];
+    if (count === undefined)
+      return yield* new ExecutorOperationError({
+        operation,
+        message: "The container runtime returned no OOM counter",
+        cause: new Error("missing oom_kill"),
+      });
+    const kills = Number(count);
     if (kills === 0)
       yield* Effect.logDebug("The kernel killed no process in the container", {
         ...fields,
@@ -612,7 +633,7 @@ export const containersFor = (commands: RemoteCommands) => {
 
   /**
    * Removes the containers labeled with `instance` and `instanceId` on the machine of `shell`
-   * whose Worker label is `worker` or not in `kept`. Returns the names removed.
+   * whose process label is not in `kept`. Returns the names removed.
    */
   const sweep = Effect.fn("RemoteExecutor.sweepContainers")(function* (
     shell: RemoteShell,
@@ -620,13 +641,14 @@ export const containersFor = (commands: RemoteCommands) => {
     instanceId: InstanceId,
     worker: WorkerName,
     kept: ReadonlySet<string>,
+    runtime: ContainerRuntime,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, worker, instance, instanceId });
     const listed = (yield* commands.run("cleanup", shell, "sh", [
       "-c",
       LIST_SCRIPT,
       "sh",
-      CONTAINER_RUNTIME,
+      runtime,
       `${INSTANCE_LABEL}=${instance}`,
       `${INSTANCE_ID_LABEL}=${instanceId}`,
     ]))
@@ -635,9 +657,7 @@ export const containersFor = (commands: RemoteCommands) => {
         const [name, owner = ""] = line.trim().split(" ");
         return name === undefined || name === "" ? [] : [{ name, owner }];
       });
-    const left = listed
-      .filter(({ owner }) => owner === worker || !kept.has(owner))
-      .map(({ name }) => name);
+    const left = listed.filter(({ owner }) => !kept.has(owner)).map(({ name }) => name);
     if (left.length === 0) {
       yield* Effect.logDebug("No earlier process left a container on the Worker's machine", {
         worker,
@@ -647,12 +667,7 @@ export const containersFor = (commands: RemoteCommands) => {
       });
       return left;
     }
-    yield* commands.run("cleanup", shell, CONTAINER_RUNTIME, [
-      "rm",
-      "--force",
-      "--volumes",
-      ...left,
-    ]);
+    yield* commands.run("cleanup", shell, runtime, ["rm", "--force", "--volumes", ...left]);
     yield* Effect.logInfo("Removed the containers an earlier process left on the machine", {
       worker,
       host: shell.destination,

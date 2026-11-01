@@ -1,15 +1,11 @@
+import { reclaimOnceFor } from "../remote/reclaim.ts";
 import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
-import { Cache, Effect, Redacted } from "effect";
+import { Effect, Redacted, Semaphore } from "effect";
 import { credentialEnvironment, GH_CONFIG, ghHostsConfig } from "../credential-environment.ts";
-import {
-  CredentialProvider,
-  type ExecutorError,
-  type ExecutorOperation,
-  type WorkerCredential,
-} from "../executor.ts";
+import { CredentialProvider, type ExecutorOperation, type WorkerCredential } from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import type { RemoteAccess } from "../remote/machine.ts";
 import { renewableCredential } from "../renewable-credential.ts";
@@ -34,6 +30,19 @@ mv "$3/token.next" "$3/token"
 mv "$3/hosts.next" "$3/hosts.yml"
 `.trim();
 
+const REMOVE_STALE_SCRIPT = String.raw`
+root=$1
+shift
+for directory in "$root"/*; do
+  [ -d "$directory" ] || continue
+  kept=false
+  for active in "$@"; do
+    if [ "$directory" = "$active" ]; then kept=true; break; fi
+  done
+  if [ "$kept" = false ]; then rm -rf -- "$directory" || exit 1; fi
+done
+`.trim();
+
 const credentialsRoot = (machine: SshMachine): string => `${machine.workerDirectory}/credentials`;
 
 /**
@@ -44,38 +53,44 @@ const credentialsRoot = (machine: SshMachine): string => `${machine.workerDirect
  */
 export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(function* (
   commands: RemoteCommands,
-  machineFor: (worker: WorkerName) => Effect.Effect<SshMachine, ExecutorError>,
 ) {
   const provider = yield* CredentialProvider;
+  const active = new Set<string>();
+  const membership = yield* Semaphore.make(1);
 
   const removeStale = Effect.fn("SshExecutor.removeStaleCredentials")(function* (
-    worker: WorkerName,
+    machine: SshMachine,
   ) {
-    const machine = yield* machineFor(worker);
+    const worker = machine.address.name;
     const host = machine.shell.destination;
     yield* Effect.annotateCurrentSpan({ worker, host });
-    yield* commands.run("cleanup", machine.shell, "rm", ["-rf", credentialsRoot(machine)]);
+    yield* commands.run("cleanup", machine.shell, "sh", [
+      "-c",
+      REMOVE_STALE_SCRIPT,
+      "sh",
+      credentialsRoot(machine),
+      ...active,
+    ]);
     yield* Effect.logInfo("Removed credentials an earlier process left on the SSH Worker", {
       worker,
       host,
     });
-  });
+  }, membership.withPermit);
   // A failed removal is logged and cached, not retried: the remaining tokens expire within an
   // hour and the next start removes them.
-  const reclaimed = yield* Cache.make({
-    capacity: Number.POSITIVE_INFINITY,
-    lookup: (worker: WorkerName) =>
-      removeStale(worker).pipe(
+  const reclaim = yield* reclaimOnceFor(
+    (machine: SshMachine) => `${machine.shell.destination} ${credentialsRoot(machine)}`,
+    (machine) =>
+      removeStale(machine).pipe(
         Effect.tapError((error) =>
-          Effect.logWarning("Could not remove stale credentials from the SSH Worker", {
-            worker,
+          Effect.logWarning("Could not remove stale credentials from the SSH worker", {
+            worker: machine.address.name,
             message: error.message,
           }),
         ),
         Effect.ignore,
       ),
-  });
-  const reclaim = (worker: WorkerName) => Cache.get(reclaimed, worker);
+  );
 
   const write = Effect.fn("SshExecutor.writeCredential")(
     function* (
@@ -113,6 +128,13 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
     const host = machine.shell.destination;
     yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, permissions, host });
     const directory = `${credentialsRoot(machine)}/${safeSegment(attemptId)}`;
+    yield* Effect.acquireRelease(
+      membership.withPermit(Effect.sync(() => active.add(directory))),
+      () =>
+        Effect.sync(() => {
+          active.delete(directory);
+        }),
+    );
     yield* Effect.addFinalizer(() =>
       commands.run("cleanup", machine.shell, "rm", ["-rf", directory]).pipe(
         Effect.tap(() =>

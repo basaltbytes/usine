@@ -1,7 +1,7 @@
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
-import { DateTime, Duration, Effect, Equal, Exit, Option, Result, type Scope } from "effect";
+import { DateTime, Duration, Effect, Equal, Exit, Option, Ref, Result, type Scope } from "effect";
 import {
   MachineGrant,
   MachineUnavailableError,
@@ -10,7 +10,7 @@ import {
   ExecutorOperationError,
   type WorkerCapabilityError,
 } from "../../executor.ts";
-import type { SshMachine } from "../model.ts";
+import type { SshMachine, SshWorkerAddress } from "../model.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { Held, machineHolds } from "./holds.ts";
 import type { MachineDriver } from "./model.ts";
@@ -18,6 +18,7 @@ import type { MachineDriver } from "./model.ts";
 interface ReuseOptions {
   readonly instance: string;
   readonly process: string;
+  readonly entries: Effect.Effect<ReadonlyArray<SshWorkerEntry>>;
   readonly scope: Scope.Scope;
   readonly holds: Effect.Success<typeof machineHolds>;
   readonly discard: (hold: MachineHold, reason: string) => Effect.Effect<void>;
@@ -124,6 +125,13 @@ export const machineReuseFor = (options: ReuseOptions) => {
       if (current.state !== "located" || current.uses === 0 || Option.isNone(current.machine))
         return false;
       const machine = current.machine.value;
+      if (!(yield* options.entries).some((entry) => Equal.equals(entry.address, machine.address))) {
+        yield* Effect.logInfo("Retiring the released machine after its worker connection changed", {
+          worker: current.worker,
+          machine: current.id,
+        });
+        return false;
+      }
       const policy = policyOf(machine);
       if (
         Option.isNone(policy) ||
@@ -184,5 +192,18 @@ export const machineReuseFor = (options: ReuseOptions) => {
       return true;
     }).pipe(Effect.uninterruptible),
   );
-  return { take, release };
+  const refresh = Effect.fn("SshExecutor.retireChangedIdleMachines")(function* (
+    address: SshWorkerAddress,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker: address.name });
+    for (const machine of (yield* Ref.get(holds.held)).values()) {
+      if (
+        machine.worker === address.name &&
+        !Equal.equals(machine.workerEntry.address, address) &&
+        (yield* holds.retireIdle(machine.hold))
+      )
+        yield* discard(machine.hold, "its worker connection changed while idle");
+    }
+  });
+  return { take, release, refresh };
 };

@@ -25,8 +25,8 @@ export class SshWorkers extends Context.Service<
     /**
      * Adds the machine at `address` for preflight and Attempts. Behind a Gateway, shares the admin
      * API forward with other Workers that have the same `destination` and `adminPort`, or opens it.
-     * Adding a Worker again with the same address does nothing; with a different address, fails
-     * with a `machine` capability error. The SSH executor's `addWorker` also records how to reach
+     * Adding a worker again with the same address does nothing. A different address replaces it
+     * for new work; running attempts retain their machine and gateway forward. The SSH executor's `addWorker` also records how to reach
      * a long-lived Worker's machine in `SshExecutorOptions.workerRecordsDirectory`.
      */
     readonly addWorker: (address: SshWorkerAddress) => Effect.Effect<void, WorkerCapabilityError>;
@@ -57,6 +57,7 @@ interface Machines {
   readonly byWorker: ReadonlyMap<WorkerName, SshWorkerEntry>;
   /** Keyed by Gateway destination and admin port. */
   readonly forwards: ReadonlyMap<string, HeldForward>;
+  readonly connections: ReadonlyArray<SshWorkerEntry>;
 }
 
 const forwardKey = ({ destination, adminPort }: SshWorkerGateway) =>
@@ -149,6 +150,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   const machines = yield* SynchronizedRef.make<Machines>({
     byWorker: new Map(),
     forwards: new Map(),
+    connections: [],
   });
 
   const openForward = Effect.fnUntraced(function* (settings: SshWorkerGateway) {
@@ -201,7 +203,10 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     };
   });
 
-  const addWorker = Effect.fn("SshExecutor.addWorker")(function* (address: SshWorkerAddress) {
+  const register = Effect.fn("SshExecutor.registerConnection")(function* (
+    address: SshWorkerAddress,
+    use: "Current" | "Retained",
+  ) {
     const fields = {
       worker: address.name,
       host: placeOf(address),
@@ -213,17 +218,18 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     yield* Effect.annotateCurrentSpan(fields);
     const added = yield* SynchronizedRef.modifyEffect(machines, (current) =>
       Effect.gen(function* () {
-        const existing = current.byWorker.get(address.name);
+        const existing = current.connections.find((entry) => Equal.equals(entry.address, address));
         if (existing !== undefined) {
-          if (Equal.equals(existing.address, address)) return [Option.none(), current] as const;
-          return yield* new WorkerCapabilityError({
-            worker: address.name,
-            capability: "machine",
-            message: `Can't change the settings of SSH worker "${address.name}" while its attempts run. Reload again after they end.`,
-            cause: new Error(
-              `SSH worker "${address.name}" is in use at ${placeOf(existing.address)}`,
-            ),
-          });
+          return [
+            { entry: existing, opened: Option.none<boolean>() },
+            {
+              ...current,
+              byWorker:
+                use === "Current"
+                  ? new Map(current.byWorker).set(address.name, existing)
+                  : current.byWorker,
+            },
+          ] as const;
         }
         const behind = yield* Effect.transposeOption(
           Option.map(address.gateway, (settings) => gatewayFor(current, address, settings)),
@@ -247,9 +253,13 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
               : Option.none(),
         };
         return [
-          Option.some(Option.exists(behind, ({ opened }) => opened)),
+          { entry, opened: Option.some(Option.exists(behind, ({ opened }) => opened)) },
           {
-            byWorker: new Map(current.byWorker).set(address.name, entry),
+            byWorker:
+              use === "Current"
+                ? new Map(current.byWorker).set(address.name, entry)
+                : current.byWorker,
+            connections: [...current.connections, entry],
             forwards: Option.match(behind, {
               onNone: () => current.forwards,
               onSome: ({ forwards }) => forwards,
@@ -258,7 +268,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
         ] as const;
       }).pipe(Effect.uninterruptible),
     );
-    yield* Option.match(added, {
+    yield* Option.match(added.opened, {
       onNone: () =>
         Effect.logDebug("The SSH executor has this Worker with the same settings already", fields),
       onSome: (opened) =>
@@ -271,7 +281,10 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
           fields,
         ),
     });
+    return added.entry;
   });
+
+  const addWorker = (address: SshWorkerAddress) => Effect.asVoid(register(address, "Current"));
 
   const removeWorker = Effect.fn("SshExecutor.removeWorker")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
@@ -281,42 +294,39 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       const byWorker = new Map(current.byWorker);
       byWorker.delete(worker);
       const forwards = new Map(current.forwards);
-      const left = Option.flatMap(machine.gateway, ({ settings }) => {
-        const key = forwardKey(settings);
-        const held = forwards.get(key);
-        if (held === undefined) return Option.none();
+      const released = [];
+      for (const [key, held] of forwards) {
+        if (!held.workers.has(worker)) continue;
         const workers = new Set(held.workers);
         workers.delete(worker);
-        if (workers.size === 0) forwards.delete(key);
-        else forwards.set(key, { ...held, workers });
-        return Option.some({ held, others: workers.size });
-      });
-      return [Option.some({ machine, left }), { byWorker, forwards }] as const;
+        if (workers.size === 0) {
+          forwards.delete(key);
+          released.push(held);
+        } else forwards.set(key, { ...held, workers });
+      }
+      return [
+        Option.some({ machine, released }),
+        {
+          ...current,
+          byWorker,
+          forwards,
+          connections: current.connections.filter(({ address }) => address.name !== worker),
+        },
+      ] as const;
     });
     if (Option.isNone(removed)) {
       yield* Effect.logDebug("The SSH executor has no Worker by this name to remove", { worker });
       return;
     }
-    const { machine, left } = removed.value;
-    const fields = { worker, host: placeOf(machine.address) };
-    if (Option.isNone(left)) {
-      yield* Effect.logInfo("SSH Worker removed from the executor", fields);
-      return;
-    }
-    const { held, others } = left.value;
-    const gatewayFields = { ...fields, gateway: held.forward.gateway };
-    if (others > 0) {
-      yield* Effect.logInfo(
-        "SSH Worker removed from the executor; the forward to its Gateway's admin API stays open for the other Workers behind it",
-        { ...gatewayFields, others },
-      );
-      return;
-    }
-    yield* Scope.close(held.scope, Exit.void);
-    yield* Effect.logInfo(
-      "SSH Worker removed from the executor; it was the last behind its Gateway, so the forward to the Gateway's admin API closed",
-      gatewayFields,
-    );
+    const { machine, released } = removed.value;
+    yield* Effect.forEach(released, ({ scope }) => Scope.close(scope, Exit.void), {
+      discard: true,
+    });
+    yield* Effect.logInfo("SSH Worker removed from the executor; unused Gateway forwards closed", {
+      worker,
+      host: placeOf(machine.address),
+      forwardsClosed: released.length,
+    });
   });
 
   const workerFor = Effect.fn("SshExecutor.workerFor")(function* (worker: WorkerName) {
@@ -364,6 +374,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   return {
     machineFor,
     workerFor,
+    entryFor: (address: SshWorkerAddress) => register(address, "Retained"),
     machineAt,
     entries: SynchronizedRef.get(machines).pipe(
       Effect.map(({ byWorker }) => [...byWorker.values()]),

@@ -1,3 +1,4 @@
+import { workerConnectionsFor } from "./connections.ts";
 import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
@@ -13,14 +14,13 @@ import {
   layer as cloudflareExecutorLayer,
 } from "@usine/executor/cloudflare";
 import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
-import { Config, ConfigProvider, Effect, Layer } from "effect";
+import { Config, ConfigProvider, Effect, Equal, Layer } from "effect";
 import { externalHttpClientLayer } from "./http-client.ts";
 import {
   stepExecutorLayer,
   type StepExecutorOptions,
   type WorkerRemoval,
 } from "./scheduler/scheduler.ts";
-import { workersChange } from "./current-instance/changes.ts";
 import { withSshWorkerDiscard } from "./ssh.ts";
 
 /** Returns the Cloudflare Workers that `usine.yaml` declares, in declared order. */
@@ -72,7 +72,7 @@ export const cloudflareWorkerAddressesOf = Effect.fn("Orchestrator.cloudflareWor
 
 /**
  * Provides the full engine and `WorkerStatus` for Cloudflare Workers. The executor reads its
- * workers' secrets when a revision adds a worker; existing clients remain unchanged.
+ * workers' secrets when a revision adds or changes a worker. Attempts retain their original client.
  * Requires `CredentialProvider`, `GitHubApp`, `TriggerCondition`, `AttemptRuntime` (built before
  * the engine), `ClaudeLoginLock`, and `CurrentInstance`.
  */
@@ -82,30 +82,55 @@ export const layer = (
   brains: ReadonlyArray<BrainSpec>,
   options: CloudflareExecutorOptions,
   database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
-) => {
-  const executor = cloudflareExecutorLayer(options).pipe(
-    Layer.provide(NodeServices.layer),
-    Layer.provide(externalHttpClientLayer),
-  );
-  const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
-    cloudflareStepExecutorLayer(config, brains, {
-      discard,
-      initializedWorkers: options.workers.map(({ name }) => name),
+) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const connections = yield* workerConnectionsFor(
+        `${instanceDirectory}/.usine/attempt-connections`,
+        (worker) =>
+          worker.kind === "cloudflare"
+            ? cloudflareWorkerAddressOf(worker)
+            : Effect.fail(
+                new WorkerCapabilityError({
+                  worker: worker.name,
+                  capability: "machine",
+                  message: "The recorded worker connection is not Cloudflare",
+                  cause: worker.kind,
+                }),
+              ),
+        options.workers.flatMap((address) =>
+          config.workers
+            .filter(({ name }) => name === address.name)
+            .map((worker) => ({ worker, address })),
+        ),
+      );
+      const executor = cloudflareExecutorLayer({
+        ...options,
+        attemptConnections: connections.store,
+      }).pipe(Layer.provide(NodeServices.layer), Layer.provide(externalHttpClientLayer));
+      const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
+        cloudflareStepExecutorLayer(config, brains, {
+          discard,
+          resolveAddress: connections.resolve,
+          initializedWorkers: options.workers.map(({ name }) => name),
+        }),
+      ).pipe(Layer.provide(executor));
+      return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
     }),
-  ).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
-};
+  ).pipe(Layer.provide(NodeServices.layer));
 
 /**
- * Resolves credentials and registers a client once for each added Cloudflare worker. A worker
- * that the scheduler accepted keeps its client for the life of the process; a worker whose
- * addition was refused before any acceptance loses its client, so a corrected revision can add it.
+ * Registers the current connection after resolving credentials. Existing attempts keep their
+ * client when a revision replaces the connection. Refused additions release their registration.
  */
 export const cloudflareStepExecutorLayer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
   options: Pick<StepExecutorOptions, "discard"> & {
     readonly initializedWorkers?: ReadonlyArray<WorkerName>;
+    readonly resolveAddress?: (
+      worker: CloudflareWorker,
+    ) => Effect.Effect<CloudflareWorkerAddress, WorkerCapabilityError>;
   } = {},
 ) =>
   Layer.unwrap(
@@ -122,31 +147,15 @@ export const cloudflareStepExecutorLayer = (
         if (worker.kind !== "cloudflare")
           return yield* Effect.die(new Error(`Unexpected worker kind ${worker.kind}`));
         const previous = initialized.get(worker.name);
-        if (previous !== undefined) {
-          const { restart } = workersChange([previous], [worker]);
-          if (restart.length > 0) {
-            yield* Effect.logWarning(
-              "Refused a changed Cloudflare connection already initialized",
-              {
-                worker: worker.name,
-                fields: restart.map(({ field }) => field),
-              },
-            );
-            return yield* new WorkerCapabilityError({
-              worker: worker.name,
-              capability: "machine",
-              message: `Restart the orchestrator to change the connection of Cloudflare worker "${worker.name}"; retained attempts keep their machine`,
-              cause: restart,
-            });
-          }
+        if (previous !== undefined && Equal.equals(previous, worker)) {
           yield* Effect.logDebug("Cloudflare worker credentials are already initialized", {
             worker: worker.name,
           });
           return;
         }
-        const address = yield* cloudflareWorkerAddressOf(worker).pipe(
-          Effect.provideService(ConfigProvider.ConfigProvider, environment),
-        );
+        const address = yield* (
+          options.resolveAddress?.(worker) ?? cloudflareWorkerAddressOf(worker)
+        ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, environment));
         yield* workers.addWorker(address);
         initialized.set(worker.name, worker);
       });

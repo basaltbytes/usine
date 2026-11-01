@@ -1,3 +1,4 @@
+import type { AttemptConnections } from "../attempt-connections.ts";
 import type { SshCommand } from "@usine/agents/child-host";
 import type {
   CloudflareImageName,
@@ -28,6 +29,8 @@ export interface CloudflareWorkerAddress {
 
 export interface CloudflareExecutorOptions {
   readonly workers: ReadonlyArray<CloudflareWorkerAddress>;
+  /** Restores attempt connections after a restart. Omit for an in-memory executor. */
+  readonly attemptConnections?: AttemptConnections<CloudflareWorkerAddress>;
   /**
    * The identity of this usine instance, in kebab case, such as `github-app-123`. It's part of
    * each sandbox's owner and name, so that orphan cleanup removes only this instance's sandboxes

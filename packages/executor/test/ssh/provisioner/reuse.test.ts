@@ -43,10 +43,25 @@ for (const address of [hetznerAddress, boatAddress]) {
   assert(address.machine._tag === "Provisioned");
   const provider = address.machine.provisioner.provider;
   describe(`${provider} machine reuse`, () => {
-    it.live(
-      "reuses only a released machine, updates its attempt identity, and retires it at the attempt limit",
-      () => {
+    it.live.each(["docker", "podman"])(
+      "reuses only a released %s machine, updates its attempt identity, and retires it at the attempt limit",
+      (containerRuntime) => {
         const machine = machineFixture();
+        if (containerRuntime === "podman") {
+          machine.state.docker = "absent";
+          machine.state.podmanInfo = JSON.stringify({
+            version: { Version: "5.4.2" },
+            host: {
+              security: { rootless: true },
+              serviceIsRemote: false,
+              cgroupVersion: "v2",
+              cgroupManager: "systemd",
+              cgroupControllers: ["cpu", "memory", "pids"],
+              kernel: "6.12.43+deb13-amd64",
+              ociRuntime: { name: "crun", version: "crun version 1.21" },
+            },
+          });
+        }
         const providers = fakeProviders();
         return Effect.gen(function* () {
           const machines = yield* WorkerMachines;
@@ -167,23 +182,33 @@ it.live("retires a reused machine when preflight fails and retries on a fresh on
   );
 });
 
-it.live("retires idle machines before a worker's connection is replaced", () => {
-  const machine = machineFixture();
-  const providers = fakeProviders();
-  const address = reuseAddress(hetznerAddress);
-  return Effect.gen(function* () {
-    const machines = yield* WorkerMachines;
-    const workers = yield* SshWorkers;
-    const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
-    yield* machines.release(first.hold);
-    yield* workers.removeWorker(WORKER);
-    assert.strictEqual(providers.hetzner.servers.size, 0);
-    yield* workers.addWorker({ ...address, root: WorkerRoot.make("/replacement") });
-    const next = yield* machines.create(WORKER, RUN, second, []);
-    assert.notEqual(next.id, first.id);
-    yield* machines.release(next.hold);
-  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
-});
+for (const transition of ["removed", "idle revision", "active revision"] as const) {
+  it.live(`retires reused machines on a connection change (${transition})`, () => {
+    const machine = machineFixture();
+    const providers = fakeProviders();
+    const address = reuseAddress(hetznerAddress);
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const workers = yield* SshWorkers;
+      const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+      if (transition !== "active revision") yield* machines.release(first.hold);
+      if (transition === "removed") yield* workers.removeWorker(WORKER);
+      yield* workers.addWorker({ ...address, root: WorkerRoot.make("/replacement") });
+      if (transition === "active revision") {
+        assert.strictEqual(
+          providers.hetzner.servers.size,
+          1,
+          "the active attempt keeps its machine",
+        );
+        yield* machines.release(first.hold);
+      }
+      assert.strictEqual(providers.hetzner.servers.size, 0);
+      const next = yield* machines.create(WORKER, RUN, second, []);
+      assert.notEqual(next.id, first.id);
+      yield* machines.release(next.hold);
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
+  });
+}
 
 it.live("preserves machine-start counts across executor restarts and deletion", () => {
   const machine = machineFixture();

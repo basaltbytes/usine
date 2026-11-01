@@ -17,6 +17,9 @@ if [ "$1" = volume ]; then
   mkdir -p "$STORE"
   exit 0
 fi
+if [ "$RUNTIME_NAME" = podman ]; then
+  case " $* " in *" --userns=keep-id "*) ;; *) echo missing-keep-id >&2; exit 1 ;; esac
+fi
 while [ "$1" != --entrypoint ]; do shift; done
 shift
 entrypoint=$1
@@ -26,15 +29,17 @@ exec "$entrypoint" "$@"
 
 it.each(
   ["usine-pnpm-store", "usine-turbo-cache"].flatMap((volume) =>
-    ["1000", "2345"].map((imageUid) => ({ volume, imageUid })),
+    ["1000", "2345"].flatMap((imageUid) =>
+      ["docker", "podman"].map((runtimeName) => ({ volume, imageUid, runtimeName })),
+    ),
   ),
 )(
-  "initializes and reuses $volume for image UID $imageUid without changing another owner",
-  async ({ volume, imageUid }) => {
+  "initializes and reuses $volume with $runtimeName for image UID $imageUid without changing another owner",
+  async ({ volume, imageUid, runtimeName }) => {
     const directory = await mkdtemp("/tmp/usine-shared-cache-");
     onTestFinished(() => rm(directory, { recursive: true, force: true }));
     const store = join(directory, "store");
-    const docker = join(directory, "docker");
+    const docker = join(directory, runtimeName);
     await writeFile(docker, runtime, { mode: 0o755 });
     await writeFile(
       join(directory, "id"),
@@ -55,10 +60,11 @@ it.each(
       { mode: 0o755 },
     );
     const prepare = (uid = imageUid, failStage = "none") =>
-      run("sh", ["-c", PREPARE_CACHE_SCRIPT, "sh", docker, "image", volume, "mount", store], {
+      run("sh", ["-c", PREPARE_CACHE_SCRIPT, "sh", runtimeName, "image", volume, "mount", store], {
         env: {
           PATH: `${directory}:${process.env.PATH}`,
           STORE: store,
+          RUNTIME_NAME: runtimeName,
           IMAGE_UID: uid,
           OWNER_FILE: ownerFile,
           FAIL_STAGE: failStage,
@@ -73,10 +79,10 @@ it.each(
     await mkdir(join(store, "v11"));
     await writeFile(join(store, "v11", "package"), "cached package");
     await Promise.all([prepare(), prepare()]);
-    await assert.rejects(prepare("7001"), new RegExp(`docker volume rm ${volume}`, "u"));
+    await assert.rejects(prepare("7001"), new RegExp(`${runtimeName} volume rm ${volume}`, "u"));
     assert.strictEqual((await readFile(ownerFile, "utf8")).trim(), imageUid);
     await writeFile(ownerFile, "0");
-    await assert.rejects(prepare(), new RegExp(`docker volume rm ${volume}`, "u"));
+    await assert.rejects(prepare(), new RegExp(`${runtimeName} volume rm ${volume}`, "u"));
     assert.strictEqual(await readFile(join(store, "v11", "package"), "utf8"), "cached package");
   },
 );
