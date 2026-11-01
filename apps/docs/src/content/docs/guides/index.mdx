@@ -18,31 +18,31 @@ You need:
 - The harnesses that your agents use, logged in on the machine that runs the child sessions: Claude Code with a Claude subscription, or Codex CLI 0.164.0 (or 0.159.0 through 0.159.3 for one release) with a ChatGPT login. With the default local worker, this is the orchestrator machine and the user who runs `usine up`.
 - A model credential in Pi's configuration for the Pi parent of each attempt. See [Pi parent](/guides/write-an-agent/#pi-parent).
 
-## Install usine
-
-Install the CLI and web UI from npm:
-
-```sh title="Orchestrator machine"
-npm install --global @usine/server
-```
-
-The package provides the `usine` command. To update it, run `npm install --global @usine/server@latest`, then run `usine restart` from the instance folder when no attempt is running. For a systemd installation, see [Server upgrades](/guides/run-the-orchestrator-on-a-server/#upgrade-the-server).
-
 ## Create the instance folder
 
-Create an empty folder and start usine there:
+Create a runtime folder and install the CLI and web UI from npm:
 
-```sh
-mkdir -p ~/my-factory
+```sh title="Orchestrator machine"
+npm create usine@latest ~/my-factory
 cd ~/my-factory
-usine up
+npm run usine -- up
 ```
+
+With pnpm, run `pnpm create usine ~/my-factory`, then `cd ~/my-factory` and `pnpm usine up`.
+
+Choose a new or empty folder on persistent storage. The scaffold pins `@usine/server` to an exact release in `package.json` and installs it with npm or pnpm, which writes the lockfile. It also writes `.gitignore` and a commented `.env` template with optional environment overrides. If installation fails, run `npm install` or `pnpm install` in the folder to retry.
+
+Commands below use the short name `usine`. For this local installation, replace it with `npm run usine --` or `pnpm usine`; for example, `npm run usine -- sign-in-link`.
 
 The first start saves an empty configuration revision in the database. Use the web UI to add repositories, projects, agents, and loops. Existing instance folders with `usine.yaml` import their configuration on the first start; later starts read the database. [`usine config import` and `export`](/reference/configuration/config/) support file-based configuration transfers.
 
 <FileTree>
 
 - my-factory/
+  - package.json exact server version and local CLI script
+  - package-lock.json installed dependency versions (pnpm-lock.yaml with pnpm)
+  - .gitignore runtime data and secrets
+  - node_modules/ local installation
   - .env optional environment overrides
   - .usine/ runtime state and secrets
     - runtime.sqlite configuration, revisions, and runs
@@ -53,6 +53,8 @@ The first start saves an empty configuration revision in the database. Use the w
 </FileTree>
 
 Keep `.usine/` and `.env` out of git and include them in your instance backups.
+
+For a systemd installation, see [Run the orchestrator on a server](/guides/run-the-orchestrator-on-a-server/). Its service uses a global installation; for a local installation, set the service's `WorkingDirectory` to the instance folder and `ExecStart` to the absolute path of `node_modules/.bin/usine up`. Keep the instance folder available at boot.
 
 ## Connect a GitHub App
 
