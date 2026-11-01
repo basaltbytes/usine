@@ -35,6 +35,14 @@ Durable storage opens and resumes its tasks before the engine reconciles worktre
 
 `usine backup <path>` also copies the durable storage (`<name>.durable<ext>`) the same way. The copies aren't one snapshot, so the durable storage goes first: every attempt the newer runtime copy shows open either has its task in the durable copy or fails as interrupted and is retried. Restore both files from the same backup.
 
+## Amendment (2026-11-01, #814): managed upgrade rollback restores both databases
+
+Before stopping the server or replacing its package, the systemd upgrade helper runs the installed version's `usine backup` command into a private `.usine/upgrade/backup.*` directory. This reuses the online SQLite backup APIs and includes committed WAL data. A failed backup aborts the upgrade without stopping the server or changing packages.
+
+If installation or the target's health check fails, the helper stops the service, restores the previous package and both databases, removes the target's WAL and SHM files, and checks the previous version's API. A database absent before the upgrade remains absent after rollback. Copies are staged before replacing either database, and a failed restore prevents restart. Backups remain available for manual recovery. Failed recovery stops the service and records a failure instead of allowing automatic restarts against incompatible data. Each API health check has a deadline of 180 elapsed seconds, including request and retry delays.
+
+Database restoration is required because startup migrations can change stored schemas and values as well as add configuration entity kinds. Ignoring unknown kinds for a release would cover only additive kind changes and could omit configuration required by other records. Restoring the data with the package gives the previous version the storage format it read before the upgrade. This follows the existing backup ordering and restore rules; the two online copies remain separate snapshots.
+
 ## Amendment (2026-10-11, #176): the cluster tables are removed
 
 A migration drops `usine_workflow_commands` and Effect's `cluster_messages`, `cluster_replies`, and `cluster_migrations` with the Effect workflow (ADR 0003 amendment of the same date), leaving only usine's tables; pi-durable's storage is the second file.
