@@ -94,7 +94,7 @@ cloud-init sets up the server from `infra/hetzner/orchestrator-cloud-init.yaml`:
 - Node.js from NodeSource, at the major version of the attempt image, and `@usine/server` installed with `npm install --global` in `/home/usine/.local`, whose `bin` folder is on `usine`'s `PATH` in a login shell.
 - Tailscale from its apt repository, with the signing key that the gateway pins, and chrony, with the gateway as its preferred time source.
 - The nftables rules of `infra/hetzner/orchestrator-nftables.conf`. They accept new connections only to SSH from `tailscale0`, and forward nothing. cloud-init doesn't enable them, because they refuse SSH through the gateway, the only path to the server until `orchestrator-tailnet-up` logs it in to the tailnet.
-- The `usine.service` unit, which runs `/home/usine/.local/bin/usine up` as `usine` in the instance folder `/home/usine/factory`. Its systemd unit starts at boot once the bootstrap `usine.yaml` exists; retain that file for the unit condition even after import.
+- The `usine.service` unit, which runs `/home/usine/.local/bin/usine up` as `usine` in the instance folder `/home/usine/factory`. Its systemd unit starts at boot once the instance folder exists.
 - A polkit rule that lets `usine` start, stop, and restart `usine.service`, which `usine stop`, `usine restart`, and `usine upgrade` do.
 
 ## Set up the usine user's SSH access
@@ -132,7 +132,7 @@ Provisioned workers behind the gateway need no entry: the executor jumps through
    chmod 600 .env
    ```
 
-3. Start `usine up` once in the foreground. For a new instance, this imports the bootstrap files as revision 1; an existing database retains its configuration. Later starts ignore the original configuration files. Make later changes with `usine config edit <kind> <name>` or `usine config import <folder> --message <text>`. After checking startup, stop it with Ctrl+C:
+3. Start `usine up` once in the foreground. For a new instance, this creates an empty configuration revision and opens setup mode; an existing database retains its configuration. Later starts ignore the original configuration files. Make later changes with `usine config edit <kind> <name>` or `usine config import <folder> --message <text>`. After checking startup, stop it with Ctrl+C:
 
    ```sh title="/home/usine/factory"
    usine up
