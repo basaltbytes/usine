@@ -16,15 +16,15 @@ allowBuilds:
 catalog:
   "@changesets/cli": 3.0.3
   "@effect/language-service": 0.87.5
-  "@effect/platform-node": 4.0.6
-  "@effect/platform-node-shared": 4.0.6
-  "@effect/sql-sqlite-node": 4.0.6
-  "@effect/vitest": 4.0.6
+  "@effect/platform-node": 4.1.0
+  "@effect/platform-node-shared": 4.1.0
+  "@effect/sql-sqlite-node": 4.1.0
+  "@effect/vitest": 4.1.0
   "@oxlint/plugins": 1.90.0
   "@vitest/browser-playwright": 5.0.5
   drizzle-kit: 1.0.0-rc.5
   drizzle-orm: 1.0.0-rc.5
-  effect: 4.0.6
+  effect: 4.1.0
   knip: 6.43.0
   oxfmt: 0.75.0
   oxlint: 1.90.0
