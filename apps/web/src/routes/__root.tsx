@@ -1,4 +1,5 @@
-import { PermissionsContext, sessionQuery } from "~/lib/permissions";
+import { MemberShell } from "~/components/member-shell";
+import { sessionQuery } from "~/lib/permissions";
 import { CommandPalette } from "~/components/command-palette/palette";
 import { PageCommandsProvider, PageCommandsScope } from "~/components/command-palette/context";
 import { RefreshProvider } from "~/components/refresh/provider";
@@ -169,7 +170,6 @@ const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
 };
 
 const Shell = () => {
-  const { data: session } = useSuspenseQuery(sessionQuery());
   const { data } = useSuspenseQuery(overviewQuery());
   const { run } = Route.useSearch();
   // Plain useNavigate resolves "." against the current route; Route.useNavigate would pin it to "/".
@@ -190,81 +190,79 @@ const Shell = () => {
   if (run !== undefined && run !== shownRun) setShownRun(run);
   const live = data._tag !== "NeedsSetup";
   return (
-    <PermissionsContext.Provider value={session.permissions}>
-      <SidebarProvider>
-        <AppSidebar
-          projects={data.projects}
-          view={view}
-          project={project === undefined ? undefined : projectId(project)}
-          needsYou={needsYouByProject(data.needsYou, data.projects)}
-          needsYouTotal={data.needsYou.length}
-          runningTotal={
-            new Set(
-              data.projects.flatMap(({ runs }) =>
-                runs.filter(({ state }) => state === "Running").map(({ id }) => id),
-              ),
-            ).size
-          }
-          live={live}
-        />
-        <SidebarInset className="h-svh min-w-0 overflow-hidden">
-          <PageCommandsProvider>
-            <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
-              <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
-              <Breadcrumb className="min-w-0 flex-1">
-                <BreadcrumbList>
-                  <Crumbs
-                    view={view}
-                    project={project}
-                    runId={params.run === undefined ? undefined : RunId.make(params.run)}
-                    task={
-                      project === undefined || params.number === undefined
-                        ? undefined
-                        : taskCrumb(data, repository ?? project.repository, params.number)
-                    }
-                  />
-                </BreadcrumbList>
-              </Breadcrumb>
-              <CommandPalette overview={data} />
-              <NotificationTray needs={data.needsYou} />
-            </header>
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-              {data._tag === "NeedsSetup" && (
-                <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
-                  <WarningIcon weight="fill" className="text-needs-you" />
-                  <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
-                  <AlertDescription className="max-w-prose">
-                    <p>
-                      <a href="/setup" className="underline underline-offset-4">
-                        Finish GitHub App setup
-                      </a>{" "}
-                      to connect this instance.
-                    </p>
-                  </AlertDescription>
-                </Alert>
-              )}
-              <PageCommandsScope active={run === undefined}>
-                <RefreshProvider>
-                  <Outlet />
-                </RefreshProvider>
-              </PageCommandsScope>
-            </div>
-            <PageCommandsScope active={run !== undefined}>
-              {shownRun !== undefined && (
-                <Suspense fallback={null}>
-                  <RunDrawer
-                    key={shownRun}
-                    runId={shownRun}
-                    open={run !== undefined}
-                    close={closeRun}
-                  />
-                </Suspense>
-              )}
+    <SidebarProvider>
+      <AppSidebar
+        projects={data.projects}
+        view={view}
+        project={project === undefined ? undefined : projectId(project)}
+        needsYou={needsYouByProject(data.needsYou, data.projects)}
+        needsYouTotal={data.needsYou.length}
+        runningTotal={
+          new Set(
+            data.projects.flatMap(({ runs }) =>
+              runs.filter(({ state }) => state === "Running").map(({ id }) => id),
+            ),
+          ).size
+        }
+        live={live}
+      />
+      <SidebarInset className="h-svh min-w-0 overflow-hidden">
+        <PageCommandsProvider>
+          <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
+            <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
+            <Breadcrumb className="min-w-0 flex-1">
+              <BreadcrumbList>
+                <Crumbs
+                  view={view}
+                  project={project}
+                  runId={params.run === undefined ? undefined : RunId.make(params.run)}
+                  task={
+                    project === undefined || params.number === undefined
+                      ? undefined
+                      : taskCrumb(data, repository ?? project.repository, params.number)
+                  }
+                />
+              </BreadcrumbList>
+            </Breadcrumb>
+            <CommandPalette overview={data} />
+            <NotificationTray needs={data.needsYou} />
+          </header>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {data._tag === "NeedsSetup" && (
+              <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
+                <WarningIcon weight="fill" className="text-needs-you" />
+                <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
+                <AlertDescription className="max-w-prose">
+                  <p>
+                    <a href="/setup" className="underline underline-offset-4">
+                      Finish GitHub App setup
+                    </a>{" "}
+                    to connect this instance.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+            <PageCommandsScope active={run === undefined}>
+              <RefreshProvider>
+                <Outlet />
+              </RefreshProvider>
             </PageCommandsScope>
-          </PageCommandsProvider>
-        </SidebarInset>
-      </SidebarProvider>
-    </PermissionsContext.Provider>
+          </div>
+          <PageCommandsScope active={run !== undefined}>
+            {shownRun !== undefined && (
+              <Suspense fallback={null}>
+                <RunDrawer
+                  key={shownRun}
+                  runId={shownRun}
+                  open={run !== undefined}
+                  close={closeRun}
+                />
+              </Suspense>
+            )}
+          </PageCommandsScope>
+        </PageCommandsProvider>
+      </SidebarInset>
+    </SidebarProvider>
   );
 };
 
@@ -273,7 +271,9 @@ const Root = () => {
   return matchRoute({ to: "/sign-in" }) !== false || matchRoute({ to: "/setup" }) !== false ? (
     <Outlet />
   ) : (
-    <Shell />
+    <MemberShell>
+      <Shell />
+    </MemberShell>
   );
 };
 
@@ -282,9 +282,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   loaderDeps: ({ search }) => ({ run: search.run }),
   loader: async ({ context: { queryClient }, deps: { run }, location }) => {
     if (location.pathname === "/sign-in" || location.pathname === "/setup") return;
+    const session = await queryClient.ensureQueryData(sessionQuery());
+    if (session.permissions.length === 0) return;
     await Promise.all([
       queryClient.ensureQueryData(overviewQuery()),
-      queryClient.ensureQueryData(sessionQuery()),
       // A rejected drawer query is displayed inside the drawer.
       Promise.allSettled(
         run === undefined ? [] : [queryClient.ensureQueryData(runDetailQuery(queryClient, run))],

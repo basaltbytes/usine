@@ -24,7 +24,7 @@ export const authRequest = async <A, I>(
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
   const response = await fetch(path, init);
-  if (response.status === 401 && !path.startsWith("/api/auth/"))
+  if (response.status === 401 && (path === "/api/auth/session" || !path.startsWith("/api/auth/")))
     window.location.replace("/sign-in");
   const value: unknown = await response.json();
   if (!response.ok) throw new Error(Schema.decodeUnknownSync(Failure)(value).message);

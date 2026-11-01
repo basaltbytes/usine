@@ -1,3 +1,6 @@
+import { WorkerStatus } from "../../src/worker-status.ts";
+import { MachineStarts } from "@usine/executor";
+import { WorkerName } from "@usine/core/worker";
 import { assert, it } from "@effect/vitest";
 import { RequestPermissions, RoleBinding, ProjectScope, GitHubUserId } from "@usine/core/access";
 import { ProjectId } from "@usine/core/project";
@@ -97,12 +100,15 @@ it.effect("isolates project statistics from cached admin results and hides worke
     });
     yield* OperatorStatistics.use(({ runStatistics }) =>
       Effect.gen(function* () {
-        assert.equal((yield* runStatistics(loaded, "all")).runs.succeeded, 2);
+        const admin = yield* runStatistics(loaded, "all");
+        assert.equal(admin.runs.succeeded, 2);
+        assert.equal(admin.machineStarts[0]?.count, 3);
         const scoped = yield* runStatistics(loaded, "all").pipe(
           Effect.provideService(RequestPermissions, grants),
         );
         assert.equal(scoped.runs.succeeded, 1);
         assert.deepEqual(scoped.utilization, []);
+        assert.deepEqual(scoped.machineStarts, []);
         assert.equal(
           (yield* runStatistics(loaded, "all").pipe(Effect.provideService(RequestPermissions, [])))
             .runs.succeeded,
@@ -113,6 +119,18 @@ it.effect("isolates project statistics from cached admin results and hides worke
     ).pipe(
       Effect.provide(
         OperatorStatistics.layer.pipe(
+          Layer.provide(
+            Layer.mock(WorkerStatus)({
+              machineStarts: Effect.succeed([
+                new MachineStarts({
+                  worker: WorkerName.make("worker"),
+                  provider: "boat",
+                  day: DateTime.formatIso(yield* DateTime.now).slice(0, 10),
+                  count: 3,
+                }),
+              ]),
+            }),
+          ),
           Layer.provide(configurationLayer),
           Layer.provide(RunUsageReader.layer),
           Layer.provide(reader),

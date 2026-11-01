@@ -543,7 +543,7 @@ export const stepExecutorLayer = (
               onSome: (held) =>
                 machines === undefined
                   ? Effect.void
-                  : Effect.logDebug("Deleting the machine of the released slot", {
+                  : Effect.logDebug("Releasing the machine of the released slot", {
                       worker,
                       hold: held,
                     }).pipe(Effect.andThen(machines.release(held))),
@@ -980,6 +980,7 @@ export const stepExecutorLayer = (
           ),
         unavailable: preflight.unavailable,
         machines: machines === undefined ? Effect.succeed([]) : machines.machines,
+        machineStarts: machines === undefined ? Effect.succeed([]) : machines.starts,
         provisioning: Effect.gen(function* () {
           const waiting = yield* Effect.forEach(
             [...(yield* Ref.get(runMachines))],

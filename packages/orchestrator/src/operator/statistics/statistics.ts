@@ -1,5 +1,6 @@
 import { RequestPermissions, permits, InstanceScope } from "@usine/core/access";
 import { visibleInstance } from "../access.ts";
+import { WorkerStatus } from "../../worker-status.ts";
 import { ConfigurationStore, type ConfigurationStoreError } from "@usine/config/configuration";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { ItemKey } from "@usine/core/item";
@@ -18,7 +19,7 @@ import { cacheStatistics } from "./cache.ts";
 import { readWorkerCapacity } from "./workers.ts";
 import { runStatisticsView } from "./runs.ts";
 import { type MergedTask, taskStatisticsView } from "./tasks.ts";
-import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./view.ts";
+import { RunStatisticsView, type StatisticsView, type StatisticsWindow } from "./view.ts";
 import { sum, windowStart } from "./window.ts";
 
 /** The number of newest Items per repository searched for merged pull requests, as on a Board. */
@@ -30,6 +31,7 @@ const decodeMergedAt = Schema.decodeUnknownOption(
 
 const makeStatistics = Effect.gen(function* () {
   const reader = yield* RunReader;
+  const workerStatus = yield* WorkerStatus;
   const configuration = yield* ConfigurationStore;
   const itemReader = yield* ItemProjectionReader;
   const usageReader = yield* RunUsageReader;
@@ -194,7 +196,13 @@ const makeStatistics = Effect.gen(function* () {
       closedRuns: closed.length,
       openRuns: open.length,
     });
-    return view;
+    return new RunStatisticsView({
+      ...view,
+      machineStarts: (admin ? yield* workerStatus.machineStarts : []).filter(
+        ({ day }) =>
+          (window === "all" || day >= view.from.slice(0, 10)) && day <= view.to.slice(0, 10),
+      ),
+    });
   });
 
   const cachedStatistics = cacheStatistics(reader.revision, statistics);

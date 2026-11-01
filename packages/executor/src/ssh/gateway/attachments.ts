@@ -75,6 +75,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     worker: WorkerName,
   ) => Effect.Effect<{ readonly gateway: Option.Option<MachineGateway> }, ExecutorError>,
   holdCodexHome: CodexHomes["hold"],
+  onDetachFailure: (machine: SshMachine) => Effect.Effect<void>,
 ) {
   const provider = yield* CredentialProvider;
 
@@ -184,7 +185,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
                   Effect.logWarning(
                     "Could not detach the Attempt's token from the Gateway; the attachment expires with the token",
                     { ...fields, attachment: id, message: error.message },
-                  ),
+                  ).pipe(Effect.andThen(onDetachFailure(machine))),
                 ),
                 Effect.ignore,
               ),

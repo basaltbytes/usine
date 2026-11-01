@@ -31,6 +31,7 @@ it.effect("reports a Boat paid-plan size refusal as quota after successful prefl
         run: RunId.make("run"),
         process: "test",
         attempt: AttemptId.make("run/execute/1"),
+        attempts: 1,
       })
       .pipe(Effect.flip);
     assert(failure._tag === "MachineUnavailableError");
@@ -75,6 +76,7 @@ it.effect(
             run: RunId.make("run"),
             process: "test",
             attempt: AttemptId.make("run/execute/1"),
+            attempts: 1,
           })
           .pipe(Effect.flip);
         assert(failure._tag === "MachineUnavailableError");

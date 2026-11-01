@@ -1,3 +1,6 @@
+import { issue, mergedPullRequest } from "./statistics/fixtures.ts";
+import { MachineStarts } from "@usine/executor";
+import { WorkerStatus } from "../src/worker-status.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
@@ -46,8 +49,8 @@ import { ItemNumber } from "@usine/core/item";
 import {
   ItemContentHash,
   ItemProjection,
-  ItemProjectionReader,
   ItemProjectionSource,
+  ItemProjectionReader,
 } from "@usine/engine/item-projection";
 import { RunReader } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
@@ -776,78 +779,6 @@ describe("Run statistics", () => {
   });
 });
 
-const issue = (number: number, pullRequests: ReadonlyArray<number>) =>
-  new ItemProjection({
-    itemKey: gitHubItemKey(repository, number),
-    repository,
-    source: ItemProjectionSource.make("issue"),
-    number: ItemNumber.make(number),
-    contentHash: ItemContentHash.make(`issue-${number}`),
-    payload: {
-      number,
-      title: `Issue ${number}`,
-      body: "",
-      url: `https://github.com/basaltbytes/usine/issues/${number}`,
-      state: "CLOSED",
-      stateReason: null,
-      createdAt: "2026-10-19T10:00:00Z",
-      updatedAt: "2026-10-22T08:00:00Z",
-      closedAt: "2026-10-22T08:00:00Z",
-      author: { login: "PhilDL" },
-      issueType: null,
-      milestone: null,
-      labels: { totalCount: 0, nodes: [] },
-      assignees: { totalCount: 0, nodes: [] },
-      comments: { totalCount: 0, nodes: [] },
-      closedByPullRequestsReferences: {
-        totalCount: pullRequests.length,
-        nodes: pullRequests.map((pr) => ({
-          number: pr,
-          state: "MERGED",
-          isDraft: false,
-          url: `https://github.com/basaltbytes/usine/pull/${pr}`,
-        })),
-      },
-    },
-  });
-const mergedPullRequest = (number: number, mergedAt: string) =>
-  new ItemProjection({
-    itemKey: gitHubItemKey(repository, number),
-    repository,
-    source: ItemProjectionSource.make("pr"),
-    number: ItemNumber.make(number),
-    contentHash: ItemContentHash.make(`pr-${number}`),
-    payload: {
-      number,
-      title: `Pull request ${number}`,
-      body: "",
-      url: `https://github.com/basaltbytes/usine/pull/${number}`,
-      state: "MERGED",
-      isDraft: false,
-      merged: true,
-      createdAt: "2026-10-20T09:00:00Z",
-      updatedAt: mergedAt,
-      mergedAt,
-      author: { login: "usine-bot" },
-      baseRefName: "main",
-      headRefName: `fix/${number}`,
-      headRefOid: "410607d",
-      additions: 1,
-      deletions: 1,
-      changedFiles: 1,
-      reviewDecision: null,
-      mergeable: "UNKNOWN",
-      mergeStateStatus: "UNKNOWN",
-      statusCheckRollup: null,
-      labels: { totalCount: 0, nodes: [] },
-      reviewRequests: { totalCount: 0, nodes: [] },
-      reviews: { totalCount: 0, nodes: [] },
-      reviewThreads: { totalCount: 0, nodes: [] },
-      comments: { totalCount: 0, nodes: [] },
-      closingIssuesReferences: { totalCount: 0, nodes: [] },
-    },
-  });
-
 const tokenReport = (attempt: string, tokens: number, usd: number) =>
   new TranscriptEntry({
     sequence: TranscriptSequence.make(1),
@@ -967,11 +898,41 @@ describe("OperatorStatistics", () => {
         ).pipe(
           Effect.provide(
             OperatorStatistics.layer.pipe(
+              Layer.provide(
+                Layer.effect(
+                  WorkerStatus,
+                  Effect.gen(function* () {
+                    const status = yield* WorkerStatus;
+                    return {
+                      ...status,
+                      machineStarts: Effect.succeed([
+                        new MachineStarts({
+                          worker: WorkerName.make("worker"),
+                          provider: "boat",
+                          day: DateTime.formatIso(now).slice(0, 10),
+                          count: 3,
+                        }),
+                        new MachineStarts({
+                          worker: WorkerName.make("worker"),
+                          provider: "boat",
+                          day: "2020-01-01",
+                          count: 7,
+                        }),
+                      ]),
+                    };
+                  }),
+                ).pipe(Layer.provide(WorkerStatus.idle)),
+              ),
               Layer.provide(configurationLayer),
               Layer.provide(RunUsageReader.layer),
               Layer.provide(Layer.mergeAll(reader, items, budgets)),
             ),
           ),
+        );
+
+        assert.deepStrictEqual(
+          runsClosed.machineStarts.map(({ count }) => count),
+          [3],
         );
 
         // Issue 1 and pull request 2 form the task, up to its review's close; the review reported no tokens.

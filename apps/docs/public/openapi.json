@@ -33956,6 +33956,12 @@
           },
           "needsAttention": {
             "$ref": "#/components/schemas/_usine_orchestrator_NeedsAttentionViewEncoded"
+          },
+          "machineStarts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/_usine_executor_MachineStartsEncoded"
+            }
           }
         },
         "required": [
@@ -33974,7 +33980,40 @@
           "queueWait",
           "attemptsPerRun",
           "utilization",
-          "needsAttention"
+          "needsAttention",
+          "machineStarts"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_executor_MachineStartsEncoded": {
+        "type": "object",
+        "properties": {
+          "worker": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "hetzner",
+              "boat"
+            ]
+          },
+          "day": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "worker",
+          "provider",
+          "day",
+          "count"
         ],
         "additionalProperties": false
       },
@@ -35009,6 +35048,7 @@
             "enum": [
               "creating",
               "ready",
+              "idle",
               "deleting"
             ]
           },
@@ -35047,6 +35087,11 @@
           },
           "since": {
             "type": "string"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -35056,7 +35101,8 @@
           "id",
           "runId",
           "attemptId",
-          "since"
+          "since",
+          "attempts"
         ],
         "additionalProperties": false
       },

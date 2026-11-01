@@ -1,5 +1,5 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
-import { describe, expect, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -435,6 +435,26 @@ describe("ConfigParser", () => {
         creationBackoffMax: 600,
         machineCheckInterval: 86400,
       });
+      expect(Option.isNone(provisioner.reuse)).toBe(true);
+      const reused = yield* parse([...hetzner, "      reuse: { attempts: 5, max_age: 2h }"]);
+      const reusedWorker = reused.workers[0];
+      assert(reusedWorker?.kind === "ssh" && Option.isSome(reusedWorker.provisioner));
+      const reuse = reusedWorker.provisioner.value.reuse;
+      assert(Option.isSome(reuse));
+      expect(reuse.value.attempts).toBe(5);
+      expect(reuse.value.maxAgeMillis).toBe(7_200_000);
+      for (const invalid of [
+        "{ attempts: 0, max_age: 2h }",
+        "{ attempts: 1.5, max_age: 2h }",
+        "{ attempts: 5, max_age: 0h }",
+        "{ attempts: 5, max_age: forever }",
+        "{ attempts: 5, max_age: 25d }",
+        "{ attempts: 5, max_age: 2h, extra: true }",
+      ]) {
+        expect((yield* parse([...hetzner, `      reuse: ${invalid}`]).pipe(Effect.flip))._tag).toBe(
+          "ConfigFileError",
+        );
+      }
       const customized = yield* parse([
         ...hetzner,
         "      timings: { ssh_wait: 90, creation_backoff_min: 5, creation_backoff_max: 20, machine_check_interval: 3600 }",

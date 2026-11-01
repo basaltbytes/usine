@@ -217,7 +217,7 @@ describe("Desk", () => {
       slots: new WorkerSlotsView({ capacity: 3, leased: 2 }),
       preflight: new PassedCheckView({ checkedAt: "2026-10-20T08:00:00.000Z" }),
       machines: [
-        machineFixture({ state: "ready", id: "52341896", attemptId: "attempt-1" }),
+        machineFixture({ state: "ready", id: "52341896", attemptId: "attempt-1", attempts: 3 }),
         machineFixture({ runId: "run-other" }),
       ],
       provisioning: pause,
@@ -225,7 +225,7 @@ describe("Desk", () => {
     const html = render(<WorkersLine workers={[provisioned]} now={now} />);
     assert.include(
       text(html),
-      `hz-pool 2 of 3 slots in use, 2 machines Preflight passed 2h ago Machine creation failed: no capacity. ${nextCreationLine(pause, now)}`,
+      `hz-pool 2 of 3 slots in use, 2 machines 52341896: 3 attempts, 2m old Creating: 1 attempt, 2m old Preflight passed 2h ago Machine creation failed: no capacity. ${nextCreationLine(pause, now)}`,
     );
     assert.include(html, "Hetzner Cloud has no cx33 servers in nbg1 right now");
     const resumed = new WorkerView({

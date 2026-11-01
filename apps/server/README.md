@@ -4,11 +4,15 @@ The foreground CLI for a local [usine](https://github.com/basaltbytes/usine) fac
 
 The run reader matches GitHub changes to each attempt's worker identity, including exe.dev's integration bot. Board moves retain their operator attribution.
 
-Run it from an instance folder:
+Create an instance folder and run its pinned installation:
 
 ```sh
-usine up
+npm create usine@latest my-factory
+cd my-factory
+npm run usine -- up
 ```
+
+With pnpm, use `pnpm create usine my-factory`, then `pnpm usine up` from that folder. The first start saves an empty configuration revision and opens GitHub App setup. Commands below use `usine`; for the local installation, invoke them with `npm run usine --` or `pnpm usine`.
 
 It prints `http://127.0.0.1:7331` and stays attached to the terminal. Every command reads `.env` in the instance folder for the variables that the environment doesn't set, as dotenv does, so keep tokens there to run the commands from any shell. `--port <port>` or `USINE_PORT` changes the port; if the port is taken, the CLI names the conflict and suggests the override. `--origin <url>` or `USINE_ORIGIN` names the URL at which a proxy, such as `tailscale serve`, publishes the UI; the operator API then accepts browser requests from pages there too. `--log-level <level>` or `USINE_LOG_LEVEL` sets the lowest level it logs, `info` by default; `debug` adds the lines that say why something was skipped. Each log line starts with its date and time in UTC. `usine --version` prints the `@usine/server` version that the instance pins. On macOS, `usine up` warns if the Mac can sleep, which drops the SSH connections to workers: run `caffeinate -s` while runs are open, or turn off sleep on AC power with `sudo pmset -c sleep 0`.
 

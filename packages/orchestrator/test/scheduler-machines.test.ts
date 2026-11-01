@@ -99,6 +99,7 @@ const fakeMachines = () =>
         }),
       release: (hold) => Effect.sync(() => void calls.push(`release ${hold}`)),
       sweep: Effect.sync(() => void calls.push("sweep")),
+      starts: Effect.succeed([]),
       machines: Effect.succeed([
         new MachineStatus({
           worker: POOL,

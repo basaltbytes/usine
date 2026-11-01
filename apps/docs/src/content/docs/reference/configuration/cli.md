@@ -270,10 +270,13 @@ The `usine` process reads these variables from its environment, or from the [env
 | `TMPDIR` | `usine up` | Added to the temporary directories of the volatile path check. |
 | `USINE_GITHUB_APP_ID` | `usine up` | The GitHub App ID, a positive integer. Takes precedence over `app_id` in the secrets file. |
 | `USINE_GITHUB_PRIVATE_KEY` | `usine up` | The App's PEM-encoded RSA private key. Takes precedence over `private_key` in the secrets file. |
+| `USINE_GITHUB_CLIENT_ID` | GitHub sign-in | Overrides `client_id` in the App secrets file. |
+| `USINE_GITHUB_CLIENT_SECRET` | GitHub sign-in | Overrides `client_secret` in the App secrets file. |
+| `USINE_GITHUB_WEBHOOK_SECRET` | Webhook delivery | Overrides `webhook_secret` in the App secrets file. |
 | the name in `admin_token_env` | `usine up` | One per SSH worker with a `gateway`: the token for the gateway's admin API. If it's unset, startup fails. |
 | `OTEL_RESOURCE_ATTRIBUTES` | `usine up` with a [`tracing`](/reference/configuration/usine-yaml/#tracing) block | Resource attributes of exported spans, as comma-separated `key=value` pairs with percent-encoded keys and values. If a key or value isn't valid percent-encoding, `usine up` exits with status 1. |
 
-usine starts in setup mode, without falling back to the file, if a GitHub App variable is set but invalid. It does the same if the secrets file is missing, unreadable, not mode `0600`, or not JSON with exactly the two keys.
+usine starts in setup mode, without falling back to the file, if a GitHub App variable is set but invalid. It does the same if the secrets file is missing, unreadable, not mode `0600`, or fails credential validation. The file requires `app_id` and `private_key`; setup also saves `client_id`, `client_secret`, and `webhook_secret`.
 
 Child processes don't inherit the orchestrator's environment. Git and `gh` commands for a local worker receive only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `TMPDIR`, and `USER`. The `ssh` client for an SSH worker receives those and `SSH_AGENT_PID` and `SSH_AUTH_SOCK` ([`SSH_ENVIRONMENT_ALLOWLIST`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L70)). Only the orchestrator process has the App private key and the gateway admin tokens.
 

@@ -5,5 +5,6 @@
   "privatePackages": {
     "version": false,
     "tag": false
-  }
+  },
+  "fixed": [["@usine/server", "create-usine"]]
 }

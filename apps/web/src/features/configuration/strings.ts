@@ -498,3 +498,9 @@ export const bindingCopy = {
   member: "Member",
   instance: "Instance",
 };
+
+export const machineReuseCopy = {
+  idle: "Idle",
+  limits: "Reuse stops at the configured attempt or age limit",
+  attempts: "Attempts",
+};

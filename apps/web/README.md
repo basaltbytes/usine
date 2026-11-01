@@ -350,7 +350,10 @@ Idle upgrade waits show the requested version in run headers, Overview's Running
 
 `/setup` resumes App creation, credential recovery, installation discovery, and repository selection. A one-time sign-in link opens the setup session. The page posts a prepared manifest to GitHub and supports restoring existing credential JSON. After installation, GitHub sign-in enrolls the first admin and ends the setup session. **Add repositories** opens the existing installation repository picker.
 
+Provisioned machines on Overview and Configuration > Workers show their assigned attempt count and age. Idle machines are available for reuse. Statistics > Details lists machine starts by UTC day, worker, and provider, including machines that failed preflight.
 
 ## Access control
 
 The session permissions control action visibility. Project viewers read data, operators act on runs and boards, and maintainers edit loops and lanes. Instance admins manage role bindings under Configuration. Tokens shows and edits permission ceilings and displays a new token secret once.
+
+Members without role bindings can still open Tokens and sign out. Other pages explain that an instance admin must grant access.

@@ -23,6 +23,7 @@ for (const address of [hetznerAddress, boatAddress]) {
     run: RUN,
     process: "earlier",
     attempt: request.attemptId,
+    attempts: 1,
   };
 
   it.live(

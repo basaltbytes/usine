@@ -1,0 +1,43 @@
+{
+  "name": "create-usine",
+  "version": "0.5.0",
+  "description": "Create a runtime folder with a pinned usine server and start setup.",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/basaltbytes/usine.git",
+    "directory": "packages/create-usine"
+  },
+  "bin": {
+    "create-usine": "./dist/main.js"
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc -b && node scripts/release.mjs",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
+    "@usine/core": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@usine/server": "workspace:*",
+    "@usine/tsconfig": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
