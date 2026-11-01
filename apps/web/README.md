@@ -349,3 +349,5 @@ Idle upgrade waits show the requested version in run headers, Overview's Running
 ## GitHub App setup
 
 `/setup` resumes App creation, credential recovery, installation discovery, and repository selection. A one-time sign-in link opens the setup session. The page posts a prepared manifest to GitHub and supports restoring existing credential JSON. After installation, GitHub sign-in enrolls the first admin and ends the setup session. **Add repositories** opens the existing installation repository picker.
+
+Provisioned machines on Overview and Configuration > Workers show their assigned attempt count and age. Idle machines are available for reuse. Statistics > Details lists machine starts by UTC day, worker, and provider, including machines that failed preflight.

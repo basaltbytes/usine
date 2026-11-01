@@ -5,6 +5,7 @@ import { OperatorLogin } from "@usine/core/operator";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import {
   ProvisionerTimings,
+  ProvisionerReuse,
   BoatSize,
   BoatSnapshotName,
   TailnetAddress,
@@ -170,8 +171,7 @@ const ProvisionerTimingsFromYaml = ProvisionerTimings.pipe(
 );
 
 /**
- * Settings for creating one Hetzner Cloud server per attempt from a snapshot and deleting it after
- * the attempt (ADR 0029).
+ * Settings for Hetzner Cloud machines, with optional reuse across attempts (ADR 0029).
  */
 export class HetznerProvisioner extends Schema.Class<HetznerProvisioner>(
   "@usine/config/HetznerProvisioner",
@@ -203,6 +203,10 @@ export class HetznerProvisioner extends Schema.Class<HetznerProvisioner>(
    * provisioner defaults.
    */
   timings: ProvisionerTimingsFromYaml,
+  /** Omitted by default; both limits are required when reuse is enabled. */
+  reuse: Schema.OptionFromOptionalKey(
+    ProvisionerReuse.pipe(Schema.encodeKeys({ maxAge: "max_age" })),
+  ),
 }) {}
 
 /** The gateway address and OAuth client variables for a Boat sandbox's tailnet join. */
@@ -215,7 +219,7 @@ export class BoatTailnet extends Schema.Class<BoatTailnet>("@usine/config/BoatTa
   clientSecretEnv: EnvironmentVariableName,
 }) {}
 
-/** Settings for creating one Boat sandbox per attempt, optionally from a snapshot (ADR 0029). */
+/** Settings for Boat machines, optionally from a snapshot and with bounded reuse (ADR 0029). */
 export class BoatProvisioner extends Schema.Class<BoatProvisioner>("@usine/config/BoatProvisioner")(
   {
     /** The discriminator that selects the Boat provisioner. */
@@ -246,10 +250,14 @@ export class BoatProvisioner extends Schema.Class<BoatProvisioner>("@usine/confi
      * the provisioner defaults.
      */
     timings: ProvisionerTimingsFromYaml,
+    /** Omitted by default; both limits are required when reuse is enabled. */
+    reuse: Schema.OptionFromOptionalKey(
+      ProvisionerReuse.pipe(Schema.encodeKeys({ maxAge: "max_age" })),
+    ),
   },
 ) {}
 
-/** The provider that creates one machine per attempt for an SSH worker; `provider` selects it. */
+/** The provider that creates machines for an SSH worker; `provider` selects it. */
 export const WorkerProvisioner = Schema.Union([HetznerProvisioner, BoatProvisioner]);
 export type WorkerProvisioner = typeof WorkerProvisioner.Type;
 

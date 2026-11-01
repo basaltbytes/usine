@@ -84,3 +84,5 @@ Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to rea
 ## Member authentication
 
 Authenticated operator actions use `ActingMember` and `requestActor` from `@usine/core/operator`. Operator cancellations record the member login in `OperatorCanceled.by`; older cancellations decode with no actor. The approval channel is `ui`.
+
+`ProvisionerReuse` in `@usine/core/worker` defines a positive attempt limit and a compact maximum machine age (`2h`, for example). The attempt limit includes the first assignment; maximum age is bounded to 24 days.

@@ -267,7 +267,7 @@ describe("Workers page", () => {
     assert.include(page, "Size default");
     assert.include(page, "API token Read from BOAT_API_KEY");
     assert.include(page, "Anthropic key Read from ANTHROPIC_API_KEY");
-    assert.include(page, "Machines Created for each attempt and deleted afterwards No machines");
+    assert.include(page, "Machines Reuse stops at the configured attempt or age limit No machines");
     assert.notInclude(page, "Machine creation failed");
   });
 

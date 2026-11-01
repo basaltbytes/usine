@@ -87,7 +87,7 @@ const releaseSteps = (machine: ReturnType<typeof fakeMachine>) => {
     checkoutGone: lines.findIndex(
       (line) => line.includes('rm -f "$2"') && line.includes(`'${WORKTREE}' '${MARKER}'`),
     ),
-    containerGone: lines.indexOf(`exec 'docker' 'rm' '--force' '${CONTAINER}'`),
+    containerGone: lines.indexOf(`exec 'docker' 'rm' '--force' '--volumes' '${CONTAINER}'`),
     credentialGone: lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`),
   };
 };
@@ -396,7 +396,7 @@ describe("SSH Worker with Docker", () => {
         assert.include(machine.state.files.get(`${codexHome}/config.toml`) ?? "", "usine-gateway");
         const lines = linesOf(machine);
         const containerGone = lines.findIndex((line) =>
-          line.startsWith(`exec 'docker' 'rm' '--force' '${CONTAINER}'`),
+          line.startsWith(`exec 'docker' 'rm' '--force' '--volumes' '${CONTAINER}'`),
         );
         const homeGone = lines.findIndex((line) => line === `exec 'rm' '-rf' '${codexHome}'`);
         assert(

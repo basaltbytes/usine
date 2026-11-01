@@ -276,6 +276,7 @@ export const configurationJson = {
           id: "52341001",
           runId: null,
           attemptId: "7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+          attempts: 1,
           since: minutesAgo(95),
         },
         {
@@ -285,6 +286,7 @@ export const configurationJson = {
           id: "52341896",
           runId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
           attemptId: "3e4f5a6b-7c8d-4e9f-a0b1-c2d3e4f5a6b7",
+          attempts: 1,
           since: minutesAgo(12),
         },
         {
@@ -294,6 +296,7 @@ export const configurationJson = {
           id: null,
           runId: "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a",
           attemptId: null,
+          attempts: 1,
           since: minutesAgo(1),
         },
       ],

@@ -198,12 +198,27 @@ A gateway released before that endpoint answers 404: the worker's first such pre
 
 Boat machine creation distinguishes concurrent sandbox, compute allowance, billing, and size plan limits from transient API rate limits. Quota failures preserve the provider message in `MachineUnavailableError`. Hetzner reports `resource_limit_exceeded` as a quota failure.
 
-A worker whose address has `machine: { _tag: "Provisioned" }` has no machine of its own: it creates a Hetzner Cloud server or a Boat sandbox for each attempt and deletes it afterwards ([#550](https://github.com/basaltbytes/usine/issues/550)). The layer provides `WorkerMachines` for the scheduler:
+A worker whose address has `machine: { _tag: "Provisioned" }` has no machine of its own: it creates a Hetzner Cloud server or a Boat sandbox for each attempt and deletes it afterwards by default ([#550](https://github.com/basaltbytes/usine/issues/550)). The layer provides `WorkerMachines` for the scheduler:
 
-- `create(worker, runId, attemptId, brains)` creates the machine, tagged with `SshExecutorOptions.instance`, the worker, the run, the persisted attempt, and a random value of this process, and waits up to `machineReadyTimeout` (or `provisioner.timings.sshWait`, 600 seconds by default) until it answers over SSH. It then waits for cloud-init, creates the root, and waits for the selected container runtime. The worker's first machine after `provisioner.timings.machineCheckInterval` seconds since its last successful check, and its first after the layer starts, also gets the machine preflight with `brains`, whose failure is a `WorkerCapabilityError`. Each machine runs one attempt, so that preflight derives the unset container limits for one slot, and the worker's machines get them until the next such preflight. The grant's `checked` is then a `MachineCheck` with the brains and the limits. A provider's refusal, no capacity or quota, no answer, or a timeout is a `MachineUnavailableError` with its `reason`. On failure or interruption, the machine is deleted.
+- `create(worker, runId, attemptId, brains)` reuses an eligible idle machine or creates one, tagged with `SshExecutorOptions.instance`, the worker, the run, the persisted attempt, and a random value of this process, and waits up to `machineReadyTimeout` (or `provisioner.timings.sshWait`, 600 seconds by default) until it answers over SSH. It then waits for cloud-init, creates the root, and waits for the selected container runtime. The worker's first machine after `provisioner.timings.machineCheckInterval` seconds since its last successful check, and its first after the layer starts, also gets the machine preflight with `brains`, whose failure is a `WorkerCapabilityError`. Each machine runs one attempt at a time, so that preflight derives the unset container limits for one slot, and the worker's machines get them until the next such preflight. The grant's `checked` is then a `MachineCheck` with the brains and the limits. A provider's refusal, no capacity or quota, no answer, or a timeout is a `MachineUnavailableError` with its `reason`. On failure or interruption, the machine is deleted.
 - `adopt(worker, attemptId)` holds the machine of an attempt from an earlier process, found by that tag in one listing per worker. If the provider can't be read, the hold still keeps `sweep` from deleting the machine, and the next use looks it up again.
-- `release(hold)` deletes the machine, unless it has the attempt's checkout: one kept for a reattachment, until its parent task's stop is confirmed, or with unpreserved work. That machine stays for the next process. A failed deletion is retried by `sweep`.
+- `release(hold)` resets an eligible machine for reuse or deletes it, unless it has the attempt's checkout: one kept for a reattachment, until its parent task's stop is confirmed, or with unpreserved work. That machine stays for the next process. A failed deletion is retried by `sweep`.
 - `sweep` warns at startup about machines with the instance label whose worker is not configured, using the configured providers' credentials. It lists each provisioned worker's machines and deletes those that no hold or creation of this process has. The engine runs it after startup recovery and at each reconcile.
+
+Set the provisioner's `reuse` to `Option.some(new ProvisionerReuse({ attempts, maxAge }))` to
+reuse clean machines of the same worker. `attempts` includes the first assignment; `maxAge`
+accepts positive compact durations such as `2h`, up to `24d`. Reuse requires Podman or Docker and runs
+preflight before each assignment. Cleanup or gateway-detach failure retires the machine.
+Idle machines retire at the age limit, on worker removal, or on orderly shutdown. An active
+attempt can finish after the age limit. Provider metadata records the current attempt and
+count for restart recovery. Older machines without a count are recovered but not reused.
+
+Reset removes attempt containers and their anonymous volumes, checkouts, credentials, and
+Codex homes. Shared pnpm and Turbo cache volumes and the pulled image remain.
+`machines` includes idle machines, assignment counts, and creation times. `starts` returns
+acknowledged provider creations by worker and UTC day, including failed preflights. The
+counts persist in `machine-starts.json` under `knownHostsDirectory`; use a persistent directory
+for counts to survive executor restarts, as the orchestrator does.
 
 `recover` finds an earlier attempt's machine by its tag, reconciles the checkout there, and deletes the machine unless the checkout stays.
 

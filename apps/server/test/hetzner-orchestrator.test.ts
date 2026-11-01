@@ -164,6 +164,8 @@ describe("the orchestrator's Hetzner server", () => {
       [...unit.matchAll(new RegExp(`^${key}=(.*)$`, "gmu"))].map(([, value]) => value);
     assert.deepStrictEqual(settings("User"), ["usine"]);
     assert.deepStrictEqual(settings("WorkingDirectory"), ["/home/usine/factory"]);
+    assert.deepStrictEqual(settings("ConditionPathIsDirectory"), ["/home/usine/factory"]);
+    assert.deepStrictEqual(settings("ConditionPathExists"), []);
     assert.deepStrictEqual(settings("ExecStart"), ["/home/usine/.local/bin/usine up"]);
     // SIGTERM to usine up alone: the drain keeps the SSH connections of running attempts.
     assert.deepStrictEqual(settings("KillMode"), ["mixed"]);

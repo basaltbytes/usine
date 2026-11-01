@@ -433,6 +433,7 @@ const deskLayer = (
       queued("queued-4", 4, 2),
     ]),
     machines: Effect.succeed([]),
+    machineStarts: Effect.succeed([]),
     provisioning: Effect.succeed([]),
     preflights: Effect.succeed([
       {

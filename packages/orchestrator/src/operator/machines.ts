@@ -57,6 +57,10 @@ export class MachineView extends Schema.Class<MachineView>("@usine/orchestrator/
   attemptId: Schema.NullOr(AttemptId),
   /** When its creation started, or when the provider created a machine found after a restart, as an ISO instant. */
   since: Schema.String,
+  /** Assigned attempts, or zero when an older machine has no recorded count. */
+  attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+    Schema.withConstructorDefault(Effect.succeed(0)),
+  ),
 }) {}
 
 /** A provisioned Worker whose last machine creation failed, and when it tries again. */
@@ -141,6 +145,7 @@ export const machineView = (machine: MachineStatus): MachineView =>
     runId: Option.getOrNull(machine.runId),
     attemptId: Option.getOrNull(machine.attemptId),
     since: DateTime.formatIso(machine.since),
+    attempts: machine.attempts,
   });
 
 export const provisioningPauseView = (pause: ProvisioningPause): ProvisioningPauseView =>

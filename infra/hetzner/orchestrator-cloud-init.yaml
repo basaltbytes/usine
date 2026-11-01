@@ -80,7 +80,7 @@ write_files:
       Documentation=https://docs.usine.dev/guides/run-the-orchestrator-on-a-server/
       Wants=network-online.target
       After=network-online.target tailscaled.service
-      ConditionPathExists=/home/usine/factory/usine.yaml
+      ConditionPathIsDirectory=/home/usine/factory
 
       [Service]
       Type=exec

@@ -188,7 +188,7 @@ describe("rootless Podman", () => {
         assert.strictEqual(machine.state.containers.size, 0);
         assert(
           machine.state.calls.some(
-            ({ line }) => line === `exec 'podman' 'rm' '--force' '${CONTAINER}'`,
+            ({ line }) => line === `exec 'podman' 'rm' '--force' '--volumes' '${CONTAINER}'`,
           ),
         );
       }).pipe(

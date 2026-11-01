@@ -15,7 +15,7 @@ import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model
 import { boatSettings, hetznerSettings } from "./support.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { hetznerDriverFor } from "../../../src/ssh/provisioner/hetzner.ts";
-import { attemptTag, type MachineTags } from "../../../src/ssh/provisioner/model.ts";
+import { tagValue, attemptTag, type MachineTags } from "../../../src/ssh/provisioner/model.ts";
 import { BOAT_TEST_API, fakeProviders, HETZNER_TEST_API } from "./fake-providers.ts";
 
 const WORKER = WorkerName.make("hetzner-pool");
@@ -28,6 +28,7 @@ const tags: MachineTags = {
   run: RUN,
   process: "a1b2c3d4e5f6",
   attempt: ATTEMPT,
+  attempts: 1,
 };
 
 const noWait = Effect.void;
@@ -60,6 +61,7 @@ describe("Hetzner Cloud driver", () => {
             "usine-run": RUN,
             "usine-process": "a1b2c3d4e5f6",
             "usine-attempt": attemptTag(ATTEMPT),
+            "usine-attempts": "1",
           },
           start_after_create: true,
         });
@@ -244,7 +246,7 @@ describe("Boat driver", () => {
         const created = providers.boat.sandboxes.get(id);
         assert.deepStrictEqual(created?.body, {
           type: "default",
-          name: `usine github-app-4242 hetzner-pool ${RUN} a1b2c3d4e5f6 ${attemptTag(ATTEMPT)}`,
+          name: `usine github-app-4242 hetzner-pool ${tagValue(RUN, 24)} a1b2c3d4e5f6 ${attemptTag(ATTEMPT)} 1`,
           ttlSeconds: null,
           noEnv: true,
           snapshots: false,
@@ -261,7 +263,7 @@ describe("Boat driver", () => {
 
         assert.strictEqual(
           providers.boat.sandboxes.get(id)?.name,
-          `usine github-app-4242 hetzner-pool ${RUN} a1b2c3d4e5f6 ${attemptTag(ATTEMPT)}`,
+          `usine github-app-4242 hetzner-pool ${tagValue(RUN, 24)} a1b2c3d4e5f6 ${attemptTag(ATTEMPT)} 1`,
         );
         yield* driver.remove(id);
         assert.strictEqual(providers.boat.sandboxes.size, 0);
@@ -310,7 +312,8 @@ describe("Boat driver", () => {
         [ours],
       );
       assert.lengthOf(yield* driver.list("github-app-4242", Option.none()), 2);
-      assert.strictEqual(listed[0]?.tags.run, RUN);
+      assert.strictEqual(listed[0]?.tags.run, tagValue(RUN, 24));
+      assert.strictEqual(listed[0]?.attempts, 1);
       assert.deepStrictEqual(listed[0]?.tags.attempt, Option.some(attemptTag(ATTEMPT)));
     }).pipe(Effect.provide(providers.layer));
   });

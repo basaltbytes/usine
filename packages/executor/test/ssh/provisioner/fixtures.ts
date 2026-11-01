@@ -1,3 +1,5 @@
+import { Attachments } from "@usine/gateway";
+import { fakeGateway } from "../gateway/support.ts";
 import { RunId } from "@usine/core/run";
 import {
   ProvisionerTimings,
@@ -91,4 +93,31 @@ export const runtimeOf = (
     ),
     Layer.provide(claudeLoginLockLayer),
     Layer.provide(providers.layer),
+  );
+
+/** Returns the executor for `address` behind `gateway`. */
+export const gatewayRuntimeOf = (
+  machine: ReturnType<typeof fakeMachine>,
+  providers: ReturnType<typeof fakeProviders>,
+  gateway: ReturnType<typeof fakeGateway>,
+  address: SshWorkerAddress,
+  parent: StubParent = completes,
+) =>
+  Layer.merge(
+    sshLayer({
+      workers: [address],
+      instance: INSTANCE,
+      instanceId: INSTANCE_ID,
+      interruptGrace: "2 seconds",
+      providerEndpoints: { hetzner: HETZNER_TEST_API },
+      machinePollInterval: "1 millis",
+      machineReadyTimeout: "1 second",
+    }).pipe(
+      Layer.provide(machine.layer),
+      Layer.provide(mintingProvider().layer),
+      Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+      Layer.provide(claudeLoginLockLayer),
+      Layer.provide(providers.over(gateway.layer)),
+    ),
+    Layer.effect(Attachments, Attachments).pipe(Layer.provide(gateway.layer)),
   );
