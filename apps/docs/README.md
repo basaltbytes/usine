@@ -18,7 +18,7 @@ The [Operate runs guide](src/content/docs/guides/operate-runs.md) documents proj
 
 The [review and fix loops guide](src/content/docs/guides/review-fix-loops.md) documents conflict findings for read-only reviewers, base-branch merges before pushing fixes, and CI checks before changing outcome labels.
 
-The [Run a factory guide](src/content/docs/guides/index.mdx) documents installation and updates with npm.
+The [Run a factory guide](src/content/docs/guides/index.mdx) starts with `npm create usine` and documents the pinned runtime folder, npm and pnpm commands, and GitHub App setup.
 
 The [server guide](src/content/docs/guides/run-the-orchestrator-on-a-server.mdx) documents npm channel upgrades, idle and immediate restarts, the independent rollback helper, and setup for existing systemd installations. The CLI and `usine.yaml` reference pages describe the corresponding command and settings.
 

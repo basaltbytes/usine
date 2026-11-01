@@ -14,6 +14,7 @@ export const machineFixture = (
     worker: "hz-pool",
     provider: "hetzner",
     state: "creating",
+    attempts: 1,
     id: null,
     runId: "run-queued-398",
     attemptId: null,

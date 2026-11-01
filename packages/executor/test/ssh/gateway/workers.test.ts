@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
+import { AttemptId } from "@usine/core/attempt";
 import { SshDestination, WorkerName } from "@usine/core/worker";
 import { Effect } from "effect";
-import { Executor } from "../../../src/executor.ts";
+import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
   aloneOnItem,
@@ -146,6 +147,20 @@ describe("SSH Workers added and removed while the executor runs", () => {
             );
             assert.strictEqual(machine.state.forwards.length, 2);
             assert(machine.state.forwards.every(({ live }) => live));
+            const originalAttachments = (yield* attachmentsInForce).map(({ id }) => id);
+            yield* Effect.scoped(
+              executor.prepare(
+                new CheckoutRequest({
+                  ...request,
+                  attemptId: AttemptId.make("replacement-gateway/execute/1"),
+                }),
+              ),
+            );
+            assert.deepStrictEqual(
+              (yield* attachmentsInForce).map(({ id }) => id),
+              originalAttachments,
+              "a gateway connection alias preserves the original attachment",
+            );
             machine.state.calls.length = 0;
             yield* prepared.launch(sink);
             assert(

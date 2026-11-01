@@ -3,7 +3,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
-import { Effect, Redacted } from "effect";
+import { Effect, Redacted, Semaphore } from "effect";
 import { credentialEnvironment, GH_CONFIG, ghHostsConfig } from "../credential-environment.ts";
 import { CredentialProvider, type ExecutorOperation, type WorkerCredential } from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
@@ -56,6 +56,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
 ) {
   const provider = yield* CredentialProvider;
   const active = new Set<string>();
+  const membership = yield* Semaphore.make(1);
 
   const removeStale = Effect.fn("SshExecutor.removeStaleCredentials")(function* (
     machine: SshMachine,
@@ -74,7 +75,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
       worker,
       host,
     });
-  });
+  }, membership.withPermit);
   // A failed removal is logged and cached, not retried: the remaining tokens expire within an
   // hour and the next start removes them.
   const reclaim = yield* reclaimOnceFor(
@@ -128,7 +129,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
     yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, permissions, host });
     const directory = `${credentialsRoot(machine)}/${safeSegment(attemptId)}`;
     yield* Effect.acquireRelease(
-      Effect.sync(() => active.add(directory)),
+      membership.withPermit(Effect.sync(() => active.add(directory))),
       () =>
         Effect.sync(() => {
           active.delete(directory);

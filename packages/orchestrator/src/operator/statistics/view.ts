@@ -1,3 +1,4 @@
+import { MachineStarts } from "@usine/executor";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec } from "@usine/core/agent/brain";
 import { BillingPool, TokenCount, UsdAmount } from "@usine/core/agent/session";
@@ -5,7 +6,7 @@ import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const PositiveCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -440,4 +441,8 @@ export class RunStatisticsView extends Schema.Class<RunStatisticsView>(
   utilization: Schema.Array(WorkerUtilizationView),
   /** Approval and failure counts with the waits for recorded operator answers. */
   needsAttention: NeedsAttentionView,
+  /** Acknowledged provider creations by UTC day, including machines that failed preflight. */
+  machineStarts: Schema.Array(MachineStarts).pipe(
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
 }) {}

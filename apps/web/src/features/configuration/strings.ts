@@ -490,3 +490,9 @@ export const preflightBusyReason = "Available after all attempts end";
 export const preflightSetupReason = "Available after GitHub App setup";
 export const preflightRunningReason = "A preflight is already running";
 export const preflightCommand = (worker: string) => `Run preflight on ${worker}`;
+
+export const machineReuseCopy = {
+  idle: "Idle",
+  limits: "Reuse stops at the configured attempt or age limit",
+  attempts: "Attempts",
+};

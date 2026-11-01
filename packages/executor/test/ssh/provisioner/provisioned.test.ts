@@ -6,6 +6,9 @@ import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import {
   ProvisionerTimings,
+  ProvisionerReuse,
+  MachineAttemptLimit,
+  MachineMaxAge,
   ContainerCpus,
   ContainerLimits,
   ContainerMemoryMib,
@@ -13,12 +16,7 @@ import {
   type GatewayLlmProvider,
 } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
-import {
-  completes,
-  type StubParent,
-  StubStorage,
-  stubAttemptRuntime,
-} from "@usine/durable/testing";
+import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import {
   AnthropicProvider,
   AnthropicSubscriptionToken,
@@ -28,33 +26,26 @@ import {
   UpstreamBase,
 } from "@usine/gateway";
 import { TestClock } from "effect/testing";
-import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect";
-import {
-  CheckoutRequest,
-  claudeLoginLockLayer,
-  Executor,
-  MachineCheck,
-  WorkerMachines,
-} from "../../../src/executor.ts";
+import { Deferred, Effect, Fiber, Option, Redacted, Schema } from "effect";
+import { CheckoutRequest, Executor, MachineCheck, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
-import { layer as sshLayer, SshWorkers } from "../../../src/ssh/ssh.ts";
+import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
   capturedLogs,
   fakeMachine,
   INSTANCE,
-  INSTANCE_ID,
   LOCAL_TEMPORARY_DIRECTORY,
-  mintingProvider,
   request,
   TEST_AGENT,
   WORKER,
 } from "../support.ts";
 import { hetznerSettings } from "./support.ts";
 import { fakeGateway, gatewayAddress } from "../gateway/support.ts";
-import { fakeProviders, HETZNER_TEST_API } from "./fake-providers.ts";
+import { fakeProviders } from "./fake-providers.ts";
 
 import {
+  gatewayRuntimeOf,
   ROOT,
   RUN,
   KEY,
@@ -130,30 +121,6 @@ const gatewayHetznerAddress = (
     }),
   },
 });
-
-/** Returns the executor for `address` behind `gateway`. */
-const gatewayRuntimeOf = (
-  machine: ReturnType<typeof fakeMachine>,
-  providers: ReturnType<typeof fakeProviders>,
-  gateway: ReturnType<typeof fakeGateway>,
-  address: SshWorkerAddress,
-  parent: StubParent = completes,
-) =>
-  sshLayer({
-    workers: [address],
-    instance: INSTANCE,
-    instanceId: INSTANCE_ID,
-    interruptGrace: "2 seconds",
-    providerEndpoints: { hetzner: HETZNER_TEST_API },
-    machinePollInterval: "1 millis",
-    machineReadyTimeout: "1 second",
-  }).pipe(
-    Layer.provide(machine.layer),
-    Layer.provide(mintingProvider().layer),
-    Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-    Layer.provide(claudeLoginLockLayer),
-    Layer.provide(providers.over(gateway.layer)),
-  );
 
 describe("Provisioned SSH Worker behind a Gateway", () => {
   it.live(
@@ -417,6 +384,21 @@ describe("Provisioned SSH Worker", () => {
     "keeps the machine of a checkout that a stopping process kept, and reattaches on it after the restart",
     () => {
       const machine = fakeMachine();
+      machine.state.docker = "running";
+      const address: SshWorkerAddress = {
+        ...hetznerAddress,
+        machine: {
+          _tag: "Provisioned",
+          provisioner: hetznerSettings({
+            reuse: Option.some(
+              new ProvisionerReuse({
+                attempts: MachineAttemptLimit.make(5),
+                maxAge: MachineMaxAge.make("2h"),
+              }),
+            ),
+          }),
+        },
+      };
       const providers = fakeProviders();
       const storage = new StubStorage();
       return Effect.gen(function* () {
@@ -426,8 +408,11 @@ describe("Provisioned SSH Worker", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const machines = yield* WorkerMachines;
+          const warm = yield* machines.create(WORKER, RUN, AttemptId.make("warm/execute/1"), []);
+          yield* machines.release(warm.hold);
           const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
 
+          assert.strictEqual(grant.id, warm.id);
           const launch = yield* (yield* executor.prepare(request))
             .launch(sink)
             .pipe(Effect.forkChild);
@@ -440,7 +425,7 @@ describe("Provisioned SSH Worker", () => {
           assert.strictEqual(providers.hetzner.servers.size, 1);
           const workers = yield* SshWorkers;
           yield* workers.removeWorker(WORKER);
-          yield* workers.addWorker(hetznerAddress);
+          yield* workers.addWorker(address);
           yield* machines.sweep;
           assert.strictEqual(
             providers.hetzner.servers.size,
@@ -453,9 +438,7 @@ describe("Provisioned SSH Worker", () => {
           assert.strictEqual(providers.hetzner.servers.size, 1);
         }).pipe(
           Effect.scoped,
-          Effect.provide(
-            runtimeOf(machine, providers, hetznerAddress, { parent: working, storage }),
-          ),
+          Effect.provide(runtimeOf(machine, providers, address, { parent: working, storage })),
         );
 
         let given: AttemptRequest | undefined;
@@ -469,6 +452,7 @@ describe("Provisioned SSH Worker", () => {
           assert.isTrue(yield* executor.isLive(request.attemptId));
           const hold = yield* machines.adopt(WORKER, request.attemptId);
           assert.isTrue(Option.isSome(hold));
+          assert.strictEqual((yield* machines.machines)[0]?.attempts, 2);
           const prepared = yield* executor.prepare(
             new CheckoutRequest({ ...request, reattach: true }),
           );
@@ -480,7 +464,7 @@ describe("Provisioned SSH Worker", () => {
           assert.strictEqual(providers.hetzner.servers.size, 0);
         }).pipe(
           Effect.scoped,
-          Effect.provide(runtimeOf(machine, providers, hetznerAddress, { parent, storage })),
+          Effect.provide(runtimeOf(machine, providers, address, { parent, storage })),
         );
       });
     },

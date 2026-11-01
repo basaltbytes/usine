@@ -312,18 +312,20 @@ export const containersFor = (commands: RemoteCommands) => {
     name: string,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, container: name });
-    yield* commands.run("cleanup", shell, CONTAINER_RUNTIME, ["rm", "--force", name]).pipe(
-      Effect.tap(() =>
-        Effect.logInfo("Removed the container", { host: shell.destination, container: name }),
-      ),
-      Effect.tapError((error) =>
-        Effect.logWarning(
-          "Could not remove the container; the next process that uses the Worker removes it",
-          { host: shell.destination, container: name, message: error.message },
+    yield* commands
+      .run("cleanup", shell, CONTAINER_RUNTIME, ["rm", "--force", "--volumes", name])
+      .pipe(
+        Effect.tap(() =>
+          Effect.logInfo("Removed the container", { host: shell.destination, container: name }),
         ),
-      ),
-      Effect.ignore,
-    );
+        Effect.tapError((error) =>
+          Effect.logWarning(
+            "Could not remove the container; the next process that uses the Worker removes it",
+            { host: shell.destination, container: name, message: error.message },
+          ),
+        ),
+        Effect.ignore,
+      );
   });
 
   /**
@@ -614,14 +616,14 @@ export const containersFor = (commands: RemoteCommands) => {
 
   /**
    * Removes the containers labeled with `instance` and `instanceId` on the machine of `shell`
-   * that were started by another executor process. Returns the names removed.
+   * whose process label is not in `kept`. Returns the names removed.
    */
   const sweep = Effect.fn("RemoteExecutor.sweepContainers")(function* (
     shell: RemoteShell,
     instance: string,
     instanceId: InstanceId,
     worker: WorkerName,
-    process: string,
+    kept: ReadonlySet<string>,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, worker, instance, instanceId });
     const listed = (yield* commands.run("cleanup", shell, "sh", [
@@ -637,7 +639,7 @@ export const containersFor = (commands: RemoteCommands) => {
         const [name, owner = ""] = line.trim().split(" ");
         return name === undefined || name === "" ? [] : [{ name, owner }];
       });
-    const left = listed.filter(({ owner }) => owner !== process).map(({ name }) => name);
+    const left = listed.filter(({ owner }) => !kept.has(owner)).map(({ name }) => name);
     if (left.length === 0) {
       yield* Effect.logDebug("No earlier process left a container on the Worker's machine", {
         worker,
@@ -647,7 +649,12 @@ export const containersFor = (commands: RemoteCommands) => {
       });
       return left;
     }
-    yield* commands.run("cleanup", shell, CONTAINER_RUNTIME, ["rm", "--force", ...left]);
+    yield* commands.run("cleanup", shell, CONTAINER_RUNTIME, [
+      "rm",
+      "--force",
+      "--volumes",
+      ...left,
+    ]);
     yield* Effect.logInfo("Removed the containers an earlier process left on the machine", {
       worker,
       host: shell.destination,

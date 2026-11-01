@@ -1,6 +1,7 @@
 import type {
   ConnectivityWarningView,
   DeskView,
+  MachineView,
   RepositoryPollView,
   WorkerView,
 } from "@usine/orchestrator/operator";
@@ -12,7 +13,7 @@ import type {
   StatisticsWindow,
   UntimedTasksView,
 } from "@usine/orchestrator/operator";
-import { agoLabel, clockLabel } from "~/lib/strings";
+import { agoLabel, clockLabel, elapsedLabel } from "~/lib/strings";
 import { durationLabel } from "~/lib/strings";
 
 export const warningLine = (warning: ConnectivityWarningView): string =>
@@ -182,3 +183,15 @@ export const firstTimeRightDetails =
 
 export const workerUtilizationDetails =
   "Utilization uses slot counts from configuration history over the selected window. Before the first revision, it uses revision 1’s slot count. The displayed slot count is the current count.";
+
+export const machineStartsCopy = {
+  label: "Machine starts per day",
+  title: "Machine starts per day (UTC)",
+  day: "Day",
+  worker: "Worker",
+  provider: "Provider",
+  starts: "Starts",
+};
+
+export const machineReuseLine = (machine: MachineView, now: number): string =>
+  `${machine.id ?? "Creating"}: ${machine.attempts} ${machine.attempts === 1 ? "attempt" : "attempts"}, ${elapsedLabel(machine.since, now)} old${machine.state === "idle" ? ", idle" : ""}`;

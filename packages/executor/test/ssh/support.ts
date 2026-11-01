@@ -201,6 +201,7 @@ interface FakeMachineState {
   readonly containers: Map<string, FakeContainer>;
   /** The number of containers that `docker run` created, which gives each its ID. */
   containersCreated: number;
+  containerRemovalFails: boolean;
   /** The files under the SSH user's home, such as harness logins. */
   readonly homeFiles: Set<string>;
   /** Whether the checkout's `.git` is a file, as in a linked worktree of the cached clone. */
@@ -336,6 +337,7 @@ export const fakeMachine = () => {
     storeSizeKiB: "4096",
     containers: new Map(),
     containersCreated: 0,
+    containerRemovalFails: false,
     homeFiles: new Set([".claude/.credentials.json", ".claude.json"]),
     linkedCheckout: false,
     markers: new Set(),
@@ -404,6 +406,7 @@ export const fakeMachine = () => {
       return oneShotHandle(`${id}\n`, 0);
     }
     if (line.startsWith("exec 'docker' 'rm' '--force' ")) {
+      if (state.containerRemovalFails) return oneShotHandle("", 1, "container removal failed");
       for (const name of words.slice(3)) state.containers.delete(name);
       return oneShotHandle("", 0);
     }

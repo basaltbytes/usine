@@ -15,6 +15,7 @@ import {
 } from "./http.ts";
 import {
   attemptTag,
+  attemptsFromTag,
   type ListedMachine,
   type MachineDriver,
   type MachineTags,
@@ -31,6 +32,7 @@ const LABELS = {
   run: "usine-run",
   process: "usine-process",
   attempt: "usine-attempt",
+  attempts: "usine-attempts",
 } as const;
 
 /**
@@ -221,6 +223,7 @@ export const hetznerDriverFor = (
       [LABELS.run]: tagValue(tags.run),
       [LABELS.process]: tagValue(tags.process),
       [LABELS.attempt]: attemptTag(tags.attempt),
+      [LABELS.attempts]: String(tags.attempts),
     });
 
     const verify = Effect.fn("HetznerDriver.verify")(
@@ -434,6 +437,13 @@ export const hetznerDriverFor = (
         ),
     );
 
+    const assign = Effect.fn("HetznerDriver.assign")(function* (id: MachineId, tags: MachineTags) {
+      yield* Effect.annotateCurrentSpan({ worker, machine: id, attemptId: tags.attempt });
+      yield* api
+        .send("PUT", `/servers/${id}`, { body: { labels: labelsOf(tags) } })
+        .pipe(Effect.asVoid, Effect.mapError(apiError("assign the machine to the attempt")));
+    });
+
     const remove = Effect.fn("HetznerDriver.remove")(function* (id: MachineId) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
       yield* api.send("DELETE", `/servers/${id}`).pipe(
@@ -473,6 +483,7 @@ export const hetznerDriverFor = (
             attempt: Option.fromNullishOr(server.labels[LABELS.attempt]),
           },
           createdAt: Option.getOrElse(DateTime.make(server.created), () => DateTime.makeUnsafe(0)),
+          attempts: attemptsFromTag(server.labels[LABELS.attempts]),
         }));
     });
 
@@ -481,6 +492,7 @@ export const hetznerDriverFor = (
       verify,
       create,
       endpoint,
+      assign,
       remove,
       list,
     } satisfies MachineDriver;

@@ -119,6 +119,7 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
             labels: settings.labels,
             apiKeys,
             timings: settings.timings,
+            reuse: settings.reuse,
           },
         } satisfies SshWorkerMachine;
       case "boat":
@@ -130,6 +131,7 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
             size: settings.size,
             apiKeys,
             timings: settings.timings,
+            reuse: settings.reuse,
             snapshot: settings.snapshot,
             tailnet: yield* Effect.transposeOption(
               Option.map(settings.tailnet, (tailnet) =>

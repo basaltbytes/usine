@@ -34,6 +34,7 @@ import {
 } from "./gateway/preflight.ts";
 import type { SshExecutorOptions, SshMachine, SshWorkerAddress } from "./model.ts";
 import { sshMachinePreflightFor, sshPreflightFor } from "./preflight.ts";
+import { machineResetFor } from "./provisioner/reset.ts";
 import { provisionedMachinesFor } from "./provisioner/machines.ts";
 import { sshWorkerRecordsFor } from "./worker-records.ts";
 import { sshMachinesFor, SshWorkers } from "./workers.ts";
@@ -42,7 +43,8 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const logins = yield* ClaudeLoginLock;
-    const commands = yield* remoteCommandsFor;
+    const reset = machineResetFor(yield* remoteCommandsFor, options.instance, options.instanceId);
+    const { commands } = reset;
     const base = options.ssh ?? DEFAULT_SSH;
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)
       return yield* Effect.die(new Error("SshExecutorOptions.workers contains duplicate names"));
@@ -102,7 +104,9 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     };
     const credentials = yield* sshCredentialsFor(commands);
     const codexHomes = yield* codexHomesFor(commands);
-    const attachments = yield* gatewayAttachmentsFor(commands, codexHomes.hold);
+    const attachments = yield* gatewayAttachmentsFor(commands, codexHomes.hold, (machine) =>
+      reset.failed(machine.shell),
+    );
     const containers = yield* sshContainersFor(commands, options.instance, options.instanceId);
     const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, logins, containers);
     const provisioned = yield* provisionedMachinesFor({
@@ -114,6 +118,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       entries,
       machineAt,
       verifyMachine,
+      reset: reset.reset,
       verifyGatewayAdmin,
       settings: options,
     });
@@ -181,7 +186,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           }),
       } satisfies RemoteGrant<SshMachine>);
 
-    // A provisioned Worker's machines are deleted with their Attempts, Codex homes included.
+    // Provisioned machines remove their Codex homes during reset or machine deletion.
     const sweep = Effect.fn("SshExecutor.sweep")(function* () {
       const machines = (yield* entries).flatMap(({ machine }) => Option.toArray(machine));
       yield* Effect.forEach(
@@ -266,7 +271,8 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       Context.add(
         SshWorkers,
         SshWorkers.of({
-          addWorker,
+          addWorker: (address) =>
+            addWorker(address).pipe(Effect.andThen(provisioned.refresh(address))),
           removeWorker: (worker) =>
             provisioned.retire(worker).pipe(Effect.andThen(workers.removeWorker(worker))),
         }),
@@ -281,7 +287,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
  * the Attempt's own container if the machine has Docker. Without a Gateway, the Attempt's GitHub
  * token is written next to its checkout (ADR 0026). Behind a Gateway, the machine gets only a
  * caller token for an attachment made through the Gateway's admin API (ADR 0027). A provisioned
- * Worker creates one machine per Attempt at a provider and deletes it afterwards
+ * Worker creates machines at a provider and optionally reuses them between attempts
  * (`WorkerMachines`, #550). `SshWorkers` adds and removes Workers at runtime. Requires Node.
  */
 export const layer = (

@@ -1,3 +1,4 @@
+import { WorkerStatus } from "../../src/worker-status.ts";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { configurationLayer } from "../support/configuration.ts";
 import { NodeServices } from "@effect/platform-node";
@@ -234,6 +235,7 @@ describe("Statistics cache", () => {
         Layer.provide(alwaysHoldsLayer),
       );
       const services = OperatorStatistics.layer.pipe(
+        Layer.provide(WorkerStatus.idle),
         Layer.provide(configurationLayer),
         Layer.provide(RunUsageReader.layer),
         Layer.provideMerge(engineLayer),

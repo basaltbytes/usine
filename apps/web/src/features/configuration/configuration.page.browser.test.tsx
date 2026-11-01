@@ -135,6 +135,7 @@ it("keeps a provisioned worker's Machines table within the main column beside th
   expect(visible(machines.querySelectorAll("th")).map((cell) => cell.textContent)).toEqual([
     "Machine",
     "State",
+    "Attempts",
     "Age",
     "For",
   ]);

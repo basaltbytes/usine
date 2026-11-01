@@ -84,6 +84,16 @@ process.exitCode = failed === 0 ? 0 : 1;
 const imported = passes("node", ["--input-type=module", "--eval", importAll]);
 const started = passes(join(project, "node_modules", ".bin", "usine"), ["--version"]);
 
+const scaffoldStarted = passes(join(project, "node_modules", ".bin", "create-usine"), ["--help"]);
+const scaffoldRelease = JSON.parse(
+  readFileSync(join(project, "node_modules", "create-usine", "dist", "release.json"), "utf8"),
+);
+const serverRelease = JSON.parse(
+  readFileSync(join(project, "node_modules", "@usine", "server", "package.json"), "utf8"),
+);
+const scaffoldPinned = scaffoldRelease.serverVersion === serverRelease.version;
+if (!scaffoldPinned) console.error("The scaffold does not pin the packed server version.");
+
 const lockfile = readFileSync(join(repository, "pnpm-lock.yaml"), "utf8");
 const lockedPackages = lockfile.slice(
   lockfile.indexOf("\npackages:\n"),
@@ -140,7 +150,7 @@ if (drift.length === 0) {
   console.log(`ok      ${installed.length} @earendil-works packages match pnpm-lock.yaml`);
 }
 
-if (!imported || !started || drift.length > 0) {
+if (!imported || !started || !scaffoldStarted || !scaffoldPinned || drift.length > 0) {
   console.error("A plain npm install of the packed packages is broken.");
   process.exit(1);
 }

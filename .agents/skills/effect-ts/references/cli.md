@@ -12,10 +12,10 @@
 ## Installation
 
 ```bash
-bun add effect@beta @effect/platform-bun@beta
+bun add effect@4.0.6 @effect/platform-bun@4.0.6
 ```
 
-For Node.js, use `@effect/platform-node@beta` instead.
+For Node.js, use `@effect/platform-node@4.0.6` instead.
 
 ## Minimal Example
 
@@ -24,23 +24,23 @@ import { Argument, Command, Flag } from "effect/cli"
 import { BunServices, BunRuntime } from "@effect/platform-bun"
 import { Console, Effect } from "effect"
 
-const name = Argument.string("name").pipe(Argument.withDefault("World"))
-const shout = Flag.boolean("shout").pipe(Flag.withAlias("s"))
+const name = Argument.String("name").pipe(Argument.withDefault("World"))
+const shout = Flag.Boolean("shout").pipe(Flag.withAlias("s"))
 
 const greet = Command.make("greet", { name, shout }, ({ name, shout }) => {
   const message = `Hello, ${name}!`
   return Console.log(shout ? message.toUpperCase() : message)
 })
 
-const cli = Command.run(greet, { name: "greet", version: "1.0.0" })
+const cli = Command.run(greet, { version: "1.0.0" })
 
-cli(process.argv).pipe(
+cli.pipe(
   Effect.provide(BunServices.layer),
   BunRuntime.runMain
 )
 ```
 
-Built-in `--help` and `--version` work automatically. Every command should have `Command.withDescription` for useful help output.
+In Effect 4.0.6, `Command.run` returns an Effect and reads arguments from `Stdio`. Use `Command.runWith(command, { version })(args)` to supply an argument array without the Node executable or script path. Built-in `--help` and `--version` work automatically. Every command should have `Command.withDescription` for useful help output.
 
 ## Arguments and Flags
 
@@ -51,12 +51,12 @@ Built-in `--help` and `--version` work automatically. Every command should have 
 ```typescript
 import { Argument } from "effect/cli"
 
-Argument.string("file")                              // required text
-Argument.string("output").pipe(Argument.optional)    // optional
-Argument.string("format").pipe(Argument.withDefault("json")) // default
-Argument.string("files").pipe(Argument.variadic())   // zero or more
-Argument.string("files").pipe(Argument.atLeast(1))   // one or more
-Argument.integer("id").pipe(Argument.withSchema(TaskId)) // schema-validated
+Argument.String("file")                              // required text
+Argument.String("output").pipe(Argument.optional)    // optional
+Argument.String("format").pipe(Argument.withDefault("json")) // default
+Argument.String("files").pipe(Argument.variadic())   // zero or more
+Argument.String("files").pipe(Argument.atLeast(1))   // one or more
+Argument.Int("id").pipe(Argument.withSchema(TaskId)) // schema-validated
 ```
 
 ### Flags
@@ -64,11 +64,11 @@ Argument.integer("id").pipe(Argument.withSchema(TaskId)) // schema-validated
 ```typescript
 import { Flag } from "effect/cli"
 
-Flag.boolean("verbose").pipe(Flag.withAlias("v"))     // boolean
-Flag.string("output").pipe(Flag.withAlias("o"))       // text
-Flag.string("config").pipe(Flag.optional)             // optional text
-Flag.choice("format", ["json", "yaml", "toml"])       // enum
-Flag.integer("count").pipe(Flag.withDefault(10))      // integer with default
+Flag.Boolean("verbose").pipe(Flag.withAlias("v"))     // boolean
+Flag.String("output").pipe(Flag.withAlias("o"))       // text
+Flag.String("config").pipe(Flag.optional)             // optional text
+Flag.Literals("format", ["json", "yaml", "toml"])       // enum
+Flag.Int("count").pipe(Flag.withDefault(10))      // integer with default
 ```
 
 Add descriptions for help output:
@@ -196,7 +196,7 @@ import { Argument, Command, Flag } from "effect/cli"
 import { Console, Effect, Option } from "effect"
 
 const addCmd = Command.make("add", {
-  text: Argument.string("task").pipe(Argument.withDescription("The task description")),
+  text: Argument.String("task").pipe(Argument.withDescription("The task description")),
 }, ({ text }) =>
   Effect.gen(function* () {
     const repo = yield* TaskRepo
@@ -206,7 +206,7 @@ const addCmd = Command.make("add", {
 ).pipe(Command.withDescription("Add a new task"))
 
 const listCmd = Command.make("list", {
-  all: Flag.boolean("all").pipe(Flag.withAlias("a"), Flag.withDescription("Include completed")),
+  all: Flag.Boolean("all").pipe(Flag.withAlias("a"), Flag.withDescription("Include completed")),
 }, ({ all }) =>
   Effect.gen(function* () {
     const repo = yield* TaskRepo
@@ -219,7 +219,7 @@ const listCmd = Command.make("list", {
 ).pipe(Command.withDescription("List pending tasks"))
 
 const toggleCmd = Command.make("toggle", {
-  id: Argument.integer("id").pipe(Argument.withSchema(TaskId)),
+  id: Argument.Int("id").pipe(Argument.withSchema(TaskId)),
 }, ({ id }) =>
   Effect.gen(function* () {
     const repo = yield* TaskRepo
@@ -249,17 +249,17 @@ const app = Command.make("tasks").pipe(
 ```typescript
 import { BunServices, BunRuntime } from "@effect/platform-bun"
 
-const cli = Command.run(app, { name: "tasks", version: "1.0.0" })
+const cli = Command.run(app, { version: "1.0.0" })
 const mainLayer = Layer.provideMerge(TaskRepo.layer, BunServices.layer)
 
-cli(process.argv).pipe(Effect.provide(mainLayer), BunRuntime.runMain)
+cli.pipe(Effect.provide(mainLayer), BunRuntime.runMain)
 ```
 
 ### Version from package.json
 
 ```typescript
 import pkg from "./package.json" with { type: "json" }
-const cli = Command.run(app, { name: "tasks", version: pkg.version })
+const cli = Command.run(app, { version: pkg.version })
 ```
 
 Requires `"resolveJsonModule": true` in tsconfig.
@@ -269,12 +269,12 @@ Requires `"resolveJsonModule": true` in tsconfig.
 | Concept | API |
 |---------|-----|
 | Define command | `Command.make(name, config, handler)` |
-| Positional args | `Argument.string`, `.integer`, `.optional`, `.variadic()` |
-| Named flags | `Flag.boolean`, `.string`, `.choice`, `.integer` |
+| Positional args | `Argument.String`, `.Int`, `.optional`, `.variadic()` |
+| Named flags | `Flag.Boolean`, `.String`, `.Literals`, `.Int` |
 | Flag alias | `Flag.withAlias("v")` |
 | Descriptions | `Argument.withDescription`, `Flag.withDescription`, `Command.withDescription` |
 | Schema validation | `Argument.withSchema(BrandedType)` |
 | Subcommands | `Command.withSubcommands([...])` |
-| Run CLI | `Command.run(cmd, { name, version })` |
+| Run CLI | `Command.run(cmd, { version })` |
 | Bun platform | `BunServices.layer` + `BunRuntime.runMain` |
 | Node platform | `NodeServices.layer` + `NodeRuntime.runMain` |

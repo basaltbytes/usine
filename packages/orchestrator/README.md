@@ -388,3 +388,5 @@ Run views expose `upgradeWait` while attempt admission defers them, and the desk
 `OperatorApi` includes OpenAPI titles and descriptions alongside its route schemas. The server combines it with the sign-in contract and publicly serves the generated document at `GET /api/openapi.json`. The [operator HTTP API reference](https://docs.usine.dev/reference/operator-api/) lists paths, parameters, bodies, and responses. Regenerate `apps/docs/public/openapi.json` after changing the contract; the [docs README](../../apps/docs/README.md#operator-http-api-reference) lists the commands.
 
 Changes to the `auth` block require a restart, like `tracing`. `CurrentInstance.reload` reports the changed block in `RestartRequiredError` and preserves the running snapshot until restart.
+
+Provisioned SSH workers can reuse machines with `provisioner.reuse`. Worker status includes idle machines, their assignment counts, and creation times. Run statistics include acknowledged machine starts by worker, provider, and UTC day, persisted across restarts in `.usine/known-hosts/machine-starts.json`.

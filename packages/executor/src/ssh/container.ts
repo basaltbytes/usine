@@ -410,7 +410,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   const sweep = Effect.fn("SshExecutor.removeLeftContainers")(function* (machine: SshMachine) {
     const worker = machine.address.name;
     yield* Effect.annotateCurrentSpan({ worker, host: machine.shell.destination });
-    yield* containers.sweep(machine.shell, instance, instanceId, worker, process);
+    yield* containers.sweep(machine.shell, instance, instanceId, worker, new Set([process]));
   });
   // Runs once per destination and worker, before its first container starts. A failure is
   // logged; the containers stay until the next process.

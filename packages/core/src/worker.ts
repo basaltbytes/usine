@@ -358,3 +358,38 @@ export class ProvisionerTimings extends Schema.Class<ProvisionerTimings>("Provis
     ),
   ),
 ) {}
+
+/** Positive compact duration in seconds, minutes, hours, or days, up to 24 days. */
+export const MachineMaxAge = Schema.String.check(
+  Schema.isPattern(/^[1-9][0-9]{0,5}[smhd]$/u),
+  Schema.makeFilter(
+    (value) => ageMillis(value) <= 2_073_600_000 || "Machine age must not exceed 24 days",
+  ),
+).pipe(Schema.brand("MachineMaxAge"));
+export type MachineMaxAge = typeof MachineMaxAge.Type;
+
+const ageMillis = (value: string): number =>
+  Number.parseInt(value, 10) *
+  (value.endsWith("d")
+    ? 86_400_000
+    : value.endsWith("h")
+      ? 3_600_000
+      : value.endsWith("m")
+        ? 60_000
+        : 1_000);
+
+/** Maximum number of attempts served by one provisioned machine. */
+export const MachineAttemptLimit = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 100_000 }),
+).pipe(Schema.brand("MachineAttemptLimit"));
+export type MachineAttemptLimit = typeof MachineAttemptLimit.Type;
+
+/** Limits for consecutive attempts on a provisioned machine. */
+export class ProvisionerReuse extends Schema.Class<ProvisionerReuse>("ProvisionerReuse")({
+  attempts: MachineAttemptLimit,
+  maxAge: MachineMaxAge,
+}) {
+  get maxAgeMillis(): number {
+    return ageMillis(this.maxAge);
+  }
+}

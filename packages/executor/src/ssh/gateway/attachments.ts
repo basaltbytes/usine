@@ -72,8 +72,11 @@ const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
 export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFor")(function* (
   commands: RemoteCommands,
   holdCodexHome: CodexHomes["hold"],
+  onDetachFailure: (machine: SshMachine) => Effect.Effect<void>,
 ) {
   const provider = yield* CredentialProvider;
+  const active = new Set<AttachmentId>();
+  const membership = yield* Semaphore.make(1);
 
   const detachLeftovers = Effect.fn("SshExecutor.detachLeftoverAttachments")(function* (
     machine: Pick<SshMachine, "gateway" | "address">,
@@ -87,7 +90,9 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const { admin, settings } = machine.gateway.value;
     yield* Effect.annotateCurrentSpan({ domain: settings.domain });
     const { attachments } = yield* admin.list;
-    const leftovers = attachments.filter((attachment) => attachment.worker === worker);
+    const leftovers = attachments.filter(
+      (attachment) => attachment.worker === worker && !active.has(attachment.id),
+    );
     if (leftovers.length === 0)
       return yield* Effect.logDebug("No earlier process left a Gateway attachment for the Worker", {
         worker,
@@ -116,7 +121,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
         ),
       { discard: true },
     );
-  });
+  }, membership.withPermit);
   // Caches a failed listing; the leftover attachments expire with their tokens within an hour.
   const reclaim = yield* reclaimOnceFor(
     (machine: Pick<SshMachine, "gateway" | "address">) =>
@@ -181,9 +186,14 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
                   Effect.logWarning(
                     "Could not detach the Attempt's token from the Gateway; the attachment expires with the token",
                     { ...fields, attachment: id, message: error.message },
-                  ),
+                  ).pipe(Effect.andThen(onDetachFailure(machine))),
                 ),
                 Effect.ignore,
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    active.delete(id);
+                  }),
+                ),
               ),
           }),
         ),
@@ -216,6 +226,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
               }),
           ),
         );
+        active.add(answer.attachment.id);
         yield* Ref.set(attached, Option.some({ id: answer.attachment.id, credential }));
         yield* Effect.annotateCurrentSpan({ attachment: answer.attachment.id });
         yield* Effect.logInfo(
@@ -230,6 +241,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
         );
         return answer.callerToken;
       },
+      membership.withPermit,
       // Scope closure waits for an in-flight attach, so the detach has the attachment ID.
       turn.withPermits(1),
       Effect.uninterruptible,

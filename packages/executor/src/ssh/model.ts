@@ -3,6 +3,7 @@ import type { SshCommand } from "@usine/agents/child-host";
 import type { InstanceId } from "@usine/core/instance";
 import type {
   ProvisionerTimings,
+  ProvisionerReuse,
   BoatSize,
   BoatSnapshotName,
   TailnetAddress,
@@ -88,6 +89,7 @@ export interface HetznerProvisioner {
   readonly labels: HetznerLabels;
   readonly apiKeys: ProviderApiKeys;
   readonly timings: ProvisionerTimings;
+  readonly reuse: Option.Option<ProvisionerReuse>;
 }
 
 /** Credentials for creating single-use auth keys tagged tag:usine-attempt. */
@@ -107,6 +109,7 @@ export interface BoatProvisioner {
   readonly tailnet: Option.Option<BoatTailnet>;
   readonly apiKeys: ProviderApiKeys;
   readonly timings: ProvisionerTimings;
+  readonly reuse: Option.Option<ProvisionerReuse>;
 }
 
 export type SshProvisioner = HetznerProvisioner | BoatProvisioner;
