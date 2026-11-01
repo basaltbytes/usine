@@ -33,7 +33,7 @@ import {
 } from "@usine/executor";
 import { Context, DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { stepExecutorLayer } from "../src/scheduler/scheduler.ts";
+import { type ExecutorWorkers, stepExecutorLayer } from "../src/scheduler/scheduler.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { fixedConfigLayer, fixedInstance } from "./support/current-instance.ts";
 import { testAppLayer } from "./support/github-app.ts";
@@ -151,10 +151,12 @@ const scheduler = (
   machines: WorkerMachines["Service"],
   config = configWithTimings({}),
   instances = fixedConfigLayer(config),
+  workers: ExecutorWorkers = { add: () => Effect.void, remove: () => Effect.void },
 ) =>
   Layer.build(
     stepExecutorLayer(config, [], {
       machines,
+      workers,
       discard: (worker, attempts) =>
         Effect.sync(() => void discarded.push(`${worker} ${attempts.join(",")}`)),
     }).pipe(
@@ -398,6 +400,26 @@ describe("Worker scheduler on a provisioned Worker", () => {
           if (transition === "revision") {
             yield* TestClock.adjust("10 seconds");
             yield* Ref.set(fake.provisioned, true);
+            const reload = yield* Deferred.await(registered);
+            const apply = yield* reload(
+              new LoadedInstance({
+                ...initial,
+                config: Schema.decodeUnknownSync(UsineConfig)({
+                  version: 1,
+                  repos: [{ name: "acme/demo" }],
+                  workers: [
+                    {
+                      name: "pool",
+                      kind: "ssh",
+                      destination: "usine@203.0.113.7",
+                      root: "/srv/usine",
+                    },
+                  ],
+                }),
+              }),
+              initial,
+            );
+            yield* apply;
             fake.failures.push(
               new MachineUnavailableError({
                 worker: POOL,
@@ -432,6 +454,88 @@ describe("Worker scheduler on a provisioned Worker", () => {
         }).pipe(Effect.scoped),
     );
   }
+
+  it.effect("stops old creation retries while a fixed connection fails initialization", () =>
+    Effect.gen(function* () {
+      const fake = yield* fakeMachines();
+      fake.failures.push(
+        new MachineUnavailableError({
+          worker: POOL,
+          provider: "hetzner",
+          reason: "quota",
+          message: "quota exhausted",
+        }),
+      );
+      const config = configWithTimings({});
+      const initial = yield* CurrentInstance.pipe(
+        Effect.flatMap((instances) => instances.get),
+        Effect.provide(fixedConfigLayer(config)),
+      );
+      const current = yield* Ref.make(initial);
+      const registered = yield* Deferred.make<WorkerReload>();
+      const instances = Layer.succeed(CurrentInstance)({
+        ...fixedInstance(initial),
+        get: Ref.get(current),
+        registerWorkers: (reload) => Deferred.succeed(registered, reload).pipe(Effect.asVoid),
+      });
+      const available = yield* Ref.make(false);
+      const context = yield* scheduler(fake.machines, config, instances, {
+        add: (worker) =>
+          Effect.gen(function* () {
+            if (worker.kind !== "ssh" || Option.isSome(worker.provisioner)) return;
+            if (!(yield* Ref.get(available)))
+              return yield* new ExecutorOperationError({
+                operation: "preflight",
+                message: "Gateway credential variable is unset",
+                cause: new Error("missing credential"),
+              });
+            yield* Ref.set(fake.provisioned, false);
+          }),
+        remove: () => Effect.void,
+      });
+      const steps = Context.get(context, StepExecutor);
+      const status = Context.get(context, WorkerStatus);
+      const run = RunId.make("failed-fixed-run");
+      const attempt = AttemptId.make("failed-fixed-run/execute/1");
+      const lease = yield* steps.reserve(run, submission(1), Option.none());
+      const waiting = yield* Effect.forkChild(
+        steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip),
+      );
+      yield* settle;
+      const changed = new LoadedInstance({
+        ...initial,
+        config: Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [{ name: "acme/demo" }],
+          workers: [
+            { name: "pool", kind: "ssh", destination: "usine@203.0.113.7", root: "/srv/usine" },
+          ],
+        }),
+      });
+      const apply = yield* (yield* Deferred.await(registered))(initial, changed);
+      yield* Ref.set(current, changed);
+      yield* apply;
+      yield* TestClock.adjust("30 seconds");
+      yield* settle;
+      assert.lengthOf(
+        fake.calls.filter((call) => call.startsWith("create")),
+        1,
+      );
+      assert.lengthOf(yield* status.provisioning, 0);
+      assert.notInclude(prepared, attempt);
+      assert.isUndefined(waiting.pollUnsafe());
+      yield* Ref.set(available, true);
+      yield* TestClock.adjust("30 seconds");
+      yield* settle;
+      yield* Fiber.join(waiting);
+      assert.include(prepared, attempt);
+      assert.lengthOf(
+        fake.calls.filter((call) => call.startsWith("create")),
+        1,
+      );
+      yield* lease.release;
+    }).pipe(Effect.scoped),
+  );
 
   it.effect(
     "retains quota attention through transient retries and clears the run wait after creation",

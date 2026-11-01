@@ -311,11 +311,20 @@ export const stepExecutorLayer = (
         new Set(workers.map(({ name }) => name)),
       );
       const machines = options.machines;
+      const declaredWorkers = yield* Ref.make(workers);
       const provisioning = yield* provisioningPausesFor(instances);
       // The machine of each Run's lease, which `execute` gives to the Run's Attempt.
       const runMachines = yield* Ref.make<ReadonlyMap<RunId, RunMachine>>(new Map());
       const provisions = (worker: WorkerName) =>
-        machines === undefined ? Effect.succeed(false) : machines.provisions(worker);
+        Effect.gen(function* () {
+          const configured = (yield* Ref.get(declaredWorkers)).find(({ name }) => name === worker);
+          return (
+            machines !== undefined &&
+            configured?.kind === "ssh" &&
+            Option.isSome(configured.provisioner) &&
+            (yield* machines.provisions(worker))
+          );
+        });
 
       /**
        * Removes `worker` from the executor unless the scheduler has it or a reload is adding it.
@@ -384,6 +393,7 @@ export const stepExecutorLayer = (
       ) {
         yield* preflight.accept(declared, roster, checked);
         yield* preflight.refresh(change.updated);
+        yield* Ref.set(declaredWorkers, declared);
         for (const worker of change.updated) {
           if (!(yield* provisions(worker.name))) yield* provisioning.clear(worker.name);
         }
@@ -752,6 +762,7 @@ export const stepExecutorLayer = (
             found: Option.isSome(adopted),
           });
         }
+        yield* preflight.wait(worker);
         if (!(yield* provisions(worker))) return;
         if (machine === undefined)
           return yield* Effect.die(new Error("no lease for the persisted Attempt"));
@@ -759,6 +770,7 @@ export const stepExecutorLayer = (
         const roster = EffectArray.dedupe(agents.map(({ agent }) => agent.brain));
         while (true) {
           yield* provisioning.wait(worker);
+          yield* preflight.wait(worker);
           if (!(yield* provisions(worker))) {
             yield* provisioning.clear(worker);
             yield* Effect.logInfo(

@@ -5,7 +5,7 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, type WorkerName } from "@usine/core/worker";
-import { Effect, Option, Random, Ref, Schema } from "effect";
+import { Effect, Option, Random, Schema } from "effect";
 import { WorkerCapabilityError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
@@ -108,9 +108,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     (effect, machine) => effect.pipe(cacheLocks.withLock(machine.address.name)),
   );
   const isolations = new WeakMap<SshWorkerAddress, AttemptIsolation>();
-  // Workers whose earlier containers this process removed. Their containers on a shared machine
-  // belong to this process, so another Worker's removal keeps them.
-  const reclaimed = yield* Ref.make(new Set<string>());
+  const process = `${yield* Random.nextInt}:${yield* Random.nextInt}`;
 
   const imageFor = (machine: SshMachine): ContainerImage =>
     Option.getOrElse(machine.address.container.image, () => ATTEMPT_IMAGE);
@@ -232,6 +230,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       }),
     });
     const settings: ContainerSettings = {
+      process,
       image,
       limits: limits.limits,
       instance,
@@ -411,10 +410,9 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   const sweep = Effect.fn("SshExecutor.removeLeftContainers")(function* (machine: SshMachine) {
     const worker = machine.address.name;
     yield* Effect.annotateCurrentSpan({ worker, host: machine.shell.destination });
-    yield* Ref.update(reclaimed, (current) => new Set(current).add(worker));
-    yield* containers.sweep(machine.shell, instance, instanceId, worker, yield* Ref.get(reclaimed));
+    yield* containers.sweep(machine.shell, instance, instanceId, worker, process);
   });
-  // Runs once per Worker in this process, before its first container starts. A failure is
+  // Runs once per destination and worker, before its first container starts. A failure is
   // logged; the containers stay until the next process.
   const reclaim = yield* reclaimOnceFor(
     (machine: SshMachine) => `${machine.shell.destination} ${machine.address.name}`,

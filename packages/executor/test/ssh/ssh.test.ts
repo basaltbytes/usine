@@ -27,7 +27,6 @@ import {
   TEST_AGENT,
   TOKEN_PREFIX,
   WORKER,
-  WORKER_ROOT,
   WORKTREE,
   capturedLogs,
   fails,
@@ -151,7 +150,7 @@ describe("SSH Worker", () => {
         assert.strictEqual(credentialDuringLaunch, `${TOKEN_PREFIX}1`);
 
         const lines = machine.state.calls.map(({ line }) => line);
-        const stale = lines.indexOf(`exec 'rm' '-rf' '${WORKER_ROOT}/credentials'`);
+        const stale = lines.findIndex((line) => line.includes('for directory in "$root"/*'));
         const write = lines.findIndex(writesCredential);
         const clone = lines.findIndex((line) => line.includes("'clone'"));
         const removeWorktree = lines.findIndex((line) => line.includes("'worktree' 'remove'"));
@@ -429,7 +428,7 @@ describe("SSH Worker", () => {
           lines.find((line) => line.includes("'commit' '--quiet'")) ?? "",
           BOT_COMMITS,
         );
-        const stale = lines.indexOf(`exec 'rm' '-rf' '${WORKER_ROOT}/credentials'`);
+        const stale = lines.findIndex((line) => line.includes('for directory in "$root"/*'));
         const listing = lines.findIndex((line) => line.startsWith("exec 'find' "));
         const write = lines.findIndex(writesCredential);
         const push = lines.findIndex((line) => line.includes("'push' '--force'"));
@@ -504,7 +503,7 @@ describe("SSH Worker", () => {
             new CheckoutRequest({ ...request, reattach: true }),
           );
           const lines = machine.state.calls.slice(before).map(({ line }) => line);
-          const stale = lines.indexOf(`exec 'rm' '-rf' '${WORKER_ROOT}/credentials'`);
+          const stale = lines.findIndex((line) => line.includes('for directory in "$root"/*'));
           assert(stale >= 0 && stale < lines.findIndex(writesCredential));
           assert(
             !lines.some((line) => line.includes("'clone'") || line.includes("'worktree' 'add'")),

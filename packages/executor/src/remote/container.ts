@@ -53,6 +53,7 @@ exec "$1" run --rm --network none --user 0 --mount "$4" --entrypoint sh "$2" -ec
 /** The labels on each container, so a later process finds the ones it left. */
 const INSTANCE_LABEL = "dev.usine.instance";
 const INSTANCE_ID_LABEL = "dev.usine.instance-id";
+const PROCESS_LABEL = "dev.usine.process";
 const WORKER_LABEL = "dev.usine.worker";
 const ATTEMPT_LABEL = "dev.usine.attempt";
 /** The label of a preflight's container, which removes itself and never needs a sweep. */
@@ -67,6 +68,8 @@ const SEED_DIRECTORY = "/usr/local/share/usine/seed";
 
 /** The image and limits of each Attempt container on a Worker. */
 export interface ContainerSettings {
+  /** Identifies the executor that started the container across connection aliases. */
+  readonly process: string;
   readonly hosts: Readonly<Record<string, string>>;
   readonly image: ContainerImage;
   readonly limits: ContainerLimits;
@@ -197,12 +200,12 @@ const OOM_KILL_LINE = /^oom_kill (\d+)$/mu;
 const decodeContainerId = Schema.decodeUnknownEffect(ContainerId);
 
 /**
- * A script that lists the containers with both labels `$2` and `$3`, one `<name> <worker>` line
+ * A script that lists the containers with both labels `$2` and `$3`, one `<name> <process>` line
  * each. Prints nothing if the machine has no container CLI.
  */
 const LIST_SCRIPT = String.raw`
 command -v "$1" >/dev/null 2>&1 || exit 0
-exec "$1" ps --all --filter "label=$2" --filter "label=$3" --format '{{.Names}} {{.Label "dev.usine.worker"}}'
+exec "$1" ps --all --filter "label=$2" --filter "label=$3" --format '{{.Names}} {{.Label "dev.usine.process"}}'
 `.trim();
 
 /**
@@ -381,6 +384,7 @@ export const containersFor = (commands: RemoteCommands) => {
           `${INSTANCE_LABEL}=${spec.settings.instance}`,
           `${INSTANCE_ID_LABEL}=${spec.settings.instanceId}`,
           `${WORKER_LABEL}=${spec.worker}`,
+          `${PROCESS_LABEL}=${spec.settings.process}`,
           `${ATTEMPT_LABEL}=${attemptId}`,
         ],
         options: [],
@@ -610,14 +614,14 @@ export const containersFor = (commands: RemoteCommands) => {
 
   /**
    * Removes the containers labeled with `instance` and `instanceId` on the machine of `shell`
-   * whose Worker label is `worker` or not in `kept`. Returns the names removed.
+   * that were started by another executor process. Returns the names removed.
    */
   const sweep = Effect.fn("RemoteExecutor.sweepContainers")(function* (
     shell: RemoteShell,
     instance: string,
     instanceId: InstanceId,
     worker: WorkerName,
-    kept: ReadonlySet<string>,
+    process: string,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, worker, instance, instanceId });
     const listed = (yield* commands.run("cleanup", shell, "sh", [
@@ -633,9 +637,7 @@ export const containersFor = (commands: RemoteCommands) => {
         const [name, owner = ""] = line.trim().split(" ");
         return name === undefined || name === "" ? [] : [{ name, owner }];
       });
-    const left = listed
-      .filter(({ owner }) => owner === worker || !kept.has(owner))
-      .map(({ name }) => name);
+    const left = listed.filter(({ owner }) => owner !== process).map(({ name }) => name);
     if (left.length === 0) {
       yield* Effect.logDebug("No earlier process left a container on the Worker's machine", {
         worker,
