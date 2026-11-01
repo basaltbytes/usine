@@ -998,8 +998,17 @@ const makeOperator = Effect.gen(function* () {
     yield* acknowledgements.undo(key);
   });
 
+  const requireRunOperation = Effect.fn("Operator.requireRunOperation")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+  ) {
+    const { repository } = yield* reader.inspect(runId);
+    yield* Effect.annotateCurrentSpan({ runId, repository });
+    yield* requirePermission("operate", repositoryScope(instance, repository));
+  });
+
   const approve = Effect.fn("Operator.approve")(function* (instance: LoadedInstance, runId: RunId) {
-    yield* requirePermission("operate", loopScope((yield* reader.inspect(runId)).run.loop));
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId });
     const current = yield* runs.inspect(runId);
     if (current.run.state._tag !== "Waiting") {
@@ -1036,13 +1045,13 @@ const makeOperator = Effect.gen(function* () {
     runId: RunId,
     attemptId: AttemptId,
   ) {
-    yield* requirePermission("operate", loopScope((yield* reader.inspect(runId)).run.loop));
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
     yield* runs.resolveFailure(runId, attemptId, yield* requestActor(instance.config.operator));
   });
 
   const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
-    yield* requirePermission("operate", loopScope((yield* reader.inspect(runId)).run.loop));
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.retry(
       runId,
@@ -1059,7 +1068,7 @@ const makeOperator = Effect.gen(function* () {
     runId: RunId,
     edit: EditAndRetry,
   ) {
-    yield* requirePermission("operate", loopScope((yield* reader.inspect(runId)).run.loop));
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId, agent: edit.agent });
     const file = instance.agents.find(({ name }) => name === edit.agent);
     if (file === undefined)
@@ -1089,7 +1098,7 @@ const makeOperator = Effect.gen(function* () {
     runId: RunId,
     edit: EditAndRetry,
   ) {
-    yield* requirePermission("operate", loopScope((yield* reader.inspect(runId)).run.loop));
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId, agent: edit.agent });
     const current = yield* runs.inspect(runId);
     const loop = instance.loops.find(({ name }) => name === current.run.loop);
@@ -1150,7 +1159,7 @@ const makeOperator = Effect.gen(function* () {
     runId: RunId,
     input: SessionIntervention,
   ) {
-    yield* requirePermission("operate", loopScope((yield* reader.inspect(runId)).run.loop));
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({
       runId,
       attemptId: input.attemptId,
@@ -1170,8 +1179,8 @@ const makeOperator = Effect.gen(function* () {
     );
   });
 
-  const cancel = Effect.fn("Operator.cancel")(function* (runId: RunId) {
-    yield* requirePermission("operate", loopScope((yield* reader.inspect(runId)).run.loop));
+  const cancel = Effect.fn("Operator.cancel")(function* (instance: LoadedInstance, runId: RunId) {
+    yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.cancel(runId);
     yield* Effect.logInfo("Operator canceled Run", { runId });
@@ -1292,12 +1301,13 @@ const makeOperator = Effect.gen(function* () {
   );
 
   const resetCycleBudget = Effect.fn("Operator.resetCycleBudget")(function* (
+    instance: LoadedInstance,
     askId: CycleBudgetAskId,
   ) {
     const ask = (yield* budgets.asks()).find((ask) => ask.id === askId);
     yield* requirePermission(
       "operate",
-      ask === undefined ? new InstanceScope() : loopScope(ask.loop),
+      ask === undefined ? new InstanceScope() : repositoryScope(instance, ask.repository),
     );
     yield* Effect.annotateCurrentSpan({ askId });
     const key = `cycle-budget-reset:${askId}`;
@@ -1360,7 +1370,10 @@ export class Operator extends Context.Service<
     /** Removes the acknowledgement of this revision. */
     readonly undoDismissNeed: (key: AttentionKey) => Effect.Effect<void, OperatorError>;
     /** Answers the current cycle-budget ask and requests fresh polling. */
-    readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, OperatorError>;
+    readonly resetCycleBudget: (
+      instance: LoadedInstance,
+      askId: CycleBudgetAskId,
+    ) => Effect.Effect<void, OperatorError>;
     /**
      * Records the operator's approval of a waiting Run, attributed to the operator login in
      * `usine.yaml` if one is set. Execution still waits for Worker capacity.
@@ -1403,7 +1416,7 @@ export class Operator extends Context.Service<
      * Cancels an open Run and interrupts its current Attempt. Does nothing if the Run is already
      * closed.
      */
-    readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    readonly cancel: (instance: LoadedInstance, runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Runs verify-only preflight on one idle worker and returns the stored checks. */
     readonly runWorkerPreflight: (
       worker: WorkerName,

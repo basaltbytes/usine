@@ -1,4 +1,4 @@
-import { useCanOperateLoop } from "~/lib/permissions";
+import { useCanOperateRepository } from "~/lib/permissions";
 import { WorkerQuotaAsk } from "./worker-quota-ask";
 import { itemName } from "~/components/item/mark";
 import { usePageCommands } from "~/components/command-palette/context";
@@ -43,7 +43,7 @@ type ApprovalAskProps = {
  * because the Run changed state, shows no error.
  */
 const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
-  const permitted = useCanOperateLoop(need.loop);
+  const permitted = useCanOperateRepository(need.repository);
   const openRun = useOpenRun();
   const action = useRunAction();
   const [confirmingCancel, setConfirmingCancel] = useState(false);

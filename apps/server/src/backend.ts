@@ -134,7 +134,8 @@ export const liveBackendLayer = (
     dismissNeed: (key) =>
       Effect.flatMap(instances.get, (instance) => operator.dismissNeed(instance, key)),
     undoDismissNeed: operator.undoDismissNeed,
-    resetCycleBudget: operator.resetCycleBudget,
+    resetCycleBudget: (askId) =>
+      Effect.flatMap(instances.get, (instance) => operator.resetCycleBudget(instance, askId)),
     retry: (runId) => Effect.flatMap(instances.get, (instance) => operator.retry(instance, runId)),
     resolveFailure: (runId, attemptId) =>
       Effect.flatMap(instances.get, (instance) =>
@@ -147,7 +148,8 @@ export const liveBackendLayer = (
       Effect.flatMap(instances.get, (instance) => operator.runAgain(instance, runId, edit)),
     intervene: (runId, input) =>
       Effect.flatMap(instances.get, (instance) => operator.intervene(instance, runId, input)),
-    cancel: operator.cancel,
+    cancel: (runId) =>
+      Effect.flatMap(instances.get, (instance) => operator.cancel(instance, runId)),
     runWorkerPreflight: operator.runWorkerPreflight,
     discardLeftovers: operator.discardLeftovers,
     moveBoardItem: (move) =>

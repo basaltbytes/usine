@@ -220,6 +220,6 @@ export const useWorkerPreflight = (worker: WorkerName) => {
 
 export const configurationHeadQuery = () =>
   queryOptions({
-    queryKey: ["configuration-head"],
+    queryKey: [...configurationEditorKeys, "head"],
     queryFn: () => api((client) => client.configurationHead({})),
   });

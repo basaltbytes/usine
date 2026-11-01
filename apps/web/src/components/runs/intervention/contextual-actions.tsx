@@ -1,4 +1,4 @@
-import { useCanOperateLoop } from "~/lib/permissions";
+import { useCanOperateRepository } from "~/lib/permissions";
 import { usePageCommands } from "~/components/command-palette/context";
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
@@ -42,7 +42,7 @@ export const ContextualActions = ({
   className,
 }: ContextualActionsProps) => {
   const { run, agentDefinitionChanged } = detail;
-  const permitted = useCanOperateLoop(run.loop);
+  const permitted = useCanOperateRepository(run.repository);
   const retryDescriptionId = useId();
   const mutation = useRunAction();
   const again = useRunAgain();

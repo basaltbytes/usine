@@ -1,4 +1,4 @@
-import { useCanOperateLoop } from "~/lib/permissions";
+import { useCanOperateRepository } from "~/lib/permissions";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import type { AttemptId } from "@usine/core/attempt";
 import { ChildTarget, ParentTarget } from "@usine/core/attempt/channel";
@@ -72,7 +72,7 @@ type RunWorkspaceProps = {
 
 export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
   const run = detail.run;
-  const permitted = useCanOperateLoop(run.loop);
+  const permitted = useCanOperateRepository(run.repository);
   const outlineId = useId();
   const githubChanges = useQuery(runGitHubChangesQuery(run));
   const document = useMemo(

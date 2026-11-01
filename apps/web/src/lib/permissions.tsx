@@ -1,4 +1,6 @@
-import { queryOptions } from "@tanstack/react-query";
+import type { RepositoryName } from "@usine/core/repository";
+import { overviewQuery, projectForRepository } from "./overview";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import {
   PermissionGrant,
   InstanceScope,
@@ -39,3 +41,12 @@ export const useCan = (permission: Permission, project?: string) => {
 };
 export const useCanOperateLoop = (loop: string) =>
   useCan("operate", loop.includes("/") ? loop.split("/")[0] : undefined);
+
+export const useCanOperateRepository = (repository: RepositoryName) => {
+  const permissions = usePermissions();
+  const { data } = useQuery({
+    ...overviewQuery(),
+    enabled: canReadOverview(permissions) && !permits(permissions, "admin", new InstanceScope()),
+  });
+  return useCan("operate", projectForRepository(data?.projects ?? [], repository)?.id);
+};

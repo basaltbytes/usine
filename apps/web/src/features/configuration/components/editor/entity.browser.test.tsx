@@ -129,6 +129,35 @@ it("shows entity history as export-format diffs, reverts with a message, and loa
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
 });
 
+it("refreshes the head after a stale revert and after a successful write", async () => {
+  await mount(undefined, [
+    {
+      status: 409,
+      body: JSON.stringify({
+        error: "StaleRevision",
+        message: "Configuration changed",
+        expected: 2,
+        current: 3,
+      }),
+    },
+  ]);
+  await button("Revision 2").click();
+  await button("Revert").click();
+  await button("Confirm revert").click();
+  await expect.element(button("Revision 3")).toBeVisible();
+  await button("Revision 3").click();
+  await button("Revert").click();
+  await button("Confirm revert").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(2);
+  expect((await commands.configurationEditorRequests())[1]?.payload).toMatchObject({ expected: 3 });
+  await expect.element(button("Revision 4")).toBeVisible();
+  await button("Revision 4").click();
+  await button("Revert").click();
+  await button("Confirm revert").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(3);
+  expect((await commands.configurationEditorRequests())[2]?.payload).toMatchObject({ expected: 4 });
+});
+
 it("keeps invalid text and lists every field problem under the editor before saving", async () => {
   await mount(undefined, [
     {

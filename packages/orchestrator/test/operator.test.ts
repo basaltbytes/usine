@@ -426,7 +426,8 @@ const testLayer = (
   projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
   runSnapshot: RunSnapshot = snapshot,
   budgets: Layer.Layer<CycleBudgets> = noCycleBudgets,
-  commands: Pick<RunEngine["Service"], "retry" | "intervene" | "runAgain"> = {
+  commands: Pick<RunEngine["Service"], "retry" | "intervene" | "runAgain"> &
+    Partial<Pick<RunEngine["Service"], "cancel">> = {
     retry: () => Effect.void,
     intervene: () => Effect.void,
     runAgain: () => Effect.die("unused"),
@@ -480,7 +481,7 @@ const testLayer = (
     intervene: commands.intervene,
     approve: (id, event, source) =>
       Ref.update(approved, (entries) => [...entries, { runId: id, event, source }]),
-    cancel: () => Effect.void,
+    cancel: commands.cancel ?? (() => Effect.void),
     discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.succeed(runSnapshot),
     reconcile: () => Effect.void,
@@ -2293,7 +2294,7 @@ describe("Operator", () => {
         yield* operator.dismissNeed(instance, attentionKey(changedNeed));
         yield* operator.undoDismissNeed(attentionKey(changedNeed));
         assert((yield* operator.overview(instance)).needsYou.some((entry) => entry.id === need.id));
-        yield* operator.resetCycleBudget(ask.id);
+        yield* operator.resetCycleBudget(instance, ask.id);
         const answers = yield* Ref.get(answered);
         assert.strictEqual(answers[0]?.id, ask.id);
         assert.strictEqual(answers[0]?.event.id, `cycle-budget-reset:${ask.id}`);
@@ -3079,5 +3080,157 @@ it.effect("filters cached project lists and refuses actions outside a project bi
         "AccessDenied",
       );
     }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
+  }),
+);
+
+it.effect("authorizes historical run actions by current repository ownership", () =>
+  Effect.gen(function* () {
+    const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+    const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+    const reads = yield* Ref.make(0);
+    const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+    const historical = new RunSnapshot({
+      ...snapshot,
+      run: new Run({ ...snapshot.run, loop: LoopName.make("alpha/review") }),
+    });
+    const loaded = (owner: "alpha" | "beta" | "removed") =>
+      new LoadedInstance({
+        ...instance,
+        config: Schema.decodeUnknownSync(UsineConfig)({
+          version: 2,
+          repos: [{ name: repository }, { name: "acme/alpha" }, { name: "acme/beta" }],
+          projects: [
+            {
+              id: "alpha",
+              name: "Alpha",
+              repositories: owner === "alpha" ? [repository, "acme/alpha"] : ["acme/alpha"],
+            },
+            {
+              id: "beta",
+              name: "Beta",
+              repositories: owner === "beta" ? [repository, "acme/beta"] : ["acme/beta"],
+            },
+          ],
+        }),
+        loops: [new LoopFile({ ...loop, name: historical.run.loop })],
+      });
+    const grants = (project: "alpha" | "beta", role: "operator" | "viewer" = "operator") =>
+      new RoleBinding({
+        name: `${project}-${role}`,
+        member: GitHubUserId.make(1),
+        role,
+        scope: new ProjectScope({ project: ProjectId.make(project) }),
+      }).permissions;
+    const edit = new EditAndRetry({ task: snapshot.task, agent: agentFile.name });
+    const intervention = Schema.decodeUnknownSync(SessionIntervention)({
+      attemptId,
+      action: { _tag: "Steer", message: "Continue" },
+    });
+    const actions: Array<string> = [];
+    const ask = new CycleBudgetAsk({
+      id: CycleBudgetAskId.make("historical-budget"),
+      itemKey,
+      repository,
+      loop: historical.run.loop,
+      limit: CycleLimit.make(3),
+      counts: [
+        new LoopCycleCount({
+          loop: historical.run.loop,
+          admitted: CycleCount.make(3),
+          completed: CycleCount.make(3),
+        }),
+      ],
+    });
+    const budgets = Layer.effect(
+      CycleBudgets,
+      Effect.map(CycleBudgets, (service) => ({
+        ...service,
+        asks: () => Effect.succeed([ask]),
+        reset: () =>
+          Effect.sync(() => {
+            actions.push("reset");
+          }),
+      })),
+    ).pipe(Layer.provide(noCycleBudgets));
+    yield* Effect.gen(function* () {
+      const operator = yield* Operator;
+      for (const owner of ["alpha", "beta", "removed"] as const) {
+        const current = loaded(owner);
+        for (const project of ["alpha", "beta"] as const) {
+          const permissions = grants(project);
+          if (owner === project) {
+            yield* operator
+              .detail(current, runId)
+              .pipe(Effect.provideService(RequestPermissions, permissions));
+            yield* operator
+              .cancel(current, runId)
+              .pipe(Effect.provideService(RequestPermissions, permissions));
+            yield* operator
+              .intervene(current, runId, intervention)
+              .pipe(Effect.provideService(RequestPermissions, permissions));
+            yield* operator
+              .resetCycleBudget(current, ask.id)
+              .pipe(Effect.provideService(RequestPermissions, permissions));
+          } else {
+            assert.equal(
+              (yield* operator
+                .detail(current, runId)
+                .pipe(Effect.provideService(RequestPermissions, permissions), Effect.flip))._tag,
+              "AccessDenied",
+            );
+          }
+          for (const deniedGrants of owner === project
+            ? [grants(project, "viewer")]
+            : [permissions]) {
+            for (const action of [
+              operator.resetCycleBudget(current, ask.id),
+              operator.approve(current, runId),
+              operator.retry(current, runId),
+              operator.editAndRetry(current, runId, edit),
+              operator.runAgain(current, runId, edit),
+              operator.resolveFailure(current, runId, attemptId),
+              operator.cancel(current, runId),
+              operator.intervene(current, runId, intervention),
+            ]) {
+              assert.equal(
+                yield* action.pipe(
+                  Effect.provideService(RequestPermissions, deniedGrants),
+                  Effect.match({ onFailure: (error) => error._tag, onSuccess: () => "Allowed" }),
+                ),
+                "AccessDenied",
+              );
+            }
+          }
+        }
+      }
+      yield* operator
+        .cancel(loaded("removed"), runId)
+        .pipe(Effect.provideService(RequestPermissions, administratorPermissions));
+      assert.deepEqual(actions, [
+        "cancel",
+        "intervene",
+        "reset",
+        "cancel",
+        "intervene",
+        "reset",
+        "cancel",
+      ]);
+      assert.deepEqual(yield* Ref.get(approved), []);
+    }).pipe(
+      Effect.provide(
+        testLayer(approved, moved, reads, revision, historical, budgets, {
+          retry: () => Effect.die("unauthorized retry"),
+          runAgain: () => Effect.die("unauthorized run again"),
+          cancel: () =>
+            Effect.sync(() => {
+              actions.push("cancel");
+            }),
+          intervene: () =>
+            Effect.sync(() => {
+              actions.push("intervene");
+            }),
+        }),
+      ),
+    );
   }),
 );

@@ -1,4 +1,4 @@
-import { useCanOperateLoop } from "~/lib/permissions";
+import { useCanOperateRepository } from "~/lib/permissions";
 import { usePageCommands } from "~/components/command-palette/context";
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
@@ -58,7 +58,7 @@ type RowActionsProps = {
 
 /** While an action is pending, shows its progress instead of the actions. */
 export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) => {
-  const permitted = useCanOperateLoop(run.loop);
+  const permitted = useCanOperateRepository(run.repository);
   const action = useRunAction();
   const again = useRunAgain();
   const [confirmingCancel, setConfirmingCancel] = useState(false);

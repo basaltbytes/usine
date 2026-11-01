@@ -1,4 +1,12 @@
-import { administratorPermissions } from "@usine/core/access";
+import { ProjectId } from "@usine/core/project";
+import { taskOverview } from "~/lib/tasks/fixture";
+import { overviewQuery } from "~/lib/overview";
+import {
+  administratorPermissions,
+  RoleBinding,
+  GitHubUserId,
+  ProjectScope,
+} from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { CommandPalette } from "~/components/command-palette/palette";
 import { PageCommandsProvider } from "~/components/command-palette/context";
@@ -22,7 +30,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Claimed, CycleBlocked, RunAgainResult } from "@usine/engine/engine";
-import { ReadyOverview, RunView } from "@usine/orchestrator/operator";
+import { ReadyOverview, RunView, ProjectView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import type { ReactNode } from "react";
 import { flushSync } from "react-dom";
@@ -408,4 +416,55 @@ it("hides run mutations from a member without operate permission", () => {
     </PermissionsContext.Provider>,
   );
   expect(host.querySelector("button")).toBeNull();
+});
+
+it("updates run actions when repository ownership changes without changing the historical loop", async () => {
+  const run = new RunView({ ...failedRun, loop: LoopName.make("alpha/implement") });
+  const grants = new RoleBinding({
+    name: "alpha-operator",
+    member: GitHubUserId.make(1),
+    role: "operator",
+    scope: new ProjectScope({ project: ProjectId.make("alpha") }),
+  }).permissions;
+  const overview = (project: "alpha" | "beta") =>
+    new ReadyOverview({
+      ...taskOverview(),
+      projects: taskOverview().projects.map(
+        (value) => new ProjectView({ ...value, id: ProjectId.make(project) }),
+      ),
+    });
+  client.setQueryDefaults(overviewQuery().queryKey, { staleTime: Infinity });
+  client.setQueryData(overviewQuery().queryKey, overview("alpha"));
+  const render = (permissions: typeof grants) =>
+    mount(
+      <PermissionsContext.Provider value={permissions}>
+        <ContextualActions
+          detail={{ run, agentDefinitionChanged: false }}
+          onEdit={() => undefined}
+          openRun={() => undefined}
+        />
+      </PermissionsContext.Provider>,
+    );
+  render(grants);
+  await expect.element(page.getByRole("group", { name: "Run actions" })).toBeVisible();
+  client.setQueryData(overviewQuery().queryKey, overview("beta"));
+  await expect.element(page.getByRole("group", { name: "Run actions" })).not.toBeInTheDocument();
+  render(
+    new RoleBinding({
+      name: "beta-operator",
+      member: GitHubUserId.make(1),
+      role: "operator",
+      scope: new ProjectScope({ project: ProjectId.make("beta") }),
+    }).permissions,
+  );
+  await expect.element(page.getByRole("group", { name: "Run actions" })).toBeVisible();
+  render(
+    new RoleBinding({
+      name: "beta-viewer",
+      member: GitHubUserId.make(1),
+      role: "viewer",
+      scope: new ProjectScope({ project: ProjectId.make("beta") }),
+    }).permissions,
+  );
+  await expect.element(page.getByRole("group", { name: "Run actions" })).not.toBeInTheDocument();
 });
