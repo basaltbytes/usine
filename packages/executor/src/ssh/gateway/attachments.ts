@@ -1,14 +1,14 @@
+import { reclaimOnceFor } from "../../remote/reclaim.ts";
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { AttachRequest, type AttachmentId, InstallationCredential } from "@usine/gateway/admin";
-import { Cache, DateTime, Effect, Option, Redacted, Ref, Semaphore } from "effect";
+import { DateTime, Effect, Option, Redacted, Ref, Semaphore } from "effect";
 import {
   CredentialProvider,
   CredentialUnavailableError,
-  type ExecutorError,
   type ExecutorOperation,
   type WorkerCredential,
 } from "../../executor.ts";
@@ -71,17 +71,14 @@ const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
  */
 export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFor")(function* (
   commands: RemoteCommands,
-  workerFor: (
-    worker: WorkerName,
-  ) => Effect.Effect<{ readonly gateway: Option.Option<MachineGateway> }, ExecutorError>,
   holdCodexHome: CodexHomes["hold"],
 ) {
   const provider = yield* CredentialProvider;
 
   const detachLeftovers = Effect.fn("SshExecutor.detachLeftoverAttachments")(function* (
-    worker: WorkerName,
+    machine: Pick<SshMachine, "gateway" | "address">,
   ) {
-    const machine = yield* workerFor(worker);
+    const worker = machine.address.name;
     yield* Effect.annotateCurrentSpan({ worker });
     if (Option.isNone(machine.gateway))
       return yield* Effect.logDebug("The Worker has no Gateway to detach leftovers from", {
@@ -121,20 +118,20 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     );
   });
   // Caches a failed listing; the leftover attachments expire with their tokens within an hour.
-  const reclaimed = yield* Cache.make({
-    capacity: Number.POSITIVE_INFINITY,
-    lookup: (worker: WorkerName) =>
-      detachLeftovers(worker).pipe(
+  const reclaim = yield* reclaimOnceFor(
+    (machine: Pick<SshMachine, "gateway" | "address">) =>
+      `${machine.address.name} ${Option.match(machine.gateway, { onNone: () => "none", onSome: ({ settings }) => settings.destination + " " + settings.adminPort })}`,
+    (machine) =>
+      detachLeftovers(machine).pipe(
         Effect.tapError((error) =>
-          Effect.logWarning(
-            "Could not list the Gateway attachments an earlier process left; they expire with their tokens",
-            { worker, message: error.message },
-          ),
+          Effect.logWarning("Could not list the gateway attachments an earlier process left", {
+            worker: machine.address.name,
+            message: error.message,
+          }),
         ),
         Effect.ignore,
       ),
-  });
-  const reclaim = (worker: WorkerName) => Cache.get(reclaimed, worker);
+  );
 
   const acquire = Effect.fn("SshExecutor.attachToGateway")(function* (
     attemptId: AttemptId,

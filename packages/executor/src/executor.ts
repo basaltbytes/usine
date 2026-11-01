@@ -498,3 +498,5 @@ export class WorkerMachines extends Context.Service<
 >()("@usine/executor/WorkerMachines") {}
 
 export { claudeLoginLockLayer } from "./claude-login-lock.ts";
+
+export type { AttemptConnections } from "./attempt-connections.ts";

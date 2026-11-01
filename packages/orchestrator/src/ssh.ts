@@ -1,3 +1,4 @@
+import { workerConnectionsFor } from "./connections.ts";
 import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
@@ -15,8 +16,7 @@ import {
   sshWorkerRecordsFor,
   SshWorkers,
 } from "@usine/executor/ssh";
-import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
-import { workersChange } from "./current-instance/changes.ts";
+import { Config, ConfigProvider, Effect, Equal, Layer, Option } from "effect";
 import { sshHttpClientLayer } from "./http-client.ts";
 import { type StepExecutorOptions, stepExecutorLayer } from "./scheduler/scheduler.ts";
 
@@ -187,6 +187,7 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: MissingSecret) =>
     );
     return {
       name: worker.name,
+      maxConcurrentAttempts: worker.maxConcurrentAttempts,
       machine: yield* sshWorkerMachineOf(worker, missing),
       identityFile: worker.identityFile,
       port: worker.port,
@@ -219,7 +220,7 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
 });
 
 /**
- * Provides the scheduler over the SSH executor, so reloads can resize, add, and remove SSH Workers.
+ * Provides the scheduler over the SSH executor, so revisions can resize, add, remove, and update SSH Workers.
  * A reload that adds a Worker fails with a `gateway` capability error if its `admin_token_env`
  * variable is unset. `options.discard` is `StepExecutor.discard`.
  */
@@ -229,6 +230,9 @@ export const sshStepExecutorLayer = (
   options: Pick<StepExecutorOptions, "discard"> & {
     /** Workers already registered by the supplied executor layer. */
     readonly initializedWorkers?: ReadonlyArray<WorkerName>;
+    readonly resolveAddress?: (
+      worker: SshWorker,
+    ) => Effect.Effect<SshWorkerAddress, WorkerCapabilityError>;
   } = {},
 ) =>
   Layer.unwrap(
@@ -248,24 +252,19 @@ export const sshStepExecutorLayer = (
             new Error(`The SSH executor cannot run worker "${worker.name}" of kind ${worker.kind}`),
           );
         const previous = initialized.get(worker.name);
-        if (previous !== undefined) {
-          const { restart } = workersChange([previous], [worker]);
-          if (restart.length > 0)
-            return yield* new WorkerCapabilityError({
-              worker: worker.name,
-              capability: "machine",
-              message: `Can't change the settings of SSH worker "${worker.name}" while its attempts run. Reload again after they end.`,
-              cause: restart,
-            });
+        if (previous !== undefined && Equal.equals(previous, worker)) {
           yield* Effect.logDebug("SSH worker credentials are already initialized", {
             worker: worker.name,
           });
           return;
         }
-        const address = yield* sshWorkerAddressOf(
-          worker,
-          (secret, variable, key) =>
-            `The ${secret} for SSH worker "${worker.name}" is missing: ${variable} is not set in the orchestrator's environment. usine up reads only the variables that were set when it started. Set ${variable} and restart usine up, or set ${key} to a variable that usine up already has.`,
+        const address = yield* (
+          options.resolveAddress?.(worker) ??
+          sshWorkerAddressOf(
+            worker,
+            (secret, variable, key) =>
+              `The ${secret} for SSH worker "${worker.name}" is missing: ${variable} is not set in the orchestrator's environment. usine up reads only the variables that were set when it started. Set ${variable} and restart usine up, or set ${key} to a variable that usine up already has.`,
+          )
         ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, environment));
         yield* machines.addWorker(address);
         initialized.set(worker.name, worker);
@@ -295,16 +294,43 @@ export const layer = (
   brains: ReadonlyArray<BrainSpec>,
   options: SshExecutorOptions,
   database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
-) => {
-  const executor = sshExecutorLayer(options).pipe(
-    Layer.provide(NodeServices.layer),
-    Layer.provide(sshHttpClientLayer),
-  );
-  const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
-    sshStepExecutorLayer(config, brains, {
-      discard,
-      initializedWorkers: options.workers.map(({ name }) => name),
+) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const connections = yield* workerConnectionsFor(
+        `${instanceDirectory}/.usine/attempt-connections`,
+        (worker) =>
+          worker.kind === "ssh"
+            ? sshWorkerAddressOf(
+                worker,
+                (secret, variable) =>
+                  `The ${secret} for SSH worker "${worker.name}" is missing. Set ${variable} in the orchestrator's environment.`,
+              )
+            : Effect.fail(
+                new WorkerCapabilityError({
+                  worker: worker.name,
+                  capability: "machine",
+                  message: "The recorded worker connection is not SSH",
+                  cause: worker.kind,
+                }),
+              ),
+        options.workers.flatMap((address) =>
+          config.workers
+            .filter(({ name }) => name === address.name)
+            .map((worker) => ({ worker, address })),
+        ),
+      );
+      const executor = sshExecutorLayer({ ...options, attemptConnections: connections.store }).pipe(
+        Layer.provide(NodeServices.layer),
+        Layer.provide(sshHttpClientLayer),
+      );
+      const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
+        sshStepExecutorLayer(config, brains, {
+          discard,
+          resolveAddress: connections.resolve,
+          initializedWorkers: options.workers.map(({ name }) => name),
+        }),
+      ).pipe(Layer.provide(executor));
+      return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
     }),
-  ).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
-};
+  ).pipe(Layer.provide(NodeServices.layer));

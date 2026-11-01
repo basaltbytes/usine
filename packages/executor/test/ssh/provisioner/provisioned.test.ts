@@ -3,7 +3,6 @@ import { RemoteShell } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
-import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { RunId } from "@usine/core/run";
 import {
   ProvisionerTimings,
@@ -55,7 +54,16 @@ import { hetznerSettings } from "./support.ts";
 import { fakeGateway, gatewayAddress } from "../gateway/support.ts";
 import { fakeProviders, HETZNER_TEST_API } from "./fake-providers.ts";
 
-import { ROOT, RUN, KEY, hetznerAddress, boatAddress, sink, runtimeOf } from "./fixtures.ts";
+import {
+  ROOT,
+  RUN,
+  KEY,
+  hetznerAddress,
+  boatAddress,
+  sink,
+  runtimeOf,
+  pinnedEarlier,
+} from "./fixtures.ts";
 
 const codexAgent = new Agent({
   name: AgentName.make("reviewer"),
@@ -92,13 +100,6 @@ const SUBSCRIPTION_PROVIDERS = {
     }),
   ),
 };
-
-/** Records that an earlier process pinned the host key of Hetzner server `id`. */
-const pinnedEarlier = (machine: ReturnType<typeof fakeMachine>, id: number) =>
-  machine.state.localFiles.set(
-    `${LOCAL_TEMPORARY_DIRECTORY}/hetzner-${String(id)}`,
-    `usine-hetzner-${String(id)} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEarlierHostKeyForTests\n`,
-  );
 
 /** Returns the public host key in the user data of the first server created. */
 const createdHostKey = (providers: ReturnType<typeof fakeProviders>): string | undefined => {
@@ -695,57 +696,6 @@ describe("Provisioned SSH Worker", () => {
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
     },
   );
-
-  it.live("recovers an earlier process's Attempt on its machine, then deletes the machine", () => {
-    const machine = fakeMachine();
-    machine.state.cacheExists = true;
-    const providers = fakeProviders();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      pinnedEarlier(machine, 21);
-      providers.hetzner.servers.set(21, {
-        id: 21,
-        name: "usine-eu-one-21",
-        status: "running",
-        created: new Date().toISOString(),
-        labels: {
-          "usine-instance": INSTANCE,
-          "usine-worker": WORKER,
-          "usine-run": RUN,
-          "usine-process": "earlier00000",
-          "usine-attempt": attemptTag(request.attemptId),
-        },
-        privateIp: undefined,
-        publicIp: "203.0.113.91",
-        startingReads: 0,
-      });
-      const attempt: AttemptRecovery = {
-        attemptId: request.attemptId,
-        worker: WORKER,
-        repository: request.repository,
-        ref: request.salvageRef,
-        permissions: "write",
-        succeeded: true,
-        open: false,
-        rejected: Option.none(),
-      };
-      yield* executor.recover(attempt, sink, Effect.succeed(request.commitAuthor));
-      assert.isTrue(
-        machine.state.calls.some(({ command }) => command.args.includes("usine@203.0.113.91")),
-        "the recovery ran on the Attempt's machine",
-      );
-      assert.strictEqual(providers.hetzner.servers.size, 0, "the machine is deleted after");
-      // An Attempt whose machine is gone has nothing to reconcile.
-      yield* executor.recover(
-        {
-          ...attempt,
-          attemptId: AttemptId.make("remote-run/execute/2"),
-        },
-        sink,
-        Effect.succeed(request.commitAuthor),
-      );
-    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
-  });
 
   it.live(
     "keeps a machine with no recorded host key through worker removal and restoration",

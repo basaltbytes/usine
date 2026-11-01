@@ -1,11 +1,12 @@
+import { reclaimOnceFor } from "../remote/reclaim.ts";
 import { boatTailnetOf } from "./model.ts";
 import { SSH_FAILURE } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, type WorkerName } from "@usine/core/worker";
-import { Cache, Effect, Option, Random, Ref, Schema } from "effect";
-import { type ExecutorError, WorkerCapabilityError } from "../executor.ts";
+import { Effect, Option, Random, Ref, Schema } from "effect";
+import { WorkerCapabilityError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import {
@@ -26,7 +27,7 @@ import {
   type ResolvedLimits,
   resourcesFromOutput,
 } from "./limits.ts";
-import type { SshMachine } from "./model.ts";
+import type { SshMachine, SshWorkerAddress } from "./model.ts";
 
 /**
  * The image of each Attempt container when `usine.yaml` names none, built from
@@ -87,7 +88,6 @@ const containerGap = (worker: WorkerName, message: string, cause: unknown) =>
  */
 export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function* (
   commands: RemoteCommands,
-  machineFor: (worker: WorkerName) => Effect.Effect<SshMachine, ExecutorError>,
   instance: string,
   instanceId: InstanceId,
 ) {
@@ -107,7 +107,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     },
     (effect, machine) => effect.pipe(cacheLocks.withLock(machine.address.name)),
   );
-  const isolations = yield* Ref.make(new Map<WorkerName, AttemptIsolation>());
+  const isolations = new WeakMap<SshWorkerAddress, AttemptIsolation>();
   // Workers whose earlier containers this process removed. Their containers on a shared machine
   // belong to this process, so another Worker's removal keeps them.
   const reclaimed = yield* Ref.make(new Set<string>());
@@ -190,15 +190,17 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     );
   });
 
-  const record = (worker: WorkerName, isolation: AttemptIsolation) =>
-    Ref.update(isolations, (current) => new Map(current).set(worker, isolation));
+  const record = (machine: SshMachine, isolation: AttemptIsolation) =>
+    Effect.sync(() => {
+      isolations.set(machine.address, isolation);
+    });
 
   /**
    * Records that the machine's Worker runs its Attempts as the SSH user, since the machine has no
    * Docker, and logs it.
    */
   const recordSharedUser = (machine: SshMachine) =>
-    record(machine.address.name, sharedUser).pipe(
+    record(machine, sharedUser).pipe(
       Effect.andThen(
         Effect.logWarning(
           "SSH Worker has no Docker; its Attempts run as the SSH user and can read each other's credentials",
@@ -236,7 +238,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       instanceId,
       hosts,
     };
-    yield* record(worker, { _tag: "Container", settings });
+    yield* record(machine, { _tag: "Container", settings });
     yield* Effect.logInfo("SSH Worker runs each Attempt in its own container", {
       worker,
       host: machine.shell.destination,
@@ -353,20 +355,30 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   });
 
   /**
-   * Returns how new Attempts on the machine run, as the Worker's last preflight found, or detects
-   * and logs it. Before any preflight on the Worker, as for the recovery of a provisioned Worker's
-   * machine, it derives the unset limits for one Attempt on the machine.
+   * Returns the isolation from the last preflight for this connection configuration, or detects
+   * and logs it. Without a preflight, it derives unset limits using the original slot count
+   * for a fixed machine, or one slot for a provisioned machine.
    */
   const isolationOf = Effect.fn("SshExecutor.isolation")(function* (machine: SshMachine) {
-    const recorded = (yield* Ref.get(isolations)).get(machine.address.name);
+    const recorded = isolations.get(machine.address);
+    const fields = { worker: machine.address.name, host: machine.shell.destination };
+    yield* Effect.annotateCurrentSpan(fields);
     if (recorded !== undefined) {
+      yield* Effect.logDebug("Using the SSH connection's checked attempt isolation", {
+        ...fields,
+        isolation: recorded._tag,
+      });
       if (recorded._tag === "Container") yield* prepareCaches(machine, recorded.settings.image);
       return recorded;
     }
     const version = yield* detect(machine);
     if (Option.isNone(version)) return yield* recordSharedUser(machine);
     yield* prepareCaches(machine, imageFor(machine));
-    const { settings } = yield* recordContainer(machine, version.value, 1);
+    const { settings } = yield* recordContainer(
+      machine,
+      version.value,
+      Option.isSome(machine.provisioned) ? 1 : (machine.address.maxConcurrentAttempts ?? 1),
+    );
     return { _tag: "Container", settings } satisfies AttemptIsolation;
   });
 
@@ -396,33 +408,33 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     });
   });
 
-  const sweep = Effect.fn("SshExecutor.removeLeftContainers")(function* (worker: WorkerName) {
-    const machine = yield* machineFor(worker);
+  const sweep = Effect.fn("SshExecutor.removeLeftContainers")(function* (machine: SshMachine) {
+    const worker = machine.address.name;
     yield* Effect.annotateCurrentSpan({ worker, host: machine.shell.destination });
     yield* Ref.update(reclaimed, (current) => new Set(current).add(worker));
     yield* containers.sweep(machine.shell, instance, instanceId, worker, yield* Ref.get(reclaimed));
   });
   // Runs once per Worker in this process, before its first container starts. A failure is
   // logged; the containers stay until the next process.
-  const swept = yield* Cache.make({
-    capacity: Number.POSITIVE_INFINITY,
-    lookup: (worker: WorkerName) =>
-      sweep(worker).pipe(
+  const reclaim = yield* reclaimOnceFor(
+    (machine: SshMachine) => `${machine.shell.destination} ${machine.address.name}`,
+    (machine) =>
+      sweep(machine).pipe(
         Effect.tapError((error) =>
-          Effect.logWarning("Could not remove the containers an earlier process left", {
-            worker,
+          Effect.logWarning("Could not remove containers an earlier process left", {
+            worker: machine.address.name,
             message: error.message,
           }),
         ),
         Effect.ignore,
       ),
-  });
+  );
 
   return {
     verify,
     isolation: isolationOf,
     preflightShell,
-    reclaim: (worker: WorkerName) => Cache.get(swept, worker),
+    reclaim,
   };
 });
 
