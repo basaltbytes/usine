@@ -2,7 +2,7 @@
 
 An `ssh` worker is any Linux machine that the orchestrator reaches over SSH. These files create one on Hetzner Cloud in Falkenstein (`fsn1`), Nuremberg (`nbg1`), or Helsinki (`hel1`). [Add a worker](https://docs.usine.dev/guides/add-a-worker/) covers the same steps. [ADR 0026](../../docs/adr/0026-eu-ssh-worker.md) records why usine runs its own workers on EU machines.
 
-- `cloud-init.yaml` builds a Debian 13 machine: the `usine` user, with SSH by key only, rootless Podman, Git, gh, Node.js 24, pnpm, Claude Code, Codex pinned to a supported version, and Chromium. It also builds a worker behind the gateway of `gateway/`, where `gateway/gateway.sh worker-user-data` adds the gateway's worker settings.
+- `cloud-init.yaml` builds a Debian 13 machine: the `usine` user, with SSH by key only, rootless Podman, Git, gh, Node.js 22, pnpm, Claude Code, Codex pinned to a supported version, and Chromium. It also builds a worker behind the gateway of `gateway/`, where `gateway/gateway.sh worker-user-data` adds the gateway's worker settings.
 - `render-cloud-init.sh` prints that file with the public keys to authorize for `usine` and the Node.js major version of the attempt image, `NODE_MAJOR` in `../worker-image/Dockerfile`, which the scripts here send as the server's user data.
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a Hetzner firewall that allows SSH only from the orchestrator's address.
 - `snapshot.sh` builds the snapshot from which a [provisioned worker](#provisioned-workers) creates a server for each attempt.
