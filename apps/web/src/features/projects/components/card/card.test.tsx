@@ -1,5 +1,7 @@
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
+import { CiHandoff } from "@usine/core/ci";
+import { CommitSha } from "@usine/core/repository";
 import { RunLine } from "./run-line";
 import { MachineQuotaWait } from "@usine/orchestrator/operator";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -734,4 +736,23 @@ it("renders the worker and quota refusal below the board run line", () => {
   });
   const markup = renderToStaticMarkup(<RunLine run={run} />);
   assert.include(markup, "Waiting for pool: shared core limit exceeded");
+});
+
+it("links the waiting board run to its pushed pull request checks", () => {
+  const run = new RunView({
+    ...runOnItem("Succeeded", [attempt(1, null)]),
+    state: "AwaitingCi",
+    closedAt: null,
+    ciWait: new CiHandoff({
+      pullRequest: ItemNumber.make(815),
+      head: CommitSha.make("a".repeat(40)),
+      fixLoop: LoopName.make("fix"),
+      timeoutSeconds: 3600,
+      onGreen: [],
+    }),
+  });
+  const markup = renderToStaticMarkup(<RunLine run={run} />);
+  assert.include(markup, "Waiting for CI");
+  assert.include(markup, "https://github.com/basaltbytes/usine/pull/815/checks");
+  assert.strictEqual(runLineSince(run), run.attempts[0]?.endedAt);
 });

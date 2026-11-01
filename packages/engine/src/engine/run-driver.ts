@@ -627,7 +627,7 @@ export class RunDriver extends Context.Service<
 
         // Cancel, supersede, and revoke handle the Item's queued Events themselves and can
         // interrupt this fiber at any point.
-        if (outcome === "WaitingForStop") return;
+        if (outcome === "WaitingForStop" || outcome === "RunAwaitingCi") return;
         if (outcome === "Unchanged") {
           yield* Effect.logInfo("Run closed by another operation; its fiber ends", { runId });
           return;

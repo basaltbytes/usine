@@ -1,3 +1,4 @@
+import { CiPolicy } from "@usine/core/ci";
 import { Agent, AgentName } from "@usine/core/agent";
 import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -17,7 +18,7 @@ import { AttemptStart, OperatorRetryStart } from "@usine/core/attempt/start";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ApprovalRequirement, LoopName, LoopPermissions } from "@usine/core/loop";
 import { ItemKey } from "@usine/core/item";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { OperatorActor } from "@usine/core/operator";
 import { RunId, Run } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
@@ -43,6 +44,8 @@ export const EventRouteRow = Schema.Struct({
   approval: ApprovalRequirement,
   approvalReason: Schema.NullOr(Schema.NonEmptyString),
   permissions: LoopPermissions,
+  ciPolicy: Schema.NullOr(CiPolicy),
+  ciFailureHead: Schema.NullOr(CommitSha),
   cycleLimit: Schema.NullOr(CycleLimit),
   cycleGeneration: CycleGeneration,
   repository: RepositoryName,
@@ -193,6 +196,8 @@ export const submissionFromRow = (row: EventRouteRow): Submission =>
     approval: row.approval,
     approvalReason: Option.fromNullishOr(row.approvalReason),
     permissions: row.permissions,
+    ciPolicy: Option.fromNullishOr(row.ciPolicy),
+    ciFailureHead: Option.fromNullishOr(row.ciFailureHead),
     cycleLimit: Option.fromNullishOr(row.cycleLimit),
     cycleGeneration: row.cycleGeneration,
     repository: row.repository,

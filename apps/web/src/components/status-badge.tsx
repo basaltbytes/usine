@@ -14,6 +14,7 @@ const stateTone = (state: string): string => {
     case "Queued":
     case "active":
       return "text-run-active";
+    case "AwaitingCi":
     case "Waiting":
       return "text-run-waiting";
     case "needs-you":
@@ -67,7 +68,7 @@ type StatusBadgeProps = {
 export const StatusBadge = ({ state, label = state }: StatusBadgeProps) => (
   <span className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
     <StateMark state={state} />
-    {label}
+    {label === "AwaitingCi" ? "Waiting for CI" : label}
   </span>
 );
 

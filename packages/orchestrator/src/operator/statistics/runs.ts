@@ -95,7 +95,13 @@ const attemptOutcome = (attempt: Attempt): Outcome | null =>
   Option.match(attempt.outcome, {
     onNone: () => null,
     onSome: ({ _tag }) =>
-      _tag === "Succeeded" ? "succeeded" : _tag === "Failed" ? "failed" : "canceled",
+      _tag === "AwaitingCi"
+        ? null
+        : _tag === "Succeeded"
+          ? "succeeded"
+          : _tag === "Failed"
+            ? "failed"
+            : "canceled",
   });
 
 const outcomeCounts = (outcomes: ReadonlyArray<Outcome | null>): OutcomeCountsView =>

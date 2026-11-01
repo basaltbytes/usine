@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "../support/ci.ts";
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentName, AgentPersona } from "@usine/core/agent";
@@ -231,7 +232,10 @@ const runtimeLayer = (
     parser,
     polling,
   );
-  return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
+  return Layer.merge(
+    dependencies,
+    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
+  );
 };
 
 const waitForClaim = Effect.fn("agentIntegration.waitForClaim")(function* (

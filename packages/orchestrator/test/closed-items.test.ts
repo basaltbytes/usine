@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
@@ -294,7 +295,9 @@ const withFactory = <A, E>(
         tick: () => Effect.die("unused"),
       }),
     );
-    const polling = PollingTriggers.layer.pipe(Layer.provideMerge(dependencies));
+    const polling = PollingTriggers.layer
+      .pipe(Layer.provide(idleCiMonitor))
+      .pipe(Layer.provideMerge(dependencies));
     return yield* test.pipe(
       Effect.provide(
         Operator.layer.pipe(Layer.provide(configurationLayer), Layer.provideMerge(polling)),

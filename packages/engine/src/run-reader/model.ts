@@ -1,3 +1,4 @@
+import { CiPolicy } from "@usine/core/ci";
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -53,6 +54,10 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   parentModel: Schema.Option(ModelId),
   /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions,
+  /** The loop CI policy saved when the event matched. */
+  ciPolicy: Schema.Option(CiPolicy).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
 }) {}
 
 /** A Run and the Event it was opened for; the payload is the Item as the trigger saw it. */

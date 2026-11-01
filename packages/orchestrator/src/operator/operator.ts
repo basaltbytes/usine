@@ -1136,6 +1136,7 @@ const makeOperator = Effect.gen(function* () {
         )),
         cycleLimit: cycleLimitOf(loop),
         permissions: loop.permissions,
+        ciPolicy: loop.ci,
         context: new AttemptContext({
           task: edit.task,
           agent,
@@ -1509,6 +1510,7 @@ export {
   ChildSessionBudgetFailureView,
   FailureView,
   SucceededAttemptView,
+  AwaitingCiAttemptView,
   FailedAttemptView,
   CanceledAttemptView,
   AttemptOutcomeView,

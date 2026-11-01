@@ -1,3 +1,4 @@
+import { ItemNumber } from "@usine/core/item";
 import type { OperatorActor } from "@usine/core/operator";
 import {
   Attempt,
@@ -7,8 +8,14 @@ import {
   pendingProviderRetry,
   shouldAutoRetry,
 } from "@usine/core/attempt";
-import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
+import { ciHandoff, CiHandoff, type CiPolicy } from "@usine/core/ci";
+import { AttemptFailure, AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import {
+  AttemptAwaitingCi,
+  AttemptCanceled,
+  AttemptFailed,
+  AttemptSucceeded,
+} from "@usine/core/attempt/outcome";
 import { type AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
 import {
   type AttemptStart,
@@ -57,8 +64,16 @@ type RunSucceeded = {
   readonly result: StepResult;
 };
 
+type RunAwaitingCi = {
+  readonly _tag: "RunAwaitingCi";
+  readonly attempt: Attempt;
+  readonly outcome: AttemptAwaitingCi;
+  readonly state: RunState.AwaitingCi;
+  readonly result: StepResult;
+};
+
 /** The changes committed together when an Attempt finishes. */
-export type FinishDecision = RetryAttempt | RunFailed | RunSucceeded | Unchanged;
+export type FinishDecision = RetryAttempt | RunFailed | RunSucceeded | RunAwaitingCi | Unchanged;
 
 const openAttempt = (current: RunProgress): Option.Option<Attempt> =>
   Option.fromNullishOr(current.attempts.at(-1)).pipe(
@@ -96,6 +111,7 @@ export const finishAttempt = (
   current: RunProgress,
   attemptId: AttemptId,
   result: Result.Result<StepResult, AttemptFailure>,
+  policy: Option.Option<CiPolicy> = Option.none(),
 ): FinishDecision => {
   if (current.run.state._tag !== "Running") {
     return { _tag: "Unchanged", reason: "RunNotRunning" };
@@ -110,6 +126,65 @@ export const finishAttempt = (
   });
   if (Result.isFailure(completed)) {
     return failRunningAttempt(current.run.state, attempt.value, completed.failure);
+  }
+  const handoff = ciHandoff(completed.success.message);
+  if (Result.isFailure(handoff)) {
+    return failRunningAttempt(current.run.state, attempt.value, handoff.failure);
+  }
+  const pullRequest = completed.success.facts.find(
+    (fact) => fact._tag === "PullRequest" && Option.isSome(fact.head),
+  );
+  const required = Option.match(policy, {
+    onNone: () => handoff.success,
+    onSome: (ci) =>
+      Option.match(handoff.success, {
+        onSome: (recorded) => Option.some(new CiHandoff({ ...recorded, ...ci })),
+        onNone: () =>
+          pullRequest?._tag === "PullRequest" && Option.isSome(pullRequest.head)
+            ? Option.some(
+                new CiHandoff({
+                  ...ci,
+                  pullRequest: ItemNumber.make(pullRequest.number),
+                  head: pullRequest.head.value,
+                  onGreen: [],
+                }),
+              )
+            : Option.none(),
+      }),
+  });
+  if (Option.isSome(policy) && Option.isNone(required))
+    return failRunningAttempt(
+      current.run.state,
+      attempt.value,
+      new AgentFailure({
+        message: "This loop requires CI, but the successful report has no pushed pull request head",
+      }),
+    );
+  if (Option.isSome(required)) {
+    const request = required.value;
+    if (
+      !completed.success.facts.some(
+        (fact) =>
+          fact._tag === "PullRequest" &&
+          fact.number === request.pullRequest &&
+          Option.contains(fact.head, request.head),
+      )
+    ) {
+      return failRunningAttempt(
+        current.run.state,
+        attempt.value,
+        new AgentFailure({
+          message: "The CI handoff has no harvested pull request for the checkout's pushed head",
+        }),
+      );
+    }
+    return {
+      _tag: "RunAwaitingCi",
+      attempt: attempt.value,
+      outcome: new AttemptAwaitingCi(),
+      state: new RunState.AwaitingCi({ handoff: request }),
+      result: completed.success,
+    };
   }
   return {
     _tag: "RunSucceeded",
@@ -357,7 +432,8 @@ type ClaimDecision =
 export const claimRun = (blocking: Option.Option<Run>, eventId: EventId): ClaimDecision => {
   if (Option.isNone(blocking)) return { _tag: "OpenRun" };
   const run = blocking.value;
-  if (run.state._tag === "Running") return { _tag: "QueueEvent" };
+  if (run.state._tag === "Running" || run.state._tag === "AwaitingCi")
+    return { _tag: "QueueEvent" };
   if (RunState.isUnstarted(run.state)) {
     return { _tag: "SupersedeRun", runId: run.id, state: RunState.supersede(run.state, eventId) };
   }

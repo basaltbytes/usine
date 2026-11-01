@@ -219,7 +219,10 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
   const facts = new Map<number, PullRequest>();
   for (const pr of pages.flat()) {
     if (pr.head.sha === head)
-      facts.set(pr.number, new PullRequest({ number: pr.number, url: pr.url }));
+      facts.set(
+        pr.number,
+        new PullRequest({ number: pr.number, url: pr.url, head: Option.some(head) }),
+      );
   }
   yield* Effect.logInfo("Collected Attempt pull request results", {
     attemptId: spec.attemptId,

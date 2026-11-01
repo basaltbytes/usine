@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "./support/ci.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
@@ -153,6 +154,8 @@ const changesOnce =
 const submissions: Array<string> = [];
 
 const claimingRuns = Layer.succeed(RunEngine)({
+  awaitingCi: () => Effect.succeed([]),
+  settleCi: () => Effect.void,
   resolveFailure: () => Effect.void,
   intervene: () => Effect.void,
   approve: () => Effect.die("unused"),
@@ -180,25 +183,27 @@ const claimingRuns = Layer.succeed(RunEngine)({
 
 /** A new PollingTriggers, as one `usine up` process builds it, over a shared cursor store. */
 const processLayer = (github: GitHubPolling["Service"], cursors: CursorStore["Service"]) =>
-  PollingTriggers.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        noCycleBudgets,
-        Layer.succeed(CursorStore)(cursors),
-        itemProjectionWriterLayer,
-        itemProjectionReaderLayer,
-        repositoryLabelProjectionReaderLayer,
-        repositoryLabelProjectionWriterLayer,
-        inertGitHubLabelWriterLayer,
-        inertLabelReconcilerLayer,
-        claimingRuns,
-        MarcbachmannCelLayer,
-        ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
-        Layer.succeed(GitHubPolling, github),
-        loopControlLayer(),
+  PollingTriggers.layer
+    .pipe(Layer.provide(idleCiMonitor))
+    .pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          noCycleBudgets,
+          Layer.succeed(CursorStore)(cursors),
+          itemProjectionWriterLayer,
+          itemProjectionReaderLayer,
+          repositoryLabelProjectionReaderLayer,
+          repositoryLabelProjectionWriterLayer,
+          inertGitHubLabelWriterLayer,
+          inertLabelReconcilerLayer,
+          claimingRuns,
+          MarcbachmannCelLayer,
+          ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
+          Layer.succeed(GitHubPolling, github),
+          loopControlLayer(),
+        ),
       ),
-    ),
-  );
+    );
 
 const capturedLogs = () => {
   const lines: Array<{ readonly level: string; readonly text: string }> = [];

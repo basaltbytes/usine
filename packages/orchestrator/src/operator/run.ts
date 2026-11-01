@@ -1,3 +1,4 @@
+import { CiHandoff } from "@usine/core/ci";
 import { UpgradeWait } from "@usine/engine/engine";
 import { SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
@@ -93,6 +94,11 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   agentBrain: BrainSpec,
   /** The current lifecycle state. */
   state: RunStateTag,
+  /** The pushed head and completion actions while CI is pending. */
+  ciWait: Schema.NullOr(CiHandoff).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /** The idle upgrade deferring this run before it reserves a worker slot. */
   upgradeWait: Schema.NullOr(UpgradeWait).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),

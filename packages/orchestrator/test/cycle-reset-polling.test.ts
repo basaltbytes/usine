@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
@@ -243,7 +244,7 @@ it.live(
       );
       const runtime = Layer.merge(
         dependencies,
-        PollingTriggers.layer.pipe(Layer.provide(dependencies)),
+        PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
       );
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;

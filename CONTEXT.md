@@ -94,8 +94,11 @@ The sequence for one event: open a run, try its step as one or more attempts, an
 _Avoid_: run model, workflow, state machine
 
 **Run**:
-The work for one event of a loop. Only one run per dedup key can be open. Open states are `pending`, `waiting`, `queued`, and `running`; closed states are `succeeded`, `failed`, and `canceled`.
+The work for one event of a loop. Only one run per dedup key can be open. Open states are `pending`, `waiting`, `queued`, `running`, and `awaiting CI`; closed states are `succeeded`, `failed`, and `canceled`.
 _Avoid_: execution, job, workflow run
+
+**CI wait**:
+The interval after an agent session ends during which a run waits for checks on its recorded pull request head.
 
 **Step**:
 A named unit of a run with a stored result. In v1, each run has one step: the agent action.

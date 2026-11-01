@@ -355,6 +355,7 @@ const stallReason = ({
       return Option.some(new WaitingForUpgradeView({ run: open, wait: open.upgradeWait }));
     switch (open.state) {
       case "Running":
+      case "AwaitingCi":
         return Option.none();
       case "Waiting":
         return Option.some(new AwaitingApprovalView({ run: open }));

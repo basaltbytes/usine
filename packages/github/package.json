@@ -38,6 +38,10 @@
     "./github-app": {
       "types": "./dist/github-app.d.ts",
       "default": "./dist/github-app.js"
+    },
+    "./checks": {
+      "types": "./dist/checks.d.ts",
+      "default": "./dist/checks.js"
     }
   },
   "publishConfig": {

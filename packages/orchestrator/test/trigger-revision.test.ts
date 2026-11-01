@@ -47,6 +47,8 @@ it.effect.each(["issue", "pr"] as const)(
       const resolved = yield* resolveTriggerLoop(instance, loop);
       const submissions: Array<Submission> = [];
       const engine = Layer.succeed(RunEngine)({
+        awaitingCi: () => Effect.succeed([]),
+        settleCi: () => Effect.void,
         resolveFailure: () => Effect.void,
         intervene: () => Effect.void,
         approve: () => Effect.die("unused"),

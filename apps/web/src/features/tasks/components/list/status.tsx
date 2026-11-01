@@ -1,3 +1,4 @@
+import { waitingForCi } from "~/lib/runs/strings";
 import type { StalledItemView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import { ItemMark } from "~/components/item/mark";
@@ -44,6 +45,7 @@ const statusLine = (
     at: null,
   });
   return Match.valueTags(status, {
+    AwaitingCi: () => ({ state: "AwaitingCi", words: waitingForCi, at }),
     Running: ({ run }) => ({ state: "Running", words: `Running ${run.loop}`, at }),
     AwaitingApproval: () => ({ state: "Waiting", words: "Waiting for approval", at }),
     Queued: ({ run }) => ({ state: run.state, words: run.state, at }),

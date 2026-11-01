@@ -13,8 +13,8 @@ const LabelNames = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique());
 export class ItemLabelMutation extends Schema.Class<ItemLabelMutation>(
   "@usine/github/ItemLabelMutation",
 )({
-  /** A nonempty list of unique labels to add before removing labels. */
-  add: LabelNames.check(Schema.isNonEmpty()),
+  /** Unique labels to add before removing labels. */
+  add: LabelNames,
   /** Unique labels to remove after additions; labels already absent are ignored. */
   remove: LabelNames,
 }) {}
@@ -73,20 +73,23 @@ export class GitHubItemWriter extends Context.Service<
           ) {
             yield* Effect.annotateCurrentSpan({ repository, item });
             const token = yield* app.installationToken();
-            const addResponse = yield* send(
-              HttpClientRequest.post(labelsUrl(repository, item)).pipe(
-                HttpClientRequest.bodyJsonUnsafe({ labels: mutation.add }),
-                authorized(token.value),
-              ),
-            );
-            if (addResponse.status < 200 || addResponse.status >= 300) {
-              return yield* statusError(
-                "update-item-labels",
-                addResponse,
-                yield* Clock.currentTimeMillis,
+            let applied: typeof LabelResponse.Type = [];
+            if (mutation.add.length > 0) {
+              const addResponse = yield* send(
+                HttpClientRequest.post(labelsUrl(repository, item)).pipe(
+                  HttpClientRequest.bodyJsonUnsafe({ labels: mutation.add }),
+                  authorized(token.value),
+                ),
               );
+              if (addResponse.status < 200 || addResponse.status >= 300) {
+                return yield* statusError(
+                  "update-item-labels",
+                  addResponse,
+                  yield* Clock.currentTimeMillis,
+                );
+              }
+              applied = yield* decode(addResponse);
             }
-            let applied = yield* decode(addResponse);
             for (const label of mutation.remove) {
               const removeResponse = yield* send(
                 HttpClientRequest.delete(labelUrl(repository, item, label)).pipe(
@@ -94,7 +97,7 @@ export class GitHubItemWriter extends Context.Service<
                 ),
               );
               if (removeResponse.status === 404) {
-                yield* Effect.logDebug("Lane label was already absent during Board move", {
+                yield* Effect.logDebug("Item label was already absent", {
                   repository,
                   item,
                   label,
@@ -110,7 +113,7 @@ export class GitHubItemWriter extends Context.Service<
               }
               applied = yield* decode(removeResponse);
             }
-            yield* Effect.logInfo("GitHub Item lane labels updated from a Board move", {
+            yield* Effect.logInfo("GitHub item labels updated", {
               repository,
               item,
               addedLabels: mutation.add.join(", "),
