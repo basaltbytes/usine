@@ -1,6 +1,8 @@
 import { rejects } from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createServer as createRegistry } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -24,7 +26,7 @@ const fixture = async (installer = "npm") => {
     join(bin, installer),
     `#!${process.execPath}
 import { mkdirSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
-if (process.argv.slice(2).join(' ') !== 'install') process.exit(65);
+if (process.argv.slice(2).join(' ') !== ${JSON.stringify(installer === "pnpm" ? "install --ignore-workspace" : "install")}) process.exit(65);
 if (process.env.INSTALL_FAILURE) process.exit(42);
 const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
 mkdirSync('node_modules/@usine', { recursive: true });
@@ -101,18 +103,77 @@ it("accepts an existing empty folder and refuses to overwrite its contents on a 
   assert.equal(await readFile(join(f.folder, ".env"), "utf8"), "TOKEN=keep-me\n");
 });
 
+it("isolates a real pnpm install from an enclosing workspace", async () => {
+  const f = await fixture("pnpm");
+  onTestFinished(() => rm(f.root, { recursive: true, force: true }));
+  const manifest = { name: "@usine/server", version: release.version };
+  await mkdir(join(f.root, "package"));
+  await writeFile(join(f.root, "package/package.json"), JSON.stringify(manifest));
+  await exec("tar", ["-czf", "server.tgz", "package"], { cwd: f.root });
+  const tarball = await readFile(join(f.root, "server.tgz"));
+  const registry = createRegistry((request, response) => {
+    if (request.url === "/server.tgz") {
+      response.end(tarball);
+    } else {
+      response.setHeader("Content-Type", "application/json");
+      response.end(
+        JSON.stringify({
+          name: manifest.name,
+          "dist-tags": { latest: release.version },
+          versions: {
+            [release.version]: {
+              ...manifest,
+              dist: { tarball: `http://${request.headers.host}/server.tgz` },
+            },
+          },
+        }),
+      );
+    }
+  });
+  onTestFinished(() => new Promise<void>((resolve) => registry.close(() => resolve())));
+  registry.listen(0, "127.0.0.1");
+  await once(registry, "listening");
+  const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+    registry.address(),
+  );
+  await writeFile(join(f.root, "package.json"), JSON.stringify({ private: true }));
+  await writeFile(join(f.root, "pnpm-workspace.yaml"), "packages:\n  - instances/*\n");
+  const folder = join(f.root, "instances/factory");
+  const { stdout } = await exec(process.execPath, [cli, folder], {
+    cwd: f.root,
+    env: {
+      ...f.env,
+      PATH: process.env.PATH,
+      pnpm_config_registry: `http://127.0.0.1:${port}`,
+    },
+    timeout: 30_000,
+  });
+  assert.include(stdout, "pnpm usine up");
+  assert.include(await readFile(join(folder, "pnpm-lock.yaml"), "utf8"), "@usine/server");
+  assert.deepEqual(
+    JSON.parse(await readFile(join(folder, "node_modules/@usine/server/package.json"), "utf8")),
+    manifest,
+  );
+  assert.notInclude(await readdir(f.root), "pnpm-lock.yaml");
+  assert.notInclude(await readdir(f.root), "node_modules");
+}, 60_000);
+
 it.each([
-  ["INSTALL_FAILURE", "Installation exited with status 42"],
-  ["NO_LOCKFILE", "Installation did not write package-lock.json"],
-])("reports %s without claiming setup succeeded", async (variable, message) => {
-  const f = await fixture();
+  ["npm", "INSTALL_FAILURE", "Installation exited with status 42"],
+  ["npm", "NO_LOCKFILE", "Installation did not write package-lock.json"],
+  ["pnpm", "INSTALL_FAILURE", "Installation exited with status 42"],
+  ["pnpm", "NO_LOCKFILE", "Installation did not write pnpm-lock.yaml"],
+])("reports %s %s without claiming setup succeeded", async (installer, variable, message) => {
+  const f = await fixture(installer);
   onTestFinished(() => rm(f.root, { recursive: true, force: true }));
   await rejects(
     exec(process.execPath, [cli, f.folder], {
       env: { ...f.env, [variable]: "1" },
       timeout: 30_000,
     }),
-    new RegExp(message),
+    new RegExp(
+      `${message}.*${installer} install${installer === "pnpm" ? " --ignore-workspace" : ""} in this folder`,
+    ),
   );
   assert.equal(
     JSON.parse(await readFile(join(f.folder, "package.json"), "utf8")).dependencies[

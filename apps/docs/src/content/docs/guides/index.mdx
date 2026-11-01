@@ -30,7 +30,7 @@ npm run usine -- up
 
 With pnpm, run `pnpm create usine ~/my-factory`, then `cd ~/my-factory` and `pnpm usine up`.
 
-Choose a new or empty folder on persistent storage. The scaffold pins `@usine/server` to an exact release in `package.json` and installs it with npm or pnpm, which writes the lockfile. It also writes `.gitignore` and a commented `.env` template with optional environment overrides. If installation fails, run `npm install` or `pnpm install` in the folder to retry.
+Choose a new or empty folder on persistent storage. The scaffold pins `@usine/server` to an exact release in `package.json` and installs it with npm or pnpm, which writes the lockfile. It also writes `.gitignore` and a commented `.env` template with optional environment overrides. If installation fails, run `npm install` or `pnpm install --ignore-workspace` in the folder to retry.
 
 Commands below use the short name `usine`. For this local installation, replace it with `npm run usine --` or `pnpm usine`; for example, `npm run usine -- sign-in-link`.
 

@@ -68,8 +68,10 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
     installer,
   });
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const installArgs = installer === "pnpm" ? ["install", "--ignore-workspace"] : ["install"];
+  const installCommand = [installer, ...installArgs].join(" ");
   const exitCode = yield* spawner.exitCode(
-    ChildProcess.make(installer, ["install"], {
+    ChildProcess.make(installer, installArgs, {
       cwd: directory,
       stdin: "inherit",
       stdout: "inherit",
@@ -80,7 +82,7 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
     yield* Effect.logError("Scaffold installation failed", { directory, installer, exitCode });
     return yield* new ScaffoldError({
       directory,
-      message: `Installation exited with status ${exitCode}. Run ${installer} install in this folder to retry.`,
+      message: `Installation exited with status ${exitCode}. Run ${installCommand} in this folder to retry.`,
     });
   }
   const lockfile = installer === "npm" ? "package-lock.json" : "pnpm-lock.yaml";
@@ -92,7 +94,7 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
     });
     return yield* new ScaffoldError({
       directory,
-      message: `Installation did not write ${lockfile}. Enable lockfiles and run ${installer} install in this folder.`,
+      message: `Installation did not write ${lockfile}. Enable lockfiles and run ${installCommand} in this folder.`,
     });
   }
   yield* Effect.logInfo("Runtime folder created", {
