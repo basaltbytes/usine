@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
+import { WorkerRoot } from "@usine/core/worker";
 import { Effect, Layer, Option } from "effect";
 import { Executor } from "../../src/executor.ts";
 import { keptCheckoutRecovery } from "../../src/provision.ts";
@@ -102,13 +103,21 @@ it.effect(
   },
 );
 
-it.effect(
-  "keeps the original connection when container cleanup fails after removing the checkout",
-  () => {
+it.effect.each(["runtime inspection", "container removal"])(
+  "keeps the original connection across restart after failed %s with no checkout",
+  (failure) => {
     const machine = fakeMachine();
     machine.state.docker = "running";
     const records = new Map<AttemptId, typeof ADDRESS>();
-    return Effect.gen(function* () {
+    const layer = (address: typeof ADDRESS) =>
+      executorLayer(machine, mintingProvider(), address, undefined, undefined, {
+        attemptConnections: {
+          read: (id) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
+          write: (id, connection) => Effect.sync(() => void records.set(id, connection)),
+          remove: (id) => Effect.sync(() => void records.delete(id)),
+        },
+      }).pipe(Layer.provide(noGateway));
+    const prepare = Effect.gen(function* () {
       const executor = yield* Executor;
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -120,18 +129,40 @@ it.effect(
         records.has(request.attemptId),
         "the leftover container still needs its original connection",
       );
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        executorLayer(machine, mintingProvider(), ADDRESS, undefined, undefined, {
-          attemptConnections: {
-            read: (id) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
-            write: (id, address) => Effect.sync(() => void records.set(id, address)),
-            remove: (id) => Effect.sync(() => void records.delete(id)),
-          },
-        }).pipe(Layer.provide(noGateway)),
-      ),
-    );
+      assert.strictEqual(machine.state.containers.size, 1);
+    });
+    const recover = Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.recover(
+        { ...keptCheckoutRecovery(request), succeeded: true, open: false },
+        {
+          salvage: () => Effect.die("no checkout"),
+          comments: () => Effect.void,
+          windows: aloneOnItem(),
+        },
+        Effect.die("no salvage author needed"),
+      );
+    });
+    return Effect.gen(function* () {
+      yield* prepare.pipe(Effect.scoped, Effect.provide(layer(ADDRESS)));
+      machine.state.cacheExists = false;
+      machine.state.containerRemovalFails = failure === "container removal";
+      machine.state.docker = failure === "runtime inspection" ? "unusable" : "running";
+      const replacement = { ...ADDRESS, root: WorkerRoot.make("/replacement") };
+      const result = yield* recover.pipe(
+        Effect.scoped,
+        Effect.provide(layer(replacement)),
+        Effect.result,
+      );
+      assert.strictEqual(machine.state.containers.size, 1);
+      assert.deepStrictEqual(records.get(request.attemptId), ADDRESS);
+      assert.strictEqual(result._tag, "Failure");
+      machine.state.containerRemovalFails = false;
+      machine.state.docker = "running";
+      yield* recover.pipe(Effect.scoped, Effect.provide(layer(replacement)));
+      assert.strictEqual(machine.state.containers.size, 0);
+      assert.strictEqual(records.size, 0, "successful recovery removes the original connection");
+    });
   },
 );
 

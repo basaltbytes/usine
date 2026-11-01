@@ -328,6 +328,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     holds,
     discard,
     reset: options.reset,
+    forgetConnection: options.forgetConnection,
     check: checkMachine,
   });
 

@@ -63,6 +63,7 @@ for (const address of [hetznerAddress, boatAddress]) {
           });
         }
         const providers = fakeProviders();
+        const records = new Map<AttemptId, SshWorkerAddress>();
         return Effect.gen(function* () {
           const machines = yield* WorkerMachines;
           const executor = yield* Executor;
@@ -72,12 +73,15 @@ for (const address of [hetznerAddress, boatAddress]) {
               yield* (yield* executor.prepare(request)).launch(sink);
             }),
           );
+          assert.isTrue(records.has(request.attemptId));
           yield* machines.release(first.hold);
           yield* machines.release(first.hold);
           assert.strictEqual((yield* machines.machines)[0]?.state, "idle");
           assert.strictEqual(machine.state.containers.size, 0);
           assert.strictEqual(machine.state.credentials.size, 0);
+          assert.strictEqual(records.size, 0, "reset removes the completed attempt connection");
           const reused = yield* machines.create(WORKER, RUN, second, [TEST_AGENT.brain]);
+          assert.isTrue(records.has(second));
           assert.strictEqual(reused.id, first.id);
           assert.notEqual(reused.hold, first.hold);
           assert.strictEqual((yield* machines.machines)[0]?.attempts, 2);
@@ -94,13 +98,22 @@ for (const address of [hetznerAddress, boatAddress]) {
           );
           yield* machines.release(reused.hold);
           assert.lengthOf(yield* machines.machines, 0);
+          assert.strictEqual(records.size, 0, "deletion leaves no previous attempt connections");
           const fresh = yield* machines.create(WORKER, RUN, third, [TEST_AGENT.brain]);
           assert.notEqual(fresh.id, first.id);
           assert.strictEqual((yield* machines.starts)[0]?.count, 2);
           yield* machines.release(fresh.hold);
         }).pipe(
           Effect.scoped,
-          Effect.provide(runtimeOf(machine, providers, reuseAddress(address))),
+          Effect.provide(
+            runtimeOf(machine, providers, reuseAddress(address), {
+              attemptConnections: {
+                read: (id) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
+                write: (id, connection) => Effect.sync(() => void records.set(id, connection)),
+                remove: (id) => Effect.sync(() => void records.delete(id)),
+              },
+            }),
+          ),
         );
       },
     );
