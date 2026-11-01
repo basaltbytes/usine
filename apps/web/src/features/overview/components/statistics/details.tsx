@@ -1,3 +1,11 @@
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "~/components/ui/table";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -68,6 +76,31 @@ const RunDetails = ({ statistics }: RunDetailsProps) => {
   return (
     <div className="flex flex-col gap-7">
       <p className="text-sm text-muted-foreground">{firstTimeRightDetails}</p>
+      {statistics.machineStarts.length > 0 && (
+        <section aria-label="Machine starts per day">
+          <h3 className="text-sm font-medium">Machine starts per day (UTC)</h3>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Day</TableHead>
+                <TableHead>Worker</TableHead>
+                <TableHead>Provider</TableHead>
+                <TableHead className="text-right">Starts</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {statistics.machineStarts.map((entry) => (
+                <TableRow key={`${entry.day}:${entry.worker}:${entry.provider}`}>
+                  <TableCell>{entry.day}</TableCell>
+                  <TableCell>{entry.worker}</TableCell>
+                  <TableCell>{entry.provider}</TableCell>
+                  <TableCell className="text-right tabular-nums">{entry.count}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </section>
+      )}
       <dl className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-4">
         <Figure
           label="Runs closed"

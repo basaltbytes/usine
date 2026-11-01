@@ -7,6 +7,7 @@ import { type ContainerLimits, WorkerName } from "@usine/core/worker";
 import type {
   ExecutorError,
   MachineStatus,
+  MachineStarts,
   MachineUnavailableReason,
   PreflightReport,
   WorkerCapability,
@@ -297,6 +298,8 @@ export class WorkerStatus extends Context.Service<
     readonly unavailable: Effect.Effect<ReadonlyArray<WorkerPreflightFailure>>;
     /** The machines of the provisioned Workers in flight, oldest first. */
     readonly machines: Effect.Effect<ReadonlyArray<MachineStatus>>;
+    /** Persisted provider creation counts by UTC day. */
+    readonly machineStarts: Effect.Effect<ReadonlyArray<MachineStarts>>;
     /** The provisioned Workers whose last machine creation failed. */
     readonly provisioning: Effect.Effect<ReadonlyArray<ProvisioningPause>>;
   }
@@ -317,6 +320,7 @@ export class WorkerStatus extends Context.Service<
       ),
     unavailable: Effect.succeed([]),
     machines: Effect.succeed([]),
+    machineStarts: Effect.succeed([]),
     provisioning: Effect.succeed([]),
   });
 }

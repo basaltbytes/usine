@@ -1,7 +1,7 @@
 import { upgradeWaitLine } from "~/lib/runs/strings";
 import type { ProvisioningPauseView, WorkerView } from "@usine/orchestrator/operator";
 import { StateMark } from "~/components/status-badge";
-import { agoLabel, timestampLabel } from "~/lib/strings";
+import { agoLabel, elapsedLabel, timestampLabel } from "~/lib/strings";
 import { creationFailureTitle, nextCreationLine } from "~/lib/workers/strings";
 
 const outcome = {
@@ -61,6 +61,13 @@ export const WorkersLine = ({ workers, now }: WorkersLineProps) => (
           {worker.machines.length > 0 &&
             `, ${worker.machines.length} ${worker.machines.length === 1 ? "machine" : "machines"}`}
         </span>
+        {worker.machines.map((machine) => (
+          <span key={machine.id ?? machine.since} className="tabular-nums">
+            {machine.id ?? "Creating"}: {machine.attempts}{" "}
+            {machine.attempts === 1 ? "attempt" : "attempts"}, {elapsedLabel(machine.since, now)}{" "}
+            old{machine.state === "idle" ? ", idle" : ""}
+          </span>
+        ))}
         {worker.upgradeWait !== null && <span>{upgradeWaitLine(worker.upgradeWait)}</span>}
         <Preflight worker={worker} now={now} />
         {worker.provisioning?.blocked === true && (

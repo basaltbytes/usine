@@ -191,6 +191,7 @@ describe("Boat tailnet", () => {
         run: RunId.make("earlier-run"),
         process: "earlier-process",
         attempt: AttemptId.make("earlier-run/execute/1"),
+        attempts: 1,
       });
       assert.strictEqual(boat.boat.sandboxes.size, 1);
       yield* (yield* WorkerMachines).sweep;

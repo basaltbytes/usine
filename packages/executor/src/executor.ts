@@ -432,10 +432,10 @@ export class MachineGrant extends Schema.Class<MachineGrant>("@usine/executor/Ma
 }) {}
 
 /**
- * `creating` until the machine answers over SSH, `ready` while an Attempt holds it, and
+ * `creating` until the machine answers over SSH, `ready` while an attempt uses it, `idle` between attempts, and
  * `deleting` until its deletion succeeds.
  */
-export const MachineState = Schema.Literals(["creating", "ready", "deleting"]);
+export const MachineState = Schema.Literals(["creating", "ready", "idle", "deleting"]);
 export type MachineState = typeof MachineState.Type;
 
 /** A machine in flight on a provisioned Worker. */
@@ -450,23 +450,34 @@ export class MachineStatus extends Schema.Class<MachineStatus>("@usine/executor/
   attemptId: Schema.Option(AttemptId),
   /** When the creation started, or when the provider created a machine found after a restart. */
   since: Schema.DateTimeUtc,
+  /** Assigned attempts, or zero when an older provider record has no count. */
+  attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+    Schema.withConstructorDefault(Effect.succeed(0)),
+  ),
+}) {}
+
+/** Accepted provider creations by worker and UTC day, including failed preflights. */
+export class MachineStarts extends Schema.Class<MachineStarts>("@usine/executor/MachineStarts")({
+  worker: WorkerName,
+  provider: MachineProvider,
+  day: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u)),
+  count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
 /**
- * The machines of the provisioned Workers, which create one machine per Attempt and delete it
- * afterwards (#550). Only the SSH executor provides it.
+ * The provisioned workers' machines, with optional bounded reuse. Only the SSH executor provides it.
  */
 export class WorkerMachines extends Context.Service<
   WorkerMachines,
   {
-    /** Returns whether `worker` creates a machine for each Attempt. */
+    /** Returns whether `worker` uses provisioned machines. */
     readonly provisions: (worker: WorkerName) => Effect.Effect<boolean>;
     /**
-     * Creates a machine on `worker` for the persisted `attemptId`, labeled with the instance,
+     * Reuses an eligible idle machine or creates one on `worker` for the persisted `attemptId`, labeled with the instance,
      * Worker, Run, and Attempt, and waits until it answers over SSH. The first machine after the configured
      * check interval also gets the preflight checks of `brains`, whose failure is a `WorkerCapabilityError`.
      * Call only before preparing the Attempt. A retry first deletes machines from its earlier failed creation.
-     * On failure or interruption, deletes the machine.
+     * Reused machines always get preflight. On failure or interruption, deletes the machine.
      */
     readonly create: (
       worker: WorkerName,
@@ -484,7 +495,7 @@ export class WorkerMachines extends Context.Service<
       worker: WorkerName,
       attemptId: AttemptId,
     ) => Effect.Effect<Option.Option<MachineHold>>;
-    /** Deletes the held machine. Logs a failure, and each `sweep` tries again. */
+    /** Resets an eligible machine for reuse, or deletes it. Retained checkouts prevent both. Failed deletion is retried by `sweep`. */
     readonly release: (hold: MachineHold) => Effect.Effect<void>;
     /**
      * Lists each provisioned Worker's machines at its provider and deletes those that no
@@ -494,6 +505,8 @@ export class WorkerMachines extends Context.Service<
     readonly sweep: Effect.Effect<void>;
     /** The machines in flight, oldest first. */
     readonly machines: Effect.Effect<ReadonlyArray<MachineStatus>>;
+    /** Persisted counts of acknowledged provider creations, including failed preflights. */
+    readonly starts: Effect.Effect<ReadonlyArray<MachineStarts>>;
   }
 >()("@usine/executor/WorkerMachines") {}
 
