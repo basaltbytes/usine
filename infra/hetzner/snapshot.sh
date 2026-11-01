@@ -27,7 +27,8 @@ Environment:
   GATEWAY_SSH    the gateway's SSH destination, such as its Host alias; required with NETWORK
   ATTEMPT_IMAGE  the attempt image to pull, default ATTEMPT_IMAGE in
                  packages/executor/src/ssh/container.ts
-  DESCRIPTION    the snapshot's description, default usine-worker-<attempt image tag>
+  USINE_CONTAINER_RUNTIME  podman (default) or docker
+  DESCRIPTION    the snapshot's description, default usine-worker-<runtime>-<attempt image tag>
   SERVER_NAME    name of the temporary server, default usine-snapshot-<time>
 
 Behind the gateway, gateway.sh reads GATEWAY_IP, DOMAIN, and NETWORK_CIDR as
@@ -46,7 +47,10 @@ IMAGE=${IMAGE:-debian-13}
 NETWORK=${NETWORK:-}
 SERVER_NAME=${SERVER_NAME:-usine-snapshot-$(date -u +%Y%m%d%H%M%S)}
 ATTEMPT_IMAGE=${ATTEMPT_IMAGE:-$(grep -o 'ghcr\.io/basaltbytes/usine-worker:[A-Za-z0-9._-]*' "$here/../../packages/executor/src/ssh/container.ts" | head -n 1)}
-DESCRIPTION=${DESCRIPTION:-usine-worker-${ATTEMPT_IMAGE##*:}}
+USINE_CONTAINER_RUNTIME=${USINE_CONTAINER_RUNTIME:-podman}
+export USINE_CONTAINER_RUNTIME
+case "$USINE_CONTAINER_RUNTIME" in podman|docker) ;; *) echo "Invalid USINE_CONTAINER_RUNTIME" >&2; exit 64 ;; esac
+DESCRIPTION=${DESCRIPTION:-usine-worker-$USINE_CONTAINER_RUNTIME-${ATTEMPT_IMAGE##*:}}
 identity=${public_key_file%.pub}
 
 [ -f "$public_key_file" ] || { echo "No public key at $public_key_file" >&2; exit 66; }
@@ -139,10 +143,10 @@ case "$waited" in
     ;;
 esac
 
-remote "usine@$address" docker version > /dev/null || { echo "Docker doesn't answer the usine user on $SERVER_NAME" >&2; exit 1; }
+remote "usine@$address" "$USINE_CONTAINER_RUNTIME" info > /dev/null || { echo "The container runtime doesn't answer the usine user on $SERVER_NAME" >&2; exit 1; }
 echo "Pulling $ATTEMPT_IMAGE" >&2
-remote "usine@$address" docker pull --quiet "$ATTEMPT_IMAGE" > /dev/null
-remote "usine@$address" docker image inspect "$ATTEMPT_IMAGE" > /dev/null || { echo "$ATTEMPT_IMAGE isn't on $SERVER_NAME after the pull" >&2; exit 1; }
+remote "usine@$address" "$USINE_CONTAINER_RUNTIME" pull --quiet "$ATTEMPT_IMAGE" > /dev/null
+remote "usine@$address" "$USINE_CONTAINER_RUNTIME" image inspect "$ATTEMPT_IMAGE" > /dev/null || { echo "$ATTEMPT_IMAGE isn't on $SERVER_NAME after the pull" >&2; exit 1; }
 
 hcloud server shutdown --wait --wait-timeout 2m "$SERVER_NAME" > /dev/null || hcloud server poweroff "$SERVER_NAME" > /dev/null
 echo "Creating the snapshot $DESCRIPTION, which takes a few minutes" >&2

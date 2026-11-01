@@ -801,7 +801,7 @@ describe("SSH Worker", () => {
       yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       for (const { line } of machine.state.calls)
         for (const mutating of ["mkdir", "rm", "mv", "clone", "find", "read -r token"])
-          assert.notInclude(line, mutating, `preflight ran ${mutating}`);
+          assert.notMatch(line, new RegExp(`\\b${mutating}\\b`, "u"), `preflight ran ${mutating}`);
 
       machine.state.rootWritable = false;
       const unwritable = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);

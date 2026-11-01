@@ -26,7 +26,7 @@ After fixing a login, package, or connection on a worker, select **Run preflight
 | `kind`                   | Where children run                                                                         | GitHub credential on the machine                                             |
 | ------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | `local`                  | as processes on the orchestrator machine                                                   | a token file in a private temporary folder, removed with the attempt         |
-| `ssh`                    | on a Linux machine, in the attempt's own Docker container                                  | a token file under the worker's root, removed with the attempt               |
+| `ssh`                    | on a Linux machine, in the attempt's own Podman or Docker container                        | a token file under the worker's root, removed with the attempt               |
 | `ssh` with `gateway`     | on a Linux machine with no public address, through a gateway                               | none: the gateway adds the token to the machine's GitHub requests            |
 | `ssh` with `provisioner` | on a machine that Hetzner Cloud or Boat creates for the attempt and usine deletes after it | as for `ssh`, or `ssh` with `gateway` on Hetzner Cloud                       |
 | `cloudflare`             | in a Cloudflare container per attempt, through the sandbox Worker that you deploy          | none: the Worker's outbound handlers add the token and the provider API keys |
@@ -55,18 +55,18 @@ Use the local worker only for agents that you trust with your own access. For ot
 
 Worker [preflight](/reference/configuration/agent-files/#preflight) never installs anything or logs in. It checks:
 
-| Worker               | Checks                                                                                                                                                                                                                                                                                         |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `local`              | `git --version`, the memory for `max_concurrent_attempts`, and each harness with the children's environment ([harness checks](/reference/configuration/agent-files/#preflight)).                                                                                                               |
-| `ssh`                | The SSH connection, a writable `root`, `git --version`, the memory for `max_concurrent_attempts`, Docker and the attempt image, and each harness in a container from that image. Without Docker, each harness over SSH, and the worker is degraded. A Pi agent in the roster fails this check. |
-| `ssh` with `gateway` | The `ssh` checks, and also: the admin API accepts the admin token, the worker's sshd accepts the caller token variables, the worker can connect to `git.<domain>`, and for each harness that uses its login on the worker, the login's hosts respond through the forward proxy.                |
-| `cloudflare`         | The Worker's health route accepts the Access service token, the Worker has the image, the worker has an API key for each harness, and each harness's version in a preflight sandbox ([details](/guides/cloudflare-sandboxes/#preflight)). A Pi agent in the roster fails this check.           |
+| Worker               | Checks                                                                                                                                                                                                                                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local`              | `git --version`, the memory for `max_concurrent_attempts`, and each harness with the children's environment ([harness checks](/reference/configuration/agent-files/#preflight)).                                                                                                                                 |
+| `ssh`                | The SSH connection, a writable `root`, `git --version`, the memory for `max_concurrent_attempts`, Podman or Docker and the attempt image, and each harness in a container from that image. Without either runtime, each harness over SSH, and the worker is degraded. A Pi agent in the roster fails this check. |
+| `ssh` with `gateway` | The `ssh` checks, and also: the admin API accepts the admin token, the worker's sshd accepts the caller token variables, the worker can connect to `git.<domain>`, and for each harness that uses its login on the worker, the login's hosts respond through the forward proxy.                                  |
+| `cloudflare`         | The Worker's health route accepts the Access service token, the Worker has the image, the worker has an API key for each harness, and each harness's version in a preflight sandbox ([details](/guides/cloudflare-sandboxes/#preflight)). A Pi agent in the roster fails this check.                             |
 
 The `memory` check is described under [`workers`](/reference/configuration/usine-yaml/#workers).
 
 ## SSH workers
 
-An SSH worker is a Linux machine with Git, Docker, a directory that the SSH user can write to, and your agents' harnesses logged in for the SSH user.
+An SSH worker is a Linux machine with Git, rootless Podman or Docker, a directory that the SSH user can write to, and your agents' harnesses logged in for the SSH user.
 
 ```yaml title="usine.yaml"
 workers:
@@ -84,35 +84,37 @@ usine writes each attempt's token to `<root>/workers/<name>/credentials/<attempt
 
 ### A container per attempt
 
-Each attempt runs in its own container from an image with Node.js 22, pnpm, Git, gh, Chromium, Claude Code, and Codex, built from `infra/worker-image/Dockerfile` ([ADR 0011](https://github.com/basaltbytes/usine/blob/main/docs/adr/0011-github-app-identity-scoped-worker-tokens.md), amended 2026-10-25). The container mounts that attempt's checkout, the SSH user's harness login files, and the worker's shared pnpm store and Turborepo cache read-write, and its cached clone and credential directory read-only. The harnesses rewrite the login files when they refresh their tokens, as they do without containers. Every command of the attempt runs in it with `docker exec`, so attempts can't read each other's checkouts, tokens, or processes. The SSH user's shell starts and removes the container and fetches the cached clone. [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) sets the image and the CPU, memory, and process limits of each container. Preflight derives CPU limits from all host CPUs divided by `max_concurrent_attempts`, and memory limits from host memory minus a 1024 MiB reserve, divided by `max_concurrent_attempts`. Choose `max_concurrent_attempts` so that each container has the memory of the heaviest command its agents run, such as the repository's tests: [usine's own tests](https://github.com/basaltbytes/usine/blob/main/apps/web/README.md#conversation-browser-tests) need about 4.7 GiB, so a machine with 7.7 GiB runs one of its attempts at a time. Limits that add up to more than the machine's memory don't stop attempts from starting, but heavy commands that run at the same time make the machine swap, and the kernel kills processes for memory. Under an attempt's outcome, the run page totals the processes the kernel killed for memory across the attempt's containers and separately gives the memory limit of the last container with recorded kills. The **Workers** page shows the limits that the last preflight applied.
+Each attempt runs in its own container from an image with Node.js 24, pnpm, Git, gh, Chromium, Claude Code, and Codex, built from `infra/worker-image/Dockerfile` ([ADR 0011](https://github.com/basaltbytes/usine/blob/main/docs/adr/0011-github-app-identity-scoped-worker-tokens.md), amended 2026-10-25). The container mounts that attempt's checkout, the SSH user's harness login files, and the worker's shared pnpm store and Turborepo cache read-write, and its cached clone and credential directory read-only. The harnesses rewrite the login files when they refresh their tokens, as they do without containers. Every command of the attempt runs in it with the selected runtime's `exec`, so attempts can't read each other's checkouts, tokens, or processes. The SSH user's shell starts and removes the container and fetches the cached clone. [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) sets the image and the CPU, memory, and process limits of each container. Preflight derives CPU limits from all host CPUs divided by `max_concurrent_attempts`, and memory limits from host memory minus a 1024 MiB reserve, divided by `max_concurrent_attempts`. Choose `max_concurrent_attempts` so that each container has the memory of the heaviest command its agents run, such as the repository's tests: [usine's own tests](https://github.com/basaltbytes/usine/blob/main/apps/web/README.md#conversation-browser-tests) need about 4.7 GiB, so a machine with 7.7 GiB runs one of its attempts at a time. Limits that add up to more than the machine's memory don't stop attempts from starting, but heavy commands that run at the same time make the machine swap, and the kernel kills processes for memory. Under an attempt's outcome, the run page totals the processes the kernel killed for memory across the attempt's containers and separately gives the memory limit of the last container with recorded kills. The **Workers** page shows the limits that the last preflight applied.
 
 The container is named `usine-<attempt id>` and is removed with the checkout when the attempt ends. A process that stops without removing it leaves it; the next process removes containers with both its App ID and instance ID labels before its first attempt on that machine, and removes the containers of workers that the stored configuration no longer declares too.
 
-The containers use the machine's network, so a worker behind a gateway still reaches only the gateway. The SSH user must be in the `docker` group, which lets it act as root on the machine; the attempts never get Docker access.
+New Hetzner workers use rootless Podman with `--userns=keep-id`, so container writes retain the SSH user's ownership. The image's UID and GID must match that user's. The containers use the machine's network and the gateway's existing nftables policy. Podman workers require cgroup v2, delegated CPU, memory, and PID controllers, non-overlapping subordinate UID and GID ranges, and a lingering systemd user manager. Preflight checks those prerequisites and verifies the applied limits through `exec` in a disposable container.
 
-Without Docker on the machine, attempts run as the SSH user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)). Preflight passes and reports the worker as degraded in the log and on the **Workers** page. If the SSH user can use Docker, attempts never run as that user: a Docker that doesn't answer, or the `docker` group without the `docker` CLI, fails preflight.
+`/etc/usine/container-runtime` selects `podman` or `docker`. Without that file, the executor selects installed Podman first, then Docker. A selected runtime that fails its checks fails preflight with remediation. Docker workers retain Docker group access, which lets their SSH user act as root; Podman workers have neither that membership nor access to the system Docker socket.
+
+Without either runtime or Docker socket access, attempts run as the SSH user and can read each other's tokens. Preflight reports this worker as degraded.
 
 ### Shared pnpm store
 
-Preflight creates the Docker volume `usine-pnpm-store` if absent and sets its owner to the image's `usine` UID. Every attempt container mounts it read-write at `/home/usine/.local/share/pnpm/store`, the store directory configured in the image. Later attempts reuse downloaded packages. Containers copy packages into the checkout when it is on a different filesystem.
+Preflight creates the volume `usine-pnpm-store` if absent and sets its owner to the image's `usine` UID. Every attempt container mounts it read-write at `/home/usine/.local/share/pnpm/store`, the store directory configured in the image. Later attempts reuse downloaded packages. Containers copy packages into the checkout when it is on a different filesystem.
 
 The image must run with the SSH user's UID; build custom images with `--build-arg USINE_UID=<SSH UID>`. Preflight refuses a store owned by another UID with a `container` capability error. Remove the volume before using an image with a different UID. On machines that skip the full daily preflight, first use prepares the volume; later attempts on the same machine reuse that preparation.
 
-The volume belongs to the machine's Docker daemon. Worker entries or instances that use the same daemon share it. Use it only for trusted jobs: pnpm's store integrity checks detect corruption, but do not isolate mutually untrusted writers. pnpm 11.20.0 supports concurrent installs without an additional sharing flag; its [11.0.0 release notes](https://github.com/pnpm/pnpm/releases/tag/v11.0.0) describe SQLite WAL for concurrent store access, and [11.5.2](https://github.com/pnpm/pnpm/releases/tag/v11.5.2) fixes concurrent package imports.
+Podman volumes belong to the SSH user's local store; Docker volumes belong to its daemon. Worker entries and instances using the same store share them. Use it only for trusted jobs: pnpm's store integrity checks detect corruption, but do not isolate mutually untrusted writers. pnpm 11.20.0 supports concurrent installs without an additional sharing flag; its [11.0.0 release notes](https://github.com/pnpm/pnpm/releases/tag/v11.0.0) describe SQLite WAL for concurrent store access, and [11.5.2](https://github.com/pnpm/pnpm/releases/tag/v11.5.2) fixes concurrent package imports.
 
 Preflight logs `Shared pnpm store disk usage` with `worker`, `host`, `volume`, and `sizeKiB` (allocated disk space in KiB). The store grows as attempts install packages; usine does not prune it automatically or enforce a quota. To reclaim it, pause the worker's loops, let attempts finish, and remove any retained containers that mount the volume before running this command on the worker:
 
 ```sh
-docker volume rm usine-pnpm-store
+podman volume rm usine-pnpm-store
 ```
 
-Docker refuses to remove a volume while a container references it, including a stopped container. Run preflight again after removal to recreate an empty store. A provisioned worker deletes the volume with its machine after each attempt, so it does not reuse packages between machines. Preflight also prepares `usine-turbo-cache` with the same ownership checks. Containers mount it read-write at `/home/usine/.cache/turbo`, the image's `TURBO_CACHE_DIR`, so concurrent and later attempts reuse cached task outputs. It survives container removal and shares the pnpm volume's trust boundary and lifetime. To reclaim it, remove containers that reference it and run `docker volume rm usine-turbo-cache`.
+The runtime refuses to remove a volume while a container references it, including a stopped container. Run preflight again after removal to recreate an empty store. A provisioned worker deletes the volume with its machine after each attempt, so it does not reuse packages between machines. Use `docker` in these commands on Docker workers. Preflight also prepares `usine-turbo-cache` with the same ownership checks. Containers mount it read-write at `/home/usine/.cache/turbo`, the image's `TURBO_CACHE_DIR`, so concurrent and later attempts reuse cached task outputs. It survives container removal and shares the pnpm volume's trust boundary and lifetime. To reclaim it, remove containers that reference it and run `podman volume rm usine-turbo-cache`.
 
 ### Create a worker on Hetzner Cloud
 
-The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs Docker, with `usine` in the `docker` group, and Git, gh, Node.js 22, pnpm 11.20.0, Claude Code at the version pinned in `cloud-init.yaml`, Codex 0.164.0, and Chromium, which the logins use. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
+The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs rootless Podman and crun, enables lingering and controller delegation for `usine`, and installs Git, gh, Node.js 24, pnpm 11.20.0, Claude Code at the version pinned in `cloud-init.yaml`, Codex 0.164.0, and Chromium, which the logins use. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
 
-Workers can also be arm64 machines, such as Hetzner's Ampere `cax` types: the attempt image has linux/amd64 and linux/arm64 builds under the same tag, and Docker pulls the one for the machine. A `cax21` has 4 vCPUs and 8 GB of memory; set `HCLOUD_SERVER_TYPE=cax21`. A Hetzner snapshot creates servers of its own architecture only, and `infra/hetzner/snapshot.sh` builds it on a `cx23` by default, so for a [provisioned worker](/guides/add-a-provisioned-worker/) on `cax` servers, set `SERVER_TYPE` to a `cax` type, such as `cax11`.
+Workers can also be arm64 machines, such as Hetzner's Ampere `cax` types: the attempt image has linux/amd64 and linux/arm64 builds under the same tag, and the runtime pulls the one for the machine. A `cax21` has 4 vCPUs and 8 GB of memory; set `HCLOUD_SERVER_TYPE=cax21`. A Hetzner snapshot creates servers of its own architecture only, and `infra/hetzner/snapshot.sh` builds it on a `cx23` by default, so for a [provisioned worker](/guides/add-a-provisioned-worker/) on `cax` servers, set `SERVER_TYPE` to a `cax` type, such as `cax11`.
 
 <Steps>
 
@@ -141,26 +143,13 @@ Workers can also be arm64 machines, such as Hetzner's Ampere `cax` types: the at
 
 </Steps>
 
-### Move a worker to containers
+### Move a worker to rootless Podman
 
-A worker created before cloud-init installed Docker runs its attempts as the SSH user. To give each attempt its own container:
+Drain the worker's attempts, then replace it using the current cloud-init files. Set `USINE_CONTAINER_RUNTIME=podman` when creating the worker or rebuilding its snapshot. For provisioned workers, update `provisioner.image` to the new snapshot ID. Set `USINE_CONTAINER_RUNTIME=docker` to build a Docker worker during the transition.
 
-<Steps>
+Podman uses its own image and volume store. Re-pull the attempt image and let preflight initialize new caches; do not reuse Docker volumes by changing their ownership. Keep Podman's storage on a local filesystem. For private images, use a protected persistent `REGISTRY_AUTH_FILE` outside attempt mounts because the default login file under `/run` does not survive reboot.
 
-1. Stop the worker's attempts: [stop](/reference/configuration/cli/#usine-stop) `usine up`, or wait until the worker runs none. After the restart, usine refuses to reattach or salvage a checkout from before Docker, since that would run git as a user who can now use Docker; it leaves the checkout for you to salvage and remove.
-
-2. As root on the worker, install Docker and add `usine` to the `docker` group. `usine` has no sudo; [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) shows how to become root:
-
-   ```sh title="Worker, as root"
-   apt-get install -y docker.io docker-cli
-   usermod -aG docker usine
-   ```
-
-   Behind a gateway, also add the proxy drop-in, the `daemon.json`, and the `ghcr.io` hosts of `infra/hetzner/gateway/` first; [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md) lists them.
-
-3. Start `usine up`. Preflight pulls the image and reports the worker as passed, not degraded.
-
-</Steps>
+Run preflight on the replacement worker. Before production rollout, validate reboot, fresh SSH connections, resource enforcement, OOM salvage, concurrent file ownership, gateway networking, Chromium, and cleanup on a disposable machine. The [Hetzner README](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md#rebuild-for-rootless-podman) gives the snapshot command and full validation matrix.
 
 ## SSH workers behind a gateway
 

@@ -33,8 +33,8 @@ const capabilityError = (
 /**
  * Verifies an SSH Worker's machine: SSH connects, the root is a writable directory, Git runs,
  * memory is enough for the concurrent Attempts, the Gateway (if any) responds and is reachable,
- * Docker and the Attempt image work if the machine has Docker, and each brain is ready. Pulls
- * the Attempt image and changes nothing else. With Docker, it derives the container limits that
+ * the container runtime and attempt image work when installed, and each brain is ready. Pulls
+ * the Attempt image and changes nothing else. With a container runtime, it derives the container limits that
  * `usine.yaml` leaves unset for `maxConcurrentAttempts` containers, which the report gives, and
  * brains are probed in a container from the image; without, as the SSH user, which the report
  * gives as degraded. Claude brains are checked under the Worker's lock in `logins`.
@@ -146,7 +146,7 @@ export const sshMachinePreflightFor = (
         harnessProbe(machine, shell),
         logins,
       );
-    yield* containerCheck._tag === "Container" && harnesses.length > 0
+    yield* containerCheck._tag === "Container"
       ? Effect.scoped(
           containers
             .preflightShell(

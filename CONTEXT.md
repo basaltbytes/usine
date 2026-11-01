@@ -181,7 +181,7 @@ A check that a worker can run attempts. It fails with typed capability errors an
 _Avoid_: bootstrap, provisioning, health check
 
 **Attempt container**:
-The container that runs every command of one attempt on an SSH worker with Docker, with only that attempt's checkout and credentials mounted (ADR 0011).
+The container that runs every command of one attempt on an SSH worker, with only that attempt's checkout and credentials mounted (ADR 0011).
 _Avoid_: sandbox, box, VM
 
 **Gateway**:

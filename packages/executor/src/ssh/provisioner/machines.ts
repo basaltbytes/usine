@@ -56,14 +56,18 @@ import {
 
 /**
  * A script that waits for cloud-init to finish, if the machine has it, creates the Worker root
- * `$1`, and waits up to a minute for Docker to answer, if the machine has it.
+ * `$1`, and waits up to a minute for the container runtime to answer, if the machine has it.
  */
 const READY_SCRIPT = String.raw`
 if command -v cloud-init >/dev/null 2>&1; then cloud-init status --wait >/dev/null 2>&1 || true; fi
 mkdir -p "$1" || exit 1
-if command -v docker >/dev/null 2>&1; then
+runtime=docker
+if [ -f /etc/usine/container-runtime ]; then runtime=$(cat /etc/usine/container-runtime)
+elif command -v podman >/dev/null 2>&1; then runtime=podman; fi
+case "$runtime" in podman|docker) ;; *) exit 1 ;; esac
+if command -v "$runtime" >/dev/null 2>&1; then
   tries=0
-  until docker version >/dev/null 2>&1; do
+  until "$runtime" info >/dev/null 2>&1; do
     tries=$((tries + 1))
     [ "$tries" -ge 30 ] && break
     sleep 2
