@@ -1,13 +1,14 @@
-import { machineChecksFor, harnessCredentialGap } from "./checks.ts";
+import { awaitMachineSsh, machineChecksFor, harnessCredentialGap } from "./checks.ts";
 import { machineReuseFor } from "./reuse.ts";
 import { machineStartsFor } from "./starts.ts";
 import { machineHolds, type Held } from "./holds.ts";
 import { boatTailnetsFor } from "./tailnet/bootstrap.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
+import type { AttemptRecovery } from "@usine/core/attempt/salvage";
+import { safeSegment } from "@usine/core/repository";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
-import { RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import {
   Array as Arr,
   DateTime,
@@ -50,31 +51,15 @@ import {
   type MachineTags,
 } from "./model.ts";
 
-/**
- * A script that waits for cloud-init to finish, if the machine has it, creates the Worker root
- * `$1`, and waits up to a minute for the container runtime to answer, if the machine has it.
- */
-const READY_SCRIPT = String.raw`
-if command -v cloud-init >/dev/null 2>&1; then cloud-init status --wait >/dev/null 2>&1 || true; fi
-mkdir -p "$1" || exit 1
-runtime=docker
-if [ -f /etc/usine/container-runtime ]; then runtime=$(cat /etc/usine/container-runtime)
-elif command -v podman >/dev/null 2>&1; then runtime=podman; fi
-case "$runtime" in podman|docker) ;; *) exit 1 ;; esac
-if command -v "$runtime" >/dev/null 2>&1; then
-  tries=0
-  until "$runtime" info >/dev/null 2>&1; do
-    tries=$((tries + 1))
-    [ "$tries" -ge 30 ] && break
-    sleep 2
-  done
-fi
-`.trim();
-
 export interface ProvisionedMachinesOptions {
   readonly instance: string;
   readonly commands: RemoteCommands;
   readonly workerFor: (worker: WorkerName) => Effect.Effect<SshWorkerEntry, ExecutorError>;
+  readonly attemptEntry: (
+    worker: WorkerName,
+    attemptId: AttemptId,
+  ) => Effect.Effect<SshWorkerEntry, WorkerCapabilityError>;
+  readonly forgetConnection: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
   readonly entries: Effect.Effect<ReadonlyArray<SshWorkerEntry>>;
   readonly machineAt: (
     entry: SshWorkerEntry,
@@ -129,10 +114,9 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   const holds = yield* machineHolds;
   const { held, register, update, unregister, entryOf, byAttempt, retireIdle } = holds;
   const scope = yield* Effect.scope;
-  const checks = yield* machineChecksFor(options.verifyMachine);
-  const earlierMachines = yield* Ref.make<ReadonlyMap<WorkerName, ReadonlyArray<ListedMachine>>>(
-    new Map(),
-  );
+  const checks = machineChecksFor(options.verifyMachine);
+  const protectedAttempts = new Set<AttemptId>();
+  const earlierMachines = new WeakMap<MachineDriver, ReadonlyArray<ListedMachine>>();
   const process = yield* randomHex(12);
   const readyTimeoutFor = (entry: SshWorkerEntry) =>
     Duration.fromInputUnsafe(
@@ -154,7 +138,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     path.join(knownHostsDirectory, `${provider}-${id}`);
 
   const drivers = yield* machineDriversFor(options);
-  const driverFor = drivers.get;
 
   /** Deletes the machine `id` and its host key file. Fails if the provider doesn't delete it. */
   const destroy = Effect.fn("SshExecutor.deleteMachine")(function* (
@@ -181,10 +164,10 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     worker: WorkerName,
     driver: MachineDriver,
   ) {
-    const cached = (yield* Ref.get(earlierMachines)).get(worker);
+    const cached = earlierMachines.get(driver);
     if (cached !== undefined) return cached;
     const listed = yield* driver.list(instance, Option.some(worker));
-    yield* Ref.update(earlierMachines, (current) => new Map(current).set(worker, listed));
+    earlierMachines.set(driver, listed);
     yield* Effect.logInfo("Listed the machines of a provisioned Worker for its earlier Attempts", {
       worker,
       provider: driver.provider,
@@ -212,20 +195,13 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       reason,
     };
     yield* update(hold, (current) => ({ ...current, state: "deleting" }));
-    const driver = yield* driverFor(found.worker).pipe(Effect.option);
-    if (Option.isNone(driver)) {
-      yield* unregister(hold);
-      return yield* Effect.logWarning(
-        "The Worker of the machine is gone, so the machine can't be deleted; delete it at the provider",
-        { ...fields, machine: Option.getOrElse(found.id, () => "unknown") },
-      );
-    }
+    const driver = found.driver;
     const id = Option.isSome(found.id)
       ? Option.some(found.id.value)
       : yield* Option.match(found.attemptId, {
           onNone: () => Effect.succeedNone,
           onSome: (attemptId) =>
-            earlierMachinesOf(found.worker, driver.value).pipe(
+            earlierMachinesOf(found.worker, driver).pipe(
               Effect.map((listed) =>
                 Option.map(
                   Option.fromNullishOr(
@@ -255,7 +231,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       );
     }
     if (Option.isSome(found.machine)) yield* tailnets.leave(found.machine.value);
-    const deleted = yield* destroy(driver.value, found.worker, id.value).pipe(
+    const deleted = yield* destroy(driver, found.worker, id.value).pipe(
       Effect.as(true),
       Effect.tapError((error) =>
         Effect.logWarning("Could not delete the machine; the next sweep tries again", {
@@ -328,49 +304,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     return options.machineAt(entry, id, endpoint, pinned);
   });
 
-  /** Waits until the machine answers over SSH and runs `READY_SCRIPT`. */
-  const awaitSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function* (machine: SshMachine) {
-    const worker = machine.address.name;
-    const host = machine.shell.destination;
-    yield* Effect.annotateCurrentSpan({ worker, host });
-    const shell = new RemoteShell({
-      ssh: {
-        command: machine.shell.ssh.command,
-        args: [...machine.shell.ssh.args, "-o", "ConnectTimeout=10"],
-      },
-      sshEnvironment: machine.shell.sshEnvironment,
-      destination: machine.shell.destination,
-    });
-    let tries = 0;
-    while (true) {
-      tries += 1;
-      const result = yield* commands.inspect("prepare", shell, "sh", [
-        "-c",
-        READY_SCRIPT,
-        "sh",
-        machine.address.root,
-      ]);
-      if (result.exitCode === 0) {
-        yield* Effect.logInfo("The new machine answers over SSH", { worker, host, tries });
-        return;
-      }
-      if (result.exitCode !== SSH_FAILURE)
-        return yield* new WorkerCapabilityError({
-          worker,
-          capability: "machine",
-          message: `The new machine of worker "${worker}" at ${host} can't create the root ${machine.address.root}`,
-          cause: new Error(result.stderr.trim() || `exit code ${String(result.exitCode)}`),
-        });
-      yield* Effect.logDebug("The new machine doesn't answer over SSH yet", {
-        worker,
-        host,
-        tries,
-        message: result.stderr.trim(),
-      });
-      yield* interval;
-    }
-  });
-
   const checkMachine = checks.check;
 
   const timedOut = (
@@ -386,6 +319,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     });
 
   const reuse = machineReuseFor({
+    entries: options.entries,
     instance,
     process,
     scope,
@@ -395,143 +329,157 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     check: checkMachine,
   });
 
-  const create = Effect.fn("SshExecutor.createMachine")(function* (
-    worker: WorkerName,
-    runId: RunId,
-    attemptId: AttemptId,
-    brains: ReadonlyArray<BrainSpec>,
-  ) {
-    yield* Effect.annotateCurrentSpan({ worker, runId, attemptId });
-    const defect = <E>(error: E) => Effect.die(error);
-    const entry = yield* options
-      .workerFor(worker)
-      .pipe(
-        Effect.catchTags({ ExecutorOperationError: defect, CredentialUnavailableError: defect }),
+  const create = Effect.fn("SshExecutor.createMachine")(
+    function* (
+      worker: WorkerName,
+      runId: RunId,
+      attemptId: AttemptId,
+      brains: ReadonlyArray<BrainSpec>,
+    ) {
+      yield* Effect.annotateCurrentSpan({ worker, runId, attemptId });
+      const entry = yield* options.attemptEntry(worker, attemptId);
+      const driver = yield* drivers.forEntry(entry);
+      const reused = yield* reuse.take(entry, runId, attemptId, brains, driver);
+      if (Option.isSome(reused)) return reused.value;
+      yield* Effect.gen(function* () {
+        const earlier = yield* driver.list(instance, Option.some(worker));
+        for (const machine of earlier.filter(({ tags }) =>
+          Option.contains(tags.attempt, attemptTag(attemptId)),
+        )) {
+          yield* destroy(driver, worker, machine.id);
+          const previous = [...(yield* Ref.get(held)).values()].filter((entry) =>
+            Option.contains(entry.id, machine.id),
+          );
+          yield* Effect.forEach(previous, ({ hold }) => unregister(hold), { discard: true });
+          yield* Effect.logInfo(
+            "Deleted a machine from an earlier failed creation before retrying",
+            {
+              worker,
+              attemptId,
+              machine: machine.id,
+            },
+          );
+        }
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new MachineUnavailableError({
+              worker,
+              provider: driver.provider,
+              reason: "provider",
+              message: `Could not clean up the attempt's earlier machine creation: ${error.message}`,
+            }),
+        ),
       );
-    const driver = yield* driverFor(worker).pipe(
-      Effect.catchTags({ ExecutorOperationError: defect, CredentialUnavailableError: defect }),
-    );
-    const reused = yield* reuse.take(entry, runId, attemptId, brains, driver);
-    if (Option.isSome(reused)) return reused.value;
-    yield* Effect.gen(function* () {
-      const earlier = yield* driver.list(instance, Option.some(worker));
-      for (const machine of earlier.filter(({ tags }) =>
-        Option.contains(tags.attempt, attemptTag(attemptId)),
-      )) {
-        yield* destroy(driver, worker, machine.id);
-        const previous = [...(yield* Ref.get(held)).values()].filter((entry) =>
-          Option.contains(entry.id, machine.id),
-        );
-        yield* Effect.forEach(previous, ({ hold }) => unregister(hold), { discard: true });
-        yield* Effect.logInfo("Deleted a machine from an earlier failed creation before retrying", {
-          worker,
-          attemptId,
-          machine: machine.id,
-        });
-      }
-    }).pipe(
-      Effect.mapError(
-        (error) =>
-          new MachineUnavailableError({
-            worker,
-            provider: driver.provider,
-            reason: "provider",
-            message: `Could not clean up the attempt's earlier machine creation: ${error.message}`,
-          }),
-      ),
-    );
-    const readyTimeout = readyTimeoutFor(entry);
-    const since = yield* DateTime.now;
-    const tags: MachineTags = {
-      instance,
-      worker,
-      run: runId,
-      process,
-      attempt: attemptId,
-      attempts: 1,
-    };
-    const { hold } = yield* register({
-      worker,
-      provider: driver.provider,
-      state: "creating",
-      uses: 1,
-      since,
-      id: Option.none(),
-      runId: Option.some(runId),
-      attemptId: Option.some(attemptId),
-      machine: Option.none(),
-      holder: "lease",
-      checkout: false,
-    });
-    yield* Effect.logInfo("Creating a machine for the persisted Attempt", {
-      worker,
-      runId,
-      attemptId,
-      provider: driver.provider,
-    });
-    const created = yield* driver
-      .create(machineName(worker, yield* randomHex(8)), tags)
-      .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : unregister(hold))));
-    const id = created.id;
-    yield* update(hold, (current) => ({ ...current, id: Option.some(id) }));
-    const ready = starts
-      .record(worker, driver.provider)
-      .pipe(Effect.andThen(machineOf(entry, driver, id, created.hostKey)))
-      .pipe(
-        Effect.tap((machine) =>
-          awaitSsh(machine).pipe(
-            Effect.catchTag("ExecutorOperationError", (error) =>
-              Effect.fail(
-                new MachineUnavailableError({
-                  worker,
-                  provider: driver.provider,
-                  reason: "unreachable",
-                  message: error.message,
-                }),
+      const readyTimeout = readyTimeoutFor(entry);
+      const since = yield* DateTime.now;
+      const tags: MachineTags = {
+        instance,
+        worker,
+        run: runId,
+        process,
+        attempt: attemptId,
+        attempts: 1,
+      };
+      const { hold } = yield* register({
+        worker,
+        driver,
+        workerEntry: entry,
+        provider: driver.provider,
+        state: "creating",
+        uses: 1,
+        since,
+        id: Option.none(),
+        runId: Option.some(runId),
+        attemptId: Option.some(attemptId),
+        machine: Option.none(),
+        holder: "lease",
+        checkout: false,
+      });
+      yield* Effect.logInfo("Creating a machine for the persisted Attempt", {
+        worker,
+        runId,
+        attemptId,
+        provider: driver.provider,
+      });
+      const created = yield* driver
+        .create(machineName(worker, yield* randomHex(8)), tags)
+        .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : unregister(hold))));
+      const id = created.id;
+      yield* update(hold, (current) => ({ ...current, id: Option.some(id) }));
+      const ready = starts
+        .record(worker, driver.provider)
+        .pipe(Effect.andThen(machineOf(entry, driver, id, created.hostKey)))
+        .pipe(
+          Effect.tap((machine) =>
+            awaitMachineSsh(commands, interval, machine).pipe(
+              Effect.catchTag("ExecutorOperationError", (error) =>
+                Effect.fail(
+                  new MachineUnavailableError({
+                    worker,
+                    provider: driver.provider,
+                    reason: "unreachable",
+                    message: error.message,
+                  }),
+                ),
               ),
             ),
           ),
+          Effect.tap((machine) =>
+            update(hold, (current) => ({ ...current, machine: Option.some(machine) })),
+          ),
+          Effect.tap(tailnets.join),
+          Effect.timeoutOrElse({
+            duration: readyTimeout,
+            orElse: () => Effect.fail(timedOut(worker, driver.provider, readyTimeout)),
+          }),
+        );
+      const prepared = yield* ready.pipe(
+        Effect.flatMap((machine) =>
+          checkMachine(machine, brains).pipe(Effect.map((checked) => ({ machine, checked }))),
         ),
-        Effect.tap((machine) =>
-          update(hold, (current) => ({ ...current, machine: Option.some(machine) })),
+        Effect.onExit((exit) =>
+          Exit.isSuccess(exit) ? Effect.void : discard(hold, "the machine didn't become ready"),
         ),
-        Effect.tap(tailnets.join),
-        Effect.timeoutOrElse({
-          duration: readyTimeout,
-          orElse: () => Effect.fail(timedOut(worker, driver.provider, readyTimeout)),
-        }),
       );
-    const prepared = yield* ready.pipe(
-      Effect.flatMap((machine) =>
-        checkMachine(machine, brains).pipe(Effect.map((checked) => ({ machine, checked }))),
+      yield* update(hold, (current) => ({
+        ...current,
+        state: "located",
+        machine: Option.some(prepared.machine),
+      }));
+      yield* Effect.logInfo("The machine for the Attempt is ready", {
+        worker,
+        runId,
+        attemptId,
+        provider: driver.provider,
+        machine: id,
+        host: prepared.machine.shell.destination,
+        seconds: Math.round(Duration.toSeconds(DateTime.distance(since, yield* DateTime.now))),
+        checked: Option.isSome(prepared.checked),
+      });
+      return new MachineGrant({
+        hold,
+        id,
+        worker,
+        provider: driver.provider,
+        checked: prepared.checked,
+      });
+    },
+    (effect, _worker, _runId, attemptId) =>
+      effect.pipe(
+        Effect.tapError(() =>
+          options.forgetConnection(attemptId).pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning("Could not remove the failed creation's connection record", {
+                attemptId,
+                message: error.message,
+              }),
+            ),
+            Effect.ignore,
+          ),
+        ),
       ),
-      Effect.onExit((exit) =>
-        Exit.isSuccess(exit) ? Effect.void : discard(hold, "the machine didn't become ready"),
-      ),
-    );
-    yield* update(hold, (current) => ({
-      ...current,
-      state: "located",
-      machine: Option.some(prepared.machine),
-    }));
-    yield* Effect.logInfo("The machine for the Attempt is ready", {
-      worker,
-      runId,
-      attemptId,
-      provider: driver.provider,
-      machine: id,
-      host: prepared.machine.shell.destination,
-      seconds: Math.round(Duration.toSeconds(DateTime.distance(since, yield* DateTime.now))),
-      checked: Option.isSome(prepared.checked),
-    });
-    return new MachineGrant({
-      hold,
-      id,
-      worker,
-      provider: driver.provider,
-      checked: prepared.checked,
-    });
-  });
+  );
 
   /**
    * Looks up the machine that an earlier process created for `entry`'s Attempt and records it
@@ -541,8 +489,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const worker = entry.worker;
     const attemptId = Option.getOrUndefined(entry.attemptId);
     if (attemptId === undefined) return false;
-    const workerEntry = yield* options.workerFor(worker);
-    const driver = yield* driverFor(worker);
+    const { workerEntry, driver } = entry;
     const listed = (yield* earlierMachinesOf(worker, driver)).find(({ tags }) =>
       Option.contains(tags.attempt, attemptTag(attemptId)),
     );
@@ -584,18 +531,24 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const existing = yield* byAttempt(attemptId);
     const entry = Option.isSome(existing)
       ? existing.value
-      : yield* register({
-          worker,
-          provider: (yield* driverFor(worker)).provider,
-          state: "unlocated",
-          uses: 0,
-          since: yield* DateTime.now,
-          id: Option.none(),
-          runId: Option.none(),
-          attemptId: Option.some(attemptId),
-          machine: Option.none(),
-          holder,
-          checkout: false,
+      : yield* Effect.gen(function* () {
+          const workerEntry = yield* options.attemptEntry(worker, attemptId);
+          const driver = yield* drivers.forEntry(workerEntry);
+          return yield* register({
+            worker,
+            workerEntry,
+            driver,
+            provider: driver.provider,
+            state: "unlocated",
+            uses: 0,
+            since: yield* DateTime.now,
+            id: Option.none(),
+            runId: Option.none(),
+            attemptId: Option.some(attemptId),
+            machine: Option.none(),
+            holder,
+            checkout: false,
+          });
         });
     if (holder === "lease" && entry.holder !== "lease")
       yield* update(entry.hold, (current) => ({ ...current, holder }));
@@ -613,11 +566,24 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     attemptId: AttemptId,
   ) {
     yield* Effect.annotateCurrentSpan({ worker, attemptId });
-    const entry = yield* options.workerFor(worker).pipe(Effect.option);
-    if (Option.isNone(entry) || Option.isNone(provisionerOf(entry.value)))
+    protectedAttempts.add(attemptId);
+    const entry = yield* options.attemptEntry(worker, attemptId).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not restore the retained attempt connection; its machines stay protected",
+          { worker, attemptId, message: error.message },
+        ),
+      ),
+      Effect.option,
+    );
+    if (Option.isNone(entry)) return Option.none<MachineHold>();
+    if (Option.isNone(provisionerOf(entry.value))) {
+      protectedAttempts.delete(attemptId);
       return Option.none<MachineHold>();
+    }
     const located = yield* locate(worker, attemptId, "lease").pipe(Effect.result);
     if (Result.isSuccess(located)) {
+      protectedAttempts.delete(attemptId);
       if (Option.isNone(located.success))
         yield* Effect.logInfo("The Attempt's machine is gone; its slot holds no machine", {
           worker,
@@ -678,10 +644,10 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   const sweepWorker = Effect.fn("SshExecutor.sweepMachines")(function* (entry: SshWorkerEntry) {
     const worker = entry.address.name;
     yield* Effect.annotateCurrentSpan({ worker });
-    const driver = yield* driverFor(worker);
+    const driver = yield* drivers.forEntry(entry);
     const listed = yield* driver.list(instance, Option.some(worker));
     const current = [...(yield* Ref.get(held)).values()].filter(
-      (machine) => machine.worker === worker,
+      (machine) => machine.worker === worker && machine.provider === driver.provider,
     );
     const listedIds = new Set(listed.map(({ id }) => id));
     const holding = (machine: ListedMachine) =>
@@ -706,6 +672,16 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         }
         continue;
       }
+      if (
+        Option.exists(machine.tags.attempt, (tag) =>
+          [...protectedAttempts].some(
+            (id) =>
+              attemptTag(id) === tag &&
+              !current.some((held) => Option.contains(held.attemptId, id)),
+          ),
+        )
+      )
+        continue;
       const removed = yield* destroy(driver, worker, machine.id).pipe(
         Effect.as(true),
         Effect.tapError((error) =>
@@ -733,7 +709,11 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     }
     // Drops the machines whose deletion failed but which the provider no longer lists.
     for (const machine of current)
-      if (machine.state === "deleting" && Option.exists(machine.id, (id) => !listedIds.has(id)))
+      if (
+        machine.driver === driver &&
+        machine.state === "deleting" &&
+        Option.exists(machine.id, (id) => !listedIds.has(id))
+      )
         yield* unregister(machine.hold);
     yield* Effect.logDebug("Swept the machines of a provisioned Worker", {
       worker,
@@ -746,9 +726,12 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   });
 
   const sweep = Effect.fn("SshExecutor.sweepProvisionedMachines")(function* () {
-    const provisioned = (yield* options.entries).filter((entry) =>
-      Option.isSome(provisionerOf(entry)),
-    );
+    const provisioned = [
+      ...new Set([
+        ...(yield* options.entries),
+        ...[...(yield* Ref.get(held)).values()].map(({ workerEntry }) => workerEntry),
+      ]),
+    ].filter((entry) => Option.isSome(provisionerOf(entry)));
     yield* drivers.warnUnowned(provisioned);
     yield* Effect.forEach(
       provisioned,
@@ -793,7 +776,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       ),
       Effect.ignore,
     );
-    yield* drivers.forget(worker);
     const remaining = yield* Ref.modify(held, (current) => {
       const next = new Map(current);
       let remaining = 0;
@@ -810,12 +792,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         "Removed Worker still has machines with retained checkouts or failed deletions; restore its configuration to recover them or delete them at the provider",
         { worker, instance, remaining },
       );
-    yield* checks.forget(worker);
-    yield* Ref.update(earlierMachines, (current) => {
-      const next = new Map(current);
-      next.delete(worker);
-      return next;
-    });
   });
 
   const machines = Ref.get(held).pipe(
@@ -849,11 +825,24 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     worker: WorkerName,
     attemptId: AttemptId,
   ) {
+    yield* Effect.annotateCurrentSpan({ worker, attemptId });
+    const existing = yield* byAttempt(attemptId);
+    if (Option.isNone(existing)) {
+      const entry = yield* options.attemptEntry(worker, attemptId);
+      if (Option.isSome(entry.machine)) return entry.machine.value;
+    }
     const located = yield* locate(worker, attemptId, "lease").pipe(
       Effect.mapError(operationError("prepare")),
     );
     const machine = Option.flatMap(located, ({ machine }) => machine);
-    if (Option.isSome(machine)) return machine.value;
+    if (Option.isSome(machine)) {
+      yield* Effect.logDebug("Preparing attempt on its retained provisioned SSH machine", {
+        worker,
+        attemptId,
+        host: machine.value.shell.destination,
+      });
+      return machine.value;
+    }
     return yield* new ExecutorOperationError({
       operation: "prepare",
       message: `Worker "${worker}" has no machine for the attempt`,
@@ -861,15 +850,39 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     });
   });
 
-  /**
-   * Returns the machine of an Attempt that startup recovery reconciles, or `None` if it has
-   * none. `recovered` deletes a machine that no lease holds.
-   */
-  const recoveryMachine = (worker: WorkerName, attemptId: AttemptId) =>
-    locate(worker, attemptId, "recovery").pipe(
-      Effect.map((located) => Option.flatMap(located, ({ machine }) => machine)),
+  const leftovers = Effect.fn("SshExecutor.recoveryLeftovers")(function* (
+    attempt: AttemptRecovery,
+  ) {
+    const { worker, attemptId } = attempt;
+    yield* Effect.annotateCurrentSpan({ worker, attemptId });
+    const existing = yield* byAttempt(attemptId);
+    protectedAttempts.add(attemptId);
+    if (Option.isNone(existing)) {
+      const entry = yield* options.attemptEntry(worker, attemptId);
+      if (Option.isSome(entry.machine)) {
+        protectedAttempts.delete(attemptId);
+        const machine = entry.machine.value;
+        return Option.some({
+          machine,
+          checkouts: new Set([`${machine.workerDirectory}/attempts/${safeSegment(attemptId)}`]),
+        });
+      }
+    }
+    const located = yield* locate(worker, attemptId, "recovery").pipe(
       Effect.mapError(operationError("cleanup")),
     );
+    protectedAttempts.delete(attemptId);
+    const machine = Option.flatMap(located, ({ machine }) => machine);
+    yield* Effect.logInfo("Resolved retained SSH machine for attempt recovery", {
+      worker,
+      attemptId,
+      found: Option.isSome(machine),
+    });
+    return Option.map(machine, (machine) => ({
+      machine,
+      checkouts: new Set([`${machine.workerDirectory}/attempts/${safeSegment(attemptId)}`]),
+    }));
+  });
 
   /**
    * Deletes the machine of `attemptId` after its recovery succeeded, unless a lease holds it.
@@ -908,7 +921,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const provisioner = provisionerOf(entry);
     if (Option.isNone(provisioner))
       return yield* Effect.die(new Error(`SSH worker "${worker}" isn't provisioned`));
-    const driver = yield* driverFor(worker);
+    const driver = yield* drivers.forEntry(entry);
     const report = yield* driver.verify(worker, maxConcurrentAttempts);
     yield* Effect.forEach(
       report.warnings,
@@ -964,8 +977,9 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       starts: starts.counts,
     }),
     retire,
+    refresh: reuse.refresh,
     attemptMachine,
-    recoveryMachine,
+    leftovers,
     recovered,
     checkoutHeld,
     verifyProvisioned,

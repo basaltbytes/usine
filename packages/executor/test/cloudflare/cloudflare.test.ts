@@ -1,3 +1,6 @@
+import type { AttemptConnections } from "../../src/executor.ts";
+import type { CloudflareWorkerAddress } from "../../src/cloudflare/model.ts";
+import type { AttemptId } from "@usine/core/attempt";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell, sshArguments } from "@usine/agents/child-host";
@@ -101,8 +104,10 @@ const executor = (
   providers: ReadonlyArray<CloudflareProviderKey> = [ANTHROPIC],
   accessClientSecret = ACCESS_CLIENT_SECRET,
   runtime = stubAttemptRuntime(storage, parent),
+  connections: { readonly attemptConnections?: AttemptConnections<CloudflareWorkerAddress> } = {},
 ) =>
   cloudflareLayer({
+    ...connections,
     workers: [
       {
         name: WORKER,
@@ -699,7 +704,7 @@ describe("sandbox shell", () => {
 });
 
 it.live(
-  "adds a Cloudflare client once, preserves existing clients, and replaces removed ones",
+  "replaces Cloudflare connections for preflight while an open attempt keeps its client",
   () =>
     Effect.gen(function* () {
       const original = yield* fakeWorker;
@@ -726,7 +731,7 @@ it.live(
             yield* service.preflight(added, [], 1);
             assert.strictEqual(
               next.state.requests.filter((request) => request === "GET /v1/health").length,
-              1,
+              2,
             );
             const originalChecks = () =>
               original.state.requests.filter((request) => request === "GET /v1/health").length;
@@ -743,3 +748,105 @@ it.live(
       }).pipe(Effect.provide(executor(original, mintingProvider())));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+for (const origin of ["startup", "replacement"] as const) {
+  it.live(
+    `recovers a kept ${origin} sandbox through its retained client after a connection change`,
+    () =>
+      Effect.gen(function* () {
+        const initial = yield* fakeWorker;
+        const original = origin === "startup" ? initial : yield* fakeWorker;
+        const replacement = yield* fakeWorker;
+        const storage = new StubStorage();
+        const records = new Map<AttemptId, CloudflareWorkerAddress>();
+        const attemptConnections = {
+          read: (id: AttemptId) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
+          write: (id: AttemptId, address: CloudflareWorkerAddress) =>
+            Effect.sync(() => {
+              records.set(id, address);
+            }),
+          remove: (id: AttemptId) =>
+            Effect.sync(() => {
+              records.delete(id);
+            }),
+        };
+        const runtime = (worker: { readonly url: URL }, parent: StubParent) =>
+          executor(
+            worker,
+            credentials,
+            parent,
+            storage,
+            [ANTHROPIC],
+            ACCESS_CLIENT_SECRET,
+            stubAttemptRuntime(storage, parent),
+            { attemptConnections },
+          );
+        const working = yield* Deferred.make<void>();
+        const blocks: StubParent = () =>
+          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+        const credentials = mintingProvider();
+        const retain = Effect.gen(function* () {
+          const service = yield* Executor;
+          const prepared = yield* service.prepare(request);
+          const running = yield* Effect.forkChild(prepared.launch(sink));
+          yield* Deferred.await(working);
+          yield* Fiber.interrupt(running);
+        }).pipe(Effect.scoped);
+        const address = (worker: { readonly url: URL }) => ({
+          name: WORKER,
+          workerUrl: worker.url,
+          accessClientId: Redacted.make(ACCESS_CLIENT_ID),
+          accessClientSecret: Redacted.make(ACCESS_CLIENT_SECRET),
+          image: CloudflareImageName.make("usine"),
+          instanceType: "standard-4" as const,
+          providers: [ANTHROPIC],
+        });
+        if (origin === "startup") yield* retain.pipe(Effect.provide(runtime(original, blocks)));
+
+        yield* Effect.gen(function* () {
+          const service = yield* Executor;
+          const workers = yield* CloudflareWorkers;
+          if (origin === "replacement") {
+            yield* workers.addWorker(address(original));
+            yield* retain;
+          }
+          const kept = original.state.sandboxes.get(SANDBOX);
+          assert(kept !== undefined);
+          assert.isTrue(kept.held);
+          assert.isTrue(yield* service.isLive(request.attemptId));
+          let committed = false;
+          original.state.respond = (_sandbox, words) => {
+            if (words[0] !== "git") return Option.none();
+            if (words.includes("status"))
+              return Option.some({ stdout: " M src/index.ts\n", exitCode: 0 });
+            if (words.includes("diff"))
+              return Option.some({ stdout: "src/index.ts\0", exitCode: 0 });
+            if (words.includes("commit")) committed = true;
+            return committed && words.includes("HEAD")
+              ? Option.some({ stdout: `${"c".repeat(40)}\n`, exitCode: 0 })
+              : Option.none();
+          };
+          yield* workers.addWorker(address(replacement));
+          yield* service.preflight(WORKER, [], 1);
+          const salvages: Array<AttemptSalvage> = [];
+          yield* service.recover(
+            keptCheckoutRecovery(request),
+            { ...sink, salvage: (salvage) => Effect.sync(() => void salvages.push(salvage)) },
+            Effect.succeed(COMMIT_AUTHOR),
+          );
+          assert.deepStrictEqual(
+            salvages.map(({ _tag }) => _tag),
+            ["Pushed"],
+          );
+          assert.isTrue(
+            kept.commands.some(
+              (line) => line.includes("'push'") && line.includes(request.salvageRef),
+            ),
+          );
+          assert.isFalse(original.state.sandboxes.has(SANDBOX));
+          assert.include(replacement.state.requests, "GET /v1/health");
+          assert.isFalse(replacement.state.requests.some((line) => line.includes(SANDBOX)));
+        }).pipe(Effect.provide(runtime(origin === "startup" ? replacement : initial, blocks)));
+      }).pipe(Effect.scoped),
+  );
+}

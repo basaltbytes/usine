@@ -1,9 +1,10 @@
+import { attemptPathsOn } from "../remote/sweep.ts";
+import type { AttemptId } from "@usine/core/attempt";
+import { attemptConnectionsFor } from "../attempt-connections.ts";
 import type { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
-import type { AttemptId } from "@usine/core/attempt";
-import type { AttemptRecovery } from "@usine/core/attempt/salvage";
-import { type RepositoryName, safeSegment } from "@usine/core/repository";
+import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Context, Effect, FileSystem, Layer, Option, type Path } from "effect";
@@ -12,7 +13,7 @@ import { ChildProcessSpawner } from "effect/process";
 import {
   type CredentialProvider,
   Executor,
-  type ExecutorError,
+  WorkerCapabilityError,
   WorkerMachines,
 } from "../executor.ts";
 import { agentsHarnessProbe, type HarnessProbe } from "../harness-preflight.ts";
@@ -47,10 +48,27 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     const base = options.ssh ?? DEFAULT_SSH;
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)
       return yield* Effect.die(new Error("SshExecutorOptions.workers contains duplicate names"));
-    const { machineFor, workerFor, machineAt, entries, workers } = yield* sshMachinesFor(
+    const { machineFor, workerFor, entryFor, machineAt, entries, workers } = yield* sshMachinesFor(
       base,
       commands,
     );
+    const connections = yield* attemptConnectionsFor(options.attemptConnections);
+    const attemptEntry = (worker: WorkerName, attemptId: AttemptId) =>
+      connections
+        .resolve(worker, attemptId, workerFor(worker).pipe(Effect.map(({ address }) => address)))
+        .pipe(
+          Effect.flatMap(entryFor),
+          Effect.mapError((cause) =>
+            cause._tag === "WorkerCapabilityError"
+              ? cause
+              : new WorkerCapabilityError({
+                  worker,
+                  capability: "machine",
+                  message: `Can't restore the connection of attempt ${attemptId}: ${cause.message}`,
+                  cause,
+                }),
+          ),
+        );
     const fs = yield* FileSystem.FileSystem;
     const records = yield* sshWorkerRecordsFor(
       options.workerRecordsDirectory ??
@@ -84,25 +102,19 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         onSome: (gateway) => gatewayHarnessProbe(commands, machine, gateway, probe, shell, keyed),
       });
     };
-    const credentials = yield* sshCredentialsFor(commands, machineFor);
+    const credentials = yield* sshCredentialsFor(commands);
     const codexHomes = yield* codexHomesFor(commands);
-    const attachments = yield* gatewayAttachmentsFor(
-      commands,
-      workerFor,
-      codexHomes.hold,
-      (machine) => reset.failed(machine.shell),
+    const attachments = yield* gatewayAttachmentsFor(commands, codexHomes.hold, (machine) =>
+      reset.failed(machine.shell),
     );
-    const containers = yield* sshContainersFor(
-      commands,
-      machineFor,
-      options.instance,
-      options.instanceId,
-    );
+    const containers = yield* sshContainersFor(commands, options.instance, options.instanceId);
     const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, logins, containers);
     const provisioned = yield* provisionedMachinesFor({
       instance: options.instance,
       commands,
       workerFor,
+      attemptEntry,
+      forgetConnection: connections.forget,
       entries,
       machineAt,
       verifyMachine,
@@ -114,27 +126,37 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     // Runs for every Worker, because one that moved behind a Gateway can still have tokens from
     // an earlier process. A provisioned Worker's machines are new, so only its Gateway can have
     // leftovers.
+    const reclaimMachine = (machine: SshMachine) =>
+      Option.isSome(machine.provisioned)
+        ? attachments.reclaim(machine)
+        : credentials
+            .reclaim(machine)
+            .pipe(
+              Effect.andThen(attachments.reclaim(machine)),
+              Effect.andThen(containers.reclaim(machine)),
+            );
     const reclaim = (worker: WorkerName) =>
-      provisioned
-        .provisions(worker)
-        .pipe(
-          Effect.flatMap((perAttempt) =>
-            perAttempt
-              ? attachments.reclaim(worker)
-              : credentials
-                  .reclaim(worker)
-                  .pipe(
-                    Effect.andThen(attachments.reclaim(worker)),
-                    Effect.andThen(containers.reclaim(worker)),
-                  ),
-          ),
-        );
+      workerFor(worker).pipe(
+        Effect.flatMap((entry) =>
+          Option.match(entry.machine, {
+            onNone: () => attachments.reclaim(entry),
+            onSome: reclaimMachine,
+          }),
+        ),
+        Effect.tapError((error) =>
+          Effect.logWarning("Could not reclaim worker resources", {
+            worker,
+            message: error.message,
+          }),
+        ),
+        Effect.ignore,
+      );
 
     const grantFor = (repository: RepositoryName) =>
       Effect.succeed({
         acquire: (attemptId, worker, permissions, machine, operation) =>
           Effect.gen(function* () {
-            yield* reclaim(worker);
+            yield* reclaimMachine(machine);
             const access = Option.isNone(machine.gateway)
               ? yield* credentials.acquire(
                   attemptId,
@@ -187,38 +209,34 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       );
     });
 
-    const attemptMachine = (
-      worker: WorkerName,
-      attemptId: AttemptId,
-    ): Effect.Effect<SshMachine, ExecutorError> =>
-      Effect.flatMap(
-        provisioned.provisions(worker),
-        (perAttempt): Effect.Effect<SshMachine, ExecutorError> =>
-          perAttempt ? provisioned.attemptMachine(worker, attemptId) : machineFor(worker),
-      );
-
     const executor = yield* remoteExecutorFor<SshMachine>({
       kind: "ssh",
       spanPrefix: "SshExecutor",
       label: "SSH",
       commands,
       machineFor,
-      attemptMachine,
-      leftovers: (attempt: AttemptRecovery, listed) =>
-        provisioned.provisions(attempt.worker).pipe(
-          Effect.flatMap((perAttempt) =>
-            perAttempt
-              ? provisioned.recoveryMachine(attempt.worker, attempt.attemptId).pipe(
-                  Effect.map(
-                    Option.map((machine) => ({
-                      machine,
-                      checkouts: new Set([
-                        `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`,
-                      ]),
-                    })),
-                  ),
-                )
-              : Effect.map(listed, Option.some),
+      attemptMachine: provisioned.attemptMachine,
+      leftovers: (attempt) =>
+        provisioned.leftovers(attempt).pipe(
+          Effect.flatMap((located) =>
+            Effect.transposeOption(
+              Option.map(located, (leftovers) =>
+                Effect.gen(function* () {
+                  const { machine } = leftovers;
+                  yield* reclaimMachine(machine);
+                  if (Option.isSome(machine.provisioned)) return leftovers;
+                  const checkouts = new Set(
+                    yield* attemptPathsOn(
+                      commands,
+                      "cleanup",
+                      machine.shell,
+                      `${machine.workerDirectory}/attempts`,
+                    ),
+                  );
+                  return { machine, checkouts };
+                }),
+              ),
+            ),
           ),
         ),
       recovered: (attempt, succeeded) => provisioned.recovered(attempt.attemptId, succeeded),
@@ -253,7 +271,8 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       Context.add(
         SshWorkers,
         SshWorkers.of({
-          addWorker,
+          addWorker: (address) =>
+            addWorker(address).pipe(Effect.andThen(provisioned.refresh(address))),
           removeWorker: (worker) =>
             provisioned.retire(worker).pipe(Effect.andThen(workers.removeWorker(worker))),
         }),

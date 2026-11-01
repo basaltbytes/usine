@@ -489,7 +489,9 @@ export const fakeMachine = () => {
       );
       return oneShotHandle(
         listed
-          .map(([name, container]) => `${name} ${container.labels.get("dev.usine.worker") ?? ""}\n`)
+          .map(
+            ([name, container]) => `${name} ${container.labels.get("dev.usine.process") ?? ""}\n`,
+          )
           .join(""),
         0,
       );
@@ -579,6 +581,14 @@ export const fakeMachine = () => {
         0,
       );
     if (line.includes("pidfile")) return oneShotHandle("no-children\n", 0);
+    if (line.includes('for directory in "$root"/*')) {
+      const [, , , , root = "", ...active] = remoteWords(line);
+      for (const directory of state.credentials.keys()) {
+        if (directory.startsWith(`${root}/`) && !active.includes(directory))
+          state.credentials.delete(directory);
+      }
+      return oneShotHandle("", 0);
+    }
     if (line.startsWith("exec 'rm' '-rf' ")) {
       for (const target of remoteWords(line).slice(2)) {
         state.codexHomes.delete(target);
@@ -870,7 +880,7 @@ export const executorLayer = (
   /** Rebuilding on the same storage simulates an orchestrator restart. */
   storage: StubStorage = new StubStorage(),
   /** Replaces the executor's own login and binary checks. */
-  probes: Pick<SshExecutorOptions, "harnessReadiness"> = {},
+  probes: Pick<SshExecutorOptions, "harnessReadiness" | "attemptConnections"> = {},
 ) =>
   sshLayer({
     workers: [address],

@@ -99,7 +99,9 @@ The next poll or schedule tick uses the new loops and registry. Changes to setti
 
 Webhook revisions replace the active hint source. Switching away from `deliveries` interrupts its current request or backoff; switching to it resumes from the stored delivery cursor. Endpoint mode updates the App URL and replaces the HTTP handler. **Settings** shows the accepted mode and the next hint received. The endpoint health interval starts again after a webhook change.
 
-A new Cloudflare worker resolves its credential references and builds its client before preflight, without a restart. Existing worker connections and Cloudflare clients remain unchanged until the orchestrator restarts.
+SSH and Cloudflare connection changes apply live. The next preflight and new attempt use the new connection. Open attempts keep their original machine, SSH settings, container limits, gateway, and Cloudflare client, including reattachment and recovery after a restart. A failed check of a changed connection blocks new attempts on that worker and retries automatically; other workers continue. Switching a provisioned SSH worker to a fixed destination cancels its provisioning pause and stops creation retries.
+
+The orchestrator records each attempt's worker configuration under `.usine/attempt-connections/` before allocating its resources. Include this directory in instance backups. Records contain credential variable names, not secret values. Keep the original variables and SSH key files available until retained attempts have been recovered. For attempts started before this version, recover them with their original worker settings before changing the connection.
 
 These changes require a restart:
 
@@ -108,7 +110,6 @@ These changes require a restart:
 | Instance | `tracing` | The exporter belongs to the process-wide Effect context created before the runtime. Existing fibers retain that tracer, and its shutdown flush runs after the runtime closes. Replacing only the exporter layer would leave existing fibers exporting through the old context. |
 | Instance | `auth` | Browser origin restrictions initialize the HTTP middleware at startup. |
 | Existing worker | `kind` or a rename (`name`). | The executor kind is selected at startup, and stored attempt and machine identities use the worker name. |
-| Existing worker connection | SSH: `destination`, `identity_file`, `port`, `root`, `gateway`, `container`, `provisioner`. Cloudflare: `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, `llm_providers`. | Retained attempts keep their machine. Reattachment and recovery must use the original connection, isolation settings, and cleanup client. |
 | Worker set | Changes while no worker executor is registered, as in setup mode, or adding a worker of another kind. | There is no matching executor to initialize or preflight these workers. |
 | Bootstrap values | GitHub App credentials, `.env` and provider or gateway credential values, listen port, origin, and log level. | These values initialize process services and are outside configuration revisions. |
 

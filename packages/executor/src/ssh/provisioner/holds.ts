@@ -3,10 +3,14 @@ import type { RunId } from "@usine/core/run";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Option, Ref } from "effect";
 import { MachineHold } from "../../executor.ts";
+import type { MachineDriver } from "./model.ts";
+import type { SshWorkerEntry } from "../workers.ts";
 import type { SshMachine } from "../model.ts";
 
 export interface Held {
   readonly hold: MachineHold;
+  readonly driver: MachineDriver;
+  readonly workerEntry: SshWorkerEntry;
   readonly worker: WorkerName;
   readonly provider: MachineProvider;
   /**

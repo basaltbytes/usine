@@ -67,7 +67,8 @@ A new attempt atomically claims an idle machine of the same worker, updates its 
 identity and attempt count, and runs preflight. Assignment or preflight failure retires the
 machine. Machines retire at either limit, when their worker connection is removed, or when
 the orchestrator stops while they are idle. An age timer never interrupts an active attempt.
-Changing existing connection fields still requires a restart as documented for #801.
+Connection revisions apply live as described in ADR 0031. An active attempt keeps its original
+connection; idle machines with the previous connection retire.
 
 Provider labels (Hetzner) or the sandbox name (Boat) identify the current attempt and its
 machine's attempt count, so restart recovery uses the correct machine. Startup reconciliation

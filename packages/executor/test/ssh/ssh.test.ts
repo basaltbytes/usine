@@ -1,17 +1,22 @@
+import { SshWorkers, type SshWorkerAddress } from "../../src/ssh/ssh.ts";
+import { keptCheckoutRecovery } from "../../src/provision.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { AttemptId } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
-import { WorkerName } from "@usine/core/worker";
+import { SshDestination, WorkerRoot, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Option } from "effect";
+import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../src/remote/commands.ts";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
+  ADDRESS,
+  executorLayer,
+  noGateway,
   aloneOnItem,
   BOT_COMMITS,
   COMMIT_AUTHOR,
@@ -22,7 +27,6 @@ import {
   TEST_AGENT,
   TOKEN_PREFIX,
   WORKER,
-  WORKER_ROOT,
   WORKTREE,
   capturedLogs,
   fails,
@@ -146,7 +150,7 @@ describe("SSH Worker", () => {
         assert.strictEqual(credentialDuringLaunch, `${TOKEN_PREFIX}1`);
 
         const lines = machine.state.calls.map(({ line }) => line);
-        const stale = lines.indexOf(`exec 'rm' '-rf' '${WORKER_ROOT}/credentials'`);
+        const stale = lines.findIndex((line) => line.includes('for directory in "$root"/*'));
         const write = lines.findIndex(writesCredential);
         const clone = lines.findIndex((line) => line.includes("'clone'"));
         const removeWorktree = lines.findIndex((line) => line.includes("'worktree' 'remove'"));
@@ -424,7 +428,7 @@ describe("SSH Worker", () => {
           lines.find((line) => line.includes("'commit' '--quiet'")) ?? "",
           BOT_COMMITS,
         );
-        const stale = lines.indexOf(`exec 'rm' '-rf' '${WORKER_ROOT}/credentials'`);
+        const stale = lines.findIndex((line) => line.includes('for directory in "$root"/*'));
         const listing = lines.findIndex((line) => line.startsWith("exec 'find' "));
         const write = lines.findIndex(writesCredential);
         const push = lines.findIndex((line) => line.includes("'push' '--force'"));
@@ -499,7 +503,7 @@ describe("SSH Worker", () => {
             new CheckoutRequest({ ...request, reattach: true }),
           );
           const lines = machine.state.calls.slice(before).map(({ line }) => line);
-          const stale = lines.indexOf(`exec 'rm' '-rf' '${WORKER_ROOT}/credentials'`);
+          const stale = lines.findIndex((line) => line.includes('for directory in "$root"/*'));
           assert(stale >= 0 && stale < lines.findIndex(writesCredential));
           assert(
             !lines.some((line) => line.includes("'clone'") || line.includes("'worktree' 'add'")),
@@ -868,3 +872,100 @@ describe("SSH Worker", () => {
     },
   );
 });
+
+for (const transition of ["live", "restart"] as const) {
+  for (const operation of ["reattach", "recover"] as const) {
+    it.effect(
+      `uses the original fixed SSH connection for ${operation} after a ${transition} revision`,
+      () => {
+        const machine = fakeMachine();
+        const credentials = mintingProvider();
+        const storage = new StubStorage();
+        const records = new Map<AttemptId, SshWorkerAddress>();
+        const attemptConnections = {
+          read: (id: AttemptId) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
+          write: (id: AttemptId, address: SshWorkerAddress) =>
+            Effect.sync(() => {
+              records.set(id, address);
+            }),
+          remove: (id: AttemptId) =>
+            Effect.sync(() => {
+              records.delete(id);
+            }),
+        };
+        const replacement: SshWorkerAddress = {
+          ...ADDRESS,
+          root: WorkerRoot.make("/srv/new"),
+          machine: { _tag: "Fixed", destination: SshDestination.make("new-host") },
+        };
+        const sink = {
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
+          transcript: Effect.succeed([]),
+          windows: aloneOnItem(),
+        };
+        return Effect.gen(function* () {
+          const started = yield* Deferred.make<void>();
+          const parent: StubParent = () =>
+            Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+          const start = Effect.gen(function* () {
+            const executor = yield* Executor;
+            const launched = yield* (yield* executor.prepare(request))
+              .launch(sink)
+              .pipe(Effect.forkChild);
+            yield* Deferred.await(started);
+            yield* Fiber.interrupt(launched);
+          }).pipe(Effect.scoped);
+          const check = Effect.gen(function* () {
+            const executor = yield* Executor;
+            yield* (yield* SshWorkers).addWorker(replacement);
+            yield* executor.preflight(WORKER, [], 1);
+            machine.state.salvage = "dirty";
+            const before = machine.state.calls.length;
+            if (operation === "reattach") {
+              yield* Effect.scoped(
+                executor.prepare(new CheckoutRequest({ ...request, reattach: true })),
+              );
+            } else {
+              yield* executor.recover(
+                keptCheckoutRecovery(request),
+                sink,
+                Effect.succeed(COMMIT_AUTHOR),
+              );
+            }
+            const calls = machine.state.calls.slice(before);
+            assert(
+              calls.some(({ command }) => command.args.includes(DESTINATION)),
+              "uses the original host",
+            );
+            assert(
+              !calls.some(({ command }) => command.args.includes("new-host")),
+              "never sends old-attempt commands to the new host",
+            );
+            const next = requestFor(2);
+            const offset = machine.state.calls.length;
+            yield* Effect.scoped(executor.prepare(next));
+            assert(
+              machine.state.calls
+                .slice(offset)
+                .some(({ command }) => command.args.includes("new-host")),
+              "new attempts use the replacement",
+            );
+          }).pipe(Effect.scoped);
+          const layer = (address: SshWorkerAddress, scripted: StubParent) =>
+            executorLayer(machine, credentials, address, scripted, storage, {
+              attemptConnections,
+            }).pipe(Layer.provide(noGateway));
+          if (transition === "live")
+            yield* start.pipe(Effect.andThen(check), Effect.provide(layer(ADDRESS, parent)));
+          else {
+            yield* start.pipe(Effect.provide(layer(ADDRESS, parent)));
+            yield* check.pipe(Effect.provide(layer(replacement, completes)));
+          }
+        });
+      },
+    );
+  }
+}

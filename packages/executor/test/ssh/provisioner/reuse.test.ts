@@ -182,23 +182,33 @@ it.live("retires a reused machine when preflight fails and retries on a fresh on
   );
 });
 
-it.live("retires idle machines before a worker's connection is replaced", () => {
-  const machine = machineFixture();
-  const providers = fakeProviders();
-  const address = reuseAddress(hetznerAddress);
-  return Effect.gen(function* () {
-    const machines = yield* WorkerMachines;
-    const workers = yield* SshWorkers;
-    const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
-    yield* machines.release(first.hold);
-    yield* workers.removeWorker(WORKER);
-    assert.strictEqual(providers.hetzner.servers.size, 0);
-    yield* workers.addWorker({ ...address, root: WorkerRoot.make("/replacement") });
-    const next = yield* machines.create(WORKER, RUN, second, []);
-    assert.notEqual(next.id, first.id);
-    yield* machines.release(next.hold);
-  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
-});
+for (const transition of ["removed", "idle revision", "active revision"] as const) {
+  it.live(`retires reused machines on a connection change (${transition})`, () => {
+    const machine = machineFixture();
+    const providers = fakeProviders();
+    const address = reuseAddress(hetznerAddress);
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const workers = yield* SshWorkers;
+      const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+      if (transition !== "active revision") yield* machines.release(first.hold);
+      if (transition === "removed") yield* workers.removeWorker(WORKER);
+      yield* workers.addWorker({ ...address, root: WorkerRoot.make("/replacement") });
+      if (transition === "active revision") {
+        assert.strictEqual(
+          providers.hetzner.servers.size,
+          1,
+          "the active attempt keeps its machine",
+        );
+        yield* machines.release(first.hold);
+      }
+      assert.strictEqual(providers.hetzner.servers.size, 0);
+      const next = yield* machines.create(WORKER, RUN, second, []);
+      assert.notEqual(next.id, first.id);
+      yield* machines.release(next.hold);
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
+  });
+}
 
 it.live("preserves machine-start counts across executor restarts and deletion", () => {
   const machine = machineFixture();

@@ -235,7 +235,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     const shell = options.shell ?? DEFAULT_SHELL;
     const drainPollInterval = options.drainPollInterval ?? "30 seconds";
 
-    const { workerFor, membership } = yield* cloudflareWorkersFor(options, shell);
+    const { workerFor, attemptWorkerFor, membership } = yield* cloudflareWorkersFor(options, shell);
 
     const lastIssued = yield* Ref.make(DateTime.makeUnsafe(0));
     /**
@@ -651,14 +651,13 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     // Once per Worker per process; a failure is logged and the next start retries it.
     const orphansReconciled = yield* Cache.make({
       capacity: Number.POSITIVE_INFINITY,
-      lookup: (name: WorkerName) =>
-        workerFor("cleanup", name).pipe(
-          Effect.flatMap(reconcileOrphans),
+      lookup: (worker: CloudflareWorker) =>
+        reconcileOrphans(worker).pipe(
           Effect.tapError((error) =>
             Effect.logWarning(
               "Could not list the Worker's sandboxes; orphans stay until the next start",
               {
-                worker: name,
+                worker: worker.address.name,
                 message: error.message,
               },
             ),
@@ -700,12 +699,12 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     ) {
       yield* Effect.annotateCurrentSpan(recoveryFields(attempt));
       yield* session.stopForRecovery(attempt);
-      const worker = yield* workerFor("cleanup", attempt.worker);
+      const worker = yield* attemptWorkerFor("cleanup", attempt.worker, attempt.attemptId);
       const name = sandboxName(worker.owner, attempt.attemptId);
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* claim(name);
-          yield* Cache.get(orphansReconciled, attempt.worker);
+          yield* Cache.get(orphansReconciled, worker);
           const summary = yield* worker.client
             .get(name)
             .pipe(Effect.mapError(operationError("cleanup")));
@@ -834,7 +833,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         reattach: request.reattach,
       };
       yield* Effect.annotateCurrentSpan(fields);
-      const worker = yield* workerFor("prepare", request.worker);
+      const worker = yield* attemptWorkerFor("prepare", request.worker, request.attemptId);
       const gap = brainGap(worker.address, request.agent.brain);
       if (Option.isSome(gap)) {
         yield* Effect.logWarning("Refused an Attempt whose brain the sandbox can't run", {
@@ -847,7 +846,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       const layout = layoutFor(request.repository, request.attemptId);
       const shell = worker.shellFor(name);
       yield* claim(name);
-      yield* Cache.get(orphansReconciled, request.worker);
+      yield* Cache.get(orphansReconciled, worker);
       yield* Effect.logInfo(
         request.reattach
           ? "Reattaching the Attempt to its cloudflare sandbox"

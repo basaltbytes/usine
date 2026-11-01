@@ -57,7 +57,7 @@ Call `executor.preflight(worker, brains, maxConcurrentAttempts)` with the roster
 
 Every adapter compares the machine's memory with `maxConcurrentAttempts`. The local adapter reads `/proc/meminfo` on Linux and physical memory on macOS, where swap grows on demand; exe.dev and SSH read `/proc/meminfo` over SSH. Under 1.5 GiB per concurrent attempt, or no swap with more than one, is a `memory` `WorkerCapabilityError`; under 3 GiB logs a warning ([#270](https://github.com/basaltbytes/usine/issues/270)).
 
-SSH preflight also warns when the concurrent containers' combined memory limits exceed `MemTotal` minus a 1 GiB host reserve, including when every container limit is configured. The warning includes the worker, slot count, limits, and available memory. Startup and reloads that add a worker or change its slot count run this check; changing container settings requires a restart. Containers set `--memory-swap` equal to `--memory`, so they cannot use host swap.
+SSH preflight also warns when the concurrent containers' combined memory limits exceed `MemTotal` minus a 1 GiB host reserve, including when every container limit is configured. The warning includes the worker, slot count, limits, and available memory. Startup and revisions that add a worker, change its connection or container settings, or change its slot count run this check. Containers set `--memory-swap` equal to `--memory`, so they cannot use host swap.
 
 Every adapter runs the `@usine/agents/preflight` checks where children run: local on this machine (override with `LocalExecutorOptions.harnessReadiness`), exe.dev and SSH over SSH (`SshExecutorOptions.harnessReadiness`). Codex needs CLI 0.164.0 (or 0.159.0 through 0.159.3 for one release) and a ChatGPT login, Claude its CLI and subscription login, and Pi children API keys for their models. Pi children run tools in the orchestrator, so exe.dev and SSH workers report Pi brains unavailable.
 
@@ -160,7 +160,7 @@ With a container runtime on the machine, each attempt runs in its own container 
 | `memoryMib` (`--memory`) | `MemTotal` | 1024 MiB | a MiB, at least 256 |
 | `pids` (`--pids-limit`) | the lower of `threads-max` and `pid_max` | 1024 tasks | a task, at least 64 |
 
-A machine with 4 CPUs and 8 GiB gets 4 CPUs and 7168 MiB with one slot, and 1.33 CPUs and 2389 MiB with three. Preflight reads the machine only if a limit is unset, and fails with a `container` `WorkerCapabilityError` if it can't. It logs the limits, which ones it derived, and the machine's totals with `SSH Worker runs each Attempt in its own container` and `SSH Worker preflight verified`, and returns them as the report's `containerLimits`. The worker's containers get these limits until its next preflight; a container started before any preflight on the worker, such as the recovery of a provisioned worker's machine, gets limits derived for one attempt on the machine, which `SSH Worker runs each Attempt in its own container` logs the same way.
+A machine with 4 CPUs and 8 GiB gets 4 CPUs and 7168 MiB with one slot, and 1.33 CPUs and 2389 MiB with three. Preflight reads the machine only if a limit is unset, and fails with a `container` `WorkerCapabilityError` if it can't. It logs the limits, which ones it derived, and the machine's totals with `SSH Worker runs each Attempt in its own container` and `SSH Worker preflight verified`, and returns them as the report's `containerLimits`. The worker's containers get these limits until its next preflight; a container started before any preflight on the worker, such as the recovery of a provisioned worker's machine, gets limits derived from the original fixed worker's slot count, or one slot on a provisioned machine, which `SSH Worker runs each Attempt in its own container` logs the same way.
 
 Run cache commands as the SSH user, using `podman` on Podman workers and `docker` on Docker workers.
 
@@ -311,3 +311,9 @@ Removing a provisioned worker performs one final sweep before discarding its pro
 Durable-session test databases use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Executable fixtures use the OS temporary directory.
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+### Connection revisions
+
+`SshWorkers.addWorker` and `CloudflareWorkers.addWorker` replace the connection used by preflight and new attempts. Each attempt retains its original address, machine, gateway, isolation settings, and client. Provisioned machines retain their provider driver for recovery and deletion. Refreshing a worker never deletes a retained machine.
+
+`SshExecutorOptions.attemptConnections` and `CloudflareExecutorOptions.attemptConnections` accept an `AttemptConnections<Address>` store from the host. The executor records the connection before allocating resources, restores it before reattachment or recovery, and removes a failed creation's record before retrying. Without a store, connections survive live revisions within that executor instance. The Node orchestrator supplies a durable store using credential references. Hosts must persist references rather than resolved secrets.

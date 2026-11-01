@@ -4,7 +4,7 @@ import { Agent } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, type ContainerOutOfMemoryKills } from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
-import { ContainerMemoryMib, WorkerName } from "@usine/core/worker";
+import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import { ChatGptLogin, HostFilePath, OpenAiProvider, UpstreamBase } from "@usine/gateway";
@@ -598,7 +598,7 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
-    "removes the containers an earlier process left before a Worker's first Attempt, and keeps a running Attempt's on a shared machine and another instance's",
+    "removes the containers an earlier process left before a Worker's first Attempt, and keeps active resources across SSH login aliases and other workers",
     () => {
       const machine = dockerMachine();
       const leftover = (worker: string, instance = INSTANCE, instanceId: string = INSTANCE_ID) => ({
@@ -650,6 +650,21 @@ describe("SSH Worker with Docker", () => {
           CONTAINER,
         ]);
 
+        yield* workers.addWorker({
+          ...ADDRESS,
+          machine: { _tag: "Fixed", destination: SshDestination.make("other@203.0.113.7") },
+        });
+        yield* Effect.scoped(
+          executor.prepare(new CheckoutRequest({ ...secondRequest, worker: WORKER })),
+        );
+        assert(
+          machine.state.containers.has(CONTAINER),
+          "an SSH login alias keeps the active container",
+        );
+        assert(
+          machine.state.credentials.has(CREDENTIALS),
+          "an SSH login alias keeps the active credential",
+        );
         yield* workers.addWorker({ ...ADDRESS, name: second });
         yield* Effect.scoped(executor.prepare(secondRequest));
         assert(machine.state.containers.has(CONTAINER), "the running Attempt keeps its container");
