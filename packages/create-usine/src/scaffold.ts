@@ -68,7 +68,8 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
     installer,
   });
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const installArgs = installer === "pnpm" ? ["install", "--ignore-workspace"] : ["install"];
+  const installArgs =
+    installer === "pnpm" ? ["install", "--ignore-workspace"] : ["install", "--workspaces=false"];
   const installCommand = [installer, ...installArgs].join(" ");
   const exitCode = yield* spawner.exitCode(
     ChildProcess.make(installer, installArgs, {

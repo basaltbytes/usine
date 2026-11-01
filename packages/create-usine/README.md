@@ -16,7 +16,7 @@ cd my-factory
 pnpm usine up
 ```
 
-The destination must be new or empty. The command writes `package.json`, `.gitignore`, and a mode-0600 `.env` template, then runs the invoking package manager's install command to create its lockfile and `node_modules/`. The pnpm install runs independently of any enclosing workspace. Direct invocation defaults to npm. If installation fails, run `npm install` or `pnpm install --ignore-workspace` in the destination to retry.
+The destination must be new or empty. The command writes `package.json`, `.gitignore`, and a mode-0600 `.env` template, then runs the invoking package manager's install command to create its lockfile and `node_modules/`. Both installers run independently of any enclosing workspace. Direct invocation defaults to npm. If installation fails, run `npm install --workspaces=false` or `pnpm install --ignore-workspace` in the destination to retry.
 
 The first `usine up` creates an empty configuration revision and opens GitHub App setup. Configuration and credentials are saved under `.usine/`. `.gitignore` excludes that directory, `.env`, and `node_modules/`. Keep the instance folder on persistent storage and include its runtime data in backups.
 
@@ -28,4 +28,4 @@ Changesets releases `create-usine` and `@usine/server` together. The build copie
 
 ## Validation
 
-After `pnpm build`, `pnpm --filter create-usine test` runs the compiled CLI in temporary folders. A process fixture substitutes the registry install and links the built server; the startup test runs that server, checks setup mode and the stored revision, then stops it. A pnpm integration test installs a fixture package from a local registry inside an enclosing workspace and checks that the lockfile and dependencies stay in the destination. `pnpm check:packed-install` checks installation of the published package contents with npm.
+After `pnpm build`, `pnpm --filter create-usine test` runs the compiled CLI in temporary folders. A process fixture substitutes the registry install and links the built server; the startup test runs that server, checks setup mode and the stored revision, then stops it. npm and pnpm integration tests install a fixture package from a local registry inside an enclosing workspace and check that the lockfile and dependencies stay in the destination. `pnpm check:packed-install` checks installation of the published package contents with npm.
