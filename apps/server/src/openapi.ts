@@ -21,6 +21,7 @@ export const DocumentationApi = HttpApiGroup.make("documentation").add(
 
 export const publicOperatorPaths = new Set<string>([
   OperatorApi.groups.operator.endpoints.serverVersion.path,
+  OperatorApi.groups.operator.endpoints.serverReady.path,
   DocumentationApi.endpoints.openapi.path,
   SetupApi.endpoints.callback.path,
 ]);

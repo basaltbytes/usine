@@ -58,6 +58,7 @@ import {
   HttpApiEndpoint,
   HttpApiGroup,
   HttpApiMiddleware,
+  HttpApiSchema,
   OpenApi,
 } from "effect/http-api";
 import { RestartBlock } from "../current-instance/changes.ts";
@@ -448,6 +449,21 @@ export const OperatorApi = operatorApi.add(
         .annotate(
           OpenApi.Description,
           "Public health check that returns the running release string.",
+        ),
+      HttpApiEndpoint.get("serverReady", "/api/ready", {
+        success: acknowledged.annotate({
+          title: "Readiness",
+          description: "Startup recovery has finished and runtime routes are available.",
+        }),
+        error: Schema.Struct({
+          error: Schema.Literal("Starting"),
+          message: Schema.String,
+        }).pipe(HttpApiSchema.status(503)),
+      })
+        .annotate(OpenApi.Summary, "Check startup readiness")
+        .annotate(
+          OpenApi.Description,
+          "Public readiness check. Returns 503 with Retry-After during startup recovery and 200 after runtime routes are installed.",
         ),
       HttpApiEndpoint.post("requestUpgrade", "/api/upgrade", {
         payload: UpgradeRequest,
@@ -911,6 +927,7 @@ export const OperatorApi = operatorApi.add(
 /** Minimum route permissions; resource-specific checks run in the operator and configuration editor. */
 export const operatorPermissions = {
   serverVersion: "public",
+  serverReady: "public",
   upgradeStatus: "admin",
   cancelUpgrade: "admin",
   requestUpgrade: "admin",

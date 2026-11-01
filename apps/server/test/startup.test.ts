@@ -133,6 +133,9 @@ it("answers the version while recovering 400 finished attempts without per-attem
       assert.strictEqual(version.status, 200);
       assert.strictEqual(yield* version.json, "0.5.1-next.341");
       assert.strictEqual(recovered, 1, "the API answers before reconciliation finishes");
+      const notReady = yield* client.get("/api/ready");
+      assert.strictEqual(notReady.status, 503);
+      assert.strictEqual(notReady.headers["retry-after"], "1");
       const waiting = yield* client.post("/api/runs");
       assert.strictEqual(waiting.status, 503);
       yield* Deferred.succeed(finish, undefined);
@@ -158,6 +161,9 @@ it("answers the version while recovering 400 finished attempts without per-attem
           listener,
         ),
       );
+      const readiness = yield* client.get("/api/ready");
+      assert.strictEqual(readiness.status, 200);
+      assert.deepStrictEqual(yield* readiness.json, { ok: true });
       const ready = yield* client.get("/api/overview");
       assert.strictEqual(
         ready.status,
