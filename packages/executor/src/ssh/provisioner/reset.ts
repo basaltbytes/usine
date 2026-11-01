@@ -70,5 +70,10 @@ export const machineResetFor = (raw: RemoteCommands, instance: string, instanceI
       host,
     });
   });
-  return { commands, failed, reset };
+  return {
+    commands,
+    failed,
+    reset,
+    cleanupSucceeded: (shell: RemoteShell) => !failures.has(shell),
+  };
 };

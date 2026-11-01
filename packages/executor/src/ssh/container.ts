@@ -408,7 +408,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       );
   });
   // Runs once per destination and worker, before its first container starts. A failure is
-  // logged; the containers stay until the next process.
+  // cached and propagated; the containers and connection records stay until the next process.
   const reclaim = yield* reclaimOnceFor(
     (machine: SshMachine) => `${machine.shell.destination} ${machine.address.name}`,
     (machine) =>
@@ -419,7 +419,6 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
             message: error.message,
           }),
         ),
-        Effect.ignore,
       ),
   );
 

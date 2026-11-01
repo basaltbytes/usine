@@ -23,6 +23,7 @@ interface ReuseOptions {
   readonly holds: Effect.Success<typeof machineHolds>;
   readonly discard: (hold: MachineHold, reason: string) => Effect.Effect<void>;
   readonly reset: (machine: SshMachine) => Effect.Effect<void, ExecutorOperationError>;
+  readonly forgetConnection: (attemptId: AttemptId) => Effect.Effect<void>;
   readonly check: (
     machine: SshMachine,
     brains: ReadonlyArray<BrainSpec>,
@@ -167,6 +168,7 @@ export const machineReuseFor = (options: ReuseOptions) => {
         });
         return false;
       }
+      yield* Effect.forEach(Option.toArray(current.attemptId), options.forgetConnection);
       yield* holds.update(current.hold, (entry) => ({
         ...entry,
         state: "idle",

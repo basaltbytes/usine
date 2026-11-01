@@ -1,3 +1,5 @@
+import { startupListener, type StartupListener } from "./listener.ts";
+import { createServer } from "node:http";
 import { memberAccessLayer } from "./auth/access.ts";
 import { Setup } from "./setup/control.ts";
 import { webhookEndpoint } from "./webhooks.ts";
@@ -9,7 +11,7 @@ import { AuthStore } from "./auth/store.ts";
 import { sqliteAuthLayer } from "./auth/sqlite.ts";
 import { writeAdminToken } from "./auth/local.ts";
 import type { AuthServices } from "./auth/http.ts";
-import { FetchHttpClient, type HttpRouter } from "effect/http";
+import { FetchHttpClient, HttpServer, type HttpRouter } from "effect/http";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubPolling } from "@usine/github/polling";
@@ -22,7 +24,7 @@ import { configurationLayer, initializeConfiguration } from "./configuration/run
 import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NodeServices } from "@effect/platform-node";
+import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { InstanceDirectory, type InstanceId } from "@usine/core/instance";
 import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
 import { GitHubApp, GitHubCredentials } from "@usine/github/github-app";
@@ -62,6 +64,7 @@ import {
   portInUse,
   refuseTakenPort,
   serverStartError,
+  SERVER_HOST,
   volatileRoot,
   volatileRoots,
 } from "./cli.ts";
@@ -88,6 +91,7 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly configurationEditor: ConfigurationEditor["Service"];
   readonly catalog?: Layer.Layer<GitHubApp | GitHubPolling>;
   readonly webhooks?: Layer.Layer<never, never, HttpRouter.HttpRouter>;
+  readonly listener?: StartupListener;
 }) {
   yield* Layer.build(
     serverLayer(
@@ -102,6 +106,7 @@ const serve = Effect.fnUntraced(function* (options: {
       ),
       options.webhooks,
       options.setup,
+      options.listener,
     ),
   ).pipe(
     Effect.mapError((error) => serverStartError(options.port, error)),
@@ -225,6 +230,15 @@ const start = Effect.fnUntraced(function* (
 
   const shutdown = yield* Deferred.make<void>();
   const startup = Effect.gen(function* () {
+    const http = yield* Layer.build(
+      NodeHttpServer.layer(createServer, { host: SERVER_HOST, port }),
+    ).pipe(
+      Effect.mapError((error) => serverStartError(port, error)),
+      Effect.catchTag("PortInUseError", ({ port }) => portInUse(port)),
+    );
+    const listener = yield* startupListener(record.version).pipe(
+      Effect.provideService(HttpServer.HttpServer, Context.get(http, HttpServer.HttpServer)),
+    );
     const runtime = runtimeLayer(directory, instanceId, database).pipe(
       Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
       Layer.provide(Layer.succeed(CurrentInstance, instances)),
@@ -273,6 +287,7 @@ const start = Effect.fnUntraced(function* (
           port,
           url,
           openSetupPage: false,
+          listener,
           webhooks,
           upgrades,
         }),

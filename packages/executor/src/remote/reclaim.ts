@@ -1,12 +1,12 @@
 import { Effect, Semaphore } from "effect";
 
 /** Shares cleanup by physical location, including across connection changes to the same host. */
-export const reclaimOnceFor = <A>(
+export const reclaimOnceFor = <A, E>(
   keyOf: (value: A) => string,
-  reclaim: (value: A) => Effect.Effect<void>,
+  reclaim: (value: A) => Effect.Effect<void, E>,
 ) =>
   Effect.gen(function* () {
-    const completed = new Map<string, Effect.Effect<void>>();
+    const completed = new Map<string, Effect.Effect<void, E>>();
     const exclusive = yield* Semaphore.make(1);
     return (value: A) =>
       exclusive

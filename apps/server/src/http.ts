@@ -1,3 +1,4 @@
+import type { StartupListener } from "./listener.ts";
 import { RequestPermissions, InstanceScope, ProjectScope, permits } from "@usine/core/access";
 import { DocumentationApi, operatorOpenApi } from "./openapi.ts";
 import { setupRoutes } from "./setup/http.ts";
@@ -24,7 +25,13 @@ import {
   operatorPermissions,
 } from "@usine/orchestrator/operator/http";
 import { Effect, Layer, Option, Schema, type Types } from "effect";
-import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import {
+  Headers,
+  HttpPlatform,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/http";
 import { HttpApiBuilder, HttpApiError } from "effect/http-api";
 import { FactoryBackend, type BackendError } from "./backend.ts";
 import { type Port, SERVER_HOST } from "./cli.ts";
@@ -452,6 +459,7 @@ export const serverLayer = (
     | Layer.Layer<never> = Layer.empty,
   webhooks: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.empty,
   setup?: Setup["Service"],
+  listener?: StartupListener,
 ) => {
   const authenticated = authenticatedRoutes(auth);
   const setupHttp =
@@ -465,6 +473,16 @@ export const serverLayer = (
     webhooks,
     securityMiddleware(auth.authentication),
   ).pipe(HttpRouter.provideRequest(Layer.merge(backend, services)));
+  if (listener !== undefined)
+    return Layer.effectDiscard(
+      Effect.gen(function* () {
+        const platform = yield* HttpPlatform.HttpPlatform;
+        const handler = yield* HttpRouter.toHttpEffect(routes);
+        yield* listener.install(
+          handler.pipe(Effect.provideService(HttpPlatform.HttpPlatform, platform)),
+        );
+      }),
+    ).pipe(Layer.provide(NodeHttpServer.layerHttpServices));
   return HttpRouter.serve(routes).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),
   );
