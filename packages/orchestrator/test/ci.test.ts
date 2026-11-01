@@ -203,10 +203,10 @@ const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number,
   return accepted.runId;
 });
 
-it.live("pending CI starts no agent; green applies the recorded labels once", () =>
+it.live("green CI observed after the deadline applies the recorded labels once", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const setup = yield* scenario(3600);
+      const setup = yield* scenario(1);
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
         const monitor = yield* CiMonitor;
@@ -215,6 +215,7 @@ it.live("pending CI starts no agent; green applies the recorded labels once", ()
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
         yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "success" }));
+        yield* Effect.sleep("1100 millis");
         yield* monitor.reconcile(instance, Option.none());
         yield* monitor.reconcile(instance, Option.none());
         assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Succeeded");
@@ -225,63 +226,63 @@ it.live("pending CI starts no agent; green applies the recorded labels once", ()
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live(
-  "red starts one fix run with failure diagnostics and counts it against the cycle budget",
-  () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const setup = yield* scenario(3600);
-        yield* Effect.gen(function* () {
-          const monitor = yield* CiMonitor;
-          const engine = yield* RunEngine;
-          const runId = yield* openWait(setup.timeoutSeconds);
-          yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "failure" }));
-          yield* monitor.reconcile(instance, Option.none());
-          yield* monitor.reconcile(instance, Option.none());
-          yield* Ref.get(setup.tasks).pipe(
-            Effect.repeat({
-              until: (all) => all.length === 2,
-              schedule: Schedule.spaced("10 millis"),
-            }),
-            Effect.timeout("5 seconds"),
-          );
-          const tasks = yield* Ref.get(setup.tasks);
-          assert.include(tasks[1] ?? "", "ci");
-          assert.include(tasks[1] ?? "", "TypeError: failing CI log");
-          assert.strictEqual(tasks.length, 2);
-          assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Failed");
-          assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
-          yield* engine.drain();
-          const another = yield* triggerSubmission(yield* ExpressionEngine, {
-            loop: new LoopFile({ ...loop, maxCycles: CycleLimit.make(1) }),
-            agent: agent.agent,
-            parentModel: Option.none(),
-            dedupKey: DedupKey.make("another-fix"),
-            cycleGeneration: CycleGeneration.make(0),
-            itemKey: gitHubItemKey(repository, 815),
-            payload,
-            receivedAt: yield* DateTime.now,
-            repository: instance.config.repos[0] ?? assert.fail("missing repo"),
-            revision: RepositoryRevision.make(head),
-            task: AttemptTask.make("Fix again"),
-          });
-          assert.strictEqual((yield* engine.submit(another))._tag, "CycleBlocked");
-          assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
-        }).pipe(Effect.provide(setup.runtime));
-      }),
-    ).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.live("a new push supersedes a green result for the old head", () =>
+it.live("red CI observed after the deadline starts one budgeted fix with failure diagnostics", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const setup = yield* scenario(3600);
+      const setup = yield* scenario(1);
+      yield* Effect.gen(function* () {
+        const monitor = yield* CiMonitor;
+        const engine = yield* RunEngine;
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "failure" }));
+        yield* Effect.sleep("1100 millis");
+        yield* monitor.reconcile(instance, Option.none());
+        yield* monitor.reconcile(instance, Option.none());
+        yield* Ref.get(setup.tasks).pipe(
+          Effect.repeat({
+            until: (all) => all.length === 2,
+            schedule: Schedule.spaced("10 millis"),
+          }),
+          Effect.timeout("5 seconds"),
+        );
+        const tasks = yield* Ref.get(setup.tasks);
+        assert.include(tasks[1] ?? "", "ci");
+        assert.include(tasks[1] ?? "", "TypeError: failing CI log");
+        assert.strictEqual(tasks.length, 2);
+        assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Failed");
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+        yield* engine.drain();
+        const another = yield* triggerSubmission(yield* ExpressionEngine, {
+          loop: new LoopFile({ ...loop, maxCycles: CycleLimit.make(1) }),
+          agent: agent.agent,
+          parentModel: Option.none(),
+          dedupKey: DedupKey.make("another-fix"),
+          cycleGeneration: CycleGeneration.make(0),
+          itemKey: gitHubItemKey(repository, 815),
+          payload,
+          receivedAt: yield* DateTime.now,
+          repository: instance.config.repos[0] ?? assert.fail("missing repo"),
+          revision: RepositoryRevision.make(head),
+          task: AttemptTask.make("Fix again"),
+        });
+        assert.strictEqual((yield* engine.submit(another))._tag, "CycleBlocked");
+        assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a new push observed after the deadline supersedes the old head", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const setup = yield* scenario(1);
       yield* Effect.gen(function* () {
         const runId = yield* openWait(setup.timeoutSeconds);
         yield* Ref.set(
           setup.observed,
           new CheckSnapshot({ head: CommitSha.make("c".repeat(40)), state: "success" }),
         );
+        yield* Effect.sleep("1100 millis");
         yield* (yield* CiMonitor).reconcile(instance, Option.none());
         assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "Canceled");
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);

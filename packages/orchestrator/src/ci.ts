@@ -70,24 +70,6 @@ export class CiMonitor extends Context.Service<
         const endedAt = wait.attempts.at(-1)?.endedAt;
         if (endedAt === undefined || Option.isNone(endedAt))
           return yield* Effect.die("A CI wait has no ended attempt");
-        const now = yield* DateTime.now;
-        if (
-          DateTime.toEpochMillis(now) >=
-          DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000
-        ) {
-          yield* Effect.logWarning("CI wait timed out; operator attention is required", {
-            runId,
-            head,
-            timeoutSeconds: handoff.timeoutSeconds,
-          });
-          return yield* engine.settleCi(
-            runId,
-            head,
-            new CiFailed({
-              message: `CI did not settle within ${handoff.timeoutSeconds} seconds. Check https://github.com/${wait.repository}/pull/${pullRequest}/checks`,
-            }),
-          );
-        }
         const observed = yield* checks.snapshot(wait.repository, pullRequest);
         if (observed.head !== head) {
           yield* Effect.logInfo("A new push superseded the CI wait", {
@@ -97,7 +79,25 @@ export class CiMonitor extends Context.Service<
           });
           return yield* engine.settleCi(runId, head, new CiSuperseded({ head: observed.head }));
         }
+        const now = yield* DateTime.now;
         if (observed.state === "pending") {
+          if (
+            DateTime.toEpochMillis(now) >=
+            DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000
+          ) {
+            yield* Effect.logWarning("CI wait timed out; operator attention is required", {
+              runId,
+              head,
+              timeoutSeconds: handoff.timeoutSeconds,
+            });
+            return yield* engine.settleCi(
+              runId,
+              head,
+              new CiFailed({
+                message: `CI did not settle within ${handoff.timeoutSeconds} seconds. Check https://github.com/${wait.repository}/pull/${pullRequest}/checks`,
+              }),
+            );
+          }
           yield* Effect.logDebug("CI is pending; no agent starts", { runId, head });
           return;
         }
