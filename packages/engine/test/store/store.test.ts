@@ -223,12 +223,13 @@ describe("run store", () => {
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
         const reader = yield* RunReader;
-        const claim = (name: string) => {
+        const claim = (name: string, repository = lifecycleSubmission.repository) => {
           const runId = RunId.make(name);
           return store
             .recordAndClaim(
               new Submission({
                 ...lifecycleSubmission,
+                repository,
                 event: new Event({
                   ...lifecycleSubmission.event,
                   id: EventId.make(name),
@@ -309,6 +310,24 @@ describe("run store", () => {
           ),
         );
         assert.strictEqual((yield* reader.closed({ limit: 1 }))[0]?.run.id, waited);
+
+        const otherRepository = RepositoryName.make("acme/hidden");
+        for (const name of ["hidden-first", "hidden-second", "hidden-third"]) {
+          yield* finish(yield* begin(yield* claim(name, otherRepository)));
+        }
+        const visible = yield* reader.closed({
+          limit: 2,
+          repositories: [RepositoryName.make(lifecycleSubmission.repository.toUpperCase())],
+        });
+        assert.deepStrictEqual(
+          visible.map(({ run }) => run.id),
+          [waited, RunId.make("finished-meanwhile")],
+        );
+        assert.deepStrictEqual(yield* reader.closed({ limit: 2, repositories: [] }), []);
+        assert.deepStrictEqual(
+          (yield* reader.closed({ limit: 2 })).map(({ run }) => run.id),
+          [RunId.make("hidden-third"), RunId.make("hidden-second")],
+        );
       }).pipe(
         Effect.provide(Layer.mergeAll(RunStore.layer, RunReader.layer)),
         Effect.provide(localSqliteLayer(directory)),

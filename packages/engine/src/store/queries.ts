@@ -1,4 +1,4 @@
-import { RepositoryName } from "@usine/core/repository";
+import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import type { Agent } from "@usine/core/agent";
 import type { ModelId } from "@usine/core/agent/brain";
@@ -401,9 +401,17 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   const closedRunSummaries = Effect.fn("RunStoreQueries.closedRunSummaries")(function* (
     limit: number,
+    repositories?: ReadonlyArray<RepositoryName>,
   ) {
     const closedRuns = yield* selectRuns()
-      .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
+      .where(
+        and(
+          notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]),
+          repositories === undefined
+            ? undefined
+            : sql`lower(${runs.repository}) in (select value from json_each(${JSON.stringify(repositories.map(canonicalRepositoryName))}))`,
+        ),
+      )
       .orderBy(desc(runs.closedAt), desc(runs.runId))
       .limit(limit)
       .execute()

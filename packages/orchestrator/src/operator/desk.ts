@@ -552,6 +552,8 @@ const makeDesk = Effect.gen(function* () {
   });
 
   const desk = Effect.fn("Operator.desk")(function* (instance: LoadedInstance) {
+    const grants = yield* RequestPermissions;
+    const visible = (repository: RepositoryName) => visibleRepository(instance, grants, repository);
     const [
       summaries,
       closed,
@@ -567,7 +569,16 @@ const makeDesk = Effect.gen(function* () {
     ] = yield* Effect.all(
       [
         reader.list({ closedLimit: 0 }),
-        reader.closed({ limit: CLOSED_RUNS_READ }),
+        reader.closed(
+          permits(grants, "read", new InstanceScope())
+            ? { limit: CLOSED_RUNS_READ }
+            : {
+                limit: CLOSED_RUNS_READ,
+                repositories: instance.config.repos
+                  .filter(({ name }) => visible(name))
+                  .map(({ name }) => name),
+              },
+        ),
         controls.states,
         budgets.asks(),
         workerStatus.slots,
@@ -722,7 +733,7 @@ const makeDesk = Effect.gen(function* () {
     );
 
     const lastOutcomes = closed
-      .filter((summary) => !replacedBeforeStart(summary))
+      .filter((summary) => visible(summary.repository) && !replacedBeforeStart(summary))
       .map((summary) => {
         const run = runView(summary, paused, access, waits, upgrade);
         return new ClosedRunView({
@@ -787,12 +798,10 @@ const makeDesk = Effect.gen(function* () {
       lastOutcomes: lastOutcomes.length,
       workers: workers.length,
     });
-    const grants = yield* RequestPermissions;
-    const visible = (repository: RepositoryName) => visibleRepository(instance, grants, repository);
     return new DeskView({
       running: running.filter(({ run }) => visible(run.repository)),
       notMoving: [...notMoving].filter(({ repository }) => visible(repository)).sort(stalledOrder),
-      lastOutcomes: lastOutcomes.filter(({ run }) => visible(run.repository)),
+      lastOutcomes,
       workers: permits(grants, "admin", new InstanceScope()) ? workers : [],
       polls: polls.filter(({ repository }) => visible(repository)),
     });
