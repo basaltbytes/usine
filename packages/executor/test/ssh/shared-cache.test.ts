@@ -85,6 +85,14 @@ it.each(
     assert.strictEqual((await stat(store)).mode & 0o777, 0o755);
     await mkdir(join(store, "v11"));
     await writeFile(join(store, "v11", "package"), "cached package");
+    for (const timestamp of ["1793637391N", "17936373913N", ""]) {
+      await writeFile(join(directory, "date"), `#!/bin/sh\necho '${timestamp}'\n`, {
+        mode: 0o755,
+      });
+      const prepared = await prepare();
+      assert.strictEqual(prepared.stdout, `${timestamp}:${timestamp}\n`);
+      assert.strictEqual(prepared.stderr, "");
+    }
     await Promise.all([prepare(), prepare()]);
     await assert.rejects(prepare("7001"), new RegExp(`${runtimeName} volume rm ${volume}`, "u"));
     assert.strictEqual((await readFile(ownerFile, "utf8")).trim(), imageUid);
