@@ -1,5 +1,13 @@
 import { assert, it } from "@effect/vitest";
-import { CiFailed, CiHandedOff, CiPassed, CiPolicy, CiSuperseded } from "@usine/core/ci";
+import {
+  CiFailed,
+  CiHandedOff,
+  CiLabelMutation,
+  CiPassed,
+  CiPolicy,
+  CiSuperseded,
+} from "@usine/core/ci";
+import { ItemNumber } from "@usine/core/item";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import * as RunState from "@usine/core/run/state";
 import { CycleBudgets } from "../src/cycle-budget/cycle-budget.ts";
@@ -49,13 +57,22 @@ it.live(
             yield* Scope.provide(Layer.build(runtime), firstScope),
             RunEngine,
           );
-          const accepted = yield* first.submit(required());
+          const ciOnGreen = [
+            new CiLabelMutation({
+              item: ItemNumber.make(811),
+              add: ["implemented"],
+              remove: ["agent-in-progress"],
+            }),
+          ];
+          const accepted = yield* first.submit(new Submission({ ...required(), ciOnGreen }));
           assert(accepted._tag === "Claimed");
           const waiting = yield* waitFor(
             first,
             accepted.runId,
             ({ run }) => run.state._tag === "AwaitingCi",
           );
+          assert(waiting.run.state._tag === "AwaitingCi");
+          assert.deepStrictEqual(waiting.run.state.handoff.onGreen, ciOnGreen);
           assert.strictEqual(
             waiting.attempts
               .at(-1)
@@ -74,7 +91,11 @@ it.live(
             yield* Scope.provide(Layer.build(runtime), secondScope),
             RunEngine,
           );
-          assert.strictEqual((yield* second.awaitingCi()).length, 1);
+          const waits = yield* second.awaitingCi();
+          assert.strictEqual(waits.length, 1);
+          const restored = waits[0];
+          assert(restored?.run.state._tag === "AwaitingCi");
+          assert.deepStrictEqual(restored.run.state.handoff.onGreen, ciOnGreen);
           assert.strictEqual(
             (yield* second.inspect(accepted.runId)).ciPolicy
               .pipe(Option.map(({ fixLoop }) => fixLoop))

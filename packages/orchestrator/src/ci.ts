@@ -186,13 +186,18 @@ export class CiMonitor extends Context.Service<
           ),
         });
         const result = yield* engine.submit(
-          new Submission({ ...submission, ciFailureHead: Option.some(head) }),
+          new Submission({
+            ...submission,
+            ciFailureHead: Option.some(head),
+            ciOnGreen: handoff.onGreen,
+          }),
         );
         yield* Effect.logInfo("CI failure routed through the fix loop's cycle budget", {
           runId,
           head,
           fixLoop: fix.loop.name,
           result: result._tag,
+          inheritedActions: handoff.onGreen.length,
         });
         if (result._tag === "Queued") {
           if (!timedOut) {

@@ -9,7 +9,7 @@ import {
   pendingProviderRetry,
   shouldAutoRetry,
 } from "@usine/core/attempt";
-import { ciHandoff, CiHandoff, type CiPolicy } from "@usine/core/ci";
+import { ciHandoff, CiHandoff, type CiLabelMutation, type CiPolicy } from "@usine/core/ci";
 import { AttemptFailure, AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
   AttemptAwaitingCi,
@@ -113,6 +113,7 @@ export const finishAttempt = (
   attemptId: AttemptId,
   result: Result.Result<StepResult, AttemptFailure>,
   policy: Option.Option<CiPolicy> = Option.none(),
+  inheritedOnGreen: ReadonlyArray<CiLabelMutation> = [],
 ): FinishDecision => {
   if (current.run.state._tag !== "Running") {
     return { _tag: "Unchanged", reason: "RunNotRunning" };
@@ -162,7 +163,10 @@ export const finishAttempt = (
       }),
     );
   if (Option.isSome(required)) {
-    const request = required.value;
+    const request = new CiHandoff({
+      ...required.value,
+      onGreen: [...inheritedOnGreen, ...required.value.onGreen],
+    });
     if (
       !completed.success.facts.some(
         (fact) =>

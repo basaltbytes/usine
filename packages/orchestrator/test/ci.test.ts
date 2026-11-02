@@ -124,9 +124,11 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   );
   const observed = yield* Ref.make(new CheckSnapshot({ head, state: "pending" }));
   const tasks = yield* Ref.make<ReadonlyArray<string>>([]);
-  const mutations = yield* Ref.make<ReadonlyArray<ItemLabelMutation>>([]);
+  const mutations = yield* Ref.make<
+    ReadonlyArray<{ readonly item: number; readonly mutation: ItemLabelMutation }>
+  >([]);
   const result = new StepResult({
-    message: `[usine:awaiting-ci]\n${JSON.stringify({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 815, add: ["ready-for-review"], remove: ["agent-in-progress"] }] })}`,
+    message: `[usine:awaiting-ci]\n${JSON.stringify({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`,
     facts: [new PullRequest({ number: 815, url: new URL(payload.url), head: Option.some(head) })],
   });
   const executor = Layer.succeed(StepExecutor)({
@@ -153,8 +155,8 @@ const scenario = Effect.fn("test.ciScenario")(function* (
       ),
   });
   const writer = Layer.succeed(GitHubItemWriter)({
-    updateLabels: (_repository, _item, mutation) =>
-      Ref.update(mutations, (all) => [...all, mutation]).pipe(Effect.as([])),
+    updateLabels: (_repository, item, mutation) =>
+      Ref.update(mutations, (all) => [...all, { item, mutation }]).pipe(Effect.as([])),
   });
   const polling = Layer.succeed(GitHubPolling)({
     baseRefHead: unmovedBaseRefHead,
@@ -162,8 +164,14 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     missingIssues: () => Effect.succeed([]),
     labels: () => Effect.die("unused labels"),
     snapshot: () =>
-      Effect.succeed(
-        new PullRequestSnapshot({ payload, contentHash: ContentHash.make("b".repeat(64)) }),
+      Ref.get(observed).pipe(
+        Effect.map(
+          ({ head }) =>
+            new PullRequestSnapshot({
+              payload: PullRequestPayload.make({ ...payload, headRefOid: head }),
+              contentHash: ContentHash.make("b".repeat(64)),
+            }),
+        ),
       ),
   });
   const engine = engineLayer(directory).pipe(
@@ -294,6 +302,80 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live(
+  "issue and PR completion actions survive successive CI fixes until the final head passes",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const heads = [CommitSha.make("b".repeat(40)), CommitSha.make("c".repeat(40))];
+        const completedFixes = yield* Ref.make(0);
+        const setup = yield* scenario(
+          3600,
+          instance,
+          Ref.updateAndGet(completedFixes, (count) => count + 1).pipe(
+            Effect.map((count) => {
+              const fixedHead = heads[count - 1] ?? assert.fail("unexpected fix attempt");
+              return new StepResult({
+                message: `[usine:awaiting-ci]\n${JSON.stringify({ pull_request: 815, head: fixedHead, fix_loop: "fix", timeout_seconds: 3600, on_green: [{ item: 815, add: [count === 1 ? "fix-validated" : "ready-for-review"], remove: ["agent-review-findings"] }] })}`,
+                facts: [
+                  new PullRequest({
+                    number: 815,
+                    url: new URL(payload.url),
+                    head: Option.some(fixedHead),
+                  }),
+                ],
+              });
+            }),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const monitor = yield* CiMonitor;
+          let sourceId = yield* openWait(setup.timeoutSeconds);
+          let failedHead = head;
+          for (const fixedHead of heads) {
+            yield* Ref.set(
+              setup.observed,
+              new CheckSnapshot({ head: failedHead, state: "failure" }),
+            );
+            yield* monitor.reconcile(instance, Option.none());
+            const source = yield* engine.inspect(sourceId);
+            assert(source.run.state._tag === "HandedOff");
+            sourceId = source.run.state.fixRunId;
+            const fix = yield* engine.inspect(sourceId).pipe(
+              Effect.repeat({
+                until: ({ run }) => run.state._tag === "AwaitingCi",
+                schedule: Schedule.spaced("10 millis"),
+              }),
+              Effect.timeout("5 seconds"),
+            );
+            assert(fix.run.state._tag === "AwaitingCi");
+            assert.strictEqual(fix.run.state.handoff.head, fixedHead);
+            assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+            failedHead = fixedHead;
+          }
+          yield* Ref.set(setup.observed, new CheckSnapshot({ head: failedHead, state: "success" }));
+          yield* monitor.reconcile(instance, Option.none());
+          yield* monitor.reconcile(instance, Option.none());
+          assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "Succeeded");
+          assert.deepStrictEqual(
+            (yield* Ref.get(setup.mutations)).map(({ item, mutation }) => ({
+              item,
+              add: mutation.add,
+              remove: mutation.remove,
+            })),
+            [
+              { item: 811, add: ["implemented"], remove: ["agent-in-progress"] },
+              { item: 815, add: ["fix-validated"], remove: ["agent-review-findings"] },
+              { item: 815, add: ["ready-for-review"], remove: ["agent-review-findings"] },
+            ],
+          );
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 3);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live("a new push observed after the deadline supersedes the old head", () =>

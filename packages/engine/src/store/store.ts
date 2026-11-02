@@ -632,7 +632,15 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(attempt.runId);
-        const decision = decideFinishAttempt(current, attempt.id, result, current.ciPolicy);
+        const [route] = yield* tx.eventRouteByRun(attempt.runId);
+        if (route === undefined) return yield* Effect.die("A run has no recorded event");
+        const decision = decideFinishAttempt(
+          current,
+          attempt.id,
+          result,
+          current.ciPolicy,
+          route.ciOnGreen,
+        );
         yield* applyFinish(tx, attempt.runId, decision);
         const stop = operatorStop(decision, result);
         if (Option.isSome(stop)) yield* suppressForOperator(tx, current, stop.value);

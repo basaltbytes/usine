@@ -62,6 +62,7 @@ export const triggerEvents = snakeCase.table(
     approvalReason: text(),
     ciPolicyJson: text({ mode: "json" }).$type<Schema.Json>(),
     ciFailureHead: text(),
+    ciOnGreenJson: text({ mode: "json" }).$type<Schema.Json>().notNull().default([]),
     // The Loop's permissions at match time, used by every Attempt of the Run.
     permissions: text({ enum: LOOP_PERMISSIONS })
       .$type<LoopPermissions>()

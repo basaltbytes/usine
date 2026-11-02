@@ -1,0 +1,1 @@
+ALTER TABLE `usine_trigger_events` ADD `ci_on_green_json` text DEFAULT '[]' NOT NULL;
