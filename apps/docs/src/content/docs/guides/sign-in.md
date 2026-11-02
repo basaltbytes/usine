@@ -66,8 +66,10 @@ Lists omit projects without read access, including their runs and attention item
 
 ### Token scopes and local access
 
-**Tokens** shows each credential's permission ceiling. Create a token with selected permissions or edit an existing token's scopes. The secret is shown once. The server refuses scopes wider than the caller's effective permissions. Every request intersects the token ceiling with current bindings, so removing a binding takes effect on the next request. Adding a role does not expand newly issued tokens; sign in again or edit the scopes.
+Browser sessions follow the member's current role bindings on every request. Adding, changing, or removing a binding takes effect without signing in again, including for sessions created before this behavior changed. Browser sessions have no scope ceiling to edit.
 
-Device sign-in and browser sign-in snapshot the member's current permissions. Tokens issued before role bindings retain a full-member ceiling for compatibility, still limited by current bindings. Read, operate, and maintain scopes are independent: include read when a client needs to fetch data before acting. Non-admin device tokens cannot manage other tokens; use a browser session.
+**Tokens** shows each device token's permission ceiling. Create a token with selected permissions or edit an existing device token's scopes. The secret is shown once. The server refuses scopes wider than the caller's effective permissions. Every device token request intersects its ceiling with current bindings, so removing a binding takes effect on the next request. Adding a role does not expand a device token; use a browser session to edit its scopes or sign in on the device again.
+
+Device sign-in snapshots the member's current permissions. Device tokens issued before role bindings retain a full-member ceiling for compatibility, still limited by current bindings. Read, operate, and maintain scopes are independent: include read when a client needs to fetch data before acting. Non-admin device tokens cannot manage other tokens; use a browser session.
 
 The local admin token represents the built-in local actor, displayed as **local admin**. It has instance admin access and no member identity. Local API writes and configuration CLI revisions record **local admin**, even when no member is enrolled. The actor cannot sign in through GitHub or own member tokens. A one-time sign-in link still opens a member browser session when members exist.

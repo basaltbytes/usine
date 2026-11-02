@@ -22,7 +22,7 @@ it("distinguishes tokens with the same name and confirms revocation through the 
     name: "Laptop",
     createdAt: 0,
     lastUsedAt: 0,
-    kind: "browser",
+    kind: id === "first" ? "session" : "device",
     scopes: administratorPermissions,
   }));
   client.setQueryData(tokensQuery().queryKey, tokens);
@@ -53,6 +53,12 @@ it("distinguishes tokens with the same name and confirms revocation through the 
           </QueryClientProvider>
         </PermissionsContext.Provider>,
       ),
+    );
+    await expect
+      .element(page.getByText("Browser session · Access follows your role bindings"))
+      .toBeVisible();
+    expect(page.getByRole("button", { name: "Edit scopes", exact: true }).elements()).toHaveLength(
+      1,
     );
     await page.getByRole("button", { name: "Open commands" }).click();
     await page.getByRole("combobox").fill("Revoke");

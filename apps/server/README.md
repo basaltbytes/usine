@@ -235,4 +235,4 @@ One global middleware sets CSP and the security headers on routes, assets, prefl
 
 ## Access control
 
-Members receive access through configuration role bindings. Requests intersect current bindings with the token permission ceiling. The first member and migrated members receive instance admin bindings; later members need explicit grants. Local admin credentials and configuration CLI writes use `local admin` attribution. See the sign-in guide for roles and scoped token management.
+Members receive access through configuration role bindings. Browser sessions use current bindings on every request, so grants and removals apply without signing in again. Device token requests intersect current bindings with the token permission ceiling; device sign-in snapshots current grants. Only device tokens have editable scopes. The first member and migrated members receive instance admin bindings; later members need explicit grants. Local admin credentials and configuration CLI writes use `local admin` attribution. See the sign-in guide for roles and scoped token management.
