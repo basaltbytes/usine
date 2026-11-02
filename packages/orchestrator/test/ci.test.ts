@@ -123,6 +123,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory(), prefix: "usine-ci-" }),
   );
   const observed = yield* Ref.make(new CheckSnapshot({ head, state: "pending" }));
+  const mergeable = yield* Ref.make<PullRequestPayload["mergeable"]>("CONFLICTING");
   const tasks = yield* Ref.make<ReadonlyArray<string>>([]);
   const mutations = yield* Ref.make<
     ReadonlyArray<{ readonly item: number; readonly mutation: ItemLabelMutation }>
@@ -170,20 +171,18 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     missingIssues: () => Effect.succeed([]),
     labels: () => Effect.die("unused labels"),
     snapshot: () =>
-      Ref.get(observed).pipe(
-        Effect.map(
-          ({ head, state }) =>
-            new PullRequestSnapshot({
-              payload: PullRequestPayload.make({
-                ...payload,
-                headRefOid: head,
-                mergeable: state === "conflict" ? "CONFLICTING" : "UNKNOWN",
-                statusCheckRollup: state === "conflict" ? null : payload.statusCheckRollup,
-              }),
-              contentHash: ContentHash.make("b".repeat(64)),
-            }),
-        ),
-      ),
+      Effect.gen(function* () {
+        const { head, state } = yield* Ref.get(observed);
+        return new PullRequestSnapshot({
+          payload: PullRequestPayload.make({
+            ...payload,
+            headRefOid: head,
+            mergeable: state === "conflict" ? yield* Ref.get(mergeable) : "UNKNOWN",
+            statusCheckRollup: state === "conflict" ? null : payload.statusCheckRollup,
+          }),
+          contentHash: ContentHash.make("b".repeat(64)),
+        });
+      }),
   });
   const engine = engineLayer(directory).pipe(
     Layer.provide(executor),
@@ -205,7 +204,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     MarcbachmannCelLayer,
   );
   const runtime = CiMonitor.layer.pipe(Layer.provideMerge(dependencies));
-  return { observed, tasks, mutations, runtime, timeoutSeconds };
+  return { observed, mergeable, tasks, mutations, runtime, timeoutSeconds };
 });
 
 const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number, sameLoop = false) {
@@ -518,6 +517,7 @@ it.live.each([
   { state: "failure", outcome: "admitted and pushed" },
   { state: "failure", outcome: "timed out" },
   { state: "conflict", outcome: "admitted" },
+  { state: "conflict", outcome: "admitted through unknown mergeability" },
   { state: "conflict", outcome: "admitted and pushed" },
   { state: "conflict", outcome: "timed out" },
 ] as const)("a queued CI fix for $state waits for admission until $outcome", ({ state, outcome }) =>
@@ -565,8 +565,12 @@ it.live.each([
           yield* monitor.reconcile(instance, Option.none());
           assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "Failed");
         }
+        if (outcome === "admitted through unknown mergeability") {
+          yield* Ref.set(setup.mergeable, "UNKNOWN");
+        }
         yield* Deferred.succeed(completion, new StepResult({ message: "Fixed", facts: [] }));
         yield* engine.drain();
+        yield* Ref.set(setup.mergeable, "CONFLICTING");
         if (outcome === "admitted and pushed") {
           yield* Ref.set(
             setup.observed,
