@@ -4,6 +4,7 @@ import { unified } from "@astrojs/markdown-remark";
 import { defineConfig } from "astro/config";
 import lucode from "lucode-starlight";
 import starlightLinksValidator from "starlight-links-validator";
+import { guideGroups } from "./sidebar.mjs";
 import starlightLlmsTxt from "starlight-llms-txt";
 import { redirects } from "./redirects.mjs";
 import rehypePele from "./diagrams/rehype.mjs";
@@ -29,6 +30,7 @@ export default defineConfig({
         lucode({
           navLinks: [
             { label: "Get started", link: "/get-started/" },
+            { label: "Run usine", link: "/guides/run-usine/" },
             { label: "Guides", link: "/guides/overview/" },
             { label: "Reference", link: "/reference/" },
             { label: "GitHub", link: "https://github.com/basaltbytes/usine" },
@@ -48,7 +50,10 @@ export default defineConfig({
             { label: "Concepts", slug: "get-started/concepts" },
           ],
         },
-        { label: "Guides", items: [{ autogenerate: { directory: "guides" } }] },
+        {
+          label: "Guides",
+          items: [{ label: "Overview", slug: "guides/overview" }, ...guideGroups],
+        },
         {
           label: "Reference",
           items: [

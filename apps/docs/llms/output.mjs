@@ -17,29 +17,26 @@ export function llmsOutput(site) {
     hooks: {
       "astro:build:done": async ({ dir, logger }) => {
         const overview = fromHtml(await readFile(new URL("get-started/index.html", dir), "utf8"));
-        /** @type {Map<string, string>} */
-        const links = new Map();
+        /** @type {Set<string>} */
+        const links = new Set();
         visit(overview, "element", (node) => {
           if (node.tagName !== "sl-sidebar-state-persist") return;
           visit(node, "element", (link) => {
             if (link.tagName === "a") {
-              links.set(
-                Schema.decodeUnknownSync(Schema.String)(link.properties.href),
-                toString(link),
-              );
+              links.add(Schema.decodeUnknownSync(Schema.String)(link.properties.href));
             }
           });
         });
         if (links.size === 0) throw new Error("The docs sidebar contains no pages for llms.txt.");
 
         const pages = await Promise.all(
-          [...links].map(async ([href, label]) => {
+          [...links].map(async (href) => {
             const html = fromHtml(await readFile(new URL(`.${href}index.html`, dir), "utf8"));
             let title = "";
             visit(html, "element", (node) => {
               if (node.tagName === "h1") title = toString(node);
             });
-            return { href, label, title };
+            return { href, title };
           }),
         );
 
@@ -48,7 +45,7 @@ export function llmsOutput(site) {
         const header = index.split("\n\n").slice(0, 2).join("\n\n");
         await writeFile(
           indexUrl,
-          `${index}\n## Pages\n\n${pages.map(({ href, label }) => `- [${label}](${new URL(href, site)})`).join("\n")}\n`,
+          `${index}\n## Pages\n\n${pages.map(({ href, title }) => `- [${title}](${new URL(href, site)})`).join("\n")}\n`,
         );
 
         for (const filename of ["llms-full.txt", "llms-small.txt"]) {

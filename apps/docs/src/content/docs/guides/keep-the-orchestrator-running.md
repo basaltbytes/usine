@@ -28,6 +28,6 @@ An initialized instance on persistent storage, its credentials in the instance e
 
 ## Check the result
 
-`usine status` reports the PID, version, uptime, listener, and open runs. The log updates as work proceeds. Use [a server deployment](/guides/run-the-orchestrator-on-a-server/) for unattended operation.
+`usine status` reports the PID, version, uptime, listener, and open runs. The log updates as work proceeds. Use [a Linux server deployment](/guides/host-usine-on-linux/) for unattended operation.
 
 Use `usine stop` to drain running attempts, and `usine restart` to restart an idle instance. `--force` interrupts the wait; the next start reattaches retained attempts. [CLI lifecycle commands](/reference/cli/) describe timeouts.

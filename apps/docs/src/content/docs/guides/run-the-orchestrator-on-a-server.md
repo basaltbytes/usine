@@ -1,9 +1,11 @@
 ---
-title: Run the orchestrator on a server
+title: Run the orchestrator in a Hetzner gateway network
 description: Create a Hetzner orchestrator with systemd and tailnet HTTPS access.
 ---
 
 Create an always-on orchestrator in a gateway’s Hetzner private network.
+
+For a VPS or another Linux machine without this gateway setup, [host usine on a Linux server](/guides/host-usine-on-linux/).
 
 ## Prerequisites
 

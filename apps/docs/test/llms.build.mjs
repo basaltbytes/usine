@@ -11,14 +11,14 @@ for (const filename of ["llms.txt", "llms-full.txt", "llms-small.txt"]) {
       "Overview",
       "Quickstart",
       "Concepts",
+      "Add a local worker",
       "Add a Boat worker",
       "Add a Hetzner worker",
-      "Add a local worker",
       "CLI",
       "Settings",
       "Workers",
       "Loops",
-    ].map((title) => (filename === "llms.txt" ? `[${title}]` : `# ${title}\n`));
+    ].map((title) => (filename === "llms.txt" ? `[${title}]` : `\n# ${title}\n`));
     let previous = -1;
     for (const label of labels) {
       const position = text.indexOf(label);
