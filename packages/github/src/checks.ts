@@ -94,17 +94,32 @@ export class GitHubChecks extends Context.Service<
       const jobFailure = Effect.fn("GitHubChecks.jobFailure")(function* (
         prefix: string,
         job: string,
+        archives: Map<string, Uint8Array>,
       ) {
         yield* Effect.annotateCurrentSpan({ job });
         const metadata = yield* get(`${prefix}/actions/jobs/${job}`);
         const steps = yield* HttpClientResponse.schemaBodyJson(ActionsJob)(metadata).pipe(
           Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
         );
-        const response = yield* get(`${prefix}/actions/jobs/${job}/logs`);
-        const log = yield* response.text.pipe(
-          Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-        );
-        const output = failedStepsExcerpt(steps, log);
+        yield* Effect.annotateCurrentSpan({
+          actionsRunId: steps.run_id,
+          actionsRunAttempt: steps.run_attempt,
+        });
+        const path = `${prefix}/actions/runs/${steps.run_id}/attempts/${steps.run_attempt}/logs`;
+        let archive = archives.get(path);
+        if (archive === undefined) {
+          const response = yield* get(path);
+          const buffer = yield* response.arrayBuffer.pipe(
+            Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+          );
+          archive = new Uint8Array(buffer);
+          archives.set(path, archive);
+        }
+        const bytes = archive;
+        const output = yield* Effect.try({
+          try: () => failedStepsExcerpt(steps, bytes),
+          catch: () => invalidResponse("read-ci-checks", "Invalid Actions log archive"),
+        });
         if (output.length === 0)
           return yield* invalidResponse("read-ci-checks", "No failed step logs are available");
         yield* Effect.logInfo("Read failed CI step logs", {
@@ -170,12 +185,13 @@ export class GitHubChecks extends Context.Service<
             if (page * 100 >= checks.total_count) break;
           }
           const excerpts: Array<string> = [];
+          const archives = new Map<string, Uint8Array>();
           for (const check of failed.slice(0, 4)) {
             const job = check.details_url?.match(/\/actions\/runs\/\d+\/job\/(\d+)(?:\?|$)/u)?.[1];
             const log =
               job === undefined
                 ? Effect.succeed(check.output.text ?? check.output.summary ?? "")
-                : jobFailure(prefix, job);
+                : jobFailure(prefix, job, archives);
             const output = yield* log.pipe(
               Effect.catch((error) =>
                 error._tag === "GitHubRateLimitError"

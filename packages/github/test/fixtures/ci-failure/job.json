@@ -1,4 +1,7 @@
 {
+  "name": "ci",
+  "run_id": 1,
+  "run_attempt": 2,
   "steps": [
     {
       "name": "Run pnpm --filter @usine/web exec playwright install-deps chromium",

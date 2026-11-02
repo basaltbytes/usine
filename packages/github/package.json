@@ -54,7 +54,8 @@
     "test:integration": "vitest run test/integration/github-app.test.ts"
   },
   "dependencies": {
-    "@usine/core": "workspace:*"
+    "@usine/core": "workspace:*",
+    "fflate": "0.8.3"
   },
   "devDependencies": {
     "@effect/platform-node": "catalog:",

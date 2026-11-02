@@ -1,4 +1,5 @@
-import { DateTime, Schema } from "effect";
+import { Schema } from "effect";
+import { unzipSync } from "fflate/browser";
 
 export const FAILED_CONCLUSIONS = new Set([
   "failure",
@@ -9,13 +10,17 @@ export const FAILED_CONCLUSIONS = new Set([
   "stale",
 ]);
 
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
+
 export const ActionsJob = Schema.Struct({
+  name: Schema.NonEmptyString,
+  run_id: PositiveInt,
+  run_attempt: PositiveInt,
   steps: Schema.Array(
     Schema.Struct({
       name: Schema.NonEmptyString,
       conclusion: Schema.NullOr(Schema.String),
-      started_at: Schema.NullOr(Schema.DateTimeUtcFromString),
-      completed_at: Schema.NullOr(Schema.DateTimeUtcFromString),
+      number: PositiveInt,
     }),
   ),
 });
@@ -51,60 +56,43 @@ const excerpt = (lines: ReadonlyArray<string>, limit: number): string => {
   return `${context}\n...\n${tail}`;
 };
 
-/** Extracts failed step output from timestamped job logs, including annotation continuations. */
-export const failedStepsExcerpt = (job: typeof ActionsJob.Type, log: string): string => {
+/** Extracts failed step files from an Actions log archive. Invalid ZIP data throws. */
+export const failedStepsExcerpt = (job: typeof ActionsJob.Type, archive: Uint8Array): string => {
   const failed = job.steps.filter(
     ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
   );
   if (failed.length === 0) return "";
   const limit = Math.floor(2800 / failed.length);
-  const logLines = log.split(/\r?\n/u);
+  // GitHub removes slashes and colons and truncates job folders to 90 UTF-16 units.
+  const folder = job.name
+    .replace(/[/:]/gu, "")
+    .slice(0, 90)
+    .replace(/[\uD800-\uDBFF]$/u, "");
+  const stepNumber = (path: string) => {
+    const [directory, file, extra] = path.split("/");
+    if (directory !== folder || file === undefined || extra !== undefined) return undefined;
+    return file.match(/^(\d+)_.*\.txt$/u)?.[1];
+  };
+  const files = unzipSync(archive, {
+    filter: ({ name }) => failed.some(({ number }) => stepNumber(name) === String(number)),
+  });
   const sections: Array<string> = [];
-  // Second-rounded ranges can overlap; later steps must not reuse consumed lines.
-  let nextLine = 0;
-  const executed = job.steps.filter(({ conclusion }) => conclusion !== "skipped");
-  for (const [stepIndex, step] of executed.entries()) {
-    if (step.started_at === null || step.completed_at === null) continue;
-    const start = DateTime.toEpochMillis(step.started_at);
-    // The step API rounds to seconds; log timestamps retain subsecond precision.
-    const end = DateTime.toEpochMillis(step.completed_at) + 1000;
-    const next = executed[stepIndex + 1];
-    const nextStart =
-      next?.started_at === undefined || next.started_at === null
-        ? end
-        : DateTime.toEpochMillis(next.started_at);
-    const lines: Array<string> = [];
-    let withinStep = false;
-    for (const [index, line] of logLines.entries()) {
-      if (index < nextLine) continue;
-      const timestamp = line.match(/^\uFEFF?(\d{4}-\d\d-\d\dT\S+Z) /u)?.[1];
-      if (timestamp !== undefined) {
-        const at = Date.parse(timestamp);
-        withinStep = at >= start && at < end;
-        if (at >= end) break;
-      }
-      if (!withinStep) continue;
-      const content = timestamp === undefined ? line : line.slice(line.indexOf(" ") + 1);
-      // Post steps start with cleanup; composite actions also emit embedded Run headers.
-      if (
-        lines.length > 0 &&
-        timestamp !== undefined &&
-        Date.parse(timestamp) >= nextStart &&
-        ((content.startsWith("##[group]Run ") && !next?.name.startsWith("Post ")) ||
-          content === "Post job cleanup.")
-      )
-        break;
-      if (content === "Post job cleanup." && !step.name.startsWith("Post ")) break;
-      lines.push(content);
-      nextLine = index + 1;
-    }
-    if (lines.length > 0 && step.conclusion !== null && FAILED_CONCLUSIONS.has(step.conclusion))
-      sections.push(
-        `${step.name}\n${excerpt(lines, Math.max(0, limit - step.name.length - 3))}`.slice(
-          0,
-          Math.max(0, limit - 2),
-        ),
-      );
+  for (const step of failed) {
+    const matches = Object.entries(files).filter(
+      ([path]) => stepNumber(path) === String(step.number),
+    );
+    const file = matches[0]?.[1];
+    if (matches.length !== 1 || file === undefined || file.byteLength === 0) return "";
+    const lines = new TextDecoder()
+      .decode(file)
+      .split(/\r?\n/u)
+      .map((line) => line.replace(/^\uFEFF?\d{4}-\d\d-\d\dT\S+Z /u, ""));
+    sections.push(
+      `${step.name}\n${excerpt(lines, Math.max(0, limit - step.name.length - 3))}`.slice(
+        0,
+        Math.max(0, limit - 2),
+      ),
+    );
   }
   return sections.join("\n\n");
 };

@@ -4,6 +4,7 @@ import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
 import { DateTime, Effect, Layer, Redacted, type Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
+import { strToU8, zipSync } from "fflate/browser";
 import { GitHubApp } from "../src/github-app.ts";
 import { GitHubChecks } from "../src/checks.ts";
 import {
@@ -85,6 +86,22 @@ const recordedJob = readFileSync(
 );
 const recordedLog = readFileSync(new URL("./fixtures/ci-failure/job.log", import.meta.url), "utf8");
 
+const archiveResponse = (files: Record<string, string>) =>
+  new Response(
+    new Uint8Array(
+      zipSync(
+        Object.fromEntries(Object.entries(files).map(([path, text]) => [path, strToU8(text)])),
+      ),
+    ),
+  );
+
+const metadata = (steps: ReadonlyArray<{ name: string; conclusion: string }>, name = "ci") => ({
+  name,
+  run_id: 1,
+  run_attempt: 2,
+  steps: steps.map((step, index) => ({ ...step, number: index + 1 })),
+});
+
 it.effect("keeps the recorded failing assertion and step name without post-job cleanup", () =>
   Effect.gen(function* () {
     const evidence = yield* (yield* GitHubChecks).failures(repository, head);
@@ -100,13 +117,20 @@ it.effect("keeps the recorded failing assertion and step name without post-job c
     assert.notInclude(evidence.excerpt, "Cleaning up orphan processes");
   }).pipe(
     Effect.provide(
-      withClient((url) =>
-        url.includes("/logs")
-          ? new Response(recordedLog)
-          : url.includes("/actions/jobs/")
-            ? new Response(recordedJob)
-            : json(failedCheck),
-      ),
+      withClient((url) => {
+        if (url.includes("/logs")) {
+          assert.include(url, "/actions/runs/1/attempts/2/logs");
+          const lines = recordedLog.split("\n");
+          const cleanup = lines.findIndex((line) => line.includes("Post job cleanup."));
+          return archiveResponse({
+            "ci/15_Setup.txt": lines.slice(0, 3).join("\n"),
+            "ci/16_Run pnpm test.txt": lines.slice(3, cleanup).join("\n"),
+            "ci/31_Post.txt": lines.slice(cleanup).join("\n"),
+            "0_ci.txt": recordedLog,
+          });
+        }
+        return url.includes("/actions/jobs/") ? new Response(recordedJob) : json(failedCheck);
+      }),
     ),
   ),
 );
@@ -138,30 +162,30 @@ it.effect("keeps failure-marker context and tails from each failed step within t
           "✗ rejects invalid input\nexpected 2 to equal 1",
         ];
         if (url.includes("/logs"))
-          return new Response(
-            [
-              "2026-11-02T07:33:00.1000000Z successful setup",
-              ...failures.flatMap((failure, index) => [
-                `2026-11-02T07:33:${10 + index * 10}.1000000Z preceding context ${"setup ".repeat(1000)}`,
-                `2026-11-02T07:33:${10 + index * 10}.2000000Z ${failure}`,
-                ...Array.from(
-                  { length: 100 },
-                  () => `2026-11-02T07:33:${10 + index * 10}.3000000Z ${"noise ".repeat(30)}`,
-                ),
-                `2026-11-02T07:33:${15 + index * 10}.1000000Z last line`,
+          return archiveResponse({
+            ...Object.fromEntries(
+              failures.map((failure, index) => [
+                `ci/${index + 1}_Check.txt`,
+                [
+                  `2026-11-02T07:33:10.1000000Z preceding context ${"setup ".repeat(1000)}`,
+                  `2026-11-02T07:33:10.2000000Z ${failure}`,
+                  ...Array.from(
+                    { length: 100 },
+                    () => `2026-11-02T07:33:10.3000000Z ${"noise ".repeat(30)}`,
+                  ),
+                  "2026-11-02T07:33:15.1000000Z last line",
+                ].join("\n"),
               ]),
-              "2026-11-02T07:33:40.1000000Z successful upload",
-            ].join("\n"),
-          );
-        if (url.includes("/actions/jobs/"))
-          return json({
-            steps: ["Typecheck", "Lint", "Tests"].map((name, index) => ({
-              name,
-              conclusion: "failure",
-              started_at: `2026-11-02T07:33:${10 + index * 10}Z`,
-              completed_at: `2026-11-02T07:33:${15 + index * 10}Z`,
-            })),
+            ),
+            "ci/4_Upload.txt": "successful upload",
+            "ci/5_Setup.txt": "successful setup",
           });
+        if (url.includes("/actions/jobs/"))
+          return json(
+            metadata(
+              ["Typecheck", "Lint", "Tests"].map((name) => ({ name, conclusion: "failure" })),
+            ),
+          );
         return json({
           total_count: 4,
           check_runs: Array.from({ length: 4 }, (_, index) => ({
@@ -175,95 +199,66 @@ it.effect("keeps failure-marker context and tails from each failed step within t
   ),
 );
 
-for (const firstStart of ["00", "01"]) {
-  for (const action of ["shell", "script", "script after success"]) {
-    it.effect(
-      `keeps ${action} failures separate when their timestamp ranges overlap (${firstStart})`,
-      () =>
-        Effect.gen(function* () {
-          const evidence = yield* (yield* GitHubChecks).failures(repository, head);
-          const [first, second] = evidence.excerpt.split("\n\nSecond check\n");
-          assert.isDefined(second);
-          assert.include(first, "Error: first check failed");
-          assert.notInclude(first, "Error: second check failed");
-          assert.include(second, "Error: second check failed");
-          assert.include(second, "expected second result");
-          if (action === "shell") assert.include(second, "Process completed with exit code 2");
-          assert.notInclude(evidence.excerpt, "successful intervening script");
-          assert.notInclude(second, "Error: first check failed");
-          assert.notInclude(evidence.excerpt, "Post job cleanup");
-        }).pipe(
-          Effect.provide(
-            withClient((url) => {
-              if (url.includes("/logs"))
-                return new Response(
-                  [
-                    `2026-11-02T10:00:${firstStart}.1000000Z ##[group]Run ${action === "shell" ? "first-check" : "actions/github-script@v8"}`,
-                    `2026-11-02T10:00:${firstStart}.1100000Z ##[endgroup]`,
-                    "2026-11-02T10:00:01.1000000Z Error: first check failed",
-                    ...(action === "shell"
-                      ? [
-                          "2026-11-02T10:00:01.2000000Z ##[error]Process completed with exit code 1.",
-                        ]
-                      : []),
-                    ...(action === "script after success"
-                      ? [
-                          "2026-11-02T10:00:01.2500000Z ##[group]Run actions/github-script@v8",
-                          "2026-11-02T10:00:01.2600000Z ##[endgroup]",
-                          "2026-11-02T10:00:01.2700000Z successful intervening script",
-                        ]
-                      : []),
-                    `2026-11-02T10:00:01.3000000Z ##[group]Run ${action === "shell" ? "second-check" : "actions/github-script@v8"}`,
-                    "2026-11-02T10:00:01.3100000Z ##[endgroup]",
-                    "2026-11-02T10:00:01.4000000Z ##[error]Error: second check failed",
-                    "expected second result",
-                    ...(action === "shell"
-                      ? [
-                          "2026-11-02T10:00:01.5000000Z ##[error]Process completed with exit code 2.",
-                        ]
-                      : []),
-                    "2026-11-02T10:00:01.6000000Z Post job cleanup.",
-                  ].join("\n"),
-                );
-              if (url.includes("/actions/jobs/"))
-                return json({
-                  steps: [
-                    {
-                      name: "First check",
-                      conclusion: "failure",
-                      started_at: `2026-11-02T10:00:${firstStart}Z`,
-                      completed_at: "2026-11-02T10:00:01Z",
-                    },
-                    ...(action === "script after success"
-                      ? [
-                          {
-                            name: "Successful script",
-                            conclusion: "success",
-                            started_at: "2026-11-02T10:00:01Z",
-                            completed_at: "2026-11-02T10:00:01Z",
-                          },
-                        ]
-                      : []),
-                    {
-                      name: "Second check",
-                      conclusion: "failure",
-                      started_at: "2026-11-02T10:00:01Z",
-                      completed_at: "2026-11-02T10:00:01Z",
-                    },
-                  ],
-                });
-              return json(failedCheck);
-            }),
-          ),
-        ),
-    );
-  }
+for (const action of ["shell", "script", "script after success"]) {
+  it.effect(`keeps ${action} failures separate within one timestamp second`, () =>
+    Effect.gen(function* () {
+      const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+      const [first, second] = evidence.excerpt.split("\n\nSecond check\n");
+      assert.isDefined(second);
+      assert.include(first, "Error: first check failed");
+      assert.notInclude(first, "Error: second check failed");
+      assert.include(second, "Error: second check failed");
+      assert.include(second, "expected second result");
+      if (action === "shell") assert.include(second, "Process completed with exit code 2");
+      assert.notInclude(evidence.excerpt, "successful intervening script");
+      assert.notInclude(second, "Error: first check failed");
+      assert.notInclude(evidence.excerpt, "Post job cleanup");
+    }).pipe(
+      Effect.provide(
+        withClient((url) => {
+          if (url.includes("/logs"))
+            return archiveResponse({
+              "ci/1_First.txt": [
+                "2026-11-02T10:00:01.1000000Z ##[group]Run first-check",
+                "2026-11-02T10:00:01.1100000Z ##[endgroup]",
+                "2026-11-02T10:00:01.2000000Z Error: first check failed",
+                ...(action === "shell"
+                  ? ["2026-11-02T10:00:01.2100000Z ##[error]Process completed with exit code 1."]
+                  : []),
+              ].join("\n"),
+              "ci/2_Success.txt": "2026-11-02T10:00:01.2500000Z successful intervening script",
+              "ci/3_Second.txt": [
+                "2026-11-02T10:00:01.3000000Z ##[group]Run second-check",
+                "2026-11-02T10:00:01.3100000Z ##[endgroup]",
+                "2026-11-02T10:00:01.4000000Z ##[error]Error: second check failed",
+                "expected second result",
+                ...(action === "shell"
+                  ? ["2026-11-02T10:00:01.5000000Z ##[error]Process completed with exit code 2."]
+                  : []),
+              ].join("\n"),
+              "ci/4_Post.txt": "2026-11-02T10:00:01.6000000Z Post job cleanup.",
+            });
+          if (url.includes("/actions/jobs/"))
+            return json({
+              ...metadata([
+                { name: "First check", conclusion: "failure" },
+                {
+                  name: "Successful script",
+                  conclusion: action === "script after success" ? "success" : "skipped",
+                },
+                { name: "Second check", conclusion: "failure" },
+              ]),
+            });
+          return json(failedCheck);
+        }),
+      ),
+    ),
+  );
 }
 
 for (const action of ["shell", "script"]) {
-  it.effect(
-    `keeps embedded ${action} failures in a composite action before same-second cleanup`,
-    () =>
+  for (const followup of ["Post Run actions/checkout@v7", "Diagnostics"]) {
+    it.effect(`keeps embedded ${action} failures before same-second ${followup}`, () =>
       Effect.gen(function* () {
         const evidence = yield* (yield* GitHubChecks).failures(repository, head);
         assert.include(evidence.excerpt, "Composite checks");
@@ -272,14 +267,15 @@ for (const action of ["shell", "script"]) {
         assert.include(evidence.excerpt, "final composite diagnostics");
         if (action === "shell")
           assert.include(evidence.excerpt, "Process completed with exit code 1");
+        assert.notInclude(evidence.excerpt, "successful follow-up diagnostics");
         assert.notInclude(evidence.excerpt, "Post job cleanup");
         assert.notInclude(evidence.excerpt, "git config");
       }).pipe(
         Effect.provide(
           withClient((url) => {
             if (url.includes("/logs"))
-              return new Response(
-                [
+              return archiveResponse({
+                "ci/1_Composite.txt": [
                   "2026-11-02T10:00:01.1000000Z ##[group]Run ./.github/actions/check",
                   "2026-11-02T10:00:01.1100000Z ##[endgroup]",
                   "2026-11-02T10:00:01.1200000Z ##[group]Run echo setup",
@@ -295,33 +291,79 @@ for (const action of ["shell", "script"]) {
                   "2026-11-02T10:00:01.4100000Z ##[group]Run echo diagnostics",
                   "2026-11-02T10:00:01.4200000Z ##[endgroup]",
                   "2026-11-02T10:00:01.4300000Z final composite diagnostics",
+                ].join("\n"),
+                "ci/2_Diagnostics.txt":
+                  "2026-11-02T10:00:01.4500000Z successful follow-up diagnostics",
+                "ci/3_Post.txt": [
                   "2026-11-02T10:00:01.5000000Z Post job cleanup.",
                   "2026-11-02T10:00:01.6000000Z git config --local --unset-all http.https://github.com/.extraheader",
                 ].join("\n"),
-              );
-            if (url.includes("/actions/jobs/"))
-              return json({
-                steps: [
-                  {
-                    name: "Composite checks",
-                    conclusion: "failure",
-                    started_at: "2026-11-02T10:00:01Z",
-                    completed_at: "2026-11-02T10:00:01Z",
-                  },
-                  {
-                    name: "Post Run actions/checkout@v7",
-                    conclusion: "success",
-                    started_at: "2026-11-02T10:00:01Z",
-                    completed_at: "2026-11-02T10:00:01Z",
-                  },
-                ],
               });
+            if (url.includes("/actions/jobs/"))
+              return json(
+                metadata([
+                  { name: "Composite checks", conclusion: "failure" },
+                  { name: followup, conclusion: "success" },
+                  { name: "Post Run actions/checkout@v7", conclusion: "success" },
+                ]),
+              );
             return json(failedCheck);
           }),
         ),
       ),
+    );
+  }
+}
+
+for (const logs of ["corrupt", "missing", "partial"]) {
+  it.effect(`uses check output when the step archive is ${logs}`, () =>
+    Effect.gen(function* () {
+      const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+      assert.include(evidence.excerpt, "Check summary");
+    }).pipe(
+      Effect.provide(
+        withClient((url) => {
+          if (url.includes("/logs"))
+            return logs === "corrupt"
+              ? new Response("invalid ZIP")
+              : archiveResponse(logs === "missing" ? {} : { "ci/1_First.txt": "first failure" });
+          if (url.includes("/actions/jobs/"))
+            return json(
+              metadata([
+                { name: "First", conclusion: "failure" },
+                { name: "Second", conclusion: "failure" },
+              ]),
+            );
+          return json(failedCheck);
+        }),
+      ),
+    ),
   );
 }
+
+it.effect("matches numbered step files in sanitized job folders and excludes other jobs", () =>
+  Effect.gen(function* () {
+    const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+    assert.include(evidence.excerpt, "expected own result");
+    assert.notInclude(evidence.excerpt, "unrelated failure");
+  }).pipe(
+    Effect.provide(
+      withClient((url) => {
+        if (url.includes("/logs"))
+          return archiveResponse({
+            [`${"check  matrix".repeat(10).slice(0, 90)}/1_Any filename.txt`]:
+              "expected own result",
+            "other-job/1_Check.txt": "unrelated failure",
+          });
+        if (url.includes("/actions/jobs/"))
+          return json(
+            metadata([{ name: "Check", conclusion: "failure" }], "check / matrix:".repeat(10)),
+          );
+        return json(failedCheck);
+      }),
+    ),
+  ),
+);
 
 it.effect("uses check output when Actions step metadata is unavailable", () =>
   Effect.gen(function* () {
@@ -364,8 +406,8 @@ for (const endpoint of ["metadata", "logs"]) {
     }).pipe(
       Effect.provide(
         withClient((url) => {
-          if (url.includes("/actions/jobs/")) {
-            if (endpoint === "metadata" || url.includes("/logs"))
+          if (url.includes("/actions/")) {
+            if ((endpoint === "metadata" && url.includes("/jobs/")) || url.includes("/logs"))
               return new Response("rate limited", {
                 status: 429,
                 headers: { "retry-after": "60" },
