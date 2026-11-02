@@ -1,7 +1,7 @@
 import { awaitMachineSsh, machineChecksFor, harnessCredentialGap } from "./checks.ts";
 import { machineReuseFor } from "./reuse.ts";
 import { machineStartsFor } from "./starts.ts";
-import { machineHolds, type Held } from "./holds.ts";
+import { machineHolds, machineStatusOf, type Held } from "./holds.ts";
 import { boatTailnetsFor } from "./tailnet/bootstrap.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
@@ -27,7 +27,6 @@ import {
   ExecutorOperationError,
   MachineGrant,
   MachineHold,
-  MachineStatus,
   MachineUnavailableError,
   type PreflightReport,
   WorkerCapabilityError,
@@ -75,6 +74,9 @@ export interface ProvisionedMachinesOptions {
     brains: ReadonlyArray<BrainSpec>,
     maxConcurrentAttempts: number,
   ) => Effect.Effect<PreflightReport, ExecutorError>;
+  readonly prepareContainers: (
+    machine: SshMachine,
+  ) => Effect.Effect<void, ExecutorOperationError | WorkerCapabilityError>;
   readonly reset: (machine: SshMachine) => Effect.Effect<void, ExecutorOperationError>;
   readonly verifyGatewayAdmin: (
     worker: WorkerName,
@@ -446,7 +448,24 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         );
       const prepared = yield* ready.pipe(
         Effect.flatMap((machine) =>
-          checkMachine(machine, brains).pipe(Effect.map((checked) => ({ machine, checked }))),
+          update(hold, (current) => ({ ...current, state: "preparing" })).pipe(
+            Effect.andThen(checkMachine(machine, brains)),
+            Effect.tap(() =>
+              options.prepareContainers(machine).pipe(
+                Effect.catchTag("ExecutorOperationError", (error) =>
+                  Effect.fail(
+                    new WorkerCapabilityError({
+                      worker,
+                      capability: "container",
+                      message: error.message,
+                      cause: error,
+                    }),
+                  ),
+                ),
+              ),
+            ),
+            Effect.map((checked) => ({ machine, checked })),
+          ),
         ),
         Effect.onExit((exit) =>
           Exit.isSuccess(exit) ? Effect.void : discard(hold, "the machine didn't become ready"),
@@ -803,22 +822,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         .sort(
           (left, right) => DateTime.toEpochMillis(left.since) - DateTime.toEpochMillis(right.since),
         )
-        .map(
-          (entry) =>
-            new MachineStatus({
-              worker: entry.worker,
-              provider: entry.provider,
-              state:
-                entry.state === "creating" || entry.state === "deleting" || entry.state === "idle"
-                  ? entry.state
-                  : "ready",
-              id: entry.id,
-              runId: entry.runId,
-              attemptId: entry.attemptId,
-              since: entry.since,
-              attempts: entry.uses,
-            }),
-        ),
+        .map(machineStatusOf),
     ),
   );
 

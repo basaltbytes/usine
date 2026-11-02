@@ -16,7 +16,7 @@ import type { RunActionRequest } from "~/hooks/runs/actions";
 import type { Chapter } from "~/lib/runs/transcript/document/model";
 import type { MessageDelivery, QueuedFor } from "~/lib/runs/transcript/model";
 import { timestampLabel } from "~/lib/strings";
-import { providerLabel } from "~/lib/workers/strings";
+import { preparingAttemptImage, providerLabel } from "~/lib/workers/strings";
 
 export const handedOff = "Handed off";
 export const ciFailedOn = (head: string): string => `CI failed on ${head.slice(0, 8)}; `;
@@ -81,6 +81,7 @@ export const runStateLine = (
   if (unconfirmedStop !== null) return stopWaitLine(run.id, unconfirmedStop);
   if (run.upgradeWait !== null) return upgradeWaitLine(run.upgradeWait);
   if (run.machineWait !== null) return machineWaitLine(run.machineWait);
+  if (run.state === "Queued" && machine?.state === "preparing") return preparingAttemptImage;
   if (run.state === "Queued" && machine?.state === "creating")
     return `Queued, creating a ${providerLabel[machine.provider]} machine`;
   if (run.providerRetry !== null) {

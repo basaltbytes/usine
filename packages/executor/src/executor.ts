@@ -432,10 +432,11 @@ export class MachineGrant extends Schema.Class<MachineGrant>("@usine/executor/Ma
 }) {}
 
 /**
- * `creating` until the machine answers over SSH, `ready` while an attempt uses it, `idle` between attempts, and
+ * `creating` until the machine answers over SSH, `preparing` during machine preflight,
+ * `ready` while an attempt uses it, `idle` between attempts, and
  * `deleting` until its deletion succeeds.
  */
-export const MachineState = Schema.Literals(["creating", "ready", "idle", "deleting"]);
+export const MachineState = Schema.Literals(["creating", "preparing", "ready", "idle", "deleting"]);
 export type MachineState = typeof MachineState.Type;
 
 /** A machine in flight on a provisioned Worker. */

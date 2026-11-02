@@ -35619,6 +35619,7 @@
             "type": "string",
             "enum": [
               "creating",
+              "preparing",
               "ready",
               "idle",
               "deleting"

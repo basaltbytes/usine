@@ -1,3 +1,4 @@
+import { prepareAttemptImage } from "./image.ts";
 import { reclaimOnceFor } from "../remote/reclaim.ts";
 import { detectRuntime, verifyPodmanLimits } from "./runtime.ts";
 import { type ContainerRuntime, runtimeOptions } from "../remote/runtime.ts";
@@ -7,7 +8,7 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, type WorkerName } from "@usine/core/worker";
-import { Effect, Option, Random, Schema } from "effect";
+import { Duration, Effect, Option, Random, Schema } from "effect";
 import { WorkerCapabilityError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
@@ -107,6 +108,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
           "The machine's container runtime differs from its last preflight. Run preflight before starting attempts.",
           new Error("container runtime changed"),
         );
+      yield* prepareAttemptImage(commands, machine, image, runtime, "prepare");
       yield* containers.prepareCaches(
         "prepare",
         machine.shell,
@@ -245,39 +247,24 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
           "Neither Podman nor Docker is installed, so attempts run as the SSH user and can read each other's credentials. Install rootless Podman or Docker to run each attempt in its own container.",
       } satisfies ContainerCheck;
     }
-    const pulled = yield* commands.inspect("preflight", machine.shell, selected.value, [
-      "pull",
-      "--quiet",
-      image,
-    ]);
-    if (pulled.exitCode !== 0) {
-      const local = yield* commands.inspect("preflight", machine.shell, selected.value, [
-        "image",
-        "inspect",
-        "--format",
-        "{{.Id}}",
+    yield* prepareAttemptImage(commands, machine, image, selected.value, "preflight");
+    const [probeDuration, ids] = yield* commands
+      .inspect("preflight", machine.shell, "sh", [
+        "-c",
+        USER_IDS_SCRIPT,
+        "sh",
+        selected.value,
         image,
-      ]);
-      if (local.exitCode !== 0)
-        return yield* containerGap(
-          worker,
-          `SSH worker "${worker}" can't pull the attempt image ${image}`,
-          new Error(
-            pulled.stderr.trim() || `${selected.value} pull exited with code ${pulled.exitCode}`,
-          ),
-        );
-      yield* Effect.logWarning(
-        "SSH Worker could not pull the Attempt image; its Attempts use the image already on the machine",
-        { worker, host, image, message: pulled.stderr.trim() },
-      );
-    }
-    const ids = yield* commands.inspect("preflight", machine.shell, "sh", [
-      "-c",
-      USER_IDS_SCRIPT,
-      "sh",
-      selected.value,
+      ])
+      .pipe(Effect.timed);
+    yield* Effect.logInfo("Ran the attempt image user probe", {
+      worker,
+      host,
       image,
-    ]);
+      runtime: selected.value,
+      durationMillis: Duration.toMillis(probeDuration),
+      exitCode: ids.exitCode,
+    });
     if (ids.exitCode !== 0)
       return yield* containerGap(
         worker,

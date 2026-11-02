@@ -131,6 +131,75 @@ describe("SSH Worker with Docker", () => {
     );
   });
 
+  it.effect.each([
+    { present: true, changed: false },
+    { present: false, changed: false },
+    { present: true, changed: true },
+  ])(
+    "reports image presence and whether preflight downloaded it: $present, $changed",
+    ({ present, changed }) => {
+      const machine = dockerMachine();
+      machine.state.imageOnMachine = present;
+      if (changed) machine.state.pulledImageId = "sha256:4567";
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], 1);
+        const inspections = logs.lines.filter((line) =>
+          line.includes("Inspected the attempt image"),
+        );
+        assert.include(inspections[0] ?? "", `"status":"${present ? "present" : "absent"}"`);
+        assert.include(inspections[0] ?? "", '"durationMillis":');
+        const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
+        assert.lengthOf(pulls, 1);
+        assert.deepInclude(JSON.parse(pulls[0] ?? "")[1], {
+          image: ATTEMPT_IMAGE,
+          downloaded: !present || changed,
+          durationMillis: 0,
+        });
+        assert.lengthOf(
+          linesOf(machine).filter((line) => line.startsWith("exec 'docker' 'pull' ")),
+          1,
+        );
+        assert.lengthOf(
+          logs.warnings.filter((line) => line.includes("image is absent")),
+          present ? 0 : 1,
+        );
+        const cache = logs.lines.find((line) => line.includes("Prepared shared cache volume"));
+        assert.deepInclude(JSON.parse(cache ?? "")[1], {
+          runDurationMillis: 17,
+          durationMillis: 0,
+        });
+        assert.include(logs.lines.join("\n"), "Ran the attempt image user probe");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider())),
+        Effect.provide(logs.layer),
+      );
+    },
+  );
+
+  it.effect.each([true, false])(
+    "checks the image before cache initialization without preflight: present=%s",
+    (present) => {
+      const machine = dockerMachine();
+      machine.state.imageOnMachine = present;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.prepare(request);
+        const lines = linesOf(machine);
+        const inspect = lines.findIndex((line) =>
+          line.startsWith("exec 'docker' 'image' 'inspect'"),
+        );
+        const cache = lines.findIndex((line) => line.includes("volume create"));
+        assert.isAtLeast(inspect, 0);
+        assert.isAbove(cache, inspect);
+        const pulls = lines.filter((line) => line.startsWith("exec 'docker' 'pull'"));
+        assert.lengthOf(pulls, present ? 0 : 1);
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
+
   it.effect(
     "runs the Attempt's commands in its own container with its paths and shared cache volumes",
     () => {

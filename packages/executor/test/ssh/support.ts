@@ -200,6 +200,9 @@ interface FakeMachineState {
   /** Whether `docker pull` of the Attempt image fails, and whether the image is on the machine anyway. */
   pullFails: boolean;
   imageOnMachine: boolean;
+  imageId: string;
+  pulledImageId: string;
+  beforePull: Effect.Effect<void>;
   /** The user IDs on the machine and inside the Attempt image. */
   hostUserId: string;
   imageUserId: string;
@@ -347,6 +350,9 @@ export const fakeMachine = () => {
     docker: "absent",
     pullFails: false,
     imageOnMachine: true,
+    imageId: "sha256:0123",
+    pulledImageId: "sha256:0123",
+    beforePull: Effect.void,
     imageUserId: "1000",
     hostUserId: "1000",
     cachePreparationFailure: undefined,
@@ -385,20 +391,23 @@ export const fakeMachine = () => {
         : oneShotHandle(state.rootlessSessionError, 1);
     if (line.includes("/sys/fs/cgroup/cpu.max"))
       return oneShotHandle("", state.limitsEnforced ? 0 : 1);
-    if (line.startsWith("exec 'docker' 'pull' "))
-      return state.pullFails
-        ? oneShotHandle("", 1, "Error response from daemon: Get https://ghcr.io/v2/: timeout")
-        : oneShotHandle("", 0);
+    if (line.startsWith("exec 'docker' 'pull' ")) {
+      if (state.pullFails)
+        return oneShotHandle("", 1, "Error response from daemon: Get https://ghcr.io/v2/: timeout");
+      state.imageOnMachine = true;
+      state.imageId = state.pulledImageId;
+      return oneShotHandle("", 0);
+    }
     if (line.startsWith("exec 'docker' 'image' 'inspect' "))
       return oneShotHandle(
-        state.imageOnMachine ? "sha256:0123\n" : "",
+        state.imageOnMachine ? `${state.imageId}\n` : "",
         state.imageOnMachine ? 0 : 1,
       );
     if (line.includes("volume create"))
       return state.cachePreparationFailure !== undefined &&
         words.includes(state.cachePreparationFailure)
         ? oneShotHandle("", 1, "cache volume: permission denied")
-        : oneShotHandle("", 0);
+        : oneShotHandle("17\n", 0);
     if (words.includes("du")) return oneShotHandle(`${state.storeSizeKiB}\t/store\n`, 0);
     if (line.includes("--entrypoint"))
       return oneShotHandle(
@@ -746,6 +755,7 @@ export const fakeMachine = () => {
             .join(" ")}`
         : line;
       state.calls.push({ command, line: direct, input });
+      if (/^exec '(?:docker|podman)' 'pull' /u.test(direct)) yield* state.beforePull;
       return respond(command, direct, input);
     }),
   );
@@ -849,10 +859,13 @@ export const writesCredential = (line: string) => line.includes("IFS= read -r to
 /** Returns a logger that collects every log message and its fields as text. */
 export const capturedLogs = () => {
   const lines: Array<string> = [];
-  const logger = Logger.make<unknown, void>(({ message }) => {
-    lines.push(JSON.stringify(message));
+  const warnings: Array<string> = [];
+  const logger = Logger.make<unknown, void>(({ message, logLevel }) => {
+    const line = JSON.stringify(message);
+    lines.push(line);
+    if (logLevel === "Warn") warnings.push(line);
   });
-  return { lines, layer: Logger.layer([logger]) };
+  return { lines, warnings, layer: Logger.layer([logger]) };
 };
 
 /** The test Worker's address, without a Gateway. */
