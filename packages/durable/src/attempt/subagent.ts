@@ -23,6 +23,7 @@ import {
   ChildSessionBudget,
   ChildSessionCount,
   SessionFinished,
+  SessionStarted,
   sessionPool,
 } from "@usine/core/agent/session";
 import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Stream } from "effect";
@@ -185,17 +186,23 @@ export const subagentTool = (services: ExtensionServices) => {
       prompt: assembleChildPrompt({
         agent: spec.agent.name,
         persona: spec.agent.persona,
-        task,
+        task: spec.task,
+        context: task,
       }),
     });
     yield* Effect.annotateCurrentSpan({ agent: session.agent, sessionId: session.id });
-    yield* Effect.logInfo("Spawning child session", {
-      attemptedChildren,
-      maxChildren: spec.maxChildren,
-      sessionId: session.id,
-      pool: sessionPool(session),
-      taskExcerpt: excerpt,
-    });
+    yield* Effect.logInfo(
+      "Spawning child session with the rendered task and supplemental parent context",
+      {
+        attemptedChildren,
+        maxChildren: spec.maxChildren,
+        sessionId: session.id,
+        pool: sessionPool(session),
+        taskCharacters: spec.task.length,
+        contextCharacters: task.length,
+        taskExcerpt: excerpt,
+      },
+    );
     const recordInfrastructureFailure = (error: AgentSessionError) =>
       error._tag === "SessionOperationError"
         ? call("record the child's infrastructure failure", () =>
@@ -253,8 +260,12 @@ export const subagentTool = (services: ExtensionServices) => {
     yield* call("publish the child's id", () =>
       api.details({ childSessionId: session.id }, context),
     );
-    const forward = (event: AgentSessionEvent) =>
-      services.hubs.event(hub, event).pipe(
+    const forward = (event: AgentSessionEvent) => {
+      const recorded =
+        event._tag === "SessionStarted"
+          ? new SessionStarted({ ...event, prompt: Option.some(childRequest.prompt) })
+          : event;
+      return services.hubs.event(hub, recorded).pipe(
         Effect.andThen(
           event._tag === "TextOutput"
             ? Effect.try({
@@ -272,6 +283,7 @@ export const subagentTool = (services: ExtensionServices) => {
             : Effect.void,
         ),
       );
+    };
     // These errors end the stream with the same report the child's result contains, so they are
     // ignored here.
     const forwarding = yield* child.events.pipe(
@@ -347,7 +359,7 @@ export const subagentTool = (services: ExtensionServices) => {
   return defineTool({
     name: SUBAGENT_TOOL,
     description:
-      "Delegate one focused task to the configured isolated child agent and wait for its report.",
+      "Delegate to the configured isolated child agent and wait for its report. The runtime includes the rendered loop task unchanged; task supplies supplemental context or a focused assignment within it.",
     parameters: Type.Object(
       { task: Type.String({ minLength: 1 }) },
       { additionalProperties: false },

@@ -315,7 +315,11 @@ describe("run transcript", () => {
     });
     const started = sessionEvent(
       1,
-      new SessionStarted({ session: child, harnessSession: Option.some(saved) }),
+      new SessionStarted({
+        session: child,
+        harnessSession: Option.some(saved),
+        prompt: Option.some("Exact child prompt\n  unchanged"),
+      }),
     );
     const finished = sessionEvent(2, new SessionFinished({ session: child }));
     const projection = projectTranscript([finished], [liveAttempt], [started, finished]);
@@ -323,6 +327,7 @@ describe("run transcript", () => {
     assert(session !== undefined);
     assert.strictEqual(session.status, "Finished");
     assert.deepStrictEqual(session.harnessSession, Option.some(saved));
+    assert.deepStrictEqual(session.prompt, Option.some("Exact child prompt\n  unchanged"));
     assert.strictEqual(session.entries.length, 1);
     const legacy = projectTranscript(
       [sessionEvent(1, new SessionStarted({ session: child }))],
@@ -331,6 +336,7 @@ describe("run transcript", () => {
     const legacySession = legacy.sessions[0];
     assert(legacySession !== undefined);
     assert(Option.isNone(legacySession.harnessSession));
+    assert(Option.isNone(legacySession.prompt));
   });
 
   it("reads parent and child messages inline in order, naming each speaker once per turn", () => {

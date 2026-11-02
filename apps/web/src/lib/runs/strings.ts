@@ -196,3 +196,6 @@ export const transcriptAttemptLabel = (attempt: Chapter["attempt"]): string =>
     onNone: () => "Attempt",
     onSome: ({ number }) => `Attempt ${number}`,
   });
+
+export const childPromptLabel = (agent: string, sessionId: string): string =>
+  `Prompt received by ${agent} (${sessionId})`;

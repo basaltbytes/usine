@@ -33,6 +33,7 @@ const session: TranscriptSession = {
     brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
   }),
   harnessSession: Option.none(),
+  prompt: Option.none(),
   status: "Live",
   held: false,
   paused: false,

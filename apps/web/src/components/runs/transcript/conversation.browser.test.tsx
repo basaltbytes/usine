@@ -845,6 +845,13 @@ it("resumes following when a wheel turn past a tool output's end reaches the lat
   output.scrollTop = output.scrollHeight;
   await userEvent.wheel(output, { delta: { y: 800 } });
   await expect.poll(atLatest).toBeLessThan(9);
+  // Chromium can update scrollTop before delivering the scroll event that resumes following.
+  await expect
+    .poll(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide"));
+      return bookmark()?.position._tag;
+    })
+    .toBe("Latest");
   mount([...events, ...longRead, message(48)]);
   await expect.poll(atLatest).toBeLessThan(9);
 });
@@ -1184,3 +1191,32 @@ it("shows that a Pi child has no saved harness session to resume", async () => {
   await expect.element(page.getByText("No saved harness session")).toBeVisible();
   expect(document.body.textContent).not.toContain("Resume this session");
 });
+
+it.each([390, 1280])(
+  "shows the exact child prompt at %s px without widening the conversation",
+  async (width) => {
+    await page.viewport(width, 844);
+    host.style.width = "100%";
+    const child = new ChildSession({
+      id: AgentSessionId.make("prompt-child"),
+      parentId: parent.id,
+      agent: AgentName.make("reviewer"),
+      brain: new BrainSpec({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
+    });
+    const prompt =
+      "# Delegated task\n\n  Add `ready-to-merge`.\nDo not wait for CI.\n" + "x".repeat(300);
+    mount(
+      [
+        record(1, new SessionStarted({ session: child, prompt: Option.some(prompt) })),
+        record(2, new TextOutput({ session: child, text: "Reviewing." })),
+      ],
+      runId,
+      undefined,
+      [liveAttempt],
+    );
+    await page.getByRole("button", { name: "Prompt received by reviewer (prompt-child)" }).click();
+    await expect.element(page.getByText(prompt, { exact: true })).toBeVisible();
+    expect(page.getByText(prompt, { exact: true }).element().textContent).toBe(prompt);
+    expect(host.scrollWidth).toBeLessThanOrEqual(width);
+  },
+);

@@ -42647,6 +42647,9 @@
               }
             ]
           },
+          "prompt": {
+            "type": "string"
+          },
           "harnessSession": {
             "type": "object",
             "properties": {

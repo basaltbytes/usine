@@ -30,6 +30,8 @@ const childBackendLayer = childDispatcherLayer.pipe(
 
 The Claude backend also needs `ClaudeLoginLock` (`/runtime`), which every Claude command that can refresh a Claude login takes: one lock per worker, or per machine of a provisioned worker, whose machines each have their own login. Give the same instance (`claudeLoginLockLayer` from `@usine/executor`) to the backends and the executor running preflight. Like Codex's app server, it also needs a `ChildProcessSpawner`, to stop a child on its worker before it resumes the child.
 
+Child prompts include the rendered loop task unchanged, including edit-and-retry amendments. Parent-written text appears separately as supplemental context and cannot replace the task instructions.
+
 ## Harnesses and credentials
 
 - **Parent:** a Pi model with an API key, or an `openai-codex` ChatGPT model through Plus or Pro OAuth. The start log records `apiKeys` or `chatgptPlan`. A child past the run spec's child-session budget stops the parent with `ChildSessionBudgetExceededError`.
