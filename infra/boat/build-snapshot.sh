@@ -1,13 +1,10 @@
 #!/bin/sh
-# Builds a credential-free Boat snapshot with Tailscale and a retained attempt image.
-# SSH scripts expand variables on the remote host.
-# shellcheck disable=SC2016
+# Builds a credential-free Boat snapshot with Tailscale.
 set -eu
-[ "$#" -eq 3 ] || { echo "Usage: $0 <snapshot-name> <attempt-image> <ssh-identity-file>" >&2; exit 2; }
+[ "$#" -eq 2 ] || { echo "Usage: $0 <snapshot-name> <ssh-identity-file>" >&2; exit 2; }
 : "${BOAT_API_KEY:?Set BOAT_API_KEY to your Boat API key}"
 name=$1
-image=$2
-identity=$3
+identity=$2
 printf '%s\n' "$name" | LC_ALL=C grep -Eq '^[a-z0-9][a-z0-9-]{0,62}$' || { echo 'Invalid snapshot name' >&2; exit 2; }
 case "$name" in latest|tree|pull|rm|save|current|self|new) echo 'Reserved snapshot name' >&2; exit 2;; esac
 [ -f "$identity" ] && [ -f "$identity.pub" ] || { echo 'The SSH identity and its .pub file must exist' >&2; exit 2; }
@@ -83,19 +80,14 @@ api POST /sandboxes -H "Idempotency-Key: $key" --data \
 source_sandbox=$(jq -er '.sandbox.id' "$work/created.json")
 echo "Preparing source sandbox $source_sandbox" >&2
 connect_sandbox "$source_sandbox"
-# The image is sent on stdin rather than interpolated into a remote shell command.
-printf '%s\n' "$image" | remote 'sh -ec '\''
-  IFS= read -r image
+remote 'sh -ec '\''
   curl -fsSL https://tailscale.com/install.sh -o /tmp/usine-install-tailscale.sh
   sudo sh /tmp/usine-install-tailscale.sh
   rm /tmp/usine-install-tailscale.sh
   sudo systemctl enable --now tailscaled
   test -c /dev/net/tun
-  docker pull "$image"
-  docker create --name usine-snapshot-image "$image"
   sudo systemctl stop tailscaled
   sudo rm -f /var/lib/tailscale/tailscaled.state
-  sudo systemctl stop docker docker.socket containerd
   sync
 '\'''
 echo "Saving snapshot $name; this can take several minutes" >&2
@@ -119,20 +111,8 @@ api POST /sandboxes -H "Idempotency-Key: $key-verify" --data \
   "$(jq -nc --arg name "usine-verify-$name" --arg from "$name" '{name:$name,from:$from,noEnv:true,snapshots:false,monitoring:false,ttlSeconds:900}')" > "$work/verification.json"
 verification_sandbox=$(jq -er '.sandbox.id' "$work/verification.json")
 connect_sandbox "$verification_sandbox"
-if ! printf '%s\n' "$image" | remote 'sh -ec '\''
-  IFS= read -r image
-  sudo systemctl start containerd docker
-  docker image inspect "$image"
-'\''' >/dev/null; then
-  echo "Snapshot $name verification failed: cannot inspect attempt image $image on sandbox $verification_sandbox." >&2
-  remote 'sh -ec '\''
-    config=$(sudo containerd config dump)
-    printf "%s\n" "$config" | grep -E "^root|^state"
-    single_quote=$(printf "\047")
-    root=$(printf "%s\n" "$config" | sed -n "s/^root = [\"$single_quote]\\(.*\\)[\"$single_quote]$/\\1/p")
-    state=$(printf "%s\n" "$config" | sed -n "s/^state = [\"$single_quote]\\(.*\\)[\"$single_quote]$/\\1/p")
-    sudo du -sh "$root" "$state"
-  '\''' >&2 || echo "Could not read containerd storage diagnostics on sandbox $verification_sandbox." >&2
+if ! remote 'tailscale version' >/dev/null; then
+  echo "Snapshot $name verification failed: cannot run Tailscale on sandbox $verification_sandbox." >&2
   exit 1
 fi
-echo "Snapshot $name is verified and ready for $image"
+echo "Snapshot $name is verified and ready"
