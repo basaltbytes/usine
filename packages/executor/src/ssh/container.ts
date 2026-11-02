@@ -7,7 +7,7 @@ import { SSH_FAILURE } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
-import { ContainerImage, type WorkerName } from "@usine/core/worker";
+import { ContainerImage, ContainerScratchMib, type WorkerName } from "@usine/core/worker";
 import { Duration, Effect, Option, Random, Schema } from "effect";
 import { WorkerCapabilityError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
@@ -208,6 +208,18 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       image,
       runtime,
       limits: limits.limits,
+      shmSizeMib: ContainerScratchMib.make(
+        Math.min(
+          Option.getOrElse(machine.address.container.shmSizeMib, () => 2048),
+          limits.limits.memoryMib,
+        ),
+      ),
+      tmpfsSizeMib: ContainerScratchMib.make(
+        Math.min(
+          Option.getOrElse(machine.address.container.tmpfsSizeMib, () => 2048),
+          limits.limits.memoryMib,
+        ),
+      ),
       instance,
       instanceId,
       hosts,
@@ -219,6 +231,8 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       runtime,
       image,
       ...limitFields(limits),
+      shmSizeMib: settings.shmSizeMib,
+      tmpfsSizeMib: settings.tmpfsSizeMib,
     });
     return { _tag: "Container", settings, limits } satisfies ContainerCheck;
   });

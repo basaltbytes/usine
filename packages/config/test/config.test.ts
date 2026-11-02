@@ -8,7 +8,7 @@ import { InstanceFolder } from "../src/instance-folder.ts";
 import { InstancePath } from "../src/file.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
 import { loopReferenceFailure, referenceIndex } from "../src/instance/references.ts";
-import { ManagedRepo } from "../src/factory.ts";
+import { ManagedRepo, UsineConfig } from "../src/factory.ts";
 import { formatLoop, ConfigParser } from "../src/parser.ts";
 import { issueEnvironment, pullRequestEnvironment } from "../src/payload-slices.ts";
 import { matchesSelector } from "../src/selector.ts";
@@ -197,6 +197,8 @@ describe("ConfigParser", () => {
         "      cpus: 1.5",
         "      memory_mib: 6144",
         "      pids: 2048",
+        "      shm_size_mib: 1024",
+        "      tmpfs_size_mib: 3072",
       ]);
       const [first, second] = configured.workers;
       expect(first?.kind).toBe("ssh");
@@ -216,11 +218,20 @@ describe("ConfigParser", () => {
       expect(gateway?.adminPort).toBe(7071);
       expect(gateway?.adminTokenEnv).toBe("USINE_GATEWAY_ADMIN_TOKEN");
       expect(gateway?.llmProviders).toEqual(["anthropic"]);
-      const containerOf = ({ image, cpus, memoryMib, pids }: typeof first.container) => ({
+      const containerOf = ({
+        image,
+        cpus,
+        memoryMib,
+        pids,
+        shmSizeMib,
+        tmpfsSizeMib,
+      }: typeof first.container) => ({
         image: Option.getOrNull(image),
         cpus: Option.getOrNull(cpus),
         memoryMib: Option.getOrNull(memoryMib),
         pids: Option.getOrNull(pids),
+        shmSizeMib: Option.getOrNull(shmSizeMib),
+        tmpfsSizeMib: Option.getOrNull(tmpfsSizeMib),
       });
       // Unset limits are derived from the machine at preflight.
       expect(containerOf(first.container)).toEqual({
@@ -228,13 +239,24 @@ describe("ConfigParser", () => {
         cpus: null,
         memoryMib: null,
         pids: null,
+        shmSizeMib: null,
+        tmpfsSizeMib: null,
       });
       expect(containerOf(second.container)).toEqual({
         image: "registry.example:5000/usine/worker:custom",
         cpus: 1.5,
         memoryMib: 6144,
         pids: 2048,
+        shmSizeMib: 1024,
+        tmpfsSizeMib: 3072,
       });
+
+      const encoded = Schema.encodeSync(UsineConfig)(configured);
+      const reloaded = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        JSON.stringify(encoded),
+      );
+      expect(reloaded).toEqual(configured);
 
       const gatewayOf = (lines: ReadonlyArray<string>) => [
         "  - name: eu",
@@ -284,6 +306,12 @@ describe("ConfigParser", () => {
           "memory_mib: 128",
           "pids: 0",
           "memoryMib: 4096",
+          "shm_size_mib: 0",
+          "tmpfs_size_mib: -1",
+          "shm_size_mib: 1.5",
+          "tmpfs_size_mib: 1.5",
+          "shmSizeMib: 2048",
+          "tmpfsSizeMib: 2048",
         ].map((line) => [
           "  - name: eu",
           "    kind: ssh",

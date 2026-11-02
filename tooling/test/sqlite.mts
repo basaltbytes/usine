@@ -1,11 +1,15 @@
 import { accessSync, constants, statfsSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-/** Selects writable tmpfs storage for SQLite fixtures, or the OS temporary directory. */
-export const sqliteTempDirectory = (memoryDirectory = "/dev/shm"): string => {
+/** Selects writable tmpfs with at least `sizeHintBytes` free, or the OS temporary directory. */
+export const sqliteTempDirectory = (
+  memoryDirectory = "/dev/shm",
+  sizeHintBytes = 16 * 1024 ** 2,
+): string => {
   try {
     // TMPFS_MAGIC from Linux's statfs API. Other filesystems still require disk commits.
-    if (statfsSync(memoryDirectory).type === 0x01021994) {
+    const filesystem = statfsSync(memoryDirectory);
+    if (filesystem.type === 0x01021994 && filesystem.bavail * filesystem.bsize >= sizeHintBytes) {
       accessSync(memoryDirectory, constants.W_OK | constants.X_OK);
       return memoryDirectory;
     }

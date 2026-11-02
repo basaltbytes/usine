@@ -242,6 +242,8 @@ for (const replacementDocker of ["absent", "running"] as const) {
           cpus: Option.some(ContainerCpus.make(1)),
           memoryMib: Option.some(ContainerMemoryMib.make(2048)),
           pids: Option.some(ContainerPids.make(1024)),
+          shmSizeMib: Option.none(),
+          tmpfsSizeMib: Option.none(),
         },
       };
       const parent: StubParent = (context) => {

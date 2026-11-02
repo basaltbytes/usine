@@ -152,6 +152,8 @@ Salvage inspection, staging, or snapshot failures keep the checkout, uncommitted
 
 ## SSH worker
 
+Attempt containers mount `/dev/shm` and `/tmp` in memory and set `TMPDIR=/tmp` for Docker and Podman. `SshWorkerContainer.shmSizeMib` and `tmpfsSizeMib` override each filesystem's default capacity of 2048 MiB. Each capacity is capped at the container memory limit; both filesystems and running processes share that limit. Temporary files are removed with the container. The executor logs the applied capacities when it records and starts a container.
+
 `@usine/executor/ssh` runs the same contract on any Linux machine that the orchestrator reaches over SSH ([ADR 0026](../../docs/adr/0026-eu-ssh-worker.md)); `infra/hetzner` creates one on Hetzner Cloud. Each worker has an SSH destination, an optional identity file and port, and a root under which it keeps `workers/<name>/repos`, `attempts`, and `credentials`. The machine needs Git, rootless Podman or Docker, and the roster's harness logins for the SSH user.
 
 Preflight checks the SSH connection, a writable root, Git, memory for `maxConcurrentAttempts`, the container runtime, and the roster's harnesses where children run. With a container runtime, it pulls the attempt image, checks that the image's user has the SSH user's ID, finds the container limits, and probes the harnesses in a container from the image that removes itself. Without either runtime, it probes them over SSH and reports the worker as degraded. A Docker that doesn't answer the SSH user, the `docker` group or a writable socket without the `docker` CLI, an image that can't be pulled and isn't on the machine, or another user ID is a `container` `WorkerCapabilityError`: an SSH user that can use Docker never runs an attempt.
@@ -271,6 +273,8 @@ const executorLayer = layer({
         cpus: Option.none(),
         memoryMib: Option.some(ContainerMemoryMib.make(6144)),
         pids: Option.none(),
+        shmSizeMib: Option.none(),
+        tmpfsSizeMib: Option.none(),
       },
     },
   ],
