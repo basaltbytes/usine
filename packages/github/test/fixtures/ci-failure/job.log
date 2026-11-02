@@ -1,3 +1,6 @@
+2026-11-02T07:33:25.4356383Z ##[group]Run pnpm --filter @usine/web exec playwright install-deps chromium
+2026-11-02T07:33:25.4378315Z ##[endgroup]
+2026-11-02T07:33:42.4893714Z No VM guests are running outdated hypervisor (qemu) binaries on this host.
 2026-11-02T07:33:43.4405276Z ##[group]Run pnpm test
 2026-11-02T07:33:43.4405604Z [36;1mpnpm test[0m
 2026-11-02T07:33:43.4426158Z shell: /usr/bin/bash -e {0}

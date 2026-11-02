@@ -176,60 +176,88 @@ it.effect("keeps failure-marker context and tails from each failed step within t
 );
 
 for (const firstStart of ["00", "01"]) {
-  it.effect(
-    `keeps consecutive failures separate when their timestamp ranges overlap (${firstStart})`,
-    () =>
-      Effect.gen(function* () {
-        const evidence = yield* (yield* GitHubChecks).failures(repository, head);
-        const [first, second] = evidence.excerpt.split("\n\nSecond check\n");
-        assert.isDefined(second);
-        assert.include(first, "Error: first check failed");
-        assert.notInclude(first, "Error: second check failed");
-        assert.include(second, "Error: second check failed");
-        assert.include(second, "expected second result");
-        assert.include(second, "Process completed with exit code 2");
-        assert.notInclude(second, "Error: first check failed");
-        assert.notInclude(evidence.excerpt, "Post job cleanup");
-      }).pipe(
-        Effect.provide(
-          withClient((url) => {
-            if (url.includes("/logs"))
-              return new Response(
-                [
-                  `2026-11-02T10:00:${firstStart}.1000000Z ##[group]Run first-check`,
-                  `2026-11-02T10:00:${firstStart}.1100000Z ##[endgroup]`,
-                  "2026-11-02T10:00:01.1000000Z Error: first check failed",
-                  "2026-11-02T10:00:01.2000000Z ##[error]Process completed with exit code 1.",
-                  "2026-11-02T10:00:01.3000000Z ##[group]Run second-check",
-                  "2026-11-02T10:00:01.3100000Z ##[endgroup]",
-                  "2026-11-02T10:00:01.4000000Z ##[error]Error: second check failed",
-                  "expected second result",
-                  "2026-11-02T10:00:01.5000000Z ##[error]Process completed with exit code 2.",
-                  "2026-11-02T10:00:01.6000000Z Post job cleanup.",
-                ].join("\n"),
-              );
-            if (url.includes("/actions/jobs/"))
-              return json({
-                steps: [
-                  {
-                    name: "First check",
-                    conclusion: "failure",
-                    started_at: `2026-11-02T10:00:${firstStart}Z`,
-                    completed_at: "2026-11-02T10:00:01Z",
-                  },
-                  {
-                    name: "Second check",
-                    conclusion: "failure",
-                    started_at: "2026-11-02T10:00:01Z",
-                    completed_at: "2026-11-02T10:00:01Z",
-                  },
-                ],
-              });
-            return json(failedCheck);
-          }),
+  for (const action of ["shell", "script", "script after success"]) {
+    it.effect(
+      `keeps ${action} failures separate when their timestamp ranges overlap (${firstStart})`,
+      () =>
+        Effect.gen(function* () {
+          const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+          const [first, second] = evidence.excerpt.split("\n\nSecond check\n");
+          assert.isDefined(second);
+          assert.include(first, "Error: first check failed");
+          assert.notInclude(first, "Error: second check failed");
+          assert.include(second, "Error: second check failed");
+          assert.include(second, "expected second result");
+          if (action === "shell") assert.include(second, "Process completed with exit code 2");
+          assert.notInclude(evidence.excerpt, "successful intervening script");
+          assert.notInclude(second, "Error: first check failed");
+          assert.notInclude(evidence.excerpt, "Post job cleanup");
+        }).pipe(
+          Effect.provide(
+            withClient((url) => {
+              if (url.includes("/logs"))
+                return new Response(
+                  [
+                    `2026-11-02T10:00:${firstStart}.1000000Z ##[group]Run ${action === "shell" ? "first-check" : "actions/github-script@v8"}`,
+                    `2026-11-02T10:00:${firstStart}.1100000Z ##[endgroup]`,
+                    "2026-11-02T10:00:01.1000000Z Error: first check failed",
+                    ...(action === "shell"
+                      ? [
+                          "2026-11-02T10:00:01.2000000Z ##[error]Process completed with exit code 1.",
+                        ]
+                      : []),
+                    ...(action === "script after success"
+                      ? [
+                          "2026-11-02T10:00:01.2500000Z ##[group]Run actions/github-script@v8",
+                          "2026-11-02T10:00:01.2600000Z ##[endgroup]",
+                          "2026-11-02T10:00:01.2700000Z successful intervening script",
+                        ]
+                      : []),
+                    `2026-11-02T10:00:01.3000000Z ##[group]Run ${action === "shell" ? "second-check" : "actions/github-script@v8"}`,
+                    "2026-11-02T10:00:01.3100000Z ##[endgroup]",
+                    "2026-11-02T10:00:01.4000000Z ##[error]Error: second check failed",
+                    "expected second result",
+                    ...(action === "shell"
+                      ? [
+                          "2026-11-02T10:00:01.5000000Z ##[error]Process completed with exit code 2.",
+                        ]
+                      : []),
+                    "2026-11-02T10:00:01.6000000Z Post job cleanup.",
+                  ].join("\n"),
+                );
+              if (url.includes("/actions/jobs/"))
+                return json({
+                  steps: [
+                    {
+                      name: "First check",
+                      conclusion: "failure",
+                      started_at: `2026-11-02T10:00:${firstStart}Z`,
+                      completed_at: "2026-11-02T10:00:01Z",
+                    },
+                    ...(action === "script after success"
+                      ? [
+                          {
+                            name: "Successful script",
+                            conclusion: "success",
+                            started_at: "2026-11-02T10:00:01Z",
+                            completed_at: "2026-11-02T10:00:01Z",
+                          },
+                        ]
+                      : []),
+                    {
+                      name: "Second check",
+                      conclusion: "failure",
+                      started_at: "2026-11-02T10:00:01Z",
+                      completed_at: "2026-11-02T10:00:01Z",
+                    },
+                  ],
+                });
+              return json(failedCheck);
+            }),
+          ),
         ),
-      ),
-  );
+    );
+  }
 }
 
 it.effect("uses check output when Actions step metadata is unavailable", () =>

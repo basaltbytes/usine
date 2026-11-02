@@ -62,11 +62,14 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, log: string): st
   const sections: Array<string> = [];
   // Second-rounded ranges can overlap; later steps must not reuse consumed lines.
   let nextLine = 0;
-  for (const step of failed) {
+  const executed = job.steps.filter(({ conclusion }) => conclusion !== "skipped");
+  for (const [stepIndex, step] of executed.entries()) {
     if (step.started_at === null || step.completed_at === null) continue;
     const start = DateTime.toEpochMillis(step.started_at);
     // The step API rounds to seconds; log timestamps retain subsecond precision.
     const end = DateTime.toEpochMillis(step.completed_at) + 1000;
+    const next = executed[stepIndex + 1]?.started_at;
+    const nextStart = next === undefined || next === null ? end : DateTime.toEpochMillis(next);
     const lines: Array<string> = [];
     let withinStep = false;
     for (const [index, line] of logLines.entries()) {
@@ -79,13 +82,19 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, log: string): st
       }
       if (!withinStep) continue;
       const content = timestamp === undefined ? line : line.slice(line.indexOf(" ") + 1);
-      // Cleanup can start in the same second as the failed step ends.
+      // Runner headers delimit actions without a shell exit marker, even within one second.
+      if (
+        lines.length > 0 &&
+        timestamp !== undefined &&
+        Date.parse(timestamp) >= nextStart &&
+        (content.startsWith("##[group]Run ") || content === "Post job cleanup.")
+      )
+        break;
       if (content === "Post job cleanup." && !step.name.startsWith("Post ")) break;
       lines.push(content);
       nextLine = index + 1;
-      if (content.startsWith("##[error]Process completed with exit code ")) break;
     }
-    if (lines.length > 0)
+    if (lines.length > 0 && step.conclusion !== null && FAILED_CONCLUSIONS.has(step.conclusion))
       sections.push(
         `${step.name}\n${excerpt(lines, Math.max(0, limit - step.name.length - 3))}`.slice(
           0,
