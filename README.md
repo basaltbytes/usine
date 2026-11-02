@@ -44,7 +44,7 @@ usine stop          # stop after the drain
 usine upgrade       # move the @usine/server pin in package.json, install, and restart
 ```
 
-See the [CLI reference](https://docs.usine.dev/reference/configuration/cli/) for the flags.
+See the [CLI reference](https://docs.usine.dev/reference/cli/) for the flags.
 
 ## Development
 

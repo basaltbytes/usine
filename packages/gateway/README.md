@@ -1,6 +1,6 @@
 # @usine/gateway
 
-The service on the gateway host in front of usine's worker VMs ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md), [#223](https://github.com/basaltbytes/usine/issues/223)). Worker VMs have no public address, GitHub token, API key, or subscription login. They reach GitHub through the gateway, which adds the credential. They reach an LLM provider the same way if the gateway has that provider's credential: an API key, a Claude subscription token, or a ChatGPT login. Otherwise they use the harness's own login through the gateway's forward proxy, which allows only allowlisted hosts: package registries and the harness login hosts. [Workers and the gateway](https://docs.usine.dev/architecture/workers-and-gateway/) describes the deployment.
+The service on the gateway host in front of usine's worker VMs ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md), [#223](https://github.com/basaltbytes/usine/issues/223)). Worker VMs have no public address, GitHub token, API key, or subscription login. They reach GitHub through the gateway, which adds the credential. They reach an LLM provider the same way if the gateway has that provider's credential: an API key, a Claude subscription token, or a ChatGPT login. Otherwise they use the harness's own login through the gateway's forward proxy, which allows only allowlisted hosts: package registries and the harness login hosts. [Workers and the gateway](https://github.com/basaltbytes/usine/blob/main/docs/architecture/workers-and-gateway.mdx) describes the deployment.
 
 The gateway serves:
 
@@ -140,7 +140,7 @@ A client that sends every request through `HTTPS_PROXY`, as Claude Code does, st
 
 ## Configuration
 
-The [CLI reference](https://docs.usine.dev/reference/configuration/cli/) lists every `usine-gateway` variable, with defaults and the environment file rules. Changing `USINE_GATEWAY_CALLER_KEY` invalidates every caller token.
+The [CLI reference](https://docs.usine.dev/reference/cli/) lists every `usine-gateway` variable, with defaults and the environment file rules. Changing `USINE_GATEWAY_CALLER_KEY` invalidates every caller token.
 
 Each provider holds one credential; setting both of a provider's variables is an error.
 

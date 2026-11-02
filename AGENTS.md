@@ -16,7 +16,7 @@ The repo has one context: `CONTEXT.md` and `docs/adr/` at the root. See `docs/ag
 
 `CONTEXT.md` defines each term in one or two sentences. Put behavior rules in ADRs and code, not in the glossary.
 
-`apps/docs/src/content/docs/architecture/index.mdx` maps what is built: packages, processes, storage, workers, and gaps. Each page states the commit it describes.
+`docs/architecture/index.mdx` maps what is built: packages, processes, storage, workers, and gaps. Each page states the commit it describes.
 
 ### Writing
 

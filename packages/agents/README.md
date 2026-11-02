@@ -1,6 +1,6 @@
 # @usine/agents
 
-The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Code, Codex, and Pi child backends that an attempt's Pi parent delegates to, their prompts, and harness preflight. The parent runs in the orchestrator as a durable task (`@usine/durable`); its `subagent` tool starts the child that the agent's brain spec selects. [Attempt execution](https://docs.usine.dev/architecture/execution/) describes each harness.
+The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Code, Codex, and Pi child backends that an attempt's Pi parent delegates to, their prompts, and harness preflight. The parent runs in the orchestrator as a durable task (`@usine/durable`); its `subagent` tool starts the child that the agent's brain spec selects. [Attempt execution](https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx) describes each harness.
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version. Harness SDKs and protocols are exact-pinned.
 

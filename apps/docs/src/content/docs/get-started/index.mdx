@@ -1,0 +1,16 @@
+---
+title: Overview
+description: Run coding agents on GitHub issues and pull requests with a self-hosted usine instance.
+---
+
+import { LinkButton } from "@astrojs/starlight/components";
+
+usine runs coding agents on GitHub issues and pull requests in the repositories you register. You define loops that select the work, then approve and follow runs in a web UI.
+
+Use usine when you want to repeat a repository task, such as implementing a labeled issue or fixing review findings, with instructions you control. An instance runs on your machine or server; agents can use Claude Code, Codex, or Pi.
+
+The quickstart uses a scratch repository, the local worker, one agent, and one loop. You create a small README issue, approve its run, and review the pull request the agent opens.
+
+<LinkButton href="/get-started/quickstart/">Start the quickstart</LinkButton>
+
+Read [Concepts](/get-started/concepts/) for the terms in the UI. After your first pull request, [write a loop](/guides/write-a-loop/) for your own work or [operate runs](/guides/operate-runs/) to follow and steer an attempt.

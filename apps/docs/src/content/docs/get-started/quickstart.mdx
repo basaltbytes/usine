@@ -1,0 +1,138 @@
+---
+title: Quickstart
+description: Install usine, connect a scratch repository, and approve an agent run that opens your first pull request.
+---
+
+import { Code } from "@astrojs/starlight/components";
+import settings from "../../../../quickstart/usine.yaml?raw";
+import agent from "../../../../quickstart/agents/developer.md?raw";
+import loop from "../../../../quickstart/projects/scratch/loops/first-pr.md?raw";
+
+This quickstart opens a pull request that adds one sentence to a scratch repository's README. It uses one local worker, one Pi agent, and one loop that waits for your approval.
+
+## Prerequisites
+
+Use macOS or Linux with Node.js 22.22 or later, npm, Git, and the [GitHub CLI](https://cli.github.com/) installed. You need a GitHub account that can create a repository and a GitHub App, plus an Anthropic API key for Pi. Model usage is billed by the provider.
+
+Run the commands in the same terminal, as the user who will run `usine up`. Keep the computer awake while the run is open.
+
+## 1. Install the CLI
+
+```sh
+npm install --global @usine/server
+usine --version
+```
+
+Expected: npm finishes installing, and `usine --version` prints the installed release number.
+
+## 2. Set up the agent credential
+
+Install Pi and open its terminal interface:
+
+```sh
+npm install --global --ignore-scripts @earendil-works/pi-coding-agent
+pi
+```
+
+In Pi, enter `/login`, choose **Anthropic**, and enter your API key. Use `/model` to select `anthropic/claude-sonnet-4-6`, then ask it to reply with `ready`.
+
+Expected: Pi replies `ready`. Exit Pi with Ctrl+C twice. Pi saves the credential for this user in `~/.pi/agent` (or `PI_CODING_AGENT_DIR` if set); both the attempt's parent and its child use it. See [Pi parent](/guides/write-an-agent/#pi-parent) for the credential requirements.
+
+## 3. Create a scratch repository
+
+Sign in to GitHub, save your login for the commands below, and create a private repository with a README:
+
+```sh
+gh auth login
+export GITHUB_LOGIN="$(gh api user --jq .login)"
+gh repo create "$GITHUB_LOGIN/usine-scratch" --private --add-readme
+```
+
+Expected: `gh` prints the URL of your new `usine-scratch` repository. Use a new repository so the example loop only sees the issue you create in this quickstart.
+
+## 4. Create the bootstrap files
+
+Create a separate instance folder on persistent storage and write these files. The command substitutes the GitHub login from step 3 into `usine.yaml`:
+
+<Code
+  lang="sh"
+  title="Same terminal"
+  code={[
+    "mkdir -p ~/usine-instance/agents ~/usine-instance/projects/scratch/loops",
+    "cd ~/usine-instance",
+    "printf '.usine/\\n.env\\n' > .gitignore",
+    "cat > usine.yaml <<YAML",
+    settings.replaceAll("YOUR_GITHUB_LOGIN", "$GITHUB_LOGIN").trimEnd(),
+    "YAML",
+    "cat > agents/developer.md <<'AGENT'",
+    agent.trimEnd(),
+    "AGENT",
+    "cat > projects/scratch/loops/first-pr.md <<'LOOP'",
+    loop.trimEnd(),
+    "LOOP",
+    "ls agents projects/scratch/loops",
+  ].join("\n")}
+/>
+
+Expected: `ls` lists `developer.md` under `agents` and `first-pr.md` under `projects/scratch/loops`. The `scratch` project contains your repository. Omitting `workers` selects the default local worker, which runs children on this machine as this user.
+
+The loop selects open issues labeled `ready-for-agent` and requires approval. Its task removes that label before changing the README, then opens a pull request that closes the issue. Review the instructions before continuing.
+
+These are bootstrap files: the first start imports them into the configuration database. Later starts read the database. Use [configuration editing](/guides/change-the-configuration/) to save later changes, and keep `.usine/` and `.env` out of Git.
+
+## 5. Start the orchestrator
+
+From `~/usine-instance`, run:
+
+```sh
+usine up
+```
+
+Expected on the first start:
+
+```text
+usine is running in setup mode at http://127.0.0.1:7331
+```
+
+The terminal also prints a one-time sign-in link, and the browser opens setup. Open the printed sign-in link to start the temporary setup session. Leave `usine up` running; use a second terminal for later commands. If the link expires, run `usine sign-in-link` from `~/usine-instance` to generate another.
+
+## 6. Connect a GitHub App
+
+In the setup screen:
+
+1. Enter a unique App name, then select **Create App on GitHub** and confirm on GitHub. The instance supplies the required permissions and callback URLs.
+2. After GitHub returns you to setup, select **Install App on GitHub**. Install it on your account and select only `usine-scratch`.
+3. Return to setup and select **Check installation**. Then select **Sign in with GitHub**; this sign-in makes you the first instance admin.
+4. Select **Open usine** to activate the runtime. The bootstrap already registered `usine-scratch` and created the **Scratch** project.
+
+Expected: the terminal reports `usine is running at http://127.0.0.1:7331`, and the web UI lists **Scratch**. The App credentials are saved in `.usine/github-app.json`. Open **Configuration > Loops** and confirm that `scratch/first-pr` is running; select **Resume** if it is paused.
+
+Setup can resume at `/setup` if interrupted. See [Sign in to an instance](/guides/sign-in/) for existing App credentials and member access.
+
+## 7. Create and approve the issue
+
+In a second terminal, sign in to GitHub if needed and create the issue:
+
+```sh
+export GITHUB_LOGIN="$(gh api user --jq .login)"
+gh issue create --repo "$GITHUB_LOGIN/usine-scratch" \
+  --title "Add a quickstart sentence to the README" \
+  --body 'Append this sentence to README.md: This repository runs its first usine loop.' \
+  --label ready-for-agent
+```
+
+Expected: `gh` prints the issue URL. Within the next polling cycle (60 seconds by default), the UI shows a run waiting for approval. In **Scratch > Tasks**, open the task and its run, review the task text, and select **Approve**.
+
+The run queues for a worker, then starts an attempt. Follow its messages on the run page. [Operate runs](/guides/operate-runs/) explains approvals, transcripts, and recovery if the attempt fails.
+
+## 8. Review the pull request
+
+After the attempt succeeds, open the pull request linked from the run, or list it in the terminal:
+
+```sh
+gh pr list --repo "$GITHUB_LOGIN/usine-scratch" --state open
+```
+
+Expected: one open pull request adds the requested sentence to `README.md` and includes `Closes #1` in its body on this new repository. Review the diff before merging. The loop does not merge it for you.
+
+To stop the instance after the run finishes, press Ctrl+C in the terminal running `usine up`. For another task, [write a loop](/guides/write-a-loop/) or [change the agent](/guides/write-an-agent/).

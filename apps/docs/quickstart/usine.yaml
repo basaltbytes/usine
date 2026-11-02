@@ -1,0 +1,11 @@
+version: 2
+repos:
+  - name: YOUR_GITHUB_LOGIN/usine-scratch
+projects:
+  - id: scratch
+    name: Scratch
+    repositories: [YOUR_GITHUB_LOGIN/usine-scratch]
+labels:
+  - name: ready-for-agent
+settings:
+  parent_model: anthropic/claude-sonnet-4-6

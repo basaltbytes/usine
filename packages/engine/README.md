@@ -1,6 +1,6 @@
 # @usine/engine
 
-The durable run engine for [usine](https://github.com/basaltbytes/usine). It turns a synthetic event into a run with one named step and a durable attempt history. [Run lifecycle](https://docs.usine.dev/architecture/run-lifecycle/) covers these rules in depth.
+The durable run engine for [usine](https://github.com/basaltbytes/usine). It turns a synthetic event into a run with one named step and a durable attempt history. [Run lifecycle](https://github.com/basaltbytes/usine/blob/main/docs/architecture/run-lifecycle.mdx) covers these rules in depth.
 
 The default adapter stores the event ledger and run records in `<instance>/.usine/runtime.sqlite`. A run's id is a hash of its event's dedup key, so submitting the same key again joins the original run, also after a restart.
 

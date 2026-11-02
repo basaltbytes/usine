@@ -284,7 +284,7 @@ If an attempt's worker stops responding, or a child can't reach its model provid
 
 While a warning is open, the current activity in the conversation and the drawer says what isn't responding and since when. **Needs attention** doesn't list these warnings.
 
-If the SSH connection to a remote Claude Code child breaks, for example while the orchestrator's machine sleeps, the child doesn't fail. usine logs `Claude child lost its SSH connection to the Worker; resuming its session`, stops what is left of the child's Claude process on the worker, and starts Claude again with the saved session in the same child, so the attempt uses no extra child. A working child gets a message to check the worktree and continue. The log shows `Resumed the Claude child's session` when it works. If the worker doesn't answer for about 9 minutes, the child fails. See [Keep the machine awake](/guides/#keep-the-machine-awake).
+If the SSH connection to a remote Claude Code child breaks, for example while the orchestrator's machine sleeps, the child doesn't fail. usine logs `Claude child lost its SSH connection to the Worker; resuming its session`, stops what is left of the child's Claude process on the worker, and starts Claude again with the saved session in the same child, so the attempt uses no extra child. A working child gets a message to check the worktree and continue. The log shows `Resumed the Claude child's session` when it works. If the worker doesn't answer for about 9 minutes, the child fails. See [Keep the machine awake](/guides/keep-the-orchestrator-running/#keep-the-machine-awake).
 
 ## Restarts
 
@@ -306,17 +306,17 @@ usine skips attempts on a worker that the stored configuration no longer declare
 
 ## Stop the orchestrator
 
-From the instance folder, run `usine stop`, or press Ctrl+C once in the terminal of `usine up`. usine stops starting attempts and waits for running attempts to end, for at most `max_attempt_minutes`. `usine stop` names the runs that it waits for and returns when the process exits, or after `--timeout` seconds (120 by default) while the drain continues. `usine stop --force`, or a second Ctrl+C, stops the orchestrator without waiting, and the next `usine up` reattaches the running attempts. If the process still runs after `--timeout`, `usine stop --force` sends it `SIGKILL`. See [Shutdown](/reference/configuration/cli/#shutdown).
+From the instance folder, run `usine stop`, or press Ctrl+C once in the terminal of `usine up`. usine stops starting attempts and waits for running attempts to end, for at most `max_attempt_minutes`. `usine stop` names the runs that it waits for and returns when the process exits, or after `--timeout` seconds (120 by default) while the drain continues. `usine stop --force`, or a second Ctrl+C, stops the orchestrator without waiting, and the next `usine up` reattaches the running attempts. If the process still runs after `--timeout`, `usine stop --force` sends it `SIGKILL`. See [Shutdown](/reference/cli/#shutdown).
 
 `usine status` tells whether the orchestrator runs, with its PID, address, engine version, uptime, and open runs. It exits with status 3 if the orchestrator doesn't run.
 
 ## Restart and upgrade
 
-`usine restart` stops the orchestrator and starts it again in the background, with the same Node.js binary, entry point, port, and flags, and its output in `.usine/usine.log`. If an earlier usine version started the orchestrator without a record that the new one reads, `usine restart` checks the orchestrator on the port where it answers, then starts it as `usine up --detach` would, on the port that your shell or `.env` sets. To start it in the background the first time, run `usine up --detach`. If a systemd service runs the orchestrator, `usine stop`, `usine restart`, and `usine upgrade` stop and start the service with `systemctl`, so that systemd keeps managing it ([Instances that systemd runs](/reference/configuration/cli/#instances-that-systemd-runs)).
+`usine restart` stops the orchestrator and starts it again in the background, with the same Node.js binary, entry point, port, and flags, and its output in `.usine/usine.log`. If an earlier usine version started the orchestrator without a record that the new one reads, `usine restart` checks the orchestrator on the port where it answers, then starts it as `usine up --detach` would, on the port that your shell or `.env` sets. To start it in the background the first time, run `usine up --detach`. If a systemd service runs the orchestrator, `usine stop`, `usine restart`, and `usine upgrade` stop and start the service with `systemctl`, so that systemd keeps managing it ([Instances that systemd runs](/reference/cli/#instances-that-systemd-runs)).
 
-`usine restart` and `usine upgrade` refuse while a run has a running attempt, so that the drain doesn't keep the orchestrator down. Wait for the attempt to end, or pass `--force` to stop without waiting; the new process reattaches the attempt. The new process gets the environment of your shell and reads `.env` in the instance folder. Keep the variables that `usine up` needs, such as a gateway's `admin_token_env`, in `.env`, so that the commands work from any shell. `usine restart` refuses if neither your shell nor `.env` sets a gateway's variable. See [Environment file](/reference/configuration/cli/#environment-file).
+`usine restart` and `usine upgrade` refuse while a run has a running attempt, so that the drain doesn't keep the orchestrator down. Wait for the attempt to end, or pass `--force` to stop without waiting; the new process reattaches the attempt. The new process gets the environment of your shell and reads `.env` in the instance folder. Keep the variables that `usine up` needs, such as a gateway's `admin_token_env`, in `.env`, so that the commands work from any shell. `usine restart` refuses if neither your shell nor `.env` sets a gateway's variable. See [Environment file](/reference/cli/#environment-file).
 
-To upgrade an instance that pins `@usine/server` in its `package.json`, run `usine upgrade`, or `usine upgrade <version>` for another version than `latest`. It backs up the stores into `.usine/backups/`, moves the pin, installs it, commits the change, and restarts the orchestrator. `usine upgrade --check` prints the versions and changes nothing. If the orchestrator runs from a checkout, pull and build that checkout, then run `usine restart`. See [`usine upgrade`](/reference/configuration/cli/#usine-upgrade-version).
+To upgrade an instance that pins `@usine/server` in its `package.json`, run `usine upgrade`, or `usine upgrade <version>` for another version than `latest`. It backs up the stores into `.usine/backups/`, moves the pin, installs it, commits the change, and restarts the orchestrator. `usine upgrade --check` prints the versions and changes nothing. If the orchestrator runs from a checkout, pull and build that checkout, then run `usine restart`. See [`usine upgrade`](/reference/cli/#usine-upgrade-version).
 
 ## Back up and export
 
@@ -326,7 +326,7 @@ Run `usine backup` from the instance folder, with a new file name, while the orc
 usine backup /backups/factory-2026-10-16.sqlite
 ```
 
-It also writes the durable storage to `/backups/factory-2026-10-16.durable.sqlite` ([`usine backup`](/reference/configuration/cli/#usine-backup-path)). Keep backups outside the instance folder, and copy credentials separately. The runtime backup includes stored configuration and its revision history. Use `usine config export <folder>` for a separate YAML and Markdown copy; it omits history and pause state.
+It also writes the durable storage to `/backups/factory-2026-10-16.durable.sqlite` ([`usine backup`](/reference/cli/#usine-backup-path)). Keep backups outside the instance folder, and copy credentials separately. The runtime backup includes stored configuration and its revision history. Use `usine config export <folder>` for a separate YAML and Markdown copy; it omits history and pause state.
 
 To restore a backup:
 
@@ -337,7 +337,7 @@ To restore a backup:
 
 An older backup has an older event record, so work done after it can run again.
 
-`usine export-run` writes one run, with its transcript, to a JSON file ([`usine export-run`](/reference/configuration/cli/#usine-export-run-runid)):
+`usine export-run` writes one run, with its transcript, to a JSON file ([`usine export-run`](/reference/cli/#usine-export-run-runid)):
 
 ```sh title="Instance folder"
 usine export-run <run id>

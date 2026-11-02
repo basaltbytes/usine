@@ -1,6 +1,6 @@
 # @usine/orchestrator
 
-Connects stored loop definitions to GitHub polling, the durable run engine, and the configured workers for [usine](https://github.com/basaltbytes/usine). [Operator surfaces](https://docs.usine.dev/architecture/operator-surfaces/) and [Run lifecycle](https://docs.usine.dev/architecture/run-lifecycle/) describe the behavior in depth.
+Connects stored loop definitions to GitHub polling, the durable run engine, and the configured workers for [usine](https://github.com/basaltbytes/usine). [Operator surfaces](https://github.com/basaltbytes/usine/blob/main/docs/architecture/operator-surfaces.mdx) and [Run lifecycle](https://github.com/basaltbytes/usine/blob/main/docs/architecture/run-lifecycle.mdx) describe the behavior in depth.
 
 The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `ScheduleTriggers` (`/schedule-triggers`), `Orchestrator` (`/orchestrator`), and `Operator` with its request and response types (`/operator`). `Orchestrator.run` runs both trigger streams over the factory's `CurrentInstance`.
 

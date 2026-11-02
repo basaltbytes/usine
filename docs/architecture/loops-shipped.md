@@ -9,7 +9,7 @@ sidebar:
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine and the dogfood instance as they were on 2026-10-16.
 :::
 
-usine has no built-in loop. At commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b), the engine reads stored loop definitions; [ADR 0031](https://github.com/basaltbytes/usine/blob/main/docs/adr/0031-authored-configuration-in-the-database.md) replaced file loading with configuration revisions. The examples below retain the historical version 1 import format. To use them now, import a complete folder with `usine config import <folder> --message <text>`; run [`usine config export <folder>`](/reference/configuration/config/#export) to export the current configuration, including loop files under `projects/<project>/loops/`. This repository has loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and in [Bounded review and fix loops](/guides/review-fix-loops/). The loops below are copied unchanged from the dogfood instance at `~/Code/usine-factory` on 2026-10-16.
+usine has no built-in loop. At commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b), the engine reads stored loop definitions; [ADR 0031](https://github.com/basaltbytes/usine/blob/main/docs/adr/0031-authored-configuration-in-the-database.md) replaced file loading with configuration revisions. The examples below retain the historical version 1 import format. To use them now, import a complete folder with `usine config import <folder> --message <text>`; run [`usine config export <folder>`](https://docs.usine.dev/reference/configuration/config/#export) to export the current configuration, including loop files under `projects/<project>/loops/`. This repository has loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and in [Bounded review and fix loops](https://docs.usine.dev/guides/review-fix-loops/). The loops below are copied unchanged from the dogfood instance at `~/Code/usine-factory` on 2026-10-16.
 
 ## Instance settings
 
@@ -54,7 +54,7 @@ flowchart TD
 
 ## Loops
 
-Every loop has `selector: { repos: [basaltbytes/usine] }` and no `max_cycles`, so each can open three runs per item between resets ([Run lifecycle](/architecture/run-lifecycle/)).
+Every loop has `selector: { repos: [basaltbytes/usine] }` and no `max_cycles`, so each can open three runs per item between resets ([Run lifecycle](./run-lifecycle.mdx)).
 
 | Loop | Stream | Fires when | Approval | Step | Agent |
 | --- | --- | --- | --- | --- | --- |
@@ -118,7 +118,7 @@ Post the review on GitHub. If you find any actionable issue, explain it with fil
 
 ### act-on-findings
 
-An attempt that ended with a question for the operator used to repeat until the cycle budget ran out ([#241][]). usine now suppresses the pull request for the loop until the operator answers or the pull request changes ([Operator questions and blockers](/architecture/run-lifecycle/#operator-questions-and-blockers)).
+An attempt that ended with a question for the operator used to repeat until the cycle budget ran out ([#241][]). usine now suppresses the pull request for the loop until the operator answers or the pull request changes ([Operator questions and blockers](./run-lifecycle.mdx#operator-questions-and-blockers)).
 
 ```markdown title="act-on-findings"
 ---

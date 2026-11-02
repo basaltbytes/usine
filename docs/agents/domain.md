@@ -4,7 +4,7 @@
 
 - `CONTEXT.md` at the repo root: the domain glossary.
 - `docs/adr/`: the ADRs for the area you work in.
-- `apps/docs/src/content/docs/architecture/index.mdx`: the map of what is built and where it is in the tree.
+- `docs/architecture/index.mdx`: the map of what is built and where it is in the tree.
 
 If a file doesn't exist, continue without flagging it or suggesting that someone create it. The `/domain-modeling` skill creates these files when terms or decisions are resolved.
 
