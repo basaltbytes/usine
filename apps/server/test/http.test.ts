@@ -439,6 +439,32 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
+      const authorizedRead = yield* Effect.promise(() =>
+        secured.handler(
+          new Request("http://127.0.0.1/api/overview", {
+            headers: { authorization: `Bearer ${localSecret}` },
+          }),
+        ),
+      );
+      assert.equal(authorizedRead.headers.get("cache-control"), "private, no-cache");
+      const validator = authorizedRead.headers.get("etag");
+      assert(validator !== null);
+      const unauthorizedRead = yield* Effect.promise(() =>
+        secured.handler(
+          new Request("http://127.0.0.1/api/overview", { headers: { "if-none-match": validator } }),
+        ),
+      );
+      assert.equal(unauthorizedRead.status, 401);
+      const sessionRead = yield* Effect.promise(() =>
+        secured.handler(
+          new Request("http://127.0.0.1/api/auth/session", {
+            headers: { authorization: `Bearer ${localSecret}` },
+          }),
+        ),
+      );
+      assert.equal(sessionRead.headers.get("cache-control"), "no-store");
+      assert.equal(sessionRead.headers.get("etag"), null);
+
       const publicRoutes = new Set([
         "GET /api/health",
         "GET /api/version",
@@ -1461,5 +1487,76 @@ it("checks the declared permission for every operator route and each role", asyn
     } finally {
       await secured.dispose();
     }
+  }
+});
+
+it("returns a private validator and an empty 304 for unchanged authorized reads", async () => {
+  const request = (headers: Record<string, string> = {}) =>
+    app.handler(new Request("http://localhost/api/overview", { headers }));
+  const first = await request();
+  assert.strictEqual(first.status, 200);
+  const etag = first.headers.get("etag");
+  assert(etag !== null);
+  assert.strictEqual(first.headers.get("cache-control"), "private, no-cache");
+  const second = await request({ "if-none-match": `W/${etag}` });
+  assert.strictEqual(second.status, 304);
+  assert.strictEqual(await second.text(), "");
+  const shell = await request({ "x-usine-view": "shell", "if-none-match": etag });
+  assert.strictEqual(shell.status, 200);
+  assert.include(shell.headers.get("vary") ?? "", "x-usine-view");
+});
+
+it("streams small changes and replays missed revisions without payloads", async () => {
+  let current = overview;
+  const changing = Layer.effect(
+    FactoryBackend,
+    Effect.map(FactoryBackend, (service) => ({ ...service, overview: Effect.sync(() => current) })),
+  ).pipe(Layer.provide(backend));
+  const streamApp = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(changing)), {
+    disableLogger: true,
+  });
+  const open = (last?: string) =>
+    streamApp.handler(
+      new Request("http://localhost/api/changes", {
+        headers: last === undefined ? {} : { "last-event-id": last },
+      }),
+    );
+  try {
+    const response = await open();
+    assert.strictEqual(response.headers.get("content-type"), "text/event-stream");
+    const reader = response.body?.getReader();
+    assert(reader !== undefined);
+    const first = new TextDecoder().decode((await reader.read()).value);
+    assert.include(first, ": heartbeat");
+    const cursor = /id: (\d+)/u.exec(first)?.[1];
+    assert(cursor !== undefined);
+    current = new ReadyOverview({
+      ...overview,
+      projects: overview.projects.map(
+        (project) => new ProjectView({ ...project, name: "Renamed workspace" }),
+      ),
+    });
+    const changed = new TextDecoder().decode((await reader.read()).value);
+    assert.include(changed, '"kind":"project","id":"workspace"');
+    assert.notInclude(changed, "Renamed workspace");
+    assert.isBelow(changed.length, 1_024);
+    await reader.cancel();
+    const resumed = await open(cursor);
+    const replayReader = resumed.body?.getReader();
+    assert(replayReader !== undefined);
+    const replay = new TextDecoder().decode((await replayReader.read()).value);
+    assert.include(replay, '"reset":false');
+    assert.include(replay, '"kind":"project","id":"workspace"');
+    await replayReader.cancel();
+    for (const invalidCursor of ["not-a-revision", "0", String(Number.MAX_SAFE_INTEGER)]) {
+      const reset = await open(invalidCursor);
+      const resetReader = reset.body?.getReader();
+      assert(resetReader !== undefined);
+      const frame = new TextDecoder().decode((await resetReader.read()).value);
+      assert.include(frame, '"reset":true');
+      await resetReader.cancel();
+    }
+  } finally {
+    await streamApp.dispose();
   }
 });

@@ -32,3 +32,11 @@ Read `GET /api/runs/:runId` for the run's task, result message, each attempt's t
 ## Operations
 
 <OperatorApiReference />
+
+## Change notices and conditional reads
+
+`GET /api/changes` returns `text/event-stream`. A `change` event contains `{revision, reset, changes}`, where each change has a `kind` and an entity `id`. Notice kinds include projects, items, runs, attempts, workers, configuration, attention, navigation, and activity. Notices contain identifiers only. Event IDs increase monotonically. Send `Last-Event-ID` to resume; a `reset: true` notice requests fresh reads when the cursor is unavailable. The server retains 256 notices per effective permission set and sends heartbeats every 15 seconds.
+
+Successful operator JSON reads return an `ETag`. Authentication and setup responses use `Cache-Control: no-store`. Send it as `If-None-Match`; an unchanged response returns HTTP 304 with no body. Validators are private to the authenticated representation.
+
+`X-Usine-View: shell` on `/api/overview` returns navigation and compact task identities. `X-Usine-View: attention` returns attention entries. `X-Usine-View: board` on `/api/projects/:project` returns settled lane counts; read their cards from `/api/projects/:project/lanes/:lane/items?offset=0` in pages of 50. `X-Usine-View: task` on a repository task read returns the first 25 runs and `runsTotal`; read subsequent pages from `/api/projects/:owner/:repository/tasks/:item/runs?offset=25`. Page responses include `nextOffset`, which is null at the end. `GET /api/workers` returns worker configuration and slot usage.

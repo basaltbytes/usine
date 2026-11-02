@@ -154,6 +154,8 @@ const BoardLaneViewFields = {
   sources: Schema.Array(LaneSource),
   origin: BoardLaneOrigin,
   items: Schema.Array(BoardTaskView),
+  /** Total cards when a lane is read in pages. */
+  totalItems: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 } as const;
 
 /**
