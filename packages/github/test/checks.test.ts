@@ -107,36 +107,42 @@ const metadata = (steps: ReadonlyArray<{ name: string; conclusion: string }>, na
   })),
 });
 
-it.effect("keeps the recorded failing assertion and step name without post-job cleanup", () =>
-  Effect.gen(function* () {
-    const evidence = yield* (yield* GitHubChecks).failures(repository, head);
-    assert.deepStrictEqual(evidence.jobs, ["ci"]);
-    assert.include(evidence.excerpt, "Run pnpm test");
-    assert.include(evidence.excerpt, "expected -4391 to be greater than or equal to 0");
-    assert.include(evidence.excerpt, "conversation.browser.test.tsx:866:24");
-    assert.include(evidence.excerpt, "Process completed with exit code 1");
-    assert.isAtMost(evidence.excerpt.length, 12000);
-    assert.notInclude(evidence.excerpt, "Post job cleanup");
-    assert.notInclude(evidence.excerpt, "Pruning is unnecessary");
-    assert.notInclude(evidence.excerpt, "git config");
-    assert.notInclude(evidence.excerpt, "Cleaning up orphan processes");
-  }).pipe(
-    Effect.provide(
-      withClient((url) => {
-        if (url.includes("/logs")) {
-          assert.include(url, "/actions/runs/41406855561/attempts/1/logs");
-          return new Response(new Uint8Array(recordedArchive));
-        }
-        return url.includes("/actions/jobs/")
-          ? new Response(recordedJob)
-          : json({
-              total_count: 1,
-              check_runs: [{ ...failedCheckRun, output: { text: null, summary: null } }],
-            });
-      }),
+for (const stepName of ["Run pnpm test", "Tests"]) {
+  it.effect(`keeps the recorded assertion with step name ${stepName} without cleanup`, () =>
+    Effect.gen(function* () {
+      const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+      assert.deepStrictEqual(evidence.jobs, ["ci"]);
+      assert.include(evidence.excerpt, `ci\n${stepName}\n`);
+      assert.include(evidence.excerpt, "expected -4391 to be greater than or equal to 0");
+      assert.include(evidence.excerpt, "conversation.browser.test.tsx:866:24");
+      assert.include(evidence.excerpt, "Process completed with exit code 1");
+      assert.isAtMost(evidence.excerpt.length, 12000);
+      assert.notInclude(evidence.excerpt, "Post job cleanup");
+      assert.notInclude(evidence.excerpt, "Pruning is unnecessary");
+      assert.notInclude(evidence.excerpt, "git config");
+      assert.notInclude(evidence.excerpt, "Cleaning up orphan processes");
+    }).pipe(
+      Effect.provide(
+        withClient((url) => {
+          if (url.includes("/logs")) {
+            assert.include(url, "/actions/runs/41406855561/attempts/1/logs");
+            return new Response(new Uint8Array(recordedArchive));
+          }
+          return url.includes("/actions/jobs/")
+            ? new Response(
+                stepName === "Run pnpm test"
+                  ? recordedJob
+                  : recordedJob.replace('"name": "Run pnpm test"', '"name": "Tests"'),
+              )
+            : json({
+                total_count: 1,
+                check_runs: [{ ...failedCheckRun, output: { text: null, summary: null } }],
+              });
+        }),
+      ),
     ),
-  ),
-);
+  );
+}
 
 it.effect("keeps failure-marker context and tails from each failed step within the limit", () =>
   Effect.gen(function* () {
@@ -202,12 +208,21 @@ it.effect("keeps failure-marker context and tails from each failed step within t
   ),
 );
 
-for (const layout of ["numbered", "combined"]) {
-  for (const action of ["shell", "script", "script after success", "repeated script"]) {
-    const firstCommand = action === "repeated script" ? "same-check" : "first-check";
-    const secondCommand = action === "repeated script" ? "same-check" : "second-check";
-    const firstName = layout === "numbered" ? "First check" : `Run ${firstCommand}`;
-    const secondName = layout === "numbered" ? "Second check" : `Run ${secondCommand}`;
+for (const layout of ["numbered", "combined", "combined custom names"]) {
+  for (const action of [
+    "shell",
+    "script",
+    "script after success",
+    "repeated script",
+    "mixed repeated script",
+  ]) {
+    const firstCommand = action.includes("repeated script") ? "same-check" : "first-check";
+    const secondCommand = action.includes("repeated script") ? "same-check" : "second-check";
+    const firstName =
+      layout !== "combined" && action !== "mixed repeated script"
+        ? "First check"
+        : `Run ${firstCommand}`;
+    const secondName = layout !== "combined" ? "Second check" : `Run ${secondCommand}`;
     it.effect(
       `keeps ${action} failures separate in ${layout} logs within one timestamp second`,
       () =>
@@ -272,7 +287,10 @@ for (const layout of ["numbered", "combined"]) {
                   ...metadata([
                     { name: firstName, conclusion: "failure" },
                     {
-                      name: "Run successful-script",
+                      name:
+                        layout === "combined custom names"
+                          ? "Successful script"
+                          : "Run successful-script",
                       conclusion: action === "script after success" ? "success" : "skipped",
                     },
                     { name: secondName, conclusion: "failure" },
@@ -289,7 +307,7 @@ for (const layout of ["numbered", "combined"]) {
   for (const action of ["shell", "script"]) {
     for (const followup of ["Post Run actions/checkout@v7", "Diagnostics"]) {
       const compositeName =
-        layout === "numbered" ? "Composite checks" : "Run ./.github/actions/check";
+        layout !== "combined" ? "Composite checks" : "Run ./.github/actions/check";
       it.effect(
         `keeps embedded ${action} failures in ${layout} logs before same-second ${followup}`,
         () =>
@@ -361,35 +379,42 @@ for (const layout of ["numbered", "combined"]) {
   }
 }
 
-it.effect("uses check output when combined step boundaries are ambiguous", () =>
-  Effect.gen(function* () {
-    const evidence = yield* (yield* GitHubChecks).failures(repository, head);
-    assert.include(evidence.excerpt, "Check summary");
-    assert.notInclude(evidence.excerpt, "successful follow-up");
-  }).pipe(
-    Effect.provide(
-      withClient((url) => {
-        if (url.includes("/logs"))
-          return archiveResponse({
-            "0_ci.txt": [
-              "2026-11-02T10:00:01.1000000Z ##[group]Run check",
-              "2026-11-02T10:00:01.2000000Z ##[error]failed check",
-              "2026-11-02T10:00:01.3000000Z ##[group]Run echo diagnostics",
-              "2026-11-02T10:00:01.4000000Z successful follow-up",
-            ].join("\n"),
-          });
-        if (url.includes("/actions/jobs/"))
-          return json(
-            metadata([
-              { name: "Run check", conclusion: "failure" },
-              { name: "Custom diagnostics name", conclusion: "success" },
-            ]),
-          );
-        return json(failedCheck);
-      }),
-    ),
-  ),
-);
+for (const ambiguous of [false, true]) {
+  it.effect(
+    `handles custom follow-up names with ${ambiguous ? "ambiguous" : "unique"} combined boundaries`,
+    () =>
+      Effect.gen(function* () {
+        const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+        assert.include(evidence.excerpt, ambiguous ? "Check summary" : "##[error]failed check");
+        assert.notInclude(evidence.excerpt, "successful follow-up");
+      }).pipe(
+        Effect.provide(
+          withClient((url) => {
+            if (url.includes("/logs"))
+              return archiveResponse({
+                "0_ci.txt": [
+                  "2026-11-02T10:00:01.1000000Z ##[group]Run check",
+                  "2026-11-02T10:00:01.2000000Z ##[error]failed check",
+                  ...(ambiguous
+                    ? ["2026-11-02T10:00:01.2500000Z ##[group]Run embedded diagnostics"]
+                    : []),
+                  "2026-11-02T10:00:01.3000000Z ##[group]Run echo diagnostics",
+                  "2026-11-02T10:00:01.4000000Z successful follow-up",
+                ].join("\n"),
+              });
+            if (url.includes("/actions/jobs/"))
+              return json(
+                metadata([
+                  { name: "Run check", conclusion: "failure" },
+                  { name: "Custom diagnostics name", conclusion: "success" },
+                ]),
+              );
+            return json(failedCheck);
+          }),
+        ),
+      ),
+  );
+}
 
 for (const logs of ["corrupt", "missing", "partial"]) {
   it.effect(`uses check output when the step archive is ${logs}`, () =>

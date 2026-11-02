@@ -83,34 +83,57 @@ const combinedStepLogs = (job: typeof ActionsJob.Type, file: Uint8Array) => {
           },
         ],
   );
-  const starts = new Map<number, number>();
-  let before = lines.length;
-  // Work backwards so identical headers and post-job steps in one second remain separate.
-  for (let index = steps.length - 1; index >= 0; index--) {
-    const step = steps[index];
-    if (step === undefined) continue;
+  const candidates = steps.flatMap((step, index) => {
+    const postJob = step.name.startsWith("Post ") || step.name === "Complete job";
     const header = step.name.startsWith("Post ")
       ? "Post job cleanup."
       : step.name === "Complete job"
         ? "Cleaning up orphan processes"
         : `##[group]${step.name.split("\n")[0]}`;
-    let start = -1;
-    for (let line = before - 1; line >= 0; line--) {
-      const entry = lines[line];
-      if (entry === undefined || entry.second > step.startSecond) continue;
-      if (entry.second < step.startSecond) break;
-      if (entry.text === header) {
-        start = line;
-        break;
-      }
-    }
+    let positions = lines.flatMap((line, index) =>
+      line.second === step.startSecond && line.text === header ? [index] : [],
+    );
     const previous = steps[index - 1];
-    if (start === -1 && (previous === undefined || previous.endSecond < step.startSecond))
-      start = lines.findIndex((line) => line.second >= step.startSecond);
-    // Rounded timestamps alone cannot separate an unrecognized header in a shared second.
-    if (start === -1 || start >= before) continue;
-    starts.set(step.number, start);
-    before = start;
+    if (
+      positions.length === 0 &&
+      (previous === undefined || previous.endSecond < step.startSecond)
+    ) {
+      const start = lines.findIndex((line) => line.second >= step.startSecond);
+      if (start !== -1) positions = [start];
+    }
+    const matched = positions.length > 0;
+    if (!matched && !postJob)
+      positions = lines.flatMap((line, index) =>
+        line.second === step.startSecond && line.text.startsWith("##[group]Run ") ? [index] : [],
+      );
+    return positions.length === 0 ? [] : [{ number: step.number, positions, matched }];
+  });
+  const align = (choices: typeof candidates, reverse: boolean) => {
+    const aligned = new Map<number, number>();
+    let boundary = reverse ? lines.length : -1;
+    for (const candidate of reverse ? [...choices].reverse() : choices) {
+      const position = reverse
+        ? [...candidate.positions].reverse().find((line) => line < boundary)
+        : candidate.positions.find((line) => line > boundary);
+      if (position === undefined) return new Map<number, number>();
+      aligned.set(candidate.number, position);
+      boundary = position;
+    }
+    return aligned;
+  };
+  // Match headers backwards so repeated commands inside composite actions remain in their step.
+  const latest = align(candidates, true);
+  const anchored = candidates.map((candidate) => {
+    const position = latest.get(candidate.number);
+    return candidate.matched && position !== undefined
+      ? { ...candidate, positions: [position] }
+      : candidate;
+  });
+  const earliest = align(anchored, false);
+  const starts = new Map<number, number>();
+  // Custom display names require the same boundary in every ordered alignment.
+  for (const [number, position] of earliest) {
+    if (position === latest.get(number)) starts.set(number, position);
   }
   const logs = new Map<number, ReadonlyArray<string>>();
   for (let index = 0; index < steps.length; index++) {
