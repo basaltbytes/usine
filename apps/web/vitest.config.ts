@@ -1,5 +1,3 @@
-import { FactoryOverview, ProjectView } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
 import { accessResponses } from "./src/features/members/browser-fixture.ts";
 import {
   workerPreflightResponses,
@@ -56,6 +54,8 @@ const statisticsWindows = new WeakMap<Page, StatisticsRequests>();
 const SLOW_OVERVIEW_MS = 5_000;
 
 const projectResponses = async (page: Page, overview: () => string) => {
+  const { FactoryOverview, ProjectView } = await import("@usine/orchestrator/operator");
+  const { Schema } = await import("effect");
   await page.unroute("**/api/projects/*");
   await page.route("**/api/projects/*", (route) => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1) ?? "");
