@@ -608,7 +608,7 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
-    "fails preflight when Docker doesn't answer, the image can't be pulled, or its user ID differs",
+    "fails preflight when Docker doesn't answer, the image user ID differs, or cache preparation fails",
     () =>
       Effect.gen(function* () {
         const failureOf = (setup: (machine: ReturnType<typeof fakeMachine>) => void) => {
@@ -620,10 +620,6 @@ describe("SSH Worker with Docker", () => {
           }).pipe(Effect.flip, Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
         };
         const unusable = yield* failureOf((machine) => (machine.state.docker = "unusable"));
-        const unpulled = yield* failureOf((machine) => {
-          machine.state.pullFails = true;
-          machine.state.imageOnMachine = false;
-        });
         const otherUser = yield* failureOf((machine) => (machine.state.hostUserId = "2345"));
         const storeFailed = yield* failureOf(
           (machine) => (machine.state.cachePreparationFailure = "usine-pnpm-store"),
@@ -632,27 +628,19 @@ describe("SSH Worker with Docker", () => {
           (machine) => (machine.state.cachePreparationFailure = "usine-turbo-cache"),
         );
         const invalidSize = yield* failureOf((machine) => (machine.state.storeSizeKiB = "invalid"));
-        for (const failure of [
-          unusable,
-          unpulled,
-          otherUser,
-          storeFailed,
-          turboFailed,
-          invalidSize,
-        ]) {
+        for (const failure of [unusable, otherUser, storeFailed, turboFailed, invalidSize]) {
           assert.strictEqual(failure._tag, "WorkerCapabilityError");
           if (failure._tag === "WorkerCapabilityError")
             assert.strictEqual(failure.capability, "container");
         }
         assert.include(unusable.message, "add the user to the docker group");
-        assert.include(unpulled.message, `can't pull the attempt image ${ATTEMPT_IMAGE}`);
         assert.include(otherUser.message, "--build-arg USINE_UID=2345");
         assert.include(storeFailed.message, "usine-pnpm-store");
         assert.include(turboFailed.message, "usine-turbo-cache");
         assert.include(invalidSize.message, "Can't measure the shared pnpm store");
 
         const cached = dockerMachine();
-        cached.state.pullFails = true;
+        cached.state.pullError = "Error response from daemon: Get https://ghcr.io/v2/: timeout";
         const report = yield* Effect.gen(function* () {
           const executor = yield* Executor;
           return yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);

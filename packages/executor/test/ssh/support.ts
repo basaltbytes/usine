@@ -197,8 +197,8 @@ interface FakeMachineState {
   hostGroupId: string;
   imageGroupId: string;
   docker: "absent" | "running" | "unusable" | "socket-only";
-  /** Whether `docker pull` of the Attempt image fails, and whether the image is on the machine anyway. */
-  pullFails: boolean;
+  /** The stderr of a failed image pull, and whether the image is on the machine anyway. */
+  pullError: string | undefined;
   imageOnMachine: boolean;
   imageInspectFailure: { readonly exitCode: number; readonly stderr: string } | undefined;
   imageId: string;
@@ -350,7 +350,7 @@ export const fakeMachine = () => {
     hostGroupId: "1000",
     imageGroupId: "1000",
     docker: "absent",
-    pullFails: false,
+    pullError: undefined,
     imageOnMachine: true,
     imageInspectFailure: undefined,
     imageId: "sha256:0123",
@@ -396,8 +396,7 @@ export const fakeMachine = () => {
     if (line.includes("/sys/fs/cgroup/cpu.max"))
       return oneShotHandle("", state.limitsEnforced ? 0 : 1);
     if (line.startsWith("exec 'docker' 'pull' ")) {
-      if (state.pullFails)
-        return oneShotHandle("", 1, "Error response from daemon: Get https://ghcr.io/v2/: timeout");
+      if (state.pullError !== undefined) return oneShotHandle("", 1, state.pullError);
       state.imageOnMachine = true;
       state.imageId = state.pulledImageId;
       return oneShotHandle("", 0);

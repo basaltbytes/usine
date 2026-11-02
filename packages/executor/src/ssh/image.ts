@@ -60,37 +60,55 @@ export const prepareAttemptImage = Effect.fn("SshExecutor.prepareAttemptImage")(
         : "The attempt image is absent on the worker; downloading it",
       fields,
     );
-  yield* Effect.logInfo("Pulling the attempt image", fields);
-  const [duration, pulled] = yield* commands
-    .inspect(operation, machine.shell, runtime, ["pull", "--quiet", image])
-    .pipe(Effect.timed);
-  const pullFields = {
-    ...fields,
-    durationMillis: Duration.toMillis(duration),
-    exitCode: pulled.exitCode,
-  };
-  if (pulled.exitCode !== 0) {
-    yield* Effect.logWarning("Attempt image pull failed", pullFields);
-    const local = yield* inspect();
-    if (Option.isNone(local))
-      return yield* gap(
-        `SSH worker "${worker}" can't pull the attempt image ${image}`,
-        pulled.stderr.trim() || `${runtime} pull exited with code ${pulled.exitCode}`,
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    yield* Effect.logInfo("Pulling the attempt image", { ...fields, attempt });
+    const [duration, pulled] = yield* commands
+      .inspect(operation, machine.shell, runtime, ["pull", "--quiet", image])
+      .pipe(Effect.timed);
+    const pullFields = {
+      ...fields,
+      attempt,
+      durationMillis: Duration.toMillis(duration),
+      exitCode: pulled.exitCode,
+    };
+    if (pulled.exitCode !== 0) {
+      yield* Effect.logWarning("Attempt image pull failed", {
+        ...pullFields,
+        stderr: pulled.stderr.trim().slice(0, 1000),
+      });
+      const local = yield* inspect();
+      if (Option.isNone(local)) {
+        if (attempt < 3) {
+          const delayMillis = attempt === 1 ? 5000 : 15000;
+          yield* Effect.logInfo("Retrying the attempt image pull", {
+            ...fields,
+            nextAttempt: attempt + 1,
+            delayMillis,
+          });
+          yield* Effect.sleep(delayMillis);
+          continue;
+        }
+        return yield* gap(
+          `SSH worker "${worker}" can't pull the attempt image ${image}`,
+          pulled.stderr.trim() || `${runtime} pull exited with code ${pulled.exitCode}`,
+        );
+      }
+      yield* Effect.logWarning(
+        "SSH Worker could not pull the Attempt image; its Attempts use the image already on the machine",
+        { ...fields, message: pulled.stderr.trim() },
       );
-    yield* Effect.logWarning(
-      "SSH Worker could not pull the Attempt image; its Attempts use the image already on the machine",
-      { ...fields, message: pulled.stderr.trim() },
-    );
+      return;
+    }
+    const after = yield* inspect();
+    if (Option.isNone(after))
+      return yield* gap(
+        `Can't inspect the pulled attempt image ${image}`,
+        "Image is absent after pull",
+      );
+    yield* Effect.logInfo("Pulled the attempt image", {
+      ...pullFields,
+      downloaded: Option.isNone(before) || before.value !== after.value,
+    });
     return;
   }
-  const after = yield* inspect();
-  if (Option.isNone(after))
-    return yield* gap(
-      `Can't inspect the pulled attempt image ${image}`,
-      "Image is absent after pull",
-    );
-  yield* Effect.logInfo("Pulled the attempt image", {
-    ...pullFields,
-    downloaded: Option.isNone(before) || before.value !== after.value,
-  });
 });
