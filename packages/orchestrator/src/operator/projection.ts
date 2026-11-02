@@ -6,9 +6,13 @@ import { AttemptFailure } from "@usine/core/attempt/failure";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { LoopName } from "@usine/core/loop";
 import * as RunState from "@usine/core/run/state";
-import { PullRequest } from "@usine/core/step/result";
 import { SshDestination, type WorkerName } from "@usine/core/worker";
-import { type RunSnapshot, type RunSummary, RunReader } from "@usine/engine/run-reader";
+import {
+  type RunSnapshot,
+  type RunSummary,
+  RunReader,
+  summarizeRun,
+} from "@usine/engine/run-reader";
 import type { UpgradeDrain, RunStoreError } from "@usine/engine/engine";
 import {
   type TranscriptEntry,
@@ -114,7 +118,7 @@ export const workerAccesses = (workers: ReadonlyArray<ConfigWorker>): WorkerAcce
   new Map(workers.map((worker) => [worker.name, workerAccess(worker)]));
 
 const attemptSummaryView = (
-  attempt: RunSnapshot["attempts"][number],
+  attempt: RunSummary["attempts"][number],
   workers: WorkerAccesses,
 ): AttemptSummaryView => {
   return new AttemptSummaryView({
@@ -226,10 +230,6 @@ export const runSummaryView = (
   upgrade: UpgradeDrain | null = null,
 ): RunSummaryView => {
   const actions = RunState.operatorActions(snapshot.run.state);
-  const result = Option.getOrNull(snapshot.step.result);
-  const pullRequest = result?.facts.find(
-    (fact): fact is PullRequest => fact._tag === "PullRequest",
-  );
   return new RunSummaryView({
     id: snapshot.run.id,
     itemKey: snapshot.itemKey,
@@ -258,7 +258,7 @@ export const runSummaryView = (
         }),
     }),
     runAgain: Option.getOrNull(snapshot.runAgain),
-    pullRequestUrl: pullRequest?.url.toString() ?? null,
+    pullRequestUrl: snapshot.pullRequestUrl,
     ...actions,
     canResolveFailure:
       actions.canResolveFailure &&
@@ -268,14 +268,14 @@ export const runSummaryView = (
 
 /** Returns the full run and attempt prompts for a detail read. */
 export const runView = (
-  snapshot: RunSummary,
+  snapshot: RunSnapshot,
   pausedLoops: ReadonlySet<LoopName>,
   workers: WorkerAccesses,
   waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
   upgrade: UpgradeDrain | null = null,
 ): RunView =>
   new RunView({
-    ...runSummaryView(snapshot, pausedLoops, workers, waits, upgrade),
+    ...runSummaryView(summarizeRun(snapshot), pausedLoops, workers, waits, upgrade),
     task: snapshot.task,
     resultMessage: Option.match(snapshot.step.result, {
       onNone: () => null,

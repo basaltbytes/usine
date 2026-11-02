@@ -14,6 +14,7 @@ import {
   RunEvidence,
   RunSnapshot,
   RunSummary,
+  BoardRunHistory,
   type WorkerAttempts,
 } from "./model.ts";
 import { TranscriptAllQuery, TranscriptEntry, TranscriptQuery } from "../transcript.ts";
@@ -68,6 +69,9 @@ const makeRunReader = Effect.gen(function* () {
     });
     return evidence;
   });
+  const summary = Effect.fn("RunReader.summary")((runId: RunId) =>
+    queries.runSummary(runId).pipe(persistence("read run summary")),
+  );
   const list = Effect.fn("RunReader.list")((options: { readonly closedLimit: number }) =>
     queries.runSummaries(options.closedLimit).pipe(persistence("list runs")),
   );
@@ -97,6 +101,12 @@ const makeRunReader = Effect.gen(function* () {
   );
   const forItems = Effect.fn("RunReader.forItems")((itemKeys: ReadonlyArray<ItemKey>) =>
     queries.itemRunSummaries(itemKeys).pipe(persistence("read item run histories")),
+  );
+  const board = Effect.fn("RunReader.board")(
+    (itemKeys: ReadonlyArray<ItemKey>, attentionRunIds: ReadonlyArray<RunId>) =>
+      queries
+        .boardRunSummaries(itemKeys, attentionRunIds)
+        .pipe(persistence("read current board runs and history totals")),
   );
   const events = Effect.fn("RunReader.events")((runIds: ReadonlyArray<RunId>) =>
     queries.runEvents(runIds).pipe(persistence("read the events of runs")),
@@ -149,12 +159,14 @@ const makeRunReader = Effect.gen(function* () {
 
   return {
     inspect,
+    summary,
     runForEvent,
     evidence,
     list,
     closed,
     closedSince,
     forItems,
+    board,
     events,
     revision,
     transcript,
@@ -170,6 +182,8 @@ export class RunReader extends Context.Service<
   {
     /** Returns the Run's state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
+    /** Returns polling metadata for one run without prompts, results, or comments. */
+    readonly summary: (runId: RunId) => Effect.Effect<RunSummary, RunStoreError>;
     /** Returns the admitted run, or `None` if the event has no run. */
     readonly runForEvent: (
       dedupKey: DedupKey,
@@ -196,6 +210,11 @@ export class RunReader extends Context.Service<
     readonly forItems: (
       itemKeys: ReadonlyArray<ItemKey>,
     ) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
+    /** Returns current runs selected in SQL and aggregate history for every selected board item. */
+    readonly board: (
+      itemKeys: ReadonlyArray<ItemKey>,
+      attentionRunIds: ReadonlyArray<RunId>,
+    ) => Effect.Effect<BoardRunHistory, RunStoreError>;
     /** Returns the Event each existing Run in `runIds` was opened for, once per Run, in no particular order. */
     readonly events: (
       runIds: ReadonlyArray<RunId>,
@@ -225,6 +244,11 @@ export class RunReader extends Context.Service<
 
 export {
   LoopSighting,
+  AttemptSummary,
+  ItemRunHistory,
+  RunUsageSource,
+  BoardRunHistory,
+  summarizeRun,
   RunEvent,
   RunEvidence,
   RunSnapshot,

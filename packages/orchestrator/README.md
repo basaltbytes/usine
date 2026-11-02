@@ -412,3 +412,5 @@ Polling and repository hints reconcile persisted CI waits before fetching trigge
 A recorded head with no checks and GitHub mergeability `CONFLICTING` starts the configured fix loop with instructions to merge the base branch and resolve conflicts. Mergeability `UNKNOWN` leaves missing checks pending. Conflict fixes inherit completion actions and use the same admission, approval, and cycle budget as fixes for failed checks. No agent or worker runs while checks remain pending. Loop CI policy is captured when an event matches. See [ADR 0033](../../docs/adr/0033-durable-ci-waits.md).
 
 The overview includes every open run and the latest 50 closed runs across the instance. Board cards include a run count, attempt count, aggregate usage, each loop’s latest state, and summaries needed for current actions, activity, and CI handoffs. Task detail and statistics use complete run history. Needs attention includes older unresolved failures.
+
+Board polling uses current runs selected in SQL and aggregate history, including links from older run results. Complete prompts, results, and harvested comments are read for detail views.

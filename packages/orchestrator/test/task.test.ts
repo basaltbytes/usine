@@ -1,3 +1,4 @@
+import { boardHistory } from "./support/run-reader.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { assert, describe, it } from "@effect/vitest";
@@ -12,7 +13,7 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
-import { RepositoryName } from "@usine/core/repository";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import * as RunState from "@usine/core/run/state";
@@ -28,7 +29,7 @@ import {
 import { UnconfirmedStops } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
-import { RunEvent, RunReader, RunSummary } from "@usine/engine/run-reader";
+import { RunEvent, RunReader, RunSnapshot, summarizeRun } from "@usine/engine/run-reader";
 import { DateTime, Effect, Layer, Option, Ref, Schema } from "effect";
 import { OperatorObservation } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
@@ -189,7 +190,16 @@ const summary = (
   runAgain: Option.Option<RunAgain> = Option.none(),
 ) => {
   const runId = RunId.make(id);
-  return new RunSummary({
+  return new RunSnapshot({
+    event: new Event({
+      id: EventId.make(`event-${id}`),
+      dedupKey: DedupKey.make(`event/${id}`),
+      payload: {},
+      receivedAt: at(openedAt),
+    }),
+    revision: RepositoryRevision.make("main"),
+    permissions: "write",
+    parentModel: Option.none(),
     itemKey: gitHubItemKey(repository, item),
     run: new Run({
       id: runId,
@@ -369,14 +379,19 @@ const observation = (
   const reader = Layer.succeed(RunReader)({
     runForEvent: () => Effect.die("unused"),
     latestPoolRateLimits: () => Effect.succeed([]),
-    inspect: () => Effect.die("unused"),
+    inspect: (id) => {
+      const run = runs.find(({ run }) => run.id === id);
+      return run === undefined ? Effect.die("Missing run fixture") : Effect.succeed(run);
+    },
+    summary: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
     list: () => Effect.succeed([]),
     closed: () => Effect.die("unused"),
     closedSince: () => Effect.die("unused"),
+    board: () => Effect.succeed(boardHistory(runs.map(summarizeRun))),
     forItems: (keys) =>
       Ref.set(requested, keys).pipe(
-        Effect.as(runs.filter(({ itemKey }) => keys.includes(itemKey))),
+        Effect.as(runs.filter(({ itemKey }) => keys.includes(itemKey)).map(summarizeRun)),
       ),
     events: (runIds) => Effect.succeed(runEvents.filter(({ runId }) => runIds.includes(runId))),
     revision: () => Effect.succeed(Option.none()),

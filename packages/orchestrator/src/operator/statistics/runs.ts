@@ -1,6 +1,6 @@
 import type { BillingPool } from "@usine/core/agent/session";
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
-import type { Attempt } from "@usine/core/attempt";
+import type { AttemptSummary } from "@usine/engine/run-reader";
 import type { RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import type { WorkerName } from "@usine/core/worker";
@@ -91,7 +91,7 @@ const runOutcome = (summary: RunSummary): Outcome | null => {
   }
 };
 
-const attemptOutcome = (attempt: Attempt): Outcome | null =>
+const attemptOutcome = (attempt: AttemptSummary): Outcome | null =>
   Option.match(attempt.outcome, {
     onNone: () => null,
     onSome: ({ _tag }) =>
@@ -112,7 +112,7 @@ const outcomeCounts = (outcomes: ReadonlyArray<Outcome | null>): OutcomeCountsVi
   });
 
 /** Returns the Attempt's wall time, or `None` while it runs or if its end wasn't recorded. */
-export const attemptMillis = (attempt: Attempt): Option.Option<number> =>
+export const attemptMillis = (attempt: AttemptSummary): Option.Option<number> =>
   Option.isNone(attempt.outcome)
     ? Option.none()
     : Option.map(attempt.endedAt, (endedAt) =>
@@ -241,13 +241,13 @@ const perPeriod = (
   return counts;
 };
 
-const firstAttempt = (summary: RunSummary): Attempt | undefined =>
-  summary.attempts.reduce<Attempt | undefined>(
+const firstAttempt = (summary: RunSummary): AttemptSummary | undefined =>
+  summary.attempts.reduce<AttemptSummary | undefined>(
     (first, attempt) => (first === undefined || attempt.number < first.number ? attempt : first),
     undefined,
   );
 
-const automaticRestart = (attempt: Attempt | undefined): boolean =>
+const automaticRestart = (attempt: AttemptSummary | undefined): boolean =>
   attempt !== undefined &&
   Option.exists(
     attempt.start,
@@ -255,7 +255,7 @@ const automaticRestart = (attempt: Attempt | undefined): boolean =>
   );
 
 /** Whether the operator started the Attempt by retrying the failed Run, with or without an edit. */
-export const operatorRetry = (attempt: Attempt | undefined): attempt is Attempt =>
+export const operatorRetry = (attempt: AttemptSummary | undefined): attempt is AttemptSummary =>
   attempt !== undefined &&
   Option.exists(attempt.start, ({ _tag }) => _tag === "OperatorRetry" || _tag === "EditAndRetry");
 

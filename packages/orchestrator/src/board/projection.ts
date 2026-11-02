@@ -1,3 +1,4 @@
+import type { ItemRunHistory } from "@usine/engine/run-reader";
 import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import {
   isSettledItemState,
@@ -160,6 +161,7 @@ export const projectBoard = Effect.fn("Board.project")(
     runUsage: ReadonlyMap<RunId, RunUsageView> = new Map(),
     runEvents: ReadonlyMap<RunId, Event> = new Map(),
     attentionRuns: ReadonlySet<RunId> = new Set(),
+    itemHistory: ReadonlyMap<ItemKey, ItemRunHistory> = new Map(),
   ): Effect.Effect<BoardView> =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ repository: repository.name });
@@ -190,6 +192,7 @@ export const projectBoard = Effect.fn("Board.project")(
         itemLoops,
         runUsage,
         attentionRuns,
+        itemHistory,
       );
       yield* Effect.logDebug("Projected Task cards from linked Items", {
         repository: repository.name,

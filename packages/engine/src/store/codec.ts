@@ -27,10 +27,10 @@ import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { Comment, StepResult } from "@usine/core/step/result";
-import { Array as EffectArray, Effect, Option, Schema } from "effect";
+import { Array as EffectArray, Effect, Option, Schema, Struct } from "effect";
 import { EnginePersistenceError, RunStoreError } from "../engine/error.ts";
 import { IgnoreReason, Submission } from "../engine/submission.ts";
-import { ProjectionRevision, RunEvent, RunSummary } from "../run-reader/model.ts";
+import { ProjectionRevision, RunEvent, RunSummary, AttemptSummary } from "../run-reader/model.ts";
 import { TranscriptEntry, TranscriptSequence } from "../transcript.ts";
 
 export const EventRouteRow = Schema.Struct({
@@ -104,6 +104,20 @@ export const AttemptRow = Schema.Struct({
   outOfMemory: Schema.NullOr(Schema.Array(ContainerOutOfMemoryKills)),
 });
 export type AttemptRow = typeof AttemptRow.Type;
+
+export const RunSummaryRow = Schema.Struct({
+  ...Struct.omit(RunRow.fields, ["task", "result", "revision", "parentModel", "stepName", "agent"]),
+  agent: RunSummary.fields.agent,
+  pullRequestUrl: Schema.NullOr(Schema.String),
+});
+export type RunSummaryRow = typeof RunSummaryRow.Type;
+
+export const AttemptSummaryRow = Schema.Struct(
+  Struct.omit(AttemptRow.fields, ["task", "comments"]),
+);
+export type AttemptSummaryRow = typeof AttemptSummaryRow.Type;
+export const decodeRunSummaryRows = Schema.decodeUnknownEffect(Schema.Array(RunSummaryRow));
+export const decodeAttemptSummaryRows = Schema.decodeUnknownEffect(Schema.Array(AttemptSummaryRow));
 
 export const TranscriptRow = Schema.Struct({
   sequence: TranscriptSequence,
@@ -209,7 +223,9 @@ export const submissionFromRow = (row: EventRouteRow): Submission =>
     parentModel: Option.fromNullishOr(row.parentModel),
   });
 
-export const runFromRow = (row: RunRow): Run =>
+export const runFromRow = (
+  row: Pick<RunRow, "runId" | "eventId" | "loop" | "state" | "openedAt">,
+): Run =>
   new Run({
     id: row.runId,
     eventId: row.eventId,
@@ -218,7 +234,9 @@ export const runFromRow = (row: RunRow): Run =>
     openedAt: row.openedAt,
   });
 
-export const approvalFromRow = (row: RunRow): Option.Option<RunApproval> =>
+export const approvalFromRow = (
+  row: Pick<RunRow, "approvedAt" | "approvalChannel" | "approver">,
+): Option.Option<RunApproval> =>
   Option.map(
     Option.fromNullishOr(row.approvedAt),
     (approvedAt) =>
@@ -232,7 +250,9 @@ export const approvalFromRow = (row: RunRow): Option.Option<RunApproval> =>
       }),
   );
 
-export const runAgainFromRow = (row: RunRow): Option.Option<RunAgain> =>
+export const runAgainFromRow = (
+  row: Pick<RunRow, "againFrom" | "againRequestedBy">,
+): Option.Option<RunAgain> =>
   Option.map(
     Option.fromNullishOr(row.againFrom),
     (from) => new RunAgain({ from, requestedBy: Option.fromNullishOr(row.againRequestedBy) }),
@@ -245,15 +265,14 @@ export const stepFromRow = (row: RunRow): Step =>
     result: Option.fromNullishOr(row.result),
   });
 
-export const attemptFromRow = (row: AttemptRow): Attempt =>
-  new Attempt({
+const attemptSummaryFromRow = (row: AttemptSummaryRow): AttemptSummary =>
+  new AttemptSummary({
     id: row.attemptId,
     runId: row.runId,
     stepName: row.stepName,
     worker: row.worker,
     number: row.number,
     brain: row.brain,
-    task: row.task,
     agent: row.agent,
     operatorIntervened: row.operatorIntervened,
     parentModel: Option.fromNullishOr(row.parentModel),
@@ -264,29 +283,30 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     start: Option.fromNullishOr(row.start),
     failureResolution: Option.fromNullishOr(row.failureResolution),
     reattachedAt: Option.fromNullishOr(row.reattachedAt),
-    comments: row.comments ?? [],
     outOfMemory: Option.liftPredicate(
       row.outOfMemory ?? [],
       EffectArray.isReadonlyArrayNonEmpty,
     ).pipe(Option.map(totalOutOfMemoryKills)),
   });
 
+export const attemptFromRow = (row: AttemptRow): Attempt =>
+  new Attempt({ ...attemptSummaryFromRow(row), task: row.task, comments: row.comments ?? [] });
+
 export const runSummaryFromRow = (
-  row: RunRow,
-  storedAttempts: ReadonlyArray<AttemptRow>,
+  row: RunSummaryRow,
+  storedAttempts: ReadonlyArray<AttemptSummaryRow>,
 ): RunSummary =>
   new RunSummary({
     itemKey: row.itemKey,
     run: runFromRow(row),
-    step: stepFromRow(row),
-    attempts: storedAttempts.map(attemptFromRow),
+    pullRequestUrl: row.pullRequestUrl,
+    attempts: storedAttempts.map(attemptSummaryFromRow),
     resolvedFailureAttemptId: Option.fromNullishOr(row.resolvedFailureAttemptId),
     closedAt: Option.fromNullishOr(row.closedAt),
     approval: approvalFromRow(row),
     approvalReason: Option.fromNullishOr(row.approvalReason),
     runAgain: runAgainFromRow(row),
     repository: row.repository,
-    task: row.task,
     agent: row.agent,
   });
 

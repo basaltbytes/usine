@@ -22,8 +22,8 @@ import {
 } from "effect";
 import { type ProjectedItem, projectedItem } from "../../board/items.ts";
 import { taskCards } from "../../board/tasks.ts";
-import { runView } from "../projection.ts";
-import { RunUsageReader } from "../usage.ts";
+import { runSummaryView } from "../projection.ts";
+import { RunUsageReader, runUsageSource } from "../usage.ts";
 import { cacheStatistics } from "./cache.ts";
 import { readWorkerCapacity } from "./workers.ts";
 import { runStatisticsView } from "./runs.ts";
@@ -50,7 +50,9 @@ const makeStatistics = Effect.gen(function* () {
     Effect.forEach(
       runs,
       (summary) =>
-        usageReader.read(summary).pipe(Effect.map((read) => [summary.run.id, read] as const)),
+        usageReader
+          .read(runUsageSource(summary))
+          .pipe(Effect.map((read) => [summary.run.id, read] as const)),
       { concurrency: 4 },
     ).pipe(Effect.map((entries) => new Map(entries)));
 
@@ -96,7 +98,7 @@ const makeStatistics = Effect.gen(function* () {
     const cards = taskCards(
       repository,
       items,
-      history.map((summary) => runView(summary, new Set(), new Map())),
+      history.map((summary) => runSummaryView(summary, new Set(), new Map())),
       [],
       new Map(),
       new Map(),

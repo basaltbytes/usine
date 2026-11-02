@@ -1,3 +1,5 @@
+import { boardHistory } from "./support/run-reader.ts";
+import { summarizeRun } from "@usine/engine/run-reader";
 import {
   RequestPermissions,
   RoleBinding,
@@ -516,15 +518,17 @@ const testLayer = (
         ).values(),
       ]),
     inspect: () => Effect.succeed(runSnapshot),
+    summary: () => Effect.succeed(summarizeRun(runSnapshot)),
     evidence: () => Effect.die("unused"),
     list: () =>
       Ref.updateAndGet(overviewReads, (reads) => reads + 1).pipe(
         Effect.andThen(Effect.yieldNow),
-        Effect.as([runSnapshot]),
+        Effect.as([summarizeRun(runSnapshot)]),
       ),
     closed: () => Effect.succeed([]),
     closedSince: () => Effect.die("unused"),
-    forItems: () => Effect.succeed([runSnapshot]),
+    board: () => Effect.succeed(boardHistory([summarizeRun(runSnapshot)])),
+    forItems: () => Effect.succeed([summarizeRun(runSnapshot)]),
     events: (runIds) =>
       Effect.succeed(
         runIds.includes(runSnapshot.run.id)

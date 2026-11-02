@@ -42,7 +42,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
-import { Step, StepName } from "@usine/core/step";
+import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import {
   ItemContentHash,
@@ -195,14 +195,14 @@ const summary = (
       state,
       openedAt: time(openedAt),
     }),
-    step: new Step({ runId: RunId.make(id), name: StepName.make("run"), result: Option.none() }),
+    pullRequestUrl: null,
     attempts,
     resolvedFailureAttemptId: Option.none(),
     closedAt: Option.none(),
     approval: Option.none(),
     runAgain: Option.none(),
     repository,
-    task: AttemptTask.make("Work on it."),
+
     agent,
   });
 
@@ -367,6 +367,7 @@ const deskLayer = (
     runForEvent: () => Effect.die("unused"),
     latestPoolRateLimits: () => Effect.succeed([]),
     inspect: () => Effect.die("unused"),
+    summary: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
     list: () => Effect.succeed(all),
     closed: ({ limit, repositories }) =>
@@ -388,6 +389,7 @@ const deskLayer = (
           .slice(0, limit),
       ),
     closedSince: () => Effect.die("unused"),
+    board: () => Effect.die("unused"),
     forItems: (keys) => Effect.succeed(all.filter(({ itemKey }) => keys.includes(itemKey))),
     events: () => Effect.die("unused"),
     revision: () => Effect.die("unused"),

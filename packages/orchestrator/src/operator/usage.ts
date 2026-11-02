@@ -7,10 +7,15 @@ import {
   TokenCount,
   UsdAmount,
 } from "@usine/core/agent/session";
-import { type Attempt, AttemptId } from "@usine/core/attempt";
+import { AttemptId } from "@usine/core/attempt";
 import type { RunStoreError } from "@usine/engine/engine";
 import type { RunId } from "@usine/core/run";
-import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
+import {
+  RunReader,
+  type RunSummary,
+  type ItemRunHistory,
+  RunUsageSource,
+} from "@usine/engine/run-reader";
 import { type TranscriptEntry, TranscriptUsageQuery } from "@usine/engine/transcript";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import type { AttemptView } from "./attempt.ts";
@@ -220,7 +225,19 @@ export const taskUsage = (
       else durationMillis += Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
     }
   }
-  const sessions = runs.flatMap(({ id }) => usage.get(id)?.sessions ?? []);
+  return taskUsageTotals(
+    runs.map(({ id }) => id),
+    { durationMillis, unmeasured, runningSince },
+    usage,
+  );
+};
+
+const taskUsageTotals = (
+  runIds: ReadonlyArray<RunId>,
+  timing: Pick<TaskUsageView, "durationMillis" | "unmeasured" | "runningSince">,
+  usage: ReadonlyMap<RunId, RunUsageView>,
+): TaskUsageView => {
+  const sessions = runIds.flatMap((id) => usage.get(id)?.sessions ?? []);
   const pools = POOLS.flatMap((pool) => {
     const members = sessions.filter((session) => session.pool === pool);
     if (members.length === 0) return [];
@@ -241,9 +258,8 @@ export const taskUsage = (
   });
   const costs = pools.flatMap(({ cost }) => (cost === null ? [] : [cost]));
   return new TaskUsageView({
-    durationMillis: Math.round(durationMillis),
-    runningSince,
-    unmeasured,
+    ...timing,
+    durationMillis: Math.round(timing.durationMillis),
     tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
     pools,
     cost:
@@ -256,16 +272,40 @@ export const taskUsage = (
   });
 };
 
+/** Combines SQL history totals with session usage for the task's items. */
+export const taskHistoryUsage = (
+  items: ReadonlyArray<ItemRunHistory>,
+  usage: ReadonlyMap<RunId, RunUsageView>,
+): TaskUsageView =>
+  taskUsageTotals(
+    items.flatMap(({ usageSources }) => usageSources.map(({ run }) => run.id)),
+    {
+      durationMillis: items.reduce((sum, item) => sum + item.durationMillis, 0),
+      unmeasured: items.reduce((sum, item) => sum + item.unmeasured, 0),
+      runningSince: items.flatMap(({ runningSince }) => runningSince),
+    },
+    usage,
+  );
+
+/** Selects the attempt identities and terminal status needed for token reports. */
+export const runUsageSource = (source: Pick<RunSummary, "run" | "attempts">): RunUsageSource =>
+  new RunUsageSource({
+    run: { id: source.run.id },
+    attempts: source.attempts.map(({ id, outcome }) => ({ id, ended: Option.isSome(outcome) })),
+  });
+
 const makeRunUsageReader = Effect.gen(function* () {
   const runs = yield* RunReader;
   const ended = yield* Effect.sync(() => new Map<AttemptId, ReadonlyArray<TranscriptEntry>>());
   const loggedModels = yield* Effect.sync(() => new Set<string>());
 
-  const attemptReports = Effect.fn("RunUsageReader.attemptReports")(function* (attempt: Attempt) {
+  const attemptReports = Effect.fn("RunUsageReader.attemptReports")(function* (
+    attempt: RunUsageSource["attempts"][number],
+  ) {
     const cached = ended.get(attempt.id);
     if (cached !== undefined) return { reports: cached, read: false };
     const reports = yield* runs.transcript(new TranscriptUsageQuery({ attemptId: attempt.id }));
-    if (Option.isSome(attempt.outcome)) ended.set(attempt.id, reports);
+    if (attempt.ended) ended.set(attempt.id, reports);
     return { reports, read: true };
   });
 
@@ -293,8 +333,6 @@ const makeRunUsageReader = Effect.gen(function* () {
 
   return { read };
 });
-
-type RunUsageSource = Pick<RunSnapshot, "run" | "attempts">;
 
 /**
  * Reads a Run's usage from each session's highest token report. Caches the reports of Attempts with
