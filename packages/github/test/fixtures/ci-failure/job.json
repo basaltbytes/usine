@@ -1,0 +1,202 @@
+{
+  "id": 125150736388,
+  "run_id": 41406855561,
+  "workflow_name": "CI",
+  "head_branch": "fix/811-session-permissions",
+  "run_url": "https://api.github.com/repos/basaltbytes/usine/actions/runs/41406855561",
+  "run_attempt": 1,
+  "node_id": "CR_kwDOT5Ftr88AAAAdI5CwBA",
+  "head_sha": "184a27bd2731ed84373aa86a7e3dbb40351ba746",
+  "url": "https://api.github.com/repos/basaltbytes/usine/actions/jobs/125150736388",
+  "html_url": "https://github.com/basaltbytes/usine/actions/runs/41406855561/job/125150736388",
+  "status": "completed",
+  "conclusion": "failure",
+  "created_at": "2026-11-02T07:31:33Z",
+  "started_at": "2026-11-02T07:31:36Z",
+  "completed_at": "2026-11-02T07:36:42Z",
+  "name": "ci",
+  "steps": [
+    {
+      "name": "Set up job",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 1,
+      "started_at": "2026-11-02T07:31:37Z",
+      "completed_at": "2026-11-02T07:31:38Z"
+    },
+    {
+      "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 2,
+      "started_at": "2026-11-02T07:31:38Z",
+      "completed_at": "2026-11-02T07:31:40Z"
+    },
+    {
+      "name": "Run pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 3,
+      "started_at": "2026-11-02T07:31:40Z",
+      "completed_at": "2026-11-02T07:31:48Z"
+    },
+    {
+      "name": "Run actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 4,
+      "started_at": "2026-11-02T07:31:48Z",
+      "completed_at": "2026-11-02T07:32:00Z"
+    },
+    {
+      "name": "Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 5,
+      "started_at": "2026-11-02T07:32:00Z",
+      "completed_at": "2026-11-02T07:32:05Z"
+    },
+    {
+      "name": "Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 6,
+      "started_at": "2026-11-02T07:32:05Z",
+      "completed_at": "2026-11-02T07:32:09Z"
+    },
+    {
+      "name": "Run pnpm install --frozen-lockfile",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 7,
+      "started_at": "2026-11-02T07:32:09Z",
+      "completed_at": "2026-11-02T07:32:16Z"
+    },
+    {
+      "name": "Validate changesets",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 8,
+      "started_at": "2026-11-02T07:32:16Z",
+      "completed_at": "2026-11-02T07:32:18Z"
+    },
+    {
+      "name": "Run pnpm lint",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 9,
+      "started_at": "2026-11-02T07:32:18Z",
+      "completed_at": "2026-11-02T07:32:21Z"
+    },
+    {
+      "name": "Run pnpm format:check",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 10,
+      "started_at": "2026-11-02T07:32:21Z",
+      "completed_at": "2026-11-02T07:32:23Z"
+    },
+    {
+      "name": "Run pnpm knip",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 11,
+      "started_at": "2026-11-02T07:32:23Z",
+      "completed_at": "2026-11-02T07:32:27Z"
+    },
+    {
+      "name": "Run pnpm build",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 12,
+      "started_at": "2026-11-02T07:32:27Z",
+      "completed_at": "2026-11-02T07:32:55Z"
+    },
+    {
+      "name": "Run pnpm check",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 13,
+      "started_at": "2026-11-02T07:32:55Z",
+      "completed_at": "2026-11-02T07:33:25Z"
+    },
+    {
+      "name": "Run pnpm --filter @usine/web exec playwright install --with-deps chromium",
+      "status": "completed",
+      "conclusion": "skipped",
+      "number": 14,
+      "started_at": "2026-11-02T07:33:25Z",
+      "completed_at": "2026-11-02T07:33:25Z"
+    },
+    {
+      "name": "Run pnpm --filter @usine/web exec playwright install-deps chromium",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 15,
+      "started_at": "2026-11-02T07:33:25Z",
+      "completed_at": "2026-11-02T07:33:43Z"
+    },
+    {
+      "name": "Run pnpm test",
+      "status": "completed",
+      "conclusion": "failure",
+      "number": 16,
+      "started_at": "2026-11-02T07:33:43Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+      "status": "completed",
+      "conclusion": "skipped",
+      "number": 28,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Post Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+      "status": "completed",
+      "conclusion": "skipped",
+      "number": 29,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Post Run actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "status": "completed",
+      "conclusion": "skipped",
+      "number": 30,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Post Run pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 31,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 32,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Complete job",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 33,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    }
+  ],
+  "check_run_url": "https://api.github.com/repos/basaltbytes/usine/check-runs/125150736388",
+  "labels": ["ubuntu-latest"],
+  "runner_id": 1000012034,
+  "runner_name": "GitHub Actions 1000012034",
+  "runner_group_id": 0,
+  "runner_group_name": "GitHub Actions"
+}
