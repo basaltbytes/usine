@@ -1,3 +1,5 @@
+import { ProjectId } from "@usine/core/project";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
@@ -10,11 +12,10 @@ import { TaskList } from "~/features/tasks/list.page";
 
 const TasksRoute = () => {
   const { project: slug } = Route.useParams();
-  const { data } = useSuspenseQuery(overviewQuery());
+  const { data: project } = useSuspenseQuery(projectTasksQuery(ProjectId.make(slug)));
   const { repository } = Route.useSearch();
   const navigate = Route.useNavigate();
   const desk = useSuspenseQuery(deskQuery());
-  const project = data.projects.find((entry) => projectId(entry) === slug);
   // A refetch after the loader ran can remove the project.
   if (project === undefined) return <ProjectNotFound />;
   return (
@@ -37,6 +38,7 @@ export const Route = createFileRoute("/projects/$project/tasks/")({
     const [overview] = await Promise.all([
       context.queryClient.ensureQueryData(overviewQuery()),
       context.queryClient.ensureQueryData(deskQuery()),
+      context.queryClient.ensureQueryData(projectTasksQuery(ProjectId.make(params.project))),
     ]);
     if (!overview.projects.some((project) => projectId(project) === params.project)) {
       const legacy = projectForRepository(

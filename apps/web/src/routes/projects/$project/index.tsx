@@ -1,10 +1,12 @@
+import { ProjectId } from "@usine/core/project";
+import { projectQuery } from "~/features/projects/queries";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { RouteError, RoutePending } from "~/components/route-status";
 import { ProjectNotFound } from "~/components/project-not-found";
 import { ProjectBoard } from "~/features/projects/board.page";
 import { deskQuery } from "~/lib/desk/queries";
-import { overviewQuery, projectId } from "~/lib/overview";
+import { overviewQuery } from "~/lib/overview";
 import { useOpenRun } from "~/hooks/use-open-run";
 
 const BoardRoute = () => {
@@ -12,7 +14,7 @@ const BoardRoute = () => {
   const { data } = useSuspenseQuery(overviewQuery());
   const desk = useSuspenseQuery(deskQuery());
   const openRun = useOpenRun();
-  const project = data.projects.find((entry) => projectId(entry) === slug);
+  const { data: project } = useSuspenseQuery(projectQuery(ProjectId.make(slug)));
   // A refetch after the loader ran can remove the project.
   if (project === undefined) return <ProjectNotFound />;
   return (
@@ -27,7 +29,11 @@ const BoardRoute = () => {
 };
 
 export const Route = createFileRoute("/projects/$project/")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(deskQuery()),
+  loader: ({ context, params }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(deskQuery()),
+      context.queryClient.ensureQueryData(projectQuery(ProjectId.make(params.project))),
+    ]),
   pendingComponent: RoutePending,
   errorComponent: RouteError,
   component: BoardRoute,

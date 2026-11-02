@@ -1,3 +1,5 @@
+import { invalidateChanges } from "~/lib/changes";
+import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
@@ -204,6 +206,14 @@ it("keeps separate saved moves while another card can move, and accepts work tha
   await expect.element(taskIn("Ready", 2)).toBeVisible();
 
   await respond(overview(["In progress", "Ready"]));
+  await invalidateChanges(
+    queryClient,
+    new ChangeNotice({
+      revision: 1,
+      reset: false,
+      changes: [{ kind: "navigation", id: "instance" }],
+    }),
+  );
   await expect.element(taskIn("In progress", 1), { timeout: 5_000 }).toBeVisible();
   await expect.element(taskIn("Ready", 2)).toBeVisible();
   await expectMovable(1, true);

@@ -28,8 +28,6 @@ import { api } from "~/lib/api";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { overviewQuery } from "~/lib/overview";
 
-const UPGRADE_REFRESH_MS = 5_000;
-
 export const usePauseLoop = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -48,7 +46,7 @@ export const upgradeQuery = () =>
     queryKey: ["upgrade"] as const,
     queryFn: () => api((client) => client.upgradeStatus({})),
     meta: { refreshLabel: "Upgrades" },
-    refetchInterval: UPGRADE_REFRESH_MS,
+    staleTime: 30_000,
     retry: 3,
   });
 
@@ -57,12 +55,14 @@ const configurationEditorKeys = ["configuration-editor"] as const;
 export const entityQuery = (key: ConfigurationEntityKey) =>
   queryOptions({
     queryKey: [...configurationEditorKeys, "entity", key.kind, key.identifier],
+    meta: { refreshLabel: "Configuration" },
     queryFn: () => api((client) => client.configurationEntity({ params: key })),
   });
 
 export const revisionsQuery = (key?: ConfigurationEntityKey) =>
   infiniteQueryOptions({
     queryKey: [...configurationEditorKeys, "history", key?.kind, key?.identifier],
+    meta: { refreshLabel: "Configuration" },
     initialPageParam: undefined,
     queryFn: ({ pageParam }: { readonly pageParam: ConfigurationRevisionNumber | undefined }) =>
       api((client) =>
@@ -222,4 +222,12 @@ export const configurationHeadQuery = () =>
   queryOptions({
     queryKey: [...configurationEditorKeys, "head"],
     queryFn: () => api((client) => client.configurationHead({})),
+  });
+
+export const workersQuery = () =>
+  queryOptions({
+    queryKey: ["configuration", "workers"] as const,
+    queryFn: () => api((client) => client.workers()),
+    staleTime: 30_000,
+    meta: { refreshLabel: "Workers" },
   });

@@ -21,7 +21,8 @@ export const sessionQuery = () =>
         "/api/auth/session",
         Schema.Struct({ permissions: Schema.Array(PermissionGrant) }),
       ),
-    refetchInterval: 15_000,
+    staleTime: 60_000,
+    meta: { refreshLabel: "Session" },
   });
 export const PermissionsContext = createContext<ReadonlyArray<PermissionGrant>>([]);
 export const canReadOverview = (grants: ReadonlyArray<PermissionGrant>) =>

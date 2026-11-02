@@ -1,10 +1,14 @@
 import { notifyManager, useQueryClient } from "@tanstack/react-query";
-import { isFunction } from "effect/Predicate";
 import { createContext, useEffect, useState, type ReactNode } from "react";
 
 declare module "@tanstack/react-query" {
   interface Register {
-    queryMeta: { readonly refreshLabel?: string };
+    queryMeta: {
+      readonly refreshLabel?: string;
+      readonly itemKeys?: ReadonlyArray<string>;
+      readonly attemptId?: string;
+      readonly projectId?: string;
+    };
   }
 }
 
@@ -18,7 +22,7 @@ export const RefreshContext = createContext<ReadonlyArray<RefreshSource>>([]);
 
 type RefreshProviderProps = { readonly children: ReactNode };
 
-/** Tracks successful reads and continuous failures for the page's active polling queries. */
+/** Tracks successful reads and continuous failures for the page's active queries. */
 export const RefreshProvider = ({ children }: RefreshProviderProps) => {
   const client = useQueryClient();
   const [sources, setSources] = useState<ReadonlyArray<RefreshSource>>([]);
@@ -34,20 +38,7 @@ export const RefreshProvider = ({ children }: RefreshProviderProps) => {
         if (query.state.status === "success") failures.delete(query.queryHash);
         else if (query.state.status === "error" && !failures.has(query.queryHash))
           failures.set(query.queryHash, query.state.errorUpdatedAt);
-        const polling = query.observers.some(({ options }) => {
-          const enabled = isFunction(options.enabled) ? options.enabled(query) : options.enabled;
-          const interval = isFunction(options.refetchInterval)
-            ? options.refetchInterval(query)
-            : options.refetchInterval;
-          return (
-            enabled !== false &&
-            interval !== false &&
-            interval !== undefined &&
-            interval > 0 &&
-            Number.isFinite(interval)
-          );
-        });
-        if (polling)
+        if (query.isActive())
           next.push({
             label,
             updatedAt: query.state.dataUpdatedAt,

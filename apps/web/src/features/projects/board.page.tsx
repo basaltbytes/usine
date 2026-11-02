@@ -83,7 +83,10 @@ export const ProjectBoard = ({
       ? loops
       : loops.filter((loop) => loop.name.startsWith(`${project.id}/`)),
   );
-  const itemCount = lanes.reduce((total, lane) => total + lane.items.length, 0);
+  const itemCount = lanes.reduce(
+    (total, lane) => total + (lane.totalItems ?? lane.items.length),
+    0,
+  );
   const stallOf = (task: BoardTaskView): StalledItemView | null => taskStall(stalled, task);
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const pending = disabled || isPending;

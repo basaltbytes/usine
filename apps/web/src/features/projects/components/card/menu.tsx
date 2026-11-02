@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { runHistoryLoading, runHistoryFailed } from "~/features/projects/strings";
-import { taskQuery } from "~/lib/tasks/queries";
+import { taskHistoryQuery } from "~/lib/tasks/queries";
 import { ArrowSquareOutIcon, DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, RunSummaryView } from "@usine/orchestrator/operator";
@@ -53,7 +53,7 @@ const RunHistory = ({ item, displayedRun, openRun }: RunHistoryProps) => {
   const [open, setOpen] = useState(false);
   const origin = item.items.find(({ kind }) => kind === "issue") ?? item;
   const history = useQuery({
-    ...taskQuery(item.repository, origin.number),
+    ...taskHistoryQuery(item.repository, origin.number),
     enabled: open,
   });
   const runs = history.data?.runs.filter(({ id }) => id !== displayedRun?.id) ?? [];

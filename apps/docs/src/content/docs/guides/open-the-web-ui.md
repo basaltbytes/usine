@@ -25,3 +25,11 @@ A running instance and an enrolled member with project access, or access to the 
 The UI lists only projects you can read. A project board combines its repositories and links to task and run pages. If no project appears, ask an instance admin to check your role bindings.
 
 For a shared address, [expose the instance over HTTPS](/guides/expose-an-instance/). Authentication is required on loopback as well as through a proxy.
+
+## Live updates
+
+An open screen receives change notices over one server-sent events connection and reads only the affected data. The refresh indicator reports when live updates disconnect. During disconnection, the screen checks for changes every minute and resumes live updates when the connection recovers.
+
+Board moves appear immediately. A failed label write restores the card's previous lane and displays the error. An accepted move remains visible until GitHub synchronization confirms the lane. Open **Done** and scroll to load all its cards; long lanes and run histories load more rows as you scroll.
+
+If you serve the UI through a reverse proxy, disable response buffering for `/api/changes` and allow a long-lived response. The endpoint sends a heartbeat every 15 seconds.

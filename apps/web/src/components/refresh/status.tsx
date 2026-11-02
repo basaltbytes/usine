@@ -1,9 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
+import { connectionQuery } from "~/lib/changes";
 import { useContext } from "react";
 import { useNow } from "~/hooks/use-now";
 import { refreshCopy } from "~/lib/strings";
 import { RefreshContext } from "./provider";
 
 export const RefreshStatus = () => {
+  const { data: connection } = useQuery(connectionQuery());
   const sources = useContext(RefreshContext);
   const now = useNow(1_000);
   if (sources.length === 0) return null;
@@ -32,6 +35,7 @@ export const RefreshStatus = () => {
           </time>
         </>
       )}
+      {connection === "disconnected" && <span role="status">{refreshCopy.disconnected}</span>}
       {failed.length > 0 && <span role="status">{refreshCopy.failed(failed.join(", "))}</span>}
     </p>
   );

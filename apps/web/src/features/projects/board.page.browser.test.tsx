@@ -1,8 +1,11 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectId } from "~/lib/overview";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { LaneName } from "@usine/config/board";
+import { Schema } from "effect";
+import { StateLaneSource, LaneName } from "@usine/config/board";
 import { RepositoryName } from "@usine/core/repository";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import {
@@ -20,7 +23,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { routeTree } from "~/route-tree.gen";
 import { boardOverview } from "~/lib/projects/fixture";
@@ -105,6 +108,12 @@ afterEach(() => {
 const mountBoard = async (width: number) => {
   await page.viewport(width, 800);
   queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
+  const view = queryClient.getQueryData(overviewQuery().queryKey)?.projects[0];
+  if (view !== undefined) queryClient.setQueryData(projectQuery(projectId(view)).queryKey, view);
+  queryClient.setQueryData(
+    attentionQuery().queryKey,
+    queryClient.getQueryData(overviewQuery().queryKey),
+  );
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/projects/basaltbytes/usine"] }),
@@ -191,4 +200,72 @@ it("scrolls a long lane on its own and fades the edges that hide cards", async (
   expect(cards.className).not.toContain("mask-b-from");
   expect(getComputedStyle(cards).maskImage).not.toBe("none");
   expect(lane("Ready").getBoundingClientRect().top).toBe(otherLane);
+});
+
+it("loads every Done card as the virtual lane scrolls", async () => {
+  const cards = manyTasks(120);
+  const done = new ReadOnlyBoardLaneView({
+    id: BoardLaneId.make("Done"),
+    name: LaneName.make("Done"),
+    origin: "authored",
+    sources: [new StateLaneSource({ state: "issue-closed" })],
+    items: [],
+    totalItems: cards.length,
+  });
+  const view = new ProjectView({
+    ...project,
+    board: new BoardView({
+      failures: [],
+      lanes: [...project.board.lanes.filter(({ name }) => name !== "Done"), done],
+    }),
+  });
+  queryClient.setQueryData(
+    overviewQuery().queryKey,
+    new ReadyOverview({ projects: [view], loops: [], needsYou: [] }),
+  );
+  const offsets: number[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+    if (!url.pathname.endsWith("/lanes/Done/items")) return originalFetch(input, init);
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    offsets.push(offset);
+    const items = cards.slice(offset, offset + 50);
+    return new Response(
+      JSON.stringify({
+        items: Schema.encodeSync(Schema.Array(BoardTaskView))(items),
+        total: cards.length,
+        nextOffset: offset + items.length < cards.length ? offset + items.length : null,
+      }),
+      { headers: { "content-type": "application/json" } },
+    );
+  };
+  try {
+    await mountBoard(1024);
+    const viewport = board();
+    viewport.scrollLeft = viewport.scrollWidth;
+    await page.getByTitle("Open Done", { exact: true }).click();
+    await expect.element(page.getByRole("link", { name: "Task 1000", exact: true })).toBeVisible();
+    const scroller = page.getByLabelText("Done cards").element();
+    for (const offset of [50, 100]) {
+      const height = scroller.scrollHeight;
+      scroller.scrollTop = height;
+      await expect
+        .poll(
+          () => {
+            scroller.scrollTop = scroller.scrollHeight;
+            return offsets.includes(offset);
+          },
+          { timeout: 10_000 },
+        )
+        .toBe(true);
+      await expect.poll(() => scroller.scrollHeight).toBeGreaterThan(height);
+    }
+    scroller.scrollTop = scroller.scrollHeight;
+    await expect.element(page.getByRole("link", { name: "Task 1119", exact: true })).toBeVisible();
+    expect(scroller.querySelectorAll("h3").length).toBeLessThan(50);
+    expect(offsets).toEqual([0, 50, 100]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
