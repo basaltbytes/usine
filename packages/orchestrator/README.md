@@ -48,6 +48,10 @@ A malformed item projection is quarantined and reported on the board and the nee
 
 Board move rejection errors derive diagnostic messages from their repository, item, or lane fields. The server uses these messages in both rejection logs and HTTP responses.
 
+### Polling summaries
+
+`Operator.overview` and `Operator.desk` return `RunSummaryView` and `AttemptSummaryView` for project histories, board cards, and desk entries. These records retain state, actions, timing, and failure details. Read `Operator.detail` or `Operator.task` for task prompts and result messages; run detail also includes the event payload and transcript.
+
 ### Run detail
 
 Machine views report `preparing` while a provisioned machine runs preflight and prepares its attempt image and shared caches. Queued runs retain their machine on the overview during this state.

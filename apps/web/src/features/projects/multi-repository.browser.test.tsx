@@ -14,7 +14,7 @@ import {
   FactoryOverview,
   ProjectView,
   ReadyOverview,
-  RunView,
+  RunSummaryView,
   WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
@@ -57,7 +57,12 @@ const overview = () => {
     ),
     runs: template.runs.map(
       (run) =>
-        new RunView({ ...run, repository: second, id: RunId.make(`api-${run.id}`), itemKey }),
+        new RunSummaryView({
+          ...run,
+          repository: second,
+          id: RunId.make(`api-${run.id}`),
+          itemKey,
+        }),
     ),
     run: null,
     loops: [],

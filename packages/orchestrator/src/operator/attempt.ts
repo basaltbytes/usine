@@ -6,7 +6,7 @@ import { RunawayCeiling } from "@usine/core/attempt/failure";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { AttemptStart } from "@usine/core/attempt/start";
 import { MachineProvider, SshDestination, SshPort, WorkerName } from "@usine/core/worker";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Struct } from "effect";
 
 /** A GitHub push refusal with its repository, ref, and token scope in the message. */
 export class GitHubPushFailureView extends Schema.TaggedClass<GitHubPushFailureView>(
@@ -229,3 +229,8 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
     Schema.withConstructorDefault(Effect.succeed(null)),
   ),
 }) {}
+
+/** Attempt metadata used by polling views; the task is available on run detail. */
+export class AttemptSummaryView extends Schema.Class<AttemptSummaryView>(
+  "@usine/orchestrator/AttemptSummaryView",
+)(Struct.omit(AttemptView.fields, ["task"])) {}

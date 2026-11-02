@@ -1,13 +1,13 @@
 import { CiWaitLine } from "~/components/runs/ci";
 import { machineWaitLine } from "~/lib/runs/strings";
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunSummaryView } from "@usine/orchestrator/operator";
 import { StateMark } from "~/components/status-badge";
 import { useNow } from "~/hooks/use-now";
 import { runLineSince } from "~/lib/projects/card";
 import { elapsedLabel } from "~/lib/strings";
 import { runLineTimeTitle } from "~/features/projects/strings";
 
-type RunLineProps = { readonly run: RunView };
+type RunLineProps = { readonly run: RunSummaryView };
 
 export const RunLine = ({ run }: RunLineProps) => {
   const now = useNow(30_000);

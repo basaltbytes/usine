@@ -1,3 +1,5 @@
+import { AttemptTask } from "@usine/core/attempt";
+import { AttemptView, RunView } from "@usine/orchestrator/operator";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -245,7 +247,15 @@ it("uses drawer actions while open and restores the underlying page commands aft
   client.setQueryData(
     runDetailQuery(client, run.id).queryKey,
     new RunDetailView({
-      run,
+      run: new RunView({
+        ...run,
+        task: "Implement the issue.",
+        resultMessage: null,
+        attempts: run.attempts.map(
+          (attempt) =>
+            new AttemptView({ ...attempt, task: AttemptTask.make("Implement the issue.") }),
+        ),
+      }),
       agentDefinitionChanged: false,
       eventDedupKey: "event",
       eventPayload: {},

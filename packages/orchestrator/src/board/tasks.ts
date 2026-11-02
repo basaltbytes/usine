@@ -5,7 +5,7 @@ import { canonicalRepositoryName, type RepositoryName } from "@usine/core/reposi
 import type { RunId } from "@usine/core/run";
 import { Array as EffectArray, Option, Order, Schema } from "effect";
 import { BoardItemLink, BoardPullRequestView, BoardTaskView } from "../operator/board.ts";
-import type { RunView } from "../operator/run.ts";
+import type { RunSummaryView } from "../operator/run.ts";
 import { type RunUsageView, taskUsage } from "../operator/usage.ts";
 import { type ProjectedItem, runNeedsAttention } from "./items.ts";
 
@@ -15,7 +15,7 @@ const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString);
 // key lookup.
 interface TaskItem {
   readonly item: ProjectedItem;
-  readonly runs: ReadonlyArray<RunView>;
+  readonly runs: ReadonlyArray<RunSummaryView>;
   readonly related: Set<TaskItem>;
 }
 
@@ -23,7 +23,7 @@ interface TaskItem {
 export interface TaskCard {
   readonly view: BoardTaskView;
   /** The Task's newest open Run once an Attempt has started, on the card's current Item. */
-  readonly running: RunView | undefined;
+  readonly running: RunSummaryView | undefined;
 }
 
 const itemLink = (item: ProjectedItem) =>
@@ -43,7 +43,7 @@ const itemLink = (item: ProjectedItem) =>
 export const taskCards = (
   repository: RepositoryName,
   items: ReadonlyArray<ProjectedItem>,
-  runs: ReadonlyArray<RunView>,
+  runs: ReadonlyArray<RunSummaryView>,
   cycleBlockedItems: ReadonlyArray<ItemKey>,
   itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>>,
   runUsage: ReadonlyMap<RunId, RunUsageView>,

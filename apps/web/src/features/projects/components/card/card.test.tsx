@@ -41,6 +41,7 @@ import {
   ProjectView,
   ReadOnlyBoardLaneView,
   RunFailureNeed,
+  RunSummaryView,
   RunView,
   SucceededAttemptView,
   WritableBoardLaneView,
@@ -173,7 +174,7 @@ describe("Board Run failure copy", () => {
 
   it("shows the newest failure across development and review Runs", () => {
     const card = itemWithRun("Failed", [attempt(1, "old development failure")]);
-    const review = new RunView({
+    const review = new RunSummaryView({
       ...runOnItem("Failed", [attempt(1, "new review failure")]),
       id: RunId.make("review-new"),
       openedAt: "2026-09-02T12:00:00.000Z",
@@ -182,7 +183,7 @@ describe("Board Run failure copy", () => {
       itemFailure(new BoardTaskView({ ...card, runs: [...card.runs, review], run: review })),
       "new review failure",
     );
-    const resolved = new RunView({ ...review, canResolveFailure: false });
+    const resolved = new RunSummaryView({ ...review, canResolveFailure: false });
     assert.strictEqual(
       itemFailure(new BoardTaskView({ ...card, runs: [...card.runs, resolved], run: resolved })),
       "old development failure",
@@ -241,7 +242,7 @@ describe("Runs without a Board card", () => {
     const carded = itemWithRun("Succeeded", [attempt(1, null)]);
     const cardedRun = carded.runs[0];
     assert(cardedRun !== undefined);
-    const scheduled = new RunView({
+    const scheduled = new RunSummaryView({
       ...cardedRun,
       id: RunId.make("run-schedule"),
       itemKey: ItemKey.make('["github","basaltbytes/usine"]'),
@@ -322,7 +323,7 @@ describe("Board lane order", () => {
 
 describe("Board flow arrows", () => {
   const card = itemWithRun("Succeeded", [attempt(1, null)]);
-  const waiting = new RunView({
+  const waiting = new RunSummaryView({
     ...runOnItem("Succeeded", []),
     state: "Waiting",
     loop: LoopName.make("start-dev"),
@@ -381,7 +382,7 @@ describe("Board card stall note", () => {
   const suppressingRun = runOnItem("Failed", [question]);
   const suppressed = itemWithRun("Failed", [question]);
   const canceledLink = issueLink(18, "Cache the label catalog");
-  const canceledRun = new RunView({
+  const canceledRun = new RunSummaryView({
     ...runOnItem("Succeeded", [attempt(1, null)]),
     id: RunId.make("run-18"),
     itemKey: canceledLink.itemKey,
@@ -697,7 +698,7 @@ describe("Board card Run line", () => {
       currentRun(
         new BoardTaskView({
           ...card,
-          run: new RunView({ ...runOnItem("Failed", [failed]), state, canResolveFailure }),
+          run: new RunSummaryView({ ...runOnItem("Failed", [failed]), state, canResolveFailure }),
         }),
       )?.state ?? null;
     assert.strictEqual(shown("Failed", true), "Failed");
@@ -712,22 +713,25 @@ describe("Board card Run line", () => {
   it("counts from the Run's opening, its live Attempt's start, or its last Attempt's end", () => {
     const run = runOnItem("Failed", [failed]);
     const live = new AttemptView({ ...attempt(2, null), outcome: null, endedAt: null });
-    assert.strictEqual(runLineSince(new RunView({ ...run, state: "Waiting" })), run.openedAt);
     assert.strictEqual(
-      runLineSince(new RunView({ ...run, state: "Running", attempts: [failed, live] })),
+      runLineSince(new RunSummaryView({ ...run, state: "Waiting" })),
+      run.openedAt,
+    );
+    assert.strictEqual(
+      runLineSince(new RunSummaryView({ ...run, state: "Running", attempts: [failed, live] })),
       live.startedAt,
     );
     assert.strictEqual(runLineSince(run), failed.endedAt);
     // A retried Run is Running before its next Attempt starts.
-    assert.strictEqual(runLineSince(new RunView({ ...run, state: "Running" })), null);
+    assert.strictEqual(runLineSince(new RunSummaryView({ ...run, state: "Running" })), null);
     // Attempts that ended before end times were recorded have no end time.
     const unrecorded = new AttemptView({ ...failed, endedAt: null });
-    assert.strictEqual(runLineSince(new RunView({ ...run, attempts: [unrecorded] })), null);
+    assert.strictEqual(runLineSince(new RunSummaryView({ ...run, attempts: [unrecorded] })), null);
   });
 });
 
 it("renders the worker and quota refusal below the board run line", () => {
-  const run = new RunView({
+  const run = new RunSummaryView({
     ...runOnItem("Failed", []),
     state: "Running",
     closedAt: null,
@@ -741,7 +745,7 @@ it("renders the worker and quota refusal below the board run line", () => {
 });
 
 it("links the waiting board run to its pushed pull request checks", () => {
-  const run = new RunView({
+  const run = new RunSummaryView({
     ...runOnItem("Succeeded", [attempt(1, null)]),
     state: "AwaitingCi",
     closedAt: null,
@@ -760,7 +764,7 @@ it("links the waiting board run to its pushed pull request checks", () => {
 });
 
 it("shows the continuing fix status and its link on a neutral handed-off board card", () => {
-  const fix = new RunView({
+  const fix = new RunSummaryView({
     ...runOnItem("Succeeded", []),
     id: RunId.make("fix-run-828"),
     loop: LoopName.make("fix"),
@@ -768,7 +772,7 @@ it("shows the continuing fix status and its link on a neutral handed-off board c
     closedAt: null,
     canCancel: true,
   });
-  const source = new RunView({
+  const source = new RunSummaryView({
     ...runOnItem("Succeeded", []),
     state: "HandedOff",
     handoff: new HandedOff({

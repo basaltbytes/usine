@@ -13,7 +13,7 @@ import {
 } from "./need.ts";
 import { ReadyOverview } from "./overview.ts";
 import type { WorkerStatus } from "../worker-status.ts";
-import type { RunView } from "./run.ts";
+import type { RunSummaryView } from "./run.ts";
 
 export const workerAttentionFor = (
   reader: Pick<RunReader["Service"], "transcript">,
@@ -22,7 +22,7 @@ export const workerAttentionFor = (
 ) =>
   Effect.fn("Operator.workerAttention")(function* (
     overview: ReadyOverview,
-    running: ReadonlyArray<RunView>,
+    running: ReadonlyArray<RunSummaryView>,
     declared: ReadonlyArray<WorkerName>,
   ) {
     const silent = yield* Effect.forEach(

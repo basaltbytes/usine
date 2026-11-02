@@ -7,7 +7,7 @@ import {
   LoopPausedView,
   QueuedForWorkerView,
   RunFailedView,
-  RunView,
+  RunSummaryView,
   StalledItemView,
   SuppressedForOperatorView,
 } from "@usine/orchestrator/operator";
@@ -92,7 +92,7 @@ describe("Tasks list model", () => {
             ...task,
             runs: task.runs.map(
               (run) =>
-                new RunView({
+                new RunSummaryView({
                   ...run,
                   openedAt: minutesAgo(3 * 1440),
                   closedAt: minutesAgo(1),
@@ -213,7 +213,7 @@ describe("Tasks list model", () => {
       changeTasks(overview, (task) => {
         if (task.number !== 28) return task;
         const review = lastRunOf(task);
-        const audit = new RunView({
+        const audit = new RunSummaryView({
           ...review,
           id: RunId.make("run-pinned-audit"),
           loop: LoopName.make("audit"),
@@ -281,7 +281,7 @@ describe("Tasks list model", () => {
             ...task,
             runs: task.runs.map((run) =>
               run.state === "Running"
-                ? new RunView({ ...run, state: "Queued", attempts: [], canCancel: true })
+                ? new RunSummaryView({ ...run, state: "Queued", attempts: [], canCancel: true })
                 : run,
             ),
           })

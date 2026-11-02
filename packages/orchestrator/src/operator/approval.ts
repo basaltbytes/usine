@@ -3,11 +3,11 @@ import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { Array as EffectArray, Effect, Option } from "effect";
 import { projectedItem } from "../board/items.ts";
 import { BoardItemLink } from "./board.ts";
-import type { RunView } from "./run.ts";
+import type { RunSummaryView } from "./run.ts";
 
 /** Reads the stored items of waiting runs that have no board card. */
 export const readApprovalItems = Effect.fn("Operator.readApprovalItems")(function* (
-  runs: ReadonlyArray<RunView>,
+  runs: ReadonlyArray<RunSummaryView>,
   cardedItems: ReadonlyMap<ItemKey, BoardItemLink>,
 ) {
   const reader = yield* ItemProjectionReader;

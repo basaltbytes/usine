@@ -23,6 +23,12 @@ Paths use `/api/...`. The schema’s `info.version` is `unversioned`; `GET /api/
 
 The reference covers the operator HTTP API, including sign-in, members, and tokens. Static UI assets and the separate signature-verified GitHub webhook listener are outside this contract.
 
+## Polling summaries and detail
+
+`GET /api/overview` returns project and board summaries with item titles, states, labels, counts, and identities. Its runs use `RunSummaryView` and its attempts use `AttemptSummaryView`. `GET /api/desk` uses the same summary types for running, stalled, and recent runs.
+
+Read `GET /api/runs/:runId` for the run's task, result message, each attempt's task, event payload, and transcript. The task endpoint, `GET /api/projects/:owner/:repository/tasks/:item`, also returns full run and attempt records. The board's **Run again** action reads run detail before submitting the saved task and agent.
+
 ## Operations
 
 <OperatorApiReference />

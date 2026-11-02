@@ -8,7 +8,7 @@ import type {
   FailureView,
   MachineView,
   MachineQuotaWait,
-  RunView,
+  RunSummaryView,
   UnconfirmedStopView,
 } from "@usine/orchestrator/operator";
 import { DateTime, Match, Option } from "effect";
@@ -58,7 +58,7 @@ export const attemptStartLabel = (start: AttemptStart): string =>
  * local`, or `Waiting for attempt 1 of an earlier run to stop on local` for another Run's attempt.
  */
 export const stopWaitLine = (
-  runId: RunView["id"],
+  runId: RunSummaryView["id"],
   { runId: stopped, attemptNumber, worker }: UnconfirmedStopView,
 ): string =>
   stopped === runId
@@ -74,7 +74,10 @@ export const upgradeWaitLine = ({ target }: UpgradeWait): string =>
 
 /** Returns the run state, including a stop or machine creation that prevents progress. */
 export const runStateLine = (
-  run: Pick<RunView, "id" | "state" | "attempts" | "providerRetry" | "machineWait" | "upgradeWait">,
+  run: Pick<
+    RunSummaryView,
+    "id" | "state" | "attempts" | "providerRetry" | "machineWait" | "upgradeWait"
+  >,
   unconfirmedStop: UnconfirmedStopView | null = null,
   machine: MachineView | null = null,
 ): string => {

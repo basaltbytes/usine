@@ -1,6 +1,6 @@
 import { ArrowSquareOutIcon, DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
-import type { BoardLaneView, BoardTaskView, RunView } from "@usine/orchestrator/operator";
+import type { BoardLaneView, BoardTaskView, RunSummaryView } from "@usine/orchestrator/operator";
 import { Fragment, type ReactNode, useState } from "react";
 import { ItemMark, itemName } from "~/components/item/mark";
 import { StateMark } from "~/components/status-badge";
@@ -41,7 +41,7 @@ export interface CardMoves {
 }
 
 type RunHistoryProps = {
-  readonly runs: ReadonlyArray<RunView>;
+  readonly runs: ReadonlyArray<RunSummaryView>;
   readonly openRun: (runId: RunId) => void;
 };
 
@@ -75,7 +75,7 @@ type CardMenuProps = {
   readonly readOnly: boolean;
   readonly item: BoardTaskView;
   /** The Run shown on the card, or `null` if none. */
-  readonly run: RunView | null;
+  readonly run: RunSummaryView | null;
   readonly moves: CardMoves;
   readonly openRun: (runId: RunId) => void;
   readonly action: RunActions;

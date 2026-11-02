@@ -33,7 +33,7 @@ import {
   BoardLaneId,
   BoardProjectNotFoundError,
 } from "./board.ts";
-import { readRunningEvents, runView, workerAccesses } from "./projection.ts";
+import { readRunningEvents, runSummaryView, runView, workerAccesses } from "./projection.ts";
 import { RunView } from "./run.ts";
 
 /**
@@ -207,7 +207,7 @@ const makeTaskReader = Effect.gen(function* () {
         onSome: ({ labels }) => labels.map(({ name }) => name),
       }),
       stored,
-      summaries.map((summary) => runView(summary, paused, access, waits)),
+      summaries.map((summary) => runSummaryView(summary, paused, access, waits)),
       asks.map(({ itemKey }) => itemKey),
       new Map(),
       new Map(),
@@ -288,7 +288,10 @@ const makeTaskReader = Effect.gen(function* () {
       lane: new TaskLaneView({ id: lane.id, name: lane.name }),
       needsYou: task.needsYou,
       items: [first, ...rest],
-      runs: [...task.runs].reverse(),
+      runs: summaries
+        .filter(({ run }) => taskRuns.has(run.id))
+        .map((summary) => runView(summary, paused, access, waits))
+        .sort((a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id)),
       comments,
     });
     yield* Effect.logDebug("Read a Task", {

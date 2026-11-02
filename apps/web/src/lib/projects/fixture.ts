@@ -32,6 +32,7 @@ import {
   ReadOnlyBoardLaneView,
   ReadyOverview,
   RunFailedView,
+  RunSummaryView,
   RunView,
   StalledItemView,
   SucceededAttemptView,
@@ -149,7 +150,7 @@ const pool = (
 
 /** Returns a Task's usage as the server computes it: its Runs' Attempt time and billing pools. */
 export const taskUsageOf = (
-  runs: ReadonlyArray<RunView>,
+  runs: ReadonlyArray<RunSummaryView>,
   pools: ReadonlyArray<TaskPoolUsageView> = [],
 ): TaskUsageView => {
   const attempts = runs.flatMap((candidate) => candidate.attempts);
@@ -182,7 +183,7 @@ export const taskUsageOf = (
 const task = (
   members: readonly [BoardItemLink, ...ReadonlyArray<BoardItemLink>],
   labels: ReadonlyArray<string>,
-  runs: ReadonlyArray<RunView> = [],
+  runs: ReadonlyArray<RunSummaryView> = [],
   extra: {
     readonly conflicting?: boolean;
     readonly state?: BoardTaskView["state"];
@@ -194,7 +195,7 @@ const task = (
   const current = members.at(-1) ?? members[0];
   const state = extra.state ?? (current.kind === "pr" ? "pr-open" : "issue-open");
   // As the server does, a failed Run on a closed or merged Item doesn't need the operator.
-  const needsYou = (run: RunView) =>
+  const needsYou = (run: RunSummaryView) =>
     run.canApprove ||
     (run.canResolveFailure &&
       !members.some(({ itemKey, state }) => itemKey === run.itemKey && isSettledItemState(state)));
@@ -426,7 +427,7 @@ export const changeTasks = (
 export const boardOverviewResolved = () =>
   changeTasks(boardOverview(), (task) => {
     if (task.itemKey !== pinned.itemKey) return task;
-    const runs = task.runs.map((run) => new RunView({ ...run, canResolveFailure: false }));
+    const runs = task.runs.map((run) => new RunSummaryView({ ...run, canResolveFailure: false }));
     return new BoardTaskView({ ...task, runs, run: null, needsYou: false });
   });
 
@@ -510,7 +511,7 @@ export const boardOverviewDocumentedLongLoop = () =>
     if (task.itemKey !== redesignPr.itemKey) return task;
     const runs = task.runs.map((run) =>
       run.state === "Running"
-        ? new RunView({ ...run, loop: LoopName.make("dependency_updates") })
+        ? new RunSummaryView({ ...run, loop: LoopName.make("dependency_updates") })
         : run,
     );
     return new BoardTaskView({
@@ -530,7 +531,7 @@ const starting = link(47, "issue", "Move a running card to the lane of its curre
  * server places #47 in the In progress lane.
  */
 export const boardOverviewReviewing = () => {
-  const running = new RunView({
+  const running = new RunSummaryView({
     ...run("run-reviewing", reviewing, "review", "Running", 2, [
       attempt(1, minutesAgo(2), "running"),
     ]),

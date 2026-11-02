@@ -6,7 +6,7 @@ import {
   type UniqueIdentifier,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import type { BoardLaneView, ProjectView, RunView } from "@usine/orchestrator/operator";
+import type { BoardLaneView, ProjectView, RunSummaryView } from "@usine/orchestrator/operator";
 import { type BoardMoveProgress } from "~/hooks/projects/moves";
 
 /** Returns writable lanes first, then read-only lanes, each in configured order, with the fallback
@@ -82,7 +82,7 @@ export const applyMove = (
 };
 
 /** Returns the Runs whose Item has no card, such as schedule Runs and Runs on quarantined Items. */
-export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
+export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunSummaryView> => {
   const carded = new Set(
     project.board.lanes.flatMap(({ items }) =>
       items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),

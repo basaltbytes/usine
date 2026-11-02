@@ -35812,7 +35812,7 @@
         "type": "object",
         "properties": {
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           },
           "item": {
             "anyOf": [
@@ -35882,7 +35882,7 @@
         ],
         "additionalProperties": false
       },
-      "_usine_orchestrator_RunViewEncoded": {
+      "_usine_orchestrator_RunSummaryViewEncoded": {
         "type": "object",
         "properties": {
           "id": {
@@ -36145,15 +36145,6 @@
               }
             ]
           },
-          "task": {
-            "type": "string"
-          },
-          "attempts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/_usine_orchestrator_AttemptViewEncoded"
-            }
-          },
           "approval": {
             "anyOf": [
               {
@@ -36185,16 +36176,6 @@
               }
             ]
           },
-          "resultMessage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "pullRequestUrl": {
             "anyOf": [
               {
@@ -36219,6 +36200,12 @@
           },
           "canRunAgain": {
             "type": "boolean"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/_usine_orchestrator_AttemptSummaryViewEncoded"
+            }
           }
         },
         "required": [
@@ -36232,138 +36219,19 @@
           "loopPaused",
           "openedAt",
           "closedAt",
-          "task",
-          "attempts",
           "approval",
           "runAgain",
-          "resultMessage",
           "pullRequestUrl",
           "canApprove",
           "canRetry",
           "canResolveFailure",
           "canCancel",
-          "canRunAgain"
+          "canRunAgain",
+          "attempts"
         ],
         "additionalProperties": false
       },
-      "RunAgainEncoded": {
-        "type": "object",
-        "properties": {
-          "from": {
-            "type": "string",
-            "minLength": 1
-          },
-          "requestedBy": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "local admin"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "from",
-          "requestedBy"
-        ],
-        "propertyNames": {
-          "anyOf": [
-            {
-              "enum": [
-                "from",
-                "requestedBy"
-              ]
-            },
-            {
-              "type": "string"
-            }
-          ]
-        },
-        "additionalProperties": false
-      },
-      "_usine_orchestrator_ApprovalViewEncoded": {
-        "type": "object",
-        "properties": {
-          "approvedAt": {
-            "type": "string"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ApprovalSourceEncoded"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "approvedAt",
-          "source"
-        ],
-        "additionalProperties": false
-      },
-      "ApprovalSourceEncoded": {
-        "type": "object",
-        "properties": {
-          "channel": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "ui"
-                ]
-              }
-            ]
-          },
-          "approver": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "local admin"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "channel",
-          "approver"
-        ],
-        "propertyNames": {
-          "anyOf": [
-            {
-              "enum": [
-                "channel",
-                "approver"
-              ]
-            },
-            {
-              "type": "string"
-            }
-          ]
-        },
-        "additionalProperties": false
-      },
-      "_usine_orchestrator_AttemptViewEncoded": {
+      "_usine_orchestrator_AttemptSummaryViewEncoded": {
         "type": "object",
         "properties": {
           "id": {
@@ -36400,10 +36268,6 @@
           },
           "brain": {
             "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
-          },
-          "task": {
-            "type": "string",
-            "pattern": "\\S"
           },
           "agent": {
             "type": "string",
@@ -36518,7 +36382,6 @@
           "worker",
           "workerAccess",
           "brain",
-          "task",
           "agent",
           "operatorIntervened",
           "startedAt",
@@ -37213,6 +37076,123 @@
         ],
         "additionalProperties": false
       },
+      "RunAgainEncoded": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestedBy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "local admin"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "from",
+          "requestedBy"
+        ],
+        "propertyNames": {
+          "anyOf": [
+            {
+              "enum": [
+                "from",
+                "requestedBy"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_ApprovalViewEncoded": {
+        "type": "object",
+        "properties": {
+          "approvedAt": {
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalSourceEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "approvedAt",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "ApprovalSourceEncoded": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ui"
+                ]
+              }
+            ]
+          },
+          "approver": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "local admin"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "channel",
+          "approver"
+        ],
+        "propertyNames": {
+          "anyOf": [
+            {
+              "enum": [
+                "channel",
+                "approver"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "additionalProperties": false
+      },
       "_usine_orchestrator_StalledItemViewEncoded": {
         "type": "object",
         "properties": {
@@ -37295,7 +37275,7 @@
             ]
           },
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           },
           "ahead": {
             "anyOf": [
@@ -37351,7 +37331,7 @@
             ]
           },
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           },
           "stop": {
             "$ref": "#/components/schemas/_usine_orchestrator_UnconfirmedStopViewEncoded"
@@ -37413,7 +37393,7 @@
             ]
           },
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           }
         },
         "required": [
@@ -37432,7 +37412,7 @@
             ]
           },
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           }
         },
         "required": [
@@ -37573,7 +37553,7 @@
             ]
           },
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           }
         },
         "required": [
@@ -37592,7 +37572,7 @@
             ]
           },
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           }
         },
         "required": [
@@ -37611,7 +37591,7 @@
             ]
           },
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           },
           "wait": {
             "$ref": "#/components/schemas/_usine_engine_UpgradeWaitEncoded"
@@ -37645,10 +37625,10 @@
         "type": "object",
         "properties": {
           "run": {
-            "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
           },
           "attempt": {
-            "$ref": "#/components/schemas/_usine_orchestrator_AttemptViewEncoded"
+            "$ref": "#/components/schemas/_usine_orchestrator_AttemptSummaryViewEncoded"
           },
           "item": {
             "anyOf": [
@@ -40307,6 +40287,538 @@
         ],
         "additionalProperties": false
       },
+      "_usine_orchestrator_RunViewEncoded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "itemKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "loop": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+          },
+          "agent": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "agentBrain": {
+            "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "Pending",
+              "Waiting",
+              "Queued",
+              "Running",
+              "AwaitingCi",
+              "Succeeded",
+              "HandedOff",
+              "Failed",
+              "Canceled"
+            ]
+          },
+          "ciWait": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "pullRequest": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "head": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
+                  "fixLoop": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "timeoutSeconds": {
+                    "type": "integer",
+                    "maximum": 86400,
+                    "exclusiveMinimum": 0
+                  },
+                  "onGreen": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "item": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "add": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true
+                        },
+                        "remove": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "item",
+                        "add",
+                        "remove"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "pullRequest",
+                  "head",
+                  "fixLoop",
+                  "timeoutSeconds",
+                  "onGreen"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "handoff": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "HandedOff"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "head": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
+                  "fixLoop": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fixRunId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "reason",
+                  "head",
+                  "fixLoop",
+                  "fixRunId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "upgradeWait": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+                  },
+                  "since": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target",
+                  "since"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providerRetry": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "nextAttempt": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 9007199254740991
+                  },
+                  "retryAt": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "nextAttempt",
+                  "retryAt",
+                  "message"
+                ],
+                "propertyNames": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "nextAttempt",
+                        "retryAt",
+                        "message"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "machineWait": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "worker": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "worker",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loopPaused": {
+            "type": "boolean"
+          },
+          "openedAt": {
+            "type": "string"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/_usine_orchestrator_AttemptViewEncoded"
+            }
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_ApprovalViewEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runAgain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunAgainEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resultMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pullRequestUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canApprove": {
+            "type": "boolean"
+          },
+          "canRetry": {
+            "type": "boolean"
+          },
+          "canResolveFailure": {
+            "type": "boolean"
+          },
+          "canCancel": {
+            "type": "boolean"
+          },
+          "canRunAgain": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "itemKey",
+          "loop",
+          "repository",
+          "agent",
+          "agentBrain",
+          "state",
+          "loopPaused",
+          "openedAt",
+          "closedAt",
+          "task",
+          "attempts",
+          "approval",
+          "runAgain",
+          "resultMessage",
+          "pullRequestUrl",
+          "canApprove",
+          "canRetry",
+          "canResolveFailure",
+          "canCancel",
+          "canRunAgain"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_AttemptViewEncoded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "worker": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "workerAccess": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_LocalWorkerAccessEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_SshWorkerAccessEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_ProvisionedWorkerAccessEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_SandboxWorkerAccessEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brain": {
+            "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
+          },
+          "task": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "agent": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "operatorIntervened": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_SucceededAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_AwaitingCiAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_HandedOffAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_FailedAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_CanceledAttemptViewEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "salvage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttemptSalvage_PushedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptSalvage_PartlyPushedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptSalvage_RetainedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptSalvage_RejectedEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttemptStart_EventEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_RetryEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_EditAndRetryEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_InfraRetryEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_ProviderRetryEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptStart_AfterRestartEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reattachedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outOfMemory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutOfMemoryKillsEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "worker",
+          "workerAccess",
+          "brain",
+          "task",
+          "agent",
+          "operatorIntervened",
+          "startedAt",
+          "outcome",
+          "endedAt",
+          "salvage",
+          "start",
+          "reattachedAt",
+          "outOfMemory"
+        ],
+        "additionalProperties": false
+      },
       "_usine_orchestrator_TaskItemViewEncoded": {
         "type": "object",
         "properties": {
@@ -40468,7 +40980,7 @@
           "runs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+              "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
             }
           },
           "board": {
@@ -40715,13 +41227,13 @@
           "runs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+              "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
             }
           },
           "run": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/_usine_orchestrator_RunViewEncoded"
+                "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
               },
               {
                 "type": "null"

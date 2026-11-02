@@ -375,7 +375,11 @@ export default mergeConfig(
                   delayedMoves.delete(page);
                 },
                 // Delays the next Run again request of any Run until `releaseRunAgain`.
-                delayRunAgain: async ({ page }) => {
+                delayRunAgain: async ({ page }, detail: string) => {
+                  await page.unroute("**/api/runs/run-dropped");
+                  await page.route("**/api/runs/run-dropped", (route) =>
+                    route.fulfill({ contentType: "application/json", body: detail }),
+                  );
                   let receive: (route: Route) => void;
                   const request = new Promise<Route>((resolve) => {
                     receive = resolve;

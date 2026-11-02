@@ -1,3 +1,5 @@
+import { AttemptTask } from "@usine/core/attempt";
+import { AttemptView, RunView } from "@usine/orchestrator/operator";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -12,7 +14,7 @@ import {
   ProjectView,
   ReadyOverview,
   RunDetailView,
-  RunView,
+  RunSummaryView,
   StatisticsView,
   RunStatisticsView,
   WorkerQuotaNeed,
@@ -49,7 +51,7 @@ const fixture = () => {
     message:
       "Hetzner refused machine creation: status 403 resource_limit_exceeded: shared core limit exceeded.",
   });
-  const run = new RunView({
+  const run = new RunSummaryView({
     ...previousRun,
     id: RunId.make("approval-run"),
     state: "Running",
@@ -72,7 +74,15 @@ const fixture = () => {
     needsYou: [need],
   });
   const detail = new RunDetailView({
-    run,
+    run: new RunView({
+      ...run,
+      task: "Implement the issue.",
+      resultMessage: null,
+      attempts: run.attempts.map(
+        (attempt) =>
+          new AttemptView({ ...attempt, task: AttemptTask.make("Implement the issue.") }),
+      ),
+    }),
     agentDefinitionChanged: false,
     eventDedupKey: "quota-capture",
     eventPayload: {},
