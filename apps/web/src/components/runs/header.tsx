@@ -1,4 +1,4 @@
-import { CiWaitLine } from "~/components/runs/ci";
+import { CiHandoffLine, CiWaitLine } from "~/components/runs/ci";
 import {
   ArrowsClockwiseIcon,
   CoinsIcon,
@@ -137,7 +137,9 @@ export const RunHeader = ({
             style={shared ? { viewTransitionName: "run-state" } : undefined}
           >
             <StateMark state={run.state} className="ml-0.75" />
-            {run.ciWait === null ? (
+            {run.handoff !== null ? (
+              <CiHandoffLine run={run} />
+            ) : run.ciWait === null ? (
               runStateLine(run, detail.unconfirmedStop, detail.machine)
             ) : (
               <CiWaitLine run={run} />

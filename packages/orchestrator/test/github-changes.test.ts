@@ -224,6 +224,7 @@ const testLayer = (
   timelines: ReadonlyMap<BotLogin, ReadonlyArray<ItemChange>> = new Map([[appActor, appChanges]]),
 ) => {
   const reader = Layer.succeed(RunReader)({
+    runForEvent: () => Effect.die("unused"),
     latestPoolRateLimits: () => Effect.succeed([]),
     inspect: () => Ref.get(current),
     evidence: () => Effect.die("unused"),

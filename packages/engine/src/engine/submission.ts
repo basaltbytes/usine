@@ -1,4 +1,4 @@
-import { CiPolicy } from "@usine/core/ci";
+import { CiHandoff, CiPolicy } from "@usine/core/ci";
 import { Agent } from "@usine/core/agent";
 import {
   CycleBudgetAsk,
@@ -40,6 +40,11 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   ciFailureHead: Schema.Option(CommitSha).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
+  /** Completion actions inherited from the source CI wait. */
+  ciOnGreen: CiHandoff.fields.onGreen.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
   ),
   /** The loop CI policy captured with this event. */
   ciPolicy: Schema.Option(CiPolicy).pipe(

@@ -26,11 +26,17 @@ export class AttemptAwaitingCi extends Schema.TaggedClass<AttemptAwaitingCi>(
   "AttemptOutcome/AwaitingCi",
 )("AwaitingCi", {}) {}
 
+/** The attempt ended and a fix run continues after failed CI. */
+export class AttemptHandedOff extends Schema.TaggedClass<AttemptHandedOff>(
+  "AttemptOutcome/HandedOff",
+)("HandedOff", {}) {}
+
 /** The outcome of an attempt; a successful step's result is stored separately. */
 export const AttemptOutcome = Schema.Union([
   AttemptSucceeded,
   AttemptFailed,
   AttemptCanceled,
   AttemptAwaitingCi,
+  AttemptHandedOff,
 ]);
 export type AttemptOutcome = typeof AttemptOutcome.Type;

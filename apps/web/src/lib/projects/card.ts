@@ -31,6 +31,7 @@ export const runLineSince = (run: RunView): string | null => {
     case "AwaitingCi":
     case "Failed":
       return last?.endedAt ?? null;
+    case "HandedOff":
     case "Succeeded":
     case "Canceled":
       return null;

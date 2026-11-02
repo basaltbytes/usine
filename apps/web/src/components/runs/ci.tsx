@@ -1,5 +1,6 @@
 import type { RunView } from "@usine/orchestrator/operator";
-import { waitingForCi } from "~/lib/runs/strings";
+import { Link } from "@tanstack/react-router";
+import { ciFailedOn, continuesTheWork, waitingForCi } from "~/lib/runs/strings";
 
 type CiWaitLineProps = { readonly run: RunView };
 
@@ -15,3 +16,21 @@ export const CiWaitLine = ({ run }: CiWaitLineProps) =>
       {waitingForCi}
     </a>
   );
+
+export const CiHandoffLine = ({ run }: CiWaitLineProps) => {
+  const handoff = run.handoff;
+  return handoff === null ? null : (
+    <span className="text-muted-foreground" title={handoff.reason}>
+      {ciFailedOn(handoff.head)}
+      <Link
+        to="."
+        search={(previous) => ({ ...previous, run: handoff.fixRunId })}
+        className="text-primary hover:underline"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {handoff.fixLoop} run {handoff.fixRunId.slice(0, 8)}
+      </Link>
+      {continuesTheWork}
+    </span>
+  );
+};

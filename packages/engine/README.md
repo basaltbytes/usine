@@ -208,7 +208,6 @@ File-backed SQLite fixtures use the shared [SQLite fixture directory helper](../
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
 
-
 ## Access control
 
 Operator audit fields accept `OperatorActor`: a GitHub login or the reserved `local admin` actor. Existing stored logins retain their meaning.
@@ -216,3 +215,5 @@ Operator audit fields accept `OperatorActor`: a GitHub login or the reserved `lo
 ## CI waits
 
 `Submission.ciFailureHead` identifies CI fix events for queued-head rechecks. `Submission.ciPolicy` saves the loop's requirement with the event. A successful result with a verified CI handoff, or a harvested pushed PR under a required policy, ends the attempt in `AwaitingCi` and releases its worker. These open runs reserve no slot and start no fiber after restart. `RunEngine.awaitingCi()` reads the durable waits; `settleCi(runId, expectedHead, resolution)` atomically updates their run and attempt outcomes, preserves the session end time, and ignores stale observations. Operator cancel also cancels the waiting attempt.
+
+An admitted CI fix closes its source run as `HandedOff` with the fix run ID and failure reason. The source attempt also ends neutrally. A same-loop fix for the recorded failed head can pass cycle-budget admission while the source awaits CI, since its attempt has ended. Refused fixes and exhausted budgets leave the source failed.

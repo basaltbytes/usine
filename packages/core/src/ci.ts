@@ -2,6 +2,7 @@ import { Option, Result, Schema } from "effect";
 import { AgentFailure } from "./attempt/failure.ts";
 import { ItemNumber } from "./item.ts";
 import { LoopName } from "./loop.ts";
+import { RunId } from "./run/id.ts";
 import { CommitSha } from "./repository.ts";
 
 /** The final-answer marker that transfers CI waiting to the orchestrator. */
@@ -66,11 +67,17 @@ export class CiFailed extends Schema.TaggedClass<CiFailed>("CiFailed")("CiFailed
   message: Schema.NonEmptyString,
 }) {}
 
+/** Failed CI accepted by a fix run. */
+export class CiHandedOff extends Schema.TaggedClass<CiHandedOff>("CiHandedOff")("CiHandedOff", {
+  reason: Schema.NonEmptyString,
+  fixRunId: RunId,
+}) {}
+
 /** A different head replaced the recorded push. */
 export class CiSuperseded extends Schema.TaggedClass<CiSuperseded>("CiSuperseded")("CiSuperseded", {
   head: CommitSha,
 }) {}
 
 /** A terminal observation of the recorded head's CI. */
-export const CiResolution = Schema.Union([CiPassed, CiFailed, CiSuperseded]);
+export const CiResolution = Schema.Union([CiPassed, CiFailed, CiHandedOff, CiSuperseded]);
 export type CiResolution = typeof CiResolution.Type;

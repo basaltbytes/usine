@@ -121,6 +121,7 @@ const eventRouteSelection = {
   permissions: triggerEvents.permissions,
   ciPolicy: triggerEvents.ciPolicyJson,
   ciFailureHead: triggerEvents.ciFailureHead,
+  ciOnGreen: triggerEvents.ciOnGreenJson,
   cycleLimit: triggerEvents.cycleLimit,
   cycleGeneration: triggerEvents.cycleGeneration,
   repository: triggerEvents.repository,
@@ -266,7 +267,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       return decoded.map(({ number, outcome, salvage, ...attempt }) => ({
         ...attempt,
         ref: salvageRefFor(attempt.runId, number),
-        succeeded: outcome === "Succeeded" || outcome === "AwaitingCi",
+        succeeded: outcome === "Succeeded" || outcome === "AwaitingCi" || outcome === "HandedOff",
         open: outcome === "",
         rejected: salvage?._tag === "Rejected" ? Option.some(salvage) : Option.none(),
       }));
@@ -898,6 +899,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           approvalReason: Option.getOrNull(submission.approvalReason),
           permissions: submission.permissions,
           ciFailureHead: Option.getOrNull(submission.ciFailureHead),
+          ciOnGreenJson: Schema.encodeSync(Submission.fields.ciOnGreen)(submission.ciOnGreen),
           ciPolicyJson: Option.match(submission.ciPolicy, {
             onNone: () => null,
             onSome: Schema.encodeSync(CiPolicy),

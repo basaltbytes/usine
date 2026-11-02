@@ -1,3 +1,4 @@
+import { HandedOff } from "@usine/core/run/state";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -927,4 +928,34 @@ describe("Run approval", () => {
     );
     assert.notInclude(outline(ranAgain(philippe)), `/runs/${from}`);
   });
+});
+
+it("renders a CI handoff neutrally and links to the fix run in the run header", () => {
+  const fixRunId = RunId.make("fix-run-828");
+  const source = run({
+    state: "HandedOff",
+    handoff: new HandedOff({
+      reason: "CI failed: ci.",
+      head: CommitSha.make("a".repeat(40)),
+      fixLoop: LoopName.make("act-on-findings"),
+      fixRunId,
+    }),
+  });
+  const markup = renderToStaticMarkup(
+    <WithRouter>
+      <RunHeader
+        detail={detail(source)}
+        overview={undefined}
+        placement="page"
+        shared={false}
+        actions={null}
+      />
+    </WithRouter>,
+  );
+  assert.include(markup, "CI failed on aaaaaaaa;");
+  assert.include(markup, "act-on-findings run fix-run-");
+  assert.include(markup, "continues the work");
+  assert.include(markup, `run=${fixRunId}`);
+  assert.include(markup, "text-muted-foreground");
+  assert.notInclude(markup, "text-run-failed");
 });

@@ -13,7 +13,7 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 | `@usine/core/step`, `@usine/core/step/result` | `Step`, `StepName`; `StepResult` and its facts (`Commit`, `PullRequest`, `Comment`) |
 | `@usine/core/step/harvest` | `harvestFacts`, `harvestPostedComments`, `HarvestError`, `HarvestSpec`, `AttemptWindowsRead`: the commits and pull requests in an attempt's finished checkout, and the comments and reviews it posted on its item, read with the caller's `git`/`gh` runner |
 | `@usine/core/attempt` | `Attempt`, `FailureResolution` (the time and operator of a failure resolution), `AttemptId`, `AttemptNumber`, `AttemptTask`, `OutOfMemoryKills` (the processes the kernel killed in an attempt's containers for memory), `ContainerOutOfMemoryKills` (those of one container, by `ContainerId`), `totalOutOfMemoryKills`, `shouldAutoRetry`, `MAX_AUTO_ATTEMPTS`, `ProviderRetry`, `pendingProviderRetry`, and `AttemptWindow`, `windowOf`, `windowHolds`, `windowsOverlap`, `AttemptWindows` |
-| `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptAwaitingCi`, `AttemptOutcome` |
+| `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptAwaitingCi`, `AttemptHandedOff`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `GitHubPushFailure`, `InfraFailure`, `DefectFailure`, `ProviderCapacityFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
 | `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvagePartlyPushed` (pushed work whose checkout keeps the files that the push left out), `SalvageRetained`, `SalvageRejected` (a push that the remote refused for good), `AttemptSalvage`, `AttemptRecovery` (its `rejected` is the recorded `SalvageRejected`, whose commit recovery doesn't push again), `RecoverySink` (its `windows` reads the windows a recovered attempt's harvest needs) |
 | `@usine/core/attempt/start` | Why an attempt started: `StartedByEvent`, `StartedByRetry`, `StartedByEditAndRetry` (with the operator login), `StartedByInfraRetry`, `StartedByProviderRetry`, `StartedAfterRestart`, `AttemptStart`, `OperatorRetryStart` |
@@ -28,7 +28,7 @@ Branded schemas are exported under their brand name, as a value and a type. `Pul
 
 ## Runs
 
-The run state machine is `pending → waiting → queued → running → succeeded / failed / canceled`, plus `running → awaiting CI → succeeded / failed / canceled` for CI waits and `failed → running` on operator retry. `RunState.operatorActions(state)` returns which of approval, retry, failure resolution, cancel, and run again apply. Command handlers share these typed transitions.
+The run state machine is `pending → waiting → queued → running → succeeded / failed / canceled`, plus `running → awaiting CI → succeeded / handed off / failed / canceled` for CI waits and `failed → running` on operator retry. `RunState.operatorActions(state)` returns which of approval, retry, failure resolution, cancel, and run again apply. Command handlers share these typed transitions.
 
 - Run again opens a new run for the item state of a succeeded or canceled run. `RunAgain` (`/run/again`) records the original run and who asked.
 - Failure resolution applies only in the failed state; operator views also hide it once the latest failed attempt is resolved.
@@ -94,3 +94,5 @@ Authenticated operator actions use `ActingMember` and `requestActor` from `@usin
 ## CI waits
 
 `@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts.
+
+`HandedOff` is a closed, neutral run state with the failed head, reason, fix loop, and fix run ID. `CiHandedOff` settles a CI wait into this state and ends its attempt as `AttemptHandedOff`.
