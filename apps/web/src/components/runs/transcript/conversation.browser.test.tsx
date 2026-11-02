@@ -858,7 +858,19 @@ it("scrolls the reader to a checkpoint chosen in the outline and stops following
     .element(outline.getByRole("button", { name: "Attempt 1, running" }))
     .toHaveAttribute("aria-expanded", "true");
   await outline.getByRole("button", { name: "Parent, 45 messages" }).click();
-  await outline.getByRole("button", { name: "Message 12", exact: true }).click();
+  const checkpoint = outline.getByRole("button", { name: "Message 12", exact: true });
+  // The fold moves its buttons while expanding; click after its layout settles.
+  await expect
+    .poll(() => {
+      const panel = checkpoint.element().closest('[data-slot="collapsible-content"]');
+      return (
+        panel !== null &&
+        !panel.hasAttribute("data-starting-style") &&
+        panel.getAnimations().length === 0
+      );
+    })
+    .toBe(true);
+  await checkpoint.click();
   // Navigation needs layout frames; allow a busy browser time to place the row below its padding.
   const landed = await vi.waitFor(
     () => {
