@@ -69,6 +69,26 @@ export type RepositoryPollError =
 /** Returns safe log fields for a failed repository operation. */
 export const repositoryFailureLogFields = (error: RepositoryPollError) => {
   const common = { errorTag: error._tag, message: error.message };
+  if (error._tag === "InvalidGitHubResponseError") {
+    const detail = error.detail.slice(0, 500);
+    return {
+      ...common,
+      operation: error.operation,
+      detail,
+      message: `${error.operation}: ${error.message}: ${detail}`,
+    };
+  }
+  if (
+    error._tag === "GitHubApiError" ||
+    error._tag === "GitHubRateLimitError" ||
+    error._tag === "GitHubItemNotFoundError"
+  ) {
+    return {
+      ...common,
+      operation: error.operation,
+      message: `${error.operation}: ${error.message}`,
+    };
+  }
   if (error._tag === "ConfigFileError") {
     return { ...common, ...configFileErrorLogFields(error) };
   }
