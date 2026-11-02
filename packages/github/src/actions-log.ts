@@ -60,6 +60,8 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, log: string): st
   const limit = Math.floor(2800 / failed.length);
   const logLines = log.split(/\r?\n/u);
   const sections: Array<string> = [];
+  // Second-rounded ranges can overlap; later steps must not reuse consumed lines.
+  let nextLine = 0;
   for (const step of failed) {
     if (step.started_at === null || step.completed_at === null) continue;
     const start = DateTime.toEpochMillis(step.started_at);
@@ -67,7 +69,8 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, log: string): st
     const end = DateTime.toEpochMillis(step.completed_at) + 1000;
     const lines: Array<string> = [];
     let withinStep = false;
-    for (const line of logLines) {
+    for (const [index, line] of logLines.entries()) {
+      if (index < nextLine) continue;
       const timestamp = line.match(/^\uFEFF?(\d{4}-\d\d-\d\dT\S+Z) /u)?.[1];
       if (timestamp !== undefined) {
         const at = Date.parse(timestamp);
@@ -79,6 +82,7 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, log: string): st
       // Cleanup can start in the same second as the failed step ends.
       if (content === "Post job cleanup." && !step.name.startsWith("Post ")) break;
       lines.push(content);
+      nextLine = index + 1;
       if (content.startsWith("##[error]Process completed with exit code ")) break;
     }
     if (lines.length > 0)
