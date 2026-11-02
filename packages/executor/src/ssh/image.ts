@@ -1,4 +1,3 @@
-import { SSH_FAILURE } from "@usine/agents/child-host";
 import type { ContainerImage } from "@usine/core/worker";
 import { Duration, Effect, Option } from "effect";
 import { WorkerCapabilityError } from "../executor.ts";
@@ -35,7 +34,11 @@ export const prepareAttemptImage = Effect.fn("SshExecutor.prepareAttemptImage")(
         image,
       ])
       .pipe(Effect.timed);
-    if (result.exitCode === SSH_FAILURE || (result.exitCode !== 0 && result.exitCode !== 1))
+    const absent =
+      runtime === "podman"
+        ? result.exitCode === 125 && result.stderr.trim().endsWith(": image not known")
+        : result.exitCode === 1;
+    if (result.exitCode !== 0 && !absent)
       return yield* gap(`Can't inspect the attempt image ${image}`, result.stderr.trim());
     const id = result.stdout.trim();
     if (result.exitCode === 0 && id.length === 0)

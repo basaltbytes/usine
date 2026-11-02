@@ -200,6 +200,7 @@ interface FakeMachineState {
   /** Whether `docker pull` of the Attempt image fails, and whether the image is on the machine anyway. */
   pullFails: boolean;
   imageOnMachine: boolean;
+  imageInspectFailure: { readonly exitCode: number; readonly stderr: string } | undefined;
   imageId: string;
   pulledImageId: string;
   beforePull: Effect.Effect<void>;
@@ -350,6 +351,7 @@ export const fakeMachine = () => {
     docker: "absent",
     pullFails: false,
     imageOnMachine: true,
+    imageInspectFailure: undefined,
     imageId: "sha256:0123",
     pulledImageId: "sha256:0123",
     beforePull: Effect.void,
@@ -398,11 +400,19 @@ export const fakeMachine = () => {
       state.imageId = state.pulledImageId;
       return oneShotHandle("", 0);
     }
-    if (line.startsWith("exec 'docker' 'image' 'inspect' "))
+    if (line.startsWith("exec 'docker' 'image' 'inspect' ")) {
+      if (state.imageInspectFailure !== undefined)
+        return oneShotHandle(
+          "",
+          state.imageInspectFailure.exitCode,
+          state.imageInspectFailure.stderr,
+        );
       return oneShotHandle(
         state.imageOnMachine ? `${state.imageId}\n` : "",
-        state.imageOnMachine ? 0 : 1,
+        state.imageOnMachine ? 0 : state.podmanInfo === undefined ? 1 : 125,
+        state.imageOnMachine || state.podmanInfo === undefined ? "" : "Error: image not known\n",
       );
+    }
     if (line.includes("volume create"))
       return state.cachePreparationFailure !== undefined &&
         words.includes(state.cachePreparationFailure)
