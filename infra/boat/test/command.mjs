@@ -53,36 +53,20 @@ if (command === "curl") {
   const script = args.at(-1);
   const input = readFileSync(0, "utf8");
   log({ command, args, script, input });
-  if (script.includes("docker pull")) {
+  if (script.includes("tailscale.com/install.sh")) {
     process.exit(failure === "prepare" ? 1 : 0);
   }
   const result = spawnSync("sh", ["-c", script], { input, encoding: "utf8" });
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);
   process.exit(result.status ?? 1);
-} else if (command === "sudo") {
-  const result = spawnSync(args[0], args.slice(1), { stdio: "inherit" });
-  process.exit(result.status ?? 1);
 } else {
   log({ command, args });
   switch (command) {
-    case "docker":
-      assert.deepEqual(args.slice(0, 2), ["image", "inspect"]);
-      if (failure === "missing" || failure === "diagnostics") process.exit(1);
-      break;
-    case "containerd":
-      if (failure === "diagnostics") process.exit(1);
-      const quote = process.env.BOAT_TEST_TOML_QUOTE;
-      process.stdout.write(
-        `root = ${quote}/custom/containerd root${quote}\nstate = ${quote}/custom/containerd state${quote}\n`,
-      );
-      break;
-    case "du":
-      assert.deepEqual(args, ["-sh", "/custom/containerd root", "/custom/containerd state"]);
-      process.stdout.write("3.1G\t/custom/containerd root\n20K\t/custom/containerd state\n");
-      break;
-    case "systemctl":
-      assert.deepEqual(args, ["start", "containerd", "docker"]);
+    case "tailscale":
+      assert.deepEqual(args, ["version"]);
+      if (failure === "verify") process.exit(1);
+      process.stdout.write("1.90.0\n");
       break;
     default:
       assert.fail(`Unexpected command: ${command}`);

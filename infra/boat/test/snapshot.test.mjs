@@ -22,7 +22,7 @@ function fixture(t) {
   const stub = join(work, "command.mjs");
   writeFileSync(stub, readFileSync(new URL("command.mjs", import.meta.url)));
   chmodSync(stub, 0o755);
-  for (const command of ["curl", "ssh", "sudo", "docker", "containerd", "du", "systemctl"]) {
+  for (const command of ["curl", "ssh", "tailscale"]) {
     symlinkSync(stub, join(bin, command));
   }
   const identity = join(work, "identity with spaces");
@@ -31,26 +31,18 @@ function fixture(t) {
   const state = join(work, "state.json");
   const log = join(work, "log.jsonl");
   writeFileSync(state, "{}");
-  const image = "registry.test/attempt:latest; $(echo unsafe)";
   return {
-    image,
-    run(failure = "", tomlQuote = '"') {
+    run(failure = "") {
       writeFileSync(log, "");
       const result = spawnSync(
         "sh",
-        [
-          fileURLToPath(new URL("../build-snapshot.sh", import.meta.url)),
-          "attempt",
-          image,
-          identity,
-        ],
+        [fileURLToPath(new URL("../build-snapshot.sh", import.meta.url)), "attempt", identity],
         {
           env: {
             ...process.env,
             PATH: `${bin}:${process.env.PATH}`,
             BOAT_API_KEY: "fixture",
             BOAT_TEST_FAILURE: failure,
-            BOAT_TEST_TOML_QUOTE: tomlQuote,
             BOAT_TEST_STATE: state,
             BOAT_TEST_LOG: log,
           },
@@ -84,41 +76,30 @@ test("verifies a fresh restore before reporting success and can rebuild the same
       monitoring: false,
       ttlSeconds: 900,
     });
-    const preparation = result.calls.find((call) => call.script?.includes("docker pull"));
+    const preparation = result.calls.find((call) =>
+      call.script?.includes("tailscale.com/install.sh"),
+    );
+    assert.match(preparation.script, /sudo sh \/tmp\/usine-install-tailscale.sh/);
     assert.match(
       preparation.script,
-      /docker create[\s\S]*systemctl stop docker docker.socket containerd\s+sync/,
+      /systemctl stop tailscaled\s+sudo rm -f \/var\/lib\/tailscale\/tailscaled.state\s+sync/,
     );
-    assert.equal(preparation.input, `${f.image}\n`);
-    const inspection = result.calls.find((call) => call.command === "docker");
-    assert.deepEqual(inspection.args, ["image", "inspect", f.image]);
-    const verification = result.calls.find((call) => call.script?.includes("docker image inspect"));
+    assert.doesNotMatch(preparation.script, /docker|containerd/);
+    const version = result.calls.find((call) => call.command === "tailscale");
+    assert.deepEqual(version.args, ["version"]);
+    const verification = result.calls.find((call) => call.script === "tailscale version");
     assert(verification.args.includes("user@verification.test"));
     assert(verification.args.includes("StrictHostKeyChecking=yes"));
   }
 });
 
-for (const quote of ['"', "'"]) {
-  test(`prints containerd paths and disk usage for ${quote}-quoted TOML when the image is missing`, (t) => {
-    const result = fixture(t).run("missing", quote);
-    assert.equal(result.status, 1, result.stderr);
-    assert.doesNotMatch(result.stdout, /is verified and ready/);
-    assert.match(result.stderr, /cannot inspect attempt image/);
-    assert(result.stderr.includes(`root = ${quote}/custom/containerd root${quote}`));
-    assert(result.stderr.includes(`state = ${quote}/custom/containerd state${quote}`));
-    assert.match(result.stderr, /3.1G\s+\/custom\/containerd root/);
-    assert.match(result.stderr, /20K\s+\/custom\/containerd state/);
-  });
-}
-
-for (const failure of ["diagnostics", "prepare", "save", "readiness"]) {
+for (const failure of ["verify", "prepare", "save", "readiness"]) {
   test(`fails and deletes every created sandbox when ${failure} fails`, (t) => {
     const result = fixture(t).run(failure);
     assert.equal(result.status, 1, result.stderr);
     assert.doesNotMatch(result.stdout, /is verified and ready/);
-    if (failure === "diagnostics") {
-      assert.match(result.stderr, /cannot inspect attempt image/);
-      assert.match(result.stderr, /Could not read containerd storage diagnostics/);
+    if (failure === "verify") {
+      assert.match(result.stderr, /cannot run Tailscale on sandbox verification/);
     }
   });
 }

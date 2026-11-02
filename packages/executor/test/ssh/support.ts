@@ -871,12 +871,14 @@ export const writesCredential = (line: string) => line.includes("IFS= read -r to
 export const capturedLogs = () => {
   const lines: Array<string> = [];
   const warnings: Array<string> = [];
+  const infos: Array<string> = [];
   const logger = Logger.make<unknown, void>(({ message, logLevel }) => {
     const line = JSON.stringify(message);
     lines.push(line);
     if (logLevel === "Warn") warnings.push(line);
+    if (logLevel === "Info") infos.push(line);
   });
-  return { lines, warnings, layer: Logger.layer([logger]) };
+  return { lines, warnings, infos, layer: Logger.layer([logger]) };
 };
 
 /** The test Worker's address, without a Gateway. */
