@@ -31,6 +31,22 @@ Access to the instance machine, a recoverable backup, and either a global instal
 
 `usine status` reports the selected version, and the authenticated UI loads. The managed helper verifies `/api/version` and waits up to 180 seconds for `/api/ready` after recovery. Failed managed installation or readiness restores the prior package and database backup; inspect its recorded failure before retrying.
 
-Managed upgrades check that required packages resolve before draining. The helper backs up both stores before changing packages. Instance-local upgrades back up stores, change package pins, install dependencies, commit the pin change, and restart. A failed local installation restores manifests and lockfiles; follow the CLI’s recovery instructions if startup fails.
+Managed upgrades check that required packages resolve before draining. The helper backs up both stores before changing packages and requires free space on the backup filesystem equal to twice the combined database and WAL file sizes. If space is insufficient, it records a failed upgrade with the folder to clean and leaves the server and packages unchanged. Instance-local upgrades back up stores, change package pins, install dependencies, commit the pin change, and restart. A failed local installation restores manifests and lockfiles; follow the CLI’s recovery instructions if startup fails.
 
-Keep backup files until you verify the result. [CLI upgrade reference](/reference/cli/#usine-upgrade) describes flags and installation requirements.
+## Managed upgrade backups
+
+The helper creates private `backup.XXXXXXXX` directories under `.usine/upgrade/` in the instance folder. After a successful upgrade, it keeps the newest three backups, always including the current upgrade backup, and removes older ones. Failed upgrades and rollbacks retain all backups. The helper journal reports backup paths and cleanup failures. After a backup or space-check failure, free the required space and restart the server service to resume attempt admission before retrying the upgrade.
+
+To store backups outside the instance folder or change the retention count, run `sudo systemctl edit usine-upgrade.service` and add a drop-in:
+
+```ini
+[Service]
+Environment="USINE_UPGRADE_BACKUP_DIR=/var/backups/usine/factory"
+Environment="USINE_UPGRADE_BACKUP_KEEP=3"
+```
+
+Use an absolute directory dedicated to this instance. The helper service user must be able to create and write the directory. `USINE_UPGRADE_BACKUP_KEEP` accepts integers from 1 to 999999999. These variables belong to the helper service environment; adding them to the instance’s `.env` does not configure the helper. Run `sudo systemctl daemon-reload` after saving the drop-in. The next upgrade uses the new values.
+
+Changing the backup directory leaves backups in the previous directory available for manual removal. Keep any backups you need for longer-term recovery in separate storage.
+
+[CLI upgrade reference](/reference/cli/#usine-upgrade) describes flags and installation requirements.

@@ -9,6 +9,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -30,6 +31,14 @@ const helper = readFileSync(new URL("../../src/upgrade/helper.sh", import.meta.u
 const run = (
   scenario:
     | "good"
+    | "retention"
+    | "external-retention"
+    | "external-low-space"
+    | "failed-retention"
+    | "failed-prune"
+    | "clock-skew-retention"
+    | "low-space"
+    | "invalid-retention"
     | "bad-api"
     | "bad-install"
     | "unchanged-install"
@@ -45,6 +54,7 @@ const run = (
     | "missing-target"
     | "missing-404"
     | "migrated-api"
+    | "migrated-external"
     | "migrated-good"
     | "migrated-startup-exit"
     | "migrated-startup-wait"
@@ -59,6 +69,11 @@ const run = (
   const executables = mkdtempSync(join(tmpdir(), "usine-upgrade-commands-"));
   const storage = join(root, ".usine");
   const folder = join(storage, "upgrade");
+  const externalBackups =
+    scenario === "external-retention" ||
+    scenario === "external-low-space" ||
+    scenario === "migrated-external";
+  const backupRoot = externalBackups ? join(executables, 'external backup "folder"') : folder;
   const prefix = join(root, "custom prefix");
   const packageFolder = join(prefix, "lib/node_modules/@usine/server");
   mkdirSync(folder, { recursive: true });
@@ -95,6 +110,34 @@ const run = (
   }
   if (scenario === "bad-backup") writeFileSync(join(storage, "runtime.sqlite"), "not SQLite");
   try {
+    const databaseBytes = ["runtime.sqlite", "durable.sqlite"].reduce(
+      (total, database) =>
+        total + (existsSync(join(storage, database)) ? statSync(join(storage, database)).size : 0),
+      0,
+    );
+    if (scenario === "low-space" || scenario === "external-low-space") {
+      command("df", `printf 'Avail\\n${databaseBytes * 2 - 1}\\n'`);
+    }
+    if (scenario === "retention" || scenario === "external-retention") {
+      mkdirSync(backupRoot, { recursive: true });
+      mkdirSync(join(backupRoot, "operator-files"));
+      writeFileSync(join(backupRoot, "backup.notes"), "keep");
+    }
+    if (
+      scenario === "failed-retention" ||
+      scenario === "clock-skew-retention" ||
+      scenario === "failed-prune"
+    ) {
+      for (let backup = 0; backup < 3; backup++) {
+        const old = join(backupRoot, `backup.old0000${backup}`);
+        mkdirSync(old);
+        const modified = new Date(2100, 0, backup + 1);
+        utimesSync(old, modified, modified);
+      }
+    }
+    if (scenario === "failed-prune") {
+      command("rm", 'if [[ "$*" = *backup.* ]]; then exit 1; fi\nexec /bin/rm "$@"');
+    }
     command("sleep", 'echo "sleep $*" >> "$folder/commands"');
     command(
       "npm",
@@ -193,7 +236,7 @@ read -r authorization
 [ "$authorization" = "Authorization: Bearer $(< "$folder/../admin-token")" ] || exit 1
 if [ "$scenario" = unchanged-unhealthy ]; then exit 1; fi
 if [ "$installed" = @usine/server@2.0.0 ]; then
-  case "$scenario" in bad-api|*-rollback|migrated-api|migrated-no-durable|missing-*backup) exit 1;; esac
+  case "$scenario" in bad-api|failed-retention|*-rollback|migrated-api|migrated-external|migrated-no-durable|missing-*backup) exit 1;; esac
 else
   node "$folder/database.cjs" read || exit 1
 fi
@@ -235,25 +278,55 @@ SECONDS=0
 sleep() { command sleep "$@"; SECONDS=$((SECONDS+$1)); }
 ${helper}`,
     );
-    const result = spawnSync("bash", [script], {
-      cwd: root,
-      env: {
-        ...process.env,
-        PATH: `${executables}:${process.env.PATH}`,
-        folder,
-        scenario,
-        shutdown,
-      },
-      encoding: "utf8",
-      timeout: 20_000,
-    });
-    assert.ifError(result.error);
-    const snapshot = readdirSync(folder).find((name) => name.startsWith("backup."));
-    const snapshotPath = snapshot === undefined ? undefined : join(folder, snapshot);
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: `${executables}:${process.env.PATH}`,
+      folder,
+      scenario,
+      shutdown,
+    };
+    if (externalBackups) {
+      environment.USINE_UPGRADE_BACKUP_DIR = `${backupRoot}/`;
+      environment.USINE_UPGRADE_BACKUP_KEEP = "2";
+    }
+    if (scenario === "invalid-retention") environment.USINE_UPGRADE_BACKUP_KEEP = "0";
+    const execute = () => {
+      const result = spawnSync("bash", [script], {
+        cwd: root,
+        env: environment,
+        encoding: "utf8",
+        timeout: 20_000,
+      });
+      assert.ifError(result.error);
+      return result;
+    };
+    const snapshots = () =>
+      readdirSync(backupRoot).filter((name) => /^backup\.[A-Za-z0-9]{8}$/u.test(name));
+    const created: string[] = [];
+    let result = execute();
+    if (scenario === "retention" || scenario === "external-retention") {
+      for (let upgrade = 0; upgrade < 4; upgrade++) {
+        if (upgrade > 0) result = execute();
+        expect(result.status, result.stdout + result.stderr).toBe(0);
+        const current = result.stdout.match(/snapshot=(.*)/u)?.[1];
+        assert(current !== undefined);
+        created.push(current);
+        const modified = new Date(2020, 0, upgrade + 1);
+        utimesSync(current, modified, modified);
+      }
+    }
+    const retained = snapshots().map((name) => join(backupRoot, name));
+    const snapshotPath = retained[0];
     return {
       failed: result.status !== 0,
       output: result.stdout + result.stderr,
       prefix,
+      retained,
+      databaseBytes,
+      current: result.stdout.match(/upgrade backup previous=.*snapshot=(.*)/u)?.[1],
+      created,
+      operatorFiles: existsSync(join(backupRoot, "operator-files")),
+      notes: existsSync(join(backupRoot, "backup.notes")),
       migrated: existsSync(join(folder, "migrated")),
       configuration:
         scenario === "bad-backup"
@@ -286,7 +359,73 @@ ${helper}`,
 
 const slowCli = { timeout: 30_000 };
 
-it.each(["migrated-api", "migrated-no-durable"] as const)(
+it.each(["retention", "external-retention"] as const)(
+  "keeps the newest backups after four successful upgrades: %s",
+  slowCli,
+  (scenario) => {
+    const result = run(scenario);
+    expect(result.record.status).toBe("good");
+    expect([...result.retained].sort()).toEqual(
+      result.created.slice(scenario === "retention" ? -3 : -2).sort(),
+    );
+    expect(result.operatorFiles).toBe(true);
+    expect(result.notes).toBe(true);
+    expect(result.snapshot?.mode).toBe(0o600);
+  },
+);
+
+it.each(["low-space", "external-low-space", "invalid-retention"] as const)(
+  "records a failure without stopping or replacing the server: %s",
+  slowCli,
+  (scenario) => {
+    const result = run(scenario);
+    expect(result.failed).toBe(true);
+    assert(result.record.status === "failed");
+    expect(result.record.reason).toContain(
+      scenario === "invalid-retention" ? "BACKUP_KEEP" : "space",
+    );
+    if (scenario !== "invalid-retention") {
+      expect(result.output).toContain(`required_bytes=${result.databaseBytes * 2}`);
+    }
+    if (scenario === "low-space") expect(result.record.reason).toContain(".usine/upgrade");
+    if (scenario === "external-low-space") {
+      expect(result.record.reason).toContain('external backup "folder"');
+    }
+    expect(result.retained).toEqual([]);
+    expect(result.running).toBe("@usine/server@1.0.0");
+    expect(result.commands).not.toContain("stop");
+    expect(result.commands).not.toContain("install");
+    expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
+    expect(result.durable).toEqual([{ value: "before" }]);
+  },
+);
+
+it("records a healthy upgrade when an old backup cannot be removed", slowCli, () => {
+  const result = run("failed-prune");
+  expect(result.failed).toBe(false);
+  expect(result.record.status).toBe("good");
+  expect(result.running).toBe("@usine/server@2.0.0");
+  expect(result.retained).toHaveLength(4);
+  expect(result.retained).toContain(result.current);
+  expect(result.output).toContain("status=failed; check the upgrade service journal");
+});
+
+it("retains every backup when an upgrade rolls back", slowCli, () => {
+  const result = run("failed-retention");
+  expect(result.record.status).toBe("rolled-back");
+  expect(result.retained).toHaveLength(4);
+  expect(result.retained).toContain(result.current);
+});
+
+it("keeps the current backup even when older backups have future timestamps", slowCli, () => {
+  const result = run("clock-skew-retention");
+  expect(result.record.status).toBe("good");
+  expect(result.retained).toHaveLength(3);
+  expect(result.retained).toContain(result.current);
+  expect(result.retained.some((path) => path.endsWith("backup.old00000"))).toBe(false);
+});
+
+it.each(["migrated-api", "migrated-external", "migrated-no-durable"] as const)(
   "restores the previous stores before its API answers after %s",
   slowCli,
   (scenario) => {
@@ -296,7 +435,7 @@ it.each(["migrated-api", "migrated-no-durable"] as const)(
     expect(result.record.status).toBe("rolled-back");
     expect(result.running).toBe("@usine/server@1.0.0");
     expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
-    expect(result.durable).toEqual(scenario === "migrated-api" ? [{ value: "before" }] : []);
+    expect(result.durable).toEqual(scenario === "migrated-no-durable" ? [] : [{ value: "before" }]);
     expect(result.snapshot).toEqual({
       mode: 0o600,
       configuration: [{ kind: "settings", value: "before" }],

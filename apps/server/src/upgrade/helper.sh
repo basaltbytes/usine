@@ -2,18 +2,24 @@ set -eu
 umask 077
 
 record() {
+  local message=$2
+  message=${message//\\/\\\\}
+  message=${message//\"/\\\"}
+  message=${message//$'\n'/\\n}
+  message=${message//$'\r'/\\r}
+  message=${message//$'\t'/\\t}
   if [ "$1" = installing ] || [ "$1" = good ]; then
     printf '{"previous":"%s","target":"%s","status":"%s"}\n' \
       "$previous" "$target" "$1" > "$folder/result.tmp"
   elif [ "$1" = rolled-back ]; then
     printf '{"previous":"%s","target":"%s","status":"%s","reason":"%s","failureStage":"%s"}\n' \
-      "$previous" "$target" "$1" "$2" "$failure_stage" > "$folder/result.tmp"
+      "$previous" "$target" "$1" "$message" "$failure_stage" > "$folder/result.tmp"
   else
     printf '{"previous":"%s","target":"%s","status":"%s","reason":"%s"}\n' \
-      "$previous" "$target" "$1" "$2" > "$folder/result.tmp"
+      "$previous" "$target" "$1" "$message" > "$folder/result.tmp"
   fi
   mv "$folder/result.tmp" "$folder/result.json"
-  printf 'upgrade previous=%s target=%s status=%s reason=%s\n' "$previous" "$target" "$1" "$2"
+  printf 'upgrade previous=%s target=%s status=%s reason=%s\n' "$previous" "$target" "$1" "$message"
 }
 
 stop_server() {
@@ -80,8 +86,64 @@ healthy() {
   return 1
 }
 
+prepare_backup() {
+  backup_root=${USINE_UPGRADE_BACKUP_DIR-$folder}
+  backup_keep=${USINE_UPGRADE_BACKUP_KEEP-3}
+  if [[ ! "$backup_keep" =~ ^[1-9][0-9]{0,8}$ ]]; then
+    backup_reason='USINE_UPGRADE_BACKUP_KEEP must be an integer between 1 and 999999999; the server and packages were not changed.'
+    return 1
+  fi
+  if [[ "$backup_root" != /* ]]; then
+    backup_reason='USINE_UPGRADE_BACKUP_DIR must be an absolute path; the server and packages were not changed.'
+    return 1
+  fi
+  mkdir -p -- "$backup_root" || return 1
+  backup_root=$(cd -- "$backup_root" && pwd -P) || return 1
+  local database size=0 bytes available required
+  for database in runtime.sqlite durable.sqlite runtime.sqlite-wal durable.sqlite-wal; do
+    if [ -f "$folder/../$database" ]; then
+      bytes=$(stat -c %s -- "$folder/../$database") || return 1
+      size=$((size+bytes))
+    fi
+  done
+  required=$((size*2))
+  available=$(df -B1 --output=avail -- "$backup_root") || return 1
+  available=${available##*$'\n'}
+  available=${available//[[:space:]]/}
+  [[ "$available" =~ ^[0-9]+$ ]] || return 1
+  printf 'upgrade backup-space folder=%s required_bytes=%s available_bytes=%s\n' "$backup_root" "$required" "$available"
+  if [ "$available" -lt "$required" ]; then
+    backup_reason="Insufficient free disk space in $backup_root. Clean this backup folder before retrying; the server and packages were not changed."
+    return 1
+  fi
+}
+
+prune_backups() {
+  local backup retained=1 failed=0
+  find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name 'backup.????????' \
+    -printf '%T@ %p\0' > "$folder/backups.list" || return 1
+  sort -z -nr -o "$folder/backups.list" "$folder/backups.list" || return 1
+  while IFS= read -r -d '' backup; do
+    backup=${backup#* }
+    if [ "$backup" = "$snapshot" ]; then continue; fi
+    if [ "$retained" -lt "$backup_keep" ]; then
+      retained=$((retained+1))
+      continue
+    fi
+    if rm -rf -- "$backup"; then
+      printf 'upgrade backup-prune snapshot=%s status=removed\n' "$backup"
+    else
+      failed=1
+      printf 'upgrade backup-prune snapshot=%s status=failed\n' "$backup" >&2
+    fi
+  done < "$folder/backups.list"
+  rm -f "$folder/backups.list" || return 1
+  if [ "$failed" -ne 0 ]; then return 1; fi
+  printf 'upgrade backup-prune folder=%s keep=%s current=%s status=complete\n' "$backup_root" "$backup_keep" "$snapshot"
+}
+
 backup_data() {
-  snapshot=$(mktemp -d "$folder/backup.XXXXXXXX") || return 1
+  snapshot=$(mktemp -d "${backup_root%/}/backup.XXXXXXXX") || return 1
   printf 'upgrade backup previous=%s target=%s snapshot=%s\n' "$previous" "$target" "$snapshot"
   (cd "$folder/../.." && timeout 5m node "$prefix/lib/node_modules/@usine/server/dist/main.js" backup "$snapshot/runtime.sqlite") || return 1
   durable_snapshot=
@@ -89,21 +151,23 @@ backup_data() {
 }
 
 restore_data() {
-  local database
-  recovery_reason='Rollback failed: could not restore the databases. The service is stopped. Check the upgrade service journal and restore the backup in .usine/upgrade/backup.*.'
+  local database restore
+  recovery_reason="Rollback failed: could not restore the databases. The service is stopped. Check the upgrade service journal and restore the backup in $snapshot."
   printf 'upgrade restore previous=%s snapshot=%s\n' "$previous" "$snapshot"
-  cp "$snapshot/runtime.sqlite" "$snapshot/runtime.restore" || return 1
+  restore=$(mktemp -d "$folder/restore.XXXXXXXX") || return 1
+  cp "$snapshot/runtime.sqlite" "$restore/runtime.sqlite" || return 1
   if [ -n "$durable_snapshot" ]; then
-    cp "$durable_snapshot" "$snapshot/durable.restore" || return 1
+    cp "$durable_snapshot" "$restore/durable.sqlite" || return 1
   fi
   for database in runtime durable; do
     rm -f "$folder/../$database.sqlite-wal" "$folder/../$database.sqlite-shm" || return 1
-    if [ -f "$snapshot/$database.restore" ]; then
-      mv "$snapshot/$database.restore" "$folder/../$database.sqlite" || return 1
+    if [ -f "$restore/$database.sqlite" ]; then
+      mv "$restore/$database.sqlite" "$folder/../$database.sqlite" || return 1
     else
       rm -f "$folder/../$database.sqlite" || return 1
     fi
   done
+  rmdir "$restore" || return 1
   recovery_reason=
   printf 'upgrade restore previous=%s status=complete snapshot=%s\n' "$previous" "$snapshot"
 }
@@ -154,6 +218,11 @@ restore_previous() {
 exec 9> "$folder/helper.lock"
 flock -n 9 || exit 0
 record installing ''
+backup_reason='Could not prepare database backups; the server and packages were not changed. Check the upgrade service journal.'
+if ! prepare_backup; then
+  record failed "$backup_reason"
+  exit 1
+fi
 if ! backup_data; then
   record failed 'Could not back up the databases; the server and packages were not changed. Check the upgrade service journal.'
   exit 1
@@ -168,6 +237,9 @@ if install_version "$target"; then
   reason='The new server did not become ready within three minutes.'
   failure_stage=health-check
   if timeout 30s systemctl start "$unit" && healthy "$target" ready; then
+    if ! prune_backups; then
+      printf 'upgrade backup-prune folder=%s status=failed; check the upgrade service journal and remove old backups manually\n' "$backup_root" >&2
+    fi
     record good ''
     exit 0
   fi
