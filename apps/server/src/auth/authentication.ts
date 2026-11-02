@@ -137,10 +137,13 @@ export const authenticationLayer = (options: {
           memberId: member.id,
           hash: secretHash(Redacted.value(secret)),
           name,
-          scopes: yield* Option.match(requestedScopes, {
-            onNone: () => access.permissions(member.id),
-            onSome: Effect.succeed,
-          }),
+          scopes:
+            kind === "session"
+              ? []
+              : yield* Option.match(requestedScopes, {
+                  onNone: () => access.permissions(member.id),
+                  onSome: Effect.succeed,
+                }),
           kind,
           createdAt: now,
           lastUsedAt: now,
@@ -196,15 +199,27 @@ export const authenticationLayer = (options: {
         }
         const found = yield* store.authenticate(hash, now);
         if (Option.isNone(found)) return yield* authFailure("Sign in to continue.");
+        const { member, token } = found.value;
+        yield* Effect.annotateCurrentSpan({
+          memberId: member.id,
+          tokenId: token.id,
+          kind: token.kind,
+        });
+        const grants = yield* access.permissions(member.id);
+        const permissions =
+          token.kind === "session" ? grants : intersectPermissions(grants, token.scopes);
+        yield* Effect.logDebug("Member permissions resolved", {
+          memberId: member.id,
+          tokenId: token.id,
+          kind: token.kind,
+          permissionCount: permissions.length,
+        });
         return {
           credential: "member" as const,
-          member: Option.some(found.value.member),
-          token: Option.some(found.value.token),
+          member: Option.some(member),
+          token: Option.some(token),
           csrf: csrf(secret),
-          permissions: intersectPermissions(
-            yield* access.permissions(found.value.member.id),
-            found.value.token.scopes,
-          ),
+          permissions,
         };
       });
       const limit = Effect.fn("Authentication.limit")(function* (endpoint: string) {
@@ -257,6 +272,17 @@ export const authenticationLayer = (options: {
           yield* Effect.annotateCurrentSpan({ memberId: caller.member.value.id });
           if (Option.isSome(caller.token))
             yield* Effect.annotateCurrentSpan({ callerTokenId: caller.token.value.id });
+          const tokens = yield* store.tokens(caller.member.value.id);
+          if (tokens.some((token) => token.id === id && token.kind === "session")) {
+            yield* Effect.logWarning("Scope change refused for a browser session", {
+              memberId: caller.member.value.id,
+              tokenId: id,
+            });
+            return yield* authFailure(
+              "Browser sessions follow role bindings. Only device tokens have editable scopes.",
+              400,
+            );
+          }
           if (
             !scopes.every((grant) => permits(caller.permissions, grant.permission, grant.scope))
           ) {

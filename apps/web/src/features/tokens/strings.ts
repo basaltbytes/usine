@@ -16,6 +16,7 @@ export const scopeCopy = {
   cancel: "Cancel",
   once: "Copy this token now. You cannot read it again.",
   none: "No permissions",
+  session: "Browser session · Access follows your role bindings",
   instance: "Instance admin",
   read: "Read",
   operate: "Operate",

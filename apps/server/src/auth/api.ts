@@ -193,7 +193,7 @@ export const AuthApi = HttpApiGroup.make("authentication")
       .annotate(OpenApi.Summary, "Set token scopes")
       .annotate(
         OpenApi.Description,
-        "Sets the scope ceiling for one of the member's tokens. Requests also check the member's current role bindings.",
+        "Sets the scope ceiling for one of the member's device tokens. Requests also check current role bindings. Browser sessions follow role bindings and reject scope edits.",
       ),
     HttpApiEndpoint.delete("revokeToken", "/api/tokens/:id", {
       params: { id: TokenId },

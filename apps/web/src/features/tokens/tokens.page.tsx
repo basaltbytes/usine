@@ -58,7 +58,11 @@ export const TokensPage = () => {
             <li key={token.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
               <div>
                 <p className="text-sm font-medium">{token.name}</p>
-                <p>{token.scopes.map(scopeLabel).join(", ") || scopeCopy.none}</p>
+                <p>
+                  {token.kind === "session"
+                    ? scopeCopy.session
+                    : token.scopes.map(scopeLabel).join(", ") || scopeCopy.none}
+                </p>
                 <p className="text-xs text-muted-foreground">
                   {created} {new Date(token.createdAt).toLocaleDateString()} · {lastUsed}{" "}
                   {new Date(token.lastUsedAt).toLocaleString()}
@@ -68,9 +72,11 @@ export const TokensPage = () => {
                 <TokenScopes token={token} close={() => setEditing(undefined)} />
               )}
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setEditing(token.id)}>
-                  {scopeCopy.edit}
-                </Button>
+                {token.kind === "device" && (
+                  <Button variant="outline" onClick={() => setEditing(token.id)}>
+                    {scopeCopy.edit}
+                  </Button>
+                )}
                 {selected === token.id ? (
                   <>
                     <Button

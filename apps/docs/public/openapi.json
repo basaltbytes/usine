@@ -32261,7 +32261,7 @@
             }
           }
         },
-        "description": "Sets the scope ceiling for one of the member's tokens. Requests also check the member's current role bindings.",
+        "description": "Sets the scope ceiling for one of the member's device tokens. Requests also check current role bindings. Browser sessions follow role bindings and reject scope edits.",
         "summary": "Set token scopes",
         "requestBody": {
           "content": {
