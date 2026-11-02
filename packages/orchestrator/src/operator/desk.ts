@@ -597,7 +597,7 @@ const makeDesk = Effect.gen(function* () {
     const machineViews = inFlight.map(machineView);
     const creating = new Map(
       machineViews.flatMap((machine) =>
-        machine.state === "creating" && machine.runId !== null
+        (machine.state === "creating" || machine.state === "preparing") && machine.runId !== null
           ? [[machine.runId, machine] as const]
           : [],
       ),

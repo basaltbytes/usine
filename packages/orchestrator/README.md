@@ -50,6 +50,8 @@ Board move rejection errors derive diagnostic messages from their repository, it
 
 ### Run detail
 
+Machine views report `preparing` while a provisioned machine runs preflight and prepares its attempt image and shared caches. Queued runs retain their machine on the overview during this state.
+
 A `GitHubPushFailureView` shows a refused push in the run's attempt outcome and Needs attention. Its message includes the repository, refused ref, GitHub's diagnostic, and the single-repository installation token scope. The attempt's salvage still identifies the retained checkout.
 
 `Operator.detail` takes distinct cold, live-tail, and earlier-page requests. A cold read keeps the newest 500 rows per attempt, with an earlier cursor per truncated attempt for paging back. A live tail returns at most 500 rows across the run and advances its cursor from the last row. Each response also has:

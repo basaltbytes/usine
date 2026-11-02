@@ -9,11 +9,19 @@ import {
   ProvisionerSeconds,
   ProvisionerTimings,
 } from "@usine/core/worker";
-import { Effect, Fiber, Option } from "effect";
+import { Deferred, Effect, Fiber, Option } from "effect";
 import { AttemptId } from "@usine/core/attempt";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import { CheckoutRequest, Executor, WorkerMachines } from "../../../src/executor.ts";
-import { ADDRESS, DESTINATION, fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
+import {
+  ADDRESS,
+  capturedLogs,
+  DESTINATION,
+  fakeMachine,
+  request,
+  TEST_AGENT,
+  WORKER,
+} from "../support.ts";
 import { boatAddress, hetznerAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 import { hetznerSettings } from "./support.ts";
@@ -190,3 +198,55 @@ for (const replacementDocker of ["absent", "running"] as const) {
     },
   );
 }
+
+it.live.each(["preflight", "first-use"] as const)(
+  "reports image preparation during %s and warns about the snapshot once",
+  (mode) => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.imageOnMachine = false;
+    const providers = fakeProviders();
+    providers.hetzner.startingReads = 0;
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const proceed = yield* Deferred.make<void>();
+      const machines = yield* WorkerMachines;
+      if (mode === "first-use") {
+        const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+        yield* machines.release(first.hold);
+        logs.lines.length = 0;
+        logs.warnings.length = 0;
+      }
+      machine.state.imageOnMachine = false;
+      machine.state.beforePull = Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(proceed)),
+      );
+      const creating = yield* machines
+        .create(WORKER, RUN, request.attemptId, [])
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      const preparing = (yield* machines.machines)[0];
+      assert.strictEqual(preparing?.state, "preparing");
+      assert.isTrue(preparing !== undefined && Option.isSome(preparing.id));
+      assert.lengthOf(
+        logs.warnings.filter((line) => line.includes("snapshot lacks the attempt image")),
+        1,
+      );
+      assert.include(logs.warnings.join("\n"), "claude-2.1.311-codex-0.164.0");
+      yield* Deferred.succeed(proceed, undefined);
+      const grant = yield* Fiber.join(creating);
+      assert.strictEqual(Option.isSome(grant.checked), mode === "preflight");
+      assert.strictEqual((yield* machines.machines)[0]?.state, "ready");
+      assert.lengthOf(
+        logs.lines.filter((line) => line.includes("Pulled the attempt image")),
+        1,
+      );
+      yield* machines.release(grant.hold);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtimeOf(machine, providers, hetznerAddress)),
+      Effect.provide(logs.layer),
+    );
+  },
+);

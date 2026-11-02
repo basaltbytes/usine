@@ -2,6 +2,8 @@ import type { MachineProvider } from "@usine/core/worker";
 import type { MachineView, ProvisioningPauseView } from "@usine/orchestrator/operator";
 import { agoLabel, dayTimeLabel, timestampLabel } from "~/lib/strings";
 
+export const preparingAttemptImage = "Preparing the attempt image";
+
 export const providerLabel = {
   hetzner: "Hetzner",
   boat: "Boat",
@@ -15,7 +17,9 @@ export const providerMachineNoun = {
 
 /** Returns the status of a machine being created, such as `Creating a Hetzner machine, started 2m ago`. */
 export const machineCreationLine = (machine: MachineView, now: number): string =>
-  `Creating a ${providerLabel[machine.provider]} machine, started ${agoLabel(machine.since, now)}`;
+  machine.state === "preparing"
+    ? `${preparingAttemptImage}, machine started ${agoLabel(machine.since, now)}`
+    : `Creating a ${providerLabel[machine.provider]} machine, started ${agoLabel(machine.since, now)}`;
 
 const creationFailureReason = {
   capacity: "no capacity",

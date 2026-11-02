@@ -91,6 +91,10 @@ export const machineReuseFor = (options: ReuseOptions) => {
                       }),
                   ),
                 );
+              yield* holds.update(candidate.hold, (current) => ({
+                ...current,
+                state: "preparing",
+              }));
               return yield* options.check(machine, brains);
             }),
           ).pipe(
@@ -100,6 +104,7 @@ export const machineReuseFor = (options: ReuseOptions) => {
                 : discard(candidate.hold, "reuse preflight or assignment failed"),
             ),
           );
+          yield* holds.update(candidate.hold, (current) => ({ ...current, state: "located" }));
           yield* Effect.logInfo("Reused a machine for the attempt", {
             worker,
             runId,

@@ -97,7 +97,9 @@ export const Outline = ({
   const awaitedMachine =
     run.state === "Queued" &&
     machine !== null &&
-    (machine.state === "creating" || (machine.state === "ready" && machine.attemptId === null))
+    (machine.state === "creating" ||
+      machine.state === "preparing" ||
+      (machine.state === "ready" && machine.attemptId === null))
       ? machine
       : null;
   const open = selection._tag === "Attempt" ? (reading?.attemptId ?? selection.attemptId) : null;

@@ -352,6 +352,8 @@ Idle upgrade waits show the requested version in run headers, Overview's Running
 
 `/setup` resumes App creation, credential recovery, installation discovery, and repository selection. A one-time sign-in link opens the setup session. The page posts a prepared manifest to GitHub and supports restoring existing credential JSON. After installation, GitHub sign-in enrolls the first admin and ends the setup session. **Add repositories** opens the existing installation repository picker.
 
+Run pages show **Preparing the attempt image** while a provisioned machine runs preflight and prepares the image and shared caches. The run header, summary, outline, and worker machine table show this state until the machine is ready.
+
 Provisioned machines on Overview and Configuration > Workers show their assigned attempt count and age. Idle machines are available for reuse. Statistics > Details lists machine starts by UTC day, worker, and provider, including machines that failed preflight.
 
 ## Access control

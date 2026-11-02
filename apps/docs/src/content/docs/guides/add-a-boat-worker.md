@@ -32,3 +32,9 @@ Instance admin access, an instance using SSH workers, a Boat account and CLI, an
 Preflight validates the token and account limits without creating a sandbox. A test run creates a sandbox, adds the public key, verifies its pinned SSH host key, and starts an attempt container. **Workers** shows the machine until cleanup retires it.
 
 Boat offers no region setting. Each sandbox has no account secrets, automatic snapshots, command monitoring, or automatic stop. Without a gateway, the attempt can read its token and provider keys. [Boat settings](/reference/configuration/workers/#boat-provisioner) describes snapshots and reuse.
+
+## Image preparation
+
+The run page shows **Preparing the attempt image** during machine preflight and first-use cache preparation. The server logs whether the image is `present` or `absent`, the inspection duration, and the preflight pull duration. The pull's `downloaded` field compares the image IDs before and after the pull. The image user probe has its own duration. Each **Prepared shared cache volume** entry includes the complete script duration and `runDurationMillis` for its container run, in milliseconds.
+
+If a new machine lacks the attempt image, the server logs a warning with the image name before pulling it. Rebuild the snapshot with that image and update the worker's snapshot setting. Rebuild snapshots after an upgrade that changes the attempt image. A present image with a slow first container run can indicate slow reads from the restored disk; use the separate timings to identify the slow step.

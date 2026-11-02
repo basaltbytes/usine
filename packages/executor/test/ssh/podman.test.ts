@@ -5,6 +5,7 @@ import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { completes, type StubParent } from "@usine/durable/testing";
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { Executor } from "../../src/executor.ts";
+import { ATTEMPT_IMAGE } from "../../src/ssh/ssh.ts";
 import { fakeGateway, gatewayRuntime } from "./gateway/support.ts";
 import {
   aloneOnItem,
@@ -49,6 +50,67 @@ const sink = {
 };
 
 describe("rootless Podman", () => {
+  it.effect.each(["preflight", "prepare"] as const)(
+    "pulls a missing image before the first container during %s",
+    (operation) => {
+      const machine = podmanMachine();
+      machine.state.imageOnMachine = false;
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        if (operation === "preflight") yield* executor.preflight(WORKER, [], 1);
+        else yield* executor.prepare(request);
+        const warnings = logs.warnings.filter((line) => line.includes("image is absent"));
+        assert.lengthOf(warnings, 1);
+        assert.include(warnings[0] ?? "", ATTEMPT_IMAGE);
+        const inspections = logs.lines.filter((line) =>
+          line.includes("Inspected the attempt image"),
+        );
+        assert.include(inspections[0] ?? "", '"status":"absent"');
+        const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
+        assert.lengthOf(pulls, 1);
+        assert.deepInclude(JSON.parse(pulls[0] ?? "")[1], {
+          image: ATTEMPT_IMAGE,
+          runtime: "podman",
+          downloaded: true,
+          durationMillis: 0,
+        });
+        const commands = machine.state.calls.map(({ line }) => line);
+        const pull = commands.indexOf(`exec 'podman' 'pull' '--quiet' '${ATTEMPT_IMAGE}'`);
+        assert.isAtLeast(pull, 0);
+        assert.lengthOf(
+          commands.filter((line) => line.startsWith("exec 'podman' 'pull'")),
+          1,
+        );
+        const firstContainer = commands.findIndex(
+          (line) => line.includes("--entrypoint") || line.includes("volume create"),
+        );
+        assert.isAbove(firstContainer, pull);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider())),
+        Effect.provide(logs.layer),
+      );
+    },
+  );
+
+  it.effect.each([1, 125, 255])(
+    "preserves image inspection failure with exit code %s",
+    (exitCode) => {
+      const machine = podmanMachine();
+      machine.state.imageInspectFailure = {
+        exitCode,
+        stderr: "Error: opening image storage: permission denied",
+      };
+      return Effect.gen(function* () {
+        const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "WorkerCapabilityError");
+        assert.include(error.message, "Can't inspect the attempt image");
+        assert(!machine.state.calls.some(({ line }) => line.startsWith("exec 'podman' 'pull'")));
+      }).pipe(Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
+
   it.effect("runs preflight through exec and reports runtime evidence", () => {
     const machine = podmanMachine();
     const logs = capturedLogs();

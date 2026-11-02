@@ -41,4 +41,6 @@ Instance admin access, an instance using SSH workers, a Linux machine with Git, 
 
 The worker reports passing preflight, its selected runtime, and applied container limits. Start a test run and confirm its attempt lists the SSH worker.
 
+For Docker and Podman, the server logs whether the attempt image is present and how long inspection and pulling take. A missing image produces a warning and is pulled before the first container starts. Other Podman inspection errors stop preparation and report a container capability error.
+
 For later edits, run `EDITOR=vi usine config edit worker worker-one`. [Attempt containers](/reference/configuration/workers/#attempt-container) explains image requirements and shared caches. [Configure a gateway](/guides/configure-a-gateway/) to proxy credentials.
