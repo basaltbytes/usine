@@ -1,7 +1,8 @@
 import { Context, type DateTime, Effect, Layer, Option, Schema } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { attemptTranscripts } from "../database/schema.ts";
+import { attemptTranscripts, events as storedEvents, runs } from "../database/schema.ts";
+import type { DedupKey } from "@usine/core/event";
 import type { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
@@ -28,6 +29,21 @@ const makeRunReader = Effect.gen(function* () {
   const inspect = Effect.fn("RunReader.inspect")((runId: RunId) =>
     queries.snapshot(runId).pipe(persistence("read run")),
   );
+  const runForEvent = Effect.fn("RunReader.runForEvent")(function* (dedupKey: DedupKey) {
+    yield* Effect.annotateCurrentSpan({ dedupKey });
+    const rows = yield* database
+      .select({ runId: runs.runId })
+      .from(storedEvents)
+      .innerJoin(runs, eq(runs.eventId, storedEvents.eventId))
+      .where(eq(storedEvents.dedupKey, dedupKey))
+      .execute();
+    const decoded = yield* Schema.decodeUnknownEffect(
+      Schema.Array(Schema.Struct({ runId: RunId })),
+    )(rows);
+    const run = Option.fromNullishOr(decoded[0]);
+    yield* Effect.logDebug("Read the run admitted for an event", { dedupKey, run });
+    return Option.map(run, ({ runId }) => runId);
+  }, persistence("read the run admitted for an event"));
   const evidence = Effect.fn("RunReader.evidence")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     const evidence = yield* database
@@ -133,6 +149,7 @@ const makeRunReader = Effect.gen(function* () {
 
   return {
     inspect,
+    runForEvent,
     evidence,
     list,
     closed,
@@ -153,6 +170,10 @@ export class RunReader extends Context.Service<
   {
     /** Returns the Run's state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
+    /** Returns the admitted run, or `None` if the event has no run. */
+    readonly runForEvent: (
+      dedupKey: DedupKey,
+    ) => Effect.Effect<Option.Option<RunId>, RunStoreError>;
     /** Returns a Run snapshot and all its transcript entries, in append order, from one transaction. */
     readonly evidence: (runId: RunId) => Effect.Effect<RunEvidence, RunStoreError>;
     /** Returns every open Run plus the newest `closedLimit` closed ones, newest first. */

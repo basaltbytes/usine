@@ -468,14 +468,14 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live.each(["admitted", "timed out"] as const)(
+it.live.each(["admitted", "admitted and pushed", "timed out"] as const)(
   "a queued CI fix waits for admission until %s",
   (outcome) =>
     Effect.scoped(
       Effect.gen(function* () {
         const completion = yield* Deferred.make<StepResult>();
         const setup = yield* scenario(
-          outcome === "admitted" ? 3600 : 1,
+          outcome === "timed out" ? 1 : 3600,
           instance,
           Deferred.await(completion),
         );
@@ -517,10 +517,24 @@ it.live.each(["admitted", "timed out"] as const)(
           }
           yield* Deferred.succeed(completion, new StepResult({ message: "Fixed", facts: [] }));
           yield* engine.drain();
+          if (outcome === "admitted and pushed") {
+            yield* Ref.set(
+              setup.observed,
+              new CheckSnapshot({ head: CommitSha.make("c".repeat(40)), state: "success" }),
+            );
+          }
           yield* monitor.reconcile(instance, Option.none());
           const source = yield* engine.inspect(sourceId);
-          if (outcome === "admitted") {
+          if (outcome !== "timed out") {
             assert(source.run.state._tag === "HandedOff");
+            assert.strictEqual(source.run.state.head, head);
+            assert.strictEqual(
+              source.attempts.at(-1)?.outcome.pipe(
+                Option.map(({ _tag }) => _tag),
+                Option.getOrNull,
+              ),
+              "HandedOff",
+            );
             assert.notStrictEqual(source.run.state.fixRunId, active.runId);
             assert.strictEqual(
               (yield* engine.inspect(source.run.state.fixRunId)).run.loop,
@@ -529,6 +543,7 @@ it.live.each(["admitted", "timed out"] as const)(
           } else {
             assert.strictEqual(source.run.state._tag, "Failed");
           }
+          assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
           assert.strictEqual((yield* Ref.get(setup.tasks)).length, 3);
         }).pipe(Effect.provide(setup.runtime));
       }),

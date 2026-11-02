@@ -13,7 +13,7 @@ import {
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { Submission, RunEngine, type EnginePersistenceError } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
-import type { RunSnapshot } from "@usine/engine/run-reader";
+import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { GitHubChecks } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
@@ -44,6 +44,7 @@ export class CiMonitor extends Context.Service<
     CiMonitor,
     Effect.gen(function* () {
       const engine = yield* RunEngine;
+      const reader = yield* RunReader;
       const checks = yield* GitHubChecks;
       const writer = yield* GitHubItemWriter;
       const parser = yield* ConfigParser;
@@ -71,6 +72,23 @@ export class CiMonitor extends Context.Service<
         if (endedAt === undefined || Option.isNone(endedAt))
           return yield* Effect.die("A CI wait has no ended attempt");
         const observed = yield* checks.snapshot(wait.repository, pullRequest);
+        const dedupKey = DedupKey.make(JSON.stringify(["ci-failure", runId, head]));
+        const admitted = yield* reader.runForEvent(dedupKey);
+        if (Option.isSome(admitted)) {
+          yield* Effect.logInfo("CI fix event admitted; source hands off to its recorded run", {
+            runId,
+            head,
+            fixRunId: admitted.value,
+          });
+          return yield* engine.settleCi(
+            runId,
+            head,
+            new CiHandedOff({
+              reason: "CI failed; a fix run was admitted.",
+              fixRunId: admitted.value,
+            }),
+          );
+        }
         if (observed.head !== head) {
           yield* Effect.logInfo("A new push superseded the CI wait", {
             runId,
@@ -175,7 +193,7 @@ export class CiMonitor extends Context.Service<
         const submission = yield* triggerSubmission(expressions, {
           ...fix,
           repository,
-          dedupKey: DedupKey.make(JSON.stringify(["ci-failure", runId, head])),
+          dedupKey,
           cycleGeneration: observation.cycleGeneration,
           itemKey: observation.projection.itemKey,
           payload: observation.projection.payload,

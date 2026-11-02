@@ -364,6 +364,7 @@ const deskLayer = (
 ) => {
   const all = [...runs, ...stopped.runs];
   const reader = Layer.succeed(RunReader)({
+    runForEvent: () => Effect.die("unused"),
     latestPoolRateLimits: () => Effect.succeed([]),
     inspect: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),

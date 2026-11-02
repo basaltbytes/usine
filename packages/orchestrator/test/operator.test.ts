@@ -498,6 +498,7 @@ const testLayer = (
     transcript: readTranscript,
   });
   const reader = Layer.succeed(RunReader)({
+    runForEvent: () => Effect.die("unused"),
     latestPoolRateLimits: () =>
       Effect.succeed([
         ...new Map(
