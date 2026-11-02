@@ -128,8 +128,9 @@ if ! printf '%s\n' "$image" | remote 'sh -ec '\''
   remote 'sh -ec '\''
     config=$(sudo containerd config dump)
     printf "%s\n" "$config" | grep -E "^root|^state"
-    root=$(printf "%s\n" "$config" | sed -n "s/^root = \"\\(.*\\)\"/\\1/p")
-    state=$(printf "%s\n" "$config" | sed -n "s/^state = \"\\(.*\\)\"/\\1/p")
+    single_quote=$(printf "\047")
+    root=$(printf "%s\n" "$config" | sed -n "s/^root = [\"$single_quote]\\(.*\\)[\"$single_quote]$/\\1/p")
+    state=$(printf "%s\n" "$config" | sed -n "s/^state = [\"$single_quote]\\(.*\\)[\"$single_quote]$/\\1/p")
     sudo du -sh "$root" "$state"
   '\''' >&2 || echo "Could not read containerd storage diagnostics on sandbox $verification_sandbox." >&2
   exit 1

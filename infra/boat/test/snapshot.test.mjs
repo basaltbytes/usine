@@ -34,7 +34,7 @@ function fixture(t) {
   const image = "registry.test/attempt:latest; $(echo unsafe)";
   return {
     image,
-    run(failure = "") {
+    run(failure = "", tomlQuote = '"') {
       writeFileSync(log, "");
       const result = spawnSync(
         "sh",
@@ -50,6 +50,7 @@ function fixture(t) {
             PATH: `${bin}:${process.env.PATH}`,
             BOAT_API_KEY: "fixture",
             BOAT_TEST_FAILURE: failure,
+            BOAT_TEST_TOML_QUOTE: tomlQuote,
             BOAT_TEST_STATE: state,
             BOAT_TEST_LOG: log,
           },
@@ -97,18 +98,24 @@ test("verifies a fresh restore before reporting success and can rebuild the same
   }
 });
 
-for (const failure of ["missing", "diagnostics", "prepare", "save", "readiness"]) {
+for (const quote of ['"', "'"]) {
+  test(`prints containerd paths and disk usage for ${quote}-quoted TOML when the image is missing`, (t) => {
+    const result = fixture(t).run("missing", quote);
+    assert.equal(result.status, 1, result.stderr);
+    assert.doesNotMatch(result.stdout, /is verified and ready/);
+    assert.match(result.stderr, /cannot inspect attempt image/);
+    assert(result.stderr.includes(`root = ${quote}/custom/containerd root${quote}`));
+    assert(result.stderr.includes(`state = ${quote}/custom/containerd state${quote}`));
+    assert.match(result.stderr, /3.1G\s+\/custom\/containerd root/);
+    assert.match(result.stderr, /20K\s+\/custom\/containerd state/);
+  });
+}
+
+for (const failure of ["diagnostics", "prepare", "save", "readiness"]) {
   test(`fails and deletes every created sandbox when ${failure} fails`, (t) => {
     const result = fixture(t).run(failure);
     assert.equal(result.status, 1, result.stderr);
     assert.doesNotMatch(result.stdout, /is verified and ready/);
-    if (failure === "missing") {
-      assert.match(result.stderr, /cannot inspect attempt image/);
-      assert.match(result.stderr, /root = "\/custom\/containerd root"/);
-      assert.match(result.stderr, /state = "\/custom\/containerd state"/);
-      assert.match(result.stderr, /3.1G\s+\/custom\/containerd root/);
-      assert.match(result.stderr, /20K\s+\/custom\/containerd state/);
-    }
     if (failure === "diagnostics") {
       assert.match(result.stderr, /cannot inspect attempt image/);
       assert.match(result.stderr, /Could not read containerd storage diagnostics/);

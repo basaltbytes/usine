@@ -72,8 +72,9 @@ if (command === "curl") {
       break;
     case "containerd":
       if (failure === "diagnostics") process.exit(1);
+      const quote = process.env.BOAT_TEST_TOML_QUOTE;
       process.stdout.write(
-        'root = "/custom/containerd root"\nstate = "/custom/containerd state"\n',
+        `root = ${quote}/custom/containerd root${quote}\nstate = ${quote}/custom/containerd state${quote}\n`,
       );
       break;
     case "du":
