@@ -34,6 +34,7 @@ const run = (
     | "retention"
     | "external-retention"
     | "external-low-space"
+    | "external-instance-low-space"
     | "failed-retention"
     | "failed-prune"
     | "clock-skew-retention"
@@ -72,6 +73,7 @@ const run = (
   const externalBackups =
     scenario === "external-retention" ||
     scenario === "external-low-space" ||
+    scenario === "external-instance-low-space" ||
     scenario === "migrated-external";
   const backupRoot = externalBackups ? join(executables, 'external backup "folder"') : folder;
   const prefix = join(root, "custom prefix");
@@ -115,8 +117,19 @@ const run = (
         total + (existsSync(join(storage, database)) ? statSync(join(storage, database)).size : 0),
       0,
     );
-    if (scenario === "low-space" || scenario === "external-low-space") {
+    if (scenario === "low-space") {
       command("df", `printf 'Avail\\n${databaseBytes * 2 - 1}\\n'`);
+    }
+    if (externalBackups) {
+      command(
+        "df",
+        `available=${databaseBytes * 2}
+if { [ "$scenario" = external-low-space ] && [ "\${!#}" != "$folder" ]; } ||
+   { [ "$scenario" = external-instance-low-space ] && [ "\${!#}" = "$folder" ]; }; then
+  available=$((available-1))
+fi
+printf 'Avail\\n%s\\n' "$available"`,
+      );
     }
     if (scenario === "retention" || scenario === "external-retention") {
       mkdirSync(backupRoot, { recursive: true });
@@ -374,7 +387,12 @@ it.each(["retention", "external-retention"] as const)(
   },
 );
 
-it.each(["low-space", "external-low-space", "invalid-retention"] as const)(
+it.each([
+  "low-space",
+  "external-low-space",
+  "external-instance-low-space",
+  "invalid-retention",
+] as const)(
   "records a failure without stopping or replacing the server: %s",
   slowCli,
   (scenario) => {
@@ -390,6 +408,9 @@ it.each(["low-space", "external-low-space", "invalid-retention"] as const)(
     if (scenario === "low-space") expect(result.record.reason).toContain(".usine/upgrade");
     if (scenario === "external-low-space") {
       expect(result.record.reason).toContain('external backup "folder"');
+    }
+    if (scenario === "external-instance-low-space") {
+      expect(result.record.reason).toContain(".usine/upgrade");
     }
     expect(result.retained).toEqual([]);
     expect(result.running).toBe("@usine/server@1.0.0");

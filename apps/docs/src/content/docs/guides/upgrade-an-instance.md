@@ -31,7 +31,7 @@ Access to the instance machine, a recoverable backup, and either a global instal
 
 `usine status` reports the selected version, and the authenticated UI loads. The managed helper verifies `/api/version` and waits up to 180 seconds for `/api/ready` after recovery. Failed managed installation or readiness restores the prior package and database backup; inspect its recorded failure before retrying.
 
-Managed upgrades check that required packages resolve before draining. The helper backs up both stores before changing packages and requires free space on the backup filesystem equal to twice the combined database and WAL file sizes. If space is insufficient, it records a failed upgrade with the folder to clean and leaves the server and packages unchanged. Instance-local upgrades back up stores, change package pins, install dependencies, commit the pin change, and restart. A failed local installation restores manifests and lockfiles; follow the CLI’s recovery instructions if startup fails.
+Managed upgrades check that required packages resolve before draining. The helper backs up both stores before changing packages and requires free space on both the backup and instance filesystems equal to at least twice the combined database and WAL file sizes, so rollback can stage database copies locally even with external backups. If space is insufficient, it records a failed upgrade with the folder to clean and leaves the server and packages unchanged. Instance-local upgrades back up stores, change package pins, install dependencies, commit the pin change, and restart. A failed local installation restores manifests and lockfiles; follow the CLI’s recovery instructions if startup fails.
 
 ## Managed upgrade backups
 

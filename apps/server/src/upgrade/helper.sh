@@ -99,7 +99,7 @@ prepare_backup() {
   fi
   mkdir -p -- "$backup_root" || return 1
   backup_root=$(cd -- "$backup_root" && pwd -P) || return 1
-  local database size=0 bytes available required
+  local database size=0 bytes available required space_folder
   for database in runtime.sqlite durable.sqlite runtime.sqlite-wal durable.sqlite-wal; do
     if [ -f "$folder/../$database" ]; then
       bytes=$(stat -c %s -- "$folder/../$database") || return 1
@@ -107,15 +107,17 @@ prepare_backup() {
     fi
   done
   required=$((size*2))
-  available=$(df -B1 --output=avail -- "$backup_root") || return 1
-  available=${available##*$'\n'}
-  available=${available//[[:space:]]/}
-  [[ "$available" =~ ^[0-9]+$ ]] || return 1
-  printf 'upgrade backup-space folder=%s required_bytes=%s available_bytes=%s\n' "$backup_root" "$required" "$available"
-  if [ "$available" -lt "$required" ]; then
-    backup_reason="Insufficient free disk space in $backup_root. Clean this backup folder before retrying; the server and packages were not changed."
-    return 1
-  fi
+  for space_folder in "$backup_root" "$folder"; do
+    available=$(df -B1 --output=avail -- "$space_folder") || return 1
+    available=${available##*$'\n'}
+    available=${available//[[:space:]]/}
+    [[ "$available" =~ ^[0-9]+$ ]] || return 1
+    printf 'upgrade backup-space folder=%s required_bytes=%s available_bytes=%s\n' "$space_folder" "$required" "$available"
+    if [ "$available" -lt "$required" ]; then
+      backup_reason="Insufficient free disk space in $space_folder. Clean this folder before retrying; the server and packages were not changed."
+      return 1
+    fi
+  done
 }
 
 prune_backups() {
