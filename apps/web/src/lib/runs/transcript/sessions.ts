@@ -115,8 +115,14 @@ export const indexSessions = (
     }
     if (record.sequence > group.latestSequence) group.latestSequence = record.sequence;
     if (payload._tag === "InterventionApplied") {
-      group.held = payload.state.held;
-      group.paused = payload.state.paused;
+      const recipient = Option.match(payload.state.forwardedTo, {
+        onNone: () => group,
+        onSome: (id) => groups.get(key(record.attemptId, id)),
+      });
+      if (recipient !== undefined) {
+        recipient.held = payload.state.held;
+        recipient.paused = payload.state.paused;
+      }
     }
     if (first) group.interventions.push(receipt);
   }

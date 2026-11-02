@@ -199,6 +199,8 @@ Under the outline, a red count with previous and next controls steps through loa
 
 Each attempt is one document. Its first line names the worker, parent model, each child's harness, model, and effort, the account rate-window readings, and whether the operator intervened. Messages from the parent, children, and operator follow at a 72-character measure, with time and speaker in a narrow column.
 
+Operator messages show their latest delivery receipt once. A parent steer shows **Forwarded to child** while routed to a child, **Delivered to parent** when the parent reads it, or **Not acted on** if withdrawn or unread when the session ends. A queued note identifies which session still needs to read it. Forwarded receipts update the child's supervision state.
+
 Calls between two messages fold into one line that says what ran, such as “Ran 5 commands · 25s” or “Edited conversation.tsx · ran tests.”, counting failed and running calls. File summaries count distinct paths and add parent directories to tell apart same-named files. Recognized test and build commands say what ran; results are in the tool details. Long or varied folds use compact counts, and loading earlier inputs fills in missing details.
 
 An expanded fold shows each call as one row, start and finish together, naming the command, file, search, or delegated task. Commands show terminal output, reads show source, and edits show a patch or before-and-after text, each in a copyable panel; other tools show labeled parameters and readable results. **Raw details** has the complete input and output.

@@ -408,6 +408,43 @@ describe("run store", () => {
           yield* emit(
             new AttemptChannel.SessionEvent({ event: new SessionIdle({ session: child }) }),
           );
+          const steer = new AttemptChannel.Intervention({
+            operator: "Philippe",
+            target: new AttemptChannel.ParentTarget(),
+            action: new AttemptChannel.Steer({ message: "Fix the third finding" }),
+          });
+          for (const queued of [true, false])
+            yield* emit(
+              new AttemptChannel.InterventionApplied({
+                inputSequence: AttemptChannel.Sequence.make(3),
+                intervention: steer,
+                state: new AttemptChannel.InterventionState({
+                  held: true,
+                  paused: false,
+                  queued,
+                  forwardedTo: Option.some(child.id),
+                }),
+              }),
+            );
+          yield* emit(
+            new AttemptChannel.InterventionApplied({
+              inputSequence: AttemptChannel.Sequence.make(4),
+              intervention: steer,
+              state: new AttemptChannel.InterventionState({
+                held: true,
+                paused: false,
+                queued: true,
+                forwardedTo: Option.some(child.id),
+              }),
+            }),
+          );
+          yield* emit(
+            new AttemptChannel.InterventionRejected({
+              inputSequence: AttemptChannel.Sequence.make(4),
+              intervention: steer,
+              message: "The steer was withdrawn by an interruption",
+            }),
+          );
           for (let index = 0; index < 5; index++)
             yield* emit(
               new AttemptChannel.SessionEvent({
@@ -421,16 +458,31 @@ describe("run store", () => {
                 ? envelope.payload.event._tag
                 : envelope.payload._tag,
             ),
-            ["SessionStarted", "SessionStarted", "InterventionApplied", "SessionIdle"],
+            [
+              "SessionStarted",
+              "SessionStarted",
+              "InterventionRejected",
+              "InterventionApplied",
+              "SessionIdle",
+              "InterventionApplied",
+              "InterventionRejected",
+            ],
           );
           const launch = state[1]?.envelope.payload;
           assert(launch?._tag === "SessionEvent" && launch.event._tag === "SessionStarted");
           assert(Option.isSome(launch.event.harnessSession));
           assert.strictEqual(launch.event.harnessSession.value.id, "vendor-1");
           assert.strictEqual(launch.event.harnessSession.value.cwd, "/worker/repo");
-          const held = state[2]?.envelope.payload;
+          const held = state[3]?.envelope.payload;
           assert(held?._tag === "InterventionApplied");
           assert.strictEqual(held.intervention.operator, "Philippe");
+          const delivered = state[5]?.envelope.payload;
+          assert(delivered?._tag === "InterventionApplied");
+          assert.deepStrictEqual(delivered.state.forwardedTo, Option.some(child.id));
+          assert.isFalse(delivered.state.queued);
+          const rejected = state[6]?.envelope.payload;
+          assert(rejected?._tag === "InterventionRejected");
+          assert.strictEqual(rejected.inputSequence, 4);
           const page = yield* store.transcript(
             new TranscriptPageQuery({ attemptId, before: Option.none(), limit: 2 }),
           );

@@ -89,6 +89,8 @@ Attempt channel envelopes go to an append-only transcript. A redelivered envelop
 
 `RunEngine.transcript` takes distinct query types: `TranscriptAllQuery`, `TranscriptTailQuery` and `TranscriptPageQuery` (bounded, with a positive row limit), and `TranscriptUsageQuery`, which returns each session's highest `SessionTokensUpdated` report. Session queries keep each session's launch record with its latest state, so harness session ids and worker paths stay available after completion and outside the loaded page.
 
+Session queries also return each operator input's latest delivery or rejection receipt. Queued, forwarded, delivered, and unread message states remain available outside the loaded page.
+
 The run ledger keeps the submitted agent, rendered task, payload snapshot, effective parent model, and each attempt's child brain across restarts.
 
 ### Attempt windows

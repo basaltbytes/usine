@@ -2,7 +2,7 @@ import { Markdown } from "~/components/markdown";
 import { Gutter } from "~/components/runs/transcript/gutter";
 import { ReaderLine } from "~/components/runs/transcript/reader-line";
 import type { MessageRow } from "~/lib/runs/transcript/document/model";
-import { queuedMessageLabel } from "~/lib/runs/strings";
+import { messageDeliveryLabel, queuedMessageLabel } from "~/lib/runs/strings";
 
 type MessageProps = {
   readonly row: MessageRow;
@@ -26,7 +26,16 @@ export const Message = ({ row, speaker }: MessageProps) => (
       ) : (
         <p className="text-md whitespace-pre-wrap wrap-anywhere">{row.text}</p>
       )}
-      {row.undelivered && <p className="text-xs text-destructive">Not delivered</p>}
+      {row.undelivered && row.delivery === null && (
+        <p className="text-xs text-destructive">Not delivered</p>
+      )}
+      {row.delivery !== null && (
+        <p
+          className={row.undelivered ? "text-xs text-destructive" : "text-xs text-muted-foreground"}
+        >
+          {messageDeliveryLabel(row.delivery)}
+        </p>
+      )}
       {row.queued !== null && (
         <p className="text-xs text-muted-foreground">{queuedMessageLabel(row.queued)}</p>
       )}

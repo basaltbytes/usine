@@ -218,6 +218,21 @@ describe("Attempt guard", () => {
         // A parent waiting for the operator under its Hold is supervised too.
         yield* hold("parent", true);
         yield* emit(
+          new AttemptChannel.InterventionApplied({
+            inputSequence: AttemptChannel.Sequence.make(5),
+            intervention: new AttemptChannel.Intervention({
+              operator: "Philippe",
+              target: new AttemptChannel.ParentTarget(),
+              action: new AttemptChannel.Steer({ message: "Continue the delegated work" }),
+            }),
+            state: new AttemptChannel.InterventionState({
+              held: false,
+              paused: false,
+              forwardedTo: Option.some(first.id),
+            }),
+          }),
+        );
+        yield* emit(
           new AttemptChannel.SessionEvent({ event: new SessionFinished({ session: second }) }),
         );
         yield* TestClock.adjust("2 hours");
