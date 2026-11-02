@@ -99,6 +99,11 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
     Schema.withConstructorDefault(Effect.succeed(null)),
   ),
+  /** The CI failure and fix run that continues the work, or null. */
+  handoff: Schema.NullOr(RunState.HandedOff).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /** The idle upgrade deferring this run before it reserves a worker slot. */
   upgradeWait: Schema.NullOr(UpgradeWait).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),

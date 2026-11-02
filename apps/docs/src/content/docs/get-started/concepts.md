@@ -46,7 +46,7 @@ An instance is one installation of usine with its own configuration, credentials
 
 ## Project
 
-A project is a named group of managed repositories with one board and the loops that run on them. The registry lists managed repositories, and a repository belongs to at most one project. [Operate a project's board](/guides/operate-runs/#project-boards-and-tasks).
+A project is a named group of managed repositories with one board and the loops that run on them. The registry lists managed repositories, and a repository belongs to at most one project. [Operate a project's board](/guides/move-a-task/).
 
 ## Loop
 
@@ -58,11 +58,11 @@ An agent is an instance-level definition of standing instructions and a brain sp
 
 ## Run
 
-A run is the work for one event of a loop, such as an issue or pull request matching its trigger. A run has one or more attempts when execution starts, one per try. In the UI, a run can wait for approval, queue for a worker, run an attempt, or wait for CI before it closes as succeeded, failed, or canceled. [Approve and follow a run](/guides/operate-runs/).
+A run is the work for one event of a loop, such as an issue or pull request matching its trigger. A run has one or more attempts when execution starts, one per try. In the UI, a run can wait for approval, queue for a worker, run an attempt, or wait for CI before it closes as succeeded, failed, or canceled. [Approve and follow a run](/guides/follow-a-run/).
 
 ## Attempt
 
-An attempt is one try of a run's step, running the loop's agent on a worker. Retrying a failed run creates another attempt in the same run, with its own transcript of session messages. [Retry an attempt](/guides/operate-runs/#retry-a-failed-run).
+An attempt is one try of a run's step, running the loop's agent on a worker. Retrying a failed run creates another attempt in the same run, with its own transcript of session messages. [Retry an attempt](/guides/retry-a-run/).
 
 ## Worker
 
@@ -70,7 +70,7 @@ A worker is an instance-level machine configuration for running an attempt's chi
 
 ## Board and task
 
-A board groups a project's tasks into lanes. A task groups linked issues and pull requests with their runs; its current item is the issue or pull request shown on the board. A lane maps to GitHub labels or item states, and moving a card changes labels on GitHub. [Use the board](/guides/operate-runs/).
+A board groups a project's tasks into lanes. A task groups linked issues and pull requests with their runs; its current item is the issue or pull request shown on the board. A lane maps to GitHub labels or item states, and moving a card changes labels on GitHub. [Use the board](/guides/follow-a-run/).
 
 ## Configuration revision
 

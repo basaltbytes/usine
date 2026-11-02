@@ -68,7 +68,7 @@ type StatusBadgeProps = {
 export const StatusBadge = ({ state, label = state }: StatusBadgeProps) => (
   <span className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
     <StateMark state={state} />
-    {label === "AwaitingCi" ? "Waiting for CI" : label}
+    {label === "AwaitingCi" ? "Waiting for CI" : label === "HandedOff" ? "Handed off" : label}
   </span>
 );
 

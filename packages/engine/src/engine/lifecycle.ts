@@ -1,3 +1,4 @@
+import type { CommitSha } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
 import type { OperatorActor } from "@usine/core/operator";
 import {
@@ -8,7 +9,7 @@ import {
   pendingProviderRetry,
   shouldAutoRetry,
 } from "@usine/core/attempt";
-import { ciHandoff, CiHandoff, type CiPolicy } from "@usine/core/ci";
+import { ciHandoff, CiHandoff, type CiLabelMutation, type CiPolicy } from "@usine/core/ci";
 import { AttemptFailure, AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
   AttemptAwaitingCi,
@@ -112,6 +113,7 @@ export const finishAttempt = (
   attemptId: AttemptId,
   result: Result.Result<StepResult, AttemptFailure>,
   policy: Option.Option<CiPolicy> = Option.none(),
+  inheritedOnGreen: ReadonlyArray<CiLabelMutation> = [],
 ): FinishDecision => {
   if (current.run.state._tag !== "Running") {
     return { _tag: "Unchanged", reason: "RunNotRunning" };
@@ -161,7 +163,10 @@ export const finishAttempt = (
       }),
     );
   if (Option.isSome(required)) {
-    const request = required.value;
+    const request = new CiHandoff({
+      ...required.value,
+      onGreen: [...inheritedOnGreen, ...required.value.onGreen],
+    });
     if (
       !completed.success.facts.some(
         (fact) =>
@@ -429,9 +434,19 @@ type ClaimDecision =
  * Returns what an unclaimed Event does: open a Run, queue behind the Item's running Run, or
  * supersede the Item's unstarted Run (ADR 0007).
  */
-export const claimRun = (blocking: Option.Option<Run>, eventId: EventId): ClaimDecision => {
+export const claimRun = (
+  blocking: Option.Option<Run>,
+  eventId: EventId,
+  ciFailureHead: Option.Option<CommitSha> = Option.none(),
+): ClaimDecision => {
   if (Option.isNone(blocking)) return { _tag: "OpenRun" };
   const run = blocking.value;
+  if (
+    run.state._tag === "AwaitingCi" &&
+    run.state.handoff.fixLoop === run.loop &&
+    Option.contains(ciFailureHead, run.state.handoff.head)
+  )
+    return { _tag: "OpenRun" };
   if (run.state._tag === "Running" || run.state._tag === "AwaitingCi")
     return { _tag: "QueueEvent" };
   if (RunState.isUnstarted(run.state)) {

@@ -1,3 +1,4 @@
+import { CiHandoffLine } from "~/components/runs/ci";
 import { RepositoryMark } from "~/components/repository-mark";
 import type { ProjectId } from "@usine/core/project";
 import { cardAttentionLabel, cardConflictLabel } from "~/features/projects/strings";
@@ -47,6 +48,8 @@ export const CardFace = ({
 }: CardFaceProps) => {
   const failure = failedRun(item);
   const run = currentRun(item);
+  const source =
+    run === null ? undefined : item.runs.find(({ handoff }) => handoff?.fixRunId === run.id);
   const actionError = action?.error?.message ?? null;
   const runAgainError = again?.error?.message ?? null;
   // If the stall is for the failure note's Run, the note shows it, with a suppression's action.
@@ -78,6 +81,11 @@ export const CardFace = ({
       <CardTitle item={item} project={project} />
       <CardLabels labels={cardLabels(item, lane)} catalog={catalog} />
       {run !== null && <RunLine run={run} />}
+      {source !== undefined && (
+        <p className="text-xs">
+          <CiHandoffLine run={source} />
+        </p>
+      )}
       {progress !== null && (
         <p role="status" className="text-xs text-muted-foreground">
           {progress}

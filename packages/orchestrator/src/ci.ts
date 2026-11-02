@@ -3,7 +3,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { matchesLoop } from "@usine/config/project";
 import { repositoryContext } from "@usine/config/payload-slices";
 import { AttemptTask } from "@usine/core/attempt";
-import { CiFailed, CiPassed, CiSuperseded } from "@usine/core/ci";
+import { CiFailed, CiHandedOff, CiPassed, CiSuperseded } from "@usine/core/ci";
 import { DedupKey } from "@usine/core/event";
 import {
   canonicalRepositoryName,
@@ -13,7 +13,7 @@ import {
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { Submission, RunEngine, type EnginePersistenceError } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
-import type { RunSnapshot } from "@usine/engine/run-reader";
+import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { GitHubChecks } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
@@ -44,6 +44,7 @@ export class CiMonitor extends Context.Service<
     CiMonitor,
     Effect.gen(function* () {
       const engine = yield* RunEngine;
+      const reader = yield* RunReader;
       const checks = yield* GitHubChecks;
       const writer = yield* GitHubItemWriter;
       const parser = yield* ConfigParser;
@@ -71,6 +72,23 @@ export class CiMonitor extends Context.Service<
         if (endedAt === undefined || Option.isNone(endedAt))
           return yield* Effect.die("A CI wait has no ended attempt");
         const observed = yield* checks.snapshot(wait.repository, pullRequest);
+        const dedupKey = DedupKey.make(JSON.stringify(["ci-failure", runId, head]));
+        const admitted = yield* reader.runForEvent(dedupKey);
+        if (Option.isSome(admitted)) {
+          yield* Effect.logInfo("CI fix event admitted; source hands off to its recorded run", {
+            runId,
+            head,
+            fixRunId: admitted.value,
+          });
+          return yield* engine.settleCi(
+            runId,
+            head,
+            new CiHandedOff({
+              reason: "CI failed; a fix run was admitted.",
+              fixRunId: admitted.value,
+            }),
+          );
+        }
         if (observed.head !== head) {
           yield* Effect.logInfo("A new push superseded the CI wait", {
             runId,
@@ -80,11 +98,11 @@ export class CiMonitor extends Context.Service<
           return yield* engine.settleCi(runId, head, new CiSuperseded({ head: observed.head }));
         }
         const now = yield* DateTime.now;
+        const timedOut =
+          DateTime.toEpochMillis(now) >=
+          DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000;
         if (observed.state === "pending") {
-          if (
-            DateTime.toEpochMillis(now) >=
-            DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000
-          ) {
+          if (timedOut) {
             yield* Effect.logWarning("CI wait timed out; operator attention is required", {
               runId,
               head,
@@ -175,7 +193,7 @@ export class CiMonitor extends Context.Service<
         const submission = yield* triggerSubmission(expressions, {
           ...fix,
           repository,
-          dedupKey: DedupKey.make(JSON.stringify(["ci-failure", runId, head])),
+          dedupKey,
           cycleGeneration: observation.cycleGeneration,
           itemKey: observation.projection.itemKey,
           payload: observation.projection.payload,
@@ -186,20 +204,54 @@ export class CiMonitor extends Context.Service<
           ),
         });
         const result = yield* engine.submit(
-          new Submission({ ...submission, ciFailureHead: Option.some(head) }),
+          new Submission({
+            ...submission,
+            ciFailureHead: Option.some(head),
+            ciOnGreen: handoff.onGreen,
+          }),
         );
         yield* Effect.logInfo("CI failure routed through the fix loop's cycle budget", {
           runId,
           head,
           fixLoop: fix.loop.name,
           result: result._tag,
+          inheritedActions: handoff.onGreen.length,
         });
+        if (result._tag === "Queued") {
+          if (!timedOut) {
+            yield* Effect.logInfo("CI fix event queued; source waits for run admission", {
+              runId,
+              head,
+              fixLoop: fix.loop.name,
+              eventId: result.eventId,
+            });
+            return;
+          }
+          yield* Effect.logWarning("CI fix admission timed out; operator attention is required", {
+            runId,
+            head,
+            fixLoop: fix.loop.name,
+            eventId: result.eventId,
+          });
+          return yield* engine.settleCi(
+            runId,
+            head,
+            new CiFailed({
+              message: `CI failed, but fix loop ${fix.loop.name} did not admit its queued event within ${handoff.timeoutSeconds} seconds.`,
+            }),
+          );
+        }
         yield* engine.settleCi(
           runId,
           head,
-          new CiFailed({
-            message: `CI failed: ${evidence.jobs.join(", ") || "check failure"}. Fix loop ${fix.loop.name}: ${result._tag}.`,
-          }),
+          result._tag === "Claimed"
+            ? new CiHandedOff({
+                reason: `CI failed: ${evidence.jobs.join(", ") || "check failure"}.`,
+                fixRunId: result.runId,
+              })
+            : new CiFailed({
+                message: `CI failed: ${evidence.jobs.join(", ") || "check failure"}. Fix loop ${fix.loop.name}: ${result._tag}.`,
+              }),
         );
       });
 

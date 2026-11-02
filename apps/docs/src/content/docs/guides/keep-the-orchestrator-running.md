@@ -1,31 +1,33 @@
 ---
 title: Keep the orchestrator running
-description: Run the orchestrator in the background and prevent machine sleep.
+description: Start a detached instance and keep its machine awake.
 ---
 
-## Start the orchestrator
+Run an existing instance without keeping its terminal open.
 
-From the instance folder, start the orchestrator in the background:
+## Prerequisites
 
-```sh
-usine up --detach
-```
+An initialized instance on persistent storage, its credentials in the instance environment, and access as the Unix user that owns the instance.
 
-It writes output to `.usine/usine.log`. Manage it from the instance folder:
+## Procedure
 
-```sh
-usine status
-usine restart
-usine stop
-```
+1. Change to the instance folder and start the detached orchestrator:
 
-See [Operate runs](/guides/operate-runs/#stop-the-orchestrator) for draining and upgrades.
+   ```sh
+   usine up --detach
+   ```
 
-## Keep the machine awake
+2. Inspect its status and output:
 
-The orchestrator must keep running while runs are open. A sleep closes its SSH connections to workers and to the gateway: after the machine wakes, a remote Claude Code child resumes its session, and a Codex child fails. On macOS, `usine up` warns at startup if the Mac can sleep. For a factory that runs unattended, [run the orchestrator on a server](/guides/run-the-orchestrator-on-a-server/) instead of a laptop. To keep a Mac awake:
+   ```sh
+   usine status
+   tail -n 80 .usine/usine.log
+   ```
 
-- Run `caffeinate -s` in another terminal while runs are open. It keeps a Mac on AC power awake until you stop it. To stop it with the orchestrator, run `caffeinate -s -w "$(cat .usine/instance.pid)"` from the instance folder.
-- Turn off system sleep on AC power with `sudo pmset -c sleep 0`.
+3. On macOS, keep AC-powered system sleep off while work is open. Run `caffeinate -s` in another terminal, or configure the machine’s power settings. Closing a laptop lid can still cause sleep.
 
-Closing a laptop's lid also puts it to sleep, unless it runs in closed-display mode with power and an external display.
+## Check the result
+
+`usine status` reports the PID, version, uptime, listener, and open runs. The log updates as work proceeds. Use [a server deployment](/guides/run-the-orchestrator-on-a-server/) for unattended operation.
+
+Use `usine stop` to drain running attempts, and `usine restart` to restart an idle instance. `--force` interrupts the wait; the next start reattaches retained attempts. [CLI lifecycle commands](/reference/cli/) describe timeouts.

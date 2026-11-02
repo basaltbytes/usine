@@ -18,6 +18,10 @@ import type { QueuedFor } from "~/lib/runs/transcript/model";
 import { timestampLabel } from "~/lib/strings";
 import { providerLabel } from "~/lib/workers/strings";
 
+export const handedOff = "Handed off";
+export const ciFailedOn = (head: string): string => `CI failed on ${head.slice(0, 8)}; `;
+export const continuesTheWork = " continues the work";
+
 export const waitingForCi = "Waiting for CI";
 
 export const runActionLabel = {
@@ -99,6 +103,8 @@ export const runStateLine = (
       return `Running, attempt ${run.attempts.at(-1)?.number ?? 1}`;
     case "Succeeded":
       return attempts > 1 ? `Succeeded${after}` : "Succeeded";
+    case "HandedOff":
+      return handedOff;
     case "Failed":
       return `Failed${after}`;
     case "Canceled":

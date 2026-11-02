@@ -1,129 +1,103 @@
 ---
 title: usine config
-description: Edit stored configuration, import and export YAML and Markdown files, and inspect revision history from the command line.
-sidebar:
-  order: 6
+description: Configuration commands, revisions, entity names, and live application.
 ---
 
-Run `usine config` from the instance folder, where `.usine/runtime.sqlite` stores the configuration and its revision history. Commands work while the orchestrator runs or while it is stopped; they access the local database directly. Each command reads [`.env`](/reference/cli/#environment-file) first.
-
-```sh
-usine config export <folder>
-usine config import <folder> [--message <text>]
-usine config edit <kind> <name>
-usine config log [<kind> <name>]
-```
-
-A revision records its number, actor, UTC time, optional message, and each changed entity's before and after values. Commands attribute revisions to the first stored member and require the local admin-token file when members exist. Otherwise they use the stored `operator` login; without one, the revision has no actor.
-
-If the configuration tables are empty, a configuration command imports the instance's bootstrap files as revision 1, just as the first `usine up` does. Later commands and starts ignore those original files. Secrets remain in `.env` or `.usine/github-app.json`; the listen address remains in command flags or environment variables. Configuration changes do not create git commits.
+Run configuration commands from the instance folder. They read and write `.usine/runtime.sqlite` directly and work with the orchestrator running or stopped. Each command reads the [environment file](/reference/cli/#environment-file). Revisions record a number, actor, UTC time, optional message, and the changed entities' before and after values. Local writes record **local admin** and do not create git commits.
 
 ## Export
 
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<folder>` | path | required | Destination created if necessary for the configuration snapshot. |
+
 ```sh
 usine config export ./config-export
 ```
 
-`export <folder>` creates the destination if necessary and writes the current configuration as:
-
-| Path | Contents |
-| --- | --- |
-| `usine.yaml` | Version 2 settings, registry, projects and lanes, labels, and workers. |
-| `projects/<project>/loops/<loop>.md` | One loop's frontmatter and prompt. |
-| `agents/<agent>.md` | One agent's frontmatter and persona. |
-
-The folder is relative to the working directory, or an absolute path. There are no export-specific options. Existing configuration files are replaced; stale Markdown files in the exported agent and loop directories are removed. Export rewrites complete files, applies schema defaults, and does not preserve YAML comments.
-
-The command prints the exported revision number and absolute destination. It does not include secrets, loop pause state, or revision history. Use [`usine backup`](/reference/cli/#usine-backup-path) to back up the database, and copy credentials separately.
+The command prints the revision and absolute destination. It replaces export files, removes stale entity files, and excludes credentials, history, and loop pause state. See [Import and export format](/reference/configuration/import-export/).
 
 ## Import
 
+| Argument or option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<folder>` | path | required | Complete configuration snapshot that replaces stored configuration. |
+| `--message <text>` | string | omitted | Message recorded on the revision. |
+
 ```sh
-usine config export ./config-export
-# Edit the exported files, keeping every entity that should remain configured.
-usine config import ./config-export --message "Add the review loop and its labels"
+usine config import ./config-export --message "Add the review loop"
 ```
 
-`import <folder> [--message <text>]` validates the complete folder, compares it with the stored configuration, and commits the changes in one revision. `--message` is optional and records the supplied text on that revision. The folder argument is required; paths resolve as for export.
-
-Import replaces the complete configuration. Omitting an entity removes it; include the other entities from a fresh export when adding a worker, repository, project, label, loop, or agent. Renaming a file removes the old entity and adds another. A new loop starts paused, except during the first import, which preserves existing pause state. Review new loops before resuming them.
-
-The command prints `Revision <number>: <count> change(s).` and lists each added, changed, or removed entity. An unchanged import prints `No configuration changes.` and saves no revision. An invalid file, expression, or reference rejects the whole import and saves nothing. If another process commits first, a stale-revision error rejects the write; export the latest configuration and reapply the changes.
-
-Version 1 folders with `loops/` are accepted and converted to version 2 projects. Exports use the version 2 layout. See [Project configuration](/reference/configuration/usine-yaml/#projects).
+Import validates all entities, expressions, and references before saving one revision. Omitting an entity removes it. New loops start paused. Unchanged content prints `No configuration changes.` and saves nothing. A stale revision rejects the write; export the latest state and reapply changes.
 
 ## Edit
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<kind>` | entity kind | required | Entity type from the table below. |
+| `<name>` | entity identifier | required | Existing entity to edit. |
+| `EDITOR` | environment command | required | Editor command, including arguments, invoked with a temporary entity path. |
 
 ```sh
 EDITOR=vi usine config edit settings instance
 EDITOR=vi usine config edit loop widgets/start-dev
 ```
 
-`edit <kind> <name>` opens an existing entity in `$EDITOR`, including any editor arguments. It writes a temporary `.yaml` file, or `.md` for a loop or agent, and passes its path to the editor through `sh -c`. Saving and closing the editor validates the result and commits one revision. `EDITOR` must be set to a nonempty command.
+Saving and closing the editor validates the result and commits one revision. A nonzero editor exit, invalid content, unknown entity, or revision saved while the editor was open saves nothing. Unchanged content saves no revision. Use the UI or a complete import to create or delete entities.
 
-| Kind | Name | Editor contents |
-| --- | --- | --- |
-| `settings` | `instance` | YAML with `version`, `settings`, `operator`, `webhooks`, and `tracing`. |
-| `worker` | Worker name | One worker record, without the enclosing `workers:` list. |
-| `repository` | `owner/name` | One repository record, without the enclosing `repos:` list. |
-| `project` | Project ID | One project record with its repositories and lanes. |
-| `label` | Label name | One label record, without the enclosing `labels:` list. |
-| `loop` | `project/loop` | Markdown with frontmatter and prompt. A short loop name works only when unambiguous. |
-| `agent` | Agent name | Markdown with frontmatter and persona. |
+## Entity identifiers
 
-There are no edit-specific options or `--message` flag. Use import to add or remove entities. An unknown entity, a nonzero editor exit, invalid text, or a revision committed while the editor was open saves nothing. Unchanged content saves no revision. Retry an edit against the latest revision after a conflict.
+| Kind | Type of identifier | Default | Description |
+| --- | --- | --- | --- |
+| `settings` | `instance` | required | Singleton instance settings. |
+| `repository` | `owner/name` | required | Managed repository in the registry. |
+| `project` | project ID | required | Project membership and lanes. |
+| `worker` | worker name | required | Worker connection and capacity. |
+| `loop` | `project/loop` | required | Loop definition, with an unambiguous short name also accepted. |
+| `agent` | agent name | required | Brain spec and persona. |
+| `label` | label name | required | Declared GitHub label. |
+| `binding` | binding name | required | Member role and scope. |
 
-For a non-interactive edit on a system with GNU `sed`, use an editor command that changes the temporary file and exits:
-
-```sh
-EDITOR="sed -i 's/poll_interval: 60/poll_interval: 30/'" usine config edit settings instance
-```
-
-This changes a polling interval of 60 seconds to 30. If the text does not match, the command reports no configuration changes.
+For example, `usine config edit binding alice-widgets` edits one role binding. [Entity references](/reference/) describe the fields.
 
 ## Log
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<kind> <name>` | entity key | all revisions | Restricts history to one entity when both arguments are supplied. |
 
 ```sh
 usine config log
 usine config log agent developer
-usine config log loop widgets/start-dev
 ```
 
-`log [<kind> <name>]` prints tab-separated revision number, actor, ISO 8601 UTC time, and message in ascending revision order. Without arguments it lists all revisions; supply both kind and name to list revisions that changed one entity. It accepts the same entity names as `edit`, with no log-specific options. An entity with no history produces no rows. A revision without an actor prints `(operator not configured)`.
+Output has tab-separated revision number, actor, ISO 8601 UTC time, and message in ascending order. An empty history prints no rows. **Configuration > History** also shows diffs and can revert a revision by creating a new one.
 
-## Live changes and restart requirements
+## Revision application
 
-The running orchestrator observes the revision log automatically. A saved revision applies to new work after validation and worker preflight; you do not reload files. Running attempts continue, and open runs retain their submitted task, agent, and parent model. Use **Edit and retry** to change an existing run's definition.
+The running orchestrator observes the revision log and validates changes before applying them to new work. Running attempts continue with their definitions. Open runs retain their submitted task and agent; **Edit and retry** replaces them for later attempts.
 
-The next poll or schedule tick uses the new loops and registry. Changes to settings, labels, repositories, projects, agents, and loop definitions apply live. Workers can be added, removed, or resized within the running executor's capabilities. A removed worker starts no new attempts, and its running attempts finish.
+Settings, labels, registry entries, projects, loops, agents, and webhook sources apply live. Worker additions and increased capacity run preflight; removed workers start no new attempts and let running attempts finish. Reduced capacity admits no new attempt until usage falls below the limit. All workers must share the running executor kind.
 
-Webhook revisions replace the active hint source. Switching away from `deliveries` interrupts its current request or backoff; switching to it resumes from the stored delivery cursor. Endpoint mode updates the App URL and replaces the HTTP handler. **Settings** shows the accepted mode and the next hint received. The endpoint health interval starts again after a webhook change.
+SSH and Cloudflare connection changes apply to new work. Retained attempts keep their machine, container limits, gateway, and client through recovery. Their connection records are in `.usine/attempt-connections/`; back up that directory and keep the referenced variables and SSH key files until recovery finishes. Failed connection checks block new attempts on that worker and retry automatically.
 
-SSH and Cloudflare connection changes apply live. The next preflight and new attempt use the new connection. Open attempts keep their original machine, SSH settings, container limits, gateway, and Cloudflare client, including reattachment and recovery after a restart. A failed check of a changed connection blocks new attempts on that worker and retries automatically; other workers continue. Switching a provisioned SSH worker to a fixed destination cancels its provisioning pause and stops creation retries.
+These settings require a restart:
 
-The orchestrator records each attempt's worker configuration under `.usine/attempt-connections/` before allocating its resources. Include this directory in instance backups. Records contain credential variable names, not secret values. Keep the original variables and SSH key files available until retained attempts have been recovered. For attempts started before this version, recover them with their original worker settings before changing the connection.
+| Change | Type | Default | Description |
+| --- | --- | --- | --- |
+| `tracing` | startup setting | unchanged | Initializes the process-wide exporter. |
+| `auth` | startup setting | unchanged | Initializes browser origin middleware. |
+| Worker name or `kind` | worker identity | unchanged | Determines stored identities and executor selection. |
+| Executor kind or workers added in setup mode | runtime capability | unchanged | Requires executor initialization. |
+| Credentials, `.env`, listen port, canonical origin, or log level | process input | unchanged | Initializes services outside configuration revisions. |
 
-These changes require a restart:
+For example, after changing browser origins with the CLI, run `usine restart` when no attempt is running.
 
-| Configuration | Fields or changes | Reason |
-| --- | --- | --- |
-| Instance | `tracing` | The exporter belongs to the process-wide Effect context created before the runtime. Existing fibers retain that tracer, and its shutdown flush runs after the runtime closes. Replacing only the exporter layer would leave existing fibers exporting through the old context. |
-| Instance | `auth` | Browser origin restrictions initialize the HTTP middleware at startup. |
-| Existing worker | `kind` or a rename (`name`). | The executor kind is selected at startup, and stored attempt and machine identities use the worker name. |
-| Worker set | Changes while no worker executor is registered, as in setup mode, or adding a worker of another kind. | There is no matching executor to initialize or preflight these workers. |
-| Bootstrap values | GitHub App credentials, `.env` and provider or gateway credential values, listen port, origin, and log level. | These values initialize process services and are outside configuration revisions. |
-
-A CLI write can succeed while the running process refuses to apply it with `RestartRequiredError` or `ReloadPreflightError`. The revision remains saved, and the complete running configuration stays unchanged. Check the orchestrator log for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`.
-
-After saving a change to startup-only fields, run `usine restart` when no attempt is running. For a refused addition or resize, correct the worker or save another revision, then apply the saved configuration again with a restart or [an explicit store reread](/reference/cli/#reload). A successful CLI exit reports a saved revision, not successful application by the running process.
+The UI refuses a revision that requires a restart or fails preflight. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. `SIGUSR1` requests an explicit store reread.
 
 ## Exit status
 
-These statuses apply to all four subcommands:
-
-| Status | Meaning |
-| --- | --- |
-| `0` | The command completed, including an unchanged import or edit, an empty log, or `--help`. |
-| `1` | Invalid arguments, missing or unknown entity, unset `EDITOR`, nonzero editor exit, invalid configuration, stale revision, unreadable environment or credential file, or a filesystem or database failure. The diagnostic is on standard error. |
-
-`usine config --help` prints the general CLI usage. Configuration commands do not use the `3` status of `usine status`, and an editor's nonzero status becomes `1` rather than propagating unchanged.
+| Status | Type | Default | Description |
+| --- | --- | --- | --- |
+| `0` | exit code | success | Command completed, including unchanged content, empty history, or help. |
+| `1` | exit code | failure | Invalid usage, editor failure, invalid configuration, stale revision, or storage failure, with a diagnostic on standard error. |

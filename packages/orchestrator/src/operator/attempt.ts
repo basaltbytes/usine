@@ -126,10 +126,16 @@ export class CanceledAttemptView extends Schema.TaggedClass<CanceledAttemptView>
   "@usine/orchestrator/CanceledAttemptView",
 )("Canceled", {}) {}
 
+/** An attempt whose failed CI continues in a fix run. */
+export class HandedOffAttemptView extends Schema.TaggedClass<HandedOffAttemptView>(
+  "@usine/orchestrator/HandedOffAttemptView",
+)("HandedOff", {}) {}
+
 /** The terminal outcome of an Attempt. A running Attempt has none. */
 export const AttemptOutcomeView = Schema.Union([
   SucceededAttemptView,
   AwaitingCiAttemptView,
+  HandedOffAttemptView,
   FailedAttemptView,
   CanceledAttemptView,
 ]);

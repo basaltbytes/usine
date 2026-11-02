@@ -1,45 +1,32 @@
 ---
 title: Guides
-description: Configure loops and agents, operate runs, and deploy an instance.
+description: Procedures for configuring an instance, operating runs, and managing workers.
 sidebar:
   hidden: true
 ---
 
-import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+Start with the [quickstart](/get-started/quickstart/) to open your first agent pull request. These guides cover tasks for an existing instance.
 
-Start with the [quickstart](/get-started/quickstart/) to open your first agent pull request. These guides cover individual tasks for an existing instance.
+## Configure work
 
-<CardGrid>
-  <LinkCard
-    title="Write a loop"
-    href="/guides/write-a-loop/"
-    description="Select work and define the task an agent receives."
-  />
-  <LinkCard
-    title="Write an agent"
-    href="/guides/write-an-agent/"
-    description="Choose a harness, model, and standing instructions."
-  />
-  <LinkCard
-    title="Operate runs"
-    href="/guides/operate-runs/"
-    description="Approve, follow, steer, and retry work."
-  />
-  <LinkCard
-    title="Change the configuration"
-    href="/guides/change-the-configuration/"
-    description="Save and inspect configuration revisions."
-  />
-  <LinkCard
-    title="Add a worker"
-    href="/guides/add-a-worker/"
-    description="Run child sessions on another machine."
-  />
-  <LinkCard
-    title="Run the orchestrator on a server"
-    href="/guides/run-the-orchestrator-on-a-server/"
-    description="Keep an instance available for unattended work."
-  />
-</CardGrid>
+[Write an issue loop](/guides/write-a-loop/), [write a schedule loop](/guides/write-a-schedule-loop/), or [create an agent](/guides/write-an-agent/). [Connect review and fix loops](/guides/review-fix-loops/) to route pull requests through review and CI. [Pause a loop](/guides/pause-a-loop/) before changing its trigger.
 
-For local operation, [keep the orchestrator running](/guides/keep-the-orchestrator-running/), [open the web UI](/guides/open-the-web-ui/), or [back up instance state](/guides/back-up-instance-state/).
+[Change configuration](/guides/change-the-configuration/) saves a revision. [Revert a revision](/guides/revert-configuration/) restores saved values.
+
+## Operate runs
+
+[Follow a run](/guides/follow-a-run/) to read its attempts and conversation. [Approve](/guides/approve-a-run/), [retry](/guides/retry-a-run/), [cancel](/guides/cancel-a-run/), or [run completed work again](/guides/run-again/). [Answer agent questions and blockers](/guides/answer-an-agent/), or [message a live session](/guides/message-an-agent/).
+
+[Move tasks on the board](/guides/move-a-task/), [read statistics](/guides/read-statistics/), and [export a run](/guides/export-a-run/).
+
+## Manage workers
+
+Add a [local worker](/guides/add-a-worker/), [fixed SSH worker](/guides/add-an-ssh-worker/), [Hetzner worker](/guides/add-a-provisioned-worker/), or [Boat worker](/guides/add-a-boat-worker/). [Deploy Cloudflare sandboxes](/guides/cloudflare-sandboxes/) for a Cloudflare instance.
+
+[Configure a gateway](/guides/configure-a-gateway/) to proxy credentials, [connect Boat over Tailscale](/guides/connect-boat-to-a-gateway/), [run preflight](/guides/run-worker-preflight/) after a repair, and [remove a worker](/guides/remove-a-worker/) before retiring its machine.
+
+## Operate the instance
+
+[Keep the orchestrator running](/guides/keep-the-orchestrator-running/) or [deploy it on a server](/guides/run-the-orchestrator-on-a-server/). [Open the UI](/guides/open-the-web-ui/), [sign in](/guides/sign-in/), [grant member access](/guides/manage-members/), and [create a device token](/guides/create-a-device-token/). [Expose HTTPS access](/guides/expose-an-instance/) before sharing a remote instance.
+
+[Back up state](/guides/back-up-instance-state/), [restore a backup](/guides/restore-instance-state/), [move an instance](/guides/move-an-instance/), or [upgrade it](/guides/upgrade-an-instance/).

@@ -22,6 +22,7 @@ import {
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
   AttemptCanceled,
+  AttemptHandedOff,
   AttemptFailed,
   type AttemptOutcome,
   AttemptSucceeded,
@@ -34,7 +35,7 @@ import {
 } from "@usine/core/attempt/start";
 import { EventId } from "@usine/core/event";
 import { LoopName } from "@usine/core/loop";
-import { RepositoryName } from "@usine/core/repository";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import { RunApproval } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
@@ -549,6 +550,43 @@ describe("Task statistics", () => {
 });
 
 describe("Run statistics", () => {
+  it("excludes handed-off runs and attempts from failure, cancellation, and attention counts", () => {
+    const source = summary({
+      id: "handed-off",
+      item: 828,
+      loop: startDev,
+      agent: developer,
+      state: new RunState.HandedOff({
+        reason: "CI failed: ci.",
+        head: CommitSha.make("a".repeat(40)),
+        fixLoop: actOnFindings,
+        fixRunId: RunId.make("fix-828"),
+      }),
+      openedAt: "25T08:00",
+      closedAt: "25T09:00",
+      attempts: [
+        {
+          worker: "w1",
+          startedAt: "25T08:01",
+          endedAt: "25T09:00",
+          outcome: new AttemptHandedOff(),
+        },
+      ],
+    });
+    const view = runStatisticsView({
+      window: "7d",
+      now,
+      runs: [source],
+      usage: new Map(),
+      workers,
+    });
+    assert.deepStrictEqual({ ...view.runs }, { succeeded: 0, failed: 0, canceled: 0 });
+    assert.strictEqual(view.needsAttention.failures, 0);
+    assert.deepStrictEqual(
+      view.brains.map(({ outcomes }) => ({ ...outcomes })),
+      [{ succeeded: 0, failed: 0, canceled: 0 }],
+    );
+  });
   it("counts the closed Runs of the window by outcome and day, leaving out superseded Runs", () => {
     assert.strictEqual(week.from, "2026-10-19T00:00:00.000Z");
     assert.strictEqual(week.bucket, "day");
@@ -827,6 +865,7 @@ describe("OperatorStatistics", () => {
         let itemReads = 0;
         let historyReads = 0;
         const reader = Layer.succeed(RunReader)({
+          runForEvent: () => Effect.die("unused"),
           latestPoolRateLimits: () => Effect.succeed([]),
           inspect: () => Effect.die("unused"),
           evidence: () => Effect.die("unused"),

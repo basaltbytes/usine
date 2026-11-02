@@ -1511,6 +1511,7 @@ export {
   FailureView,
   SucceededAttemptView,
   AwaitingCiAttemptView,
+  HandedOffAttemptView,
   FailedAttemptView,
   CanceledAttemptView,
   AttemptOutcomeView,

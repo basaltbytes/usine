@@ -29,7 +29,11 @@ argument-hint: <issue-or-pr number> [notes]
    against the final diff.
 
 5. **Surface** — README per touched package; changesets for every package whose published
-   surface changed, siblings included; PR body through `public-facing-copy`.
+   surface changed, siblings included; PR body through `public-facing-copy`. For changes to
+   behavior visible to users (CLI, configuration, web UI, operator API, or workers), update
+   the matching guide or reference page under `apps/docs/src/content/docs/` in the same PR,
+   describing the resulting behavior in the present tense. Confirm that each changed behavior
+   has a matching documentation update before shipping.
 
 6. **Ship** — gate green, push, CI green on the PR. The balade GitHub App generates
    `.agents/walkthroughs/` in CI; never write or refresh those files by hand.
