@@ -98,8 +98,10 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
           if ("stderr" in frame)
             yield* Queue.offer(stderr, yield* Effect.fromResult(Base64.decode(frame.stderr)));
           if ("exitCode" in frame) {
-            if (frame.exitCode === 0) yield* Deferred.succeed(exit, frame.exitCode);
-            else
+            if (frame.exitCode === 0) {
+              yield* stopRemote;
+              yield* Deferred.succeed(exit, frame.exitCode);
+            } else
               return yield* operationError(
                 "stream",
                 client,

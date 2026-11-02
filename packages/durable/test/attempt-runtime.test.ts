@@ -2008,6 +2008,33 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "fails as infrastructure when the parent returns partial progress after a code-0 child exit",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/824-zero-exit");
+          const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+          yield* (yield* (yield* StubChildren).next).crash("Codex app-server exited with code 0");
+          const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+          assert.strictEqual(failure._tag, "InfraFailure");
+          assert.strictEqual(failure.message, "Codex app-server exited with code 0");
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Complete the task"),
+                answer("Merged main and started the gate. No changes have been pushed."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
   for (const report of ["ask", "block"] as const) {
     it.live(`prioritizes a child transport loss over an earlier child ${report} report`, () =>
       Effect.gen(function* () {

@@ -13,13 +13,15 @@ import { execPath } from "node:process";
 for (const failure of [
   "ssh-drop",
   "app-server-exit",
+  "app-server-zero-exit",
   "initial-turn-exit",
   "supervisor-exit",
   "resume-exit",
+  "resume-zero-exit",
 ] as const)
   it.live(
-    failure === "resume-exit"
-      ? "fails after one thread resume when the app-server exits again"
+    failure === "resume-exit" || failure === "resume-zero-exit"
+      ? `fails after one thread resume when the app-server exits again (${failure})`
       : `finishes on one Codex thread after ${failure}`,
     () =>
       Effect.scoped(
@@ -33,13 +35,15 @@ for (const failure of [
 const fs = require('node:fs');
 const readline = require('node:readline');
 process.stdout.on('error', () => {});
-if ('${failure}' === 'supervisor-exit' && !fs.existsSync(process.env.CODEX_HOME + '/original-pids')) {
+if (['supervisor-exit', 'app-server-zero-exit'].includes('${failure}') && !fs.existsSync(process.env.CODEX_HOME + '/original-pids')) {
   fs.writeFileSync(process.env.CODEX_HOME + '/original-pids', JSON.stringify([process.ppid, process.pid]));
   const command = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   fs.writeFileSync(process.env.CODEX_HOME + '/command-pid', String(command.pid));
-  process.on('SIGTERM', () => {});
-  process.stdin.on('end', () => {});
-  setInterval(() => {}, 1000);
+  if ('${failure}' === 'supervisor-exit') {
+    process.on('SIGTERM', () => {});
+    process.stdin.on('end', () => {});
+    setInterval(() => {}, 1000);
+  }
 }
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line);
@@ -53,7 +57,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     fs.appendFileSync(process.env.CODEX_HOME + '/threads', 'thread-one\\n');
     process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one' }, model: 'test-model', instructionSources: [] } }) + '\\n');
   } else if (request.method === 'thread/resume') {
-    if ('${failure}' === 'supervisor-exit') {
+    if (['supervisor-exit', 'app-server-zero-exit'].includes('${failure}')) {
       const pids = JSON.parse(fs.readFileSync(process.env.CODEX_HOME + '/original-pids'));
       pids.push(Number(fs.readFileSync(process.env.CODEX_HOME + '/command-pid')));
       for (const pid of pids) {
@@ -72,6 +76,10 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     process.stdout.write(JSON.stringify({ id: request.id, result: { turn: { id: 'turn-one' } } }) + '\\n');
     if ('${failure}' === 'supervisor-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed')) {
       process.kill(process.ppid, 'SIGKILL');
+      return;
+    }
+    if ('${failure}' === 'resume-zero-exit' || ('${failure}' === 'app-server-zero-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed'))) {
+      setTimeout(() => process.exit(0), 50);
       return;
     }
     if ('${failure}' === 'resume-exit' || ('${failure}' === 'app-server-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed'))) {
@@ -133,7 +141,7 @@ relay.on('exit', code => { clearInterval(timer); process.exit(code || 0); });
               }),
             }),
           );
-          if (failure === "resume-exit") {
+          if (failure === "resume-exit" || failure === "resume-zero-exit") {
             const error = yield* running.result.pipe(Effect.flip);
             assert.strictEqual(error._tag, "SessionOperationError");
             assert.strictEqual(yield* fs.readFileString(`${directory}/resumed`), "thread-one\n");
@@ -151,7 +159,7 @@ relay.on('exit', code => { clearInterval(timer); process.exit(code || 0); });
           );
           if (failure !== "ssh-drop")
             assert.strictEqual(yield* fs.readFileString(`${directory}/resumed`), "thread-one\n");
-          if (failure === "supervisor-exit")
+          if (failure === "supervisor-exit" || failure === "app-server-zero-exit")
             assert.strictEqual(yield* fs.readFileString(`${directory}/original-stopped`), "yes");
         }),
       ).pipe(
