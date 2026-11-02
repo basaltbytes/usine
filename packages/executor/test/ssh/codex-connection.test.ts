@@ -8,6 +8,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { WorkerName } from "@usine/core/worker";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { Effect, FileSystem, Option, Stream } from "effect";
+import { execPath } from "node:process";
 
 for (const failure of ["ssh-drop", "app-server-exit"] as const)
   it.live(
@@ -17,6 +18,7 @@ for (const failure of ["ssh-drop", "app-server-exit"] as const)
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-codex-drop-" });
+          yield* fs.symlink(execPath, `${directory}/node`);
           yield* fs.writeFileString(
             `${directory}/codex`,
             `#!/usr/bin/env node
@@ -54,8 +56,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
           yield* fs.chmod(`${directory}/codex`, 0o755);
           yield* fs.writeFileString(
             `${directory}/ssh`,
-            `#!/usr/bin/node
-const fs = require('node:fs');
+            `const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const relay = spawn('sh', ['-c', process.argv.at(-1)], { stdio: ['pipe', 'pipe', 'pipe'] });
 process.stdin.pipe(relay.stdin);
@@ -72,7 +73,6 @@ const timer = setInterval(() => {
 relay.on('exit', code => { clearInterval(timer); process.exit(code || 0); });
 `,
           );
-          yield* fs.chmod(`${directory}/ssh`, 0o755);
           const running = yield* (yield* CodexChildBackend).launch(
             new ChildRequest({
               worker: WorkerName.make("boat"),
@@ -94,7 +94,7 @@ relay.on('exit', code => { clearInterval(timer); process.exit(code || 0); });
                 CODEX_HOME: directory,
               },
               host: new RemoteShell({
-                ssh: { command: `${directory}/ssh`, args: [] },
+                ssh: { command: execPath, args: [`${directory}/ssh`] },
                 sshEnvironment: {},
                 destination: "worker",
               }),
