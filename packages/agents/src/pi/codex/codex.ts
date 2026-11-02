@@ -325,7 +325,6 @@ const makeCodexChild = Effect.gen(function* () {
         pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
         beforeFinish: Effect.suspend(() => connection.close),
       });
-      yield* startTurn(request.prompt);
 
       const fail = Effect.fn("CodexChildBackend.fail")(function* (error: AgentSessionError) {
         yield* connection.close.pipe(
@@ -339,14 +338,17 @@ const makeCodexChild = Effect.gen(function* () {
         );
         yield* channel.fail(error);
       });
+      let resumed = false;
       const resume = Effect.fn("CodexChildBackend.resume")(function* (error: AgentSessionError) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.thread.id });
         if (
+          resumed ||
           request.host._tag !== "RemoteShell" ||
           error._tag !== "SessionOperationError" ||
           !(error.cause instanceof RemoteCodexProcessLost)
         )
           return yield* error;
+        resumed = true;
         yield* Effect.logWarning("Remote Codex app-server stopped; resuming its saved thread", {
           sessionId: session.id,
           threadId: thread.thread.id,
@@ -389,6 +391,7 @@ const makeCodexChild = Effect.gen(function* () {
           "Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.",
         );
       });
+      yield* startTurn(request.prompt).pipe(Effect.catch(resume));
       const consumeNotifications = Stream.unwrap(Effect.sync(() => connection.notifications)).pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {

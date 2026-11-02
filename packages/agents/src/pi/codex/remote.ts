@@ -2,12 +2,7 @@ import type { AgentSessionId } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Fiber, Queue, Ref, Schema, Stream } from "effect";
 import { Base64 } from "effect/encoding";
 import { ChildProcessSpawner } from "effect/process";
-import {
-  CHILD_STOP_SCRIPT,
-  childPidFile,
-  type RemoteShell,
-  SSH_FAILURE,
-} from "../../child-host/child-host.ts";
+import { childPidFile, type RemoteShell, SSH_FAILURE } from "../../child-host/child-host.ts";
 import { hostCommand, hostOutput } from "../../child-host/command.ts";
 import { type CodexClient, operationError } from "./connection.ts";
 import { CODEX_SUPERVISOR } from "./supervisor.ts";
@@ -122,8 +117,8 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     return code;
   });
   const stopRemote = hostOutput(client.host, {
-    command: "sh",
-    args: ["-c", CHILD_STOP_SCRIPT, "sh", pidFile],
+    command: "node",
+    args: ["-e", CODEX_SUPERVISOR, "stop", pidFile, "0"],
     environment: client.environment,
   }).pipe(
     Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -133,14 +128,20 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
         : operationError(
             "interrupt",
             client,
-            "Could not confirm the remote Codex supervisor stopped",
+            "Could not confirm the remote Codex process group stopped",
             { exitCode: result.exitCode },
           ),
     ),
+    Effect.tap(() => Effect.logInfo("Confirmed the remote Codex process group stopped", fields)),
     Effect.mapError((cause) =>
       cause instanceof SessionOperationError
         ? cause
-        : operationError("interrupt", client, "Could not stop the remote Codex supervisor", cause),
+        : operationError(
+            "interrupt",
+            client,
+            "Could not stop the remote Codex process group",
+            cause,
+          ),
     ),
   );
   const monitor = yield* Effect.gen(function* () {

@@ -10,9 +10,17 @@ import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { Effect, FileSystem, Option, Stream } from "effect";
 import { execPath } from "node:process";
 
-for (const failure of ["ssh-drop", "app-server-exit"] as const)
+for (const failure of [
+  "ssh-drop",
+  "app-server-exit",
+  "initial-turn-exit",
+  "supervisor-exit",
+  "resume-exit",
+] as const)
   it.live(
-    `finishes on one Codex thread after ${failure} mid-turn`,
+    failure === "resume-exit"
+      ? "fails after one thread resume when the app-server exits again"
+      : `finishes on one Codex thread after ${failure}`,
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -24,6 +32,15 @@ for (const failure of ["ssh-drop", "app-server-exit"] as const)
             `#!/usr/bin/env node
 const fs = require('node:fs');
 const readline = require('node:readline');
+process.stdout.on('error', () => {});
+if ('${failure}' === 'supervisor-exit' && !fs.existsSync(process.env.CODEX_HOME + '/original-pids')) {
+  fs.writeFileSync(process.env.CODEX_HOME + '/original-pids', JSON.stringify([process.ppid, process.pid]));
+  const command = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  fs.writeFileSync(process.env.CODEX_HOME + '/command-pid', String(command.pid));
+  process.on('SIGTERM', () => {});
+  process.stdin.on('end', () => {});
+  setInterval(() => {}, 1000);
+}
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line);
   if (request.method === 'initialize') {
@@ -36,12 +53,28 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     fs.appendFileSync(process.env.CODEX_HOME + '/threads', 'thread-one\\n');
     process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one' }, model: 'test-model', instructionSources: [] } }) + '\\n');
   } else if (request.method === 'thread/resume') {
+    if ('${failure}' === 'supervisor-exit') {
+      const pids = JSON.parse(fs.readFileSync(process.env.CODEX_HOME + '/original-pids'));
+      pids.push(Number(fs.readFileSync(process.env.CODEX_HOME + '/command-pid')));
+      for (const pid of pids) {
+        try { process.kill(pid, 0); process.exit(2); }
+        catch (error) { if (error.code !== 'ESRCH') throw error; }
+      }
+      fs.writeFileSync(process.env.CODEX_HOME + '/original-stopped', 'yes');
+    }
     fs.appendFileSync(process.env.CODEX_HOME + '/resumed', request.params.threadId + '\\n');
     process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one' }, model: 'test-model', instructionSources: [] } }) + '\\n');
   } else if (request.method === 'turn/start') {
     fs.appendFileSync(process.env.CODEX_HOME + '/turn-started', 'yes\\n');
+    if (['initial-turn-exit', 'resume-exit'].includes('${failure}') && !fs.existsSync(process.env.CODEX_HOME + '/resumed')) {
+      process.exit(1);
+    }
     process.stdout.write(JSON.stringify({ id: request.id, result: { turn: { id: 'turn-one' } } }) + '\\n');
-    if ('${failure}' === 'app-server-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed')) {
+    if ('${failure}' === 'supervisor-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed')) {
+      process.kill(process.ppid, 'SIGKILL');
+      return;
+    }
+    if ('${failure}' === 'resume-exit' || ('${failure}' === 'app-server-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed'))) {
       setTimeout(() => process.exit(1), 50);
       return;
     }
@@ -100,6 +133,13 @@ relay.on('exit', code => { clearInterval(timer); process.exit(code || 0); });
               }),
             }),
           );
+          if (failure === "resume-exit") {
+            const error = yield* running.result.pipe(Effect.flip);
+            assert.strictEqual(error._tag, "SessionOperationError");
+            assert.strictEqual(yield* fs.readFileString(`${directory}/resumed`), "thread-one\n");
+            assert.strictEqual(yield* fs.readFileString(`${directory}/threads`), "thread-one\n");
+            return;
+          }
           assert.strictEqual((yield* running.result).message, "Completed on original thread");
           const events = yield* Stream.runCollect(running.events);
           assert.strictEqual(events.filter((event) => event._tag === "SessionStarted").length, 1);
@@ -109,8 +149,10 @@ relay.on('exit', code => { clearInterval(timer); process.exit(code || 0); });
             yield* fs.readFileString(`${directory}/turn-started`),
             failure === "ssh-drop" ? "yes\n" : "yes\nyes\n",
           );
-          if (failure === "app-server-exit")
+          if (failure !== "ssh-drop")
             assert.strictEqual(yield* fs.readFileString(`${directory}/resumed`), "thread-one\n");
+          if (failure === "supervisor-exit")
+            assert.strictEqual(yield* fs.readFileString(`${directory}/original-stopped`), "yes");
         }),
       ).pipe(
         Effect.provide(codexChildBackendLayer),

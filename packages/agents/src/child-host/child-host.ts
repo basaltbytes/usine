@@ -125,7 +125,7 @@ export const childPidFile = (worktree: string, session: AgentSessionId): string 
 export const SSH_FAILURE = 255;
 
 /**
- * Stops the process in `$pidfile`: TERM, up to 5 seconds of waiting, then KILL. Prints
+ * Stops the process in `$pidfile` (or its process group for a negative PID): TERM, up to 5 seconds of waiting, then KILL. Prints
  * `<pidfile> stopped`, `killed`, or `absent`, and removes the file.
  */
 const STOP_PID_FILE = `

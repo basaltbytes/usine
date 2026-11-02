@@ -45,4 +45,4 @@ For later edits, run `EDITOR=vi usine config edit worker worker-one`. [Attempt c
 
 ## Codex connection recovery
 
-Remote Codex children continue running through an SSH disconnect. usine reconnects to the same app-server and reads buffered output. If the app-server exits, usine resumes its saved thread once before recording an infrastructure failure. The worker needs Node.js on its command path, including inside the attempt container.
+Remote Codex children continue running through an SSH disconnect. usine reconnects to the same app-server and reads buffered output. If the supervisor or app-server exits after the thread is saved, including during the first turn request, usine stops the remaining process group and confirms termination before resuming the thread once. A second failure records an infrastructure failure. The worker needs Node.js on its command path, including inside the attempt container.

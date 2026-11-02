@@ -13,14 +13,34 @@ const input = path.join(root, 'input');
 const output = path.join(root, 'output');
 const ready = path.join(root, 'ready');
 const append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\n');
-if (mode === 'remove') {
+if (mode === 'stop') {
+  const stop = async () => {
+    if (!fs.existsSync(pidFile)) return;
+    const target = Number(fs.readFileSync(pidFile, 'utf8'));
+    const signal = name => {
+      try { process.kill(target, name); return true; }
+      catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+    };
+    if (signal('SIGTERM')) {
+      for (let n = 0; signal(0); n++) {
+        if (n === 200) signal('SIGKILL');
+        if (n === 400) throw new Error('Remote Codex process group did not stop');
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
+    fs.rmSync(pidFile, { force: true });
+  };
+  stop().catch(error => { console.error(error.message); process.exitCode = 1; });
+} else if (mode === 'remove') {
   if (fs.existsSync(pidFile)) {
     try { process.kill(Number(fs.readFileSync(pidFile, 'utf8')), 0); process.exit(1); }
     catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
+  fs.rmSync(pidFile, { force: true });
   fs.rmSync(root, { recursive: true, force: true });
 } else if (mode === 'supervise') {
-  fs.writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
+  // The detached supervisor leads the process group, including Codex and its commands.
+  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });
   const child = spawn('codex', args, { stdio: ['pipe', 'pipe', 'pipe'] });
   let exited = false;
   const stop = () => {
@@ -36,7 +56,6 @@ if (mode === 'remove') {
   child.on('close', code => {
     exited = true;
     append({ exitCode: code === null ? 1 : code });
-    fs.rmSync(pidFile, { force: true });
     clearInterval(timer);
   });
   let offset = 0;
@@ -105,7 +124,7 @@ if (mode === 'remove') {
       process.stdin.destroy();
       process.exitCode = 0;
     } else {
-      try { process.kill(Number(fs.readFileSync(pidFile, 'utf8')), 0); }
+      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, 'utf8'))), 0); }
       catch (error) { if (error.code === 'ESRCH' || error.code === 'ENOENT') process.exit(1); else throw error; }
     }
   }, 25);
