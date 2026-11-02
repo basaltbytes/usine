@@ -36,7 +36,7 @@ pi
 
 In Pi, enter `/login`, choose **Anthropic**, and enter your API key. Use `/model` to select `anthropic/claude-sonnet-4-6`, then ask it to reply with `ready`.
 
-Expected: Pi replies `ready`. Exit Pi with Ctrl+C twice. Pi saves the credential for this user in `~/.pi/agent` (or `PI_CODING_AGENT_DIR` if set); both the attempt's parent and its child use it. See [Pi parent](/guides/write-an-agent/#pi-parent) for the credential requirements.
+Expected: Pi replies `ready`. Exit Pi with Ctrl+C twice. Pi saves the credential for this user in `~/.pi/agent` (or `PI_CODING_AGENT_DIR` if set); both the attempt's parent and its child use it. See [Pi parent](/reference/configuration/agents/#parent-selection) for the credential requirements.
 
 ## 3. Create a scratch repository
 
@@ -123,7 +123,7 @@ gh issue create --repo "$GITHUB_LOGIN/usine-scratch" \
 
 Expected: `gh` prints the issue URL. Within the next polling cycle (60 seconds by default), the UI shows a run waiting for approval. In **Scratch > Tasks**, open the task and its run, review the task text, and select **Approve**.
 
-The run queues for a worker, then starts an attempt. Follow its messages on the run page. [Operate runs](/guides/operate-runs/) explains approvals, transcripts, and recovery if the attempt fails.
+The run queues for a worker, then starts an attempt. Follow its messages on the run page. [Follow a run](/guides/follow-a-run/) explains approvals, transcripts, and recovery if the attempt fails.
 
 ## 8. Review the pull request
 
@@ -133,6 +133,6 @@ After the attempt succeeds, open the pull request linked from the run, or list i
 gh pr list --repo "$GITHUB_LOGIN/usine-scratch" --state open
 ```
 
-Expected: one open pull request adds the requested sentence to `README.md` and includes `Closes #1` in its body on this new repository. Review the diff before merging. The loop does not merge it for you.
+Expected: one open pull request adds the requested sentence to `README.md` and includes a closing reference to the issue in its body. Review the diff before merging. The loop does not merge it for you.
 
 To stop the instance after the run finishes, press Ctrl+C in the terminal running `usine up`. For another task, [write a loop](/guides/write-a-loop/) or [change the agent](/guides/write-an-agent/).

@@ -1,0 +1,22 @@
+---
+title: Answer an agent question or blocker
+description: Respond on GitHub and release work suppressed by an agent outcome.
+---
+
+Resolve an agent’s question or blocker so its loop can act on the item again.
+
+## Prerequisites
+
+A question or blocker in **Needs attention**, access to its GitHub item, and project operator access or a higher role.
+
+## Procedure
+
+1. Open the entry and read the agent’s question or exact blocker. Inspect the linked GitHub comment and failed attempt.
+2. Reply on the GitHub item with the decision, or fix the stated blocker. Keep the answer within the item’s requested scope.
+3. Select **Mark answered** for a question or **Mark resolved** for a blocker after the decision or fix is ready. Use **Retry** if the existing run should make another attempt with the same task.
+
+## Check the result
+
+The unresolved attention entry clears. Marking the question answered or blocker resolved checks the newest item state; a matching active loop can open work again.
+
+An agent ends with `[usine:question]` or `[usine:blocked]` and records the decision needed on the item. That outcome suppresses automatic work for the same state. A later changed item state can release suppression. A GitHub reply must change the item after polling observed the question; if both happen within one poll interval, use the explicit action above.

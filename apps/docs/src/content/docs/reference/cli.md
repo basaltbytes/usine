@@ -1,345 +1,229 @@
 ---
 title: CLI
-description: The usine commands, their flags, the environment variables that the orchestrator and the gateway read, and exit statuses.
-sidebar:
-  order: 5
+description: Commands, arguments, environment variables, lifecycle behavior, and exit statuses.
 ---
 
-The `@usine/server` package provides the `usine` binary ([`main.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/main.ts#L47)). Run every command from the instance folder, the folder that contains `.usine/runtime.sqlite` and the bootstrap files. Each command first reads the [environment file](#environment-file), `.env`, in that folder.
+The `@usine/server` package provides `usine`. Run commands from the instance folder, where `.usine/runtime.sqlite` stores configuration and run history. Each command reads `.env` before resolving its environment. `usine --help` prints usage; `usine --version` prints the installed release.
 
-```sh title="Usage"
-usine up [--port <port>] [--origin <url>] [--log-level <level>] [--allow-volatile-instance] [--detach]
-usine status
-usine stop [--timeout <seconds>] [--force]
-usine restart [--timeout <seconds>] [--force]
-usine upgrade [<version> | --channel <latest|next>] [--check] [--timeout <seconds>] [--force]
-usine backup <path>
-usine export-run <runId> [--output <path>]
-usine config export <folder>
-usine config import <folder> [--message <text>]
-usine config edit <kind> <name>
-usine config log [<kind> <name>]
-usine --help
-usine --version
+## usine up
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `-p`, `--port` | integer, 1–65535 | `USINE_PORT`, then `7331` | HTTP port on `127.0.0.1`. |
+| `--origin` | HTTP or HTTPS origin | `USINE_ORIGIN`, then loopback | Canonical browser address without a path, query, or fragment. |
+| `--log-level` | `trace`, `debug`, `info`, `warn`, or `error` | `USINE_LOG_LEVEL`, then `info` | Minimum log level, without case sensitivity. |
+| `--allow-volatile-instance` | flag | off | Permit an instance folder under temporary storage. |
+| `--detach` | flag | off | Start a detached process with output in `.usine/usine.log`. |
+
+```sh
+usine up
+usine up --detach --origin https://usine.example.com
 ```
 
-For any other form, the parser prints the usage on standard error and exits with status 1 ([`parseCli`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/cli.ts#L192)).
+Startup takes the instance lock, checks the listener, loads stored configuration, reads App and worker credentials, checks workers, and recovers attempts. Empty configuration tables accept a bootstrap import or initialize empty setup configuration. [Import and export format](/reference/configuration/import-export/) describes bootstrap input. Later starts read the database.
 
-| Command | Description |
-| --- | --- |
-| `usine up` | Starts the orchestrator and serves the UI. |
-| `usine status` | Reports whether the orchestrator runs, and its PID, address, engine version, uptime, and open runs. |
-| `usine stop` | Stops the orchestrator after its drain. |
-| `usine restart` | Stops the orchestrator and starts it again in the background. |
-| `usine upgrade` | Moves the instance's `@usine/server` pin to another version and restarts the orchestrator. |
-| `usine config` | [Edits configuration and imports, exports, or lists revisions](/reference/configuration/config/). |
-| `usine backup <path>` | Copies the runtime store and the durable storage while the orchestrator runs. |
-| `usine export-run <runId>` | Writes one run's records and transcript to a JSON file. |
-| `usine --help`, `usine -h` | Prints the usage. `usine <command> --help` does the same for every command. |
-| `usine --version`, `usine -v` | Prints the version of the installed `@usine/server`. |
+Missing or invalid App credentials start setup mode. Polling and schedules stay idle until setup completes. Worker preflight failure stops runtime startup. The App secrets file, `.usine/github-app.json`, must be a regular file with mode `0600`; environment values override corresponding file fields.
 
-## `usine up`
-
-| Flag | Value | Default | Description |
-| --- | --- | --- | --- |
-| `-p <port>`, `--port <port>`, `--port=<port>` | integer 1 to 65535 | `USINE_PORT`, then `7331` | The HTTP port. The server listens only on `127.0.0.1`. |
-| `--origin <url>`, `--origin=<url>` | an `http` or `https` URL without a path, query, or fragment, such as `https://usine-orchestrator.tail1234.ts.net` | `USINE_ORIGIN`, then none | The URL at which a proxy, such as `tailscale serve`, publishes the UI. This canonical origin is allowed for browser requests. Add other exact origins, including development ports, to `auth.origins`. See [Browser origins](/guides/expose-an-instance/#browser-origins). |
-| `--log-level <level>`, `--log-level=<level>` | `trace`, `debug`, `info`, `warn`, or `error`, in any case | `USINE_LOG_LEVEL`, then `info` | The lowest level of the lines that usine logs. `debug` adds the lines that say why usine skipped or deferred something, such as an entry left out of **Needs attention**. A change takes effect at the next `usine up`; `usine restart` keeps the recorded level. |
-| `--allow-volatile-instance` | none | off | Starts even if the instance folder is under a temporary directory. |
-| `--detach` | none | off | Starts the orchestrator in the background. See [Background start](#background-start). |
-
-If a flag repeats, the last value wins.
-
-Each log line starts with its time as an ISO 8601 timestamp in UTC, such as `[2026-10-27T02:25:13.123Z] INFO`, whatever the machine's time zone.
-
-### Startup
-
-`usine up` runs these steps in order and stops at the first failure ([`up`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L104)):
-
-1. **Volatile path check.** usine refuses an instance folder under `os.tmpdir()`, `$TMPDIR`, `/tmp`, `/private/tmp`, or `/var/folders`, by the given path or its real path, because the runtime store is the only copy of every run and transcript. With `--allow-volatile-instance`, usine logs a warning and continues.
-2. **Instance lock.** usine holds an exclusive SQLite transaction on `.usine/instance.lock`, writes its process ID to `.usine/instance.pid`, and writes the [instance record](#instance-record) to `.usine/instance.json` ([`holdInstance`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/instance-lock.ts#L44)). A second `usine up` in the folder exits and prints that ID. The lock ends with the process, however it exits. usine removes both files when it exits, unless the OS kills it, for example with `SIGKILL`. usine then reads the instance ID from `.usine/instance-id`, or writes a new UUID there at the first start. The ID labels the instance's attempt containers on SSH workers, so that another instance folder with the same GitHub App doesn't remove them ([`instanceIdOf`](https://github.com/basaltbytes/usine/blob/main/apps/server/src/instance/id.ts)). If the file doesn't contain a UUID, usine exits.
-3. **Port check.** usine refuses a port that another process listens on, and prints that process if `lsof` finds it.
-4. **Configuration load.** usine reads the runtime configuration store. If the configuration tables are empty, it imports the bootstrap `usine.yaml`, `agents/`, and `projects/<project>/loops/` files as revision 1, attributed to the instance's `operator`, with the message `Imported from the instance folder`. Any schema, CEL, or reference problem refuses the import. Later starts ignore those configuration files. Loop pause state is unchanged.
-5. **GitHub App credentials.** usine reads `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, and fills a missing one from `.usine/github-app.json` ([`loadLocalCredentials`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/local-secrets.ts#L69)). If both variables are set, usine doesn't read the file. It accepts PKCS#1 keys (`BEGIN RSA PRIVATE KEY`, as GitHub downloads them) and PKCS#8 keys.
-6. **Runtime.** usine opens the stores, reads each gateway's admin token, runs preflight on every worker, starts polling and schedules, and reattaches the attempts that an earlier process left running. It prints `usine is running at http://127.0.0.1:<port>`.
-
-On macOS, after the port check, usine reads `pmset -g` and logs a warning if system sleep is on and `caffeinate` doesn't prevent it, since a sleep drops the SSH connections to workers and the gateway. The check doesn't stop startup. See [Keep the machine awake](/guides/keep-the-orchestrator-running/#keep-the-machine-awake) and [Run the orchestrator on a server](/guides/run-the-orchestrator-on-a-server/).
-
-An expected startup failure prints one line with the file, setting, or worker at fault, such as a preflight check like `machine` or `harness-login`, and what to do, and exits with status 1. Only a defect in usine prints a full trace.
+A second process cannot run the same instance folder. Temporary paths are refused by default because runtime state needs persistent storage. On macOS, startup warns if system sleep can interrupt remote sessions. Logs use ISO 8601 UTC timestamps.
 
 ### Background start
 
-`usine up --detach` checks that no `usine up` runs in the folder. It then starts `usine up` with the same Node.js binary, Node.js options, entry point, port, origin, log level, and `--allow-volatile-instance` flag, in a new session and with no terminal. The new process appends its output to `.usine/usine.log`, which has owner-only permissions; usine doesn't rotate it. The command waits for the process to write its instance record and answer HTTP requests, and then prints:
-
-```text
-usine is running at http://127.0.0.1:7331 (pid 48120), with its output in .usine/usine.log.
-```
-
-The process answers only after startup recovery, which reconciles the checkouts that earlier attempts left on workers and can take minutes. So the command keeps waiting while the process writes to the log, and gives up after 120 seconds without a new line. At log level `warn` or `error`, startup recovery writes few lines, so a long recovery can exceed the wait.
-
-If the process exits first, the command prints how it exited and the last 20 lines of the log, and exits with status 1. If the process neither answers nor writes to the log for 120 seconds, the command says so and exits with status 1, and the process keeps running. The process inherits the environment of the shell that runs the command, and reads the [environment file](#environment-file) itself.
+A detached start retains the selected Node binary, options, entry point, and launch flags. It waits for the process to answer after startup recovery. If the process exits, the command prints its exit and the log tail. After 120 seconds without an answer or new log line, the command reports a timeout while the process can still be starting. Logs have owner-only permissions and require operator-managed rotation.
 
 ### Instance record
 
-`.usine/instance.json` describes the running `usine up`. It has owner-only permissions:
-
-| Key | Description |
-| --- | --- |
-| `pid` | The process ID, which `.usine/instance.pid` also contains. |
-| `version` | The `@usine/server` version of the process. |
-| `startedAt` | When the process took the instance lock, in ISO 8601 format. |
-| `launch` | How the process started: `node` (the Node.js binary), `nodeOptions`, `script` (the CLI entry point), `port`, `origin` (absent without `--origin`), `logLevel`, and `allowVolatileInstance`. `usine restart` starts the new process with these values, and at `info` if a version before `--log-level` wrote the record without `logLevel`. |
-| `systemdUnit` | The systemd system service whose cgroup the process is in, from `/proc/self/cgroup`, such as `usine.service`. Absent outside one. See [Instances that systemd runs](#instances-that-systemd-runs). |
-| `stoppingSince` | When the process received its first `SIGINT` or `SIGTERM`. Absent until then. |
-
-The record says which process holds the instance, but the instance lock says whether one does. If a process stops without removing its files, for example after `SIGKILL`, `usine status` reports them as stale, and the next `usine up` replaces them.
+`.usine/instance.json` records PID, release, start time, launch settings, systemd unit when applicable, and drain start time. The lock determines whether a process owns the instance; stale process records are replaced on the next start. `.usine/instance-id` identifies attempt containers and must remain with the instance during moves and restores.
 
 ### Instances that systemd runs
 
-If the record has a `systemdUnit`, `usine status`, `usine stop`, `usine restart`, and `usine upgrade` first run `systemctl show --property=MainPID --value <unit>`. If systemd reports the recorded process as the service's main process, they manage the service with `systemctl` instead of signals and background starts:
+Lifecycle commands verify that the recorded unit owns the process. They use `systemctl stop --no-block` and `systemctl start` to preserve service management. Service starts use the service environment and the instance `.env`. The service user needs authorization to manage the unit. See [server deployment](/guides/run-the-orchestrator-on-a-server/).
 
-- The first stop signal is `systemctl stop --no-block <unit>`, so that systemd doesn't restart the service. The drain, `--timeout`, and `--force` work as for any instance: the command waits for the process to exit, and `--force` sends the second `SIGTERM` and `SIGKILL` itself.
-- `usine restart` and `usine upgrade` start the service again with `systemctl start <unit>`, and wait until the new process answers. If the service fails or waits to restart before that, the command stops it with `systemctl stop --no-block`, so that a failing start doesn't repeat, and exits with status 1. If `systemctl start` itself fails, for example because the service's command can't run, the command also stops a service that waits to restart, and exits with status 1 and the error of `systemctl start`. If the process doesn't answer within `--timeout`, the command exits with status 1, and the service keeps starting.
-- `usine status` adds `service   <unit>, managed with systemctl`.
+## usine status
 
-If the service has another main process, for example because a script of another service started `usine up`, the commands signal the process as for any instance. If a `systemctl` command fails, for example because the user may not stop or start the service, `usine stop`, `usine restart`, and `usine upgrade` stop at that step, exit with status 1, and name the `systemctl` command; `usine status` shows the failure on its `service` line. [Run the orchestrator on a server](/guides/run-the-orchestrator-on-a-server/) sets up a service and a polkit rule that lets the `usine` user start and stop it.
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| none | none | instance folder | Report the owning process, listener, version, uptime, open runs, and systemd unit. |
 
-The process that `systemctl start` starts gets the environment of the service, not of the shell that runs the command, and reads the [environment file](#environment-file) itself.
-
-### Setup mode
-
-If the credentials are missing or invalid, usine starts in setup mode instead of the runtime. It logs `GitHub App credentials are absent; pollers are idle`, prints `usine is running in setup mode at http://127.0.0.1:<port>`, and opens that page in the browser. The page shows **GitHub App not set up**, the error, and the two ways to supply the credentials.
-
-In setup mode, usine doesn't poll GitHub or fire schedules. You can read projects, runs, and transcripts, and edit the stored configuration. Every other action, such as approve, retry, cancel, pause, or a board move, fails with `BackendUnavailableError`. usine reads the credentials only at startup, so restart `usine up` after you add them.
-
-The secrets file is JSON with two keys, and must be a regular file with mode `0600`. usine refuses any other mode, including `0400`:
-
-```json title=".usine/github-app.json"
-{
-  "app_id": 123456,
-  "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n"
-}
+```sh
+usine status
 ```
 
-### Reload
+The command exits with `0` for an owned instance and `3` when stopped. It identifies stale process records and reports an active drain.
 
-Committed configuration revisions apply automatically. Files are read only for the first-start import or an explicit `usine config import <folder>`. See [Live changes and restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements) for the fields that need a restart and the behavior of running attempts.
+## usine stop
 
-To reread the stored configuration explicitly, for example after fixing a worker preflight failure, send `SIGHUP`:
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--timeout` | integer seconds > 0 | `120` | Wait for the process to exit before reporting a timeout. |
+| `--force` | flag | off | Stop without waiting for attempts and send SIGKILL if the process exceeds the timeout. |
 
-```sh title="Instance folder"
-kill -HUP "$(cat .usine/instance.pid)"
+```sh
+usine stop --timeout 300
 ```
 
-This reads `.usine/runtime.sqlite`, not edited files or `.env`. An accepted revision ends the poll's `poll_interval` wait, or waits until GitHub's requested backoff ends if that is later. If a loop is added or removed, or its `on` or `if:` changes, the next poll reads the affected repository's items from the start. A failed reread (`FactoryConfigError`), startup-only change (`RestartRequiredError`), or failed worker check (`ReloadPreflightError`) keeps the running configuration unchanged.
+The first stop request stops admission and drains running attempts. A command timeout leaves the drain active. Another ordinary stop waits without escalating; `--force` sends the second termination signal. A stopped instance returns success.
 
 ### Shutdown
 
-The first `SIGINT` or `SIGTERM` (Ctrl+C) starts a graceful drain: usine logs `Orchestrator shutdown started`, writes `stoppingSince` to the instance record, stops opening new work, and waits for active attempts to finish ([`withGracefulShutdown`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/shutdown.ts#L25)). The drain's deadline is `settings.max_attempt_minutes`, or none without that setting. After a full drain, the log shows `Orchestrator exiting after graceful drain`.
+Ctrl+C or SIGTERM starts a drain. Its deadline uses `settings.max_attempt_minutes` when set. A second signal stops immediately. Retained Pi parent tasks and checkouts can reattach on the next start. If a task cannot be confirmed stopped, its slot remains reserved and reconciliation retries rather than starting duplicate work.
 
-A second signal, or the deadline, stops the orchestrator without waiting. Running attempts stay recorded as open, and the next `usine up` reattaches them. Runs that wait for a worker and pending automatic retries continue at the next start. The process exits with status 130. Until it exits, the instance lock blocks a new `usine up`.
+## usine restart
 
-`usine stop` sends these signals for you and waits for the process to exit. With `--force`, it sends `SIGKILL` if the process still runs after its timeout.
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--timeout` | integer seconds > 0 | `120` | Maximum wait for stop and restart lifecycle operations. |
+| `--force` | flag | off | Permit interruption and later reattachment of active attempts. |
 
-## `usine status`
-
-Reports whether `usine up` runs in the instance folder. It reads the instance lock and the instance record, and sends one `GET /api/overview` to the running orchestrator:
-
-```text
-usine is running in /home/me/factory.
-  pid       48120
-  address   http://127.0.0.1:7331
-  engine    @usine/server 0.4.0, installed in the instance
-  started   2026-10-25T16:04:00.000Z (2h 13m 5s ago)
-  runs      1 running, 2 queued
-  update    @usine/server 0.5.0 is available. Run usine upgrade.
+```sh
+usine restart
 ```
 
-- `origin` appears after `address` for an orchestrator started with `--origin` or `USINE_ORIGIN`.
-- `engine` names the entry point if the engine runs from outside the instance's `node_modules`, such as a checkout.
-- `runs` counts the open runs by state. If the orchestrator doesn't answer, it says `unavailable` and why.
-- `installed` appears if the `usine` that you run has the orchestrator's entry point but another version, for example after an install without a restart.
-- `update` appears for an engine that is installed in the instance from its `package.json` pin. It compares the running version with the `latest` version that `npm view` reports.
-- A draining orchestrator reports `usine is stopping` and when the drain started.
-- An orchestrator of an earlier usine version, which writes only `.usine/instance.pid`, is reported as running with its PID only.
-- A stopped instance reports `usine is not running`, and the PID of stale files if a process left them.
+Restart requires a running instance and retains its launch flags. It refuses active attempts unless forced and verifies required gateway credential variables before stopping. A detached restart appends to `.usine/usine.log`; systemd instances restart through their unit. The new process reads the instance environment again.
 
-The command exits with status 0 if a process holds the instance, and 3 if none does.
+## usine upgrade
 
-## `usine stop`
-
-| Flag | Value | Default | Description |
+| Argument or option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--timeout <seconds>`, `--timeout=<seconds>` | whole number above 0 | `120` | How long to wait for the process to exit. |
-| `--force` | none | off | Sends a second `SIGTERM`, which stops the orchestrator without waiting for running attempts, and `SIGKILL` if the process still runs after the timeout. The next `usine up` reattaches the attempts. |
+| `<version>` | registry version, range, or tag | configured channel for managed global installs, otherwise `latest` | Release to install. |
+| `--channel` | `latest` or `next` | configured channel | npm channel for managed global upgrades. |
+| `--check` | flag | off | Report versions without changing packages or process state. |
+| `--timeout` | integer seconds > 0 | `120` | Lifecycle wait for local pin upgrades. |
+| `--force` | flag | off | Restart immediately and reattach active attempts. |
 
-Sends `SIGTERM` to the orchestrator, which starts the [drain](#shutdown), and waits until the process exits. For an orchestrator that a systemd service runs, it runs `systemctl stop --no-block` instead ([Instances that systemd runs](#instances-that-systemd-runs)). It names the runs whose attempts the drain waits for. If no `usine up` runs, it prints `usine is not running in <folder>.` and exits with status 0. It also stops an orchestrator of an earlier usine version, through `.usine/instance.pid`.
-
-If the process still runs after the timeout, the command exits with status 1, and the drain continues. Run `usine stop` again to keep waiting: the instance record shows the drain, so the command doesn't send the second signal. Run `usine stop --force` to stop without waiting.
-
-With `--force`, a process that still runs after the timeout gets `SIGKILL`, and the command prints `usine (pid <pid>) did not exit within <timeout>. Sent SIGKILL: the next start reattaches the running attempts.` It then waits up to 5 seconds for the process to exit, and exits with status 1 if the process still runs.
-
-## `usine restart`
-
-Takes the same flags as `usine stop`. It applies `--timeout` to the stop, and to the start as the time without a new log line.
-
-Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record, or with `systemctl start` for an orchestrator that a systemd service runs. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces, and reads the [environment file](#environment-file) again. A variable in `.env` doesn't need to be set in that shell.
-
-If the orchestrator has no instance record that this `usine` can read, for example because an earlier usine version started it, the command stops the process in `.usine/instance.pid`. It then starts `usine up` as `usine up --detach` without flags would: with the `usine` that you run, and the port, log level, and volatile flag that the shell or `.env` sets, else the defaults. Before it stops the process, it lists the TCP ports that the process listens on, from `/proc` on Linux and from `lsof` elsewhere, and runs the checks below on the port where the process answers the operator API. That port can differ from the new one. The checks pass if no port answers. The command prints the port that it checks, if any, and the new port.
-
-The command changes nothing and exits with status 1 in these cases:
-
-- No `usine up` runs in the folder. Start it with `usine up --detach`.
-- A process holds the instance lock, but `.usine/instance.pid` names no running process, because the orchestrator is still starting. Run the command again after it starts.
-- A run has a running attempt, unless you pass `--force`. Without a deadline, the drain would keep the orchestrator down until the attempt ends.
-- Neither the shell nor `.env` sets the `admin_token_env` variable of a gateway in the running configuration. The new process would stop at startup without it.
-- The orchestrator has no readable instance record, and the command can't list the ports of its process, for example because another user started it. Run the command as that user, or run `usine stop` and then `usine up --detach`.
-
-## `usine upgrade [<version>]`
-
-For a global npm installation managed by systemd, this command requests an upgrade from `settings.upgrade_channel`. It waits for running attempts by default; `--force` selects immediate restart and reattachment. The separate upgrade helper restores the previous package version if installation or the new API fails. The command exits after acceptance; follow Settings or the helper journal for the outcome. Install the helper as described in the [server guide](/guides/run-the-orchestrator-on-a-server/#upgrade-the-server).
-
-For an installation pinned in the instance folder, the following pin upgrade behavior applies.
-
-| Flag | Value | Default | Description |
-| --- | --- | --- | --- |
-| `--channel` | `latest` or `next` | configured channel for systemd | Selects an npm dist-tag. |
-| `<version>` | a version, range, or dist-tag | `latest` | The `@usine/server` version to pin. |
-| `--check` | none | off | Prints the running, pinned, and available versions, and changes nothing. |
-| `--timeout <seconds>`, `--force` | | | As for `usine restart`. |
-
-Moves the `@usine/server` pin in the instance's `package.json` and restarts the orchestrator on the new version. It applies to an instance that pins `@usine/server` to a registry version and runs the engine from its own `node_modules`. The command runs these steps in order:
-
-1. **Version.** It resolves `<version>` with `npm view` in the instance folder, so the folder's `.npmrc` applies. Other `@usine/*` packages with a registry version in `package.json` move to the version that the new `@usine/server` depends on, or to their latest version.
-2. **Checks.** It refuses, as `usine restart` does, while a run has a running attempt or neither the shell nor `.env` sets a gateway's admin token variable.
-3. **Backup.** It copies `.usine/runtime.sqlite` and `.usine/durable.sqlite` into `.usine/backups/`, as `usine backup` does, named `runtime-<UTC time>-<running version>.sqlite` and `runtime-<UTC time>-<running version>.durable.sqlite`.
-4. **Stop.** It stops the orchestrator as `usine stop` does.
-5. **Install.** It rewrites the version of each pin in `package.json` and keeps the rest of the file as it is. Then it runs `install` with the instance's package manager: the one in the `packageManager` field, else the one whose lockfile exists (pnpm, npm, Yarn, or Bun), else npm. If the install fails, it restores `package.json` and the lockfile, and the orchestrator stays stopped.
-6. **Commit.** It commits `package.json` and the lockfile, and no other file, as `Pin @usine/server to <version>`. If Git fails, it says so and continues.
-7. **Start.** If the orchestrator was running, it starts it as `usine restart` does, with `systemctl start` for a systemd service, and the new version runs its forward-only migrations at startup.
-
-If the new version exits before it listens, for example because a migration failed, the command prints the last lines of `.usine/usine.log`, or the `journalctl` command for a systemd service, and the steps to roll back: revert the commit, install, restore the backup, and start the orchestrator.
-
-The command changes nothing in these cases:
-
-- The orchestrator runs from outside the instance's `node_modules`, except for a global npm installation managed by systemd. The command exits with status 1 and says how to update that engine. `--check` still prints the versions.
-- `package.json` is missing, or doesn't pin `@usine/server` to a registry version, for example because it links a local folder. The command exits with status 1.
-- The pin already has the version. If the orchestrator runs another version, the command suggests `usine restart`.
-- Without `<version>`, the `latest` version is older than the pin.
-
-If no `usine up` runs, the command moves the pin and installs, and doesn't start the orchestrator.
-
-## `usine backup <path>`
-
-Copies the instance's runtime store, `.usine/runtime.sqlite`, to `<path>`, and its durable storage, `.usine/durable.sqlite`, next to it.
-
-For destinations ending in `.sqlite` or `.db`, the durable copy has `.durable` before that extension: `backup.sqlite` becomes `backup.durable.sqlite`, and `backup.db` becomes `backup.durable.db`. For all other names, the command appends `.durable.sqlite`: `before-pi-1.4-2026-10-29` becomes `before-pi-1.4-2026-10-29.durable.sqlite`, and `nightly` becomes `nightly.durable.sqlite`.
-
-- It works while `usine up` runs, without the instance lock, through SQLite's backup API on read-only connections.
-- Both copies have owner-only permissions.
-- `<path>` is relative to the working directory. Its directory must exist and support hard links.
-- It fails instead of overwriting a file at either destination.
-- It copies the durable storage first, and removes that copy if the runtime copy fails.
-- If the instance has no durable storage yet, it backs up only the runtime store and says so.
-
-```sh title="Terminal"
-cd ~/factory
-usine backup ~/backups/factory-2026-10-16.sqlite
+```sh
+usine upgrade --check
+usine upgrade
 ```
 
-## `usine export-run <runId>`
+For a global installation managed by systemd, the command requests the separate upgrade helper and exits after acceptance. The default waits for admitted attempts to finish. **Settings** and the helper journal report the final outcome. The helper backs up stores, installs, restarts, and checks version and readiness. Installation or readiness failure restores the prior package and databases.
 
-Writes the evidence of one run to a new JSON file, read in one transaction: its event and approval, run, step and its result, attempts, effective task and agent, repository and revision, and transcript ([`exportRun`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/export-run.ts#L81)). It opens `.usine/runtime.sqlite` read-only, without credentials and without starting execution.
+For an instance-local registry pin, upgrade backs up stores in `.usine/backups/`, changes package pins, installs with the instance package manager, commits manifest and lockfile changes, and restarts if the instance was running. It refuses active attempts unless forced. Failed installation restores manifests and lockfiles and leaves the instance stopped. Startup failure prints recovery instructions. A stopped instance receives the package update without starting.
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `-o <path>`, `--output <path>` | `run-<runId>.json` in the working directory, with the run ID URL-encoded | Where to write the file. |
+A checkout installation requires updating and building its checkout, then restarting. [Upgrade an instance](/guides/upgrade-an-instance/) describes the procedure.
 
-The file has mode `0600` and the top-level keys `version` (`1`), `exportedAt`, `snapshot`, and `transcript`. The command never overwrites an existing destination. With an unknown run ID, the command exits with `Run <runId> was not found.`
+## usine backup
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<path>` | new file path | required | Destination for the runtime database backup. |
+
+```sh
+usine backup /backups/instance.sqlite
+```
+
+The command uses SQLite’s backup API while the instance runs. It copies durable storage first and the runtime store second, with owner-only permissions, and refuses an existing destination. The directory must exist and support hard links. A runtime backup failure removes the durable copy. An instance without durable storage produces only the runtime copy and reports it.
+
+The durable path inserts `.durable` before `.sqlite` or `.db`, or appends `.durable.sqlite` for another extension. Backups omit credentials and connection-record files. See [Back up instance state](/guides/back-up-instance-state/).
+
+## usine export-run
+
+| Argument or option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<runId>` | run ID | required | Run to read from the runtime store. |
+| `-o`, `--output` | new file path | URL-encoded `run-<runId>.json` | Destination for run evidence and transcript. |
+
+```sh
+usine export-run <run-id> --output /evidence/run.json
+```
+
+The command reads a snapshot without starting execution. JSON contains `version`, `exportedAt`, `snapshot`, and `transcript`, including event, approval, attempts, results, and effective definitions. The file has mode `0600`; an existing path or unknown run is an error.
+
+## usine sign-in
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<origin>` | instance origin | `USINE_ORIGIN`, then `http://127.0.0.1:<port>` | Instance that issues the device token after GitHub authorization. |
+
+```sh
+usine sign-in https://usine.example.com
+```
+
+Open the printed device page and enter the code. The token appears once. Store it securely and send it as a bearer token. Its permission ceiling is limited by current role bindings. See [Create a device token](/guides/create-a-device-token/).
+
+## usine sign-in-link
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| none | none | local running instance | Issue a private one-time browser sign-in URL using local admin access. |
+
+```sh
+usine sign-in-link
+```
+
+The URL works once within ten minutes. Local lifecycle and link commands require a regular `.usine/admin-token` owned by the current user with mode `0600`. Startup replaces that file. See [Access](/reference/access/).
+
+## Configuration commands
+
+[`usine config`](/reference/configuration/config/) documents `export`, `import`, `edit`, and `log`. These commands access the local database directly and save configuration revisions.
 
 ## Environment variables
 
-The `usine` process reads these variables from its environment, or from the [environment file](#environment-file) if the environment doesn't set them:
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `USINE_PORT` | integer, 1–65535 | `7331` | Port used when `--port` is absent. |
+| `USINE_ORIGIN` | origin | loopback listener | Canonical origin used when `--origin` is absent. |
+| `USINE_LOG_LEVEL` | log level | `info` | Minimum log level used when the flag is absent. |
+| `USINE_ALLOW_VOLATILE_INSTANCE` | `1` | off | Equivalent to `--allow-volatile-instance`. |
+| `TMPDIR` | path | OS default | Additional path considered temporary by the volatile-instance check. |
+| `USINE_GITHUB_APP_ID` | positive integer | App secrets file | GitHub App ID. |
+| `USINE_GITHUB_PRIVATE_KEY` | PEM string | App secrets file | App RSA private key in RSA-specific or generic PEM encoding. |
+| `USINE_GITHUB_CLIENT_ID` | string | App secrets file | App client ID for member sign-in. |
+| `USINE_GITHUB_CLIENT_SECRET` | secret string | App secrets file | App client secret for member sign-in. |
+| `USINE_GITHUB_WEBHOOK_SECRET` | secret string | App secrets file | Signature secret for endpoint webhook hints. |
+| `PI_CODING_AGENT_DIR` | path | `~/.pi/agent` | Pi parent configuration and credential directory. |
+| Worker credential variable names | secret strings | required when configured | Provider tokens, API keys, gateway admin tokens, and Access credentials referenced by worker records. |
+| `OTEL_RESOURCE_ATTRIBUTES` | percent-encoded `key=value` list | empty | Additional span resource attributes when tracing is enabled. |
 
-| Variable | Read by | Description |
-| --- | --- | --- |
-| `USINE_PORT` | `usine up` | The HTTP port if `--port` is absent. If the value isn't a whole number from 1 to 65535, `usine up` exits with status 1. `usine restart` passes the recorded port with `--port`, so this variable doesn't change it unless the instance record is missing or unreadable. |
-| `USINE_ORIGIN` | `usine up` | The URL of `--origin` if the flag is absent. If the value isn't an `http` or `https` URL without a path, query, or fragment, `usine up` exits with status 1. `usine restart` passes the recorded origin with `--origin`. |
-| `USINE_LOG_LEVEL` | `usine up` | The log level if `--log-level` is absent. If the value isn't `trace`, `debug`, `info`, `warn`, or `error`, in any case, `usine up` exits with status 1. `usine restart` passes the recorded level with `--log-level`, so this variable doesn't change it unless the instance record is missing or unreadable. |
-| `USINE_ALLOW_VOLATILE_INSTANCE` | `usine up` | `1` has the same effect as `--allow-volatile-instance`. usine ignores other values. |
-| `TMPDIR` | `usine up` | Added to the temporary directories of the volatile path check. |
-| `USINE_GITHUB_APP_ID` | `usine up` | The GitHub App ID, a positive integer. Takes precedence over `app_id` in the secrets file. |
-| `USINE_GITHUB_PRIVATE_KEY` | `usine up` | The App's PEM-encoded RSA private key. Takes precedence over `private_key` in the secrets file. |
-| `USINE_GITHUB_CLIENT_ID` | GitHub sign-in | Overrides `client_id` in the App secrets file. |
-| `USINE_GITHUB_CLIENT_SECRET` | GitHub sign-in | Overrides `client_secret` in the App secrets file. |
-| `USINE_GITHUB_WEBHOOK_SECRET` | Webhook delivery | Overrides `webhook_secret` in the App secrets file. |
-| the name in `admin_token_env` | `usine up` | One per SSH worker with a `gateway`: the token for the gateway's admin API. If it's unset, startup fails. |
-| `OTEL_RESOURCE_ATTRIBUTES` | `usine up` with a [`tracing`](/reference/configuration/usine-yaml/#tracing) block | Resource attributes of exported spans, as comma-separated `key=value` pairs with percent-encoded keys and values. If a key or value isn't valid percent-encoding, `usine up` exits with status 1. |
-
-usine starts in setup mode, without falling back to the file, if a GitHub App variable is set but invalid. It does the same if the secrets file is missing, unreadable, not mode `0600`, or fails credential validation. The file requires `app_id` and `private_key`; setup also saves `client_id`, `client_secret`, and `webhook_secret`.
-
-Child processes don't inherit the orchestrator's environment. Git and `gh` commands for a local worker receive only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `TMPDIR`, and `USER`. The `ssh` client for an SSH worker receives those and `SSH_AGENT_PID` and `SSH_AUTH_SOCK` ([`SSH_ENVIRONMENT_ALLOWLIST`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L70)). Only the orchestrator process has the App private key and the gateway admin tokens.
+Restart retains recorded port, origin, and log-level flags. Set a different flag on the next explicit start to change them. Invalid process settings fail with a diagnostic. Invalid App credentials enter setup mode. Child processes receive a restricted environment rather than all orchestrator secrets.
 
 ### Environment file
 
-Each `usine` command reads `.env` in the instance folder when it starts, before it reads any variable ([`instanceEnvironment`](https://github.com/basaltbytes/usine/blob/main/apps/server/src/instance/environment.ts)). As with [dotenv](https://github.com/motdotla/dotenv), a variable that the environment sets keeps its value, and `.env` sets the others. So `USINE_PORT=8080 usine up` overrides a `USINE_PORT` in `.env` for one start. Without `.env`, usine reads the environment alone. If `.env` exists but can't be read, the command exits with status 1 and names the file.
+Every command reads `.env` in the instance folder. Shell environment values take precedence; empty values count as unset. A missing file is allowed; an unreadable file is an error. Each line is `KEY=value`, optionally prefixed by `export`. Quote values containing a hash character. Single, double, and backtick quotes are accepted; double-quoted `\n` becomes a newline. Variable and command substitutions stay literal.
 
-```sh title=".env"
-# The variable named by the stored gateway admin_token_env setting
-USINE_GATEWAY_ADMIN_TOKEN=4f0c...
-export HCLOUD_TOKEN=...
-USINE_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n"
+```dotenv
+USINE_ORIGIN=https://usine.example.com
+USINE_PORT=7331
 ```
 
-- Each line is `KEY=value`, optionally after `export`. A `#` outside quotes starts a comment, so quote a value that contains `#`.
-- A value can be in single, double, or backtick quotes. In double quotes, `\n` is a newline.
-- usine doesn't expand variables or run commands: `${HOME}` and `$(cat token)` stay as written.
-- An empty value, as in `KEY=`, counts as unset.
-- `usine up` reads `.env` only when it starts, and a reload doesn't read it. After you change it, run `usine restart`.
-- usine doesn't add the variables to its process environment. A child process gets a variable from `.env` only if its list above includes it, such as `PATH`.
+Keep `.env` private, set mode `0600`, and exclude it from git. Changes take effect when a command starts; the running orchestrator does not reread it on configuration changes.
 
-Unlike the [gateway's environment files](#usine-gateway), `.env` doesn't override the environment. It contains secrets, so make it readable only by you, and keep it out of git:
+### Reload
 
-```sh title="Instance folder"
-chmod 600 .env
-echo .env >> .gitignore
-```
+`SIGUSR1` requests a reread of stored configuration. It does not import files or reread `.env`. Most revisions apply automatically. See [revision application](/reference/configuration/config/#revision-application).
 
 ## Exit status
 
-| Status | When |
-| --- | --- |
-| `0` | `--help`, `--version`, a completed `config` command, `backup`, `export-run`, `stop`, `restart`, or `upgrade`, a background start that listens, or `status` while a process holds the instance. |
-| `1` | A usage error, an unreadable `.env`, a refused start (volatile path, instance in use, port in use, lock failure), an invalid bootstrap configuration, any other startup failure, a failed `config`, `backup`, or `export-run`, or a refused, timed-out, or failed `stop`, `restart`, or `upgrade`. The message is on standard error. |
-| `3` | `status` while no process holds the instance. |
-| `130` | `usine up` stopped by `SIGINT` or `SIGTERM`. |
+| Status | Type | Default | Description |
+| --- | --- | --- | --- |
+| `0` | exit code | success | Command completed or help printed. |
+| `1` | exit code | failure | Invalid usage, refused operation, timeout, or operational error on standard error. |
+| `3` | exit code | status only | No process owns the instance. |
+| `130` | exit code | signaled shutdown | Foreground orchestrator stopped after SIGINT or SIGTERM. |
 
-## `usine-gateway`
+## usine-gateway
 
-The gateway host runs a separate binary, `usine-gateway`, from `@usine/gateway`. It takes no arguments and logs one JSON object per line to the journal. The response to a refused request has the reason in its `x-usine-gateway-refusal` header, and the log records it. The binary reads the variables below from the environment files listed in `USINE_GATEWAY_ENVIRONMENT_FILES`, and from the process environment for any variable that no file sets ([`settingsFromEnvironment`](https://github.com/basaltbytes/usine/blob/be90a084707dfe4796b68d26860efa8865aa1b07/packages/gateway/src/node/environment.ts#L212)). If a required variable is missing, a value is invalid, or the allowlist can't be read, the binary exits before it starts listening.
+The `@usine/gateway` package provides a separate `usine-gateway` binary with no arguments. It logs one JSON object per line. Refused proxy requests include `x-usine-gateway-refusal` and a logged reason.
 
-On `SIGHUP`, which `systemctl reload usine-gateway` sends, the gateway reads its environment files and its allowlist file again and replaces the egress allowlist and the LLM provider settings: `ANTHROPIC_API_KEY`, `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN`, `OPENAI_API_KEY`, `USINE_GATEWAY_CHATGPT_AUTH_FILE`, the three upstreams, and `USINE_GATEWAY_EGRESS_ALLOWLIST`. It also reads the ChatGPT auth file again, so a new `auth.json` copied over it replaces the login ([`reloadOnHangup`](https://github.com/basaltbytes/usine/blob/be90a084707dfe4796b68d26860efa8865aa1b07/packages/gateway/src/node/reload.ts#L226)). The attachments, the admin API, the listeners, and open tunnels don't change, so running attempts continue. The log line `Reloaded the gateway settings` lists the keys that changed. If the allowlist doesn't parse, the provider settings are invalid, or the ChatGPT auth file isn't a ChatGPT login, the gateway keeps the current settings and logs the reason. Variables that the process environment set at startup don't change on a reload.
+Environment files listed by `USINE_GATEWAY_ENVIRONMENT_FILES` override process values, with later files taking precedence. This differs from the instance `.env`. Missing required values, invalid settings, or an unreadable allowlist stop startup.
 
-The domain, the listeners, the admin token, and the caller key change only with a restart (`systemctl restart usine-gateway`). If a reload finds one of them changed, it logs `Settings changed that take effect only after a restart` with the variable names and applies the rest. A restarted gateway loses its attachments, and the executor registers each running attempt's attachment again within two minutes.
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `USINE_GATEWAY_ENVIRONMENT_FILES` | string | none | Environment files separated by `:`, each with one `KEY=value` per line. Quote a value that contains `#`. A variable in a later file overrides the same variable in an earlier file and in the process environment. Read from the process environment only. |
+| `USINE_GATEWAY_DOMAIN` | string | required | The private DNS domain. The same value as `gateway.domain` in the stored configuration. |
+| `USINE_GATEWAY_ADMIN_TOKEN` | string | required | Bearer token of the admin API, at least 32 characters. The orchestrator's variable named by `admin_token_env` contains the same value. |
+| `USINE_GATEWAY_CALLER_KEY` | string | required | HMAC key that signs caller tokens, at least 32 characters. Only the gateway has it. |
+| `USINE_GATEWAY_EGRESS_ALLOWLIST` | string | `/etc/usine-gateway/egress-allowlist` | File of hosts that the forward proxy allows. One rule per line: `host` or `*.domain`, optionally with `:port`. A rule without a port allows 443 and 80. `#` starts a comment. |
+| `ANTHROPIC_API_KEY` | string | none | Anthropic API key that the gateway adds for Claude Code. |
+| `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` | string | none | Alternative Anthropic credential: a Claude subscription token from `claude setup-token`, valid for one year. Setting both Anthropic variables is an error. |
+| `OPENAI_API_KEY` | string | none | OpenAI-compatible API key that the gateway adds for Codex. |
+| `USINE_GATEWAY_CHATGPT_AUTH_FILE` | string | none | Alternative OpenAI credential: the absolute path of a Codex `auth.json` with a ChatGPT login, which the gateway refreshes and rewrites, so the service needs write access to its directory. Setting both OpenAI variables is an error. If the file isn't a ChatGPT login, the binary exits before it starts listening. |
+| `USINE_GATEWAY_ANTHROPIC_UPSTREAM` | string | `https://api.anthropic.com` | Base URL for Anthropic requests. |
+| `USINE_GATEWAY_OPENAI_UPSTREAM` | string | `https://api.openai.com` | Base URL for OpenAI requests with `OPENAI_API_KEY`. |
+| `USINE_GATEWAY_CHATGPT_UPSTREAM` | string | `https://chatgpt.com/backend-api/codex` | Base URL for OpenAI requests with `USINE_GATEWAY_CHATGPT_AUTH_FILE`. |
+| `USINE_GATEWAY_PROXY_HOST`, `USINE_GATEWAY_PROXY_PORT` | host string, integer port 0–65535 | `127.0.0.1`, `80` | Listener of the reverse proxy that workers call for GitHub and LLM providers. |
+| `USINE_GATEWAY_EGRESS_HOST`, `USINE_GATEWAY_EGRESS_PORT` | host string, integer port 0–65535 | `127.0.0.1`, `3128` | Listener of the forward proxy. |
+| `USINE_GATEWAY_ADMIN_HOST`, `USINE_GATEWAY_ADMIN_PORT` | host string, integer port 0–65535 | `127.0.0.1`, `7070` | Listener of the admin API. `admin_port` in the stored configuration is the same port. The executor forwards a local port to it over SSH. |
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `USINE_GATEWAY_ENVIRONMENT_FILES` | none | Environment files separated by `:`, each with one `KEY=value` per line. Quote a value that contains `#`. A variable in a later file overrides the same variable in an earlier file and in the process environment. Read from the process environment only. |
-| `USINE_GATEWAY_DOMAIN` | required | The private DNS domain. The same value as `gateway.domain` in the stored configuration. |
-| `USINE_GATEWAY_ADMIN_TOKEN` | required | Bearer token of the admin API, at least 32 characters. The orchestrator's variable named by `admin_token_env` contains the same value. |
-| `USINE_GATEWAY_CALLER_KEY` | required | HMAC key that signs caller tokens, at least 32 characters. Only the gateway has it. |
-| `USINE_GATEWAY_EGRESS_ALLOWLIST` | `/etc/usine-gateway/egress-allowlist` | File of hosts that the forward proxy allows. One rule per line: `host` or `*.domain`, optionally with `:port`. A rule without a port allows 443 and 80. `#` starts a comment. |
-| `ANTHROPIC_API_KEY` | none | Anthropic API key that the gateway adds for Claude Code. |
-| `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` | none | Alternative Anthropic credential: a Claude subscription token from `claude setup-token`, valid for one year. Setting both Anthropic variables is an error. |
-| `OPENAI_API_KEY` | none | OpenAI-compatible API key that the gateway adds for Codex. |
-| `USINE_GATEWAY_CHATGPT_AUTH_FILE` | none | Alternative OpenAI credential: the absolute path of a Codex `auth.json` with a ChatGPT login, which the gateway refreshes and rewrites, so the service needs write access to its directory. Setting both OpenAI variables is an error. If the file isn't a ChatGPT login, the binary exits before it starts listening. |
-| `USINE_GATEWAY_ANTHROPIC_UPSTREAM` | `https://api.anthropic.com` | Base URL for Anthropic requests. |
-| `USINE_GATEWAY_OPENAI_UPSTREAM` | `https://api.openai.com` | Base URL for OpenAI requests with `OPENAI_API_KEY`. |
-| `USINE_GATEWAY_CHATGPT_UPSTREAM` | `https://chatgpt.com/backend-api/codex` | Base URL for OpenAI requests with `USINE_GATEWAY_CHATGPT_AUTH_FILE`. |
-| `USINE_GATEWAY_PROXY_HOST`, `USINE_GATEWAY_PROXY_PORT` | `127.0.0.1`, `80` | Listener of the reverse proxy that workers call for GitHub and LLM providers. |
-| `USINE_GATEWAY_EGRESS_HOST`, `USINE_GATEWAY_EGRESS_PORT` | `127.0.0.1`, `3128` | Listener of the forward proxy. |
-| `USINE_GATEWAY_ADMIN_HOST`, `USINE_GATEWAY_ADMIN_PORT` | `127.0.0.1`, `7070` | Listener of the admin API. `admin_port` in the stored configuration is the same port. The executor forwards a local port to it over SSH. |
+For example, set `USINE_GATEWAY_DOMAIN=gw.internal`, private listener addresses, and the required secrets in the gateway environment files.
 
-## Configuration revisions
-
-[`usine config`](/reference/configuration/config/) documents `export`, `import`, `edit`, and `log`, with their arguments, options, exit statuses, and examples. These commands read and write the local configuration database on running or stopped instances. Files are the import and export format.
+`systemctl reload usine-gateway` sends SIGHUP and rereads provider settings, ChatGPT auth, upstreams, and the egress allowlist. An invalid reload keeps the accepted settings and logs the reason. Attachments and open tunnels continue. Domain, listener, admin-token, and caller-key changes require restart. After a gateway restart loses attachments, the executor registers running attempts again within two minutes. [Configure a gateway](/guides/configure-a-gateway/) describes setup.

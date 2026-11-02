@@ -22,6 +22,8 @@ The repo has one context: `CONTEXT.md` and `docs/adr/` at the root. See `docs/ag
 
 Write all prose in the [Google developer documentation style](https://developers.google.com/style): code comments, docs, the glossary, ADRs, changesets, and PR text. For doc comments, follow [API reference code comments](https://developers.google.com/style/api-reference-comments).
 
+A pull request that changes behavior visible to users (CLI, configuration, web UI, operator API, or workers) updates the matching guide or reference page under `apps/docs/src/content/docs/` in the same pull request. Describe the resulting behavior in the present tense.
+
 In changesets, release web changes as `@usine/server`; never name `@usine/web` or another private package.
 
 ### Coding

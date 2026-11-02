@@ -1,21 +1,26 @@
 ---
 title: Reference
-description: CLI commands, configuration formats, and the operator HTTP API.
+description: Stored configuration, CLI commands, access, and the operator HTTP API.
 ---
 
-## CLI
-
-- [CLI](/reference/cli/): the `usine` commands, their flags, and environment variables.
+Use these references to look up supported fields, defaults, and commands. For procedures, see [Guides](/guides/overview/).
 
 ## Configuration
 
-- [`usine config`](/reference/configuration/config/): edit configuration, import or export a folder, and list revisions.
+- [Settings](/reference/configuration/settings/): polling, attempt limits, parent defaults, webhooks, origins, and tracing.
+- [Projects and registry](/reference/configuration/projects/): managed repositories, project membership, lanes, and labels.
+- [Workers](/reference/configuration/workers/): local, SSH, provisioned, and Cloudflare connections.
+- [Loops](/reference/configuration/loops/): triggers, selectors, tasks, approvals, permissions, priorities, and CI policy.
+- [Agents](/reference/configuration/agents/): harnesses, models, effort, and personas.
+- [Expressions](/reference/configuration/expressions/): CEL variables, payload fields, functions, and examples.
 
-- [`usine.yaml`](/reference/configuration/usine-yaml/): the YAML import and export format for instance settings, projects, and workers.
-- [Loop files](/reference/configuration/loop-files/): the export files in `projects/<project>/loops/`, one loop each.
-- [Agent files](/reference/configuration/agent-files/): the files in `agents/`, one agent each.
-- [Expressions](/reference/configuration/expressions/): the CEL that loop conditions and prompt templates use.
+## Commands and access
+
+- [CLI](/reference/cli/): commands, flags, process environment, and gateway variables.
+- [usine config](/reference/configuration/config/): edits, imports, exports, revision history, and runtime application.
+- [Import and export format](/reference/configuration/import-export/): serialized configuration snapshots.
+- [Access](/reference/access/): members, roles, bindings, sessions, and token ceilings.
 
 ## HTTP API
 
-The [operator HTTP API](/reference/operator-api/) documents instance reads, configuration, run actions, and sign-in. Download its [OpenAPI document](/openapi.json) or fetch `/api/openapi.json` from a running instance.
+The [operator HTTP API](/reference/operator-api/) documents authenticated reads, configuration, run actions, sign-in, and tokens. Download its [OpenAPI document](/openapi.json), or request `/api/openapi.json` from a running instance.

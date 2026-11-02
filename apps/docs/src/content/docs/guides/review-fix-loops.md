@@ -1,143 +1,51 @@
 ---
-title: Write review and fix loops
-description: Write review, fix, and finishing loops whose rounds on one item stop at the cycle budget until you reset it.
-sidebar:
-  order: 4
+title: Connect review and fix loops
+description: Route pull requests between review and fixes, with CI completion handled by usine.
 ---
 
-A review loop and a fix loop can pass a pull request back and forth. Each loop's [`max_cycles`](/reference/configuration/loop-files/#max_cycles) (default 3) limits its runs on one item. When a loop reaches it, usine waits for you in **Needs attention** instead of opening another run, and you inspect the item and select **Reset cycle budget**. So the triggers don't need to count reviews.
+Connect a review loop and a fix loop using GitHub labels, and let usine wait for CI after fixes.
 
-## Review outcomes
+## Prerequisites
 
-Agents share the GitHub App's identity, which can't approve its own PR. So reviewers submit a `COMMENT` review on the reviewed head commit and set outcome labels:
+Instance admin access, a project, `reviewer` and `developer` agents, repository CI, and declared labels `ready-for-review`, `agent-review-findings`, and `review-passed`. The App needs **Actions: read-only** for failed job logs.
 
-| Outcome             | Add                     | Remove                                 |
-| ------------------- | ----------------------- | -------------------------------------- |
-| Actionable findings | `agent-review-findings` | `review-passed`, `ready-for-review`    |
-| Clean review        | `review-passed`         | `agent-review-findings`, `ready-for-review` |
-| Fix pushed          | `ready-for-review`      | `agent-review-findings`, `review-passed` |
+## Procedure
 
-Tell the reviewer to check that the PR still has the reviewed head before it posts or relabels, and to leave the PR queued for a new review if the head changed. A success label doesn't satisfy GitHub's required-review rule: you give any required approval and merge.
+1. Create a `review-pr` loop for the project with stream `pr`, agent `reviewer`, and permissions `read`. Use this condition:
 
-Set [`permissions: read`](/reference/configuration/loop-files/#permissions) on review loops so that the reviewer can't push to the branch. Tell the reviewer that if it breaks a rule, it reports its findings on the required commit and doesn't retry on a later head.
+   ```cel
+   item.state == "OPEN" && !item.isDraft &&
+   item.labels.nodes.exists(label, label.name == "ready-for-review")
+   ```
 
-## Conflicts and CI
+2. In the review task, require the agent to fetch and verify `{{ item.headRefOid }}`, review that commit, and check the live head again before posting. Require a `COMMENT` review and these outcomes:
 
-GitHub does not run `pull_request` workflows for a conflicting pull request. Before reviewing or pushing, query the live `headRefOid`, `baseRefName`, and `mergeable` with `gh pr view`. If mergeability is `UNKNOWN`, wait briefly and query again.
+   | Result | Add | Remove |
+   | --- | --- | --- |
+   | Findings | `agent-review-findings` | `review-passed`, `ready-for-review` |
+   | Clean review | `review-passed` | `agent-review-findings`, `ready-for-review` |
 
-A read-only reviewer returns a `COMMENT` finding on the expected head that requests a merge from the base branch, adds `agent-review-findings`, and removes `review-passed` and `ready-for-review`. It reviews the diff only after a writer resolves the conflict and CI passes on the resulting head. It checks mergeability again before posting a clean review, because the base can change during review.
+   The App identity is shared, so an agent review does not provide an independent GitHub approval. Require the reviewer to report merge conflicts as findings and leave resolution to a writer.
 
-Fixing and finishing agents fetch and merge the actual base branch when the PR conflicts, resolve conflicts within the issue and review findings, rerun the repository gate, and push. They wait for CI on the pushed head before changing outcome labels. If a push has no checks, they recheck mergeability and repeat recovery if the base changed again. An empty checks list alone is not a blocker, and manually dispatching CI does not repair the conflict. If resolution needs a decision the issue and findings do not cover, the agent posts the exact conflict, question, and options on the PR and returns `[usine:question]` with the outcome labels unchanged.
+3. Create an `act-on-findings` loop with stream `pr`, agent `developer`, and permissions `write`. Its condition selects open, non-draft pull requests labeled `agent-review-findings`. Require its task to check out `{{ item.headRefName }}`, fix each finding, check live mergeability, merge the base branch if needed, run local checks, and push. A conflict requiring an operator decision becomes `[usine:question]` on the pull request.
+4. Set the fix loop's CI policy to `fix_loop` equal to `widgets/act-on-findings` and `timeout_seconds` equal to `1800`, using your project ID. Use **Edit as text** for fields unavailable in the form; [Import and export format](/reference/configuration/import-export/#loop-markdown) describes the editor syntax. Keep a finite `max_cycles`, such as `3`, on both loops.
+5. Require the fix agent to end after pushing with the following handoff, substituting the actual pull request and full pushed SHA. It must leave completion labels for usine:
 
-Keep `rebase-pr` limited to conflicting PRs labeled `ready-to-merge`. Adding `ready-for-review` would allow both the rebase and review loops to match the same item. The reviewer's conflict finding gives the existing fix loop responsibility for recovery; the finishing agent handles conflicts after a clean review. This keeps the review loop read-only and avoids spending a separate rebase round before review.
+   ```text
+   [usine:awaiting-ci]
+   {"pull_request":123,"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","fix_loop":"widgets/act-on-findings","timeout_seconds":1800,"on_green":[{"item":123,"add":["ready-for-review"],"remove":["agent-review-findings","review-passed"]}]}
+   ```
 
-## CI waits
+6. Save and resume both loops. Add `ready-for-review` to a test pull request with passing checks.
 
-Set `ci` on developer and fix loops to let usine wait after the agent pushes:
+## Check the result
 
-```yaml
-ci:
-  fix_loop: widgets/act-on-findings
-  timeout_seconds: 3600
-```
+A finding starts the fix loop. After its push, the agent session ends and frees its worker slot while the run shows **Waiting for CI**. Green checks on the recorded head apply the completion labels and start review again. Failed checks start the configured fix loop with bounded evidence; inherited completion actions continue through subsequent fixes.
 
-Use a qualified loop identity from the same instance. The fix loop must be active, use the `pr` stream, and select the repository. Its approval and cycle budget still apply when CI starts it. Review loops can omit this field.
+## CI outcomes
 
-The configured task tells the agent to run local checks, push, and end with this marker and JSON, substituting the actual PR, head, and actions:
+The handoff must match the harvested pull request and pushed head. The stored policy determines the timeout and fix loop. A plain success from a loop with a CI policy also waits, with no additional label actions. A newer push cancels the old wait. Missing checks remain pending until the deadline; a timeout appears in **Needs attention**. Restarts resume stored CI waits without an agent.
 
-```text
-[usine:awaiting-ci]
-{"pull_request":123,"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","fix_loop":"widgets/act-on-findings","timeout_seconds":3600,"on_green":[{"item":123,"add":["ready-for-review"],"remove":["agent-in-progress"]},{"item":815,"add":[],"remove":["agent-in-progress"]}]}
-```
+The fix loop must be active, use the pull request stream, and select the repository. Its approval and cycle budget still apply. Accepted CI fixes close their source run as **Handed off** and link to the fix run. An exhausted cycle budget requires an operator reset. Loops without a CI policy require their agents to wait for checks before applying completion labels.
 
-The agent ends its session and frees its worker slot. It must leave completion labels for usine to apply. A plain success answer also waits when `ci` is configured, but records no label actions. The engine rejects handoffs that do not match the harvested pushed PR head, and the configured policy determines the timeout and fix loop.
-
-usine observes checks during polls and repository hints. Green applies the recorded actions; red starts the fix loop once with failed job names and a bounded log excerpt. Grant the GitHub App **Actions: read-only** for job logs; otherwise the prompt uses check output. A newer push cancels the old wait. Missing checks stay pending until the deadline, when the run appears in **Needs attention**. Restarts resume stored waits without starting an agent. The board and run page link **Waiting for CI** to the PR checks.
-
-For configured loops, replace agent-side CI watch and completion-label instructions with this handoff. Loops without a CI policy retain the agent-side procedure above.
-
-## Example loops
-
-Export with `usine config export ./config-export` and save these loop files under `config-export/projects/<project>/loops/`, using an existing project. Add the labels and any new agents in that export, then run `usine config import ./config-export --message "Add review and fix loops"`. New loops start paused. To change an existing loop, use `usine config edit loop <project>/<loop>`.
-
-Declare `ready-for-review`, `agent-review-findings`, `review-passed`, and `ready-to-merge` in `labels`, and define the `reviewer` and `developer` agents. Add a `selector` if some repositories shouldn't use these loops.
-
-```markdown title="projects/widgets/loops/review-pr.md"
----
-trigger:
-  on: pr
-  if: >-
-    item.state == "OPEN" && !item.isDraft &&
-    item.labels.nodes.exists(label, label.name == "ready-for-review")
-approval: none
-max_cycles: 3
-permissions: read
-step: review
-agent: reviewer
----
-Review PR #{{ item.number }} at {{ item.headRefOid }}. Fetch and check out
-that exact head before reviewing. Remove ready-for-review when starting.
-Before posting any review or changing outcome labels, verify the head
-again. If it changed, restore ready-for-review and stop.
-Check live mergeable before reading the diff and again before posting a
-clean review; retry UNKNOWN. For CONFLICTING, return a COMMENT finding on
-the expected head requesting a merge from the base branch and CI on the
-new head. Apply the findings labels below and stop without reviewing the
-diff. Review a resolved PR only after CI passes on the expected head.
-Submit a COMMENT review at that commit, with file and line references for
-findings. Apply review outcome labels:
-findings add agent-review-findings and remove review-passed; a clean review
-adds review-passed and removes agent-review-findings. Do not merge.
-```
-
-The attempt starts at the head commit that the event recorded, `headRefOid`. The second head check detects a push during the review.
-
-`projects/widgets/loops/act-on-findings.md` uses `agent: developer`, `max_cycles: 3`, and this trigger:
-
-```yaml title="projects/widgets/loops/act-on-findings.md"
-trigger:
-  on: pr
-  if: >-
-    item.state == "OPEN" && !item.isDraft &&
-    item.labels.nodes.exists(label, label.name == "agent-review-findings")
-```
-
-Use the complete [fixing prompt](/reference/configuration/loop-files/#more-examples), including the mergeability check before pushing and the CI watch before applying the "Fix pushed" labels. If the agent can't fix a finding, it leaves it visible. A finding that needs your decision becomes a question, which costs one attempt and one round, not three ([Answer a question](/guides/operate-runs/#answer-a-question)).
-
-`projects/widgets/loops/finish-pr.md` runs only after a clean review:
-
-```markdown title="projects/widgets/loops/finish-pr.md"
----
-trigger:
-  on: pr
-  if: >-
-    item.state == "OPEN" && !item.isDraft &&
-    item.labels.nodes.exists(label, label.name == "review-passed")
-approval: none
-step: finish
-agent: developer
----
-Finish PR #{{ item.number }} using the repository's finish-pr skill.
-Fetch and verify {{ item.headRefOid }}, then check out {{ item.headRefName }}.
-If the head changed, report the mismatch and stop before editing.
-Resolve the findings and inspect the final diff. Before pushing, query
-live mergeable and baseRefName; retry UNKNOWN. For CONFLICTING, fetch and
-merge the base branch, resolve conflicts within the issue and findings,
-then run the gate, commit, and push. If resolution needs an operator
-decision, post the exact conflict, question, and options on the PR, leave
-outcome labels unchanged, and return [usine:question] on the first line.
-Wait for CI on the pushed head in the foreground. If no checks appear,
-recheck mergeability and repeat recovery for a new conflict. An empty
-checks list alone is not a blocker; inspect workflow triggers and runs.
-After CI passes, verify the PR still has that head, record the result,
-remove review-passed and agent-review-findings, and add ready-to-merge.
-Do not merge the pull request.
-```
-
-The finishing agent changes outcome labels only after CI passes on the final head. You review and merge.
-
-## Upgrade triggers that count reviews
-
-If your triggers count reviews in CEL, remove the counts from the fix and finishing triggers, including any branch that starts finishing at three reviews: usine now waits for you when the budget runs out. After the database upgrade, existing completed runs count toward the first allowance, and the limit applies to queued item events when usine admits them.
-
-See [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) for the persistence and identity decisions, and [GitHub's rules for required reviews](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews).
+GitHub does not run pull request workflows on conflicting branches. Writer tasks must resolve the conflict and push a checked tree. A clean agent review leaves any required independent approval and merge to you.

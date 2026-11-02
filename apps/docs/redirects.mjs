@@ -1,6 +1,10 @@
 // @ts-check
 
 export const redirects = {
+  "/reference/configuration/usine-yaml": "/reference/configuration/import-export/",
+  "/reference/configuration/loop-files": "/reference/configuration/loops/",
+  "/reference/configuration/agent-files": "/reference/configuration/agents/",
+  "/guides/operate-runs": "/guides/follow-a-run/",
   "/guides": "/get-started/quickstart/",
   "/reference/configuration/cli": "/reference/cli/",
   "/architecture/execution":

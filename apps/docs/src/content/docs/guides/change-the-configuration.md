@@ -1,16 +1,29 @@
 ---
 title: Change the configuration
-description: Save configuration revisions in the web UI or with usine config.
+description: Save an entity change as a configuration revision.
 ---
 
-## Change the configuration
+Change stored configuration through an entity form or the local CLI.
 
-For command-line changes, run `EDITOR=vi usine config edit settings instance`, `usine config edit worker local`, or `usine config edit loop widgets/start-dev`. To add entities or change several together, export a folder, edit it, and import it with a message. See [`usine config`](/reference/configuration/config/) for every entity kind and the fields that require a restart.
+## Prerequisites
 
-Open **Configuration** to change loops, agents, workers, repositories, labels, or settings. On a detail page, select **Edit**, change the export-format text, optionally enter a message, and select **Save**. Errors appear below the editor with their field paths. If another change was saved first, review the newer revision's diff and select **Reload text**; your draft remains below the editor for copying.
+A running instance and the role required for the entity: instance admin for settings and shared entities, or project maintainer for loops and lanes. Local CLI changes require access to the instance folder.
 
-Use **New** on a list to create an entity from a template. New loops start paused; review the trigger and prompt before selecting **Resume**. **Delete** shows the entity name and affected loops or projects before confirmation. Removing a label declaration does not delete labels on GitHub.
+## Procedure
 
-Each detail page has **History**, with revision numbers, actors, times, and messages. Select a revision to see the before-and-after text as a diff. **Revert** creates a revision restoring every entity in the selected revision, with an optional message. A later change to an affected entity can prevent a revert. **Configuration > History** lists all revisions and links to the changed entities.
+1. Open **Configuration** and select the entity to change. Use **New** on its list to create an entity, or **Edit** on an existing entity.
+2. Change the fields. Use **Edit as text** for the entity's serialized representation. Review validation errors and, for loops, **Preview**.
+3. Add a revision message if useful and select **Save**. If another revision changed the entity first, inspect the diff, use **Reload text**, and reapply your draft.
+4. For a local edit of an existing entity, run the matching command from the instance folder instead:
 
-Revisions accepted by the UI apply live to new work; running attempts continue. The UI refuses a change that needs a restart or fails worker preflight. CLI writes save these revisions, but the running configuration stays unchanged until the restart or preflight succeeds. For command-line editing and bulk changes, use [`usine config edit`, `import`, `export`, and `log`](/reference/configuration/config/). Files are an import and export format; editing the original files does not change the stored configuration.
+   ```sh
+   EDITOR=vi usine config edit settings instance
+   ```
+
+   Save and close the editor. Use [import and export](/reference/configuration/import-export/) for a complete configuration snapshot or bulk changes.
+
+## Check the result
+
+Open the entity’s **History** and confirm its changed fields, actor, time, and revision message. Accepted live changes apply to new work. CLI storage success can precede runtime acceptance; check [revision application](/reference/configuration/config/#revision-application) for preflight and restart requirements.
+
+New loops start paused. [Revert a configuration revision](/guides/revert-configuration/) to restore a saved value.
