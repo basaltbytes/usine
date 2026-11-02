@@ -1,3 +1,4 @@
+import { CiPolicy } from "@usine/core/ci";
 import { Agent } from "@usine/core/agent";
 import {
   CycleBudgetAsk,
@@ -10,7 +11,7 @@ import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { Crypto, Effect, Option, Schema } from "effect";
@@ -32,6 +33,16 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   approval: ApprovalRequirement,
   /** The decision at event submission, or None for older events. */
   approvalReason: Schema.Option(Schema.NonEmptyString).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
+  /** The failed head that caused a CI fix event, independent of label selection. */
+  ciFailureHead: Schema.Option(CommitSha).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
+  /** The loop CI policy captured with this event. */
+  ciPolicy: Schema.Option(CiPolicy).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),

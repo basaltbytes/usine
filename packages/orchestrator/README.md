@@ -394,3 +394,7 @@ Provisioned SSH workers can reuse machines with `provisioner.reuse`. Worker stat
 ## Access control
 
 The operator API declares minimum route permissions and checks project scope before reading or changing resources. Overview, desk, statistics, configuration, and revision lists filter by request permissions after shared caches. Internal callers are trusted; HTTP adapters must supply authenticated `RequestPermissions`.
+
+## CI waits
+
+Polling and repository hints reconcile persisted CI waits before fetching trigger input. Green applies the recorded label actions and settles the run; red submits one deduplicated event to the configured fix loop through its cycle budget, with bounded failure diagnostics. A changed head cancels the old wait, and a timeout becomes a failed run in Needs attention. No agent or worker runs while checks remain pending. Loop CI policy is captured when an event matches. See [ADR 0033](../../docs/adr/0033-durable-ci-waits.md).

@@ -45,15 +45,25 @@ export const readForm = (key: ConfigurationEntityKey, text: string) =>
 export const validateForm = (key: ConfigurationEntityKey, value: Schema.JsonObject) =>
   Effect.runSync(Effect.result(validateConfigurationForm(key, value)));
 
+const encodeCiDraft = Schema.encodeSync(
+  Schema.Struct({
+    fixLoop: Schema.optionalKey(Schema.Json),
+    timeoutSeconds: Schema.optionalKey(Schema.Json),
+  }).pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
+);
+
 export const formText = (key: ConfigurationEntityKey, value: Schema.JsonObject): string => {
   if (key.kind === "loop") {
-    const { name: _name, body, maxCycles, selector, priority, ...rest } = value;
+    const { name: _name, body, maxCycles, selector, priority, ci, ...rest } = value;
     const selected = objectValue(selector);
     const ranked = objectValue(priority);
+    const configured = objectValue(ci);
     let frontmatter: Schema.JsonObject = { ...rest, max_cycles: maxCycles ?? 3 };
     if (selected._tag === "Some")
       frontmatter = { ...frontmatter, selector: objectValue(selected.value) };
     if (ranked._tag === "Some") frontmatter = { ...frontmatter, priority: ranked.value ?? 1 };
+    if (configured._tag === "Some")
+      frontmatter = { ...frontmatter, ci: encodeCiDraft(objectValue(configured.value)) };
     return `---\n${writeYaml(frontmatter)}---\n${stringValue(body)}`;
   }
   if (key.kind !== "agent") return writeYaml(value);

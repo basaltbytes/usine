@@ -1,3 +1,7 @@
+import { AttemptCanceled } from "@usine/core/attempt/outcome";
+import type { CiResolution } from "@usine/core/ci";
+import type { CommitSha } from "@usine/core/repository";
+import { ciQueries } from "./ci.ts";
 import { ActingMember } from "@usine/core/operator";
 import {
   Attempt,
@@ -35,6 +39,7 @@ import {
   Suppressed,
 } from "../engine/submission.ts";
 import {
+  EnginePersistenceError,
   RunNotFoundError,
   RunOperationRejectedError,
   RunRetryBlockedError,
@@ -344,12 +349,13 @@ const makeRunStore = Effect.gen(function* () {
       Match.valueTags(outcome, {
         Failed: ({ failure }) => ({ ...fields, failure: failure._tag }),
         Succeeded: () => fields,
+        AwaitingCi: () => fields,
       }),
     );
     const endedAt = yield* DateTime.now;
     yield* tx.closeAttempt(attempt.id, outcome, endedAt);
     if (decision._tag === "RetryAttempt") return;
-    if (decision._tag === "RunSucceeded") {
+    if (decision._tag === "RunSucceeded" || decision._tag === "RunAwaitingCi") {
       yield* tx.updateStepResult(runId, attempt.stepName, decision.result);
     }
     yield* tx.updateState(runId, decision.state, endedAt);
@@ -625,7 +631,7 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(attempt.runId);
-        const decision = decideFinishAttempt(current, attempt.id, result);
+        const decision = decideFinishAttempt(current, attempt.id, result, current.ciPolicy);
         yield* applyFinish(tx, attempt.runId, decision);
         const stop = operatorStop(decision, result);
         if (Option.isSome(stop)) yield* suppressForOperator(tx, current, stop.value);
@@ -886,6 +892,8 @@ const makeRunStore = Effect.gen(function* () {
           const { id, outcome } = decision.attempt.value;
           yield* tx.closeAttempt(id, outcome, canceledAt);
         }
+        if (current.run.state._tag === "AwaitingCi")
+          yield* tx.settleCiAttempt(runId, new AttemptCanceled());
         yield* tx.updateState(runId, decision.state, canceledAt);
         const canceled: CancelOutcome = {
           _tag: "Canceled",
@@ -982,6 +990,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("read attempt transcript"));
 
   return {
+    ...ciQueries(database),
     approve,
     appendTranscript,
     beginAttempt,
@@ -1027,6 +1036,12 @@ const makeRunStore = Effect.gen(function* () {
 export class RunStore extends Context.Service<
   RunStore,
   {
+    readonly awaitingCi: () => Effect.Effect<ReadonlyArray<RunSnapshot>, EnginePersistenceError>;
+    readonly settleCi: (
+      runId: RunId,
+      head: CommitSha,
+      resolution: CiResolution,
+    ) => Effect.Effect<boolean, RunStoreError>;
     /**
      * Records the approval Event and its source, and queues the waiting Run for a Worker. Returns
      * whether this call recorded it; a repeated approval changes nothing.

@@ -53,6 +53,7 @@ Keys are snake_case. Unknown keys at any level and duplicate keys are errors.
 | `step` | string | `run` | The name of the run's single step. |
 | `agent` | string | required | The agent that does the loop's runs: the name of a file in `agents/`, without `.md`. |
 | `max_cycles` | integer ≥ 1 | `3` | The loop's cycle budget per item. |
+| `ci` | object | omitted | Require CI after a push; `fix_loop` selects the qualified PR fix loop and `timeout_seconds` is an integer from 1 to 86,400. See [CI waits](/guides/review-fix-loops/#ci-waits). |
 | `permissions` | `write`, `read` | `write` | What the loop's attempts can do to their repository. |
 | `priority` | integer or CEL expression returning `int` | `0` | Ranks waiting runs, higher first. Ties use lane rank, then event arrival. |
 

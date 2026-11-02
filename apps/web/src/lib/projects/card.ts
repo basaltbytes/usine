@@ -28,6 +28,7 @@ export const runLineSince = (run: RunView): string | null => {
       return run.openedAt;
     case "Running":
       return last !== undefined && last.outcome === null ? last.startedAt : null;
+    case "AwaitingCi":
     case "Failed":
       return last?.endedAt ?? null;
     case "Succeeded":

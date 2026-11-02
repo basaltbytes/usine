@@ -1,3 +1,4 @@
+import type { Schema } from "effect";
 import { AttentionRevision } from "../attention/model.ts";
 import { ModelId } from "@usine/core/agent/brain";
 import { AgentName } from "@usine/core/agent";
@@ -59,6 +60,8 @@ export const triggerEvents = snakeCase.table(
     stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
     approvalReason: text(),
+    ciPolicyJson: text({ mode: "json" }).$type<Schema.Json>(),
+    ciFailureHead: text(),
     // The Loop's permissions at match time, used by every Attempt of the Run.
     permissions: text({ enum: LOOP_PERMISSIONS })
       .$type<LoopPermissions>()

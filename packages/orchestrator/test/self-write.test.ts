@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
@@ -241,7 +242,9 @@ describe("Board self-writes", () => {
               tick: () => Effect.die("unused"),
             }),
           );
-          const pollingLayer = PollingTriggers.layer.pipe(Layer.provideMerge(dependencies));
+          const pollingLayer = PollingTriggers.layer
+            .pipe(Layer.provide(idleCiMonitor))
+            .pipe(Layer.provideMerge(dependencies));
           const layer = Operator.layer.pipe(
             Layer.provide(configurationLayer),
             Layer.provideMerge(pollingLayer),

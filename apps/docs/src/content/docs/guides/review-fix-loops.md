@@ -31,6 +31,31 @@ Fixing and finishing agents fetch and merge the actual base branch when the PR c
 
 Keep `rebase-pr` limited to conflicting PRs labeled `ready-to-merge`. Adding `ready-for-review` would allow both the rebase and review loops to match the same item. The reviewer's conflict finding gives the existing fix loop responsibility for recovery; the finishing agent handles conflicts after a clean review. This keeps the review loop read-only and avoids spending a separate rebase round before review.
 
+## CI waits
+
+Set `ci` on developer and fix loops to let usine wait after the agent pushes:
+
+```yaml
+ci:
+  fix_loop: widgets/act-on-findings
+  timeout_seconds: 3600
+```
+
+Use a qualified loop identity from the same instance. The fix loop must be active, use the `pr` stream, and select the repository. Its approval and cycle budget still apply when CI starts it. Review loops can omit this field.
+
+The configured task tells the agent to run local checks, push, and end with this marker and JSON, substituting the actual PR, head, and actions:
+
+```text
+[usine:awaiting-ci]
+{"pull_request":123,"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","fix_loop":"widgets/act-on-findings","timeout_seconds":3600,"on_green":[{"item":123,"add":["ready-for-review"],"remove":["agent-in-progress"]},{"item":815,"add":[],"remove":["agent-in-progress"]}]}
+```
+
+The agent ends its session and frees its worker slot. It must leave completion labels for usine to apply. A plain success answer also waits when `ci` is configured, but records no label actions. The engine rejects handoffs that do not match the harvested pushed PR head, and the configured policy determines the timeout and fix loop.
+
+usine observes checks during polls and repository hints. Green applies the recorded actions; red starts the fix loop once with failed job names and a bounded log excerpt. Grant the GitHub App **Actions: read-only** for job logs; otherwise the prompt uses check output. A newer push cancels the old wait. Missing checks stay pending until the deadline, when the run appears in **Needs attention**. Restarts resume stored waits without starting an agent. The board and run page link **Waiting for CI** to the PR checks.
+
+For configured loops, replace agent-side CI watch and completion-label instructions with this handoff. Loops without a CI policy retain the agent-side procedure above.
+
 ## Example loops
 
 Export with `usine config export ./config-export` and save these loop files under `config-export/projects/<project>/loops/`, using an existing project. Add the labels and any new agents in that export, then run `usine config import ./config-export --message "Add review and fix loops"`. New loops start paused. To change an existing loop, use `usine config edit loop <project>/<loop>`.

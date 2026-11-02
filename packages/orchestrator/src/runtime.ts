@@ -1,3 +1,5 @@
+import { GitHubChecks } from "@usine/github/checks";
+import { CiMonitor } from "./ci.ts";
 import { WebhookHealth } from "./webhooks.ts";
 import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
@@ -127,8 +129,15 @@ export const runtimeLayer = (
     parser,
     polling,
   );
+  const ci = CiMonitor.layer.pipe(
+    Layer.provide(dependencies),
+    Layer.provide(
+      GitHubChecks.layer.pipe(Layer.provide(app), Layer.provide(externalHttpClientLayer)),
+    ),
+  );
   const triggers = Layer.mergeAll(PollingTriggers.layer, ScheduleTriggers.layer).pipe(
     Layer.provide(dependencies),
+    Layer.provide(ci),
   );
   const services = Layer.mergeAll(
     Operator.layer,

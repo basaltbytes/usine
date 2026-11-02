@@ -1,3 +1,4 @@
+import { CiPolicy } from "@usine/core/ci";
 import { boardRepositories } from "./project/operations.ts";
 import { StepName } from "@usine/core/step";
 import { ApprovalRequirement, LoopName } from "@usine/core/loop";
@@ -74,6 +75,9 @@ class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopF
   agent: AgentName,
   maxCycles: LoopFile.fields.maxCycles,
   permissions: LoopFile.fields.permissions,
+  ci: Schema.OptionFromOptionalKey(
+    CiPolicy.pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
+  ),
   priority: Schema.OptionFromOptionalKey(LoopPriority),
 }) {}
 

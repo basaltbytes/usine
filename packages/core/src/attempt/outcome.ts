@@ -21,6 +21,16 @@ export class AttemptCanceled extends Schema.TaggedClass<AttemptCanceled>("Attemp
   {},
 ) {}
 
-/** The terminal outcome of an attempt; a successful step's result is stored separately. */
-export const AttemptOutcome = Schema.Union([AttemptSucceeded, AttemptFailed, AttemptCanceled]);
+/** The agent session ended and the pushed head awaits CI. */
+export class AttemptAwaitingCi extends Schema.TaggedClass<AttemptAwaitingCi>(
+  "AttemptOutcome/AwaitingCi",
+)("AwaitingCi", {}) {}
+
+/** The outcome of an attempt; a successful step's result is stored separately. */
+export const AttemptOutcome = Schema.Union([
+  AttemptSucceeded,
+  AttemptFailed,
+  AttemptCanceled,
+  AttemptAwaitingCi,
+]);
 export type AttemptOutcome = typeof AttemptOutcome.Type;

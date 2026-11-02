@@ -1,3 +1,4 @@
+import { AWAITING_CI_MARKER } from "@usine/core/ci";
 import { githubSignature, type AgentPersona, type AgentName } from "@usine/core/agent";
 import type { AttemptTask } from "@usine/core/attempt";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
@@ -38,7 +39,7 @@ const completionInstructions: ReadonlyArray<string> = [
   "",
   "Run gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.",
   "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",
-  "A running command or pending CI check is unfinished work, not a blocker. Keep waiting and complete the task. For a genuine blocker, record the exact blocker on the issue or pull request and report which work remains incomplete.",
+  `When the task configures a CI handoff, push the final head and return ${AWAITING_CI_MARKER} on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.`,
   `For an unresolved blocker, start your final answer with exactly ${BLOCKED_MARKER} on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.`,
   `When the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly ${QUESTION_MARKER} on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.`,
 ];

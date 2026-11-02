@@ -108,6 +108,11 @@ export class SucceededAttemptView extends Schema.TaggedClass<SucceededAttemptVie
   "@usine/orchestrator/SucceededAttemptView",
 )("Succeeded", {}) {}
 
+/** An ended agent session whose pushed head awaits CI. */
+export class AwaitingCiAttemptView extends Schema.TaggedClass<AwaitingCiAttemptView>(
+  "@usine/orchestrator/AwaitingCiAttemptView",
+)("AwaitingCi", {}) {}
+
 /** An Attempt that failed. */
 export class FailedAttemptView extends Schema.TaggedClass<FailedAttemptView>(
   "@usine/orchestrator/FailedAttemptView",
@@ -124,6 +129,7 @@ export class CanceledAttemptView extends Schema.TaggedClass<CanceledAttemptView>
 /** The terminal outcome of an Attempt. A running Attempt has none. */
 export const AttemptOutcomeView = Schema.Union([
   SucceededAttemptView,
+  AwaitingCiAttemptView,
   FailedAttemptView,
   CanceledAttemptView,
 ]);

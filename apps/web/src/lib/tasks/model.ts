@@ -82,7 +82,9 @@ export const taskNumber = (task: BoardTaskView): string => String(cardIdentity(t
  * flight, each with the Run whose open time orders it (see `rowPlace` and `countedAs`).
  */
 type TaskStatus =
-  /** `run` has a running Attempt. */
+  /** `run` has ended its session and waits for checks. */
+  | { readonly _tag: "AwaitingCi"; readonly run: RunView }
+  /** `run` has a running attempt. */
   | { readonly _tag: "Running"; readonly run: RunView }
   /** `run` is waiting for approval. */
   | { readonly _tag: "AwaitingApproval"; readonly run: RunView }
@@ -154,6 +156,8 @@ const taskStatus = (
 ): TaskStatus => {
   const running = newestIn(task.runs, "Running");
   if (running !== undefined) return { _tag: "Running", run: running };
+  const ci = newestIn(task.runs, "AwaitingCi");
+  if (ci !== undefined) return { _tag: "AwaitingCi", run: ci };
   const waiting = newestIn(task.runs, "Waiting");
   if (waiting !== undefined) return { _tag: "AwaitingApproval", run: waiting };
   const queued = newestIn(task.runs, "Pending", "Queued");
@@ -189,6 +193,7 @@ const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: numbe
       return [0, Date.parse(status.run.openedAt)];
     case "AwaitingApproval":
       return [1, Date.parse(status.run.openedAt)];
+    case "AwaitingCi":
     case "Queued":
     case "Stalled":
       return [2, Date.parse(status.run.openedAt)];
@@ -232,6 +237,7 @@ const countedAs = ({ task, status }: TaskRow): (typeof HEADING_COUNTS)[number] |
   switch (status._tag) {
     case "Running":
     case "AwaitingApproval":
+    case "AwaitingCi":
     case "Queued":
     case "Stalled":
       return "in flight";

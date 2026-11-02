@@ -135,3 +135,7 @@ The protocol conformance baseline is 0.164.0. Preflight retains 0.159.0 through 
 Provider capacity refusals use `AgentCapacityError`, which maps to `ProviderCapacityFailure`. Codex's `serverOverloaded` code and Claude's `overloaded` code take precedence over error text. HTTP 529 and HTTP 503 with a retry hint also qualify. When a harness exposes only text, `harnessFailure` recognizes “Selected model is at capacity”, `overloaded_error`, HTTP 529, and 503 with a retry hint. Other task failures remain `AgentResultError`.
 
 `reportText` relays capacity refusals with `[usine:provider-capacity]`; `reportedOutcome` restores their classification. Pi children classify the final assistant error when a turn settles, including when SDK retries are disabled or the SDK does not retry that error. A successful SDK retry completes normally.
+
+## CI handoff
+
+For a loop with a CI policy, the task instructs the agent to push, record completion labels in a `[usine:awaiting-ci]` JSON answer, and end its session. The parent relays that answer unchanged. usine checks the harvested PR head and waits for CI before applying those labels. The agent must leave completion labels for the monitor. Other loops retain ordinary final answers.

@@ -1,3 +1,4 @@
+import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { noCycleBudgets } from "./support/polling.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
@@ -229,7 +230,10 @@ const runtimeLayer = (
     inertLabelReconcilerLayer,
     Layer.succeed(GitHubPolling, github),
   );
-  return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
+  return Layer.merge(
+    dependencies,
+    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
+  );
 };
 
 describe("PollingTriggers", () => {
@@ -1245,6 +1249,8 @@ describe("PollingTriggers", () => {
       write: () => Effect.void,
     });
     const runs = Layer.succeed(RunEngine)({
+      awaitingCi: () => Effect.succeed([]),
+      settleCi: () => Effect.void,
       resolveFailure: () => Effect.void,
       intervene: () => Effect.void,
       approve: () => Effect.die("unused"),
@@ -1269,25 +1275,27 @@ describe("PollingTriggers", () => {
       transcript: () => Effect.die("unused"),
     });
     const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-    const layer = PollingTriggers.layer.pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          noCycleBudgets,
-          cursors,
-          itemProjectionWriterLayer,
-          itemProjectionReaderLayer,
-          repositoryLabelProjectionReaderLayer,
-          repositoryLabelProjectionWriterLayer,
-          inertGitHubLabelWriterLayer,
-          inertLabelReconcilerLayer,
-          runs,
-          MarcbachmannCelLayer,
-          parser,
-          Layer.succeed(GitHubPolling, github),
-          loopControlLayer(),
+    const layer = PollingTriggers.layer
+      .pipe(Layer.provide(idleCiMonitor))
+      .pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            noCycleBudgets,
+            cursors,
+            itemProjectionWriterLayer,
+            itemProjectionReaderLayer,
+            repositoryLabelProjectionReaderLayer,
+            repositoryLabelProjectionWriterLayer,
+            inertGitHubLabelWriterLayer,
+            inertLabelReconcilerLayer,
+            runs,
+            MarcbachmannCelLayer,
+            parser,
+            Layer.succeed(GitHubPolling, github),
+            loopControlLayer(),
+          ),
         ),
-      ),
-    );
+      );
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
@@ -1375,6 +1383,8 @@ describe("PollingTriggers", () => {
           ),
       };
       const runs = Layer.succeed(RunEngine)({
+        awaitingCi: () => Effect.succeed([]),
+        settleCi: () => Effect.void,
         resolveFailure: () => Effect.void,
         intervene: () => Effect.void,
         approve: () => Effect.die("unused"),
@@ -1408,7 +1418,7 @@ describe("PollingTriggers", () => {
           }),
       });
       const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-      const layer = PollingTriggers.layer.pipe(
+      const layer = PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(
         Layer.provide(
           Layer.mergeAll(
             noCycleBudgets,
@@ -1489,6 +1499,8 @@ describe("PollingTriggers", () => {
         }),
     });
     const runs = Layer.succeed(RunEngine)({
+      awaitingCi: () => Effect.succeed([]),
+      settleCi: () => Effect.void,
       resolveFailure: () => Effect.void,
       intervene: () => Effect.void,
       approve: () => Effect.die("unused"),
@@ -1556,25 +1568,27 @@ describe("PollingTriggers", () => {
           }),
         ),
     };
-    const layer = PollingTriggers.layer.pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          noCycleBudgets,
-          cursors,
-          itemProjectionWriterLayer,
-          itemProjectionReaderLayer,
-          repositoryLabelProjectionReaderLayer,
-          repositoryLabelProjectionWriterLayer,
-          inertGitHubLabelWriterLayer,
-          inertLabelReconcilerLayer,
-          runs,
-          MarcbachmannCelLayer,
-          parser,
-          Layer.succeed(GitHubPolling, github),
-          loopControlLayer(),
+    const layer = PollingTriggers.layer
+      .pipe(Layer.provide(idleCiMonitor))
+      .pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            noCycleBudgets,
+            cursors,
+            itemProjectionWriterLayer,
+            itemProjectionReaderLayer,
+            repositoryLabelProjectionReaderLayer,
+            repositoryLabelProjectionWriterLayer,
+            inertGitHubLabelWriterLayer,
+            inertLabelReconcilerLayer,
+            runs,
+            MarcbachmannCelLayer,
+            parser,
+            Layer.succeed(GitHubPolling, github),
+            loopControlLayer(),
+          ),
         ),
-      ),
-    );
+      );
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;

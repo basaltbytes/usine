@@ -1,9 +1,10 @@
 import { OperatorActor } from "../operator.ts";
 import { Effect, Option, Schema } from "effect";
+import { CiHandoff } from "../ci.ts";
+import { CommitSha } from "../repository.ts";
 import { EventId } from "../event.ts";
 
 /** An operator-requested cancellation, with the operator login when recorded. */
-
 export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(
   "CancelReason/OperatorCanceled",
 )("OperatorCanceled", {
@@ -26,8 +27,14 @@ export class Superseded extends Schema.TaggedClass<Superseded>("CancelReason/Sup
 /** Cancellation because the Item stopped matching the Loop's trigger before any Attempt started. */
 export class Revoked extends Schema.TaggedClass<Revoked>("CancelReason/Revoked")("Revoked", {}) {}
 
-/** Why a run was canceled: operator action, a newer event, or an item that stopped matching its trigger. */
-export const CancelReason = Schema.Union([OperatorCanceled, Superseded, Revoked]);
+/** Cancellation because another push replaced a head awaiting CI. */
+export class HeadChanged extends Schema.TaggedClass<HeadChanged>("CancelReason/HeadChanged")(
+  "HeadChanged",
+  { head: CommitSha },
+) {}
+
+/** Why a run was canceled: operator action, a newer event or head, or an item that stopped matching its trigger. */
+export const CancelReason = Schema.Union([OperatorCanceled, Superseded, Revoked, HeadChanged]);
 export type CancelReason = typeof CancelReason.Type;
 
 /** A new Run with no Attempt started and no approval gate passed. */
@@ -41,6 +48,12 @@ export class Queued extends Schema.TaggedClass<Queued>("RunState/Queued")("Queue
 
 /** A Run with an Attempt running on a Worker. */
 export class Running extends Schema.TaggedClass<Running>("RunState/Running")("Running", {}) {}
+
+/** A run whose agent session ended and whose pushed head awaits CI. */
+export class AwaitingCi extends Schema.TaggedClass<AwaitingCi>("RunState/AwaitingCi")(
+  "AwaitingCi",
+  { handoff: CiHandoff },
+) {}
 
 /** A Run whose Step finished with a stored result. */
 export class Succeeded extends Schema.TaggedClass<Succeeded>("RunState/Succeeded")(
@@ -58,7 +71,7 @@ export class Canceled extends Schema.TaggedClass<Canceled>("RunState/Canceled")(
 }) {}
 
 /** The states of a Run that isn't closed. */
-export const Open = Schema.Union([Pending, Waiting, Queued, Running]);
+export const Open = Schema.Union([Pending, Waiting, Queued, Running, AwaitingCi]);
 export type Open = typeof Open.Type;
 
 /**
@@ -72,6 +85,8 @@ export type Open = typeof Open.Type;
  *   pending | waiting | queued | running ──► canceled   (operator cancel)
  *   pending | waiting | queued           ──► canceled   (supersede, revoke: a started
  *                                                        attempt always finishes, ADR 0007)
+ *
+ *   running ──► awaiting CI ──► succeeded / failed / canceled (ADR 0033)
  *
  * Each transition accepts only its legal source states, so an illegal transition is a type
  * error. States come from the transitions or from decoding a stored row with `RunState`.
@@ -87,7 +102,7 @@ export type Unstarted = typeof Unstarted.Type;
 export const Startable = Schema.Union([Pending, Queued]);
 export type Startable = typeof Startable.Type;
 
-/** Returns whether a value is a pending, waiting, queued, or running state. */
+/** Returns whether a run is open, including a CI wait. */
 export const isOpen = Schema.is(Open);
 /** Returns whether a value is a state with no started attempt, which permits supersede or revoke. */
 export const isUnstarted = Schema.is(Unstarted);
@@ -117,7 +132,13 @@ const tagsOf =
     tags;
 
 /** The `_tag` values of `Open`, for SQL filters. */
-export const OPEN_STATE_TAGS = tagsOf<Open>()("Pending", "Waiting", "Queued", "Running");
+export const OPEN_STATE_TAGS = tagsOf<Open>()(
+  "Pending",
+  "Waiting",
+  "Queued",
+  "Running",
+  "AwaitingCi",
+);
 
 /** The `_tag` values of `RunState`. */
 export const STATE_TAGS = tagsOf<RunState>()(
@@ -125,6 +146,7 @@ export const STATE_TAGS = tagsOf<RunState>()(
   "Waiting",
   "Queued",
   "Running",
+  "AwaitingCi",
   "Succeeded",
   "Failed",
   "Canceled",

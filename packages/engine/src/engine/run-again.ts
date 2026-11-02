@@ -23,6 +23,7 @@ export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engin
     cycleLimit: Schema.Option(CycleLimit),
     /** The current loop repository access granted to the new run's attempts. */
     permissions: LoopPermissions,
+    ciPolicy: Submission.fields.ciPolicy,
     /** The task, agent, and parent model to save as the new run's effective context. */
     context: AttemptContext,
     /** The operator who requested the new run, or `None` when no login was recorded. */
@@ -75,6 +76,7 @@ export const runAgainSubmission = (
     approval: request.approval,
     approvalReason: request.approvalReason,
     permissions: request.permissions,
+    ciPolicy: request.ciPolicy,
     cycleLimit: request.cycleLimit,
     cycleGeneration: identity.generation,
     repository: ran.repository,
