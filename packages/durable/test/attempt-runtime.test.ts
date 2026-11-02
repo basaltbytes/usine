@@ -1983,6 +1983,35 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
+  for (const report of ["ask", "block"] as const) {
+    it.live(`prioritizes a child transport loss over an earlier child ${report} report`, () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/824-earlier-report");
+          const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+          yield* (yield* (yield* StubChildren).next)[report]("Publishing needs operator guidance.");
+          yield* (yield* (yield* StubChildren).next).crash("Codex machine disappeared");
+          const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+          assert.strictEqual(failure._tag, "InfraFailure");
+          assert.strictEqual(failure.message, "Codex machine disappeared");
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Complete the task"),
+                delegate("Inspect the checkout and continue"),
+                answer("[usine:blocked]\nThe SSH connection failed."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+    );
+  }
+
   it.live("ends the Attempt with the parent's own blocker", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;

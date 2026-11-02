@@ -42,6 +42,7 @@ import {
   type CodexConnection,
   type CodexNotification,
 } from "../../../src/pi/codex/app-server.ts";
+import { RemoteCodexProcessLost } from "../../../src/pi/codex/remote.ts";
 import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
@@ -218,6 +219,122 @@ describe("Codex child backend", () => {
         }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
       }).pipe(Effect.scoped),
   );
+  for (const state of ["paused", "interrupting", "idle"] as const) {
+    it.effect(`preserves ${state} state after app-server recovery until guidance arrives`, () =>
+      Effect.gen(function* () {
+        const original = yield* Queue.make<CodexNotification, SessionOperationError | Cause.Done>();
+        const restored = yield* Queue.make<CodexNotification, Cause.Done>();
+        const idle = yield* Queue.make<void>();
+        const recovered = yield* Deferred.make<void>();
+        const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
+        const messages: Schema.Json[] = [];
+        let opens = 0;
+        const server = Layer.succeed(CodexAppServer)({
+          open: () =>
+            Effect.sync(() => {
+              const notifications =
+                opens++ === 0
+                  ? Stream.fromQueue(original)
+                  : Stream.unwrap(
+                      Deferred.succeed(recovered, undefined).pipe(
+                        Effect.as(Stream.fromQueue(restored)),
+                      ),
+                    );
+              return {
+                notifications,
+                notify: () => Effect.void,
+                close: Queue.end(restored),
+                request: (_operation, method, params) =>
+                  Effect.sync(() => {
+                    if (method === "turn/start") {
+                      messages.push(params);
+                      return { turn: { id: `turn-${messages.length}` } };
+                    }
+                    return responses[method === "thread/resume" ? "thread/start" : method] ?? {};
+                  }),
+              } satisfies CodexConnection;
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const host = new RemoteShell({
+            ssh: { command: "ssh", args: [] },
+            sshEnvironment: {},
+            destination: "worker",
+          });
+          const running = yield* (yield* CodexChildBackend).launch(
+            request(undefined, undefined, host),
+          );
+          const result = yield* Effect.forkScoped(running.result);
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) =>
+                event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+              ),
+            ),
+          );
+          if (state === "idle") {
+            yield* running.intervene(
+              new OperatorMessage({ message: "Check the result" }),
+              noDelivery,
+            );
+          } else {
+            yield* running.intervene(new Interrupt(), noDelivery);
+          }
+          if (state !== "interrupting") {
+            yield* Queue.offer(original, {
+              method: "turn/completed",
+              params: {
+                turn: {
+                  id: "turn-1",
+                  status: state === "idle" ? "completed" : "interrupted",
+                  error: null,
+                },
+              },
+            });
+            yield* Queue.take(idle);
+          }
+          yield* Queue.fail(
+            original,
+            new SessionOperationError({
+              operation: "stream",
+              sessionId: Option.some(running.session.id),
+              message: "App-server exited",
+              cause: new RemoteCodexProcessLost({ message: "App-server exited" }),
+            }),
+          );
+          yield* Deferred.await(recovered);
+          if (state === "interrupting") yield* Queue.take(idle);
+          assert.strictEqual(messages.length, 1, "recovery waits for operator guidance");
+          assert.strictEqual(result.pollUnsafe(), undefined);
+          yield* running.intervene(
+            new OperatorMessage({ message: "Continue with my correction" }),
+            noDelivery,
+          );
+          assert.strictEqual(messages.length, 2);
+          assert.include(JSON.stringify(messages[1]), "Continue with my correction");
+          yield* Queue.offer(restored, {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              turnId: "turn-2",
+              item: { type: "agentMessage", id: "answer", text: "Corrected result" },
+            },
+          });
+          yield* Queue.offer(restored, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-2", status: "completed", error: null } },
+          });
+          yield* Queue.take(idle);
+          yield* running.intervene(new Release(), noDelivery);
+          assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
+          assert.strictEqual(opens, 2);
+        }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
+      }).pipe(Effect.scoped),
+    );
+  }
+
   it.effect("reports a message steered into a running turn read once Codex records it", () =>
     Effect.gen(function* () {
       const notifications = yield* Queue.make<CodexNotification, Cause.Done>();

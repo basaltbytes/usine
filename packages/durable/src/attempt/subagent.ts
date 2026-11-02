@@ -201,7 +201,7 @@ export const subagentTool = (services: ExtensionServices) => {
         ? call("record the child's infrastructure failure", () =>
             api.commit(async (tx) => {
               const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
-              if (record.childBlocker === null)
+              if (record.childBlocker?.kind !== "infra")
                 record.childBlocker = { sessionId, message: error.message, kind: "infra" };
             }, context),
           ).pipe(

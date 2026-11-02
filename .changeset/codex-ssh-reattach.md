@@ -4,4 +4,4 @@
 "@usine/executor": patch
 ---
 
-Keep remote Codex app-servers running through SSH drops and reattach to their pending turns. Resume the saved thread once if the app-server exits. Preserve child transport failures as infrastructure failures so attempts retry automatically from recorded salvage.
+Keep remote Codex app-servers running through SSH drops and reattach to their pending turns. Resume the saved thread once if the app-server exits, preserving operator pauses and idle sessions. Record child transport failures as infrastructure failures even after earlier child reports or parent blockers, so attempts retry automatically from recorded salvage.

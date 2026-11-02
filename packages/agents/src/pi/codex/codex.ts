@@ -386,7 +386,20 @@ const makeCodexChild = Effect.gen(function* () {
             restored.thread.id,
           );
         toolsInFlight.clear();
+        turnActive = false;
         interrupting = false;
+        const paused = yield* conversation.isPaused;
+        const idle = yield* conversation.isIdle;
+        if (paused || idle) {
+          yield* Effect.logInfo("Restored Codex child waits for operator guidance", {
+            sessionId: session.id,
+            threadId: thread.thread.id,
+            paused,
+            idle,
+          });
+          if (!idle) yield* conversation.finish(finalText ?? lastText ?? "Codex turn paused");
+          return;
+        }
         yield* startTurn(
           "Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.",
         );
