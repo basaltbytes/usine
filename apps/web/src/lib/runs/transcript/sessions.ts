@@ -30,6 +30,7 @@ export interface SessionEvents {
   readonly session: AgentSession;
   readonly first: TranscriptEventView;
   harnessSession: Option.Option<HarnessSession>;
+  prompt: Option.Option<string>;
   latestSequence: TranscriptEventView["sequence"];
   status: "Live" | "Finished" | "Stopped";
   held: boolean;
@@ -66,6 +67,7 @@ export const indexSessions = (
         session: event.session,
         first: record,
         harnessSession: Option.none(),
+        prompt: Option.none(),
         latestSequence: record.sequence,
         status: terminalAttempts.has(record.attemptId) ? "Stopped" : "Live",
         held: false,
@@ -78,7 +80,10 @@ export const indexSessions = (
       if (event.session._tag === "ParentSession") parents.set(record.attemptId, group);
     }
     group.latestSequence = record.sequence;
-    if (event._tag === "SessionStarted") group.harnessSession = event.harnessSession;
+    if (event._tag === "SessionStarted") {
+      group.harnessSession = event.harnessSession;
+      group.prompt = event.prompt;
+    }
     if (event._tag === "SessionFinished") group.status = "Finished";
     if (event._tag === "SessionIdle") group.idle = true;
     if (event._tag === "SessionResumed") group.idle = false;

@@ -26,6 +26,8 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
+`SessionStarted.prompt` records the exact initial prompt sent to a child. It is `None` for parents and older transcripts.
+
 ## Runs
 
 The run state machine is `pending → waiting → queued → running → succeeded / failed / canceled`, plus `running → awaiting CI → succeeded / handed off / failed / canceled` for CI waits and `failed → running` on operator retry. `RunState.operatorActions(state)` returns which of approval, retry, failure resolution, cancel, and run again apply. Command handlers share these typed transitions.

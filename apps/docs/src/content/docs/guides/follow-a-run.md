@@ -14,7 +14,8 @@ A signed-in browser session with project viewer access or a higher role.
 1. Open **Overview**. Select a running attempt, recent run, or Needs attention entry. Alternatively, open the project’s **Board** or **Tasks** and select its task.
 2. On a task page, select a run under **Runs**. The drawer shows its item, loop, state, agent, worker, duration, and available actions. Select **Open run page** for the conversation.
 3. In the attempt outline, select an attempt and expand grouped session messages. Errors, blockers, questions, operator messages, and outcomes stay visible. Error counts navigate failures; recovered counts navigate failed tool calls after which the agent continued.
-4. Inspect **Task** and **Event** to compare the rendered task with its saved trigger payload. Select **Tokens** for per-session and per-pool usage and cost.
+4. Expand **Prompt received by** in the attempt details to read the exact initial prompt sent to a child. Each child receives the rendered loop task unchanged, followed by the standard completion instructions; parent context appears separately. These disclosures appear for attempts recorded with child prompts.
+5. Inspect **Task** and **Event** to compare the rendered task with its saved trigger payload. Select **Tokens** for per-session and per-pool usage and cost.
 
 ## Check the result
 

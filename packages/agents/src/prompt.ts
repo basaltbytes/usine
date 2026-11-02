@@ -30,8 +30,10 @@ export interface ChildPromptParts {
   readonly agent: AgentName;
   /** The agent's standing instructions, included before the task. */
   readonly persona: AgentPersona;
-  /** Free text written by the parent model, not the rendered loop task. */
-  readonly task: string;
+  /** The rendered loop task, including any edit-and-retry replacement. */
+  readonly task: AttemptTask;
+  /** Supplemental context written by the parent model. */
+  readonly context: string;
 }
 
 const completionInstructions: ReadonlyArray<string> = [
@@ -101,6 +103,12 @@ export const assembleChildPrompt = (parts: ChildPromptParts): string =>
     "# Agent persona",
     "",
     parts.persona,
+    "",
+    "# Parent context",
+    "",
+    "The following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.",
+    "",
+    parts.context,
     "",
     "# Delegated task",
     "",

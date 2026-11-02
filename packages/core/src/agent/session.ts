@@ -88,6 +88,10 @@ export class SessionStarted extends Schema.TaggedClass<SessionStarted>("Agent/Se
   {
     /** The session identity and brain settings selected at launch. */
     session: AgentSession,
+    /** The exact initial child prompt; `None` for parents and older transcripts. */
+    prompt: Schema.OptionFromOptionalKey(Schema.String).pipe(
+      Schema.withConstructorDefault(Effect.succeed(Option.none<string>())),
+    ),
     /** `None` for older transcripts and for harnesses without a saved conversation. */
     harnessSession: Schema.OptionFromOptionalKey(HarnessSession).pipe(
       Schema.withConstructorDefault(Effect.succeed(Option.none())),

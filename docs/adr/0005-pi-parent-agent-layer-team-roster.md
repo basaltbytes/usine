@@ -29,3 +29,9 @@ The parent's system prompt remains the `usine` section alone because its only to
 Unchanged: the parent's model, effort, and pool resolution, the child-session budget, `[usine:blocked]` reports, and the three child backends. A child is a vendor process the parent can't replay, so the tool isn't replay-safe. After a restart, its call ends as interrupted with the committed output, and the parent model decides whether to delegate again. Resuming the vendor session by recorded id comes later.
 
 Every child and its commands get exactly the attempt's environment, because the orchestrator's own contains the App private key ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md)). It's never stored, so after a restart new children wait for the executor. Interrupting the parent aborts its current turn and children, rather than blocking its next tool call. The parent is then on hold until operator guidance or a release ([ADR 0018](./0018-takeover-and-edit-and-retry.md)).
+
+## Amendment (2026-11-02, #820): child task preservation
+
+The runtime includes the stored rendered loop task unchanged in every child's initial prompt. This includes edit-and-retry amendments. The parent's `subagent.task` argument supplies supplemental context or a focused assignment within that task; conflicting parent context does not replace the task's instructions.
+
+The durable runtime records the exact child prompt on `SessionStarted.prompt`, alongside saved harness session metadata. The run page displays it in the attempt details, including when the launch is outside the loaded transcript page. Older transcripts omit the prompt.

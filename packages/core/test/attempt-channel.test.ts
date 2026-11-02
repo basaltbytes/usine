@@ -288,6 +288,7 @@ describe("attempt channel", () => {
     });
     const legacy = Schema.encodeSync(SessionStarted)(new SessionStarted({ session }));
     assert(Option.isNone(Schema.decodeUnknownSync(SessionStarted)(legacy).harnessSession));
+    assert(Option.isNone(Schema.decodeUnknownSync(SessionStarted)(legacy).prompt));
     const storedSpec = Schema.decodeUnknownSync(AttemptChannel.RunSpec)(
       Object.fromEntries(
         Object.entries(Schema.encodeSync(AttemptChannel.RunSpec)(spec)).filter(
@@ -299,6 +300,7 @@ describe("attempt channel", () => {
     assert(Option.isNone(storedSpec.botLogin));
     const started = new SessionStarted({
       session,
+      prompt: Option.some("Exact task\n\n  Preserve whitespace.\n"),
       harnessSession: Option.some(
         new HarnessSession({
           id: HarnessSessionId.make("native-1"),
