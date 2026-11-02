@@ -5,7 +5,6 @@ dist/
 coverage/
 .usine/
 .astro/
-apps/docs/src/content/docs/reference/api/
 
 # Impeccable scratch output
 **/.impeccable/mocks/

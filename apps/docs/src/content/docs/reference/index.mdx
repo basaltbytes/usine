@@ -1,7 +1,11 @@
 ---
 title: Reference
-description: Configuration revisions, their import and export files, the usine commands, and the public API of the @usine packages.
+description: CLI commands, configuration formats, and the operator HTTP API.
 ---
+
+## CLI
+
+- [CLI](/reference/cli/): the `usine` commands, their flags, and environment variables.
 
 ## Configuration
 
@@ -11,24 +15,7 @@ description: Configuration revisions, their import and export files, the usine c
 - [Loop files](/reference/configuration/loop-files/): the export files in `projects/<project>/loops/`, one loop each.
 - [Agent files](/reference/configuration/agent-files/): the files in `agents/`, one agent each.
 - [Expressions](/reference/configuration/expressions/): the CEL that loop conditions and prompt templates use.
-- [CLI](/reference/configuration/cli/): the `usine` commands, their flags, and the environment variables they read.
 
 ## HTTP API
 
 The [operator HTTP API](/reference/operator-api/) documents instance reads, configuration, run actions, and sign-in. Download its [OpenAPI document](/openapi.json) or fetch `/api/openapi.json` from a running instance.
-
-## Package API
-
-The site build generates these pages from the TSDoc comments of each package's public subpaths, the entries of its `exports` map, such as `@usine/core/run`. Other modules are internal and not documented.
-
-- [`@usine/core`](/reference/api/core/): the domain model, from event to run, step, and attempt, with the typed failures.
-- [`@usine/expression`](/reference/api/expression/): checks and evaluates the CEL expressions in loop files.
-- [`@usine/config`](/reference/api/config/): validates and stores configuration revisions, and imports and exports YAML and Markdown files.
-- [`@usine/github`](/reference/api/github/): GitHub App authentication, polling, and item and label writes.
-- [`@usine/engine`](/reference/api/engine/): the event ledger, run scheduling, restart recovery, and the SQLite store.
-- [`@usine/agents`](/reference/api/agents/): the Claude Code, Codex, and Pi child backends, attempt prompts, and preflight.
-- [`@usine/durable`](/reference/api/durable/): the Pi parent of each attempt, on durable storage that persists across restarts.
-- [`@usine/executor`](/reference/api/executor/): the worker contract and its local, exe.dev, SSH, and Cloudflare adapters.
-- [`@usine/gateway`](/reference/api/gateway/): the proxy that adds credentials to worker traffic and enforces the egress allowlist.
-- [`@usine/cloudflare`](/reference/api/cloudflare/): the sandbox API, exec stream, and harness environment of the Cloudflare Worker that runs each attempt in its own sandbox.
-- [`@usine/orchestrator`](/reference/api/orchestrator/): the full engine as one Effect layer that can run in-process.

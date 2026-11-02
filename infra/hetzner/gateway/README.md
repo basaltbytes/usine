@@ -1,6 +1,6 @@
 # usine gateway on Hetzner Cloud
 
-These files create the gateway host of [#223](https://github.com/basaltbytes/usine/issues/223) (stage 2) on Hetzner Cloud: a private network, a gateway VM with a public address, and a firewall. Worker VMs on the network have no public address. [ADR 0027](../../../docs/adr/0027-gateway-credential-proxy.md) records why. [Add a worker](https://docs.usine.dev/guides/add-a-worker/) walks through the whole setup, and [Workers and the gateway](https://docs.usine.dev/architecture/workers-and-gateway/) describes each part.
+These files create the gateway host of [#223](https://github.com/basaltbytes/usine/issues/223) (stage 2) on Hetzner Cloud: a private network, a gateway VM with a public address, and a firewall. Worker VMs on the network have no public address. [ADR 0027](../../../docs/adr/0027-gateway-credential-proxy.md) records why. [Add a worker](https://docs.usine.dev/guides/add-a-worker/) walks through the whole setup, and [Workers and the gateway](../../../docs/architecture/workers-and-gateway.mdx) describes each part.
 
 | File | Contents |
 | --- | --- |

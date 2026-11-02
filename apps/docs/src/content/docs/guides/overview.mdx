@@ -1,0 +1,45 @@
+---
+title: Guides
+description: Configure loops and agents, operate runs, and deploy an instance.
+sidebar:
+  order: 0
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+Start with the [quickstart](/get-started/quickstart/) to open your first agent pull request. These guides cover individual tasks for an existing instance.
+
+<CardGrid>
+  <LinkCard
+    title="Write a loop"
+    href="/guides/write-a-loop/"
+    description="Select work and define the task an agent receives."
+  />
+  <LinkCard
+    title="Write an agent"
+    href="/guides/write-an-agent/"
+    description="Choose a harness, model, and standing instructions."
+  />
+  <LinkCard
+    title="Operate runs"
+    href="/guides/operate-runs/"
+    description="Approve, follow, steer, and retry work."
+  />
+  <LinkCard
+    title="Change the configuration"
+    href="/guides/change-the-configuration/"
+    description="Save and inspect configuration revisions."
+  />
+  <LinkCard
+    title="Add a worker"
+    href="/guides/add-a-worker/"
+    description="Run child sessions on another machine."
+  />
+  <LinkCard
+    title="Run the orchestrator on a server"
+    href="/guides/run-the-orchestrator-on-a-server/"
+    description="Keep an instance available for unattended work."
+  />
+</CardGrid>
+
+For local operation, [keep the orchestrator running](/guides/keep-the-orchestrator-running/), [open the web UI](/guides/open-the-web-ui/), or [back up instance state](/guides/back-up-instance-state/).

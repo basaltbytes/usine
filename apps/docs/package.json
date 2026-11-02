@@ -7,12 +7,13 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "pnpm openapi:generate && astro build",
+    "build": "pnpm test && pnpm openapi:generate && astro build",
     "preview": "astro preview",
-    "check": "astro check",
+    "check": "astro sync && tsc --noEmit",
     "deploy": "wrangler deploy",
     "openapi:generate": "node --experimental-strip-types openapi.mjs",
-    "openapi:check": "node --experimental-strip-types openapi.mjs --check"
+    "openapi:check": "node --experimental-strip-types openapi.mjs --check",
+    "test": "vitest run"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.7",
@@ -21,25 +22,18 @@
     "astro-mermaid": "2.2.0",
     "lucode-starlight": "1.0.0",
     "mermaid": "12.2.0",
-    "starlight-links-validator": "0.27.0",
-    "starlight-typedoc": "0.23.1",
-    "typedoc": "0.28.20",
-    "typedoc-plugin-markdown": "4.14.1"
+    "starlight-links-validator": "0.27.0"
   },
   "devDependencies": {
-    "@astrojs/check": "0.9.12",
-    "@usine/agents": "workspace:*",
-    "@usine/cloudflare": "workspace:*",
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
     "@usine/config": "workspace:*",
     "@usine/core": "workspace:*",
-    "@usine/durable": "workspace:*",
-    "@usine/engine": "workspace:*",
-    "@usine/executor": "workspace:*",
     "@usine/expression": "workspace:*",
-    "@usine/gateway": "workspace:*",
-    "@usine/github": "workspace:*",
     "@usine/orchestrator": "workspace:*",
-    "typescript": "6.0.3",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
     "wrangler": "4.153.0"
   },
   "engines": {

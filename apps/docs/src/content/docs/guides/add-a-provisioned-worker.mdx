@@ -45,7 +45,7 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
 
 <Steps>
 
-1. Create an API token for the Hetzner Cloud project. In the Hetzner Cloud Console, open the project, select **Security** > **API tokens** > **Generate API token**, and select **Read & Write**. The console shows the token once. Add it to `.env` in the instance folder, the [environment file](/reference/configuration/cli/#environment-file) that usine reads at startup: run this command, paste the token, and press Enter.
+1. Create an API token for the Hetzner Cloud project. In the Hetzner Cloud Console, open the project, select **Security** > **API tokens** > **Generate API token**, and select **Read & Write**. The console shows the token once. Add it to `.env` in the instance folder, the [environment file](/reference/cli/#environment-file) that usine reads at startup: run this command, paste the token, and press Enter.
 
    ```sh title="Instance folder"
    (umask 077; read -r token && echo "HCLOUD_TOKEN=$token" >> .env)
@@ -168,7 +168,7 @@ Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has
 
 <Steps>
 
-1. Create a Boat API key. Boat shows the key once. Add it to `.env` in the instance folder, the [environment file](/reference/configuration/cli/#environment-file) that usine reads at startup: run the second command, paste the key, and press Enter.
+1. Create a Boat API key. Boat shows the key once. Add it to `.env` in the instance folder, the [environment file](/reference/cli/#environment-file) that usine reads at startup: run the second command, paste the key, and press Enter.
 
    ```sh title="Instance folder"
    boat api-key create usine-boat-pool --ttl 365d

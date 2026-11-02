@@ -9,7 +9,7 @@ import { CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
 
 :::note
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16. Code links point at that commit.
-Configuration storage and revision behavior on this page describe commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b) (2026-10-29). See [Storage and configuration](/architecture/storage-and-config/#configuration-store). Other sections retain the source versions cited above.
+Configuration storage and revision behavior on this page describe commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b) (2026-10-29). See [Storage and configuration](./storage-and-config.mdx#configuration-store). Other sections retain the source versions cited above.
 :::
 
 usine is one long-running Node process, the orchestrator. It polls the issues and pull requests of the operator's repositories and, when one matches a loop, opens a run in which a coding agent works on it. The runtime database stores loops and agents with configuration revisions. Markdown files are their import and export format. The process also serves the web UI on `127.0.0.1`.
@@ -73,7 +73,7 @@ flowchart TB
   gateway -- "adds the token" --> github
 ```
 
-[Workers and the gateway](/architecture/workers-and-gateway/) describes each path, including three that the diagram omits: the admin API forward ([#249](https://github.com/basaltbytes/usine/issues/249)), the `llm.<domain>` host ([proxy.ts:206](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/proxy/proxy.ts#L206)), and the forward proxy on port 3128. The gateway's listeners are in [environment.ts:121](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/node/environment.ts#L121).
+[Workers and the gateway](./workers-and-gateway.mdx) describes each path, including three that the diagram omits: the admin API forward ([#249](https://github.com/basaltbytes/usine/issues/249)), the `llm.<domain>` host ([proxy.ts:206](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/proxy/proxy.ts#L206)), and the forward proxy on port 3128. The gateway's listeners are in [environment.ts:121](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/node/environment.ts#L121).
 
 ADR 0006's run host is gone: [#176](https://github.com/basaltbytes/usine/issues/176) deleted `@usine/run-host` and its byte protocol ([ADR 0006](https://github.com/basaltbytes/usine/blob/main/docs/adr/0006-executor-contract-run-host-attempt-channel.md), amendment of 2026-10-11), so no usine package is installed on a worker. Attempt channel envelopes remain the transcript format.
 
@@ -182,33 +182,33 @@ sequenceDiagram
 <CardGrid>
   <LinkCard
     title="Run lifecycle"
-    href="/architecture/run-lifecycle/"
+    href="./run-lifecycle.mdx"
     description="Events, run and attempt states, operator actions, cycle budgets, and drain."
   />
   <LinkCard
     title="Attempt execution"
-    href="/architecture/execution/"
+    href="./execution.mdx"
     description="Executor contract, durable layer, interventions, transcripts, and harnesses."
   />
   <LinkCard
     title="Workers and the gateway"
-    href="/architecture/workers-and-gateway/"
+    href="./workers-and-gateway.mdx"
     description="Worker kinds, preflight, the gateway VM, and credentials."
   />
   <LinkCard
     title="Storage and configuration"
-    href="/architecture/storage-and-config/"
+    href="./storage-and-config.mdx"
     description="Runtime store, durable storage, configuration revisions, and export files."
   />
   <LinkCard
     title="Operator surfaces"
-    href="/architecture/operator-surfaces/"
+    href="./operator-surfaces.mdx"
     description="HTTP endpoints, web UI, CLI, and logs."
   />
   <LinkCard
     title="Dogfood instance loops"
-    href="/architecture/loops-shipped/"
+    href="./loops-shipped.md"
     description="The dogfood instance's loops and agents."
   />
-  <LinkCard title="Gaps" href="/architecture/gaps/" description="What the code doesn't do yet." />
+  <LinkCard title="Gaps" href="./gaps.md" description="What the code doesn't do yet." />
 </CardGrid>

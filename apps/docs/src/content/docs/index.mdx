@@ -1,18 +1,18 @@
 ---
 title: usine
-description: usine runs coding agents on the GitHub issues and pull requests of the repositories that you register, following loops stored in the instance database.
+description: Run coding agents on GitHub issues and pull requests, with loops you define and a web UI to approve and follow their work.
 head:
   - tag: title
     content: usine documentation
 template: splash
 hero:
   layout: banner
-  tagline: When an issue or pull request in your repositories matches one of your loops, usine runs the loop's agent on it through Claude Code, Codex, or Pi.
+  tagline: usine runs coding agents on GitHub issues and pull requests in the repositories you register. You define loops that select the work, then approve and follow runs in a web UI.
   actions:
-    - text: Run a factory
-      link: /guides/
-    - text: Write a loop
-      link: /guides/write-a-loop/
+    - text: Start the quickstart
+      link: /get-started/quickstart/
+    - text: Read the concepts
+      link: /get-started/concepts/
       variant: secondary
 ---
 
@@ -21,62 +21,28 @@ import { ContainerSection } from "lucode-starlight/components";
 
 <ContainerSection>
 
-## Loop files
-
-usine stores loops and agents in its database, with a revision for each configuration change. Markdown files are their import and export format. A loop's frontmatter sets which issues or pull requests open a run, whether you approve each run, and which agent does the work. Its body is the agent's task. This loop runs usine on its own repository:
-
-```markdown title="usine/start-dev (export format)" wrap
----
-trigger:
-  on: issue
-  if: >-
-    item.state == "OPEN" &&
-    item.labels.nodes.exists(label, label.name == "ready-for-agent") &&
-    !item.closedByPullRequestsReferences.nodes.exists(pr, pr.state == "OPEN")
-selector:
-  repos: [basaltbytes/usine]
-approval: required
-step: implement
-agent: developer
----
-
-Use the repository's `tackle-issue` skill to complete issue #{{ item.number }}: {{ item.title }}.
-
-Before editing, remove `ready-for-agent` from the issue and add `agent-in-progress`. Complete the issue through a non-draft pull request whose body closes the issue. Do not merge it. Once the pull request is ready, remove `agent-in-progress` from the issue and add `ready-for-review` to the pull request.
-
-If work cannot continue, add a comment to the issue that states the exact blocker. Do not add a workaround that changes the issue's scope.
-```
-
-Create the [bootstrap files](/guides/#create-the-instance-folder) before the first `usine up`, which imports them as revision 1. Later starts ignore those configuration files. Use [`usine config`](/reference/configuration/config/) to edit the stored configuration.
-
-You approve, follow, and steer the work in a local web UI.
-
-</ContainerSection>
-
-<ContainerSection>
-
-## Next steps
+## Guides
 
 <CardGrid>
   <LinkCard
-    title="Run a factory"
-    description="Create an instance folder, connect a GitHub App, and start usine up."
-    href="/guides/"
-  />
-  <LinkCard
     title="Write a loop"
-    description="Choose which issues or pull requests start work and the task that the agent receives."
+    description="Select issues or pull requests and give an agent its task."
     href="/guides/write-a-loop/"
   />
   <LinkCard
+    title="Write an agent"
+    description="Choose a harness, model, and standing instructions."
+    href="/guides/write-an-agent/"
+  />
+  <LinkCard
     title="Operate runs"
-    description="Approve, steer, retry, and cancel runs in the web UI."
+    description="Approve work, follow an attempt, or retry a failed run."
     href="/guides/operate-runs/"
   />
   <LinkCard
-    title="Architecture overview"
-    description="The packages, processes, storage, and workers, and the path of one change through them."
-    href="/architecture/"
+    title="Add a worker"
+    description="Run child sessions on another machine."
+    href="/guides/add-a-worker/"
   />
 </CardGrid>
 

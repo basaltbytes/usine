@@ -1,6 +1,6 @@
 # @usine/executor
 
-Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free root defines worker preflight, scoped attempt preparation, and cancellation, plus the credential provider, worker capability errors, and adapter-neutral request types. Each prepared attempt runs its Pi parent in this process as a durable task, tells it where the worker runs children (local processes, SSH on an exe.dev VM or any Linux machine, or a Cloudflare sandbox), and releases its resources at completion or when its scope closes. [Attempt execution](https://docs.usine.dev/architecture/execution/) and [Workers and the gateway](https://docs.usine.dev/architecture/workers-and-gateway/) cover the executors.
+Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free root defines worker preflight, scoped attempt preparation, and cancellation, plus the credential provider, worker capability errors, and adapter-neutral request types. Each prepared attempt runs its Pi parent in this process as a durable task, tells it where the worker runs children (local processes, SSH on an exe.dev VM or any Linux machine, or a Cloudflare sandbox), and releases its resources at completion or when its scope closes. [Attempt execution](https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx) and [Workers and the gateway](https://github.com/basaltbytes/usine/blob/main/docs/architecture/workers-and-gateway.mdx) cover the executors.
 
 0.x APIs can change. Supply `effect` at the workspace's pinned version.
 

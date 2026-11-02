@@ -33,7 +33,7 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 
 - [#258][]: behind the gateway, the Codex app-server requests github.com and api.github.com.
 - [#223][]: umbrella issue: replace exe.dev with EU workers that usine controls, in three stages.
-- [#228][]: `usine up` refuses `exe.dev` workers and mixed worker kinds ([Workers and the gateway](/architecture/workers-and-gateway/)).
+- [#228][]: `usine up` refuses `exe.dev` workers and mixed worker kinds ([Workers and the gateway](./workers-and-gateway.mdx)).
 - [#196][]: exe.dev workers can't run Pi children.
 - [#199][]: canceling an unlaunched live attempt on exe.dev leaves remote children running.
 - [#200][]: exe.dev recovery no longer stops a run host from older usine versions.

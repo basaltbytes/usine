@@ -31,7 +31,7 @@
       "project": []
     },
     "apps/docs": {
-      "ignoreDependencies": ["^@usine/"]
+      "ignoreDependencies": ["@usine/orchestrator"]
     },
     "apps/server": {
       "ignoreDependencies": ["@usine/web"]

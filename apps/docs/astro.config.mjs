@@ -4,10 +4,11 @@ import { defineConfig } from "astro/config";
 import mermaid from "astro-mermaid";
 import lucode from "lucode-starlight";
 import starlightLinksValidator from "starlight-links-validator";
-import { apiReference, apiSidebarGroup } from "./api-reference.mjs";
+import { redirects } from "./redirects.mjs";
 
 export default defineConfig({
   site: "https://docs.usine.dev",
+  redirects,
   integrations: [
     mermaid({
       autoTheme: true,
@@ -32,30 +33,44 @@ export default defineConfig({
       plugins: [
         lucode({
           navLinks: [
-            { label: "Guides", link: "/guides/" },
-            { label: "Architecture", link: "/architecture/" },
+            { label: "Get started", link: "/get-started/" },
+            { label: "Guides", link: "/guides/overview/" },
             { label: "Reference", link: "/reference/" },
             { label: "GitHub", link: "https://github.com/basaltbytes/usine" },
           ],
           footerText:
-            "usine is MIT licensed. The source is on [GitHub](https://github.com/basaltbytes/usine).",
+            "usine is licensed under AGPL-3.0. The source is on [GitHub](https://github.com/basaltbytes/usine).",
         }),
-        apiReference,
         starlightLinksValidator(),
       ],
       sidebar: [
+        {
+          label: "Get started",
+          items: [
+            { label: "Overview", slug: "get-started" },
+            { label: "Quickstart", slug: "get-started/quickstart" },
+            { label: "Concepts", slug: "get-started/concepts" },
+          ],
+        },
         { label: "Guides", items: [{ autogenerate: { directory: "guides" } }] },
-        { label: "Architecture", items: [{ autogenerate: { directory: "architecture" } }] },
         {
           label: "Reference",
           items: [
-            { label: "Overview", slug: "reference" },
-            { label: "Operator HTTP API", slug: "reference/operator-api" },
+            { label: "CLI", slug: "reference/cli" },
             {
               label: "Configuration",
-              items: [{ autogenerate: { directory: "reference/configuration" } }],
+              items: [
+                { label: "usine.yaml", slug: "reference/configuration/usine-yaml" },
+                { label: "Settings", link: "/reference/configuration/usine-yaml/#settings" },
+                { label: "Projects", link: "/reference/configuration/usine-yaml/#projects" },
+                { label: "Workers", link: "/reference/configuration/usine-yaml/#workers" },
+                { label: "Loops", slug: "reference/configuration/loop-files" },
+                { label: "Agents", slug: "reference/configuration/agent-files" },
+                { label: "Expressions", slug: "reference/configuration/expressions" },
+                { label: "Configuration revisions", slug: "reference/configuration/config" },
+              ],
             },
-            apiSidebarGroup,
+            { label: "Operator HTTP API", slug: "reference/operator-api" },
           ],
         },
       ],

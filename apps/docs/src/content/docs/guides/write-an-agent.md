@@ -73,4 +73,4 @@ codex login --device-auth  # ChatGPT plan: open the URL it prints and enter the 
 
 To check the result, run `claude auth status` and `codex login status`. A worker behind a gateway with `llm_providers: [anthropic]` needs no Claude Code login.
 
-Select **Save** to apply the revision. The editor reports validation and worker preflight failures without discarding the text. Use **History** on the agent page to inspect or revert a change. See [Configuration editing](/guides/#change-the-configuration).
+Select **Save** to apply the revision. The editor reports validation and worker preflight failures without discarding the text. Use **History** on the agent page to inspect or revert a change. See [Configuration editing](/guides/change-the-configuration/).

@@ -123,7 +123,7 @@ Provisioned workers behind the gateway need no entry: the executor jumps through
 
 <Steps>
 
-1. Create the instance folder `/home/usine/factory` as described in [Run a factory](/guides/#create-the-instance-folder), or move one from a laptop as described in [Move an instance from a laptop](#move-an-instance-from-a-laptop). Use SSH workers: the server has no harness for a local worker.
+1. Create the instance folder `/home/usine/factory` as described in [Quickstart](/get-started/quickstart/#4-create-the-bootstrap-files), or move one from a laptop as described in [Move an instance from a laptop](#move-an-instance-from-a-laptop). Use SSH workers: the server has no harness for a local worker.
 
 2. Set `USINE_ORIGIN` in `.env` to the URL that `orchestrator-tailnet-up` printed, so that the operator API accepts the actions of the UI's pages there. Without it, the UI at that URL shows the runs, but refuses every action with `CrossSiteRequestError`:
 
@@ -149,11 +149,11 @@ Provisioned workers behind the gateway need no entry: the executor jumps through
 
 </Steps>
 
-The unit has no `EnvironmentFile=`: `usine up` reads `.env` itself, with the [environment file](/reference/configuration/cli/#environment-file) syntax. systemd parses `export`, `\n` in double quotes, and comments differently, and its values would take precedence over usine's.
+The unit has no `EnvironmentFile=`: `usine up` reads `.env` itself, with the [environment file](/reference/cli/#environment-file) syntax. systemd parses `export`, `\n` in double quotes, and comments differently, and its values would take precedence over usine's.
 
 ## Operate the service
 
-`usine status` adds the line `service   usine.service, managed with systemctl`. `usine stop`, `usine restart`, and `usine upgrade` stop the service with `systemctl stop --no-block` and start it with `systemctl start`, so that systemd keeps managing it ([Instances that systemd runs](/reference/configuration/cli/#instances-that-systemd-runs)). They refuse and drain as for any instance: `usine restart` refuses while a run has a running attempt, and `usine restart --force` stops without waiting, after which the new process reattaches the attempt.
+`usine status` adds the line `service   usine.service, managed with systemctl`. `usine stop`, `usine restart`, and `usine upgrade` stop the service with `systemctl stop --no-block` and start it with `systemctl start`, so that systemd keeps managing it ([Instances that systemd runs](/reference/cli/#instances-that-systemd-runs)). They refuse and drain as for any instance: `usine restart` refuses while a run has a running attempt, and `usine restart --force` stops without waiting, after which the new process reattaches the attempt.
 
 `systemctl restart usine.service` doesn't refuse. systemd sends `SIGTERM` to `usine up` alone, and `usine up` drains: it starts no new attempts and waits for the running ones to end, for at most `settings.max_attempt_minutes` if the stored configuration sets it. The command waits until the old process exits, then starts a new one. If the drain lasts more than an hour (`TimeoutStopSec=1h`), systemd sends `SIGKILL`: the attempts keep running on the workers, and the new process reattaches them, as after `usine restart --force`. To end a drain at once, run `usine stop --force`, which sends the second `SIGTERM`.
 

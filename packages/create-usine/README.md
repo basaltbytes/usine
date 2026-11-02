@@ -20,7 +20,7 @@ The destination must be new or empty. The command writes `package.json`, `.gitig
 
 The first `usine up` creates an empty configuration revision and opens GitHub App setup. Configuration and credentials are saved under `.usine/`. `.gitignore` excludes that directory, `.env`, and `node_modules/`. Keep the instance folder on persistent storage and include its runtime data in backups.
 
-Use `npm run usine -- up --detach` or `pnpm usine up --detach` to run in the background. Run the local CLI with the same package manager for `status`, `stop`, `restart`, and `sign-in-link`. See [Run a factory](https://docs.usine.dev/guides/) for setup and [the CLI reference](https://docs.usine.dev/reference/configuration/cli/) for lifecycle commands.
+Use `npm run usine -- up --detach` or `pnpm usine up --detach` to run in the background. Run the local CLI with the same package manager for `status`, `stop`, `restart`, and `sign-in-link`. See [Quickstart](https://docs.usine.dev/get-started/quickstart/) for setup and [the CLI reference](https://docs.usine.dev/reference/cli/) for lifecycle commands.
 
 ## Releases
 

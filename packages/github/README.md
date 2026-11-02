@@ -13,7 +13,7 @@ The 0.x APIs can change between minor releases.
 
 ## Set up the App
 
-[Run a factory](https://docs.usine.dev/guides/) gives the steps under Connect a GitHub App: an App installable only on your account, with an active webhook for deliveries mode, with Contents, Issues, and Pull requests read and write, Checks and Metadata read-only, optionally Actions read-only for CI job logs, and **No access** for everything else, including Workflows, Administration, and all organization and account permissions.
+[Quickstart](https://docs.usine.dev/get-started/quickstart/) gives the steps under Connect a GitHub App: an App installable only on your account, with an active webhook for deliveries mode, with Contents, Issues, and Pull requests read and write, Checks and Metadata read-only, optionally Actions read-only for CI job logs, and **No access** for everything else, including Workflows, Administration, and all organization and account permissions.
 
 GitHub grants Metadata read access automatically. Contents lets installation tokens use Git over HTTPS; with Workflows off, worker tokens can't edit `.github/workflows/`. User authorization isn't required. Install the App once, on the account that owns the managed repos, for every repo in `usine.yaml`; a factory expects one installation. GitHub's references are [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app) and [Choosing permissions for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app).
 

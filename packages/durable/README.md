@@ -1,6 +1,6 @@
 # @usine/durable
 
-Runs an attempt's Pi parent in the orchestrator on [`@earendil-works/pi-durable`](https://www.npmjs.com/package/@earendil-works/pi-durable) storage. Each attempt is one durable task, `usine.attempt`, with one parent conversation. The parent's only tool, `subagent`, starts the agent's Claude Code, Codex, or Pi child in the attempt's checkout. After an orchestrator restart, unfinished attempts continue from their last committed step. [Attempt execution](https://docs.usine.dev/architecture/execution/) covers the durable layer and live channel.
+Runs an attempt's Pi parent in the orchestrator on [`@earendil-works/pi-durable`](https://www.npmjs.com/package/@earendil-works/pi-durable) storage. Each attempt is one durable task, `usine.attempt`, with one parent conversation. The parent's only tool, `subagent`, starts the agent's Claude Code, Codex, or Pi child in the attempt's checkout. After an orchestrator restart, unfinished attempts continue from their last committed step. [Attempt execution](https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx) covers the durable layer and live channel.
 
 ## Entry points
 

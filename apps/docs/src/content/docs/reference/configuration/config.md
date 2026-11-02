@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-Run `usine config` from the instance folder, where `.usine/runtime.sqlite` stores the configuration and its revision history. Commands work while the orchestrator runs or while it is stopped; they access the local database directly. Each command reads [`.env`](/reference/configuration/cli/#environment-file) first.
+Run `usine config` from the instance folder, where `.usine/runtime.sqlite` stores the configuration and its revision history. Commands work while the orchestrator runs or while it is stopped; they access the local database directly. Each command reads [`.env`](/reference/cli/#environment-file) first.
 
 ```sh
 usine config export <folder>
@@ -34,7 +34,7 @@ usine config export ./config-export
 
 The folder is relative to the working directory, or an absolute path. There are no export-specific options. Existing configuration files are replaced; stale Markdown files in the exported agent and loop directories are removed. Export rewrites complete files, applies schema defaults, and does not preserve YAML comments.
 
-The command prints the exported revision number and absolute destination. It does not include secrets, loop pause state, or revision history. Use [`usine backup`](/reference/configuration/cli/#usine-backup-path) to back up the database, and copy credentials separately.
+The command prints the exported revision number and absolute destination. It does not include secrets, loop pause state, or revision history. Use [`usine backup`](/reference/cli/#usine-backup-path) to back up the database, and copy credentials separately.
 
 ## Import
 
@@ -115,7 +115,7 @@ These changes require a restart:
 
 A CLI write can succeed while the running process refuses to apply it with `RestartRequiredError` or `ReloadPreflightError`. The revision remains saved, and the complete running configuration stays unchanged. Check the orchestrator log for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`.
 
-After saving a change to startup-only fields, run `usine restart` when no attempt is running. For a refused addition or resize, correct the worker or save another revision, then apply the saved configuration again with a restart or [an explicit store reread](/reference/configuration/cli/#reload). A successful CLI exit reports a saved revision, not successful application by the running process.
+After saving a change to startup-only fields, run `usine restart` when no attempt is running. For a refused addition or resize, correct the worker or save another revision, then apply the saved configuration again with a restart or [an explicit store reread](/reference/cli/#reload). A successful CLI exit reports a saved revision, not successful application by the running process.
 
 ## Exit status
 

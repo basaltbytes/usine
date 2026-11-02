@@ -240,7 +240,7 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
    GATEWAY_SSH=usine-gateway ./infra/hetzner/gateway/gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
    ```
 
-   On first boot, the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. See [`usine-gateway`](/reference/configuration/cli/#usine-gateway) for what a reload and a restart change.
+   On first boot, the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. See [`usine-gateway`](/reference/cli/#usine-gateway) for what a reload and a restart change.
 
 5. Give the gateway your subscription logins, so that workers need none. Make each login on your own machine and copy it to the gateway:
 
@@ -291,7 +291,7 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
      IdentityFile ~/.ssh/usine_worker
    ```
 
-9. In the instance folder, copy the admin token line into `.env`, the [environment file](/reference/configuration/cli/#environment-file) that usine reads at startup, and make it readable only by you:
+9. In the instance folder, copy the admin token line into `.env`, the [environment file](/reference/cli/#environment-file) that usine reads at startup, and make it readable only by you:
 
    ```sh title="Instance folder"
    (umask 077; ssh usine-gateway "grep '^USINE_GATEWAY_ADMIN_TOKEN=' /etc/usine-gateway/secrets.env" >> .env)
