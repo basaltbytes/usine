@@ -3,7 +3,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { matchesLoop } from "@usine/config/project";
 import { repositoryContext } from "@usine/config/payload-slices";
 import { AttemptTask } from "@usine/core/attempt";
-import { CiFailed, CiPassed, CiSuperseded } from "@usine/core/ci";
+import { CiFailed, CiHandedOff, CiPassed, CiSuperseded } from "@usine/core/ci";
 import { DedupKey } from "@usine/core/event";
 import {
   canonicalRepositoryName,
@@ -80,11 +80,11 @@ export class CiMonitor extends Context.Service<
           return yield* engine.settleCi(runId, head, new CiSuperseded({ head: observed.head }));
         }
         const now = yield* DateTime.now;
+        const timedOut =
+          DateTime.toEpochMillis(now) >=
+          DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000;
         if (observed.state === "pending") {
-          if (
-            DateTime.toEpochMillis(now) >=
-            DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000
-          ) {
+          if (timedOut) {
             yield* Effect.logWarning("CI wait timed out; operator attention is required", {
               runId,
               head,
@@ -194,12 +194,41 @@ export class CiMonitor extends Context.Service<
           fixLoop: fix.loop.name,
           result: result._tag,
         });
+        if (result._tag === "Queued") {
+          if (!timedOut) {
+            yield* Effect.logInfo("CI fix event queued; source waits for run admission", {
+              runId,
+              head,
+              fixLoop: fix.loop.name,
+              eventId: result.eventId,
+            });
+            return;
+          }
+          yield* Effect.logWarning("CI fix admission timed out; operator attention is required", {
+            runId,
+            head,
+            fixLoop: fix.loop.name,
+            eventId: result.eventId,
+          });
+          return yield* engine.settleCi(
+            runId,
+            head,
+            new CiFailed({
+              message: `CI failed, but fix loop ${fix.loop.name} did not admit its queued event within ${handoff.timeoutSeconds} seconds.`,
+            }),
+          );
+        }
         yield* engine.settleCi(
           runId,
           head,
-          new CiFailed({
-            message: `CI failed: ${evidence.jobs.join(", ") || "check failure"}. Fix loop ${fix.loop.name}: ${result._tag}.`,
-          }),
+          result._tag === "Claimed"
+            ? new CiHandedOff({
+                reason: `CI failed: ${evidence.jobs.join(", ") || "check failure"}.`,
+                fixRunId: result.runId,
+              })
+            : new CiFailed({
+                message: `CI failed: ${evidence.jobs.join(", ") || "check failure"}. Fix loop ${fix.loop.name}: ${result._tag}.`,
+              }),
         );
       });
 

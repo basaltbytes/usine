@@ -1,7 +1,9 @@
 import { OperatorActor } from "../operator.ts";
 import { Effect, Option, Schema } from "effect";
+import { LoopName } from "../loop.ts";
 import { CiHandoff } from "../ci.ts";
 import { CommitSha } from "../repository.ts";
+import { RunId } from "./id.ts";
 import { EventId } from "../event.ts";
 
 /** An operator-requested cancellation, with the operator login when recorded. */
@@ -61,6 +63,14 @@ export class Succeeded extends Schema.TaggedClass<Succeeded>("RunState/Succeeded
   {},
 ) {}
 
+/** A closed run whose failed CI continues in an admitted fix run. */
+export class HandedOff extends Schema.TaggedClass<HandedOff>("RunState/HandedOff")("HandedOff", {
+  reason: Schema.NonEmptyString,
+  head: CommitSha,
+  fixLoop: LoopName,
+  fixRunId: RunId,
+}) {}
+
 /** A Run whose last Attempt failed without an auto-retry; the failure is stored on the Attempt. */
 export class Failed extends Schema.TaggedClass<Failed>("RunState/Failed")("Failed", {}) {}
 
@@ -86,12 +96,12 @@ export type Open = typeof Open.Type;
  *   pending | waiting | queued           ──► canceled   (supersede, revoke: a started
  *                                                        attempt always finishes, ADR 0007)
  *
- *   running ──► awaiting CI ──► succeeded / failed / canceled (ADR 0033)
+ *   running ──► awaiting CI ──► succeeded / handed off / failed / canceled (ADR 0033)
  *
  * Each transition accepts only its legal source states, so an illegal transition is a type
  * error. States come from the transitions or from decoding a stored row with `RunState`.
  */
-export const RunState = Schema.Union([...Open.members, Succeeded, Failed, Canceled]);
+export const RunState = Schema.Union([...Open.members, Succeeded, HandedOff, Failed, Canceled]);
 export type RunState = typeof RunState.Type;
 
 /** The states before any Attempt starts, accepted by `supersede` and `revoke`. */
@@ -148,6 +158,7 @@ export const STATE_TAGS = tagsOf<RunState>()(
   "Running",
   "AwaitingCi",
   "Succeeded",
+  "HandedOff",
   "Failed",
   "Canceled",
 );

@@ -35,7 +35,7 @@ import {
 } from "@usine/core/attempt";
 import { DedupKey, EventId, Event } from "@usine/core/event";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId, Run } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
@@ -72,7 +72,7 @@ import {
   GitHubPushFailure,
   InfraFailure,
 } from "@usine/core/attempt/failure";
-import { AttemptCanceled, AttemptFailed } from "@usine/core/attempt/outcome";
+import { AttemptCanceled, AttemptFailed, AttemptHandedOff } from "@usine/core/attempt/outcome";
 import * as RunState from "@usine/core/run/state";
 import {
   Claimed,
@@ -1421,6 +1421,50 @@ describe("Operator", () => {
         ),
       );
     }),
+  );
+
+  it.effect(
+    "leaves handed-off runs out of Needs attention and preserves the fix link in detail",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const original = snapshot.attempts[0];
+        assert(original !== undefined);
+        const handoff = new RunState.HandedOff({
+          reason: "CI failed: ci.",
+          head: CommitSha.make("a".repeat(40)),
+          fixLoop: loopName,
+          fixRunId: RunId.make("fix-828"),
+        });
+        const current = new RunSnapshot({
+          ...snapshot,
+          closedAt: Option.some(now),
+          run: new Run({ ...snapshot.run, state: handoff }),
+          attempts: [
+            new Attempt({
+              ...original,
+              outcome: Option.some(new AttemptHandedOff()),
+              endedAt: Option.some(now),
+            }),
+          ],
+        });
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const overview = yield* operator.overview(instance);
+          assert(!overview.needsYou.some((need) => need._tag === "RunFailureNeed"));
+          const card = overview.projects[0]?.board.lanes
+            .flatMap(({ items }) => items)
+            .find((item) => item.itemKey === itemKey);
+          assert.strictEqual(card?.needsYou, false);
+          const detail = yield* operator.detail(instance, runId);
+          assert.strictEqual(detail.run.state, "HandedOff");
+          assert.deepStrictEqual(detail.run.handoff, handoff);
+          assert.strictEqual(detail.run.canResolveFailure, false);
+        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
+      }),
   );
 
   it.effect("clears only resolved failure attention and renews it for a later failed Attempt", () =>

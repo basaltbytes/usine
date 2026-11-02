@@ -95,7 +95,7 @@ const attemptOutcome = (attempt: Attempt): Outcome | null =>
   Option.match(attempt.outcome, {
     onNone: () => null,
     onSome: ({ _tag }) =>
-      _tag === "AwaitingCi"
+      _tag === "AwaitingCi" || _tag === "HandedOff"
         ? null
         : _tag === "Succeeded"
           ? "succeeded"

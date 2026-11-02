@@ -1,4 +1,4 @@
-import { CiWaitLine } from "~/components/runs/ci";
+import { CiHandoffLine, CiWaitLine } from "~/components/runs/ci";
 import { useProjectLinks } from "~/hooks/use-project-links";
 import { ArrowsOutSimpleIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -123,6 +123,8 @@ export const RunSummary = ({ detail }: RunSummaryProps) => {
       );
     case "AwaitingCi":
       return <CiWaitLine run={run} />;
+    case "HandedOff":
+      return <CiHandoffLine run={run} />;
     case "Running":
       return <LiveSummary detail={detail} />;
     case "Succeeded":

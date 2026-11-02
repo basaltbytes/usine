@@ -261,6 +261,7 @@ const envelopeEnd = (
   if (outcome !== null && outcome !== undefined)
     return Match.valueTags(outcome, {
       AwaitingCi: () => null,
+      HandedOff: () => null,
       Succeeded: (): AttemptEnd => ({ _tag: "Succeeded", message }),
       Failed: ({ failure }): AttemptEnd => ({ _tag: "Failed", failure, salvage }),
       Canceled: (): AttemptEnd => ({ _tag: "Canceled", salvage }),

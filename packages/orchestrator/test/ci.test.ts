@@ -9,6 +9,9 @@ import { PullRequestTrigger } from "@usine/config/trigger";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
+import { runView } from "../src/operator/projection.ts";
+import { runNeedsAttention } from "../src/board/items.ts";
+import { RunSummary } from "@usine/engine/run-reader";
 import { CiPolicy } from "@usine/core/ci";
 import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { DedupKey } from "@usine/core/event";
@@ -19,7 +22,7 @@ import { StepName } from "@usine/core/step";
 import { PullRequest, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
-import { RunEngine } from "@usine/engine/engine";
+import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -32,7 +35,17 @@ import {
   PullRequestPayload,
   PullRequestSnapshot,
 } from "@usine/github/polling";
-import { DateTime, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema } from "effect";
+import {
+  DateTime,
+  Deferred,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Schema,
+} from "effect";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
@@ -98,7 +111,13 @@ const payload = Schema.decodeUnknownSync(PullRequestPayload)({
   reviewThreads: { totalCount: 0, nodes: [] },
 });
 
-const scenario = Effect.fn("test.ciScenario")(function* (timeoutSeconds: number) {
+const scenario = Effect.fn("test.ciScenario")(function* (
+  timeoutSeconds: number,
+  configured = instance,
+  fixCompletion: Effect.Effect<StepResult> = Effect.succeed(
+    new StepResult({ message: "Fixed", facts: [] }),
+  ),
+) {
   const fs = yield* FileSystem.FileSystem;
   const directory = InstanceDirectory.make(
     yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory(), prefix: "usine-ci-" }),
@@ -123,9 +142,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (timeoutSeconds: number)
     reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
     execute: (execution) =>
       Ref.updateAndGet(tasks, (all) => [...all, execution.task]).pipe(
-        Effect.map((all) =>
-          all.length === 1 ? result : new StepResult({ message: "Fixed", facts: [] }),
-        ),
+        Effect.flatMap((all) => (all.length === 1 ? Effect.succeed(result) : fixCompletion)),
       ),
   });
   const checks = Layer.succeed(GitHubChecks)({
@@ -155,7 +172,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (timeoutSeconds: number)
       triggerConditionLayer.pipe(
         Layer.provide(polling),
         Layer.provide(MarcbachmannCelLayer),
-        Layer.provide(fixedInstanceLayer(instance)),
+        Layer.provide(fixedInstanceLayer(configured)),
       ),
     ),
   );
@@ -249,7 +266,14 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
         assert.include(tasks[1] ?? "", "ci");
         assert.include(tasks[1] ?? "", "TypeError: failing CI log");
         assert.strictEqual(tasks.length, 2);
-        assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Failed");
+        const settled = yield* engine.inspect(runId);
+        assert(settled.run.state._tag === "HandedOff");
+        assert.strictEqual(settled.run.state.head, head);
+        assert.strictEqual(settled.run.state.fixLoop, loop.name);
+        const fix = yield* engine.inspect(settled.run.state.fixRunId);
+        assert.strictEqual(fix.run.loop, loop.name);
+        const projected = runView(new RunSummary(settled), new Set(), new Map());
+        assert.strictEqual(runNeedsAttention(projected, false), false);
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
         yield* engine.drain();
         const another = yield* triggerSubmission(yield* ExpressionEngine, {
@@ -315,16 +339,84 @@ it.live("a silent check times out as a failed run for Needs attention", () =>
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live(
-  "CI fixes queued behind their own loop recheck the failed head instead of its label trigger",
-  () =>
+it.live("CI fixes from their own loop are admitted before the source hands off", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const sourceId = yield* openWait(setup.timeoutSeconds, true);
+        yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "failure" }));
+        yield* (yield* CiMonitor).reconcile(instance, Option.none());
+        yield* Ref.get(setup.tasks).pipe(
+          Effect.repeat({
+            until: (all) => all.length === 2,
+            schedule: Schedule.spaced("10 millis"),
+          }),
+          Effect.timeout("5 seconds"),
+        );
+        yield* (yield* RunEngine).drain();
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+        const source = yield* (yield* RunEngine).inspect(sourceId);
+        assert.strictEqual(source.run.state._tag, "HandedOff");
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("an exhausted fix-loop budget leaves a failed source run needing attention", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const limited = new LoadedInstance({
+        ...instance,
+        loops: [new LoopFile({ ...loop, maxCycles: CycleLimit.make(1) })],
+      });
+      const setup = yield* scenario(3600, limited);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds, true);
+        yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "failure" }));
+        yield* (yield* CiMonitor).reconcile(limited, Option.none());
+        const source = yield* (yield* RunEngine).inspect(runId);
+        assert.strictEqual(source.run.state._tag, "Failed");
+        const projected = runView(new RunSummary(source), new Set(), new Map());
+        assert.strictEqual(runNeedsAttention(projected, false), true);
+        assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each(["admitted", "timed out"] as const)(
+  "a queued CI fix waits for admission until %s",
+  (outcome) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const setup = yield* scenario(3600);
+        const completion = yield* Deferred.make<StepResult>();
+        const setup = yield* scenario(
+          outcome === "admitted" ? 3600 : 1,
+          instance,
+          Deferred.await(completion),
+        );
         yield* Effect.gen(function* () {
-          yield* openWait(setup.timeoutSeconds, true);
-          yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "failure" }));
-          yield* (yield* CiMonitor).reconcile(instance, Option.none());
+          const engine = yield* RunEngine;
+          const sourceId = yield* openWait(setup.timeoutSeconds);
+          const existing = yield* triggerSubmission(yield* ExpressionEngine, {
+            loop,
+            agent: agent.agent,
+            parentModel: Option.none(),
+            dedupKey: DedupKey.make("existing-fix"),
+            cycleGeneration: CycleGeneration.make(0),
+            itemKey: gitHubItemKey(repository, 815),
+            payload,
+            receivedAt: yield* DateTime.now,
+            repository: instance.config.repos[0] ?? assert.fail("missing repo"),
+            revision: RepositoryRevision.make(head),
+            task: AttemptTask.make("Fix current findings"),
+          });
+          const active = yield* engine.submit(
+            new Submission({ ...existing, ciFailureHead: Option.some(head) }),
+          );
+          assert(active._tag === "Claimed");
           yield* Ref.get(setup.tasks).pipe(
             Effect.repeat({
               until: (all) => all.length === 2,
@@ -332,8 +424,30 @@ it.live(
             }),
             Effect.timeout("5 seconds"),
           );
-          yield* (yield* RunEngine).drain();
-          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+          yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "failure" }));
+          const monitor = yield* CiMonitor;
+          yield* monitor.reconcile(instance, Option.none());
+          assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "AwaitingCi");
+          if (outcome === "timed out") {
+            yield* Effect.sleep("1100 millis");
+            yield* monitor.reconcile(instance, Option.none());
+            assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "Failed");
+          }
+          yield* Deferred.succeed(completion, new StepResult({ message: "Fixed", facts: [] }));
+          yield* engine.drain();
+          yield* monitor.reconcile(instance, Option.none());
+          const source = yield* engine.inspect(sourceId);
+          if (outcome === "admitted") {
+            assert(source.run.state._tag === "HandedOff");
+            assert.notStrictEqual(source.run.state.fixRunId, active.runId);
+            assert.strictEqual(
+              (yield* engine.inspect(source.run.state.fixRunId)).run.loop,
+              loop.name,
+            );
+          } else {
+            assert.strictEqual(source.run.state._tag, "Failed");
+          }
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 3);
         }).pipe(Effect.provide(setup.runtime));
       }),
     ).pipe(Effect.provide(NodeServices.layer)),

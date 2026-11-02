@@ -20,6 +20,7 @@ import {
   AgentFailureView,
   AttemptView,
   AwaitingCiAttemptView,
+  HandedOffAttemptView,
   BlockedFailureView,
   CanceledAttemptView,
   ChildSessionBudgetFailureView,
@@ -71,6 +72,7 @@ const attemptOutcomeView = (outcome: AttemptOutcome) =>
   Match.valueTags(outcome, {
     Succeeded: () => new SucceededAttemptView(),
     AwaitingCi: () => new AwaitingCiAttemptView(),
+    HandedOff: () => new HandedOffAttemptView(),
     Failed: ({ failure }) => new FailedAttemptView({ failure: failureView(failure) }),
     Canceled: () => new CanceledAttemptView(),
   });
@@ -236,6 +238,7 @@ export const runView = (
     agent: snapshot.agent.name,
     agentBrain: snapshot.agent.brain,
     state: snapshot.run.state._tag,
+    handoff: snapshot.run.state._tag === "HandedOff" ? snapshot.run.state : null,
     ciWait: snapshot.run.state._tag === "AwaitingCi" ? snapshot.run.state.handoff : null,
     upgradeWait:
       actions.canCancel && upgrade?.runIds.includes(snapshot.run.id) ? upgrade.wait : null,

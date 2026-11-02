@@ -1,4 +1,5 @@
-import { waitingForCi } from "~/lib/runs/strings";
+import { CiHandoffLine } from "~/components/runs/ci";
+import { handedOff, waitingForCi } from "~/lib/runs/strings";
 import type { StalledItemView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import { ItemMark } from "~/components/item/mark";
@@ -53,7 +54,11 @@ const statusLine = (
     Idle: ({ stall }) => stallLine(stall),
     NeedsAttention: () => ({ state: "needs-you", words: "Needs attention", at }),
     Done: () => ({ state: "Done", words: "Done", at }),
-    Ended: ({ run }) => ({ state: run.state, words: run.state, at }),
+    Ended: ({ run }) => ({
+      state: run.state,
+      words: run.state === "HandedOff" ? handedOff : run.state,
+      at,
+    }),
   });
 };
 
@@ -62,6 +67,13 @@ type StatusProps = { readonly row: TaskRow; readonly now: number };
 /** Renders the status, for example `Done · 28m ago`; if the text wraps, the mark stays on the first line. */
 export const Status = ({ row, now }: StatusProps) => {
   const { state, words, at } = statusLine(row, now);
+  const displayed = "run" in row.status ? row.status.run : row.last;
+  const source = [...row.task.runs]
+    .reverse()
+    .find(
+      ({ id, handoff }) =>
+        handoff !== null && (handoff.fixRunId === displayed.id || id === displayed.id),
+    );
   // A word wider than `--side`, such as the Loop `dependency_updates`, breaks inside the column:
   // `min-w-0` lets the text shrink below that word, and `wrap-break-word` breaks it only then. On a
   // phone, where the column is as wide as its longest word, text still wraps between words.
@@ -84,6 +96,11 @@ export const Status = ({ row, now }: StatusProps) => {
               </time>
             </span>
           </>
+        )}
+        {source !== undefined && (
+          <span className="block font-normal">
+            <CiHandoffLine run={source} />
+          </span>
         )}
       </span>
     </span>

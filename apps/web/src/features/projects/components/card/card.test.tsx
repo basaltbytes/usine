@@ -1,3 +1,5 @@
+import { HandedOff } from "@usine/core/run/state";
+import { CardFace } from "./face";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { CiHandoff } from "@usine/core/ci";
@@ -755,4 +757,59 @@ it("links the waiting board run to its pushed pull request checks", () => {
   assert.include(markup, "Waiting for CI");
   assert.include(markup, "https://github.com/basaltbytes/usine/pull/815/checks");
   assert.strictEqual(runLineSince(run), run.attempts[0]?.endedAt);
+});
+
+it("shows the continuing fix status and its link on a neutral handed-off board card", () => {
+  const fix = new RunView({
+    ...runOnItem("Succeeded", []),
+    id: RunId.make("fix-run-828"),
+    loop: LoopName.make("fix"),
+    state: "Running",
+    closedAt: null,
+    canCancel: true,
+  });
+  const source = new RunView({
+    ...runOnItem("Succeeded", []),
+    state: "HandedOff",
+    handoff: new HandedOff({
+      reason: "CI failed: ci.",
+      head: CommitSha.make("a".repeat(40)),
+      fixLoop: fix.loop,
+      fixRunId: fix.id,
+    }),
+  });
+  const item = new BoardTaskView({
+    ...itemWithRun("Succeeded", []),
+    run: fix,
+    runs: [source, fix],
+  });
+  const lane = new ReadOnlyBoardLaneView({
+    id: BoardLaneId.make("fallback:unmapped"),
+    name: LaneName.make("Unmapped"),
+    origin: "fallback",
+    sources: [],
+    items: [item],
+  });
+  const markup = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <WithRouter>
+        <CardFace
+          item={item}
+          lane={lane}
+          catalog={new Map()}
+          stall={null}
+          readOnly
+          action={null}
+          again={null}
+          progress={null}
+        />
+      </WithRouter>
+    </QueryClientProvider>,
+  );
+  assert.strictEqual(currentRun(item)?.id, fix.id);
+  assert.include(markup, "Running");
+  assert.include(markup, `run=${fix.id}`);
+  assert.include(markup, "continues the work");
+  assert.notInclude(markup, "text-run-failed");
+  assert.notInclude(markup, "Needs attention");
 });

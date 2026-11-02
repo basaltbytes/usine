@@ -227,6 +227,7 @@ const makeRunStore = Effect.gen(function* () {
         ? Option.none()
         : Option.some((yield* tx.snapshot(blockedBy.runId)).run),
       recorded.event.id,
+      recorded.ciFailureHead,
     );
     yield* Effect.logInfo("Event claim decided", {
       eventId: recorded.event.id,

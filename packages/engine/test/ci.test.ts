@@ -1,5 +1,8 @@
 import { assert, it } from "@effect/vitest";
-import { CiFailed, CiPassed, CiPolicy, CiSuperseded } from "@usine/core/ci";
+import { CiFailed, CiHandedOff, CiPassed, CiPolicy, CiSuperseded } from "@usine/core/ci";
+import { CycleLimit } from "@usine/core/cycle-budget";
+import * as RunState from "@usine/core/run/state";
+import { CycleBudgets } from "../src/cycle-budget/cycle-budget.ts";
 import { CommitSha } from "@usine/core/repository";
 import { LoopName } from "@usine/core/loop";
 import { PullRequest, StepResult } from "@usine/core/step/result";
@@ -157,4 +160,82 @@ it.live("operator cancellation settles the ended CI attempt and rejects late com
       }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
     }),
   ),
+);
+
+it.live.each([1, 2])(
+  "a same-loop CI fix settles the source neutrally only when admitted with a cycle limit of %s",
+  (limit) =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const worker = yield* slottedExecutor([
+          Effect.succeed(pushed),
+          Effect.succeed(stepResult("Fixed")),
+        ]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const source = new Submission({
+            ...required(),
+            loop: policy.fixLoop,
+            cycleLimit: Option.some(CycleLimit.make(limit)),
+          });
+          const accepted = yield* engine.submit(source);
+          assert(accepted._tag === "Claimed");
+          const waiting = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "AwaitingCi",
+          );
+          const fix = yield* engine.submit(
+            new Submission({
+              ...submission({ number: 2 }),
+              loop: policy.fixLoop,
+              cycleLimit: source.cycleLimit,
+              ciFailureHead: Option.some(head),
+            }),
+          );
+          assert.strictEqual(fix._tag, limit === 1 ? "CycleBlocked" : "Claimed");
+          const reason = "CI failed: ci.";
+          yield* engine.settleCi(
+            accepted.runId,
+            head,
+            fix._tag === "Claimed"
+              ? new CiHandedOff({ reason, fixRunId: fix.runId })
+              : new CiFailed({ message: reason }),
+          );
+          const settled = yield* engine.inspect(accepted.runId);
+          assert.deepStrictEqual(settled.attempts[0]?.endedAt, waiting.attempts[0]?.endedAt);
+          assert(Option.isSome(settled.closedAt));
+          if (fix._tag === "Claimed") {
+            assert.deepStrictEqual(
+              settled.run.state,
+              new RunState.HandedOff({
+                reason,
+                fixRunId: fix.runId,
+                head,
+                fixLoop: policy.fixLoop,
+              }),
+            );
+            assert.strictEqual(
+              RunState.operatorActions(settled.run.state).canResolveFailure,
+              false,
+            );
+            assert.strictEqual(
+              Option.getOrNull(settled.attempts[0]?.outcome ?? Option.none())?._tag,
+              "HandedOff",
+            );
+            yield* engine.settleCi(
+              accepted.runId,
+              head,
+              new CiFailed({ message: "late observation" }),
+            );
+            assert.strictEqual((yield* engine.inspect(accepted.runId)).run.state._tag, "HandedOff");
+            yield* waitFor(engine, fix.runId, ({ run }) => run.state._tag === "Succeeded");
+          } else {
+            assert.strictEqual(settled.run.state._tag, "Failed");
+            assert.strictEqual(RunState.operatorActions(settled.run.state).canResolveFailure, true);
+            assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
+          }
+        }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
+      }),
+    ),
 );

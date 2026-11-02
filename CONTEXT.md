@@ -94,7 +94,7 @@ The sequence for one event: open a run, try its step as one or more attempts, an
 _Avoid_: run model, workflow, state machine
 
 **Run**:
-The work for one event of a loop. Only one run per dedup key can be open. Open states are `pending`, `waiting`, `queued`, `running`, and `awaiting CI`; closed states are `succeeded`, `failed`, and `canceled`.
+The work for one event of a loop. Only one run per dedup key can be open. Open states are `pending`, `waiting`, `queued`, `running`, and `awaiting CI`; closed states are `succeeded`, `handed off`, `failed`, and `canceled`.
 _Avoid_: execution, job, workflow run
 
 **CI wait**:

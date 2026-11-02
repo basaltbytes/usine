@@ -1,5 +1,10 @@
 import { AgentFailure } from "@usine/core/attempt/failure";
-import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
+import {
+  AttemptCanceled,
+  AttemptFailed,
+  AttemptHandedOff,
+  AttemptSucceeded,
+} from "@usine/core/attempt/outcome";
 import type { CiResolution } from "@usine/core/ci";
 import type { CommitSha } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
@@ -46,20 +51,34 @@ export const ciQueries = (database: RunDatabase["Service"]) => ({
           );
           return false;
         }
+        const { handoff } = current.run.state;
         const state = Match.valueTags(resolution, {
           CiPassed: () => new RunState.Succeeded(),
           CiFailed: () => new RunState.Failed(),
+          CiHandedOff: ({ reason, fixRunId }) =>
+            new RunState.HandedOff({
+              reason,
+              fixRunId,
+              head,
+              fixLoop: handoff.fixLoop,
+            }),
           CiSuperseded: ({ head }) =>
             new RunState.Canceled({ reason: new RunState.HeadChanged({ head }) }),
         });
         const outcome = Match.valueTags(resolution, {
           CiPassed: () => new AttemptSucceeded(),
+          CiHandedOff: () => new AttemptHandedOff(),
           CiFailed: ({ message }) => new AttemptFailed({ failure: new AgentFailure({ message }) }),
           CiSuperseded: () => new AttemptCanceled(),
         });
         yield* queries.settleCiAttempt(runId, outcome);
         yield* queries.updateState(runId, state, yield* DateTime.now);
-        yield* Effect.logInfo("CI wait settled", { runId, head, resolution: resolution._tag });
+        yield* Effect.logInfo("CI wait settled", {
+          runId,
+          head,
+          resolution: resolution._tag,
+          state,
+        });
         return true;
       }),
     );

@@ -35916,6 +35916,7 @@
               "Running",
               "AwaitingCi",
               "Succeeded",
+              "HandedOff",
               "Failed",
               "Canceled"
             ]
@@ -35985,6 +35986,48 @@
                   "fixLoop",
                   "timeoutSeconds",
                   "onGreen"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "handoff": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "HandedOff"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "head": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
+                  "fixLoop": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fixRunId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "reason",
+                  "head",
+                  "fixLoop",
+                  "fixRunId"
                 ],
                 "additionalProperties": false
               },
@@ -36378,6 +36421,9 @@
               },
               {
                 "$ref": "#/components/schemas/_usine_orchestrator_AwaitingCiAttemptViewEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_HandedOffAttemptViewEncoded"
               },
               {
                 "$ref": "#/components/schemas/_usine_orchestrator_FailedAttemptViewEncoded"
@@ -37032,6 +37078,21 @@
         "required": [
           "_tag",
           "message"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_HandedOffAttemptViewEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "HandedOff"
+            ]
+          }
+        },
+        "required": [
+          "_tag"
         ],
         "additionalProperties": false
       },
