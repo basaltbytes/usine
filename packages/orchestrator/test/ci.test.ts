@@ -123,6 +123,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory(), prefix: "usine-ci-" }),
   );
   const observed = yield* Ref.make(new CheckSnapshot({ head, state: "pending" }));
+  const mergeable = yield* Ref.make<PullRequestPayload["mergeable"]>("CONFLICTING");
   const tasks = yield* Ref.make<ReadonlyArray<string>>([]);
   const mutations = yield* Ref.make<
     ReadonlyArray<{ readonly item: number; readonly mutation: ItemLabelMutation }>
@@ -150,8 +151,14 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const checks = Layer.succeed(GitHubChecks)({
     snapshot: () => Ref.get(observed),
     failures: () =>
-      Effect.succeed(
-        new CheckFailureEvidence({ jobs: ["ci"], excerpt: "TypeError: failing CI log" }),
+      Ref.get(observed).pipe(
+        Effect.flatMap(({ state }) =>
+          state === "conflict"
+            ? Effect.die("A merge conflict has no failed check logs")
+            : Effect.succeed(
+                new CheckFailureEvidence({ jobs: ["ci"], excerpt: "TypeError: failing CI log" }),
+              ),
+        ),
       ),
   });
   const writer = Layer.succeed(GitHubItemWriter)({
@@ -164,15 +171,18 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     missingIssues: () => Effect.succeed([]),
     labels: () => Effect.die("unused labels"),
     snapshot: () =>
-      Ref.get(observed).pipe(
-        Effect.map(
-          ({ head }) =>
-            new PullRequestSnapshot({
-              payload: PullRequestPayload.make({ ...payload, headRefOid: head }),
-              contentHash: ContentHash.make("b".repeat(64)),
-            }),
-        ),
-      ),
+      Effect.gen(function* () {
+        const { head, state } = yield* Ref.get(observed);
+        return new PullRequestSnapshot({
+          payload: PullRequestPayload.make({
+            ...payload,
+            headRefOid: head,
+            mergeable: state === "conflict" ? yield* Ref.get(mergeable) : "UNKNOWN",
+            statusCheckRollup: state === "conflict" ? null : payload.statusCheckRollup,
+          }),
+          contentHash: ContentHash.make("b".repeat(64)),
+        });
+      }),
   });
   const engine = engineLayer(directory).pipe(
     Layer.provide(executor),
@@ -194,7 +204,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     MarcbachmannCelLayer,
   );
   const runtime = CiMonitor.layer.pipe(Layer.provideMerge(dependencies));
-  return { observed, tasks, mutations, runtime, timeoutSeconds };
+  return { observed, mergeable, tasks, mutations, runtime, timeoutSeconds };
 });
 
 const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number, sameLoop = false) {
@@ -246,6 +256,37 @@ it.live("green CI observed after the deadline applies the recorded labels once",
         assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Succeeded");
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a conflicting head without checks starts one fix before the CI deadline", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const monitor = yield* CiMonitor;
+        const sourceId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "conflict" }));
+        yield* monitor.reconcile(instance, Option.none());
+        yield* monitor.reconcile(instance, Option.none());
+        const source = yield* engine.inspect(sourceId);
+        assert(source.run.state._tag === "HandedOff");
+        assert.include(source.run.state.reason, "conflicts with its base branch");
+        const fix = yield* engine.inspect(source.run.state.fixRunId);
+        assert.strictEqual(fix.run.loop, loop.name);
+        assert.include(fix.task, "CONFLICTING and no checks exist");
+        assert.include(fix.task, "Merge the base branch");
+        assert.include(fix.task, head);
+        yield* engine.drain();
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+        assert.strictEqual(
+          runNeedsAttention(runView(new RunSummary(source), new Set(), new Map()), false),
+          false,
+        );
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
@@ -304,9 +345,9 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live(
-  "issue and PR completion actions survive successive CI fixes until the final head passes",
-  () =>
+it.live.each(["failure", "conflict"] as const)(
+  "issue and PR completion actions survive an initial %s and successive CI fixes",
+  (initialState) =>
     Effect.scoped(
       Effect.gen(function* () {
         const heads = [CommitSha.make("b".repeat(40)), CommitSha.make("c".repeat(40))];
@@ -338,7 +379,10 @@ it.live(
           for (const fixedHead of heads) {
             yield* Ref.set(
               setup.observed,
-              new CheckSnapshot({ head: failedHead, state: "failure" }),
+              new CheckSnapshot({
+                head: failedHead,
+                state: failedHead === head ? initialState : "failure",
+              }),
             );
             yield* monitor.reconcile(instance, Option.none());
             const source = yield* engine.inspect(sourceId);
@@ -468,84 +512,94 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live.each(["admitted", "admitted and pushed", "timed out"] as const)(
-  "a queued CI fix waits for admission until %s",
-  (outcome) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const completion = yield* Deferred.make<StepResult>();
-        const setup = yield* scenario(
-          outcome === "timed out" ? 1 : 3600,
-          instance,
-          Deferred.await(completion),
+it.live.each([
+  { state: "failure", outcome: "admitted" },
+  { state: "failure", outcome: "admitted and pushed" },
+  { state: "failure", outcome: "timed out" },
+  { state: "conflict", outcome: "admitted" },
+  { state: "conflict", outcome: "admitted through unknown mergeability" },
+  { state: "conflict", outcome: "admitted and pushed" },
+  { state: "conflict", outcome: "timed out" },
+] as const)("a queued CI fix for $state waits for admission until $outcome", ({ state, outcome }) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const completion = yield* Deferred.make<StepResult>();
+      const setup = yield* scenario(
+        outcome === "timed out" ? 1 : 3600,
+        instance,
+        Deferred.await(completion),
+      );
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const sourceId = yield* openWait(setup.timeoutSeconds);
+        const existing = yield* triggerSubmission(yield* ExpressionEngine, {
+          loop,
+          agent: agent.agent,
+          parentModel: Option.none(),
+          dedupKey: DedupKey.make("existing-fix"),
+          cycleGeneration: CycleGeneration.make(0),
+          itemKey: gitHubItemKey(repository, 815),
+          payload,
+          receivedAt: yield* DateTime.now,
+          repository: instance.config.repos[0] ?? assert.fail("missing repo"),
+          revision: RepositoryRevision.make(head),
+          task: AttemptTask.make("Fix current findings"),
+        });
+        const active = yield* engine.submit(
+          new Submission({ ...existing, ciFailureHead: Option.some(head) }),
         );
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const sourceId = yield* openWait(setup.timeoutSeconds);
-          const existing = yield* triggerSubmission(yield* ExpressionEngine, {
-            loop,
-            agent: agent.agent,
-            parentModel: Option.none(),
-            dedupKey: DedupKey.make("existing-fix"),
-            cycleGeneration: CycleGeneration.make(0),
-            itemKey: gitHubItemKey(repository, 815),
-            payload,
-            receivedAt: yield* DateTime.now,
-            repository: instance.config.repos[0] ?? assert.fail("missing repo"),
-            revision: RepositoryRevision.make(head),
-            task: AttemptTask.make("Fix current findings"),
-          });
-          const active = yield* engine.submit(
-            new Submission({ ...existing, ciFailureHead: Option.some(head) }),
-          );
-          assert(active._tag === "Claimed");
-          yield* Ref.get(setup.tasks).pipe(
-            Effect.repeat({
-              until: (all) => all.length === 2,
-              schedule: Schedule.spaced("10 millis"),
-            }),
-            Effect.timeout("5 seconds"),
-          );
-          yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "failure" }));
-          const monitor = yield* CiMonitor;
+        assert(active._tag === "Claimed");
+        yield* Ref.get(setup.tasks).pipe(
+          Effect.repeat({
+            until: (all) => all.length === 2,
+            schedule: Schedule.spaced("10 millis"),
+          }),
+          Effect.timeout("5 seconds"),
+        );
+        yield* Ref.set(setup.observed, new CheckSnapshot({ head, state }));
+        const monitor = yield* CiMonitor;
+        yield* monitor.reconcile(instance, Option.none());
+        assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "AwaitingCi");
+        if (outcome === "timed out") {
+          yield* Effect.sleep("1100 millis");
           yield* monitor.reconcile(instance, Option.none());
-          assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "AwaitingCi");
-          if (outcome === "timed out") {
-            yield* Effect.sleep("1100 millis");
-            yield* monitor.reconcile(instance, Option.none());
-            assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "Failed");
-          }
-          yield* Deferred.succeed(completion, new StepResult({ message: "Fixed", facts: [] }));
-          yield* engine.drain();
-          if (outcome === "admitted and pushed") {
-            yield* Ref.set(
-              setup.observed,
-              new CheckSnapshot({ head: CommitSha.make("c".repeat(40)), state: "success" }),
-            );
-          }
-          yield* monitor.reconcile(instance, Option.none());
-          const source = yield* engine.inspect(sourceId);
-          if (outcome !== "timed out") {
-            assert(source.run.state._tag === "HandedOff");
-            assert.strictEqual(source.run.state.head, head);
-            assert.strictEqual(
-              source.attempts.at(-1)?.outcome.pipe(
-                Option.map(({ _tag }) => _tag),
-                Option.getOrNull,
-              ),
-              "HandedOff",
-            );
-            assert.notStrictEqual(source.run.state.fixRunId, active.runId);
-            assert.strictEqual(
-              (yield* engine.inspect(source.run.state.fixRunId)).run.loop,
-              loop.name,
-            );
-          } else {
-            assert.strictEqual(source.run.state._tag, "Failed");
-          }
-          assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
-          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 3);
-        }).pipe(Effect.provide(setup.runtime));
-      }),
-    ).pipe(Effect.provide(NodeServices.layer)),
+          assert.strictEqual((yield* engine.inspect(sourceId)).run.state._tag, "Failed");
+        }
+        if (outcome === "admitted through unknown mergeability") {
+          yield* Ref.set(setup.mergeable, "UNKNOWN");
+        }
+        yield* Deferred.succeed(completion, new StepResult({ message: "Fixed", facts: [] }));
+        yield* engine.drain();
+        yield* Ref.set(setup.mergeable, "CONFLICTING");
+        if (outcome === "admitted and pushed") {
+          yield* Ref.set(
+            setup.observed,
+            new CheckSnapshot({ head: CommitSha.make("c".repeat(40)), state: "success" }),
+          );
+        }
+        yield* monitor.reconcile(instance, Option.none());
+        const source = yield* engine.inspect(sourceId);
+        if (outcome !== "timed out") {
+          assert(source.run.state._tag === "HandedOff");
+          assert.strictEqual(source.run.state.head, head);
+          assert.strictEqual(
+            source.attempts.at(-1)?.outcome.pipe(
+              Option.map(({ _tag }) => _tag),
+              Option.getOrNull,
+            ),
+            "HandedOff",
+          );
+          assert.notStrictEqual(source.run.state.fixRunId, active.runId);
+          assert.strictEqual(
+            (yield* engine.inspect(source.run.state.fixRunId)).run.loop,
+            loop.name,
+          );
+        } else {
+          assert.strictEqual(source.run.state._tag, "Failed");
+        }
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 3);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
 );

@@ -44,8 +44,10 @@ A finding starts the fix loop. After its push, the agent session ends and frees 
 
 ## CI outcomes
 
-The handoff must match the harvested pull request and pushed head. The stored policy determines the timeout and fix loop. A plain success from a loop with a CI policy also waits, with no additional label actions. A newer push cancels the old wait. Missing checks remain pending until the deadline; a timeout appears in **Needs attention**. Restarts resume stored CI waits without an agent.
+The handoff must match the harvested pull request and pushed head. The stored policy determines the timeout and fix loop. A plain success from a loop with a CI policy also waits, with no additional label actions. A newer push cancels the old wait. Restarts resume stored CI waits without an agent.
 
-The fix loop must be active, use the pull request stream, and select the repository. Its approval and cycle budget still apply. Accepted CI fixes close their source run as **Handed off** and link to the fix run. An exhausted cycle budget requires an operator reset. Loops without a CI policy require their agents to wait for checks before applying completion labels.
+Missing checks remain pending until the deadline; a timeout appears in **Needs attention**. When the recorded head has no checks and GitHub reports `CONFLICTING`, usine starts the configured fix loop with instructions to merge the base branch, resolve conflicts, run local checks, and push. The fix inherits pending completion actions. Mergeability `UNKNOWN` continues waiting.
+
+The fix loop must be active, use the pull request stream, and select the repository. Its approval and cycle budget still apply. A queued CI fix remains eligible while the pull request is open at the recorded head and has failed checks or a merge conflict with no checks. If GitHub temporarily reports mergeability as `UNKNOWN` with no checks during admission, the queued fix remains eligible. Accepted CI fixes close their source run as **Handed off** and link to the fix run. An exhausted cycle budget requires an operator reset. Loops without a CI policy require their agents to wait for checks before applying completion labels.
 
 GitHub does not run pull request workflows on conflicting branches. Writer tasks must resolve the conflict and push a checked tree. A clean agent review leaves any required independent approval and merge to you.

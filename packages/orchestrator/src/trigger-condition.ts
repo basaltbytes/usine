@@ -72,16 +72,27 @@ export const triggerConditionLayer: Layer.Layer<
           : new ChangedIssue({ number, updatedAt: submission.event.receivedAt });
       const snapshot = yield* github.snapshot(repository.name, changed);
       if (Option.isSome(submission.ciFailureHead)) {
+        if (!(snapshot instanceof PullRequestSnapshot)) {
+          yield* Effect.logInfo("Queued CI fix no longer belongs to a pull request", {
+            ...fields,
+            head: submission.ciFailureHead.value,
+          });
+          return "no-longer-matches";
+        }
         const holds =
-          snapshot instanceof PullRequestSnapshot &&
           snapshot.payload.state === "OPEN" &&
           snapshot.payload.headRefOid === submission.ciFailureHead.value &&
           (snapshot.payload.statusCheckRollup?.state === "FAILURE" ||
-            snapshot.payload.statusCheckRollup?.state === "ERROR");
-        yield* Effect.logInfo("Queued CI fix rechecked against its failed head", {
+            snapshot.payload.statusCheckRollup?.state === "ERROR" ||
+            (snapshot.payload.statusCheckRollup === null &&
+              (snapshot.payload.mergeable === "CONFLICTING" ||
+                snapshot.payload.mergeable === "UNKNOWN")));
+        yield* Effect.logInfo("Queued CI fix rechecked against its recorded head", {
           ...fields,
           head: submission.ciFailureHead.value,
           holds,
+          mergeable: snapshot.payload.mergeable,
+          checkState: snapshot.payload.statusCheckRollup?.state ?? "absent",
         });
         return holds ? "matches" : "no-longer-matches";
       }
