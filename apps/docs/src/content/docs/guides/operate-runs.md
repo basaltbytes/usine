@@ -133,8 +133,8 @@ stateDiagram-v2
   Queued --> Running: a Worker slot is free
   Running --> Running: infrastructure failure, next Attempt
   Running --> Succeeded: the Attempt succeeds
-  Running --> Failed: the Attempt fails
-  Failed --> Running: Retry, or Edit and retry
+  Running --> Failed: the Attempt<br/>fails
+  Failed --> Running: Retry, or<br/>Edit and retry
   Failed --> Failed: Mark resolved
   Pending --> Canceled: Cancel run, superseded, or revoked
   Waiting --> Canceled: Cancel run, superseded, or revoked

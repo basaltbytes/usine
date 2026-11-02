@@ -30,7 +30,7 @@ flowchart TB
   end
 
   subgraph execution[Execution]
-    direction LR
+    direction TB
     item["Issue or<br/>pull request"] -->|matches trigger| run[Run]
     run -->|1+ tries| attempt[Attempt]
     attempt -->|runs| usedAgent["Loop's agent"]

@@ -7,7 +7,7 @@ pnpm --filter @usine/docs dev         # local server with reload
 pnpm --filter @usine/docs build       # test examples and build dist/
 pnpm --filter @usine/docs preview     # serve dist/
 pnpm --filter @usine/docs check       # check types and frontmatter
-pnpm --filter @usine/docs test        # validate the quickstart bootstrap
+pnpm --filter @usine/docs test        # validate diagrams and the quickstart bootstrap
 pnpm --filter @usine/docs run deploy  # upload dist/ to docs.usine.dev
 ```
 
@@ -21,7 +21,9 @@ Link to published pages by route, such as `/get-started/quickstart/`. The build 
 
 Contributor architecture notes are outside the site in [`docs/architecture/`](../../docs/architecture/index.mdx). Each page states the commit it describes. The [workers and gateway page](../../docs/architecture/workers-and-gateway.mdx) describes harness logins, caller tokens, and cleanup of attempt Codex homes.
 
-A fenced `mermaid` code block renders as a diagram in the browser and follows the light or dark theme.
+A fenced `mermaid` code block renders to SVG at build time with [Pele](https://pele.run/). The rehype plugin in `diagrams/rehype.mjs` runs for Markdown and MDX through Astro's unified processor. Invalid diagrams fail the build with the page path, fence position, and Pele error. Diagram colors use Starlight theme tokens through `--pele-*` variables in `src/styles/diagrams.css`, so switching themes updates the SVG through CSS.
+
+Diagrams retain their measured label sizes. Wide diagrams scroll inside a keyboard-focusable frame, including on mobile. Prefer vertical layouts when a horizontal diagram would require extensive scrolling. `test/diagrams.test.ts` renders every diagram page in `src/content/docs/` through the same plugin during the docs build; it also checks parse failures and distinct SVG reference IDs for pages with multiple diagrams.
 
 ## Quickstart bootstrap
 
