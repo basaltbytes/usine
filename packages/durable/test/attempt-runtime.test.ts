@@ -16,7 +16,7 @@ import { CommitSha } from "@usine/core/repository";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import { Commit, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { ChildBackend } from "@usine/agents/runtime";
+import { ChildBackend, SessionOperationError } from "@usine/agents/runtime";
 import {
   Context,
   DateTime,
@@ -103,6 +103,30 @@ const receipts = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
       ],
     ];
   });
+
+const refusingSteerBackend = Layer.effectContext(
+  Effect.gen(function* () {
+    const services = yield* Effect.context<ChildBackend | StubChildren>();
+    const base = Context.get(services, ChildBackend);
+    return Context.add(services, ChildBackend, {
+      launch: (request) =>
+        base.launch(request).pipe(
+          Effect.map((child) => ({
+            ...child,
+            intervene: () =>
+              Effect.fail(
+                new SessionOperationError({
+                  operation: "steer",
+                  sessionId: Option.some(child.session.id),
+                  message: "The child has already stopped accepting input",
+                  cause: "closed input",
+                }),
+              ),
+          })),
+        ),
+    });
+  }),
+).pipe(Layer.provide(stubChildBackendLayer));
 
 describe("durable AttemptRuntime", () => {
   it.live("relays one whole Attempt and reports the parent's final answer", () =>
@@ -685,7 +709,7 @@ describe("durable AttemptRuntime", () => {
   }
 
   it.live(
-    "reports a steer to a delegating parent queued until the child returns, then delivered",
+    "forwards a parent steer to its working child before the child reads its next input",
     () =>
       Effect.gen(function* () {
         const database = yield* temporaryDatabase;
@@ -712,10 +736,14 @@ describe("durable AttemptRuntime", () => {
             }),
           );
           assert.deepStrictEqual(receipts(recording.outbound()), [["Steer", 1, "queued"]]);
+          assert.deepStrictEqual(yield* child.interventions, [
+            new AttemptChannel.Steer({ message: "Use pnpm, not npm." }),
+          ]);
+          yield* child.readQueued;
           yield* child.reply("Child done.");
           const report = yield* Fiber.join(execution);
           assert.strictEqual(report.message, "Used pnpm as asked.");
-          assert.include(seen.at(-1), "Use pnpm, not npm.");
+          assert.notInclude(seen.at(-1), "Use pnpm, not npm.");
           const inbound = recording.inbound();
           assert.deepStrictEqual(
             inbound.map(({ sequence, payload }) => [sequence, payload._tag]),
@@ -725,16 +753,224 @@ describe("durable AttemptRuntime", () => {
             ["Steer", 1, "queued"],
             ["Steer", 1, "delivered"],
           ]);
+          assert.deepStrictEqual(
+            recording
+              .outbound()
+              .flatMap(({ payload }) =>
+                payload._tag === "InterventionApplied" ? [payload.state.forwardedTo] : [],
+              ),
+            [Option.some(child.request.session.id), Option.some(child.request.session.id)],
+          );
           // The parent never stopped, so no `SessionResumed` is sent.
           assert.notInclude(trace(recording.outbound()), "parent.SessionResumed");
-          // The last turn only answered the steer, so it isn't the task's result.
-          assert.isTrue(report.answeredOperator);
+          assert.isFalse(report.answeredOperator);
           assertAdmitted(request.spec.attemptId, recording.outbound());
         }).pipe(
           Effect.provide(layer({ database, parent: [delegate("Fix the flaky test"), steered] })),
         );
       }).pipe(Effect.scoped),
   );
+
+  for (const delivery of ["refused", "unread"] as const) {
+    it.live(`requires another parent turn when its forwarded steer is ${delivery}`, () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const actOnSteer: ParentStep = (context) => {
+          assert.include(JSON.stringify(context.messages.at(-1)), "Fix the third finding.");
+          return delegate("Fix the third finding.");
+        };
+        const backend = delivery === "unread" ? stubChildBackendLayer : refusingSteerBackend;
+        const harness = durableHarnessLayer({
+          ...fauxParent([
+            delegate("Fix the first two findings."),
+            answer("The first two findings are fixed."),
+            actOnSteer,
+            answer("All three findings are fixed."),
+          ]),
+          openStorage: Effect.tryPromise({
+            try: () => openNodeSqliteStorage(database),
+            catch: (cause) => durableError("open the test database", cause),
+          }),
+        });
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const children = yield* StubChildren;
+          const request = attemptRequest(`steering/${delivery}/1`);
+          const recording = recordingSink();
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* children.next;
+          yield* runtime.intervene(
+            request.spec.attemptId,
+            new AttemptChannel.Intervention({
+              operator: "philippe",
+              target: new AttemptChannel.ParentTarget(),
+              action: new AttemptChannel.Steer({ message: "Fix the third finding." }),
+            }),
+          );
+          if (delivery === "unread")
+            yield* child.crash("The child stopped before reading the steer");
+          else yield* child.reply("The first two findings are fixed.");
+          const next = yield* children.next.pipe(Effect.timeout("5 seconds"));
+          assert.include(next.request.prompt, "Fix the third finding.");
+          assert.strictEqual(execution.pollUnsafe(), undefined);
+          yield* next.reply("The third finding is fixed.");
+          if (delivery === "unread") {
+            const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+            assert.strictEqual(failure._tag, "InfraFailure");
+            assert.strictEqual(failure.message, "The child stopped before reading the steer");
+          } else {
+            const report = yield* Fiber.join(execution);
+            assert.strictEqual(report.message, "All three findings are fixed.");
+            assert.isFalse(report.answeredOperator);
+          }
+          const expected =
+            delivery === "unread"
+              ? [
+                  ["Steer", 1, "queued"],
+                  ["Steer", 1, "queued"],
+                  ["Steer", 1, "delivered"],
+                ]
+              : [
+                  ["Steer", 1, "queued"],
+                  ["Steer", 1, "delivered"],
+                ];
+          assert.deepStrictEqual(receipts(recording.outbound()), expected);
+          assertAdmitted(request.spec.attemptId, recording.outbound());
+        }).pipe(
+          Effect.provide(
+            attemptRuntimeLayer.pipe(Layer.provideMerge(harness), Layer.provideMerge(backend)),
+          ),
+        );
+      }).pipe(Effect.scoped),
+    );
+  }
+
+  it.live("returns an unread forwarded steer to the parent after an orchestrator restart", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = attemptRequest("steering/restart/1");
+      const recording = recordingSink();
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const services = yield* Layer.build(
+            layer({ database, parent: [delegate("Fix the findings.")] }),
+          );
+          const runtime = Context.get(services, AttemptRuntime);
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          yield* Context.get(services, StubChildren).next;
+          yield* runtime.intervene(
+            request.spec.attemptId,
+            new AttemptChannel.Intervention({
+              operator: "philippe",
+              target: new AttemptChannel.ParentTarget(),
+              action: new AttemptChannel.Steer({ message: "Fix the third finding." }),
+            }),
+          );
+          yield* Fiber.interrupt(execution);
+        }),
+      );
+      const actOnSteer: ParentStep = (context) => {
+        assert.include(JSON.stringify(context.messages.at(-1)), "Fix the third finding.");
+        return delegate("Fix the third finding.");
+      };
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+        const child = yield* (yield* StubChildren).next.pipe(Effect.timeout("5 seconds"));
+        assert.include(child.request.prompt, "Fix the third finding.");
+        yield* child.reply("Third finding fixed.");
+        const report = yield* Fiber.join(execution);
+        assert.strictEqual(report.message, "Handled the steer after restart.");
+        assertAdmitted(request.spec.attemptId, recording.outbound());
+        assert.deepStrictEqual(receipts(recording.outbound()), [
+          ["Steer", 1, "queued"],
+          ["Steer", 1, "queued"],
+          ["Steer", 1, "delivered"],
+        ]);
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              answer("The earlier work is done."),
+              actOnSteer,
+              answer("Handled the steer after restart."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  for (const delivery of ["forwarded", "refused"] as const) {
+    it.live(`withdraws a ${delivery} steer when the operator interrupts its parent`, () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest(`steering/interrupt/${delivery}/1`);
+          const recording = recordingSink();
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* (yield* StubChildren).next;
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ParentTarget(),
+                action,
+              }),
+            );
+          yield* operator(new AttemptChannel.Steer({ message: "Fix the third finding." }));
+          yield* operator(new AttemptChannel.Interrupt());
+          yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
+          yield* Effect.sleep("300 millis");
+          assert.isUndefined(execution.pollUnsafe());
+          assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+          yield* Effect.gen(function* () {
+            while (
+              !receipts(recording.outbound()).some(
+                ([action, , kind]) => action === "Steer" && kind === "rejected",
+              )
+            )
+              yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          assert.strictEqual(execution.pollUnsafe(), undefined);
+          yield* operator(new AttemptChannel.Release());
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Continued after release.");
+          assertAdmitted(request.spec.attemptId, recording.outbound());
+          assert.deepStrictEqual(
+            receipts(recording.outbound()).filter(([action]) => action === "Steer"),
+            [
+              ["Steer", 1, "queued"],
+              ["Steer", 1, "rejected"],
+            ],
+          );
+        }).pipe(
+          Effect.provide(
+            attemptRuntimeLayer.pipe(
+              Layer.provideMerge(
+                durableHarnessLayer({
+                  ...fauxParent([
+                    delegate("Fix the findings."),
+                    answer("Continued after release."),
+                  ]),
+                  openStorage: Effect.tryPromise({
+                    try: () => openNodeSqliteStorage(database),
+                    catch: (cause) => durableError("open the test database", cause),
+                  }),
+                }),
+              ),
+              Layer.provideMerge(
+                delivery === "forwarded" ? stubChildBackendLayer : refusingSteerBackend,
+              ),
+            ),
+          ),
+        );
+      }).pipe(Effect.scoped),
+    );
+  }
 
   it.live(
     "completes `attached` once an execute call relays the Attempt's channel, which input sent before cannot reach",

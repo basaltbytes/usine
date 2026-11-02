@@ -94,6 +94,8 @@ If the orchestrator stops during an attempt, the parent task stays live in durab
 
 The reattached launch resumes its runaway guard (#178) from `Sink.transcript`: each session's highest token report, finished children included; the parent's hold, if still placed; and the warnings already sent, which aren't resent. The guard checks the restored total at start, so a total past a lowered ceiling trips at once. A warning that the restored totals owe waits until `execute` relays the parent's channel.
 
+A forwarded parent steer's receipt updates the receiving child's hold state. It preserves the parent's hold when counting unsupervised time.
+
 Unsupervised time comes from `AttemptRuntime.unsupervised`. A wall-clock guard records it every 30 seconds while it grows and once when it stops, within a five-second grace. Only a running guard counts: quiet time before a restart counts, downtime doesn't. Each unclean stop loses at most the last 30 seconds, so a crash lets an attempt run that much past its ceiling.
 
 A reattachment reads only what its armed ceilings use: the transcript for either, the unsupervised time for the clock. If one can't be read after the store's retries, the guard doesn't start over with a new allowance. The durable session cancels the parent task, the launch salvages the worktree through `Sink.salvage`, and the attempt fails with an `InfraFailure` naming what couldn't be read, so the next attempt starts from the salvage.

@@ -21,7 +21,12 @@ import {
 import { useNow } from "~/hooks/use-now";
 import { clockLabel, timestampLabel } from "~/lib/strings";
 import { machineCreationLine } from "~/lib/workers/strings";
-import { upgradeWaitLine, machineWaitLine, queuedMessageLabel } from "~/lib/runs/strings";
+import {
+  upgradeWaitLine,
+  machineWaitLine,
+  messageDeliveryLabel,
+  queuedMessageLabel,
+} from "~/lib/runs/strings";
 import { overviewQuery } from "~/lib/overview";
 import { RunHeader } from "~/components/runs/header";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
@@ -75,6 +80,11 @@ const LiveSummary = ({ detail }: LiveSummaryProps) => {
             </time>
           </p>
           <p className="line-clamp-6 text-md wrap-anywhere">{previewText(message.text)}</p>
+          {message.delivery !== null && (
+            <p className="text-xs text-muted-foreground">
+              {messageDeliveryLabel(message.delivery)}
+            </p>
+          )}
           {message.queued !== null && (
             <p className="text-xs text-muted-foreground">{queuedMessageLabel(message.queued)}</p>
           )}

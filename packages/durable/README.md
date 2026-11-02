@@ -24,7 +24,7 @@ Before opening the first harness, `/live` installs Pi's HTTP dispatcher once for
 
 The dispatcher applies to all server requests, including GitHub, gateway administration, and Boat. The adapter installs undici's fetch globals together with the dispatcher, preserving a fetch override made after importing `/live`. Reopening a harness reuses the dispatcher. Restart the server to apply proxy changes.
 
-The Pi packages are pinned together at 1.4.0. The attempt and hold documents use explicit checkpoint policies that keep ordinary updates as deltas, preserving their stored format and behavior from Pi 1.2.0.
+The Pi packages are pinned together at 1.4.0. The attempt and hold documents use explicit checkpoint policies that keep ordinary updates as deltas. Hold document version 2 gives each queued guidance message a stable request ID; version 1 guidance migrates with its order and supervision state preserved.
 
 ## Run an attempt
 
@@ -51,7 +51,8 @@ Children aren't resumed after a restart: the tool call ends as interrupted with 
 `intervene(attemptId, intervention)` needs a live `execute`. It records the inbound envelope, applies the action, and records the result, in order with the relay's envelopes, so a sink's `append` must not wait for it. Input sent before `execute` has read durable storage and started relaying fails. `attached(attemptId)` completes once an `execute` in this process relays the channel; the runaway guard waits on it to deliver a reattached attempt's due warning (#178).
 
 - `OperatorMessage` places a hold on the parent or a child; `Release` ends it. A held parent's answers wait for the operator instead of ending the attempt, and a released waiting parent continues with a new turn. A held child's report goes to the parent only after `Release`. `Steer` places no hold.
-- Input to a working parent joins after the current tool round; to a working child, at its next step. Until then, `InterventionApplied` says `queued` and `AttemptRecordDoc.queuedInputs` keeps it. A second receipt for the same input sequence reports the read, with a child's state, or `InterventionRejected` if it never happens, including for a child lost to a restart.
+- A `Steer` to the parent is forwarded unchanged to its single live child. Its `InterventionApplied.state.forwardedTo` records the child ID, and `queued` remains true until the child reads it. If no single child accepts it, or a child stops before reading it, the parent gets a separate turn to act on the steer. The attempt waits for a forwarded steer's delivery receipt before completing. An unread forwarded steer also returns to the parent after a restart; an explicit interruption withdraws it instead.
+- An `OperatorMessage` to a working parent joins after the current tool round; input to a working child joins at its next step. Until then, `InterventionApplied` says `queued` and `AttemptRecordDoc.queuedInputs` keeps it. A second receipt for the same input sequence reports the read, with a child's state, or `InterventionRejected` if it never happens.
 - Input to a paused or waiting parent, or an idle or paused child, starts its next turn.
 - `Interrupt` aborts the parent's turn and children, withdraws queued input, and holds the parent until a `Steer`, `OperatorMessage`, or `Release` resumes it.
 

@@ -57,6 +57,7 @@ import { completedOutcome, failedOutcome } from "./outcome.ts";
 import { parentSession, parentSessionId, resolveParent } from "./parent.ts";
 import { type AttemptTaskInput, storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
+import { hasPendingForwardedSteer } from "./steering.ts";
 import { firstAccepted } from "./watch.ts";
 
 /** The task's checkpoint: resolving the parent, or running one parent turn. */
@@ -68,6 +69,7 @@ export type AttemptCheckpoint =
       /** Turn 1 submits the assembled prompt; later turns submit operator guidance. */
       turn: number;
       message: string | null;
+      requestId?: string;
     };
 
 type Runtime = TaskRuntime<AttemptTaskInput, AttemptCheckpoint, AttemptResult, object>;
@@ -285,7 +287,13 @@ export const attemptTask = (
         resumed = Option.some(next === undefined ? "Release" : "Guidance");
         return {
           status: "running",
-          checkpoint: { phase: "run", parent, turn: turn + 1, message: next ?? RELEASE_GUIDANCE },
+          checkpoint: {
+            phase: "run",
+            parent,
+            turn: turn + 1,
+            message: next?.message ?? RELEASE_GUIDANCE,
+            requestId: next?.requestId ?? `${ATTEMPT_TASK}:${task.id}:turn:${turn + 1}`,
+          },
         };
       });
       if (Option.isSome(resumed)) {
@@ -336,7 +344,11 @@ export const attemptTask = (
       });
     const submission = yield* call("submit the parent turn", () =>
       conversation.submit(
-        { type: "input", content, requestId: `${ATTEMPT_TASK}:${task.id}:turn:${turn}` },
+        {
+          type: "input",
+          content,
+          requestId: task.state.checkpoint.requestId ?? `${ATTEMPT_TASK}:${task.id}:turn:${turn}`,
+        },
         context,
       ),
     );
@@ -395,15 +407,35 @@ export const attemptTask = (
         Option.isSome(relayed) && relayed.value.kind === "infra"
           ? Option.some(childReportFailure(relayed.value))
           : Option.orElse(own, () => Option.map(relayed, childReportFailure));
+      const hub = yield* services.hubs.hub(spec.attemptId, task.id);
       let finished = false;
-      yield* commit(runtime, context, "record the parent's answer", async (tx) => {
-        if (supervised(await tx.doc(HoldDoc, task.id), spec.attemptId)) return undefined;
-        finished = true;
-        return Option.match(outcome, {
-          onNone: () => completedOutcome(answer, answeredOperator),
-          onSome: failedOutcome,
+      while (true) {
+        let pending = false;
+        yield* hub.routing.withPermits(1)(
+          commit(runtime, context, "record the parent's answer", async (tx) => {
+            pending = hasPendingForwardedSteer(
+              await tx.doc(AttemptRecordDoc, spec.attemptId, null),
+            );
+            if (pending || supervised(await tx.doc(HoldDoc, task.id), spec.attemptId))
+              return undefined;
+            finished = true;
+            return Option.match(outcome, {
+              onNone: () => completedOutcome(answer, answeredOperator),
+              onSome: failedOutcome,
+            });
+          }),
+        );
+        if (!pending) break;
+        yield* Effect.logInfo("Waiting for the child's receipt before completing the attempt", {
+          attemptId: spec.attemptId,
         });
-      });
+        yield* call("wait for forwarded steers", async (signal) => {
+          const scoped = withAbortSignal(signal, context);
+          const watch = await runtime.watchDoc(AttemptRecordDoc, spec.attemptId, scoped);
+          if (watch === undefined) throw new Error("The attempt has no durable record");
+          return firstAccepted(watch, (record) => !hasPendingForwardedSteer(record), scoped);
+        });
+      }
       if (finished) {
         yield* Effect.logInfo("Pi parent finished", {
           turn,

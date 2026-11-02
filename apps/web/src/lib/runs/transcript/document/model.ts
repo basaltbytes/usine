@@ -15,6 +15,7 @@ import { conflictingSalvageMessage, failureMessage } from "~/lib/runs/strings";
 import { poolMeters, type PoolMeter } from "~/lib/runs/transcript/cache";
 import {
   type NoticeTone,
+  type MessageDelivery,
   type QueuedFor,
   retriesLabel,
   type TranscriptEntry,
@@ -65,6 +66,7 @@ export interface MessageRow extends RowPosition {
   readonly undelivered: boolean;
   /** The session that queued this operator input until its current step ends, or `null`. */
   readonly queued: QueuedFor | null;
+  readonly delivery: MessageDelivery | null;
   /** Whether the message starts with the reserved blocker marker. */
   readonly blocked: boolean;
   /** Whether the message starts with the reserved question marker. */
@@ -366,6 +368,7 @@ const chapterRows = (
           format: entry.format,
           undelivered: false,
           queued: null,
+          delivery: null,
           blocked: marker === "blocked",
           question: marker === "question",
         });
@@ -449,6 +452,7 @@ const chapterRows = (
             format: entry.format,
             undelivered: entry.tone === "failed",
             queued: entry.queued,
+            delivery: entry.delivery,
             blocked: false,
             question: false,
           }

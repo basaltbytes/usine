@@ -64,7 +64,7 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
               and(
                 eq(attemptTranscripts.attemptId, attemptId),
                 sql`(
-            json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'InterventionApplied'
+            json_extract(${attemptTranscripts.envelope}, '$.payload._tag') IN ('InterventionApplied', 'InterventionRejected')
             OR (json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'
               AND json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') IN ('SessionStarted', 'SessionIdle', 'SessionResumed', 'SessionFinished'))
           )`,
@@ -72,7 +72,8 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
             )
             .groupBy(
               sql`coalesce(json_extract(${attemptTranscripts.envelope}, '$.payload.event.session.id'), json_extract(${attemptTranscripts.envelope}, '$.payload.intervention.target.sessionId'), '@parent')`,
-              sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag')`,
+              sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'`,
+              sql`json_extract(${attemptTranscripts.envelope}, '$.payload.inputSequence')`,
               // Keeps launch metadata next to the latest lifecycle state, even after completion.
               sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'SessionStarted'`,
             ),

@@ -35,6 +35,7 @@ import {
 } from "./hubs.ts";
 import { settledOf } from "./outcome.ts";
 import { parentSession, parentSessionId } from "./parent.ts";
+import { queueParentSteer } from "./steering.ts";
 
 const PAGE = 64;
 
@@ -269,6 +270,41 @@ const childStoppedFirst = (
     }),
   );
 
+const returnSteerToParent = Effect.fn("AttemptRelay.returnSteerToParent")(function* (
+  durable: DurableHarness["Service"],
+  hub: AttemptHub,
+  inputSequence: AttemptChannel.Sequence,
+  intervention: AttemptChannel.Intervention,
+) {
+  if (intervention.target._tag !== "Parent" || intervention.action._tag !== "Steer") return false;
+  yield* Effect.annotateCurrentSpan({ attemptId: hub.attemptId, inputSequence });
+  const paused = yield* durable.use(
+    "read the parent's pause state",
+    async (harness, context) =>
+      (await harness.snapshot(HoldDoc, hub.taskId, context))?.paused ?? false,
+  );
+  if (paused) {
+    yield* Effect.logInfo("The parent was interrupted; its unread forwarded steer is withdrawn", {
+      inputSequence,
+    });
+    return false;
+  }
+  const queued = yield* queueParentSteer(
+    durable,
+    hub,
+    inputSequence,
+    intervention.operator,
+    intervention.action,
+  );
+  if (Option.isNone(queued)) return false;
+  yield* emitPayload(
+    durable,
+    hub,
+    new AttemptChannel.InterventionApplied({ inputSequence, intervention, state: queued.value }),
+  );
+  return true;
+});
+
 /**
  * Sends the second receipt for each resolved queued operator input, and rejects all unread ones if
  * `attempt` is `ended`. The caller must hold the hub's routing permit.
@@ -290,6 +326,16 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
       }
       hub.childInputs.delete(input.inputSequence);
       const intervention = yield* decodeIntervention(input.intervention).pipe(Effect.orDie);
+      if (
+        attempt === "live" &&
+        (yield* returnSteerToParent(
+          durable,
+          hub,
+          AttemptChannel.Sequence.make(input.inputSequence),
+          intervention,
+        ))
+      )
+        continue;
       yield* childStoppedFirst(
         durable,
         hub,
@@ -306,10 +352,23 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
       continue;
     }
     const status = yield* durable.use("read a queued operator input", async (harness, context) => {
+      if ("requestId" in input) {
+        if (Option.isNone(hub.parent)) return undefined;
+        const parent = hub.parent.value;
+        return harness.commit(async (tx) => {
+          const submission = await tx.submissionByRequest(parent, input.requestId);
+          if (submission === undefined && (await tx.doc(HoldDoc, hub.taskId)).paused)
+            return "withdrawn";
+          return submission?.status;
+        }, context);
+      }
       const submission = await harness.submission(input.submission, context);
       return submission === undefined ? undefined : (await submission.status(context)).status;
     });
-    if (status === "queued" && attempt === "live") {
+    if (
+      (status === "queued" || (status === undefined && "requestId" in input)) &&
+      attempt === "live"
+    ) {
       yield* Effect.logDebug("A queued operator input still waits for the parent", {
         inputSequence: input.inputSequence,
       });
@@ -386,6 +445,7 @@ const relayChildDelivery = Effect.fn("AttemptRelay.childDelivery")(function* (
     );
     yield* Effect.logInfo("The child read a queued operator input", fields);
   } else {
+    if (yield* returnSteerToParent(durable, hub, inputSequence, intervention)) return;
     yield* childStoppedFirst(durable, hub, inputSequence, intervention);
     yield* Effect.logWarning("The child stopped before it read a queued operator input", fields);
   }

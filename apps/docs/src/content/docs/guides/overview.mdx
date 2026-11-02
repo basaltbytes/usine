@@ -1,32 +1,28 @@
 ---
 title: Guides
-description: Procedures for configuring an instance, operating runs, and managing workers.
-sidebar:
-  hidden: true
+description: Task guides for running an instance, managing workers, configuring loops, and operating runs.
 ---
 
-Start with the [quickstart](/get-started/quickstart/) to open your first agent pull request. These guides cover tasks for an existing instance.
+Choose the task you want to complete. For a first agent pull request, start with the [quickstart](/get-started/quickstart/).
 
-## Configure work
+## Run usine
 
-[Write an issue loop](/guides/write-a-loop/), [write a schedule loop](/guides/write-a-schedule-loop/), or [create an agent](/guides/write-an-agent/). [Connect review and fix loops](/guides/review-fix-loops/) to route pull requests through review and CI. [Pause a loop](/guides/pause-a-loop/) before changing its trigger.
+[Run usine locally](/guides/run-usine-locally/) to install the CLI, start an instance, and open its web UI. [Host usine on a Linux server](/guides/host-usine-on-linux/) for an always-on setup with systemd, HTTPS, and managed upgrades.
 
-[Change configuration](/guides/change-the-configuration/) saves a revision. [Revert a revision](/guides/revert-configuration/) restores saved values.
+The [Run usine guides](/guides/run-usine/) also cover backups, restores, upgrades, and moving an instance.
 
-## Operate runs
+## Workers
 
-[Follow a run](/guides/follow-a-run/) to read its attempts and conversation. [Approve](/guides/approve-a-run/), [retry](/guides/retry-a-run/), [cancel](/guides/cancel-a-run/), or [run completed work again](/guides/run-again/). [Answer agent questions and blockers](/guides/answer-an-agent/), or [message a live session](/guides/message-an-agent/).
+[Add and maintain workers](/guides/workers/) on your machine, SSH hosts, Boat, Hetzner, or Cloudflare. Configure gateways and check worker capabilities.
 
-[Move tasks on the board](/guides/move-a-task/), [read statistics](/guides/read-statistics/), and [export a run](/guides/export-a-run/).
+## Loops and agents
 
-## Manage workers
+[Define loops and agents](/guides/loops-and-agents/) to select work and choose how it runs. Connect review and fix loops, edit configuration, and pause admissions.
 
-Add a [local worker](/guides/add-a-worker/), [fixed SSH worker](/guides/add-an-ssh-worker/), [Hetzner worker](/guides/add-a-provisioned-worker/), or [Boat worker](/guides/add-a-boat-worker/). [Deploy Cloudflare sandboxes](/guides/cloudflare-sandboxes/) for a Cloudflare instance.
+## Work with runs
 
-[Configure a gateway](/guides/configure-a-gateway/) to proxy credentials, [connect Boat over Tailscale](/guides/connect-boat-to-a-gateway/), [run preflight](/guides/run-worker-preflight/) after a repair, and [remove a worker](/guides/remove-a-worker/) before retiring its machine.
+[Approve and follow runs](/guides/work-with-runs/), message agents, answer questions, and retry or repeat work. Export results and read instance statistics.
 
-## Operate the instance
+## Access
 
-[Keep the orchestrator running](/guides/keep-the-orchestrator-running/) or [deploy it on a server](/guides/run-the-orchestrator-on-a-server/). [Open the UI](/guides/open-the-web-ui/), [sign in](/guides/sign-in/), [grant member access](/guides/manage-members/), and [create a device token](/guides/create-a-device-token/). [Expose HTTPS access](/guides/expose-an-instance/) before sharing a remote instance.
-
-[Back up state](/guides/back-up-instance-state/), [restore a backup](/guides/restore-instance-state/), [move an instance](/guides/move-an-instance/), or [upgrade it](/guides/upgrade-an-instance/).
+[Sign in and manage access](/guides/access/) for members and API clients.

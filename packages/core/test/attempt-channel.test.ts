@@ -54,6 +54,17 @@ const spec = new AttemptChannel.RunSpec({
 });
 
 describe("attempt channel", () => {
+  it("reads older delivery receipts and round-trips the forwarded child identity", () => {
+    const decode = Schema.decodeUnknownSync(AttemptChannel.InterventionState);
+    assert.isTrue(Option.isNone(decode({ held: false, paused: false }).forwardedTo));
+    const forwarded = decode({ held: false, paused: false, queued: true, forwardedTo: "child-1" });
+    assert.deepStrictEqual(forwarded.forwardedTo, Option.some(AgentSessionId.make("child-1")));
+    const json = Schema.fromJsonString(AttemptChannel.InterventionState);
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(json)(Schema.encodeSync(json)(forwarded)),
+      forwarded,
+    );
+  });
   it("preserves legacy worker recoveries and round-trips initial confirmations", () => {
     const notice = {
       _tag: "WorkerResponsive",

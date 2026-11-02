@@ -1,0 +1,120 @@
+diff --git a/components/overrides/Pagination.astro b/components/overrides/Pagination.astro
+index 3a3f7d7aa58733e19c4f0a2d0adbd6de0284d545..0d577ddfa33a06f30c6e9cf6abd1e97a4ebd2041 100644
+--- a/components/overrides/Pagination.astro
++++ b/components/overrides/Pagination.astro
+@@ -53,6 +53,8 @@ const { prev, next } = pagination;
+         justify-content: space-between;
+         align-items: center;
+         flex-direction: row;
++        flex-wrap: wrap;
++        gap: 0.75rem;
+         padding-top: calc(var(--spacing) * 4);
+         margin-top: calc(var(--spacing) * 8);
+     }
+@@ -74,11 +76,13 @@ const { prev, next } = pagination;
+         padding-left: calc(var(--spacing) * 3);
+         padding-right: calc(var(--spacing) * 3);
+         border-radius: calc(var(--radius) - 2px);
+-        white-space: nowrap;
++        white-space: normal;
++        max-width: 100%;
+         gap: 0.375rem;
+         justify-content: center;
+         align-items: center;
+-        height: 2rem;
++        height: auto;
++        min-height: 2rem;
+         display: inline-flex;
+     }
+ 
+diff --git a/components/overrides/parts/Drawer.astro b/components/overrides/parts/Drawer.astro
+index 04171d29b1983a79f62a160fd096dd350a37825c..a4bf2010b2d68638952f23ac374b9f281b2cce68 100644
+--- a/components/overrides/parts/Drawer.astro
++++ b/components/overrides/parts/Drawer.astro
+@@ -1,13 +1,12 @@
+ ---
+ import userConfig from 'virtual:lucode-starlight-config';
++import SidebarSublist from './SidebarSublist.astro';
+ import starlightConfig from 'virtual:starlight/user-config';
+ import { getRelativeLocaleUrl } from 'astro:i18n';
+ import { createLocaleLookup, resolveNavLabel } from '../../../core/i18n';
+ 
+ const { sidebar, lang, locale } = Astro.locals.starlightRoute;
+ 
+-const currentPath = Astro.url.pathname;
+-
+ const localeKeys = createLocaleLookup({
+     lang,
+     locale: Astro.currentLocale ?? locale,
+@@ -47,29 +46,7 @@ const localeKeys = createLocaleLookup({
+             </div>
+ 
+             <div class="links-docs">
+-                {
+-                    sidebar.map(
+-                        (entry) =>
+-                            entry.type !== 'link' && (
+-                                <div class="container-sidebar-entry">
+-                                    <h4 class="entry-title">{entry.label}</h4>
+-
+-                                    {entry.entries.map(
+-                                        (link) =>
+-                                            link.type === 'link' && (
+-                                                <a
+-                                                    href={link.href}
+-                                                    {...link.attrs}
+-                                                    data-active={currentPath === link.href}
+-                                                >
+-                                                    {link.label}
+-                                                </a>
+-                                            )
+-                                    )}
+-                                </div>
+-                            )
+-                    )
+-                }
++                <SidebarSublist sublist={sidebar} />
+             </div>
+         </div>
+     </div>
+@@ -181,31 +158,17 @@ const localeKeys = createLocaleLookup({
+         gap: calc(var(--spacing) * 2);
+     }
+ 
+-    .container-sidebar-entry {
+-        padding-top: calc(var(--spacing) * 6);
+-        display: flex;
+-        flex-direction: column;
+-        gap: calc(var(--spacing) * 2);
+-
+-        &:last-child {
+-            margin-bottom: calc(var(--spacing) * 4);
+-        }
+-    }
+-
+-    .entry-title {
+-        font-weight: 500;
+-    }
+-
+-    .container-sidebar-entry a {
++    .links-docs :global(.entry-link),
++    .links-docs :global(.entry-group-summary) {
++        height: auto;
++        min-height: 44px;
+         font-size: 1rem;
+-        line-height: 1.2rem;
+-        color: var(--muted-foreground);
+-        text-decoration: inherit;
++        line-height: 1.5rem;
++    }
+ 
+-        &[data-active='true'] {
+-            color: var(--foreground);
+-            font-weight: 500;
+-        }
++    .links-docs :global(.entry-link-inner) {
++        height: auto;
++        padding-block: 0.375rem;
+     }
+ 
+     .badge {

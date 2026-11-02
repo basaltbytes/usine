@@ -15,6 +15,7 @@ import { parentSessionId } from "./parent.ts";
 import { abortEndedAttempts, repairUnreadableConversations } from "./repair.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt, relayDeliveries } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
+import { queueParentSteer } from "./steering.ts";
 
 /**
  * An operator input that couldn't be applied. The reason is recorded in the transcript and the
@@ -268,14 +269,32 @@ const makeAttemptRuntime = Effect.gen(function* () {
     intervention: AttemptChannel.Intervention,
     inputSequence: AttemptChannel.Sequence,
   ) {
+    yield* Effect.annotateCurrentSpan({
+      attemptId: hub.attemptId,
+      sessionId: target.sessionId,
+      inputSequence,
+    });
     const child = hub.children.get(target.sessionId);
     if (child === undefined) return yield* refuse("This session is no longer live");
     const action = intervention.action;
+    const forwardedTo =
+      intervention.target._tag === "Parent" ? Option.some(target.sessionId) : Option.none();
     const state = yield* child
       .intervene(action, (delivered) =>
-        hubs.delivery(hub, { _tag: "Delivery", inputSequence, intervention, delivered }),
+        hubs.delivery(hub, {
+          _tag: "Delivery",
+          inputSequence,
+          intervention,
+          delivered: Option.map(
+            delivered,
+            (state) => new AttemptChannel.InterventionState({ ...state, forwardedTo }),
+          ),
+        }),
       )
-      .pipe(Effect.mapError((error) => refuse(error.message)));
+      .pipe(
+        Effect.mapError((error) => refuse(error.message)),
+        Effect.map((state) => new AttemptChannel.InterventionState({ ...state, forwardedTo })),
+      );
     if (action._tag === "OperatorMessage" || action._tag === "Release") {
       yield* hold(hub, (held) =>
         state.held
@@ -336,6 +355,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     intervention: AttemptChannel.Intervention,
     inputSequence: AttemptChannel.Sequence,
   ) {
+    yield* Effect.annotateCurrentSpan({ attemptId: hub.attemptId, inputSequence });
     if (Option.isNone(hub.parent)) return yield* refuse("The parent hasn't started yet");
     const parent = hub.parent.value;
     const parentId = parentSessionId(hub.attemptId);
@@ -346,15 +366,59 @@ const makeAttemptRuntime = Effect.gen(function* () {
         paused: document.paused,
         queued,
       });
+    if (action._tag === "Steer") {
+      const live = yield* supervise(hub, (document) => stateOf(document, false));
+      if (Option.isNone(live)) return yield* refuse("This session has already returned");
+      const [child] = hub.children.values();
+      if (hub.children.size === 1 && child !== undefined) {
+        const forwarded = yield* routeChild(
+          hub,
+          new AttemptChannel.ChildTarget({ sessionId: child.session.id }),
+          intervention,
+          inputSequence,
+        ).pipe(Effect.result);
+        if (Result.isSuccess(forwarded)) {
+          yield* Effect.logInfo("Forwarded the parent steer to its child", {
+            inputSequence,
+            sessionId: child.session.id,
+            queued: forwarded.success.queued,
+          });
+          return forwarded.success;
+        }
+        yield* Effect.logWarning("The child refused the parent steer; the parent must act on it", {
+          inputSequence,
+          sessionId: child.session.id,
+          message: forwarded.failure.message,
+        });
+      } else {
+        yield* Effect.logInfo("The parent steer requires a separate parent turn", {
+          inputSequence,
+          liveChildren: hub.children.size,
+        });
+      }
+      const queued = yield* queueParentSteer(
+        durable,
+        hub,
+        inputSequence,
+        intervention.operator,
+        action,
+      );
+      if (Option.isNone(queued)) return yield* refuse("This session has already returned");
+      return queued.value;
+    }
     if (action._tag === "Interrupt") {
       const marked = yield* supervise(hub, (document) => {
         const already = document.paused;
+        const withdrawnGuidance = document.guidance.length;
+        document.guidance = [];
         document.paused = true;
-        return { already, state: stateOf(document, false) };
+        return { already, withdrawnGuidance, state: stateOf(document, false) };
       });
       if (Option.isNone(marked)) return yield* refuse("This session has already returned");
       if (marked.value.already) return marked.value.state;
-      yield* Effect.logInfo("Interrupting the Pi parent; it holds until the operator resumes it");
+      yield* Effect.logInfo("Interrupting the Pi parent; it holds until the operator resumes it", {
+        withdrawnGuidance: marked.value.withdrawnGuidance,
+      });
       yield* durable.use("abort the parent's turn", async (harness, context) => {
         const conversation = await harness.conversation(parent, context);
         await conversation?.abort(context);
@@ -371,7 +435,10 @@ const makeAttemptRuntime = Effect.gen(function* () {
         document.held = document.held.filter((id) => id !== parentId);
         // The interrupted turn may end after this commit, so add guidance for it to resume with.
         if (document.paused) {
-          document.guidance = [...document.guidance, RELEASE_GUIDANCE];
+          document.guidance.push({
+            message: RELEASE_GUIDANCE,
+            requestId: `intervention:${hub.attemptId}:${inputSequence}`,
+          });
           document.paused = false;
         }
         return { _tag: "Released", busy, state: stateOf(document, false) } as const;
@@ -392,7 +459,10 @@ const makeAttemptRuntime = Effect.gen(function* () {
       if (holds && !document.held.includes(parentId)) document.held = [...document.held, parentId];
       if (busy && !document.paused)
         return { _tag: "Steer", state: stateOf(document, true) } as const;
-      document.guidance = [...document.guidance, action.message];
+      document.guidance.push({
+        message: action.message,
+        requestId: `intervention:${hub.attemptId}:${inputSequence}`,
+      });
       document.paused = false;
       return { _tag: "NextTurn", state: stateOf(document, false) } as const;
     });
@@ -501,6 +571,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
             held: applied.success.held,
             paused: applied.success.paused,
             queued: applied.success.queued,
+            forwardedTo: Option.getOrUndefined(applied.success.forwardedTo),
           });
         }),
       );

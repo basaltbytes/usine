@@ -14,7 +14,7 @@ import type {
 import { DateTime, Match, Option } from "effect";
 import type { RunActionRequest } from "~/hooks/runs/actions";
 import type { Chapter } from "~/lib/runs/transcript/document/model";
-import type { QueuedFor } from "~/lib/runs/transcript/model";
+import type { MessageDelivery, QueuedFor } from "~/lib/runs/transcript/model";
 import { timestampLabel } from "~/lib/strings";
 import { providerLabel } from "~/lib/workers/strings";
 
@@ -162,6 +162,19 @@ export const queuedMessageLabel = (session: QueuedFor): string =>
   session === "parent"
     ? "Queued until the delegated task ends"
     : "Queued until the current child step ends";
+
+export const messageDeliveryLabel = (delivery: MessageDelivery): string => {
+  switch (delivery) {
+    case "parent":
+      return "Delivered to parent";
+    case "child":
+      return "Delivered to child";
+    case "forwarded":
+      return "Forwarded to child";
+    case "not-acted-on":
+      return "Not acted on";
+  }
+};
 
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;

@@ -28,6 +28,7 @@ import {
   ChildTarget,
   OperatorMessage,
   ParentTarget,
+  Steer,
 } from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { WorkerName } from "@usine/core/worker";
@@ -37,7 +38,7 @@ import {
   RunView,
   TranscriptEventView,
 } from "@usine/orchestrator/operator";
-import type { Schema } from "effect";
+import { Option, type Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, it } from "vitest";
 import { MessageScrollerProvider } from "~/components/ui/message-scroller";
@@ -731,6 +732,93 @@ it("shows an operator message to a delegating parent once, queued until the pare
     }),
   );
   assert.deepStrictEqual(operatorRows([...delegating, stopped]), [[2, null, true]]);
+});
+
+it("shows the latest parent steer's delivery once without confusing parent and child holds", () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("steered-child"),
+    parentId: parent.id,
+    agent: parent.agent,
+    brain,
+  });
+  const intervention = new Intervention({
+    operator: "Philippe",
+    target: new ParentTarget(),
+    action: new Steer({ message: "Fix the third finding." }),
+  });
+  const receipt = (sequence: number, state: InterventionState) =>
+    new TranscriptEventView({
+      sequence: TranscriptSequence.make(sequence),
+      attemptId: attempt,
+      receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
+      direction: "outbound",
+      payload: new InterventionApplied({ inputSequence: Sequence.make(1), intervention, state }),
+    });
+  const initial = [
+    record(1, new SessionStarted({ session: parent })),
+    record(2, new SessionStarted({ session: child })),
+    receipt(
+      3,
+      new InterventionState({
+        held: true,
+        paused: false,
+        queued: true,
+        forwardedTo: Option.some(child.id),
+      }),
+    ),
+  ];
+  assert.include(render(initial), "Forwarded to child");
+  assert.include(render(initial), "Queued until the current child step ends");
+  const sessions = projectTranscript(initial, []).sessions;
+  assert.isFalse(sessions.find(({ session }) => session.id === parent.id)?.held);
+  assert.isTrue(sessions.find(({ session }) => session.id === child.id)?.held);
+
+  const delivered = [
+    ...initial,
+    receipt(
+      4,
+      new InterventionState({
+        held: true,
+        paused: false,
+        forwardedTo: Option.some(child.id),
+      }),
+    ),
+  ];
+  assert.include(render(delivered), "Forwarded to child");
+  assert.notInclude(render(delivered), "Queued until");
+  const returned = [
+    ...initial,
+    receipt(4, new InterventionState({ held: false, paused: false, queued: true })),
+  ];
+  assert.notInclude(render(returned), "Forwarded to child");
+  assert.include(render(returned), "Queued until the delegated task ends");
+  const parentRead = [
+    ...returned,
+    receipt(5, new InterventionState({ held: false, paused: false })),
+  ];
+  assert.include(render(parentRead), "Delivered to parent");
+  const rejected = [
+    ...initial,
+    new TranscriptEventView({
+      sequence: TranscriptSequence.make(5),
+      attemptId: attempt,
+      receivedAt: "2026-09-06T12:00:05Z",
+      direction: "outbound",
+      payload: new InterventionRejected({
+        inputSequence: Sequence.make(1),
+        intervention,
+        message: "The attempt was interrupted.",
+      }),
+    }),
+  ];
+  assert.include(render(rejected), "Not acted on");
+  assert.notInclude(render(rejected), "Forwarded to child");
+  for (const events of [initial, delivered, returned, parentRead, rejected]) {
+    const messages = document(events)
+      .chapters.flatMap(({ rows }) => rows)
+      .filter((row) => row._tag === "Message" && row.from === "operator");
+    assert.lengthOf(messages, 1);
+  }
 });
 
 it("shows a message to a working child queued in the child's section until the child reads it", () => {

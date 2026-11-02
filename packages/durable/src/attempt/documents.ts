@@ -6,6 +6,7 @@ import {
   type TaskId,
 } from "@earendil-works/pi-durable";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
+import { Schema } from "effect";
 
 /**
  * The return value of a completed `usine.attempt` task. `answeredOperator` is absent on older
@@ -15,7 +16,7 @@ export type AttemptResult = { message: string; answeredOperator?: boolean };
 
 /**
  * An accepted, unread operator input, queued either by the busy parent (with its submission) or by
- * a working child (with its session ID).
+ * a working child (with its session ID), or awaiting a separate parent turn (with its request ID).
  */
 type QueuedInput =
   | {
@@ -26,6 +27,11 @@ type QueuedInput =
   | {
       inputSequence: number;
       child: string;
+      intervention: typeof AttemptChannel.Intervention.Encoded;
+    }
+  | {
+      inputSequence: number;
+      requestId: string;
       intervention: typeof AttemptChannel.Intervention.Encoded;
     };
 
@@ -108,7 +114,7 @@ export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
  */
 export type Hold = {
   paused: boolean;
-  guidance: string[];
+  guidance: Array<{ message: string; requestId: string }>;
   held: string[];
 };
 
@@ -116,10 +122,27 @@ export type Hold = {
 export const RELEASE_GUIDANCE =
   "The operator released you without further guidance. Continue the task; if it is already done, give your final answer.";
 
+const LegacyHold = Schema.Struct({
+  paused: Schema.Boolean,
+  guidance: Schema.Array(Schema.String),
+  held: Schema.Array(Schema.String),
+});
+
 export const HoldDoc = defineDoc<Hold>({
   kind: "usine.hold",
-  version: 1,
+  version: 2,
   scope: "task",
   checkpointWhen: () => false,
   initial: () => ({ paused: false, guidance: [], held: [] }),
+  migrate: (value) => {
+    const legacy = Schema.decodeUnknownSync(LegacyHold)(value, { onExcessProperty: "error" });
+    return {
+      ...legacy,
+      held: [...legacy.held],
+      guidance: legacy.guidance.map((message, index) => ({
+        message,
+        requestId: `legacy-guidance:${index}`,
+      })),
+    };
+  },
 });
