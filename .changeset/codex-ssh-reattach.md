@@ -11,3 +11,5 @@ Preserve the original task when an app-server exits before saving its first user
 Replay unread operator guidance when recovering a Codex thread. Report delivery after the recovered turn accepts the messages, and preserve unread guidance while the child waits for the operator to resume it.
 
 Replay incomplete output frames after an SSH disconnect, preserving the last complete output offset.
+
+Discard incomplete input frames before journaling them so reconnecting preserves the running app-server. Acknowledge guidance included in resumed input when Codex reads it, preventing replay after another pause.

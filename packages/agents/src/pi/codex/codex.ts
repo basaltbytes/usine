@@ -222,6 +222,11 @@ const makeCodexChild = Effect.gen(function* () {
       let interrupting = false;
       const toolsInFlight = new Set<string>();
       const pendingMessages: string[] = [];
+      let replayedGuidance = Option.none<{
+        readonly turnId: string;
+        readonly text: string;
+        readonly count: number;
+      }>();
       let lastText: string | undefined;
       let finalText: string | undefined;
       // Provider retries reported for the current turn, and whether the last retry is unresolved.
@@ -241,6 +246,7 @@ const makeCodexChild = Effect.gen(function* () {
           "turn start response",
           response,
         );
+        replayedGuidance = Option.none();
         turnId = started.turn.id;
         turnActive = true;
         lastText = undefined;
@@ -306,7 +312,11 @@ const makeCodexChild = Effect.gen(function* () {
           return "queued" as const;
         }
         if (!turnActive) {
-          yield* startTurn([...(yield* conversation.unread), message].join("\n\n"));
+          const unread = yield* conversation.unread;
+          const text = [...unread, message].join("\n\n");
+          yield* startTurn(text);
+          if (unread.length > 0)
+            replayedGuidance = Option.some({ turnId, text, count: unread.length });
           return "read" as const;
         }
         // Codex records steered input as a user message once the running turn reads it.
@@ -391,6 +401,7 @@ const makeCodexChild = Effect.gen(function* () {
           );
         toolsInFlight.clear();
         pendingMessages.length = 0;
+        replayedGuidance = Option.none();
         turnActive = false;
         interrupting = false;
         const paused = yield* conversation.isPaused;
@@ -466,7 +477,18 @@ const makeCodexChild = Effect.gen(function* () {
               const item = notification.value.item;
               if (Schema.is(UserMessageItem)(item)) {
                 const text = userMessageText(item);
-                return yield* conversation.read((queued) => queued.indexOf(text) + 1);
+                return yield* conversation.read((queued) => {
+                  if (
+                    Option.isSome(replayedGuidance) &&
+                    replayedGuidance.value.turnId === notification.value.turnId &&
+                    replayedGuidance.value.text === text
+                  ) {
+                    const { count } = replayedGuidance.value;
+                    replayedGuidance = Option.none();
+                    return count;
+                  }
+                  return queued.indexOf(text) + 1;
+                });
               }
               if (notification.value.turnId !== turnId) {
                 return yield* Effect.logDebug("Skipping a Codex item from another turn", {

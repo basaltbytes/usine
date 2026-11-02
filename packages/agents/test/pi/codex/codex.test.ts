@@ -358,22 +358,67 @@ describe("Codex child backend", () => {
             for (const message of guidance) assert.include(recoveredInput, message);
             assert(recoveredInput.indexOf(guidance[0]) < recoveredInput.indexOf(guidance[1]));
           }
+          let finalTurn = "turn-2";
+          if (state === "paused" || state === "interrupting") {
+            yield* Queue.offer(restored, {
+              method: "item/started",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-2",
+                item: {
+                  type: "userMessage",
+                  id: "replayed-guidance",
+                  clientId: null,
+                  content: [
+                    {
+                      type: "text",
+                      text: [...guidance, "Continue with my correction"].join("\n\n"),
+                      text_elements: [],
+                    },
+                  ],
+                },
+              },
+            });
+            for (let spin = 0; reads.length < guidance.length; spin += 1) {
+              if (spin > 1_000) return assert.fail("replayed guidance was never reported as read");
+              yield* Effect.yieldNow;
+            }
+            yield* running.intervene(new Interrupt(), noDelivery);
+            yield* Queue.offer(restored, {
+              method: "turn/completed",
+              params: { turn: { id: "turn-2", status: "interrupted", error: null } },
+            });
+            yield* Queue.take(idle);
+            yield* running.intervene(
+              new OperatorMessage({ message: "Continue again" }),
+              noDelivery,
+            );
+            assert.strictEqual(messages.length, 3);
+            assert.include(JSON.stringify(messages[2]), "Continue again");
+            for (const message of guidance) assert.notInclude(JSON.stringify(messages[2]), message);
+            assert.strictEqual(reads.length, guidance.length, "guidance is delivered only once");
+            finalTurn = "turn-3";
+          }
           yield* Queue.offer(restored, {
             method: "item/completed",
             params: {
               threadId: "thread-1",
-              turnId: "turn-2",
+              turnId: finalTurn,
               item: { type: "agentMessage", id: "answer", text: "Corrected result" },
             },
           });
           yield* Queue.offer(restored, {
             method: "turn/completed",
-            params: { turn: { id: "turn-2", status: "completed", error: null } },
+            params: { turn: { id: finalTurn, status: "completed", error: null } },
           });
           yield* Queue.take(idle);
           yield* running.intervene(new Release(), noDelivery);
           assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
-          assert.strictEqual(messages.length, 2, "queued guidance does not start a duplicate turn");
+          assert.strictEqual(
+            messages.length,
+            finalTurn === "turn-3" ? 3 : 2,
+            "queued guidance does not start a duplicate turn",
+          );
           assert.strictEqual(reads.length, guidance.length);
           assert(reads.every(Option.isSome));
           assert.strictEqual(opens, 2);

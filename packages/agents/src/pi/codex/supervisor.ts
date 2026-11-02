@@ -5,7 +5,6 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const readline = require('node:readline');
 const [mode, pidFile, cursor, ...args] = process.argv.slice(1);
 const key = crypto.createHash('sha256').update(pidFile).digest('hex');
 const root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'usine-transport', key);
@@ -128,8 +127,13 @@ if (mode === 'stop') {
       catch (error) { if (error.code === 'ESRCH' || error.code === 'ENOENT') process.exit(1); else throw error; }
     }
   }, 25);
-  readline.createInterface({ input: process.stdin }).on('line', line => {
-    fs.appendFileSync(input, line + '\n');
+  let incoming = Buffer.alloc(0);
+  process.stdin.on('data', data => {
+    incoming = Buffer.concat([incoming, data]);
+    const end = incoming.lastIndexOf(10);
+    if (end < 0) return;
+    fs.appendFileSync(input, incoming.subarray(0, end + 1));
+    incoming = incoming.subarray(end + 1);
   });
   process.stdin.on('end', () => process.exit(0));
 }
