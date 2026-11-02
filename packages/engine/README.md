@@ -107,6 +107,8 @@ The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, in
 
 `CycleBudgets` (`/cycle-budget`) stores item-level exhaustion asks and idempotent reset events. `Submission.cycleLimit` defaults to three; schedule adapters pass `None`. Admission reserves the allowance in a transaction, or returns `CycleBlocked` if the item needs a reset. Retries don't count again, and canceled runs without attempts give their reservation back. On upgrade, existing history and queued events get the default budget.
 
+A later refused event updates the ask's latest block for that loop in the admission transaction. This changes its attention revision, so a dismissed entry appears again and identifies the blocked loop. Repeated sightings of each loop's recorded event preserve the revision. The ask ID, exhausted loop, counts, and reset identity stay unchanged.
+
 A reset records a fresh polling request. Trigger adapters read `CycleBudgets.generation(itemKey)` before fetching and put it in `Submission.cycleGeneration` and the event identity. Admission supersedes older observations, including in-flight polls and queued events, and new polling creates an event with current settings. Labels, restarts, and loop changes never clear an ask. See [ADR 0022](../../docs/adr/0022-item-cycle-budgets-and-comment-reviews.md).
 
 `CycleBudgets.close(askId, "ItemClosed")` closes an ask without a reset, for an item that was closed or merged. It records the ask and the reason in `usine_cycle_ask_closures` and keeps the generation and reservations, so the item's next admission at the limit opens a new ask.

@@ -85,12 +85,29 @@ export const cycleQueries = (database: RunDatabaseClient) => {
     yield* Effect.annotateCurrentSpan({ itemKey: submission.itemKey, loop: submission.loop });
     const current = yield* get(submission.itemKey);
     if (Option.isSome(current) && Option.isSome(current.value.ask)) {
+      const previous = current.value.ask.value;
+      const ask = previous.recordBlock(submission.loop, submission.event.id);
+      if (ask !== previous) {
+        yield* database
+          .update(itemCycleBudgets)
+          .set({ askJson: Schema.encodeSync(CycleBudgetAsk)(ask) })
+          .where(eq(itemCycleBudgets.itemKey, submission.itemKey))
+          .execute();
+        yield* Effect.logInfo("Cycle budget ask updated for a newly blocked event", {
+          itemKey: submission.itemKey,
+          repository: submission.repository,
+          askId: ask.id,
+          eventId: submission.event.id,
+          blockedLoop: ask.blockedLoop,
+          exhaustedLoop: ask.loop,
+        });
+      }
       yield* Effect.logInfo("Item cycle budget remains exhausted", {
         itemKey: submission.itemKey,
-        askId: current.value.ask.value.id,
+        askId: ask.id,
         loop: submission.loop,
       });
-      return current.value.ask;
+      return Option.some(ask);
     }
     if (Option.isNone(submission.cycleLimit)) return Option.none<CycleBudgetAsk>();
     yield* database
@@ -114,7 +131,7 @@ export const cycleQueries = (database: RunDatabaseClient) => {
       loop: submission.loop,
       limit: submission.cycleLimit.value,
       counts: [completed, ...participants.filter(({ loop }) => loop !== submission.loop)],
-    });
+    }).recordBlock(submission.loop, submission.event.id);
     yield* database
       .update(itemCycleBudgets)
       .set({ askJson: Schema.encodeSync(CycleBudgetAsk)(ask) })

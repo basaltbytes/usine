@@ -7,6 +7,7 @@ import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
 import { AgentName } from "@usine/core/agent";
 import { ItemKey, ItemNumber } from "@usine/core/item";
+import { EventId } from "@usine/core/event";
 import {
   CycleBudgetAsk,
   CycleBudgetAskId,
@@ -339,14 +340,14 @@ it.each([1280, 390])(
             completed: CycleCount.make(1),
           }),
         ],
-      }),
+      }).recordBlock(LoopName.make("review-pr"), EventId.make("blocked-review")),
     });
     await replaceNeeds([need]);
     for (const surface of [needs, tray()]) {
       if (surface !== needs) await bell(1).click();
       const row = surface.getByRole("listitem").filter({ hasText: need.itemLabel });
       await expect
-        .element(row.getByText("start-dev · approval/project", { exact: true }))
+        .element(row.getByText("review-pr · approval/project", { exact: true }))
         .toBeVisible();
       await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
       const actions = row.getByRole("button", { name: /^Actions for/ });

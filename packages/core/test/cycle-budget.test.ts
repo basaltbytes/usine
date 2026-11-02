@@ -13,7 +13,10 @@ describe("cycle budget boundaries", () => {
       limit: 3,
       counts: [count],
     };
-    assert.strictEqual(Schema.decodeUnknownSync(CycleBudgetAsk)(ask).completedCycles, 3);
+    const legacy = Schema.decodeUnknownSync(CycleBudgetAsk)(ask);
+    assert.strictEqual(legacy.completedCycles, 3);
+    assert.strictEqual(legacy.blockedLoop, "review");
+    assert.deepStrictEqual(legacy.blocks, []);
     for (const invalid of [0, -1, 1.5])
       assert.throws(() => Schema.decodeUnknownSync(CycleLimit)(invalid));
     for (const invalid of [
@@ -27,6 +30,14 @@ describe("cycle budget boundaries", () => {
       { ...ask, counts: [count, count] },
       { ...ask, loop: "fix" },
       { ...ask, limit: 4 },
+      {
+        ...ask,
+        blocks: [
+          { loop: "fix", eventId: "event-1" },
+          { loop: "fix", eventId: "event-2" },
+        ],
+      },
+      { ...ask, blocks: [{ loop: "fix", eventId: 1 }] },
       { ...ask, extra: true },
     ]) {
       assert.throws(() => Schema.decodeUnknownSync(CycleBudgetAsk)(invalid));
