@@ -3,10 +3,12 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
 import { InstancePath } from "@usine/config/file";
-import type { LoopFile } from "@usine/config/loop";
+import { LoopFile } from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
 import { Event, EventId, DedupKey } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
+import type { CycleBudgetAsk } from "@usine/core/cycle-budget";
+import { LoopName } from "@usine/core/loop";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
@@ -22,6 +24,7 @@ import { LoadedInstance } from "@usine/config/instance";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { CycleBudgetReset, CycleBudgets } from "@usine/engine/cycle-budget";
+import { AttentionAcknowledgement, AttentionAcknowledgements } from "@usine/engine/attention";
 import { GitHubApiError } from "@usine/github/github-app";
 import {
   EntityTag,
@@ -32,6 +35,8 @@ import {
 } from "@usine/github/polling";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
+import { attentionKey, partitionNeeds } from "../src/operator/attention.ts";
+import { CycleBudgetNeed } from "../src/operator/need.ts";
 import {
   emptyCycleBudgets,
   memoryCursorStore,
@@ -126,7 +131,7 @@ describe("cycle reset polling", () => {
 });
 
 it.live(
-  "discards a poll rendered before reset and uses current input and configuration afterward",
+  "refreshes dismissed cycle blocks and discards pre-reset polling with current configuration afterward",
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -262,6 +267,48 @@ it.live(
         const exhausted = yield* polling.poll(withLoop(loop));
         const blocked = exhausted.submissions[0];
         assert(blocked?._tag === "CycleBlocked");
+        const acknowledgements = yield* AttentionAcknowledgements;
+        const needFor = (ask: CycleBudgetAsk) =>
+          new CycleBudgetNeed({
+            id: `cycle-budget:${ask.id}`,
+            ask,
+            itemLabel: `${repository}#72`,
+            itemUrl: "https://github.com/basaltbytes/usine/issues/72",
+          });
+        const dismiss = (ask: CycleBudgetAsk) =>
+          acknowledgements.dismiss(
+            new AttentionAcknowledgement({
+              ...attentionKey(needFor(ask)),
+              dismissedBy: Option.none(),
+              dismissedAt: DateTime.makeUnsafe("2026-11-02T19:45:00Z"),
+            }),
+          );
+        const attention = Effect.gen(function* () {
+          return partitionNeeds(
+            (yield* budgets.asks()).map(needFor),
+            yield* acknowledgements.list(),
+          );
+        });
+        yield* dismiss(blocked.ask);
+        yield* polling.poll(withLoop(loop));
+        assert.deepStrictEqual((yield* attention).needsYou, []);
+        const sibling = new LoopFile({ ...loop, name: LoopName.make("fix") });
+        const refused = (yield* polling.poll(withLoop(sibling))).submissions[0];
+        assert(refused?._tag === "CycleBlocked");
+        assert.strictEqual(refused.ask.id, blocked.ask.id);
+        assert.deepStrictEqual((yield* attention).needsYou, [needFor(refused.ask)]);
+        assert.deepStrictEqual((yield* attention).dismissedNeeds, []);
+        assert.strictEqual(refused.ask.blockedLoop, sibling.name);
+        assert.strictEqual(refused.ask.loop, loop.name);
+        yield* dismiss(refused.ask);
+        for (const unchanged of [loop, sibling]) yield* polling.poll(withLoop(unchanged));
+        assert.deepStrictEqual((yield* attention).needsYou, []);
+        assert.deepStrictEqual((yield* attention).dismissedNeeds, [needFor(refused.ask)]);
+        hash = "c";
+        const changed = (yield* polling.poll(withLoop(sibling))).submissions[0];
+        assert(changed?._tag === "CycleBlocked");
+        assert.deepStrictEqual((yield* attention).needsYou, [needFor(changed.ask)]);
+        assert.strictEqual(changed.ask.blockedLoop, sibling.name);
         shouldPause = true;
         const inFlight = yield* polling.poll(withLoop(loop)).pipe(Effect.forkChild);
         yield* Deferred.await(entered);

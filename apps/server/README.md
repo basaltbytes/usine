@@ -74,6 +74,8 @@ Direct browser requests for UI routes serve the app shell, so refreshing or shar
 
 `POST /api/cycle-budgets/reset` takes an ask identity, with the same origin guard and typed errors as other interventions. A stale ask returns 409, and setup mode rejects resets.
 
+Cycle-budget attention entries identify the most recently blocked loop. A later refused event changes the entry's revision and raises it again after dismissal. Repeated sightings of the recorded events preserve dismissal, and later blocks keep the same ask identity for reset.
+
 After `pnpm build`, reload the page to use the new web bundle; no restart is needed.
 
 ## Webhook delivery hints

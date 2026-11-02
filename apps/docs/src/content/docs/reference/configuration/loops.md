@@ -76,6 +76,8 @@ This requires approval for labels applied by bots, board moves made through the 
 
 Each loop counts its runs separately. A retry uses the same reservation; cancellation before the first attempt returns it. Schedule loops do not use cycle budgets. When a loop exhausts its allowance, **Cycle budget exhausted** appears in **Needs attention**, and new work on the item waits for an operator reset. Existing admitted runs can finish. Label edits and restarts preserve the budget.
 
+The entry identifies the most recently blocked loop, including a loop blocked by another loop's exhausted allowance. If you dismiss the entry, a later blocked event raises it again. Repeated polling of the same blocked events preserves the dismissal. **Reset cycle budget** answers the item's ask and requests fresh trigger evaluation.
+
 ## Permissions
 
 `read` gives the attempt token `contents: read` while retaining issue and pull request writes for reviews, comments, and labels. GitHub refuses code pushes with that token. A pre-push hook also explains the restriction. Failed read-only attempts create no salvage branch. `write` permits code pushes and pull request updates.

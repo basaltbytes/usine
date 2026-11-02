@@ -49,7 +49,7 @@ export const CycleBudgetAsk = ({ need, dismiss }: CycleBudgetAskProps) => {
           onSome: () => ({ ...copy, detail: cycleBudgetCounts(need.ask) }),
         })}
         item={Option.getOrUndefined(item)}
-        loop={need.ask.loop}
+        loop={need.ask.blockedLoop}
         dismiss={dismiss}
         error={reset.isError ? reset.error.message : null}
         heading={need.itemLabel}

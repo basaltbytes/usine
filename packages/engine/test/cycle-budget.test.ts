@@ -314,8 +314,12 @@ describe("Item cycle budgets", () => {
                 assert(blocked.result._tag === "CycleBlocked");
                 assert.strictEqual(blocked.result.ask.id, ask.id);
               }
+              const updated = (yield* budgets.asks())[0];
+              assert(updated !== undefined);
+              assert.strictEqual(updated.loop, ask.loop);
+              assert.strictEqual(updated.blockedLoop, "finisher");
               yield* store.revoke(LoopName.make("fix"), ItemKey.make("pr-72"));
-              assert.deepStrictEqual(yield* budgets.asks(), [ask]);
+              assert.deepStrictEqual(yield* budgets.asks(), [updated]);
               yield* complete(submission("review", 1, "another-pr"));
               yield* budgets.reset(ask.id, event("operator-reset-1"));
               assert.deepStrictEqual(yield* budgets.asks(), []);

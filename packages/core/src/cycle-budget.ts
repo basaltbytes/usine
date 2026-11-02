@@ -3,7 +3,7 @@ import { EventId } from "./event.ts";
 import { ItemKey } from "./item.ts";
 import { LoopName } from "./loop.ts";
 import { RepositoryName } from "./repository.ts";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 /** The maximum number of Runs one Loop can open for an Item between operator resets. */
 export const CycleLimit = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
@@ -46,6 +46,14 @@ export class LoopCycleCount extends Schema.Class<LoopCycleCount>("LoopCycleCount
 export const CycleBudgetAskId = EventId.pipe(Schema.brand("CycleBudgetAskId"));
 export type CycleBudgetAskId = typeof CycleBudgetAskId.Type;
 
+/** The latest event refused by an item's exhausted budget for one loop. */
+export class CycleBudgetBlock extends Schema.Class<CycleBudgetBlock>("CycleBudgetBlock")(
+  closedStruct({
+    loop: LoopName,
+    eventId: EventId,
+  }),
+) {}
+
 /** An Ask for the operator to reset an Item's cycle budget; no Runs open until the reset. */
 export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk")(
   closedStruct({
@@ -61,6 +69,20 @@ export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk
     limit: CycleLimit,
     /** The distinct participating loops and their counts, including the exhausted loop. */
     counts: Schema.NonEmptyArray(LoopCycleCount),
+    /** The latest refused event per loop, ordered by when each block changed. */
+    blocks: Schema.Array(CycleBudgetBlock)
+      .check(
+        Schema.makeFilter(
+          (blocks) => new Set(blocks.map(({ loop }) => loop)).size === blocks.length,
+          {
+            message: "Expected one blocked event per loop",
+          },
+        ),
+      )
+      .pipe(
+        Schema.withDecodingDefaultKey(Effect.succeed([])),
+        Schema.withConstructorDefault(Effect.succeed([])),
+      ),
   }).check(
     Schema.makeFilter(
       ({ loop, limit, counts }) =>
@@ -72,6 +94,23 @@ export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk
     ),
   ),
 ) {
+  /** The loop most recently blocked, or the exhausted loop for older asks. */
+  get blockedLoop(): LoopName {
+    return this.blocks.at(-1)?.loop ?? this.loop;
+  }
+
+  /** Records a changed block; repeated sightings of the same event preserve the ask. */
+  recordBlock(loop: LoopName, eventId: EventId): CycleBudgetAsk {
+    if (this.blocks.some((block) => block.loop === loop && block.eventId === eventId)) return this;
+    return new CycleBudgetAsk({
+      ...this,
+      blocks: [
+        ...this.blocks.filter((block) => block.loop !== loop),
+        new CycleBudgetBlock({ loop, eventId }),
+      ],
+    });
+  }
+
   /** The highest `completed` count across Loops; each Loop runs at most once per round. */
   get completedCycles(): CycleCount {
     return CycleCount.make(Math.max(...this.counts.map(({ completed }) => completed)));

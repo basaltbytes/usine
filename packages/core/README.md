@@ -22,7 +22,7 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 | `@usine/core/agent/capability` | `HarnessCapability`, `HarnessReady`, `HarnessUnavailableError`, and the credential-free `HarnessReadiness` preflight response |
 | `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `safeSegment`, `splitRepositoryName`, `canonicalRepositoryName` |
 | `@usine/core/worker`, `/item`, `/loop`, `/instance` | `WorkerName`, `WorkerKind`, `GatewayCredentialKind`, `ContainerId`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory`, `InstanceId` |
-| `@usine/core/cycle-budget` | `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, `CycleBudgetAsk` |
+| `@usine/core/cycle-budget` | `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, `CycleBudgetBlock`, `CycleBudgetAsk` |
 
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
@@ -35,7 +35,7 @@ The run state machine is `pending → waiting → queued → running → succeed
 - Run again opens a new run for the item state of a succeeded or canceled run. `RunAgain` (`/run/again`) records the original run and who asked.
 - Failure resolution applies only in the failed state; operator views also hide it once the latest failed attempt is resolved.
 
-An item-level `CycleBudgetAsk`, which can exist before another run opens, records the exhausted loop, its limit, and the participating loops' admitted and completed runs.
+An item-level `CycleBudgetAsk`, which can exist before another run opens, records the exhausted loop, its limit, and the participating loops' admitted and completed runs. Its `blocks` record the latest refused event per loop. `recordBlock` preserves repeated sightings, and `blockedLoop` identifies the most recently changed block. Older asks decode with empty `blocks` and use the exhausted loop as `blockedLoop`.
 
 ## Attempts
 

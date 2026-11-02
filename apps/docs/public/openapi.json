@@ -37475,6 +37475,40 @@
             "items": {
               "$ref": "#/components/schemas/LoopCycleCountEncoded"
             }
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "loop": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "eventId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "loop",
+                "eventId"
+              ],
+              "propertyNames": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "loop",
+                      "eventId"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -37494,7 +37528,8 @@
                 "repository",
                 "loop",
                 "limit",
-                "counts"
+                "counts",
+                "blocks"
               ]
             },
             {
