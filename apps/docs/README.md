@@ -22,6 +22,10 @@ Each guide covers one task: goal, prerequisites, numbered steps, and a result ch
 
 Link to site routes, such as `/guides/follow-a-run/`. Update `astro.config.mjs` for navigation and `redirects.mjs` when replacing a route. Fenced Mermaid diagrams follow the site theme. Contributor architecture notes belong in `docs/architecture/` outside the site.
 
+`sidebar.mjs` lists guides in five task groups. Add each guide to its group and link it from that group's overview page. `node --test scripts/docs/sidebar.test.mjs` from the repository root compares the sidebar with every file under `guides/` and checks group overview links. The root `pnpm test` includes this check.
+
+The pnpm patch for `lucode-starlight` reuses its recursive sidebar renderer in the mobile menu so nested groups remain accessible. It gives menu links and disclosure controls a minimum height of 44 pixels and lets pagination links wrap on narrow screens. After generating the site, the build checks that both the desktop sidebar and mobile drawer render every group and its guide links. Keep this check when updating the theme.
+
 A fenced `mermaid` code block renders to SVG at build time with [Pele](https://pele.run/). The rehype plugin in `diagrams/rehype.mjs` runs for Markdown and MDX through Astro's unified processor. Invalid diagrams fail the build with the page path, fence position, and Pele error. Diagram colors use Starlight theme tokens through `--pele-*` variables in `src/styles/diagrams.css`, so switching themes updates the SVG through CSS.
 
 Diagrams retain their measured label sizes. Wide diagrams scroll inside a keyboard-focusable frame, including on mobile. Prefer vertical layouts when a horizontal diagram would require extensive scrolling. `test/diagrams.test.ts` renders every diagram page in `src/content/docs/` through the same plugin during the docs build; it also checks parse failures and distinct SVG reference IDs for pages with multiple diagrams.

@@ -36,7 +36,7 @@ A detached start retains the selected Node binary, options, entry point, and lau
 
 ### Instances that systemd runs
 
-Lifecycle commands verify that the recorded unit owns the process. They use `systemctl stop --no-block` and `systemctl start` to preserve service management. Service starts use the service environment and the instance `.env`. The service user needs authorization to manage the unit. See [server deployment](/guides/run-the-orchestrator-on-a-server/).
+Lifecycle commands verify that the recorded unit owns the process. They use `systemctl stop --no-block` and `systemctl start` to preserve service management. Service starts use the service environment and the instance `.env`. The service user needs authorization to manage the unit. See [server deployment](/guides/host-usine-on-linux/).
 
 ## usine status
 
