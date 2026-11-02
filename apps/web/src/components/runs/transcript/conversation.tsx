@@ -136,6 +136,7 @@ const Reader = ({
             <ConversationViewport
               viewportRef={viewportRef}
               following={following}
+              revision={revision}
               onNavigate={navigate}
               onInteract={() => setPendingRestore(null)}
             >

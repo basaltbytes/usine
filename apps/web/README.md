@@ -276,6 +276,16 @@ To run the reader browser tests alone:
 pnpm --filter @usine/web exec vitest run src/components/runs/transcript/conversation.browser.test.tsx
 ```
 
+To run the wheel-resume test 100 consecutive times:
+
+```sh
+pnpm --filter @usine/web exec vitest run --project browser src/components/runs/transcript/conversation.browser.test.tsx -t 'resumes following when a wheel turn' --repeats 99
+```
+
+The wheel-resume test hovers the tool output before positioning the reader because Playwright can scroll the conversation to reveal the wheel target. It waits for the reader to be 100 pixels above the latest row and the nested output to be at its end before sending the wheel input, then checks that the reader resumes following new activity.
+
+The delayed-scroll regression delivers viewport movement several animation frames after wheel input. It checks that following resumes after that movement. Cancellation tests check that another interaction or transcript update prevents an earlier input from resuming following.
+
 To run the task list browser tests alone:
 
 ```sh
