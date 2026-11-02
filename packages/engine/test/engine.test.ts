@@ -336,7 +336,9 @@ describe("durable run engine", () => {
           );
           assert.strictEqual(listed[0]?.attempts.length, 1);
           assert.strictEqual(
-            Option.getOrUndefined(listed[0]?.step.result ?? Option.none())?.message,
+            Option.getOrUndefined(
+              (yield* reader.inspect(second.runId)).step.result ?? Option.none(),
+            )?.message,
             "listed result",
           );
           // `closedLimit` bounds closed Runs only, so the older waiting Run is still listed.

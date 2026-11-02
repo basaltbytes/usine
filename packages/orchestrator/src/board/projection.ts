@@ -1,3 +1,4 @@
+import type { ItemRunHistory } from "@usine/engine/run-reader";
 import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import {
   isSettledItemState,
@@ -23,7 +24,7 @@ import {
   ReadOnlyBoardLaneView,
   WritableBoardLaneView,
 } from "../operator/board.ts";
-import { type RunView } from "../operator/run.ts";
+import { type RunSummaryView } from "../operator/run.ts";
 import type { RunUsageView } from "../operator/usage.ts";
 import { payloadLabels, projectedItem, type ProjectedItem } from "./items.ts";
 import { taskCards } from "./tasks.ts";
@@ -96,7 +97,7 @@ const laneFor = (
 const runningLaneFor = Effect.fn("Board.runningLane")(function* (
   repository: ManagedRepo,
   view: BoardTaskView,
-  running: RunView,
+  running: RunSummaryView,
   lanes: ReadonlyArray<LaneDefinition>,
   runEvents: ReadonlyMap<RunId, Event>,
 ) {
@@ -154,11 +155,13 @@ export const projectBoard = Effect.fn("Board.project")(
     repository: ManagedRepo,
     repositoryLabels: ReadonlyArray<string>,
     storedItems: ReadonlyArray<ItemProjection>,
-    runs: ReadonlyArray<RunView>,
+    runs: ReadonlyArray<RunSummaryView>,
     cycleBlockedItems: ReadonlyArray<ItemKey> = [],
     itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>> = new Map(),
     runUsage: ReadonlyMap<RunId, RunUsageView> = new Map(),
     runEvents: ReadonlyMap<RunId, Event> = new Map(),
+    attentionRuns: ReadonlySet<RunId> = new Set(),
+    itemHistory: ReadonlyMap<ItemKey, ItemRunHistory> = new Map(),
   ): Effect.Effect<BoardView> =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ repository: repository.name });
@@ -181,7 +184,16 @@ export const projectBoard = Effect.fn("Board.project")(
         });
       }
       const lanes = effectiveLanes(repository, repositoryLabels);
-      const cards = taskCards(repository.name, items, runs, cycleBlockedItems, itemLoops, runUsage);
+      const cards = taskCards(
+        repository.name,
+        items,
+        runs,
+        cycleBlockedItems,
+        itemLoops,
+        runUsage,
+        attentionRuns,
+        itemHistory,
+      );
       yield* Effect.logDebug("Projected Task cards from linked Items", {
         repository: repository.name,
         items: items.length,

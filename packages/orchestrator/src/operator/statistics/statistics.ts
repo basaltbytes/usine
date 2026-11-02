@@ -10,11 +10,20 @@ import { CycleBudgets } from "@usine/engine/cycle-budget";
 import type { RunStoreError } from "@usine/engine/engine";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { RunReader, type RunSummary } from "@usine/engine/run-reader";
-import { Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
+import {
+  Array as EffectArray,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schema,
+} from "effect";
 import { type ProjectedItem, projectedItem } from "../../board/items.ts";
 import { taskCards } from "../../board/tasks.ts";
-import { runView } from "../projection.ts";
-import { RunUsageReader } from "../usage.ts";
+import { runSummaryView } from "../projection.ts";
+import { RunUsageReader, runUsageSource } from "../usage.ts";
 import { cacheStatistics } from "./cache.ts";
 import { readWorkerCapacity } from "./workers.ts";
 import { runStatisticsView } from "./runs.ts";
@@ -41,7 +50,9 @@ const makeStatistics = Effect.gen(function* () {
     Effect.forEach(
       runs,
       (summary) =>
-        usageReader.read(summary).pipe(Effect.map((read) => [summary.run.id, read] as const)),
+        usageReader
+          .read(runUsageSource(summary))
+          .pipe(Effect.map((read) => [summary.run.id, read] as const)),
       { concurrency: 4 },
     ).pipe(Effect.map((entries) => new Map(entries)));
 
@@ -83,11 +94,11 @@ const makeStatistics = Effect.gen(function* () {
       return [];
     }
     const history = yield* reader.forItems(items.map(({ itemKey }) => itemKey));
-    const summaries = new Map(history.map((summary) => [summary.run.id, summary]));
+    const summaries = EffectArray.groupBy(history, ({ itemKey }) => itemKey);
     const cards = taskCards(
       repository,
       items,
-      history.map((summary) => runView(summary, new Set(), new Map())),
+      history.map((summary) => runSummaryView(summary, new Set(), new Map())),
       [],
       new Map(),
       new Map(),
@@ -97,7 +108,13 @@ const makeStatistics = Effect.gen(function* () {
         const at = mergedAt.get(itemKey);
         return at === undefined ? [] : [at];
       });
-      const runs = view.runs.flatMap(({ id }) => summaries.get(id) ?? []);
+      const runs = view.items
+        .flatMap(({ itemKey }) => summaries[itemKey] ?? [])
+        .sort(
+          (a, b) =>
+            DateTime.toEpochMillis(a.run.openedAt) - DateTime.toEpochMillis(b.run.openedAt) ||
+            a.run.id.localeCompare(b.run.id),
+        );
       const [first] = merges;
       return first === undefined || runs.length === 0
         ? []

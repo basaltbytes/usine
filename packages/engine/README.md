@@ -188,6 +188,8 @@ pnpm --filter @usine/engine db:generate --name <migration_name>
 
 `localSqliteLayer(directory)` provides `RunDatabase` and the matching `SqlClient`. The `layer` and `observationLayer` functions in `/local-sqlite` accept that database layer as their second argument. Applications can build the connection once and pass its context to the engine and the configuration store; each package maintains its own migration ledger in the runtime file.
 
+Cached SQLite statements use external parent span references containing trace IDs and sampling state. This lets completed request spans and response bodies be collected while statements remain cached. SQL spans retain their request trace relationships and query attributes.
+
 ## Attention acknowledgements
 
 `AttentionAcknowledgements` from `@usine/engine/attention` records a dismissal by entry ID and content revision, with the configured operator login and time. Repeating the same dismissal preserves the first record. Undo deletes only that revision. The local runtime store persists these records and invalidates operator projections when they change. Run state, failure resolution, and cycle budgets stay unchanged.
@@ -219,3 +221,5 @@ Operator audit fields accept `OperatorActor`: a GitHub login or the reserved `lo
 `Submission.ciFailureHead` identifies CI fix events for queued-head rechecks. `Submission.ciPolicy` saves the loop's requirement with the event. A successful result with a verified CI handoff, or a harvested pushed PR under a required policy, ends the attempt in `AwaitingCi` and releases its worker. These open runs reserve no slot and start no fiber after restart. `RunEngine.awaitingCi()` reads the durable waits; `settleCi(runId, expectedHead, resolution)` atomically updates their run and attempt outcomes, preserves the session end time, and ignores stale observations. Operator cancel also cancels the waiting attempt.
 
 An admitted CI fix closes its source run as `HandedOff` with the fix run ID and failure reason. The source attempt also ends neutrally. A same-loop fix for the recorded failed head can pass cycle-budget admission while the source awaits CI, since its attempt has ended. Refused fixes and exhausted budgets leave the source failed.
+
+Polling run summaries omit task prompts, step results, attempt prompts, harvested comments, and agent personas from SQL selections. They extract only the pull request URL from a step result. Run and task detail use full snapshots. Board reads select current runs with SQL windows and aggregate historical counts, timing, loop states, and PR links; token attribution reads only run and attempt identities and terminal status. Recent closed-run lists apply their limits in SQL.

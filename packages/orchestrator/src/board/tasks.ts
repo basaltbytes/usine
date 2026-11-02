@@ -2,11 +2,17 @@ import { isSettledItemState } from "@usine/config/board";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
+import type { ItemRunHistory } from "@usine/engine/run-reader";
 import type { RunId } from "@usine/core/run";
 import { Array as EffectArray, Option, Order, Schema } from "effect";
-import { BoardItemLink, BoardPullRequestView, BoardTaskView } from "../operator/board.ts";
-import type { RunView } from "../operator/run.ts";
-import { type RunUsageView, taskUsage } from "../operator/usage.ts";
+import {
+  boardRunSummary,
+  BoardItemLink,
+  BoardPullRequestView,
+  BoardTaskView,
+} from "../operator/board.ts";
+import type { RunSummaryView } from "../operator/run.ts";
+import { type RunUsageView, taskUsage, taskHistoryUsage } from "../operator/usage.ts";
 import { type ProjectedItem, runNeedsAttention } from "./items.ts";
 
 const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString);
@@ -15,7 +21,7 @@ const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString);
 // key lookup.
 interface TaskItem {
   readonly item: ProjectedItem;
-  readonly runs: ReadonlyArray<RunView>;
+  readonly runs: ReadonlyArray<RunSummaryView>;
   readonly related: Set<TaskItem>;
 }
 
@@ -23,7 +29,7 @@ interface TaskItem {
 export interface TaskCard {
   readonly view: BoardTaskView;
   /** The Task's newest open Run once an Attempt has started, on the card's current Item. */
-  readonly running: RunView | undefined;
+  readonly running: RunSummaryView | undefined;
 }
 
 const itemLink = (item: ProjectedItem) =>
@@ -43,10 +49,12 @@ const itemLink = (item: ProjectedItem) =>
 export const taskCards = (
   repository: RepositoryName,
   items: ReadonlyArray<ProjectedItem>,
-  runs: ReadonlyArray<RunView>,
+  runs: ReadonlyArray<RunSummaryView>,
   cycleBlockedItems: ReadonlyArray<ItemKey>,
   itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>>,
   runUsage: ReadonlyMap<RunId, RunUsageView>,
+  attentionRuns: ReadonlySet<RunId> = new Set(),
+  itemHistory: ReadonlyMap<ItemKey, ItemRunHistory> = new Map(),
 ): ReadonlyArray<TaskCard> => {
   const runsByItem = EffectArray.groupBy(runs, ({ itemKey }) => itemKey);
   const nodes = items.map((item): TaskItem => ({
@@ -65,6 +73,7 @@ export const taskCards = (
     if (node.item.kind !== "issue") continue;
     const urls = [
       ...node.item.linkedPullRequests,
+      ...(itemHistory.get(node.item.itemKey)?.pullRequestUrls ?? []),
       ...node.runs.flatMap(({ pullRequestUrl }) =>
         pullRequestUrl === null ? [] : [pullRequestUrl],
       ),
@@ -128,21 +137,49 @@ export const taskCards = (
       active ??
       history[0];
     const runs = history.map(({ run }) => run).reverse();
+    const links = ordered.map(({ item }) => itemLink(item));
+    const totals = ordered.flatMap(({ item }) => itemHistory.get(item.itemKey) ?? []);
+    const loopHistory = totals
+      .flatMap(({ loops }) => loops)
+      .sort(
+        (a, b) =>
+          a.firstOpenedAt.localeCompare(b.firstOpenedAt) ||
+          a.firstRunId.localeCompare(b.firstRunId),
+      );
+    const latestLoops = new Map<LoopName, (typeof loopHistory)[number]>();
+    for (const loop of loopHistory) {
+      const before = latestLoops.get(loop.loop);
+      if (
+        before === undefined ||
+        loop.latestOpenedAt > before.latestOpenedAt ||
+        (loop.latestOpenedAt === before.latestOpenedAt && loop.latestRunId > before.latestRunId)
+      )
+        latestLoops.set(loop.loop, loop);
+    }
+    const summary = boardRunSummary(runs, preferred?.run ?? null, links, attentionRuns);
+    if (totals.length > 0) {
+      summary.runCount = totals.reduce((sum, item) => sum + item.runCount, 0);
+      summary.attemptCount = totals.reduce((sum, item) => sum + item.attemptCount, 0);
+      summary.loopStates = [...latestLoops.values()].map(({ loop, state }) => ({
+        loop,
+        state: state._tag,
+      }));
+    }
     const view = new BoardTaskView({
       ...itemLink(current),
       repository,
       title: origin.item.title,
       labels: current.labels,
-      items: ordered.map(({ item }) => itemLink(item)),
+      items: links,
       pullRequest,
-      runs,
+      ...summary,
       run: preferred?.run ?? null,
       needsYou:
         history.some(({ item, run }) => runNeedsAttention(run, isSettledItemState(item.state))) ||
         members.some(({ item }) => blocked.has(item.itemKey)),
       conflicting: current.conflicting,
       loops: [...new Set(ordered.flatMap(({ item }) => itemLoops.get(item.itemKey) ?? []))],
-      usage: taskUsage(runs, runUsage),
+      usage: totals.length === 0 ? taskUsage(runs, runUsage) : taskHistoryUsage(totals, runUsage),
     });
     cards.push({ view, running: active?.run.state === "Running" ? active.run : undefined });
   }

@@ -25,3 +25,11 @@ The trigger's lane also hid the label swap that shows progress. `start-dev` swap
 ## 2026-10-30: open runs extend the board selection
 
 The 500 highest-numbered stored items excluded older items even when they had waiting or running runs ([#719](https://github.com/basaltbytes/usine/issues/719)). The board now adds stored projections for every item with an open run before grouping tasks. Overview, task detail, and board moves share this selection. Historical reads remain limited to 500 items per repository; items with open runs do not consume that limit. Links join items only when both projections are selected, and each selected item appears once. When its last open run closes, an item outside the history window leaves the selection.
+
+## 2026-11-02: compact overview run history
+
+The board projection reads complete history to join items, place cards, and calculate usage. The overview serializes each card's selected run, total run and attempt counts, aggregate usage, and each loop's latest state. Additional summaries are limited to the latest activity, open runs, unresolved failures on open items, and CI handoffs that explain those runs. Routine closed history comes from task and run detail. The Run history submenu reads task detail when opened.
+
+The project run list includes every open run and the latest 50 closed runs across the instance. Board history does not expand that list. Needs attention still considers complete history for selected items, and every selected board item remains visible, including Done cards.
+
+Polling SQL selections exclude run and attempt prompts, step results, and attempt comments. Summary types contain only metadata, including a PR URL extracted from a result. SQL window queries select each item’s latest run alongside open runs, unresolved failures, unconfirmed stops, and their CI handoff sources. Separate aggregate reads preserve complete historical counts, duration, loop states, and links. Session usage reads retain only run and attempt identities and terminal status. Full snapshots are read for run and task detail.

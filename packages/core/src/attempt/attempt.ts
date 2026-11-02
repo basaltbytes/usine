@@ -173,7 +173,9 @@ export class AttemptWindow extends Schema.Class<AttemptWindow>("AttemptWindow")(
 }) {}
 
 /** Returns the Attempt's window, or `None` if it ended before end times were recorded. */
-export const windowOf = (attempt: Attempt): Option.Option<AttemptWindow> =>
+export const windowOf = (
+  attempt: Pick<Attempt, "id" | "outcome" | "startedAt" | "endedAt">,
+): Option.Option<AttemptWindow> =>
   Option.isSome(attempt.outcome) && Option.isNone(attempt.endedAt)
     ? Option.none()
     : Option.some(
@@ -249,7 +251,7 @@ export class ProviderRetry extends Schema.Class<ProviderRetry>("ProviderRetry")(
  */
 export const pendingProviderRetry = (
   state: RunState,
-  attempts: ReadonlyArray<Attempt>,
+  attempts: ReadonlyArray<Pick<Attempt, "number" | "outcome" | "endedAt">>,
 ): Option.Option<ProviderRetry> => {
   if (state._tag !== "Running") return Option.none();
   const last = attempts.at(-1);

@@ -135,14 +135,14 @@ const snapshot = (attempts: ReadonlyArray<Attempt>) =>
 const reviewRun = new RunSummary({
   itemKey,
   run: run(reviewRunId, "review-issue"),
-  step: step(reviewRunId),
+  pullRequestUrl: null,
   attempts: [review],
   resolvedFailureAttemptId: Option.none(),
   closedAt: Option.none(),
   approval: Option.none(),
   runAgain: Option.none(),
   repository,
-  task: AttemptTask.make("Review #247."),
+
   agent,
 });
 
@@ -227,24 +227,25 @@ const testLayer = (
     runForEvent: () => Effect.die("unused"),
     latestPoolRateLimits: () => Effect.succeed([]),
     inspect: () => Ref.get(current),
+    summary: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
     list: () => Effect.die("unused"),
     closed: () => Effect.die("unused"),
     closedSince: () => Effect.die("unused"),
+    board: () => Effect.die("unused"),
     forItems: () =>
       Ref.get(current).pipe(
         Effect.map((saved) => [
           new RunSummary({
             itemKey,
             run: saved.run,
-            step: saved.step,
+            pullRequestUrl: null,
             attempts: saved.attempts,
             resolvedFailureAttemptId: Option.none(),
             closedAt: Option.none(),
             approval: Option.none(),
             runAgain: Option.none(),
             repository,
-            task: saved.task,
             agent,
           }),
           reviewRun,

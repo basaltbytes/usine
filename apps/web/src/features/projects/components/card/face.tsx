@@ -1,3 +1,4 @@
+import { boardTaskRuns } from "@usine/orchestrator/operator";
 import { CiHandoffLine } from "~/components/runs/ci";
 import { RepositoryMark } from "~/components/repository-mark";
 import type { ProjectId } from "@usine/core/project";
@@ -49,7 +50,9 @@ export const CardFace = ({
   const failure = failedRun(item);
   const run = currentRun(item);
   const source =
-    run === null ? undefined : item.runs.find(({ handoff }) => handoff?.fixRunId === run.id);
+    run === null
+      ? undefined
+      : boardTaskRuns(item).find(({ handoff }) => handoff?.fixRunId === run.id);
   const actionError = action?.error?.message ?? null;
   const runAgainError = again?.error?.message ?? null;
   // If the stall is for the failure note's Run, the note shows it, with a suppression's action.

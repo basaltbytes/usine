@@ -7,6 +7,8 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
 import {
+  boardTaskRuns,
+  boardRunSummary,
   BoardItemLink,
   BoardTaskView,
   BoardView,
@@ -14,7 +16,7 @@ import {
   FactoryOverview,
   ProjectView,
   ReadyOverview,
-  RunView,
+  RunSummaryView,
   WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
@@ -35,29 +37,41 @@ const second = RepositoryName.make("board-test/api");
 const overview = () => {
   const [project] = boardOverview().projects;
   const ready = project?.board.lanes.find(
-    (lane) => lane._tag === "WritableBoardLane" && lane.items.some((item) => item.runs.length > 0),
+    (lane) =>
+      lane._tag === "WritableBoardLane" &&
+      lane.items.some((item) => boardTaskRuns(item).length > 0),
   );
-  const template = ready?.items.find((item) => item.runs.length > 0);
+  const template = ready?.items.find((item) => boardTaskRuns(item).length > 0);
   if (project === undefined || ready === undefined || template === undefined)
     throw new Error("Missing board fixture");
   const itemKey = ItemKey.make(`${second}:${template.number}`);
+  const items = template.items.map(
+    (item) =>
+      new BoardItemLink({
+        ...item,
+        itemKey,
+        title: "API task",
+        url: `https://github.com/${second}/issues/${item.number}`,
+      }),
+  );
   const card = new BoardTaskView({
     ...template,
     repository: second,
     itemKey,
     title: "API task",
-    items: template.items.map(
-      (item) =>
-        new BoardItemLink({
-          ...item,
-          itemKey,
-          title: "API task",
-          url: `https://github.com/${second}/issues/${item.number}`,
-        }),
-    ),
-    runs: template.runs.map(
-      (run) =>
-        new RunView({ ...run, repository: second, id: RunId.make(`api-${run.id}`), itemKey }),
+    items,
+    ...boardRunSummary(
+      boardTaskRuns(template).map(
+        (run) =>
+          new RunSummaryView({
+            ...run,
+            repository: second,
+            id: RunId.make(`api-${run.id}`),
+            itemKey,
+          }),
+      ),
+      null,
+      items,
     ),
     run: null,
     loops: [],

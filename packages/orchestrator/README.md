@@ -24,6 +24,8 @@ actors when present. Existing runs retain their original decision.
 
 `Operator.overview(instance)` keeps the latest polling and schedule failures visible after sibling work continues. Concurrent reads at one durable revision share a computation.
 
+GitHub poll failures identify the failed operation in logs and Needs attention. Invalid responses include the decode detail, limited to 500 characters. Logs also include structured `operation` and `detail` fields when the error provides them.
+
 Approval needs include the item's number, title, and GitHub link even when it has no board card. The overview reads those details from the stored item using the run's item key. Schedule runs and items without a readable stored projection have no item link.
 
 `Operator.statistics(instance, window)` and `Operator.runStatistics(instance, window)` cache their computed views in memory for up to five minutes, separately for `7d`, `30d`, and `all`. Concurrent requests for the same view and window share a computation. Each request checks the store's projection revision: run closure, retry, failure resolution, and close-time changes invalidate cached views, as do item and budget changes. Reloading the instance also invalidates them. If the revision record is missing, requests bypass the cache. Debug logs report cache hits and misses with the window.
@@ -47,6 +49,10 @@ A malformed item projection is quarantined and reported on the board and the nee
 `Operator.moveBoardItem(instance, move)` accepts authored label-backed lanes, adds the target lane's labels, and removes only labels the authored map owns, even with a stale snapshot or truncated label connection. Proposed lanes are read-only (`BoardLaneReadOnlyError`); define [`repos[].lanes`](https://docs.usine.dev/reference/configuration/usine-yaml/) and reload to enable moves. Every attempted label write, including an uncertain or partial failure, queues an item hint: the poller fetches the snapshot, places it, and evaluates its loops at once unless GitHub requested backoff.
 
 Board move rejection errors derive diagnostic messages from their repository, item, or lane fields. The server uses these messages in both rejection logs and HTTP responses.
+
+### Polling summaries
+
+`Operator.overview` and `Operator.desk` return `RunSummaryView` and `AttemptSummaryView` for project histories, board cards, and desk entries. These records retain state, actions, timing, and failure details. Read `Operator.detail` or `Operator.task` for task prompts and result messages; run detail also includes the event payload and transcript.
 
 ### Run detail
 
@@ -377,6 +383,8 @@ HTTP actions use the authenticated member for approvals, retries, interventions,
 
 Polling and statistics SQLite fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Local-worker tests that exercise Git hooks and executable files use the OS temporary directory.
 
+The CI monitor regression test keeps a persisted CI wait open across six simulated hours. It uses the real SQLite adapter and native tracing, and forces GC to verify that completed response bodies are collectable while statements remain cached.
+
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
 
 ## Idle upgrade waits
@@ -402,3 +410,7 @@ The operator API declares minimum route permissions and checks project scope bef
 Polling and repository hints reconcile persisted CI waits before fetching trigger input. Green applies the recorded label actions and settles the run; red submits one deduplicated event to the configured fix loop through its cycle budget, with bounded failure diagnostics. An accepted fix closes the source as `HandedOff`; `RunView.handoff` includes its reason, head, fix loop, and fix run ID. Task lists and boards show the continuing fix run. Handoffs are neutral in Needs attention and statistics. An unavailable fix loop, refused event, or exhausted budget leaves the source failed. A changed head cancels the old wait, and a timeout becomes a failed run in Needs attention.
 
 A recorded head with no checks and GitHub mergeability `CONFLICTING` starts the configured fix loop with instructions to merge the base branch and resolve conflicts. Mergeability `UNKNOWN` leaves missing checks pending. Conflict fixes inherit completion actions and use the same admission, approval, and cycle budget as fixes for failed checks. No agent or worker runs while checks remain pending. Loop CI policy is captured when an event matches. See [ADR 0033](../../docs/adr/0033-durable-ci-waits.md).
+
+The overview includes every open run and the latest 50 closed runs across the instance. Board cards include a run count, attempt count, aggregate usage, each loop’s latest state, and summaries needed for current actions, activity, and CI handoffs. Task detail and statistics use complete run history. Needs attention includes older unresolved failures.
+
+Board polling uses current runs selected in SQL and aggregate history, including links from older run results. Complete prompts, results, and harvested comments are read for detail views.

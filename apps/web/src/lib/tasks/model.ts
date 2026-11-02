@@ -1,11 +1,11 @@
+import { boardTaskRuns } from "@usine/orchestrator/operator";
 import { isSettledItemState } from "@usine/config/board";
-import type { LoopName } from "@usine/core/loop";
 import type { CommentKind } from "@usine/core/step/result";
 import type {
   BoardLaneView,
   BoardTaskView,
   FailureView,
-  RunView,
+  RunSummaryView,
   StalledItemView,
   TaskUsageView,
 } from "@usine/orchestrator/operator";
@@ -18,7 +18,7 @@ import { durationLabel, tokensLabel, usdLabel } from "~/lib/strings";
  * Attempt up to `now`. Returns `None` if no Attempt started or an ended Attempt has no recorded end.
  */
 export const attemptsDuration = (
-  run: Pick<RunView, "attempts">,
+  run: Pick<RunSummaryView, "attempts">,
   now: number,
 ): Option.Option<number> => {
   if (run.attempts.length === 0) return Option.none();
@@ -38,7 +38,7 @@ export const attemptsDuration = (
 
 /** Returns the failure of a Failed Run's latest Attempt, or `None` for any other Run. */
 export const runFailure = (
-  run: Pick<RunView, "state" | "attempts">,
+  run: Pick<RunSummaryView, "state" | "attempts">,
 ): Option.Option<FailureView> => {
   const outcome = run.attempts.at(-1)?.outcome;
   return run.state === "Failed" && outcome?._tag === "Failed"
@@ -49,7 +49,9 @@ export const runFailure = (
 /** Returns when a Run was last active: its close time if it is closed; otherwise its last Attempt's
  * end, that Attempt's start while it runs or if no end was recorded, or the Run's open time before
  * any Attempt. */
-export const runActivityAt = (run: Pick<RunView, "attempts" | "openedAt" | "closedAt">): string => {
+export const runActivityAt = (
+  run: Pick<RunSummaryView, "attempts" | "openedAt" | "closedAt">,
+): string => {
   const last = run.attempts.at(-1);
   return run.closedAt ?? last?.endedAt ?? last?.startedAt ?? run.openedAt;
 };
@@ -71,7 +73,7 @@ export const taskStall = (
 
 /** Returns the Run that a stall reason references, or `null` if the reason is only about the Loop
  * or the Item, such as a paused Loop, a used-up cycle budget, or a pending poll. */
-export const stallRun = ({ reason }: Pick<StalledItemView, "reason">): RunView | null =>
+export const stallRun = ({ reason }: Pick<StalledItemView, "reason">): RunSummaryView | null =>
   "run" in reason ? reason.run : null;
 
 /** Returns the number in the Task page URL, which is the originating item's number. */
@@ -83,19 +85,19 @@ export const taskNumber = (task: BoardTaskView): string => String(cardIdentity(t
  */
 type TaskStatus =
   /** `run` has ended its session and waits for checks. */
-  | { readonly _tag: "AwaitingCi"; readonly run: RunView }
+  | { readonly _tag: "AwaitingCi"; readonly run: RunSummaryView }
   /** `run` has a running attempt. */
-  | { readonly _tag: "Running"; readonly run: RunView }
+  | { readonly _tag: "Running"; readonly run: RunSummaryView }
   /** `run` is waiting for approval. */
-  | { readonly _tag: "AwaitingApproval"; readonly run: RunView }
+  | { readonly _tag: "AwaitingApproval"; readonly run: RunSummaryView }
   /** `run` is pending or queued, and the desk has no reason for it yet. */
-  | { readonly _tag: "Queued"; readonly run: RunView }
+  | { readonly _tag: "Queued"; readonly run: RunSummaryView }
   /**
    * A Loop's trigger matches one of the Task's Items with no running Attempt, and `stall` is the
    * first stall in desk order that keeps the work in flight (see `keepsInFlight`). `run` is the Run
    * the reason references, else the open pending or queued Run, else the last Run.
    */
-  | { readonly _tag: "Stalled"; readonly stall: StalledItemView; readonly run: RunView }
+  | { readonly _tag: "Stalled"; readonly stall: StalledItemView; readonly run: RunSummaryView }
   /**
    * A Loop's trigger matches one of the Task's Items, but no Run is open and no stall needs the
    * operator: the last Run closed on the unchanged Item, the next poll handles it, the Loop is
@@ -108,13 +110,13 @@ type TaskStatus =
   /** The current Item is merged or closed and no Run is open. */
   | { readonly _tag: "Done" }
   /** Nothing is open, stalled, or needs the operator; the status is the last Run's outcome. */
-  | { readonly _tag: "Ended"; readonly run: RunView };
+  | { readonly _tag: "Ended"; readonly run: RunSummaryView };
 
 /** A Tasks list row for a Task that usine ran at least once. */
 export interface TaskRow {
   readonly task: BoardTaskView;
   /** The Task's latest Run; the Status column shows its last activity time. */
-  readonly last: RunView;
+  readonly last: RunSummaryView;
   readonly status: TaskStatus;
 }
 
@@ -139,9 +141,9 @@ const keepsInFlight = ({ reason }: StalledItemView): boolean =>
   });
 
 const newestIn = (
-  runs: ReadonlyArray<RunView>,
-  ...states: ReadonlyArray<RunView["state"]>
-): RunView | undefined => [...runs].reverse().find(({ state }) => states.includes(state));
+  runs: ReadonlyArray<RunSummaryView>,
+  ...states: ReadonlyArray<RunSummaryView["state"]>
+): RunSummaryView | undefined => [...runs].reverse().find(({ state }) => states.includes(state));
 
 /**
  * Returns the first status that applies: a running Run, a Run waiting for approval, a pending or
@@ -151,16 +153,17 @@ const newestIn = (
  */
 const taskStatus = (
   task: BoardTaskView,
-  last: RunView,
+  last: RunSummaryView,
   stalled: ReadonlyArray<StalledItemView>,
 ): TaskStatus => {
-  const running = newestIn(task.runs, "Running");
+  const runs = boardTaskRuns(task);
+  const running = newestIn(runs, "Running");
   if (running !== undefined) return { _tag: "Running", run: running };
-  const ci = newestIn(task.runs, "AwaitingCi");
+  const ci = newestIn(runs, "AwaitingCi");
   if (ci !== undefined) return { _tag: "AwaitingCi", run: ci };
-  const waiting = newestIn(task.runs, "Waiting");
+  const waiting = newestIn(runs, "Waiting");
   if (waiting !== undefined) return { _tag: "AwaitingApproval", run: waiting };
-  const queued = newestIn(task.runs, "Pending", "Queued");
+  const queued = newestIn(runs, "Pending", "Queued");
   if (queued !== undefined) {
     // The desk has one stall per Loop and Item, and a stall for an older closed Run on another Item
     // can come first; only the stall that references the queued Run explains it.
@@ -216,7 +219,7 @@ export const taskRows = (
   lanes
     .flatMap(({ items }) => items)
     .flatMap((task) => {
-      const last = task.runs.at(-1);
+      const last = boardTaskRuns(task).at(-1);
       return last === undefined ? [] : [{ task, last, status: taskStatus(task, last, stalled) }];
     })
     .map((row) => ({ row, place: rowPlace(row) }))
@@ -298,7 +301,7 @@ export interface TaskTotals {
 export const taskTotals = (rows: ReadonlyArray<TaskRow>, now: number): TaskTotals => {
   const costs = rows.flatMap(({ task }) => (task.usage.cost === null ? [] : [task.usage.cost]));
   return {
-    runs: rows.reduce((sum, { task }) => sum + task.runs.length, 0),
+    runs: rows.reduce((sum, { task }) => sum + task.runCount, 0),
     durationMillis: rows.reduce((sum, { task }) => sum + taskDuration(task.usage, now), 0),
     unmeasured: rows.reduce((sum, { task }) => sum + task.usage.unmeasured, 0),
     tokens: rows.reduce((sum, { task }) => sum + task.usage.tokens, 0),
@@ -346,20 +349,6 @@ export const totalsFigures = (totals: TaskTotals): ReadonlyArray<TotalsFigure> =
         },
       ]),
 ];
-
-/** A Loop that ran on a Task, with the state of its last Run there. */
-export interface TaskLoop {
-  readonly loop: LoopName;
-  readonly state: RunView["state"];
-}
-
-/** Returns each Loop that ran on the Task once, in first-run order, with the state of its last Run. */
-export const taskLoops = (task: Pick<BoardTaskView, "runs">): ReadonlyArray<TaskLoop> => {
-  // A Map keeps the order of first insertion when a later Run of the same Loop replaces the state.
-  const states = new Map<LoopName, RunView["state"]>();
-  for (const { loop, state } of task.runs) states.set(loop, state);
-  return [...states].map(([loop, state]) => ({ loop, state }));
-};
 
 export const commentKindLabel = (kind: CommentKind): string => {
   switch (kind) {

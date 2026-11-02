@@ -5,7 +5,7 @@ import { type ItemProjection, ItemProjectionReader } from "@usine/engine/item-pr
 import { IssuePayload, PullRequestPayload } from "@usine/github/polling";
 import { Effect, Option, Result, Schema } from "effect";
 import { BoardProjectionError } from "../operator/board.ts";
-import type { RunView } from "../operator/run.ts";
+import type { RunSummaryView } from "../operator/run.ts";
 
 export interface ProjectedItem {
   readonly itemKey: ItemKey;
@@ -117,5 +117,5 @@ export const settledItemState = Effect.fn("settledItemState")(function* (itemKey
  * Returns whether `run` needs the operator: it waits for approval, or its failure is unresolved and
  * `itemSettled` is false. An Item is settled when it's closed, merged, or gone from GitHub.
  */
-export const runNeedsAttention = (run: RunView, itemSettled: boolean): boolean =>
+export const runNeedsAttention = (run: RunSummaryView, itemSettled: boolean): boolean =>
   run.canApprove || (run.canResolveFailure && !itemSettled);

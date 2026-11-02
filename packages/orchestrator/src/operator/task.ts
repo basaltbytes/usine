@@ -11,7 +11,7 @@ import type { RunStoreError } from "@usine/engine/engine";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
-import { type RunSummary, RunReader } from "@usine/engine/run-reader";
+import { type RunSnapshot, RunReader } from "@usine/engine/run-reader";
 import {
   Array as EffectArray,
   Context,
@@ -33,7 +33,7 @@ import {
   BoardLaneId,
   BoardProjectNotFoundError,
 } from "./board.ts";
-import { readRunningEvents, runView, workerAccesses } from "./projection.ts";
+import { readRunningEvents, runSummaryView, runView, workerAccesses } from "./projection.ts";
 import { RunView } from "./run.ts";
 
 /**
@@ -132,7 +132,7 @@ const isoOrNull = Option.match({ onNone: () => null, onSome: DateTime.formatIso 
  * Returns the comments and reviews that a Run's Attempts posted, newest first and without
  * duplicates.
  */
-const harvestedComments = (summary: RunSummary): ReadonlyArray<TaskCommentView> => {
+const harvestedComments = (summary: RunSnapshot): ReadonlyArray<TaskCommentView> => {
   const view = (comment: Comment, endedAt: Option.Option<DateTime.Utc>) =>
     new TaskCommentView({
       runId: summary.run.id,
@@ -207,7 +207,7 @@ const makeTaskReader = Effect.gen(function* () {
         onSome: ({ labels }) => labels.map(({ name }) => name),
       }),
       stored,
-      summaries.map((summary) => runView(summary, paused, access, waits)),
+      summaries.map((summary) => runSummaryView(summary, paused, access, waits)),
       asks.map(({ itemKey }) => itemKey),
       new Map(),
       new Map(),
@@ -271,9 +271,12 @@ const makeTaskReader = Effect.gen(function* () {
     if (first === undefined) {
       return yield* new BoardItemNotFoundError({ repository: managed.name, item: number });
     }
-    const taskRuns = new Set(task.runs.map(({ id }) => id));
-    const comments = summaries
-      .filter(({ run }) => taskRuns.has(run.id))
+    const detailRuns = yield* Effect.forEach(
+      summaries.filter(({ itemKey }) => memberKeys.has(itemKey)),
+      ({ run }) => reader.inspect(run.id),
+      { concurrency: 4 },
+    );
+    const comments = detailRuns
       .sort(
         (a, b) =>
           DateTime.toEpochMillis(b.run.openedAt) - DateTime.toEpochMillis(a.run.openedAt) ||
@@ -288,7 +291,9 @@ const makeTaskReader = Effect.gen(function* () {
       lane: new TaskLaneView({ id: lane.id, name: lane.name }),
       needsYou: task.needsYou,
       items: [first, ...rest],
-      runs: [...task.runs].reverse(),
+      runs: detailRuns
+        .map((summary) => runView(summary, paused, access, waits))
+        .sort((a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id)),
       comments,
     });
     yield* Effect.logDebug("Read a Task", {

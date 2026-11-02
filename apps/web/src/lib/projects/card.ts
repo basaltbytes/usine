@@ -3,23 +3,23 @@ import type {
   BoardLaneView,
   BoardTaskView,
   LabelView,
-  RunView,
+  RunSummaryView,
 } from "@usine/orchestrator/operator";
 import { failedRun, failureNeedsYou } from "~/lib/projects/failure";
 
 export type LabelCatalog = ReadonlyMap<string, LabelView>;
 
-const OPEN_STATES = new Set<RunView["state"]>(OPEN_STATE_TAGS);
+const OPEN_STATES = new Set<RunSummaryView["state"]>(OPEN_STATE_TAGS);
 
 /** Returns the card's Run: an open Run or a failed Run that needs the operator, else `null`. */
-export const currentRun = (item: BoardTaskView): RunView | null => {
+export const currentRun = (item: BoardTaskView): RunSummaryView | null => {
   const run = item.run;
   return run !== null && (OPEN_STATES.has(run.state) || failureNeedsYou(item, run)) ? run : null;
 };
 
 /** Returns when the Run opened while it waits, when the current Attempt started while it runs, or
  * when the last Attempt ended once it failed. Returns `null` if that time is not recorded. */
-export const runLineSince = (run: RunView): string | null => {
+export const runLineSince = (run: RunSummaryView): string | null => {
   const last = run.attempts.at(-1);
   switch (run.state) {
     case "Pending":

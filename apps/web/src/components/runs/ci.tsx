@@ -1,8 +1,8 @@
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunSummaryView } from "@usine/orchestrator/operator";
 import { Link } from "@tanstack/react-router";
 import { ciFailedOn, continuesTheWork, waitingForCi } from "~/lib/runs/strings";
 
-type CiWaitLineProps = { readonly run: RunView };
+type CiWaitLineProps = { readonly run: RunSummaryView };
 
 export const CiWaitLine = ({ run }: CiWaitLineProps) =>
   run.ciWait === null ? null : (

@@ -2,9 +2,9 @@ import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { GitHubLabelName } from "@usine/config/label";
-import { LaneItemState, LaneName, LaneSource } from "@usine/config/board";
+import { isSettledItemState, LaneItemState, LaneName, LaneSource } from "@usine/config/board";
 import { Schema } from "effect";
-import { RunView } from "./run.ts";
+import { RunStateTag, RunSummaryView } from "./run.ts";
 import { TaskUsageView } from "./usage.ts";
 
 /** The ID of a lane on a Project's Board. */
@@ -73,13 +73,19 @@ export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestra
      * there is neither.
      */
     pullRequest: Schema.NullOr(BoardPullRequestView),
-    /** Every saved Run for the visible Items, earliest first. */
-    runs: Schema.Array(RunView),
+    /** The number of saved runs across the task's items. */
+    runCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    /** The number of attempts across every saved run. */
+    attemptCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    /** Additional runs needed for current actions, latest activity, and CI handoffs. */
+    runContext: Schema.Array(RunSummaryView),
+    /** Each loop in first-run order, with its latest state. */
+    loopStates: Schema.Array(Schema.Struct({ loop: LoopName, state: RunStateTag })),
     /**
      * The newest Run that needs the operator, else the open Run, else the newest Run, or null if
      * there are no Runs. A failed Run on a closed or merged Item doesn't need the operator.
      */
-    run: Schema.NullOr(RunView),
+    run: Schema.NullOr(RunSummaryView),
     /** Whether a run or cycle-budget ask on the task needs operator attention. */
     needsYou: Schema.Boolean,
     /** Whether the current Item is an open pull request whose branch conflicts with its base. */
@@ -89,10 +95,58 @@ export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestra
      * Item order and then Loop order.
      */
     loops: Schema.Array(LoopName),
-    /** The summed Attempt time, tokens, and cost of `runs`. */
+    /** The summed attempt time, tokens, and cost across every saved run. */
     usage: TaskUsageView,
   },
 ) {}
+
+/** Returns the retained card summaries in run-opening order. Full history is on task detail. */
+export const boardTaskRuns = (
+  task: Pick<BoardTaskView, "run" | "runContext">,
+): ReadonlyArray<RunSummaryView> =>
+  [...task.runContext, ...(task.run === null ? [] : [task.run])].sort(
+    (a, b) => a.openedAt.localeCompare(b.openedAt) || a.id.localeCompare(b.id),
+  );
+
+/** Summarizes task history while retaining runs that affect current actions and status. */
+export const boardRunSummary = (
+  runs: ReadonlyArray<RunSummaryView>,
+  preferred: RunSummaryView | null,
+  items: ReadonlyArray<BoardItemLink>,
+  attentionRuns: ReadonlySet<RunSummaryView["id"]> = new Set(),
+) => {
+  const settled = new Set(
+    items.filter(({ state }) => isSettledItemState(state)).map(({ itemKey }) => itemKey),
+  );
+  const latest = runs.at(-1);
+  const retained = new Map(
+    runs
+      .filter(
+        (run) =>
+          attentionRuns.has(run.id) ||
+          run.id === latest?.id ||
+          run.canCancel ||
+          (run.canResolveFailure && !settled.has(run.itemKey)),
+      )
+      .map((run) => [run.id, run]),
+  );
+  if (preferred !== null) retained.set(preferred.id, preferred);
+  const newestFirst = [...runs].reverse();
+  const contextualRuns = [...retained.values()];
+  for (const run of contextualRuns) {
+    const source = newestFirst.find(({ handoff }) => handoff?.fixRunId === run.id);
+    if (source !== undefined) retained.set(source.id, source);
+  }
+  const states = new Map<LoopName, RunStateTag>();
+  for (const { loop, state } of runs) states.set(loop, state);
+  return {
+    run: runs.find(({ id }) => id === preferred?.id) ?? preferred,
+    runCount: runs.length,
+    attemptCount: runs.reduce((count, run) => count + run.attempts.length, 0),
+    runContext: [...retained.values()].filter(({ id }) => id !== preferred?.id),
+    loopStates: [...states].map(([loop, state]) => ({ loop, state })),
+  };
+};
 
 const BoardLaneViewFields = {
   id: BoardLaneId,

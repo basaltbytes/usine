@@ -369,3 +369,7 @@ The run header, drawer, and board card show **Waiting for CI** as a link to the 
 After failed CI starts a fix run, the source run shows a neutral handoff with a link to the continuing run. Task lists and board cards show the fix run's status and link. Only failures without an accepted fix request operator attention.
 
 The run page lists **Prompt received by** disclosures in each attempt's details. Each disclosure shows the exact initial prompt sent to that child, including the rendered loop task and supplemental parent context. Older transcripts omit the disclosure.
+
+The overview and desk polling queries use run and attempt summaries. Run and task detail queries provide task prompts and result text. Board and stalled-item **Run again** actions fetch run detail on demand before submitting the saved task and agent.
+
+Board cards use compact run summaries and aggregate counts and usage. The task list retains each loop’s latest state and totals across full task history. Opening a card’s **Run history** submenu loads the complete run list from task detail.

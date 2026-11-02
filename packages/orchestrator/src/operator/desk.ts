@@ -37,11 +37,11 @@ import {
   ProvisioningPauseView,
   provisioningPauseView,
 } from "./machines.ts";
-import { AttemptView } from "./attempt.ts";
+import { AttemptSummaryView } from "./attempt.ts";
 import { BoardItemLink } from "./board.ts";
 import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration/view.ts";
-import { runView, workerAccesses } from "./projection.ts";
-import { RunView, UnconfirmedStopView } from "./run.ts";
+import { runSummaryView, workerAccesses } from "./projection.ts";
+import { RunSummaryView, UnconfirmedStopView } from "./run.ts";
 
 /** The number of newest transcript rows the desk reads per running Attempt. */
 const RECENT_TRANSCRIPT_ROWS = 200;
@@ -101,9 +101,9 @@ export class RunningAttemptView extends Schema.Class<RunningAttemptView>(
   "@usine/orchestrator/RunningAttemptView",
 )({
   /** The run whose lifecycle state explains this entry. */
-  run: RunView,
+  run: RunSummaryView,
   /** The open attempt currently running on a worker. */
-  attempt: AttemptView,
+  attempt: AttemptSummaryView,
   /**
    * The Run's Item as its Board card links it, or null for a schedule Run or an Item the desk
    * didn't read.
@@ -126,7 +126,7 @@ export class SuppressedForOperatorView extends Schema.TaggedClass<SuppressedForO
   "@usine/orchestrator/SuppressedForOperatorView",
 )("SuppressedForOperator", {
   /** The run whose lifecycle state explains this entry. */
-  run: RunView,
+  run: RunSummaryView,
 }) {}
 
 /**
@@ -137,7 +137,7 @@ export class ClosedUnchangedView extends Schema.TaggedClass<ClosedUnchangedView>
   "@usine/orchestrator/ClosedUnchangedView",
 )("ClosedUnchanged", {
   /** The run whose lifecycle state explains this entry. */
-  run: RunView,
+  run: RunSummaryView,
 }) {}
 
 /** `run` failed on the Item's current state and waits for the operator to retry it. */
@@ -145,7 +145,7 @@ export class RunFailedView extends Schema.TaggedClass<RunFailedView>(
   "@usine/orchestrator/RunFailedView",
 )("RunFailed", {
   /** The run whose lifecycle state explains this entry. */
-  run: RunView,
+  run: RunSummaryView,
 }) {}
 
 /** The Loop is paused, so its trigger opens no Run. */
@@ -166,7 +166,7 @@ export class AwaitingApprovalView extends Schema.TaggedClass<AwaitingApprovalVie
   "@usine/orchestrator/AwaitingApprovalView",
 )("AwaitingApproval", {
   /** The run whose lifecycle state explains this entry. */
-  run: RunView,
+  run: RunSummaryView,
 }) {}
 
 /** `run` waits for a free Worker slot. */
@@ -174,7 +174,7 @@ export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>
   "@usine/orchestrator/QueuedForWorkerView",
 )("QueuedForWorker", {
   /** The run whose lifecycle state explains this entry. */
-  run: RunView,
+  run: RunSummaryView,
   /**
    * The fewest Runs that take a Worker slot before `run`, or null if the scheduler doesn't
    * queue `run`: it hasn't asked for a slot yet, or this process runs no Attempts.
@@ -197,7 +197,7 @@ export class WaitingForStopView extends Schema.TaggedClass<WaitingForStopView>(
   "@usine/orchestrator/WaitingForStopView",
 )("WaitingForStop", {
   /** The run whose lifecycle state explains this entry. */
-  run: RunView,
+  run: RunSummaryView,
   /** The unconfirmed worker stop that prevents another attempt. */
   stop: UnconfirmedStopView,
 }) {}
@@ -206,7 +206,7 @@ export class WaitingForStopView extends Schema.TaggedClass<WaitingForStopView>(
 export class WaitingForUpgradeView extends Schema.TaggedClass<WaitingForUpgradeView>(
   "@usine/orchestrator/WaitingForUpgradeView",
 )("WaitingForUpgrade", {
-  run: RunView,
+  run: RunSummaryView,
   wait: UpgradeWait,
 }) {}
 
@@ -249,7 +249,7 @@ export class StalledItemView extends Schema.Class<StalledItemView>(
 export class ClosedRunView extends Schema.Class<ClosedRunView>("@usine/orchestrator/ClosedRunView")(
   {
     /** The run whose lifecycle state explains this entry. */
-    run: RunView,
+    run: RunSummaryView,
     /**
      * The Run's Item as its Board card links it, or null for a schedule Run or an Item the desk
      * didn't read.
@@ -319,15 +319,15 @@ export class DeskView extends Schema.Class<DeskView>("@usine/orchestrator/DeskVi
 /** The desk's facts about one Loop on one matched Item. */
 interface StallFacts {
   /** The Loop's Runs on the Item, newest first. */
-  readonly runs: ReadonlyArray<RunView>;
+  readonly runs: ReadonlyArray<RunSummaryView>;
   readonly sighting: Option.Option<LoopSighting>;
   readonly paused: boolean;
   /** The Item's open cycle-budget Ask. */
   readonly ask: Option.Option<CycleBudgetAsk>;
   /** The scheduler's captured priority, lane, and queue position for each run. */
-  readonly queue: ReadonlyMap<RunView["id"], QueuedRun>;
+  readonly queue: ReadonlyMap<RunSummaryView["id"], QueuedRun>;
   /** The machine being created for each Run's next Attempt. */
-  readonly creating: ReadonlyMap<RunView["id"], MachineView>;
+  readonly creating: ReadonlyMap<RunSummaryView["id"], MachineView>;
   /** The Attempt on the Item whose parent task isn't confirmed stopped, for the Loop's open Run. */
   readonly stop: Option.Option<UnconfirmedStopView>;
 }
@@ -371,7 +371,8 @@ const stallReason = ({
     }
   }
   if (paused) return Option.some(new LoopPausedView());
-  const runOf = (runId: RunView["id"]) => Option.fromNullishOr(runs.find(({ id }) => id === runId));
+  const runOf = (runId: RunSummaryView["id"]) =>
+    Option.fromNullishOr(runs.find(({ id }) => id === runId));
   const suppressing = Option.flatMap(
     Option.flatMap(sighting, ({ suppressedBy }) => suppressedBy),
     runOf,
@@ -503,7 +504,7 @@ const standingCheck = (preflight: WorkerPreflight): Option.Option<PreflightCheck
  * Returns when a closed Run closed. The fallback (the last Attempt's end or start, else the opening
  * time) only covers the nullable field.
  */
-const closedAt = (run: RunView): string => {
+const closedAt = (run: RunSummaryView): string => {
   const last = run.attempts.at(-1);
   return run.closedAt ?? last?.endedAt ?? last?.startedAt ?? run.openedAt;
 };
@@ -533,7 +534,7 @@ const makeDesk = Effect.gen(function* () {
   });
 
   const recentActivity = Effect.fn("Operator.desk.recentActivity")(function* (
-    attempt: AttemptView,
+    attempt: AttemptSummaryView,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId: attempt.id });
     const [entries, worker] = yield* Effect.all(
@@ -636,7 +637,7 @@ const makeDesk = Effect.gen(function* () {
     const runs = new Map(
       [...summaries, ...history].map((summary) => [
         summary.run.id,
-        runView(summary, paused, access, waits, upgrade),
+        runSummaryView(summary, paused, access, waits, upgrade),
       ]),
     );
     const newestFirst = [...runs.values()].sort(
@@ -736,7 +737,7 @@ const makeDesk = Effect.gen(function* () {
     const lastOutcomes = closed
       .filter((summary) => visible(summary.repository) && !replacedBeforeStart(summary))
       .map((summary) => {
-        const run = runView(summary, paused, access, waits, upgrade);
+        const run = runSummaryView(summary, paused, access, waits, upgrade);
         return new ClosedRunView({
           run,
           item: links.get(run.itemKey) ?? null,

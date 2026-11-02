@@ -1,4 +1,6 @@
 import { assert, it } from "@effect/vitest";
+import { setImmediate } from "node:timers/promises";
+import { queryObjects } from "node:v8";
 import { NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
@@ -11,7 +13,6 @@ import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { runView } from "../src/operator/projection.ts";
 import { runNeedsAttention } from "../src/board/items.ts";
-import { RunSummary } from "@usine/engine/run-reader";
 import { CiPolicy } from "@usine/core/ci";
 import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { DedupKey } from "@usine/core/event";
@@ -46,6 +47,7 @@ import {
   Schedule,
   Schema,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
@@ -238,6 +240,50 @@ const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number,
   return accepted.runId;
 });
 
+it.effect("polling an open CI wait releases response bodies across six simulated hours", () =>
+  Effect.gen(function* () {
+    class ResponseBody {
+      readonly json: string;
+
+      constructor(json: string) {
+        this.json = json;
+      }
+    }
+
+    const now = yield* TestClock.withLive(DateTime.now);
+    yield* TestClock.setTime(DateTime.toEpochMillis(now));
+    const setup = yield* scenario(8 * 60 * 60);
+    yield* Effect.gen(function* () {
+      const runId = yield* TestClock.withLive(openWait(setup.timeoutSeconds));
+      const engine = yield* RunEngine;
+      const monitor = yield* CiMonitor;
+      const context = yield* Effect.context<never>();
+      const poll = monitor.reconcile(instance, Option.none()).pipe(
+        Effect.andThen(engine.inspect(runId)),
+        Effect.map(
+          (snapshot) => new ResponseBody(JSON.stringify(runView(snapshot, new Set(), new Map()))),
+        ),
+        Effect.withSpan("http.request"),
+        Effect.asVoid,
+        Effect.provideContext(context),
+      );
+      for (let hour = 0; hour <= 6; hour++) {
+        for (let request = 0; request < 8; request++) {
+          yield* Effect.promise(() => Effect.runPromise(poll));
+        }
+        yield* Effect.promise(() => setImmediate());
+        queryObjects(ResponseBody, { format: "count" });
+        yield* Effect.promise(() => setImmediate());
+        assert.strictEqual(queryObjects(ResponseBody, { format: "count" }), 0);
+        assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+        if (hour < 6) yield* TestClock.adjust("1 hour");
+      }
+    }).pipe(Effect.provide(setup.runtime));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.live("green CI observed after the deadline applies the recorded labels once", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -283,10 +329,7 @@ it.live("a conflicting head without checks starts one fix before the CI deadline
         yield* engine.drain();
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
-        assert.strictEqual(
-          runNeedsAttention(runView(new RunSummary(source), new Set(), new Map()), false),
-          false,
-        );
+        assert.strictEqual(runNeedsAttention(runView(source, new Set(), new Map()), false), false);
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
@@ -321,7 +364,7 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
         assert.strictEqual(settled.run.state.fixLoop, loop.name);
         const fix = yield* engine.inspect(settled.run.state.fixRunId);
         assert.strictEqual(fix.run.loop, loop.name);
-        const projected = runView(new RunSummary(settled), new Set(), new Map());
+        const projected = runView(settled, new Set(), new Map());
         assert.strictEqual(runNeedsAttention(projected, false), false);
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
         yield* engine.drain();
@@ -503,7 +546,7 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
         yield* (yield* CiMonitor).reconcile(limited, Option.none());
         const source = yield* (yield* RunEngine).inspect(runId);
         assert.strictEqual(source.run.state._tag, "Failed");
-        const projected = runView(new RunSummary(source), new Set(), new Map());
+        const projected = runView(source, new Set(), new Map());
         assert.strictEqual(runNeedsAttention(projected, false), true);
         assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);

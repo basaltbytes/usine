@@ -6,9 +6,13 @@ import { AttemptFailure } from "@usine/core/attempt/failure";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { LoopName } from "@usine/core/loop";
 import * as RunState from "@usine/core/run/state";
-import { PullRequest } from "@usine/core/step/result";
 import { SshDestination, type WorkerName } from "@usine/core/worker";
-import { type RunSnapshot, type RunSummary, RunReader } from "@usine/engine/run-reader";
+import {
+  type RunSnapshot,
+  type RunSummary,
+  RunReader,
+  summarizeRun,
+} from "@usine/engine/run-reader";
 import type { UpgradeDrain, RunStoreError } from "@usine/engine/engine";
 import {
   type TranscriptEntry,
@@ -18,6 +22,7 @@ import {
 import { DateTime, Effect, Match, Option } from "effect";
 import {
   AgentFailureView,
+  AttemptSummaryView,
   AttemptView,
   AwaitingCiAttemptView,
   HandedOffAttemptView,
@@ -47,7 +52,7 @@ import {
   TranscriptEventView,
 } from "./transcript.ts";
 import type { MachineQuotaWait } from "./machines.ts";
-import { ApprovalView, RunDurationView, RunView } from "./run.ts";
+import { ApprovalView, RunDurationView, RunSummaryView, RunView } from "./run.ts";
 
 /** The number of newest rows loaded per Attempt when a drawer opens. */
 const COLD_TRANSCRIPT_LIMIT = 500;
@@ -112,17 +117,16 @@ const workerAccess = (worker: ConfigWorker): WorkerAccess => {
 export const workerAccesses = (workers: ReadonlyArray<ConfigWorker>): WorkerAccesses =>
   new Map(workers.map((worker) => [worker.name, workerAccess(worker)]));
 
-const attemptView = (
-  attempt: RunSnapshot["attempts"][number],
+const attemptSummaryView = (
+  attempt: RunSummary["attempts"][number],
   workers: WorkerAccesses,
-): AttemptView => {
-  return new AttemptView({
+): AttemptSummaryView => {
+  return new AttemptSummaryView({
     id: attempt.id,
     number: attempt.number,
     worker: attempt.worker,
     workerAccess: workers.get(attempt.worker) ?? null,
     brain: attempt.brain,
-    task: attempt.task,
     agent: attempt.agent,
     operatorIntervened: attempt.operatorIntervened,
     startedAt: DateTime.formatIso(attempt.startedAt),
@@ -218,19 +222,15 @@ export const readRunningEvents = Effect.fn("Operator.readRunningEvents")(functio
  * Returns the operator's view of a saved Run. `pausedLoops` gives the paused Loops and `workers`
  * how each Attempt's Worker is accessed.
  */
-export const runView = (
+export const runSummaryView = (
   snapshot: RunSummary,
   pausedLoops: ReadonlySet<LoopName>,
   workers: WorkerAccesses,
   waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
   upgrade: UpgradeDrain | null = null,
-): RunView => {
+): RunSummaryView => {
   const actions = RunState.operatorActions(snapshot.run.state);
-  const result = Option.getOrNull(snapshot.step.result);
-  const pullRequest = result?.facts.find(
-    (fact): fact is PullRequest => fact._tag === "PullRequest",
-  );
-  return new RunView({
+  return new RunSummaryView({
     id: snapshot.run.id,
     itemKey: snapshot.itemKey,
     loop: snapshot.run.loop,
@@ -247,8 +247,7 @@ export const runView = (
     machineWait: actions.canCancel ? (waits.get(snapshot.run.id) ?? null) : null,
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
     closedAt: Option.match(snapshot.closedAt, { onNone: () => null, onSome: DateTime.formatIso }),
-    task: snapshot.task,
-    attempts: snapshot.attempts.map((attempt) => attemptView(attempt, workers)),
+    attempts: snapshot.attempts.map((attempt) => attemptSummaryView(attempt, workers)),
     approvalReason: Option.getOrNull(snapshot.approvalReason),
     approval: Option.match(snapshot.approval, {
       onNone: () => null,
@@ -259,14 +258,37 @@ export const runView = (
         }),
     }),
     runAgain: Option.getOrNull(snapshot.runAgain),
-    resultMessage: result?.message ?? null,
-    pullRequestUrl: pullRequest?.url.toString() ?? null,
+    pullRequestUrl: snapshot.pullRequestUrl,
     ...actions,
     canResolveFailure:
       actions.canResolveFailure &&
       !Option.contains(snapshot.resolvedFailureAttemptId, snapshot.attempts.at(-1)?.id),
   });
 };
+
+/** Returns the full run and attempt prompts for a detail read. */
+export const runView = (
+  snapshot: RunSnapshot,
+  pausedLoops: ReadonlySet<LoopName>,
+  workers: WorkerAccesses,
+  waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
+  upgrade: UpgradeDrain | null = null,
+): RunView =>
+  new RunView({
+    ...runSummaryView(summarizeRun(snapshot), pausedLoops, workers, waits, upgrade),
+    task: snapshot.task,
+    resultMessage: Option.match(snapshot.step.result, {
+      onNone: () => null,
+      onSome: ({ message }) => message,
+    }),
+    attempts: snapshot.attempts.map(
+      (attempt) =>
+        new AttemptView({
+          ...attemptSummaryView(attempt, workers),
+          task: attempt.task,
+        }),
+    ),
+  });
 
 const transcriptPayload = (
   payload: AttemptChannel.OutboundPayload | AttemptChannel.InboundPayload,

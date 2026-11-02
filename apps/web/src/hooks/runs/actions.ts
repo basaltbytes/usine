@@ -5,9 +5,11 @@ import {
   useMutationState,
   useQueryClient,
 } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { type AttemptId, AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import {
+  ColdTranscriptRequest,
   EditAndRetry,
   type FactoryOverview,
   NeedsSetupOverview,
@@ -126,8 +128,22 @@ export const useRunAgain = ({
       amendment,
     }: {
       readonly runId: RunId;
-      readonly amendment: EditAndRetry;
-    }) => api((client) => client.runAgain({ params: { runId }, payload: amendment })),
+      readonly amendment: EditAndRetry | "unchanged";
+    }) =>
+      api((client) =>
+        Effect.gen(function* () {
+          const payload =
+            amendment === "unchanged"
+              ? unchangedRunAgain(
+                  (yield* client.detail({
+                    params: { runId },
+                    query: new ColdTranscriptRequest(),
+                  })).run,
+                ).amendment
+              : amendment;
+          return yield* client.runAgain({ params: { runId }, payload });
+        }),
+      ),
     onSuccess: async (result, { runId }) => {
       await refresh(runId);
       if (result._tag === "Claimed") onClaimed?.(result.runId);

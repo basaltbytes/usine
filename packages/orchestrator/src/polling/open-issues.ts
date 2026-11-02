@@ -65,7 +65,7 @@ export const checkOpenIssues = Effect.fn("PollingTriggers.checkOpenIssues")(func
         new RepositoryPollFailure({
           repository: repository.name,
           errorTag: error._tag,
-          message: error.message,
+          message: repositoryFailureLogFields(error).message,
         }),
       ],
     };

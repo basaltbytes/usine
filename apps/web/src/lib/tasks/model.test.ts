@@ -1,13 +1,15 @@
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import {
+  boardTaskRuns,
+  boardRunSummary,
   AwaitingPollView,
   BoardTaskView,
   ClosedUnchangedView,
   LoopPausedView,
   QueuedForWorkerView,
   RunFailedView,
-  RunView,
+  RunSummaryView,
   StalledItemView,
   SuppressedForOperatorView,
 } from "@usine/orchestrator/operator";
@@ -18,7 +20,6 @@ import {
   type TaskRow,
   taskCounts,
   taskDuration,
-  taskLoops,
   taskRows,
   taskTotals,
   totalsFigures,
@@ -72,7 +73,7 @@ describe("Tasks list model", () => {
     rows.map(({ task, status }) => [task.number, status._tag]);
   const withoutPinned = boardStalled().filter(({ item }) => item.number !== 28);
   const lastRunOf = (task: BoardTaskView) => {
-    const run = task.runs.at(-1);
+    const run = boardTaskRuns(task).at(-1);
     assert(run !== undefined);
     return run;
   };
@@ -90,14 +91,18 @@ describe("Tasks list model", () => {
       task.number === 18
         ? new BoardTaskView({
             ...task,
-            runs: task.runs.map(
-              (run) =>
-                new RunView({
-                  ...run,
-                  openedAt: minutesAgo(3 * 1440),
-                  closedAt: minutesAgo(1),
-                  attempts: [],
-                }),
+            ...boardRunSummary(
+              boardTaskRuns(task).map(
+                (run) =>
+                  new RunSummaryView({
+                    ...run,
+                    openedAt: minutesAgo(3 * 1440),
+                    closedAt: minutesAgo(1),
+                    attempts: [],
+                  }),
+              ),
+              task.run,
+              task.items,
             ),
           })
         : task,
@@ -117,7 +122,7 @@ describe("Tasks list model", () => {
       [6, "Done"],
     ]);
     assert.strictEqual(taskCounts(rows), "4 in flight, 1 done");
-    assert.deepStrictEqual(rows[0] && taskLoops(rows[0].task), [
+    assert.deepStrictEqual(rows[0] && rows[0].task.loopStates, [
       { loop: LoopName.make("plan"), state: "Succeeded" },
       { loop: LoopName.make("implement"), state: "Running" },
     ]);
@@ -209,20 +214,25 @@ describe("Tasks list model", () => {
   it("keeps a Task in flight on any of its failures that waits on the operator, though the desk lists a resolved one first", () => {
     /** Returns `overview` with a failed audit Run on #28, before its review failed, with the failure
      * resolved. */
+    const auditOf = (review: RunSummaryView) =>
+      new RunSummaryView({
+        ...review,
+        id: RunId.make("run-pinned-audit"),
+        loop: LoopName.make("audit"),
+        openedAt: minutesAgo(200),
+        closedAt: minutesAgo(190),
+        attempts: [],
+        canResolveFailure: false,
+      });
     const withAudit = (overview: ReturnType<typeof boardOverview>) =>
       changeTasks(overview, (task) => {
         if (task.number !== 28) return task;
         const review = lastRunOf(task);
-        const audit = new RunView({
-          ...review,
-          id: RunId.make("run-pinned-audit"),
-          loop: LoopName.make("audit"),
-          openedAt: minutesAgo(200),
-          closedAt: minutesAgo(190),
-          attempts: [],
-          canResolveFailure: false,
+        const audit = auditOf(review);
+        return new BoardTaskView({
+          ...task,
+          ...boardRunSummary([audit, ...boardTaskRuns(task)], task.run, task.items),
         });
-        return new BoardTaskView({ ...task, runs: [audit, ...task.runs] });
       });
     /** Returns the desk's stall list for `overview`; #28's failures are on the same Item, so they
      * are ordered by Loop name, audit first. */
@@ -230,7 +240,7 @@ describe("Tasks list model", () => {
       const pinned = taskOf(28, overview);
       const [item] = pinned.items;
       assert(item !== undefined);
-      const failures = pinned.runs.map(
+      const failures = [auditOf(lastRunOf(pinned)), ...boardTaskRuns(pinned)].map(
         (run) =>
           new StalledItemView({
             repository: run.repository,
@@ -279,18 +289,31 @@ describe("Tasks list model", () => {
       task.number === 31
         ? new BoardTaskView({
             ...task,
-            runs: task.runs.map((run) =>
-              run.state === "Running"
-                ? new RunView({ ...run, state: "Queued", attempts: [], canCancel: true })
-                : run,
+            ...boardRunSummary(
+              boardTaskRuns(task).map((run) =>
+                run.state === "Running"
+                  ? new RunSummaryView({ ...run, state: "Queued", attempts: [], canCancel: true })
+                  : run,
+              ),
+              task.run,
+              task.items,
             ),
           })
         : task,
     );
     const redesign = taskOf(31, queued);
-    const [plan, implement] = redesign.runs;
+    const implement = boardTaskRuns(redesign).at(-1);
     const [issue, pullRequest] = redesign.items;
-    assert(plan && implement && issue && pullRequest);
+    assert(implement && issue && pullRequest);
+    const plan = new RunSummaryView({
+      ...implement,
+      id: RunId.make("older-plan"),
+      itemKey: issue.itemKey,
+      loop: LoopName.make("plan"),
+      state: "Succeeded",
+      canCancel: false,
+      canRunAgain: true,
+    });
     const stall = (loop: string, item: typeof issue, reason: StalledItemView["reason"]) =>
       new StalledItemView({
         repository: implement.repository,

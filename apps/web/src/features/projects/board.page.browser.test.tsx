@@ -6,6 +6,7 @@ import { LaneName } from "@usine/config/board";
 import { RepositoryName } from "@usine/core/repository";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import {
+  boardRunSummary,
   DeskView,
   BoardItemLink,
   BoardLaneId,
@@ -70,7 +71,7 @@ const manyTasks = (count: number): ReadonlyArray<BoardTaskView> => {
       ...template,
       ...item,
       items: [item],
-      runs: [],
+      ...boardRunSummary([], null, [item]),
       run: null,
       pullRequest: null,
     });

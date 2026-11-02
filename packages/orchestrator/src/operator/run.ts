@@ -14,8 +14,8 @@ import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Schema } from "effect";
-import { AttemptView } from "./attempt.ts";
+import { Effect, Schema, Struct } from "effect";
+import { AttemptSummaryView, AttemptView } from "./attempt.ts";
 import { MachineView, MachineQuotaWait } from "./machines.ts";
 import { TranscriptEventView, TranscriptPageCursor } from "./transcript.ts";
 import { RunUsageView } from "./usage.ts";
@@ -166,6 +166,15 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
    * state.
    */
   canRunAgain: Schema.Boolean,
+}) {}
+
+/** Run metadata for polling views; prompts and result text are available on run detail. */
+export class RunSummaryView extends Schema.Class<RunSummaryView>(
+  "@usine/orchestrator/RunSummaryView",
+)({
+  ...Struct.omit(RunView.fields, ["task", "resultMessage", "attempts"]),
+  /** The attempts' state and timing without their task prompts. */
+  attempts: Schema.Array(AttemptSummaryView),
 }) {}
 
 const Milliseconds = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));

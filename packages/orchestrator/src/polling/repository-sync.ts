@@ -124,7 +124,7 @@ const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(functio
         new RepositoryPollFailure({
           repository,
           errorTag: error._tag,
-          message: error.message,
+          message: repositoryFailureLogFields(error).message,
         }),
       ],
     };

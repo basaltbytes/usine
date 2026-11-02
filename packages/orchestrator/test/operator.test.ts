@@ -1,3 +1,5 @@
+import { boardHistory } from "./support/run-reader.ts";
+import { summarizeRun } from "@usine/engine/run-reader";
 import {
   RequestPermissions,
   RoleBinding,
@@ -10,6 +12,11 @@ import { ReleaseVersion } from "@usine/core/upgrade";
 import { UpgradeDrain, UpgradeWait } from "@usine/engine/engine";
 import { WebhookHealth } from "../src/webhooks.ts";
 import { testAppLayer } from "./support/github-app.ts";
+import { pollingTestLayer } from "./support/polling.ts";
+import { NodeServices } from "@effect/platform-node";
+import { GitHubApp, InstallationToken, InstallationWide } from "@usine/github/github-app";
+import { GitHubPolling } from "@usine/github/polling";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements, type AttentionAcknowledgement } from "@usine/engine/attention";
 import { attentionKey, partitionNeeds } from "../src/operator/attention.ts";
@@ -107,7 +114,7 @@ import {
 import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
-import { DateTime, Effect, Layer, Logger, Match, Option, Ref, Schema } from "effect";
+import { DateTime, Effect, Layer, Logger, Match, Option, Redacted, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
@@ -118,7 +125,7 @@ import {
 } from "../src/operator/transcript.ts";
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
 import { UnconfiguredWorkerNeed } from "../src/operator/need.ts";
-import { Operator } from "../src/operator/operator.ts";
+import { boardTaskRuns, Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
 import {
   ApprovalView,
@@ -511,15 +518,17 @@ const testLayer = (
         ).values(),
       ]),
     inspect: () => Effect.succeed(runSnapshot),
+    summary: () => Effect.succeed(summarizeRun(runSnapshot)),
     evidence: () => Effect.die("unused"),
     list: () =>
       Ref.updateAndGet(overviewReads, (reads) => reads + 1).pipe(
         Effect.andThen(Effect.yieldNow),
-        Effect.as([runSnapshot]),
+        Effect.as([summarizeRun(runSnapshot)]),
       ),
     closed: () => Effect.succeed([]),
     closedSince: () => Effect.die("unused"),
-    forItems: () => Effect.succeed([runSnapshot]),
+    board: () => Effect.succeed(boardHistory([summarizeRun(runSnapshot)])),
+    forItems: () => Effect.succeed([summarizeRun(runSnapshot)]),
     events: (runIds) =>
       Effect.succeed(
         runIds.includes(runSnapshot.run.id)
@@ -987,8 +996,8 @@ describe("Operator", () => {
           const boardWaits = Effect.map(operator.overview(instance), (view) =>
             view.projects.flatMap(({ board }) =>
               board.lanes.flatMap(({ items }) =>
-                items.flatMap(({ runs }) =>
-                  runs
+                items.flatMap((task) =>
+                  boardTaskRuns(task)
                     .filter(({ id }) => id === current.run.id)
                     .map(({ machineWait }) => machineWait),
                 ),
@@ -1210,6 +1219,104 @@ describe("Operator", () => {
             ),
           );
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
+      }),
+  );
+
+  it.effect.each(["poll-repository-changes", "list-repository-labels"] as const)(
+    "shows %s decode diagnostics in the failure log and Needs attention",
+    (operation) =>
+      Effect.gen(function* () {
+        const app = yield* GitHubApp.pipe(Effect.provide(testAppLayer));
+        const client = HttpClient.make((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(
+                JSON.stringify(
+                  request.url.includes("/labels") === (operation === "list-repository-labels")
+                    ? [{ unexpected: true }]
+                    : [],
+                ),
+                { headers: { "content-type": "application/json" } },
+              ),
+            ),
+          ),
+        );
+        const github = yield* GitHubPolling.pipe(
+          Effect.provide(
+            GitHubPolling.layer.pipe(
+              Layer.provide(
+                Layer.succeed(GitHubApp)({
+                  ...app,
+                  installationToken: () =>
+                    Effect.succeed(
+                      new InstallationToken({
+                        value: Redacted.make("polling-test-token"),
+                        expiresAt: DateTime.add(now, { hours: 1 }),
+                        scope: new InstallationWide(),
+                      }),
+                    ),
+                }),
+              ),
+              Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
+              Layer.provide(NodeServices.layer),
+            ),
+          ),
+        );
+        const lines: Array<string> = [];
+        const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+          if (logLevel === "Error") lines.push(JSON.stringify(message));
+        });
+        const cycle = yield* Effect.gen(function* () {
+          const polling = yield* PollingTriggers;
+          return yield* polling.poll(instance);
+        }).pipe(Effect.provide(pollingTestLayer(github)), Effect.withLogger(logger));
+        const failure = cycle.failures[0];
+        assert(failure !== undefined);
+        assert.strictEqual(failure.errorTag, "InvalidGitHubResponseError");
+        assert.include(failure.message, operation);
+        assert.include(failure.message, operation === "list-repository-labels" ? "name" : "number");
+        const detail = failure.message.slice(
+          `${operation}: GitHub returned a response in an unexpected format: `.length,
+        );
+        assert(
+          lines.some(
+            (line) =>
+              line.includes(`"operation":"${operation}"`) &&
+              line.includes(`"detail":${JSON.stringify(detail)}`),
+          ),
+        );
+
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const overview = yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          return yield* operator.overview(instance);
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              moved,
+              reads,
+              revision,
+              snapshot,
+              noCycleBudgets,
+              undefined,
+              [],
+              [],
+              [],
+              Effect.succeed([]),
+              {
+                poll: Effect.succeed(Option.some(cycle)),
+              },
+            ),
+          ),
+        );
+        const need = overview.needsYou.find((entry) => entry._tag === "PollFailureNeed");
+        assert(need !== undefined && need._tag === "PollFailureNeed");
+        assert.strictEqual(need.failure.message, failure.message);
       }),
   );
 
@@ -1898,7 +2005,7 @@ describe("Operator", () => {
           const overview = yield* (yield* Operator).overview(declared);
           const card = overview.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
-            .find(({ runs }) => runs.some(({ id }) => id === runId));
+            .find((task) => boardTaskRuns(task).some(({ id }) => id === runId));
           assert(card !== undefined);
           assert.deepStrictEqual(
             {
@@ -1937,7 +2044,7 @@ describe("Operator", () => {
           const later = yield* (yield* Operator).overview(declared);
           const laterCard = later.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
-            .find(({ runs }) => runs.some(({ id }) => id === runId));
+            .find((task) => boardTaskRuns(task).some(({ id }) => id === runId));
           assert.strictEqual(laterCard?.usage.tokens, 34_300);
           assert.deepStrictEqual(
             laterCard?.usage.pools.map(({ pool, tokens }) => [pool, tokens]),

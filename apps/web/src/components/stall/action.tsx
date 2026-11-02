@@ -1,7 +1,11 @@
 import { useCanOperateLoop, useCanOperateRepository } from "~/lib/permissions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { LoopName } from "@usine/core/loop";
-import type { CycleBudgetUsedUpView, RunView, StalledItemView } from "@usine/orchestrator/operator";
+import type {
+  CycleBudgetUsedUpView,
+  RunSummaryView,
+  StalledItemView,
+} from "@usine/orchestrator/operator";
 import { overviewQuery } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { Button } from "~/components/ui/button";
@@ -13,12 +17,7 @@ import {
   runActionProgress,
   runAgainBlocked,
 } from "~/lib/runs/strings";
-import {
-  type RunActionRequest,
-  unchangedRunAgain,
-  useRunAction,
-  useRunAgain,
-} from "~/hooks/runs/actions";
+import { type RunActionRequest, useRunAction, useRunAgain } from "~/hooks/runs/actions";
 
 /** The placement: at the end of a desk row, or under the reason on a Board card. */
 type StallActionAppearance = "row" | "card";
@@ -84,7 +83,7 @@ const ActionButton = ({
 
 type RunActionProps = {
   readonly appearance: StallActionAppearance;
-  readonly run: RunView;
+  readonly run: RunSummaryView;
   readonly request: RunActionRequest;
   readonly label: string;
 };
@@ -106,7 +105,7 @@ const RunAction = ({ appearance, run, request, label }: RunActionProps) => {
 
 type RunAgainActionProps = {
   readonly appearance: StallActionAppearance;
-  readonly run: RunView;
+  readonly run: RunSummaryView;
 };
 
 const RunAgainAction = ({ appearance, run }: RunAgainActionProps) => {
@@ -118,7 +117,7 @@ const RunAgainAction = ({ appearance, run }: RunAgainActionProps) => {
       label={again.isPending ? "Opening…" : runActionLabel.runAgain}
       disabled={again.isPending}
       error={blocked ? runAgainBlocked : (again.error?.message ?? null)}
-      onClick={() => again.mutate(unchangedRunAgain(run))}
+      onClick={() => again.mutate({ runId: run.id, amendment: "unchanged" })}
     />
   );
 };

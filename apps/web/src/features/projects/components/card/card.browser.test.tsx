@@ -9,9 +9,24 @@ import {
   LoopCycleCount,
 } from "@usine/core/cycle-budget";
 import { EventId } from "@usine/core/event";
+import { AttemptTask } from "@usine/core/attempt";
+import { LaneName } from "@usine/config/board";
+import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { Claimed, CycleBlocked, RunAgainResult } from "@usine/engine/engine";
-import { FactoryOverview, type ReadyOverview, type RunView } from "@usine/orchestrator/operator";
+import {
+  boardTaskRuns,
+  AttemptView,
+  TaskView,
+  TaskItemView,
+  TaskLaneView,
+  BoardLaneId,
+  RunView,
+  RunDetailView,
+  FactoryOverview,
+  type ReadyOverview,
+  type RunSummaryView,
+} from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -28,8 +43,10 @@ import "~/index.css";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
+    boardRunHistoryResponse: (body: string) => Promise<void>;
+    boardRunHistoryRequests: () => Promise<ReadonlyArray<string>>;
     boardResponses: (overview: string, moveStatus: 200 | 503) => Promise<void>;
-    delayRunAgain: () => Promise<void>;
+    delayRunAgain: (detail: string) => Promise<void>;
     releaseRunAgain: (
       status: 200 | 409,
       body: string,
@@ -69,11 +86,11 @@ const cardOf = (title: RegExp) => {
   if (!(card instanceof HTMLElement)) throw new Error(`No card titled ${title}`);
   return card;
 };
-const runOf = (id: string): RunView => {
+const runOf = (id: string): RunSummaryView => {
   const run = overview.projects
     .flatMap(({ board }) => board.lanes)
     .flatMap(({ items }) => items)
-    .flatMap(({ runs }) => runs)
+    .flatMap(boardTaskRuns)
     .find((candidate) => candidate.id === id);
   if (run === undefined) throw new Error(`No Run ${id}`);
   return run;
@@ -394,7 +411,24 @@ const runAgainBody = (result: RunAgainResult) =>
   JSON.stringify(Schema.encodeSync(RunAgainResult)(result));
 
 const runDroppedAgain = async () => {
-  await commands.delayRunAgain();
+  const run = runOf("run-dropped");
+  const detail = new RunDetailView({
+    run: new RunView({
+      ...run,
+      task: "Work on #18.",
+      resultMessage: null,
+      attempts: run.attempts.map(
+        (attempt) => new AttemptView({ ...attempt, task: AttemptTask.make("Work on #18.") }),
+      ),
+    }),
+    agentDefinitionChanged: false,
+    eventDedupKey: "run-dropped",
+    eventPayload: {},
+    transcript: [],
+    sessionState: [],
+    earlierTranscript: [],
+  });
+  await commands.delayRunAgain(JSON.stringify(Schema.encodeSync(RunDetailView)(detail)));
   await actions(18).click();
   await page.getByRole("menuitem", { name: /^Run again/u }).click();
 };
@@ -572,4 +606,51 @@ it("keeps board links available while hiding mutation controls from viewers", as
   await expect
     .element(menu.getByRole("menuitem", { name: "Run history", exact: true }))
     .toBeVisible();
+});
+
+it("loads older runs only when Run history opens and opens the selected run", async () => {
+  const task = overview.projects
+    .flatMap(({ board }) => board.lanes.flatMap(({ items }) => items))
+    .find(({ number }) => number === 18);
+  if (task?.run === null || task === undefined) throw new Error("Missing canceled task");
+  const latest = new RunView({
+    ...task.run,
+    task: "Saved task",
+    resultMessage: null,
+    attempts: [],
+  });
+  const older = new RunView({
+    ...latest,
+    id: RunId.make("older-implementation"),
+    loop: LoopName.make("older-loop"),
+  });
+  const [first, ...rest] = task.items.map(
+    (item) => new TaskItemView({ ...item, labels: [], conflicting: false }),
+  );
+  if (first === undefined) throw new Error("Missing task item");
+  const detail = new TaskView({
+    repository: task.repository,
+    number: task.number,
+    title: task.title,
+    current: task.itemKey,
+    lane: new TaskLaneView({
+      id: BoardLaneId.make("fallback:unmapped"),
+      name: LaneName.make("Done"),
+    }),
+    needsYou: false,
+    items: [first, ...rest],
+    runs: [latest, older],
+    comments: [],
+  });
+  await commands.boardRunHistoryResponse(JSON.stringify(Schema.encodeSync(TaskView)(detail)));
+  await actions(18).click();
+  expect(await commands.boardRunHistoryRequests()).toEqual([]);
+  await page.getByRole("menuitem", { name: "Run history", exact: true }).hover();
+  const historical = page.getByRole("menuitem", { name: /older-loop/u });
+  await expect.element(historical).toBeVisible();
+  expect(await commands.boardRunHistoryRequests()).toEqual([
+    "/api/projects/board-test/repo/tasks/18",
+  ]);
+  await historical.click();
+  expect(opened).toEqual([older.id]);
 });

@@ -8,7 +8,7 @@ import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/work
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import { ChatGptLogin, HostFilePath, OpenAiProvider, UpstreamBase } from "@usine/gateway";
-import { Deferred, Effect, Fiber, Layer, Option } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, References } from "effect";
 import { readFileSync } from "node:fs";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import { ATTEMPT_IMAGE, type SshWorkerAddress, SshWorkers } from "../../src/ssh/ssh.ts";
@@ -175,6 +175,36 @@ describe("SSH Worker with Docker", () => {
         Effect.scoped,
         Effect.provide(runtime(machine, mintingProvider())),
         Effect.provide(logs.layer),
+      );
+    },
+  );
+
+  it.effect.each(["1793637391N\n", "17936373913N\n", "\n", "-1\n", "1.5\n"])(
+    "prepares shared caches without a run duration when the shell prints %j",
+    (stdout) => {
+      const machine = dockerMachine();
+      machine.state.cachePreparationDuration = stdout;
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], 1);
+        const prepared = logs.lines.filter((line) => line.includes("Prepared shared cache volume"));
+        assert.lengthOf(prepared, 2);
+        for (const line of prepared) {
+          const fields = JSON.parse(line)[1];
+          assert.notProperty(fields, "runDurationMillis");
+          assert.property(fields, "durationMillis");
+        }
+        const unreadable = logs.lines.filter((line) =>
+          line.includes("Could not read the shared cache container run duration"),
+        );
+        assert.lengthOf(unreadable, 2);
+        for (const line of unreadable) assert.strictEqual(JSON.parse(line)[1].stdout, stdout);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider())),
+        Effect.provide(logs.layer),
+        Effect.provideService(References.MinimumLogLevel, "Debug"),
       );
     },
   );

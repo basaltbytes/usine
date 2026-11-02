@@ -2,6 +2,8 @@
 
 The foreground CLI for a local [usine](https://github.com/basaltbytes/usine) factory: a thin Node adapter over `@usine/orchestrator`. The library does the polling, schedule triggers, durable execution, worker composition, and operator actions; this package serves their JSON and web surfaces. The [CLI reference](https://docs.usine.dev/reference/cli/) lists every command, flag, and variable, and [Operate runs](https://docs.usine.dev/guides/operate-runs/) covers day-to-day use.
 
+The overview and desk API responses contain run and attempt summaries. Read run or task detail for prompts and result text. The board loads the saved task from run detail when **Run again** is clicked.
+
 The run reader matches GitHub changes to each attempt's worker identity, including exe.dev's integration bot. Board moves retain their operator attribution.
 
 Create an instance folder and run its pinned installation:
@@ -238,3 +240,5 @@ One global middleware sets CSP and the security headers on routes, assets, prefl
 ## Access control
 
 Members receive access through configuration role bindings. Browser sessions use current bindings on every request, so grants and removals apply without signing in again. Device token requests intersect current bindings with the token permission ceiling; device sign-in snapshots current grants. Only device tokens have editable scopes. The first member and migrated members receive instance admin bindings; later members need explicit grants. Local admin credentials and configuration CLI writes use `local admin` attribution. See the sign-in guide for roles and scoped token management.
+
+`GET /api/overview` returns compact board cards and every open run plus the latest 50 closed runs across the instance. Cards retain counts, aggregate usage, and summaries needed for their current state and actions. Task and run endpoints provide complete history and prompts.

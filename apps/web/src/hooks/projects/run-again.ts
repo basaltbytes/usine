@@ -2,8 +2,8 @@ import { type MutationState, useMutationState } from "@tanstack/react-query";
 import type { ItemKey } from "@usine/core/item";
 import type { RunId } from "@usine/core/run";
 import type { RunAgainResult } from "@usine/engine/engine";
-import type { RunView } from "@usine/orchestrator/operator";
-import { unchangedRunAgain, useRunAgain } from "~/hooks/runs/actions";
+import type { RunSummaryView } from "@usine/orchestrator/operator";
+import { useRunAgain } from "~/hooks/runs/actions";
 
 /** The state of a Task's latest Run again request, and a function to send one. */
 export interface CardRunAgain {
@@ -14,7 +14,7 @@ export interface CardRunAgain {
   /** The error of the latest request, or `null` if it did not fail. */
   readonly error: Error | null;
   /** Runs `run` again with the same task and Agent. */
-  readonly send: (run: RunView) => void;
+  readonly send: (run: RunSummaryView) => void;
 }
 
 const cardRunAgainKey = (itemKey: ItemKey) => ["run-again", "board-card", itemKey] as const;
@@ -38,6 +38,6 @@ export const useCardRunAgain = (
     isPending: latest?.status === "pending",
     data: latest?.data,
     error: latest?.error ?? null,
-    send: (run) => again.mutate(unchangedRunAgain(run)),
+    send: (run) => again.mutate({ runId: run.id, amendment: "unchanged" }),
   };
 };

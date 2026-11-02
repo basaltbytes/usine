@@ -21,7 +21,12 @@ import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { ChangedPullRequest, GitHubPolling } from "@usine/github/polling";
 import { Context, DateTime, Effect, Layer, Option, Result } from "effect";
 import { resolveTriggerLoops, triggerSubmission } from "./trigger-submission.ts";
-import { RepositoryPollFailure, type RepositoryPollError, latestPollAt } from "./polling/cycle.ts";
+import {
+  RepositoryPollFailure,
+  type RepositoryPollError,
+  latestPollAt,
+  repositoryFailureLogFields,
+} from "./polling/cycle.ts";
 import { observeItem } from "./polling/repository-sync.ts";
 
 /** Settles persisted CI waits during polling and webhook hints, without worker reservations. */
@@ -297,14 +302,13 @@ export class CiMonitor extends Context.Service<
             yield* Effect.logError("CI observation failed; this wait will be retried", {
               runId: wait.run.id,
               repository: wait.repository,
-              errorTag: error._tag,
-              message: error.message,
+              ...repositoryFailureLogFields(error),
             });
             failures.push(
               new RepositoryPollFailure({
                 repository: wait.repository,
                 errorTag: error._tag,
-                message: error.message,
+                message: repositoryFailureLogFields(error).message,
               }),
             );
             if (error._tag === "GitHubRateLimitError") {

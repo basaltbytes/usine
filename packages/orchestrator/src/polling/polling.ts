@@ -585,7 +585,7 @@ export class PollingTriggers extends Context.Service<
               new RepositoryPollFailure({
                 repository: repository.repository.name,
                 errorTag: error._tag,
-                message: error.message,
+                message: repositoryFailureLogFields(error).message,
               }),
             );
           }

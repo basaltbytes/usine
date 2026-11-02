@@ -1,3 +1,4 @@
+import { AttemptSummary } from "@usine/engine/run-reader";
 import { issue, mergedPullRequest } from "./statistics/fixtures.ts";
 import { MachineStarts } from "@usine/executor";
 import { WorkerStatus } from "../src/worker-status.ts";
@@ -39,7 +40,7 @@ import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import { RunApproval } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
-import { Step, StepName } from "@usine/core/step";
+import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { ProjectionRevision, RunSummary } from "@usine/engine/run-reader";
 import { UsineConfig } from "@usine/config/factory";
@@ -150,11 +151,7 @@ const summary = (plan: RunPlan) =>
       state: plan.state,
       openedAt: at(plan.openedAt),
     }),
-    step: new Step({
-      runId: RunId.make(plan.id),
-      name: StepName.make("run"),
-      result: Option.none(),
-    }),
+    pullRequestUrl: null,
     attempts: attempts(plan.id, plan.agent, plan.attempts ?? []),
     resolvedFailureAttemptId: Option.none(),
     closedAt: Option.map(Option.fromUndefinedOr(plan.closedAt), at),
@@ -164,7 +161,7 @@ const summary = (plan: RunPlan) =>
     ),
     runAgain: Option.none(),
     repository,
-    task: AttemptTask.make("Work on it."),
+
     agent: plan.agent,
   });
 
@@ -751,7 +748,7 @@ describe("Run statistics", () => {
         attempts: run.attempts.map((attempt) =>
           attempt.number !== number
             ? attempt
-            : new Attempt({
+            : new AttemptSummary({
                 ...attempt,
                 failureResolution: Option.some(
                   new FailureResolution({ resolvedAt: at(resolvedAt), operator: Option.none() }),
@@ -868,11 +865,13 @@ describe("OperatorStatistics", () => {
           runForEvent: () => Effect.die("unused"),
           latestPoolRateLimits: () => Effect.succeed([]),
           inspect: () => Effect.die("unused"),
+          summary: () => Effect.die("unused"),
           evidence: () => Effect.die("unused"),
           // The open Runs, and a closed Run that the window read already counts.
           list: () => Effect.succeed([running, waiting, implemented]),
           closed: () => Effect.die("unused"),
           closedSince: (from) => Effect.sync(() => since.push(from)).pipe(Effect.as(closedRuns)),
+          board: () => Effect.die("unused"),
           forItems: (keys) =>
             Effect.sync(() => {
               historyReads += 1;

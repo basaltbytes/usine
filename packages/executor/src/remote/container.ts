@@ -20,7 +20,11 @@ export const PNPM_STORE_PATH = "/home/usine/.local/share/pnpm/store";
 export const PNPM_STORE_MOUNT = `${PNPM_STORE_VOLUME}:${PNPM_STORE_PATH}:nocopy`;
 
 const decodeRunDuration = Schema.decodeUnknownEffect(
-  Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  Schema.NonEmptyString.pipe(
+    Schema.decodeTo(
+      Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+    ),
+  ),
 );
 
 const SHARED_CACHES = [
@@ -42,7 +46,7 @@ set -eu
 runtime=$1 image=$2 volume=$3 mount=$4 path=$5
 shift 5
 if [ "$runtime" = podman ]; then set -- --userns=keep-id --cgroupns=private --http-proxy=false; fi
-started=$(date +%s%3N)
+started=$(date +%s%3N) || started=
 status=0
 "$runtime" run --rm --network none "$@" --user 0 --volume "$mount" --entrypoint sh "$image" -ec '
   owner=$(id -u usine)
@@ -55,7 +59,11 @@ status=0
   chmod 0755 "$1"
   chown -h "$owner" "$1"
 ' sh "$path" "$volume" "$runtime" || status=$?
-printf '%s\n' "$(($(date +%s%3N) - started))"
+finished=$(date +%s%3N) || finished=
+case "$started:$finished" in
+  *[!0-9:]*|:*|*:) printf '%s\n' "$started:$finished" ;;
+  *) printf '%s\n' "$((finished - started))" ;;
+esac
 exit "$status"
 `.trim();
 
@@ -327,21 +335,21 @@ export const containersFor = (commands: RemoteCommands) => {
           cause: new Error(prepared.stderr),
         });
       }
-      const runDurationMillis = yield* decodeRunDuration(prepared.stdout.trim()).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ExecutorOperationError({
-              operation,
-              message: `Invalid container run duration for cache volume ${volume}`,
-              cause,
-            }),
+      const runTiming = yield* decodeRunDuration(prepared.stdout.trim()).pipe(
+        Effect.map((runDurationMillis) => ({ runDurationMillis })),
+        Effect.catchTag("SchemaError", () =>
+          Effect.logDebug("Could not read the shared cache container run duration", {
+            ...fields,
+            volume,
+            stdout: prepared.stdout,
+          }).pipe(Effect.as({})),
         ),
       );
       yield* Effect.logInfo("Prepared shared cache volume", {
         ...fields,
         volume,
         path,
-        runDurationMillis,
+        ...runTiming,
         durationMillis: Duration.toMillis(duration),
       });
     }

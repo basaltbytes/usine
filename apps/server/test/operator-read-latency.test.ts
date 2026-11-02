@@ -35,6 +35,8 @@ import {
   Operator,
   OperatorConfiguration,
   OperatorObservation,
+  RunDetailView,
+  TaskView,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { WorkerStatus } from "@usine/orchestrator/worker-status";
@@ -47,6 +49,11 @@ import { apiRoutes } from "../src/http.ts";
 // The dogfood instance has five Loops and about 500 Items on its Board; the overview and the desk
 // each evaluate every Loop's trigger on every Item, and the web UI polls both at once.
 const BOARD_ITEMS = 500;
+const SIZE_ITEMS = 301;
+const SIZE_RUNS = 800;
+const SIZE_BUDGET_BYTES = 500_000;
+const longBody = "Dependency release notes and migration instructions. ".repeat(500);
+const longTask = `Implement the issue.\n${longBody.repeat(4)}`;
 const LABELS = [
   "ready-for-agent",
   "agent-in-progress",
@@ -120,7 +127,7 @@ const issue = (number: number) =>
     payload: {
       number,
       title: `Issue ${number}`,
-      body: "What to build and how to tell it is done. ".repeat(20),
+      body: longBody,
       url: `https://github.com/basaltbytes/usine/issues/${number}`,
       state: "OPEN",
       stateReason: null,
@@ -136,7 +143,7 @@ const issue = (number: number) =>
         totalCount: 2,
         nodes: [1, 2].map((comment) => ({
           author: { login: "usine-agent[bot]" },
-          body: "Progress on the issue. ".repeat(10),
+          body: longBody,
           createdAt: "2026-10-19T11:00:00Z",
           url: `https://github.com/basaltbytes/usine/issues/${number}#issuecomment-${comment}`,
         })),
@@ -151,7 +158,7 @@ const started = (number: number) =>
     event: new Event({
       id: EventId.make(`event-${number}`),
       dedupKey: DedupKey.make(`${firstLoop}/${number}`),
-      payload: { number },
+      payload: issue(number).payload,
       receivedAt: DateTime.makeUnsafe("2026-10-21T16:48:00Z"),
     }),
     itemKey: itemKey(number),
@@ -160,7 +167,7 @@ const started = (number: number) =>
     approval: "none",
     repository,
     revision: RepositoryRevision.make("main"),
-    task: AttemptTask.make(`Implement issue ${number}.`),
+    task: AttemptTask.make(longTask),
     agent: new Agent({
       name: developer.name,
       brain,
@@ -183,11 +190,19 @@ const decodeOverview = Schema.decodeUnknownSync(Schema.fromJsonString(FactoryOve
 const decodeDesk = Schema.decodeUnknownSync(Schema.fromJsonString(DeskView));
 
 describe("operator read latency", () => {
-  it(`answers /api/overview and /api/desk, requested together, in under ${READ_BUDGET_MILLIS} ms while an Attempt starts on a Board of ${BOARD_ITEMS} Items and five Loops`, async () => {
+  const checkReads = async ({
+    initialItems,
+    openRuns,
+    history,
+  }: {
+    readonly initialItems: number;
+    readonly openRuns: number;
+    readonly history: boolean;
+  }) => {
     const program = Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
+        directory: history ? undefined : sqliteTempDirectory(),
         prefix: "usine-read-latency-",
       });
       const preparing = yield* Deferred.make<void>();
@@ -223,7 +238,12 @@ describe("operator read latency", () => {
         // Serves the overview and desk from `OperatorObservation`.
         const operator = yield* Effect.provide(
           Operator,
-          Layer.mock(Operator)({ overview: reads.overview, desk: reads.desk }),
+          Layer.mock(Operator)({
+            overview: reads.overview,
+            desk: reads.desk,
+            detail: reads.detail,
+            task: reads.task,
+          }),
         );
         const configuration = yield* Effect.provide(
           OperatorConfiguration,
@@ -243,10 +263,140 @@ describe("operator read latency", () => {
           // Measured until the response body has arrived, as the web UI waits for it.
           const read = (path: string) =>
             timed(client.get(path).pipe(Effect.flatMap((response) => response.text)));
-          for (let number = 1; number <= BOARD_ITEMS; number += 1)
+          for (let number = 1; number <= initialItems; number += 1)
             yield* items.upsert(issue(number));
-          yield* runs.submit(started(10));
+          yield* runs.submit(started(1));
           yield* Deferred.await(preparing);
+          for (let number = 2; number <= openRuns; number += 1)
+            yield* runs.submit(new Submission({ ...started(number), approval: "required" }));
+          for (let number = 2; history && number <= SIZE_ITEMS; number += 1) {
+            const count = number <= 200 ? 3 : 2;
+            for (let round = 1; round <= count; round += 1) {
+              const submission = started(number);
+              const result = yield* runs.submit(
+                new Submission({
+                  ...submission,
+                  approval: "required",
+                  event: new Event({
+                    ...submission.event,
+                    id: EventId.make(`event-${number}-${round}`),
+                    dedupKey: DedupKey.make(`${firstLoop}/${number}/${round}`),
+                  }),
+                }),
+              );
+              assert.strictEqual(result._tag, "Claimed");
+              if (result._tag === "Claimed") yield* runs.cancel(result.runId);
+            }
+            const item = issue(number);
+            yield* items.upsert(
+              new ItemProjection({
+                ...item,
+                contentHash: ItemContentHash.make(`issue-${number}-closed`),
+                payload: { ...item.payload, state: "CLOSED", closedAt: "2026-11-02T12:00:00Z" },
+              }),
+            );
+          }
+
+          const response = yield* read("/api/overview");
+          const overview = decodeOverview(response.value);
+          const bytes = (value: string) => new TextEncoder().encode(value).length;
+          const responseBytes = bytes(response.value);
+          const cards = overview.projects.flatMap(({ board }) =>
+            board.lanes.flatMap(({ items }) => items),
+          );
+          assert.strictEqual(
+            cards.filter(({ state }) => state === "issue-closed").length,
+            history ? 300 : 0,
+          );
+          assert.strictEqual(
+            cards.reduce((count, card) => count + card.runCount, 0),
+            history ? SIZE_RUNS : openRuns,
+          );
+          assert.strictEqual(
+            overview.projects.flatMap(({ board }) => board.lanes.flatMap(({ items }) => items))
+              .length,
+            initialItems,
+          );
+
+          // Reconstruct the previous wire shape to measure duplicated prompts by project and field.
+          const withText = (run: (typeof overview.projects)[number]["runs"][number]) => ({
+            ...run,
+            task: longTask,
+            resultMessage: null,
+            attempts: run.attempts.map((attempt) => ({ ...attempt, task: longTask })),
+          });
+          const previousProjects = overview.projects.map((project) => ({
+            ...project,
+            runs: project.runs.map(withText),
+            board: {
+              ...project.board,
+              lanes: project.board.lanes.map((lane) => ({
+                ...lane,
+                items: lane.items.map((task) => ({
+                  ...task,
+                  runs: [...task.runContext, ...(task.run === null ? [] : [task.run])].map(
+                    withText,
+                  ),
+                  run: task.run === null ? null : withText(task.run),
+                })),
+              })),
+            },
+          }));
+          const previousBytes = bytes(JSON.stringify({ ...overview, projects: previousProjects }));
+          const measurement = {
+            items: initialItems,
+            runs: history ? SIZE_RUNS : openRuns,
+            previousBytes,
+            responseBytes,
+            projects: overview.projects.map((project, index) => ({
+              repository: project.repository,
+              before: Object.fromEntries(
+                Object.entries(previousProjects[index] ?? {}).map(([key, value]) => [
+                  key,
+                  bytes(JSON.stringify(value)),
+                ]),
+              ),
+              after: Object.fromEntries(
+                Object.entries(project).map(([key, value]) => [key, bytes(JSON.stringify(value))]),
+              ),
+            })),
+          };
+          assert.isBelow(responseBytes, SIZE_BUDGET_BYTES, JSON.stringify(measurement));
+          assert.strictEqual(
+            overview.projects.flatMap(({ runs }) => runs).length,
+            history ? 51 : openRuns,
+          );
+          assert.isBelow(responseBytes, previousBytes * 0.1);
+          yield* Effect.logInfo("Overview response size", measurement);
+          const firstRun = overview.projects
+            .flatMap(({ runs }) => runs)
+            .find(({ state }) => state === "Running");
+          assert(firstRun !== undefined);
+          const detailResponse = yield* read(`/api/runs/${firstRun.id}`);
+          const detail = Schema.decodeUnknownSync(Schema.fromJsonString(RunDetailView))(
+            detailResponse.value,
+          );
+          assert.strictEqual(detail.run.task, longTask);
+          assert.strictEqual(detail.run.attempts[0]?.task, longTask);
+          assert.deepStrictEqual(detail.eventPayload, issue(1).payload);
+          const taskResponse = yield* read(`/api/projects/basaltbytes/usine/tasks/1`);
+          const task = Schema.decodeUnknownSync(Schema.fromJsonString(TaskView))(
+            taskResponse.value,
+          );
+          assert.strictEqual(task.runs[0]?.task, longTask);
+          assert.strictEqual(task.runs[0]?.attempts[0]?.task, longTask);
+          if (history) {
+            const doneResponse = yield* read("/api/projects/basaltbytes/usine/tasks/2");
+            const doneTask = Schema.decodeUnknownSync(Schema.fromJsonString(TaskView))(
+              doneResponse.value,
+            );
+            assert.strictEqual(doneTask.runs.length, 3);
+            assert(doneTask.runs.every(({ task }) => task === longTask));
+            return;
+          }
+
+          for (let number = initialItems + 1; number <= BOARD_ITEMS; number += 1)
+            yield* items.upsert(issue(number));
 
           // Each round requests the overview and desk together, as the web UI does, while the
           // projection keeps changing. The fastest round measures the read cost independent of
@@ -269,12 +419,15 @@ describe("operator read latency", () => {
             assert.strictEqual(decodeOverview(overview.value)._tag, "Ready");
             assert.deepStrictEqual(
               decodeDesk(desk.value).running.map(({ item }) => item?.number),
-              [ItemNumber.make(10)],
+              [ItemNumber.make(1)],
             );
           }
           const fastest = (millis: ReadonlyArray<number>) => Math.min(...millis);
           const timings = JSON.stringify(
-            rounds.map(({ overview, desk }) => ({ overview: overview.millis, desk: desk.millis })),
+            rounds.map(({ overview, desk }) => ({
+              overview: overview.millis,
+              desk: desk.millis,
+            })),
           );
           assert.isBelow(
             fastest(rounds.map(({ overview }) => overview.millis)),
@@ -290,5 +443,19 @@ describe("operator read latency", () => {
       }).pipe(Effect.provide(observation));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
     await Effect.runPromise(program);
-  }, 60_000);
+  };
+  it.each([
+    {
+      fixture: "keeps 300 done tasks and 800 runs below 500 KB",
+      initialItems: SIZE_ITEMS,
+      openRuns: 1,
+      history: true,
+    },
+    {
+      fixture: "keeps 200 items and 50 open runs below 500 KB and concurrent reads below 500 ms",
+      initialItems: 200,
+      openRuns: 50,
+      history: false,
+    },
+  ])("$fixture", checkReads, 120_000);
 });
