@@ -1,0 +1,10 @@
+/* Let wrapped labels grow beyond Lucode's fixed link height. */
+.sidebar .entry-link {
+  height: auto;
+  min-height: 1.875rem;
+}
+
+.sidebar .entry-link-inner {
+  height: auto;
+  padding-block: calc(var(--spacing) * 1.5);
+}

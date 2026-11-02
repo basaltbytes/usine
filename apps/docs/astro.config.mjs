@@ -27,7 +27,7 @@ export default defineConfig({
     starlight({
       title: "usine",
       logo: { dark: "./src/assets/logo-dark.svg", light: "./src/assets/logo-light.svg" },
-      customCss: ["./src/styles/diagrams.css"],
+      customCss: ["./src/styles/diagrams.css", "./src/styles/sidebar.css"],
       description:
         "usine runs coding agents on the GitHub issues and pull requests of the repositories an operator registers.",
       plugins: [
