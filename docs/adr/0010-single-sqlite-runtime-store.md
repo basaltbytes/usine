@@ -43,6 +43,12 @@ If installation or the target's health check fails, the helper stops the service
 
 Database restoration is required because startup migrations can change stored schemas and values as well as add configuration entity kinds. Ignoring unknown kinds for a release would cover only additive kind changes and could omit configuration required by other records. Restoring the data with the package gives the previous version the storage format it read before the upgrade. This follows the existing backup ordering and restore rules; the two online copies remain separate snapshots.
 
+## Amendment (2026-11-02, #821): managed upgrade backup retention
+
+The independent systemd helper reads `USINE_UPGRADE_BACKUP_DIR` and `USINE_UPGRADE_BACKUP_KEEP` from its service environment, defaulting to the instance's `.usine/upgrade/` directory and three backups. These settings belong to the helper because it runs independently while the server and its configuration services are stopped. The directory must be absolute and dedicated to the instance; the count is an integer from 1 to 999999999.
+
+Before making a snapshot, the helper checks that both the backup and instance filesystems have free space equal to at least twice the combined database and WAL file sizes. The instance filesystem check covers local rollback staging when backups are external. Insufficient space records a failure with the folder to clean, without stopping the server or changing packages. After the target passes its readiness check, the helper removes older `backup.XXXXXXXX` directories by modification time while always preserving the current snapshot. Cleanup failures are logged and do not roll back a healthy upgrade. Failed upgrades and rollbacks preserve all snapshots. Rollback stages copies beside the instance databases before replacing them, including when the backup directory is on another filesystem.
+
 ## Amendment (2026-10-11, #176): the cluster tables are removed
 
 A migration drops `usine_workflow_commands` and Effect's `cluster_messages`, `cluster_replies`, and `cluster_migrations` with the Effect workflow (ADR 0003 amendment of the same date), leaving only usine's tables; pi-durable's storage is the second file.
