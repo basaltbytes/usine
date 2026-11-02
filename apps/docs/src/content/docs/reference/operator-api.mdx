@@ -9,9 +9,9 @@ The operator API reads instance state, manages configuration, and operates runs.
 
 ## Authentication
 
-Send an instance token as `Authorization: Bearer <token>`. Browser clients can use the `usine_session` cookie; writes with a session also require `X-Usine-CSRF`. See [Sign in](/guides/sign-in/) for token issuance and browser sessions. The document marks health, sign-in, and schema operations as public. `GET /api/auth/session` returns effective permissions as `{permission, scope}` grants. Roles and token ceilings both limit access; a forbidden operation returns HTTP 403. Lists include only projects with read access.
+Send an instance token as `Authorization: Bearer <token>`. Browser clients can use the `usine_session` cookie; writes with a session also require `X-Usine-CSRF`. See [Sign in](/guides/sign-in/) for browser sessions, and [Create a device token](/guides/create-a-device-token/) for token issuance. The document marks health, sign-in, and schema operations as public. `GET /api/auth/session` returns effective permissions as `{permission, scope}` grants. Roles and token ceilings both limit access; a forbidden operation returns HTTP 403. Lists include only projects with read access.
 
-Viewer requires `read`, operator adds `operate`, and maintainer adds `maintain` on a project. Instance `admin` grants all operations, including membership, bindings, workers, settings, and upgrades. Project resource handlers check the target project in addition to the route requirement. See [roles and scopes](/guides/sign-in/#roles-and-bindings).
+Viewer requires `read`, operator adds `operate`, and maintainer adds `maintain` on a project. Instance `admin` grants all operations, including membership, bindings, workers, settings, and upgrades. Project resource handlers check the target project in addition to the route requirement. See [roles and scopes](/reference/access/#roles).
 
 `POST /api/tokens` accepts a name and scopes and returns the secret once. `PUT /api/tokens/:id/scopes` changes an owned token's ceiling. Neither accepts scopes wider than the caller's effective permissions. Token listing includes scopes. The local admin token has instance admin permissions and a null member; its writes are attributed to `local admin`.
 
@@ -19,7 +19,7 @@ Use HTTPS through a reverse proxy for remote access. Browser requests must use a
 
 ## Paths and versions
 
-Paths remain under `/api/...`. Path versioning is deferred until an external client needs it, as recorded in [ADR 0030](https://github.com/basaltbytes/usine/blob/main/docs/adr/0030-operator-api-authentication-and-access-control.md). The document's `info.version` is `unversioned`; read `GET /api/version` for the running release.
+Paths use `/api/...`. The schema’s `info.version` is `unversioned`; `GET /api/version` returns the running release string. The public `/api/ready` endpoint returns 200 after startup recovery and 503 while startup is incomplete.
 
 The reference covers the operator HTTP API, including sign-in, members, and tokens. Static UI assets and the separate signature-verified GitHub webhook listener are outside this contract.
 
