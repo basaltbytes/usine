@@ -1,29 +1,20 @@
 // @ts-check
 import starlight from "@astrojs/starlight";
+import { unified } from "@astrojs/markdown-remark";
 import { defineConfig } from "astro/config";
-import mermaid from "astro-mermaid";
 import lucode from "lucode-starlight";
 import starlightLinksValidator from "starlight-links-validator";
 import { redirects } from "./redirects.mjs";
+import rehypePele from "./diagrams/rehype.mjs";
 
 export default defineConfig({
   site: "https://docs.usine.dev",
   redirects,
+  markdown: {
+    processor: unified({ rehypePlugins: [rehypePele] }),
+    syntaxHighlight: { type: "shiki", excludeLangs: ["mermaid"] },
+  },
   integrations: [
-    mermaid({
-      autoTheme: true,
-      enableLog: false,
-      mermaidConfig: {
-        fontFamily: "var(--sl-font, var(--sl-font-system))",
-        themeVariables: { fontFamily: "var(--sl-font, var(--sl-font-system))" },
-        layout: "dagre",
-        look: "classic",
-        flowchart: { useMaxWidth: false },
-        sequence: { useMaxWidth: false, width: 120, actorMargin: 30 },
-        state: { useMaxWidth: false },
-        er: { useMaxWidth: false },
-      },
-    }),
     starlight({
       title: "usine",
       logo: { dark: "./src/assets/logo-dark.svg", light: "./src/assets/logo-light.svg" },

@@ -12,7 +12,7 @@ pnpm --filter @usine/docs build
 pnpm --filter @usine/docs preview
 ```
 
-Use `pnpm --filter @usine/docs dev` for a development server. `pnpm --filter @usine/docs check` synchronizes content types and checks TypeScript. The build tests configuration examples, generates OpenAPI, and validates page and heading links.
+Use `pnpm --filter @usine/docs dev` for a development server. `pnpm --filter @usine/docs check` synchronizes content types and checks TypeScript. The build tests configuration examples and diagrams, generates OpenAPI, and validates page and heading links.
 
 ## Writing rules
 
@@ -21,6 +21,10 @@ Pages are under `src/content/docs/`. Use Google developer documentation style an
 Each guide covers one task: goal, prerequisites, numbered steps, and a result check. Reference tables give each entity or command's types, defaults, and field descriptions, followed by examples. Describe stored configuration and its UI or CLI edits; keep file syntax in the import and export reference and quickstart.
 
 Link to site routes, such as `/guides/follow-a-run/`. Update `astro.config.mjs` for navigation and `redirects.mjs` when replacing a route. Fenced Mermaid diagrams follow the site theme. Contributor architecture notes belong in `docs/architecture/` outside the site.
+
+A fenced `mermaid` code block renders to SVG at build time with [Pele](https://pele.run/). The rehype plugin in `diagrams/rehype.mjs` runs for Markdown and MDX through Astro's unified processor. Invalid diagrams fail the build with the page path, fence position, and Pele error. Diagram colors use Starlight theme tokens through `--pele-*` variables in `src/styles/diagrams.css`, so switching themes updates the SVG through CSS.
+
+Diagrams retain their measured label sizes. Wide diagrams scroll inside a keyboard-focusable frame, including on mobile. Prefer vertical layouts when a horizontal diagram would require extensive scrolling. `test/diagrams.test.ts` renders every diagram page in `src/content/docs/` through the same plugin during the docs build; it also checks parse failures and distinct SVG reference IDs for pages with multiple diagrams.
 
 `node scripts/docs/check.mjs` checks every Markdown and MDX page for issue references and historical wording. The root `pnpm check` runs it, and `pnpm test` tests rejection with fixture pages. Quickstart files in `quickstart/` are imported directly by the quickstart page; edit them instead of duplicating examples. Their parser tests run in the docs build.
 
