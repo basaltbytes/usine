@@ -24,6 +24,7 @@ import {
   type AttentionAcknowledgement,
 } from "@usine/engine/attention";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { TokenCount } from "@usine/core/agent/session";
 import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -95,6 +96,11 @@ import {
   TaskItemView,
   TaskLaneView,
   TaskView,
+  BoardItemLink,
+  BoardTaskView,
+  ReadOnlyBoardLaneView,
+  boardRunSummary,
+  TaskUsageView,
   ConfigurationView,
   type OperatorConfiguration,
   SettingsView,
@@ -1556,6 +1562,94 @@ it("streams small changes and replays missed revisions without payloads", async 
       assert.include(frame, '"reset":true');
       await resetReader.cancel();
     }
+  } finally {
+    await streamApp.dispose();
+  }
+});
+
+it("emits item notices when a non-current linked pull request gains conflicts or labels", async () => {
+  const older = new BoardItemLink({
+    itemKey: ItemKey.make("github:basaltbytes/usine:41"),
+    kind: "pr",
+    number: ItemNumber.make(41),
+    title: "Older pull request",
+    url: "https://github.com/basaltbytes/usine/pull/41",
+    state: "pr-open",
+  });
+  const newer = new BoardItemLink({
+    ...older,
+    itemKey: ItemKey.make("github:basaltbytes/usine:42"),
+    number: ItemNumber.make(42),
+    title: "Current pull request",
+    url: "https://github.com/basaltbytes/usine/pull/42",
+  });
+  const view = (member: BoardItemLink) =>
+    new ReadyOverview({
+      ...overview,
+      projects: overview.projects.map(
+        (project) =>
+          new ProjectView({
+            ...project,
+            board: new BoardView({
+              failures: [],
+              lanes: [
+                new ReadOnlyBoardLaneView({
+                  id: BoardLaneId.make("Review"),
+                  name: LaneName.make("Review"),
+                  origin: "authored",
+                  sources: [],
+                  items: [
+                    new BoardTaskView({
+                      ...newer,
+                      repository: repositoryName,
+                      items: [member, newer],
+                      ...boardRunSummary([], null, [member, newer]),
+                      run: null,
+                      pullRequest: null,
+                      needsYou: false,
+                      loops: [],
+                      usage: new TaskUsageView({
+                        durationMillis: 0,
+                        runningSince: [],
+                        unmeasured: 0,
+                        tokens: TokenCount.make(0),
+                        pools: [],
+                        cost: null,
+                      }),
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          }),
+      ),
+    });
+  let current = view(older);
+  const changing = Layer.effect(
+    FactoryBackend,
+    Effect.map(FactoryBackend, (service) => ({
+      ...service,
+      overview: Effect.sync(() => current),
+    })),
+  ).pipe(Layer.provide(backend));
+  const streamApp = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(changing)), {
+    disableLogger: true,
+  });
+  try {
+    const response = await streamApp.handler(new Request("http://localhost/api/changes"));
+    const reader = response.body?.getReader();
+    assert(reader !== undefined);
+    await reader.read();
+    for (const member of [
+      new BoardItemLink({ ...older, conflicting: true }),
+      new BoardItemLink({ ...older, conflicting: true, labels: [GitHubLabelName.make("review")] }),
+    ]) {
+      current = view(member);
+      const frame = new TextDecoder().decode((await reader.read()).value);
+      assert.include(frame, `"kind":"item","id":"${older.itemKey}"`);
+      assert.notInclude(frame, "Older pull request");
+    }
+    await reader.cancel();
   } finally {
     await streamApp.dispose();
   }

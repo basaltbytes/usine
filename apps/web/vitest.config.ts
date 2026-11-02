@@ -488,6 +488,11 @@ export default mergeConfig(
                 statisticsRequests: async ({ page }) =>
                   statisticsWindows.get(page) ?? { tasks: [], runs: [] },
                 boardMoveRequests: async ({ page }) => boardMoveRequests.get(page) ?? [],
+                boardLaneItemsResponse: async ({ page }, body: string) => {
+                  await page.route("**/api/projects/*/lanes/*/items?*", (route) =>
+                    route.fulfill({ contentType: "application/json", body }),
+                  );
+                },
                 boardRunHistoryResponse: async ({ page }, body: string) => {
                   const requests: Array<string> = [];
                   boardHistoryRequests.set(page, requests);

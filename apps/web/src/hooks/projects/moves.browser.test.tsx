@@ -3,7 +3,7 @@ import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
-import { LabelLaneSource, LaneName } from "@usine/config/board";
+import { LabelLaneSource, LaneName, StateLaneSource } from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
@@ -34,6 +34,7 @@ declare module "vitest/browser" {
   interface BrowserCommands {
     boardResponses: (overview: string, moveStatus: 200 | 503) => Promise<void>;
     boardMoveRequests: () => Promise<Array<{ url: string; body: unknown }>>;
+    boardLaneItemsResponse: (body: string) => Promise<void>;
     delayBoardMove: () => Promise<void>;
     releaseBoardMove: () => Promise<void>;
   }
@@ -333,6 +334,78 @@ it("takes a keyboard drop on an empty lane before a lane with cards", async () =
   await expect.element(lane("Ready").getByRole("status")).toMatchTextContent("Saved on GitHub");
   await expect.element(taskIn("Backlog")).not.toBeInTheDocument();
 });
+
+for (const method of ["menu", "keyboard"] as const) {
+  it(`moves a loaded Done card with the ${method} and preserves its optimistic placement`, async () => {
+    const initial = overview();
+    const project = initial.projects[0];
+    if (project === undefined) throw new Error("Missing project fixture");
+    const cards = project.board.lanes.flatMap(({ items }) =>
+      items.map(
+        (item) =>
+          new BoardTaskView({
+            ...item,
+            state: "issue-closed",
+            items: item.items.map(
+              (member) => new BoardItemLink({ ...member, state: "issue-closed" }),
+            ),
+          }),
+      ),
+    );
+    const paged = new ReadyOverview({
+      ...initial,
+      projects: [
+        new ProjectView({
+          ...project,
+          board: new BoardView({
+            ...project.board,
+            lanes: [
+              ...project.board.lanes.map((lane) => ({ ...lane, items: [] })),
+              new ReadOnlyBoardLaneView({
+                id: BoardLaneId.make("Done"),
+                name: LaneName.make("Done"),
+                origin: "authored",
+                sources: [new StateLaneSource({ state: "issue-closed" })],
+                items: [],
+                totalItems: cards.length,
+              }),
+            ],
+          }),
+        }),
+      ],
+    });
+    await commands.boardLaneItemsResponse(
+      JSON.stringify({
+        items: Schema.encodeSync(Schema.Array(BoardTaskView))(cards),
+        total: cards.length,
+        nextOffset: null,
+      }),
+    );
+    await respond(paged);
+    queryClient.setQueryData(overviewQuery().queryKey, paged);
+    await page.getByTitle("Open Done", { exact: true }).click();
+    await expect.element(taskIn("Done")).toBeVisible();
+    if (method === "menu") {
+      await move(1, "Ready");
+    } else {
+      const card = taskIn("Done").element().closest("[data-slot=card]");
+      if (!(card instanceof HTMLElement)) throw new Error("No Done card");
+      card.focus();
+      await userEvent.keyboard(" ");
+      await userEvent.keyboard("{ArrowLeft}");
+      await userEvent.keyboard("{ArrowLeft}");
+      await expect.poll(() => lane("Ready").element().classList.contains("bg-muted/40")).toBe(true);
+      await userEvent.keyboard(" ");
+    }
+    await expect.element(taskIn("Ready")).toBeVisible();
+    await expect.element(lane("Ready").getByRole("status")).toMatchTextContent("Saved on GitHub");
+    await expect.element(taskIn("Done")).not.toBeInTheDocument();
+    await expect.element(taskIn("Done", 2)).toBeVisible();
+    const requests = await commands.boardMoveRequests();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.body).toEqual({ toLane: "Ready" });
+  });
+}
 
 it("restores the original lane and explains a failed GitHub write", async () => {
   await respond(overview(), 503);

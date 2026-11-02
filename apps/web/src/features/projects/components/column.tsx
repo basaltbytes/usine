@@ -118,7 +118,7 @@ export const BoardColumn = ({
     ...laneItemsQuery(project ?? ProjectId.make("missing"), lane.id),
     enabled: project !== undefined && lane.totalItems !== undefined && !folded,
   });
-  const items = history.data?.pages.flatMap(({ items }) => items) ?? lane.items;
+  const items = lane.items;
   const count = lane.totalItems ?? items.length;
   const scroll = useRef<HTMLDivElement | null>(null);
   const virtual = useVirtualizer({

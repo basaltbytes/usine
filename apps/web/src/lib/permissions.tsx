@@ -22,6 +22,8 @@ export const sessionQuery = () =>
         Schema.Struct({ permissions: Schema.Array(PermissionGrant) }),
       ),
     staleTime: 60_000,
+    refetchInterval: (query) =>
+      canReadOverview(query.state.data?.permissions ?? []) ? false : 60_000,
     meta: { refreshLabel: "Session" },
   });
 export const PermissionsContext = createContext<ReadonlyArray<PermissionGrant>>([]);

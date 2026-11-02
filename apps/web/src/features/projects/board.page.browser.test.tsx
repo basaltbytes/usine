@@ -248,8 +248,7 @@ it("loads every Done card as the virtual lane scrolls", async () => {
     await expect.element(page.getByRole("link", { name: "Task 1000", exact: true })).toBeVisible();
     const scroller = page.getByLabelText("Done cards").element();
     for (const offset of [50, 100]) {
-      const height = scroller.scrollHeight;
-      scroller.scrollTop = height;
+      scroller.scrollTop = scroller.scrollHeight;
       await expect
         .poll(
           () => {
@@ -259,9 +258,13 @@ it("loads every Done card as the virtual lane scrolls", async () => {
           { timeout: 10_000 },
         )
         .toBe(true);
-      await expect.poll(() => scroller.scrollHeight).toBeGreaterThan(height);
     }
-    scroller.scrollTop = scroller.scrollHeight;
+    await expect
+      .poll(() => {
+        scroller.scrollTop = scroller.scrollHeight;
+        return scroller.textContent;
+      })
+      .toContain("Task 1119");
     await expect.element(page.getByRole("link", { name: "Task 1119", exact: true })).toBeVisible();
     expect(scroller.querySelectorAll("h3").length).toBeLessThan(50);
     expect(offsets).toEqual([0, 50, 100]);

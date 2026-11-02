@@ -3,7 +3,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { GitHubLabelName } from "@usine/config/label";
 import { isSettledItemState, LaneItemState, LaneName, LaneSource } from "@usine/config/board";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { RunStateTag, RunSummaryView } from "./run.ts";
 import { TaskUsageView } from "./usage.ts";
 
@@ -32,6 +32,10 @@ export class BoardItemLink extends Schema.Class<BoardItemLink>("@usine/orchestra
     url: Schema.NonEmptyString,
     /** The last polled issue or pull request state used for lane placement. */
     state: LaneItemState,
+    /** The last polled labels, including labels on non-current linked items. */
+    labels: Schema.Array(GitHubLabelName).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+    /** Whether this item is an open pull request with conflicts against its base. */
+    conflicting: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   },
 ) {}
 

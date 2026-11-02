@@ -77,7 +77,10 @@ export const applyMove = (
   const card = { ...moved, labels: moved.labels.filter((label) => !laneLabels.has(label)) };
   return lanes.map((lane) => {
     const items = lane.items.filter(({ itemKey }) => itemKey !== move.itemKey);
-    return lane.id === move.toLane ? { ...lane, items: [card, ...items] } : { ...lane, items };
+    const placed = lane.id === move.toLane ? [card, ...items] : items;
+    return lane.totalItems === undefined
+      ? { ...lane, items: placed }
+      : { ...lane, items: placed, totalItems: lane.totalItems + placed.length - lane.items.length };
   });
 };
 

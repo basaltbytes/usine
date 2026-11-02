@@ -30,6 +30,8 @@ For a shared address, [expose the instance over HTTPS](/guides/expose-an-instanc
 
 An open screen receives change notices over one server-sent events connection and reads only the affected data. The refresh indicator reports when live updates disconnect. During disconnection, the screen checks for changes every minute and resumes live updates when the connection recovers.
 
-Board moves appear immediately. A failed label write restores the card's previous lane and displays the error. An accepted move remains visible until GitHub synchronization confirms the lane. Open **Done** and scroll to load all its cards; long lanes and run histories load more rows as you scroll.
+The **No project access** page checks permissions every minute. When an admin grants access, the page opens your projects automatically. Task pages refresh after label changes on any linked item and merge conflict changes on any linked pull request, including older pull requests.
+
+Board moves appear immediately. A failed label write restores the card's previous lane and displays the error. An accepted move remains visible until GitHub synchronization confirms the lane. Open **Done** and scroll to load all its cards; loaded cards support **Move to** and dragging to a writable lane. Long lanes and run histories load more rows as you scroll.
 
 If you serve the UI through a reverse proxy, disable response buffering for `/api/changes` and allow a long-lived response. The endpoint sends a heartbeat every 15 seconds.

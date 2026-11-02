@@ -40,6 +40,8 @@ const itemLink = (item: ProjectedItem) =>
     title: item.title,
     url: item.url,
     state: item.state,
+    labels: item.labels,
+    conflicting: item.conflicting,
   });
 
 /**

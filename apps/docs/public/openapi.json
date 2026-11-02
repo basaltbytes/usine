@@ -38287,6 +38287,17 @@
               "pr-closed",
               "pr-merged"
             ]
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\S(?:.*\\S)?$",
+              "maxLength": 50
+            }
+          },
+          "conflicting": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -38295,7 +38306,9 @@
           "number",
           "title",
           "url",
-          "state"
+          "state",
+          "labels",
+          "conflicting"
         ],
         "additionalProperties": false
       },
@@ -43472,10 +43485,6 @@
               "pr-merged"
             ]
           },
-          "repository": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
-          },
           "labels": {
             "type": "array",
             "items": {
@@ -43483,6 +43492,13 @@
               "pattern": "^\\S(?:.*\\S)?$",
               "maxLength": 50
             }
+          },
+          "conflicting": {
+            "type": "boolean"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
           },
           "items": {
             "type": "array",
@@ -43561,9 +43577,6 @@
           "needsYou": {
             "type": "boolean"
           },
-          "conflicting": {
-            "type": "boolean"
-          },
           "loops": {
             "type": "array",
             "items": {
@@ -43582,8 +43595,9 @@
           "title",
           "url",
           "state",
-          "repository",
           "labels",
+          "conflicting",
+          "repository",
           "items",
           "pullRequest",
           "runCount",
@@ -43592,7 +43606,6 @@
           "loopStates",
           "run",
           "needsYou",
-          "conflicting",
           "loops",
           "usage"
         ],
@@ -45987,6 +46000,17 @@
                     "pr-merged"
                   ]
                 },
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^\\S(?:.*\\S)?$",
+                    "maxLength": 50
+                  }
+                },
+                "conflicting": {
+                  "type": "boolean"
+                },
                 "repository": {
                   "type": "string",
                   "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
@@ -46028,6 +46052,17 @@
                           "pr-closed",
                           "pr-merged"
                         ]
+                      },
+                      "labels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^\\S(?:.*\\S)?$",
+                          "maxLength": 50
+                        }
+                      },
+                      "conflicting": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -46036,7 +46071,9 @@
                       "number",
                       "title",
                       "url",
-                      "state"
+                      "state",
+                      "labels",
+                      "conflicting"
                     ],
                     "additionalProperties": false
                   },
@@ -46050,6 +46087,8 @@
                 "title",
                 "url",
                 "state",
+                "labels",
+                "conflicting",
                 "repository",
                 "items"
               ],
@@ -47008,6 +47047,17 @@
                     "pr-merged"
                   ]
                 },
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^\\S(?:.*\\S)?$",
+                    "maxLength": 50
+                  }
+                },
+                "conflicting": {
+                  "type": "boolean"
+                },
                 "repository": {
                   "type": "string",
                   "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
@@ -47049,6 +47099,17 @@
                           "pr-closed",
                           "pr-merged"
                         ]
+                      },
+                      "labels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^\\S(?:.*\\S)?$",
+                          "maxLength": 50
+                        }
+                      },
+                      "conflicting": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -47057,7 +47118,9 @@
                       "number",
                       "title",
                       "url",
-                      "state"
+                      "state",
+                      "labels",
+                      "conflicting"
                     ],
                     "additionalProperties": false
                   },
@@ -47071,6 +47134,8 @@
                 "title",
                 "url",
                 "state",
+                "labels",
+                "conflicting",
                 "repository",
                 "items"
               ],

@@ -8,4 +8,4 @@ Navigation and attention reads omit board payloads. Navigation retains compact t
 
 Successful JSON reads have private ETags. Authorization precedes conditional response handling, and validators vary by browser credentials and read representation. Browsers revalidate cached reads without transferring an unchanged body. The stream disables caching and proxy buffering.
 
-Connected screens have no interval polling. During disconnection, one app-wide timer invalidates active reads every 60 seconds. The refresh indicator reports disconnection. Board mutations add optimistic move state in `onMutate`, remove it on failure, and retain accepted moves until a changed project projection confirms GitHub state.
+Connected screens have no interval polling. Members without read access refresh their session every 60 seconds until a role binding grants access and the shell opens its connection. During disconnection, one app-wide timer invalidates active reads every 60 seconds. The refresh indicator reports disconnection. Board mutations add optimistic move state in `onMutate`, remove it on failure, and retain accepted moves until a changed project projection confirms GitHub state.

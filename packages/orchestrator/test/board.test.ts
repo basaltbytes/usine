@@ -479,6 +479,13 @@ describe("Board projection", () => {
         ]);
         assert.strictEqual(card.needsYou, true);
         assert.strictEqual(card.conflicting, true);
+        assert.strictEqual(
+          card.items.find(({ itemKey }) => itemKey === pr.itemKey)?.conflicting,
+          true,
+        );
+        assert.deepStrictEqual(card.items.find(({ itemKey }) => itemKey === pr.itemKey)?.labels, [
+          review,
+        ]);
         assert.strictEqual(board.lanes.at(-1)?.items.length, 0);
       }),
   );

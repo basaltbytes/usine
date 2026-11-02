@@ -7,12 +7,61 @@ import { ProjectId } from "@usine/core/project";
 import { ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { sessionQuery } from "~/lib/permissions";
 import { routeTree } from "~/route-tree.gen";
+import { memoryRouter } from "~/lib/testing/memory-router";
+import { MemberShell } from "./member-shell";
 import "~/index.css";
+
+it("opens access granted while the No project access page stays focused", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(sessionQuery().queryKey, { permissions: [] });
+  let granted = false;
+  let reads = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input) !== "/api/auth/session") return originalFetch(input, init);
+    reads += 1;
+    return Response.json({ permissions: granted ? administratorPermissions : [] });
+  };
+  const router = memoryRouter(() => (
+    <MemberShell>
+      <p>Granted access</p>
+    </MemberShell>
+  ));
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    await router.load();
+    flushSync(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      ),
+    );
+    await expect.element(page.getByText("No project access", { exact: true })).toBeVisible();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(reads).toBe(0);
+    granted = true;
+    await vi.advanceTimersByTimeAsync(1);
+    await expect.element(page.getByText("Granted access", { exact: true })).toBeVisible();
+    expect(reads).toBe(1);
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(reads).toBe(1);
+  } finally {
+    flushSync(() => root.unmount());
+    client.clear();
+    host.remove();
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+  }
+});
 
 for (const permission of ["none", "operate", "maintain"] as const) {
   const permissions =
