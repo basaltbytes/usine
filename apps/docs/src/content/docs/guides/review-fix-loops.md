@@ -48,6 +48,6 @@ The handoff must match the harvested pull request and pushed head. The stored po
 
 Missing checks remain pending until the deadline; a timeout appears in **Needs attention**. When the recorded head has no checks and GitHub reports `CONFLICTING`, usine starts the configured fix loop with instructions to merge the base branch, resolve conflicts, run local checks, and push. The fix inherits pending completion actions. Mergeability `UNKNOWN` continues waiting.
 
-The fix loop must be active, use the pull request stream, and select the repository. Its approval and cycle budget still apply. Accepted CI fixes close their source run as **Handed off** and link to the fix run. An exhausted cycle budget requires an operator reset. Loops without a CI policy require their agents to wait for checks before applying completion labels.
+The fix loop must be active, use the pull request stream, and select the repository. Its approval and cycle budget still apply. A queued CI fix remains eligible while the pull request is open at the recorded head and has failed checks or a merge conflict with no checks. Accepted CI fixes close their source run as **Handed off** and link to the fix run. An exhausted cycle budget requires an operator reset. Loops without a CI policy require their agents to wait for checks before applying completion labels.
 
 GitHub does not run pull request workflows on conflicting branches. Writer tasks must resolve the conflict and push a checked tree. A clean agent review leaves any required independent approval and merge to you.

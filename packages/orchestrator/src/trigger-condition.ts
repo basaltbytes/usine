@@ -77,8 +77,10 @@ export const triggerConditionLayer: Layer.Layer<
           snapshot.payload.state === "OPEN" &&
           snapshot.payload.headRefOid === submission.ciFailureHead.value &&
           (snapshot.payload.statusCheckRollup?.state === "FAILURE" ||
-            snapshot.payload.statusCheckRollup?.state === "ERROR");
-        yield* Effect.logInfo("Queued CI fix rechecked against its failed head", {
+            snapshot.payload.statusCheckRollup?.state === "ERROR" ||
+            (snapshot.payload.statusCheckRollup === null &&
+              snapshot.payload.mergeable === "CONFLICTING"));
+        yield* Effect.logInfo("Queued CI fix rechecked against its recorded head", {
           ...fields,
           head: submission.ciFailureHead.value,
           holds,
