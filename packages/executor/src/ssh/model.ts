@@ -10,6 +10,7 @@ import type {
   ContainerCpus,
   ContainerImage,
   ContainerMemoryMib,
+  ContainerScratchMib,
   ContainerPids,
   GatewayAdminPort,
   GatewayCredentialKind,
@@ -60,6 +61,10 @@ export interface SshWorkerContainer {
   readonly memoryMib: Option.Option<ContainerMemoryMib>;
   /** The maximum number of processes and threads. */
   readonly pids: Option.Option<ContainerPids>;
+  /** The shared-memory capacity in MiB, or `None` for 2048, capped at the memory limit. */
+  readonly shmSizeMib: Option.Option<ContainerScratchMib>;
+  /** The temporary-file capacity in MiB, or `None` for 2048, capped at the memory limit. */
+  readonly tmpfsSizeMib: Option.Option<ContainerScratchMib>;
 }
 
 /** The LLM provider API keys that each Attempt on a provisioned Worker gets in its environment. */

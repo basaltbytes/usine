@@ -23,6 +23,7 @@ import {
   ContainerImage,
   ContainerLimits,
   ContainerMemoryMib,
+  ContainerScratchMib,
   ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
@@ -270,6 +271,10 @@ export class ContainerView extends Schema.Class<ContainerView>("@usine/orchestra
     memoryMib: Schema.NullOr(ContainerMemoryMib),
     /** The process limit per attempt container, or null for the derived default. */
     pids: Schema.NullOr(ContainerPids),
+    /** The shared-memory capacity in MiB, or null for the default. */
+    shmSizeMib: Schema.NullOr(ContainerScratchMib),
+    /** The temporary-file capacity in MiB, or null for the default. */
+    tmpfsSizeMib: Schema.NullOr(ContainerScratchMib),
   },
 ) {}
 
@@ -508,6 +513,8 @@ const workerConnection = (worker: Worker) =>
           cpus: Option.getOrNull(worker.container.cpus),
           memoryMib: Option.getOrNull(worker.container.memoryMib),
           pids: Option.getOrNull(worker.container.pids),
+          shmSizeMib: Option.getOrNull(worker.container.shmSizeMib),
+          tmpfsSizeMib: Option.getOrNull(worker.container.tmpfsSizeMib),
         }),
       }
     : {

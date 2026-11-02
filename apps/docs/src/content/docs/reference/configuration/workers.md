@@ -59,6 +59,15 @@ Fields belong to `container` on an SSH worker.
 | `memory_mib` | integer ≥ 256 | (host MiB − 1024) ÷ slots | Memory limit per attempt. |
 | `pids` | integer ≥ 64 | (host process capacity − 1024) ÷ slots | Process limit per attempt. |
 
+`shm_size_mib` and `tmpfs_size_mib` are positive integers under `container`. They set the memory-backed capacities of `/dev/shm` and `/tmp`, respectively, in MiB; each defaults to 2048 and is capped at the container memory limit. Docker and Podman set `TMPDIR=/tmp`, so temporary files avoid host disk sync latency. Both filesystems and running processes share the container memory limit; these capacities do not reserve additional memory. Container removal deletes the temporary files.
+
+```yaml
+container:
+  memory_mib: 6144
+  shm_size_mib: 2048
+  tmpfs_size_mib: 2048
+```
+
 Derived limits round down to a hundredth of a CPU, a MiB, and a process, with minimums of 0.01 CPUs, 256 MiB, and 64 processes. For example, `container: { memory_mib: 4096 }` fixes memory while preflight derives the other limits. Provisioned machines derive limits for one attempt. **Workers** shows the applied limits and which were derived. Reducing concurrency keeps existing limits until the next preflight.
 
 `/etc/usine/container-runtime` selects Podman or Docker. Without the file, installed Podman takes precedence. A selected runtime that fails checks blocks preflight. Without a usable runtime, fixed SSH workers can run as the SSH user in degraded mode, where attempts can read each other's credentials.

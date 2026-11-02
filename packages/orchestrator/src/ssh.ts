@@ -200,6 +200,8 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: MissingSecret) =>
         cpus: worker.container.cpus,
         memoryMib: worker.container.memoryMib,
         pids: worker.container.pids,
+        shmSizeMib: worker.container.shmSizeMib,
+        tmpfsSizeMib: worker.container.tmpfsSizeMib,
       },
     } satisfies SshWorkerAddress;
   });

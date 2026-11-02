@@ -892,6 +892,8 @@ export const ADDRESS: SshWorkerAddress = {
     cpus: Option.some(ContainerCpus.make(2)),
     memoryMib: Option.some(ContainerMemoryMib.make(4096)),
     pids: Option.some(ContainerPids.make(4096)),
+    shmSizeMib: Option.none(),
+    tmpfsSizeMib: Option.none(),
   },
 };
 
