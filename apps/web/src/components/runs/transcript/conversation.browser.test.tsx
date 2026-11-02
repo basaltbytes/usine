@@ -845,6 +845,13 @@ it("resumes following when a wheel turn past a tool output's end reaches the lat
   output.scrollTop = output.scrollHeight;
   await userEvent.wheel(output, { delta: { y: 800 } });
   await expect.poll(atLatest).toBeLessThan(9);
+  // Chromium can update scrollTop before delivering the scroll event that resumes following.
+  await expect
+    .poll(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide"));
+      return bookmark()?.position._tag;
+    })
+    .toBe("Latest");
   mount([...events, ...longRead, message(48)]);
   await expect.poll(atLatest).toBeLessThan(9);
 });
