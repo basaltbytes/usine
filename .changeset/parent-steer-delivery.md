@@ -1,6 +1,8 @@
 ---
 "@usine/core": patch
 "@usine/durable": patch
+"@usine/engine": patch
+"@usine/executor": patch
 "@usine/server": patch
 ---
 

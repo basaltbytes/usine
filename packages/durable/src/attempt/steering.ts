@@ -33,7 +33,12 @@ export const queueParentSteer = Effect.fn("AttemptSteering.queueParent")(functio
   const state = yield* durable.use("queue a parent turn for the steer", (harness, context) =>
     harness.commit(async (tx) => {
       const task = await tx.task(hub.taskId);
-      if (task === undefined || task.state.status === "terminal") return Option.none();
+      if (
+        task === undefined ||
+        task.state.status === "terminal" ||
+        task.state.status === "completing"
+      )
+        return Option.none();
       const hold = await tx.doc(HoldDoc, hub.taskId);
       const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
       if (!hold.guidance.some((item) => item.requestId === requestId)) {

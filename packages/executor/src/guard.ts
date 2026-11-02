@@ -110,7 +110,9 @@ const recordHolds = (
 ): void => {
   const payload = envelope.payload;
   if (payload._tag === "InterventionApplied") {
-    const key = holdKey(payload.intervention.target);
+    const key = Option.getOrElse(payload.state.forwardedTo, () =>
+      holdKey(payload.intervention.target),
+    );
     if (payload.state.held && !ended.has(key)) holds.add(key);
     else holds.delete(key);
   }
