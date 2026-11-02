@@ -39,3 +39,11 @@ pi-durable delivers steers after the running tool call returns, and the parent's
 The parent's report records whether its last turn answered operator input without delegating afterward. If so, and the checkout has no commit, PR, or comment, the executor fails the attempt with `AgentFailure`, so ending on an answer after a steer or release never yields an empty `Succeeded`. 2026-10-20 (#393): only operator messages and steers count as operator input, so a released parent's answer to the release guidance is judged like any other.
 
 The wall-clock pause covers the parent's hold too.
+
+## Amendment (2026-11-02, #835): parent steers follow the delegated work
+
+A `Steer` addressed to the parent is forwarded as a `Steer` to its single live child. The receipt preserves the original intervention and input sequence, records the receiving child in `state.forwardedTo`, and reports queued delivery until the child reads it. Forwarding places no hold. Operator messages retain the parent exchange and hold behavior above.
+
+When forwarding is refused, no single child is live, or the child stops before reading the steer, the runtime queues a separate parent turn with the guidance. The parent's earlier answer cannot complete the attempt while this turn is pending. The parent must delegate the remaining work or answer the operator. The attempt also waits for unresolved forwarded steers before completing, so a late child receipt can still require that turn.
+
+The guidance, its request ID, and unread receipts are durable. After a restart, a steer whose child is gone requires a parent turn. An explicit interruption withdraws an unread forwarded steer and preserves the pause instead. The run page presents the latest receipt once, showing delivery to the parent, forwarding to the child, or that the steer was not acted on.

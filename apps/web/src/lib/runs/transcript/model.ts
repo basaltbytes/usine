@@ -56,6 +56,7 @@ type NoticeOrigin =
 
 /** The session that queued an operator input until its current step ends. */
 export type QueuedFor = "parent" | "child";
+export type MessageDelivery = "parent" | "child" | "forwarded" | "not-acted-on";
 
 /** A message or lifecycle notice in the conversation. */
 export interface TranscriptNotice extends TranscriptPosition, NoticeContent {
@@ -63,6 +64,7 @@ export interface TranscriptNotice extends TranscriptPosition, NoticeContent {
   readonly origin: NoticeOrigin;
   /** The session that queued this operator input until its current step ends, or `null`. */
   readonly queued: QueuedFor | null;
+  readonly delivery: MessageDelivery | null;
 }
 
 interface ToolStart {
@@ -125,7 +127,14 @@ const notice = (
   event: Pick<TranscriptEventView, "sequence" | "receivedAt" | "attemptId">,
   content: NoticeContent,
   origin: NoticeOrigin,
-): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin, queued: null });
+): TranscriptNotice => ({
+  _tag: "Notice",
+  ...position(event),
+  ...content,
+  origin,
+  queued: null,
+  delivery: null,
+});
 
 /** Returns a retry count as text, for example `1 retry` or `27 retries`. */
 export const retriesLabel = (retries: number): string =>
@@ -234,13 +243,26 @@ const sessionEntries = (
   return [...entries, ...tools.values()].sort((left, right) => left.sequence - right.sequence);
 };
 
+const messageDelivery = ({ payload }: InterventionRecord): MessageDelivery | null => {
+  const { action, target } = payload.intervention;
+  if (action._tag !== "OperatorMessage" && action._tag !== "Steer") return null;
+  if (payload._tag === "InterventionRejected")
+    return action._tag === "Steer" ? "not-acted-on" : null;
+  if (Option.isSome(payload.state.forwardedTo)) return "forwarded";
+  if (payload.state.queued) return null;
+  return target._tag === "Parent" ? "parent" : "child";
+};
+
 const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
   const { action, operator, target } = record.payload.intervention;
   const rejected = record.payload._tag === "InterventionRejected";
   const message = action._tag === "OperatorMessage" || action._tag === "Steer";
+  const forwarded =
+    record.payload._tag === "InterventionApplied" &&
+    Option.isSome(record.payload.state.forwardedTo);
   const queued: QueuedFor | null =
     record.payload._tag === "InterventionApplied" && record.payload.state.queued
-      ? target._tag === "Parent"
+      ? target._tag === "Parent" && !forwarded
         ? "parent"
         : "child"
       : null;
@@ -266,7 +288,7 @@ const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
     },
     { _tag: "Operator", operator },
   );
-  return { ...entry, queued };
+  return { ...entry, queued, delivery: messageDelivery(record) };
 };
 
 /** Returns the conversation rows for `events`, without reading the clock. */
