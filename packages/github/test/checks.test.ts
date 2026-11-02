@@ -260,6 +260,69 @@ for (const firstStart of ["00", "01"]) {
   }
 }
 
+for (const action of ["shell", "script"]) {
+  it.effect(
+    `keeps embedded ${action} failures in a composite action before same-second cleanup`,
+    () =>
+      Effect.gen(function* () {
+        const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+        assert.include(evidence.excerpt, "Composite checks");
+        assert.include(evidence.excerpt, "##[error]Error: required file is missing");
+        assert.include(evidence.excerpt, "expected required-file to exist");
+        assert.include(evidence.excerpt, "final composite diagnostics");
+        if (action === "shell")
+          assert.include(evidence.excerpt, "Process completed with exit code 1");
+        assert.notInclude(evidence.excerpt, "Post job cleanup");
+        assert.notInclude(evidence.excerpt, "git config");
+      }).pipe(
+        Effect.provide(
+          withClient((url) => {
+            if (url.includes("/logs"))
+              return new Response(
+                [
+                  "2026-11-02T10:00:01.1000000Z ##[group]Run ./.github/actions/check",
+                  "2026-11-02T10:00:01.1100000Z ##[endgroup]",
+                  "2026-11-02T10:00:01.1200000Z ##[group]Run echo setup",
+                  "2026-11-02T10:00:01.1300000Z ##[endgroup]",
+                  "2026-11-02T10:00:01.1400000Z setup",
+                  `2026-11-02T10:00:01.2000000Z ##[group]Run ${action === "shell" ? "test -f required-file" : "actions/github-script@v8"}`,
+                  "2026-11-02T10:00:01.2100000Z ##[endgroup]",
+                  "2026-11-02T10:00:01.3000000Z ##[error]Error: required file is missing",
+                  "expected required-file to exist",
+                  ...(action === "shell"
+                    ? ["2026-11-02T10:00:01.4000000Z ##[error]Process completed with exit code 1."]
+                    : []),
+                  "2026-11-02T10:00:01.4100000Z ##[group]Run echo diagnostics",
+                  "2026-11-02T10:00:01.4200000Z ##[endgroup]",
+                  "2026-11-02T10:00:01.4300000Z final composite diagnostics",
+                  "2026-11-02T10:00:01.5000000Z Post job cleanup.",
+                  "2026-11-02T10:00:01.6000000Z git config --local --unset-all http.https://github.com/.extraheader",
+                ].join("\n"),
+              );
+            if (url.includes("/actions/jobs/"))
+              return json({
+                steps: [
+                  {
+                    name: "Composite checks",
+                    conclusion: "failure",
+                    started_at: "2026-11-02T10:00:01Z",
+                    completed_at: "2026-11-02T10:00:01Z",
+                  },
+                  {
+                    name: "Post Run actions/checkout@v7",
+                    conclusion: "success",
+                    started_at: "2026-11-02T10:00:01Z",
+                    completed_at: "2026-11-02T10:00:01Z",
+                  },
+                ],
+              });
+            return json(failedCheck);
+          }),
+        ),
+      ),
+  );
+}
+
 it.effect("uses check output when Actions step metadata is unavailable", () =>
   Effect.gen(function* () {
     const evidence = yield* (yield* GitHubChecks).failures(repository, head);

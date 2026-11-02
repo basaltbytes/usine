@@ -68,8 +68,11 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, log: string): st
     const start = DateTime.toEpochMillis(step.started_at);
     // The step API rounds to seconds; log timestamps retain subsecond precision.
     const end = DateTime.toEpochMillis(step.completed_at) + 1000;
-    const next = executed[stepIndex + 1]?.started_at;
-    const nextStart = next === undefined || next === null ? end : DateTime.toEpochMillis(next);
+    const next = executed[stepIndex + 1];
+    const nextStart =
+      next?.started_at === undefined || next.started_at === null
+        ? end
+        : DateTime.toEpochMillis(next.started_at);
     const lines: Array<string> = [];
     let withinStep = false;
     for (const [index, line] of logLines.entries()) {
@@ -82,12 +85,13 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, log: string): st
       }
       if (!withinStep) continue;
       const content = timestamp === undefined ? line : line.slice(line.indexOf(" ") + 1);
-      // Runner headers delimit actions without a shell exit marker, even within one second.
+      // Post steps start with cleanup; composite actions also emit embedded Run headers.
       if (
         lines.length > 0 &&
         timestamp !== undefined &&
         Date.parse(timestamp) >= nextStart &&
-        (content.startsWith("##[group]Run ") || content === "Post job cleanup.")
+        ((content.startsWith("##[group]Run ") && !next?.name.startsWith("Post ")) ||
+          content === "Post job cleanup.")
       )
         break;
       if (content === "Post job cleanup." && !step.name.startsWith("Post ")) break;
