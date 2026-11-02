@@ -1,11 +1,11 @@
-import type { RunView, StalledItemView } from "@usine/orchestrator/operator";
+import type { RunSummaryView, StalledItemView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import { agoLabel } from "~/lib/strings";
 import { machineCreationLine } from "~/lib/workers/strings";
 import { upgradeWaitLine, failureReason, stopWaitLine } from "~/lib/runs/strings";
 import { runActivityAt } from "~/lib/tasks/model";
 
-const isQuestion = (run: RunView): boolean => {
+const isQuestion = (run: RunSummaryView): boolean => {
   const outcome = run.attempts.at(-1)?.outcome;
   return outcome?._tag === "Failed" && outcome.failure._tag === "QuestionFailure";
 };

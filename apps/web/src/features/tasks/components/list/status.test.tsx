@@ -2,7 +2,7 @@ import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { HandedOff } from "@usine/core/run/state";
 import { LoopName } from "@usine/core/loop";
-import { BoardTaskView, RunView } from "@usine/orchestrator/operator";
+import { BoardTaskView, RunSummaryView } from "@usine/orchestrator/operator";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, it } from "vitest";
 import { boardOverview } from "~/lib/projects/fixture";
@@ -17,7 +17,7 @@ it("keeps a handed-off task in flight with the fix run status and link", () => {
   const task = lane?.items.find(({ runs }) => runs.length > 0);
   const base = task?.runs[0];
   assert(lane !== undefined && task !== undefined && base !== undefined);
-  const fix = new RunView({
+  const fix = new RunSummaryView({
     ...base,
     id: RunId.make("fix-run-828"),
     loop: LoopName.make("fix"),
@@ -27,7 +27,7 @@ it("keeps a handed-off task in flight with the fix run status and link", () => {
     canResolveFailure: false,
     canApprove: false,
   });
-  const source = new RunView({
+  const source = new RunSummaryView({
     ...base,
     state: "HandedOff",
     canCancel: false,

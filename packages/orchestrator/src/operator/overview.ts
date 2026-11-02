@@ -4,7 +4,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { Effect, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
-import { RunView } from "./run.ts";
+import { RunSummaryView } from "./run.ts";
 import { BoardView, LabelView } from "./board.ts";
 import { NeedView } from "./need.ts";
 
@@ -29,7 +29,7 @@ export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/
   /** Whether the project needs attention, has active runs, or is clear. */
   status: ProjectStatus,
   /** The project runs included in the overview, newest first. */
-  runs: Schema.Array(RunView),
+  runs: Schema.Array(RunSummaryView),
   /** The task cards grouped into the project lanes. */
   board: BoardView,
   /** The repository's label catalog, used to color badges on cards and lanes. */

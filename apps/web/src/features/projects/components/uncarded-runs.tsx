@@ -1,6 +1,6 @@
 import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { RunId } from "@usine/core/run";
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunSummaryView } from "@usine/orchestrator/operator";
 import { StatusBadge } from "~/components/status-badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
@@ -14,7 +14,7 @@ import {
 } from "~/components/ui/table";
 
 type UncardedRunsProps = {
-  readonly runs: ReadonlyArray<RunView>;
+  readonly runs: ReadonlyArray<RunSummaryView>;
   readonly openRun: (runId: RunId) => void;
 };
 

@@ -4,7 +4,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { GitHubLabelName } from "@usine/config/label";
 import { LaneItemState, LaneName, LaneSource } from "@usine/config/board";
 import { Schema } from "effect";
-import { RunView } from "./run.ts";
+import { RunSummaryView } from "./run.ts";
 import { TaskUsageView } from "./usage.ts";
 
 /** The ID of a lane on a Project's Board. */
@@ -74,12 +74,12 @@ export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestra
      */
     pullRequest: Schema.NullOr(BoardPullRequestView),
     /** Every saved Run for the visible Items, earliest first. */
-    runs: Schema.Array(RunView),
+    runs: Schema.Array(RunSummaryView),
     /**
      * The newest Run that needs the operator, else the open Run, else the newest Run, or null if
      * there are no Runs. A failed Run on a closed or merged Item doesn't need the operator.
      */
-    run: Schema.NullOr(RunView),
+    run: Schema.NullOr(RunSummaryView),
     /** Whether a run or cycle-budget ask on the task needs operator attention. */
     needsYou: Schema.Boolean,
     /** Whether the current Item is an open pull request whose branch conflicts with its base. */

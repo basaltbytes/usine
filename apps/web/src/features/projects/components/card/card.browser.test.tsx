@@ -9,9 +9,17 @@ import {
   LoopCycleCount,
 } from "@usine/core/cycle-budget";
 import { EventId } from "@usine/core/event";
+import { AttemptTask } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { Claimed, CycleBlocked, RunAgainResult } from "@usine/engine/engine";
-import { FactoryOverview, type ReadyOverview, type RunView } from "@usine/orchestrator/operator";
+import {
+  AttemptView,
+  RunView,
+  RunDetailView,
+  FactoryOverview,
+  type ReadyOverview,
+  type RunSummaryView,
+} from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -29,7 +37,7 @@ import "~/index.css";
 declare module "vitest/browser" {
   interface BrowserCommands {
     boardResponses: (overview: string, moveStatus: 200 | 503) => Promise<void>;
-    delayRunAgain: () => Promise<void>;
+    delayRunAgain: (detail: string) => Promise<void>;
     releaseRunAgain: (
       status: 200 | 409,
       body: string,
@@ -69,7 +77,7 @@ const cardOf = (title: RegExp) => {
   if (!(card instanceof HTMLElement)) throw new Error(`No card titled ${title}`);
   return card;
 };
-const runOf = (id: string): RunView => {
+const runOf = (id: string): RunSummaryView => {
   const run = overview.projects
     .flatMap(({ board }) => board.lanes)
     .flatMap(({ items }) => items)
@@ -394,7 +402,24 @@ const runAgainBody = (result: RunAgainResult) =>
   JSON.stringify(Schema.encodeSync(RunAgainResult)(result));
 
 const runDroppedAgain = async () => {
-  await commands.delayRunAgain();
+  const run = runOf("run-dropped");
+  const detail = new RunDetailView({
+    run: new RunView({
+      ...run,
+      task: "Work on #18.",
+      resultMessage: null,
+      attempts: run.attempts.map(
+        (attempt) => new AttemptView({ ...attempt, task: AttemptTask.make("Work on #18.") }),
+      ),
+    }),
+    agentDefinitionChanged: false,
+    eventDedupKey: "run-dropped",
+    eventPayload: {},
+    transcript: [],
+    sessionState: [],
+    earlierTranscript: [],
+  });
+  await commands.delayRunAgain(JSON.stringify(Schema.encodeSync(RunDetailView)(detail)));
   await actions(18).click();
   await page.getByRole("menuitem", { name: /^Run again/u }).click();
 };

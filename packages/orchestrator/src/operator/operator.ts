@@ -125,7 +125,7 @@ import {
 import { LoopView, ProjectView, ReadyOverview } from "./overview.ts";
 import {
   RunDetailView,
-  type RunView,
+  type RunSummaryView,
   EditAndRetry,
   LoopNotFoundError,
   SessionIntervention,
@@ -138,6 +138,7 @@ import {
   readUnrecordedEnds,
   runDuration,
   runView,
+  runSummaryView,
   workerAccesses,
 } from "./projection.ts";
 import { RunUsageReader, type RunUsageView, taskUsage } from "./usage.ts";
@@ -206,7 +207,7 @@ interface CachedOverview {
   readonly token: string;
   readonly overview: ReadyOverview;
   readonly usage: BoardUsage;
-  readonly running: ReadonlyArray<RunView>;
+  readonly running: ReadonlyArray<RunSummaryView>;
 }
 
 /**
@@ -287,7 +288,9 @@ const makeOperatorObservation = Effect.gen(function* () {
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
     const waits = quotaWaits(provisioning);
-    const views = snapshots.map((snapshot) => runView(snapshot, paused, access, waits, upgrade));
+    const views = snapshots.map((snapshot) =>
+      runSummaryView(snapshot, paused, access, waits, upgrade),
+    );
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
       const projectRuns = runsByRepository.get(view.repository) ?? [];
@@ -319,7 +322,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history) {
-            const view = runView(saved, paused, access, waits, upgrade);
+            const view = runSummaryView(saved, paused, access, waits, upgrade);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
@@ -560,7 +563,8 @@ const makeOperatorObservation = Effect.gen(function* () {
     }
     for (const { attemptId, runId, worker } of unconfirmedStops) {
       const run =
-        allRuns.get(runId) ?? runView(yield* reader.inspect(runId), paused, access, waits, upgrade);
+        allRuns.get(runId) ??
+        runSummaryView(yield* reader.inspect(runId), paused, access, waits, upgrade);
       const attempt = run.attempts.find(({ id }) => id === attemptId);
       if (attempt === undefined) {
         yield* Effect.logWarning(
@@ -1233,7 +1237,7 @@ const makeOperator = Effect.gen(function* () {
         }),
         storedItems,
         // Placement reads no pause state, so these views leave every Loop unpaused.
-        summaries.map((summary) => runView(summary, new Set(), access)),
+        summaries.map((summary) => runSummaryView(summary, new Set(), access)),
         [],
         new Map(),
         new Map(),
@@ -1482,6 +1486,7 @@ export {
   ApprovalView,
   RunStateTag,
   RunView,
+  RunSummaryView,
   RunDurationView,
   RunDetailView,
   UnconfirmedStopView,
@@ -1521,6 +1526,7 @@ export {
   SandboxWorkerAccess,
   WorkerAccess,
   AttemptView,
+  AttemptSummaryView,
 } from "./attempt.ts";
 export {
   MachineView,

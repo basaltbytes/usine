@@ -23,7 +23,7 @@ import {
   ReadOnlyBoardLaneView,
   WritableBoardLaneView,
 } from "../operator/board.ts";
-import { type RunView } from "../operator/run.ts";
+import { type RunSummaryView } from "../operator/run.ts";
 import type { RunUsageView } from "../operator/usage.ts";
 import { payloadLabels, projectedItem, type ProjectedItem } from "./items.ts";
 import { taskCards } from "./tasks.ts";
@@ -96,7 +96,7 @@ const laneFor = (
 const runningLaneFor = Effect.fn("Board.runningLane")(function* (
   repository: ManagedRepo,
   view: BoardTaskView,
-  running: RunView,
+  running: RunSummaryView,
   lanes: ReadonlyArray<LaneDefinition>,
   runEvents: ReadonlyMap<RunId, Event>,
 ) {
@@ -154,7 +154,7 @@ export const projectBoard = Effect.fn("Board.project")(
     repository: ManagedRepo,
     repositoryLabels: ReadonlyArray<string>,
     storedItems: ReadonlyArray<ItemProjection>,
-    runs: ReadonlyArray<RunView>,
+    runs: ReadonlyArray<RunSummaryView>,
     cycleBlockedItems: ReadonlyArray<ItemKey> = [],
     itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>> = new Map(),
     runUsage: ReadonlyMap<RunId, RunUsageView> = new Map(),
