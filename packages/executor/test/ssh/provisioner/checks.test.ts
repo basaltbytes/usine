@@ -10,6 +10,7 @@ import {
   ProvisionerTimings,
 } from "@usine/core/worker";
 import { Deferred, Effect, Fiber, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { AttemptId } from "@usine/core/attempt";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import { CheckoutRequest, Executor, WorkerMachines } from "../../../src/executor.ts";
@@ -25,6 +26,119 @@ import {
 import { boatAddress, hetznerAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 import { hetznerSettings } from "./support.ts";
+
+const imagePullAddress = {
+  ...hetznerAddress,
+  machine: {
+    _tag: "Provisioned" as const,
+    provisioner: hetznerSettings({ network: Option.none() }),
+  },
+};
+
+it.effect("keeps the same machine when a missing image pull succeeds on retry", () => {
+  const machine = fakeMachine();
+  machine.state.docker = "running";
+  machine.state.imageOnMachine = false;
+  const providers = fakeProviders();
+  providers.hetzner.startingReads = 0;
+  const logs = capturedLogs();
+  const stderr = "Error response from daemon: Get https://ghcr.io/v2/: timeout";
+  let pulls = 0;
+  return Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    machine.state.beforePull = Effect.sync(() => {
+      machine.state.pullError = pulls++ === 0 ? stderr : undefined;
+    }).pipe(Effect.andThen(Deferred.succeed(started, undefined)));
+    const machines = yield* WorkerMachines;
+    const creating = yield* machines
+      .create(WORKER, RUN, request.attemptId, [])
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(started);
+    while (
+      creating.pollUnsafe() === undefined &&
+      !logs.lines.some((line) => line.includes("Retrying the attempt image pull"))
+    )
+      yield* Effect.yieldNow;
+    const [id] = providers.hetzner.servers.keys();
+    yield* TestClock.adjust("4 seconds");
+    assert.strictEqual(pulls, 1);
+    assert.deepStrictEqual([...providers.hetzner.servers.keys()], [id]);
+    yield* TestClock.adjust("1 second");
+    const grant = yield* Fiber.join(creating);
+    assert.strictEqual(pulls, 2);
+    assert.deepStrictEqual([...providers.hetzner.servers.keys()], [id]);
+    assert.strictEqual((yield* machines.machines)[0]?.state, "ready");
+    assert.isTrue(Option.isSome(grant.checked));
+    const warnings = logs.warnings.filter((line) => line.includes("Attempt image pull failed"));
+    assert.lengthOf(warnings, 1);
+    assert.deepInclude(JSON.parse(warnings[0] ?? "")[1], { attempt: 1, stderr });
+    const pulled = logs.lines.find((line) => line.includes("Pulled the attempt image"));
+    assert.deepInclude(JSON.parse(pulled ?? "")[1], { attempt: 2, downloaded: true });
+    yield* machines.release(grant.hold);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(runtimeOf(machine, providers, imagePullAddress)),
+    Effect.provide(logs.layer),
+  );
+});
+
+it.effect("fails preflight after three image pulls and logs the bounded last stderr", () => {
+  const machine = fakeMachine();
+  machine.state.docker = "running";
+  machine.state.imageOnMachine = false;
+  const providers = fakeProviders();
+  providers.hetzner.startingReads = 0;
+  const logs = capturedLogs();
+  const errors = ["registry unavailable", "connection reset", `no space left: ${"x".repeat(1200)}`];
+  let pulls = 0;
+  return Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    machine.state.beforePull = Effect.sync(() => {
+      machine.state.pullError = errors[pulls++];
+    }).pipe(Effect.andThen(Deferred.succeed(started, undefined)));
+    const machines = yield* WorkerMachines;
+    const creating = yield* machines
+      .create(WORKER, RUN, request.attemptId, [])
+      .pipe(Effect.flip, Effect.forkChild);
+    yield* Deferred.await(started);
+    while (
+      creating.pollUnsafe() === undefined &&
+      !logs.lines.some((line) => line.includes("Retrying the attempt image pull"))
+    )
+      yield* Effect.yieldNow;
+    yield* TestClock.adjust("5 seconds");
+    while (
+      creating.pollUnsafe() === undefined &&
+      logs.lines.filter((line) => line.includes("Retrying the attempt image pull")).length < 2
+    )
+      yield* Effect.yieldNow;
+    yield* TestClock.adjust("14 seconds");
+    assert.strictEqual(pulls, 2);
+    assert.strictEqual(providers.hetzner.servers.size, 1);
+    yield* TestClock.adjust("1 second");
+    const failure = yield* Fiber.join(creating);
+    assert(failure._tag === "WorkerCapabilityError");
+    assert.strictEqual(failure.capability, "container");
+    assert(failure.cause instanceof Error);
+    assert.strictEqual(failure.cause.message, errors[2]);
+    assert.strictEqual(pulls, 3);
+    assert.strictEqual(providers.hetzner.servers.size, 0);
+    const warnings = logs.warnings.filter((line) => line.includes("Attempt image pull failed"));
+    assert.lengthOf(warnings, 3);
+    assert.deepStrictEqual(
+      warnings.map((line) => JSON.parse(line)[1].stderr),
+      errors.map((stderr) => stderr.slice(0, 1000)),
+    );
+    assert.deepStrictEqual(
+      warnings.map((line) => JSON.parse(line)[1].attempt),
+      [1, 2, 3],
+    );
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(runtimeOf(machine, providers, imagePullAddress)),
+    Effect.provide(logs.layer),
+  );
+});
 
 it.live("uses the configured SSH wait and deletes the unreachable machine on timeout", () => {
   const machine = fakeMachine();
