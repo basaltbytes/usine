@@ -219,17 +219,24 @@ describe("Codex child backend", () => {
         }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
       }).pipe(Effect.scoped),
   );
-  for (const state of ["paused", "interrupting", "idle"] as const) {
-    it.effect(`preserves ${state} state after app-server recovery until guidance arrives`, () =>
+  for (const state of ["working", "queued", "paused", "interrupting", "idle"] as const) {
+    it.effect(`preserves unread guidance and ${state} state after app-server recovery`, () =>
       Effect.gen(function* () {
         const original = yield* Queue.make<CodexNotification, SessionOperationError | Cause.Done>();
         const restored = yield* Queue.make<CodexNotification, Cause.Done>();
         const idle = yield* Queue.make<void>();
         const recovered = yield* Deferred.make<void>();
+        const recoveryTurn = yield* Deferred.make<void>();
+        const acceptRecoveryTurn = yield* Deferred.make<void>();
         const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
           { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
         ]);
         const messages: Schema.Json[] = [];
+        const guidance = [
+          "Do not publish; run the linter first.",
+          "Check the final diff too.",
+        ] as const;
+        const reads: Array<Option.Option<InterventionState>> = [];
         let opens = 0;
         const server = Layer.succeed(CodexAppServer)({
           open: () =>
@@ -260,7 +267,17 @@ describe("Codex child backend", () => {
                         },
                       };
                     return responses[method] ?? {};
-                  }),
+                  }).pipe(
+                    Effect.tap(() =>
+                      method === "turn/start" &&
+                      messages.length === 2 &&
+                      (state === "working" || state === "queued")
+                        ? Deferred.succeed(recoveryTurn, undefined).pipe(
+                            Effect.andThen(Deferred.await(acceptRecoveryTurn)),
+                          )
+                        : Effect.void,
+                    ),
+                  ),
               } satisfies CodexConnection;
             }),
         });
@@ -281,15 +298,19 @@ describe("Codex child backend", () => {
               ),
             ),
           );
-          if (state === "idle") {
-            yield* running.intervene(
-              new OperatorMessage({ message: "Check the result" }),
-              noDelivery,
+          if (state === "queued") yield* running.intervene(new Interrupt(), noDelivery);
+          for (const message of guidance) {
+            const taken = yield* running.intervene(new OperatorMessage({ message }), (delivered) =>
+              Effect.sync(() => {
+                reads.push(delivered);
+              }),
             );
-          } else {
-            yield* running.intervene(new Interrupt(), noDelivery);
+            assert.strictEqual(taken.queued, true);
           }
-          if (state !== "interrupting") {
+          assert.strictEqual(reads.length, 0, "queued guidance has not been read");
+          if (state === "paused" || state === "interrupting")
+            yield* running.intervene(new Interrupt(), noDelivery);
+          if (state === "paused" || state === "idle") {
             yield* Queue.offer(original, {
               method: "turn/completed",
               params: {
@@ -311,16 +332,32 @@ describe("Codex child backend", () => {
               cause: new RemoteCodexProcessLost({ message: "App-server exited" }),
             }),
           );
+          if (state === "working" || state === "queued") {
+            yield* Deferred.await(recoveryTurn);
+            assert.strictEqual(reads.length, 0, "recovery has not accepted the guidance yet");
+            yield* Deferred.succeed(acceptRecoveryTurn, undefined);
+          }
           yield* Deferred.await(recovered);
           if (state === "interrupting") yield* Queue.take(idle);
-          assert.strictEqual(messages.length, 1, "recovery waits for operator guidance");
           assert.strictEqual(result.pollUnsafe(), undefined);
-          yield* running.intervene(
-            new OperatorMessage({ message: "Continue with my correction" }),
-            noDelivery,
-          );
-          assert.strictEqual(messages.length, 2);
-          assert.include(JSON.stringify(messages[1]), "Continue with my correction");
+          if (state === "working" || state === "queued") {
+            assert.strictEqual(messages.length, 2, "recovery continues the working turn");
+            assert.strictEqual(reads.length, guidance.length, "replayed guidance is delivered");
+          } else {
+            assert.strictEqual(messages.length, 1, "recovery waits for operator guidance");
+            assert.strictEqual(reads.length, state === "idle" ? guidance.length : 0);
+            yield* running.intervene(
+              new OperatorMessage({ message: "Continue with my correction" }),
+              noDelivery,
+            );
+            assert.strictEqual(messages.length, 2);
+            assert.include(JSON.stringify(messages[1]), "Continue with my correction");
+          }
+          if (state !== "idle") {
+            const recoveredInput = JSON.stringify(messages[1]);
+            for (const message of guidance) assert.include(recoveredInput, message);
+            assert(recoveredInput.indexOf(guidance[0]) < recoveredInput.indexOf(guidance[1]));
+          }
           yield* Queue.offer(restored, {
             method: "item/completed",
             params: {
@@ -336,6 +373,9 @@ describe("Codex child backend", () => {
           yield* Queue.take(idle);
           yield* running.intervene(new Release(), noDelivery);
           assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
+          assert.strictEqual(messages.length, 2, "queued guidance does not start a duplicate turn");
+          assert.strictEqual(reads.length, guidance.length);
+          assert(reads.every(Option.isSome));
           assert.strictEqual(opens, 2);
         }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
       }).pipe(Effect.scoped),

@@ -54,7 +54,7 @@ import {
 } from "../../runtime.ts";
 import { RemoteCodexProcessLost } from "./remote.ts";
 import { sessionChannel } from "../session.ts";
-import { sessionConversation } from "../conversation.ts";
+import { type MessageTaken, sessionConversation } from "../conversation.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
 import { CodexAppServer, type CodexClient, operationError } from "./app-server.ts";
 import {
@@ -297,14 +297,16 @@ const makeCodexChild = Effect.gen(function* () {
             ),
           );
       });
-      const steer = Effect.fn("CodexChildBackend.steer")(function* (message: string) {
+      const steer: (message: string) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn(
+        "CodexChildBackend.steer",
+      )(function* (message) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         if (interrupting) {
           pendingMessages.push(message);
           return "queued" as const;
         }
         if (!turnActive) {
-          yield* startTurn(message);
+          yield* startTurn([...(yield* conversation.unread), message].join("\n\n"));
           return "read" as const;
         }
         // Codex records steered input as a user message once the running turn reads it.
@@ -388,6 +390,7 @@ const makeCodexChild = Effect.gen(function* () {
             restored.thread.id,
           );
         toolsInFlight.clear();
+        pendingMessages.length = 0;
         turnActive = false;
         interrupting = false;
         const paused = yield* conversation.isPaused;
@@ -405,16 +408,22 @@ const makeCodexChild = Effect.gen(function* () {
         const taskSaved = restored.thread.turns.some((turn) =>
           turn.items.some((item) => item.type === "userMessage"),
         );
+        const unread = yield* conversation.unread;
         yield* Effect.logInfo("Restored Codex child starts a turn", {
           sessionId: session.id,
           threadId: thread.thread.id,
           taskSaved,
+          unreadMessages: unread.length,
         });
         yield* startTurn(
-          taskSaved
-            ? "Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work."
-            : request.prompt,
+          [
+            taskSaved
+              ? "Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work."
+              : request.prompt,
+            ...unread,
+          ].join("\n\n"),
         );
+        yield* conversation.read(() => unread.length);
       });
       yield* startTurn(request.prompt).pipe(Effect.catch(resume));
       const consumeNotifications = Stream.unwrap(Effect.sync(() => connection.notifications)).pipe(
