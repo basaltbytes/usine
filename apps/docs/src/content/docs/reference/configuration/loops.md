@@ -106,7 +106,7 @@ The parent receives the event payload, rendered task, persona, and salvage infor
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `fix_loop` | qualified loop identity | required | Active pull request loop that selects this repository and handles failed checks. |
+| `fix_loop` | qualified loop identity | required | Active pull request loop that selects this repository and handles failed checks or merge conflicts that prevent checks from starting. |
 | `timeout_seconds` | integer, 1–86400 | required | Maximum CI wait after the agent session ends. |
 
 For example, use fix loop `widgets/act-on-findings` and timeout `1800`. The policy is saved with the event, so later configuration edits do not remove it from an existing run. [Connect review and fix loops](/guides/review-fix-loops/) describes the agent handoff and completion labels.

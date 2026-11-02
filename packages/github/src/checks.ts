@@ -7,10 +7,10 @@ import type { GitHubAppError } from "./error.ts";
 import { queryGraphql } from "./graphql.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
 
-/** The current PR head and GitHub's aggregate check state; missing checks remain pending. */
+/** The current PR head and CI state, including conflicts that prevent checks from starting. */
 export class CheckSnapshot extends Schema.Class<CheckSnapshot>("CheckSnapshot")({
   head: CommitSha,
-  state: Schema.Literals(["pending", "success", "failure"]),
+  state: Schema.Literals(["pending", "success", "failure", "conflict"]),
 }) {}
 
 /** Failed check names and a bounded log excerpt for a fix attempt. */
@@ -27,6 +27,7 @@ const Head = Schema.Struct({
       pullRequest: Schema.NullOr(
         Schema.Struct({
           headRefOid: CommitSha,
+          mergeable: Schema.Literals(["MERGEABLE", "CONFLICTING", "UNKNOWN"]),
           statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
         }),
       ),
@@ -35,7 +36,7 @@ const Head = Schema.Struct({
 });
 const HEAD_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) { headRefOid statusCheckRollup { state } }
+    pullRequest(number: $number) { headRefOid mergeable statusCheckRollup { state } }
   }
 }`;
 const Checks = Schema.Struct({
@@ -127,7 +128,9 @@ export class GitHubChecks extends Context.Service<
                 ? "success"
                 : state === "FAILURE" || state === "ERROR"
                   ? "failure"
-                  : "pending",
+                  : state === undefined && pr.mergeable === "CONFLICTING"
+                    ? "conflict"
+                    : "pending",
           });
         }),
         failures: Effect.fn("GitHubChecks.failures")(function* (

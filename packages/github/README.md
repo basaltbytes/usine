@@ -125,6 +125,6 @@ Enable the App webhook to record deliveries. A delivery with a failed HTTP statu
 
 ## CI checks
 
-`GitHubChecks` from `/checks` reads the live PR head and aggregate check state. Missing checks stay pending. Failure diagnostics include failed check names and up to 12,000 characters from the ends of four Actions job logs; legacy commit statuses provide their context and description. Grant the App **Actions: read-only** to read job logs. Without this optional permission, diagnostics use the check output. Rate limits propagate to the caller's polling backoff. `GitHubChecks.layer` needs `GitHubApp` and an Effect HTTP client.
+`GitHubChecks` from `/checks` reads the live PR head and aggregate check state. When checks are absent and GitHub reports `CONFLICTING`, the snapshot state is `conflict`. Missing checks otherwise stay pending, including while mergeability is `UNKNOWN`. Failure diagnostics include failed check names and up to 12,000 characters from the ends of four Actions job logs; legacy commit statuses provide their context and description. Grant the App **Actions: read-only** to read job logs. Without this optional permission, diagnostics use the check output. Rate limits propagate to the caller's polling backoff. `GitHubChecks.layer` needs `GitHubApp` and an Effect HTTP client.
 
 `ItemLabelMutation.add` and `remove` can each be empty. Removal-only actions send no additions request, and repeated removals ignore missing labels.

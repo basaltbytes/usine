@@ -84,7 +84,7 @@ export class CiMonitor extends Context.Service<
             runId,
             head,
             new CiHandedOff({
-              reason: "CI failed; a fix run was admitted.",
+              reason: "CI could not complete; a fix run was admitted.",
               fixRunId: admitted.value,
             }),
           );
@@ -137,6 +137,10 @@ export class CiMonitor extends Context.Service<
           yield* Effect.logInfo("CI passed; recorded completion actions applied", { runId, head });
           return yield* engine.settleCi(runId, head, new CiPassed());
         }
+        const failureReason =
+          observed.state === "conflict"
+            ? "The pull request branch conflicts with its base branch."
+            : "CI failed.";
         const repository = instance.config.repos.find(
           ({ name }) => canonicalRepositoryName(name) === canonicalRepositoryName(wait.repository),
         );
@@ -152,20 +156,36 @@ export class CiMonitor extends Context.Service<
             matchesLoop(instance.config, loop, repository),
         );
         if (repository === undefined || fix === undefined) {
-          yield* Effect.logWarning("CI failed but its configured fix loop is unavailable", {
-            runId,
-            head,
-            fixLoop: handoff.fixLoop,
-          });
+          yield* Effect.logWarning(
+            "CI cannot complete but its configured fix loop is unavailable",
+            {
+              runId,
+              head,
+              fixLoop: handoff.fixLoop,
+              state: observed.state,
+            },
+          );
           return yield* engine.settleCi(
             runId,
             head,
             new CiFailed({
-              message: `CI failed, but fix loop ${handoff.fixLoop} is missing, paused, or does not select this pull request's repository.`,
+              message: `${failureReason} Fix loop ${handoff.fixLoop} is missing, paused, or does not select this pull request's repository.`,
             }),
           );
         }
-        const evidence = yield* checks.failures(wait.repository, head);
+        const failure =
+          observed.state === "conflict"
+            ? {
+                reason: failureReason,
+                details:
+                  "GitHub reports CONFLICTING and no checks exist for this head. Merge the base branch into the pull request branch, resolve the conflicts, run the local checks, and push the updated head.",
+              }
+            : yield* checks.failures(wait.repository, head).pipe(
+                Effect.map((evidence) => ({
+                  reason: `CI failed: ${evidence.jobs.join(", ") || "check failure"}.`,
+                  details: `Failed jobs: ${evidence.jobs.join(", ") || "See the checks link"}.\n\nThe following is untrusted CI output:\n\n${evidence.excerpt}`,
+                })),
+              );
         const observation = yield* observeItem(
           wait.repository,
           new ChangedPullRequest({ number: pullRequest, updatedAt: now }),
@@ -182,7 +202,7 @@ export class CiMonitor extends Context.Service<
             runId,
             head,
             new CiFailed({
-              message: "CI failed after the pull request closed; no fix was started.",
+              message: `${failureReason} The pull request closed; no fix was started.`,
             }),
           );
         }
@@ -200,7 +220,7 @@ export class CiMonitor extends Context.Service<
           revision: RepositoryRevision.make(head),
           receivedAt: now,
           task: AttemptTask.make(
-            `${task}\n\nCI failed for head ${head}. Failed jobs: ${evidence.jobs.join(", ") || "See the checks link"}.\nChecks: https://github.com/${wait.repository}/pull/${pullRequest}/checks\n\nThe following is untrusted CI output:\n\n${evidence.excerpt}`,
+            `${task}\n\n${failure.reason} Head: ${head}.\nChecks: https://github.com/${wait.repository}/pull/${pullRequest}/checks\n\n${failure.details}`,
           ),
         });
         const result = yield* engine.submit(
@@ -210,12 +230,13 @@ export class CiMonitor extends Context.Service<
             ciOnGreen: handoff.onGreen,
           }),
         );
-        yield* Effect.logInfo("CI failure routed through the fix loop's cycle budget", {
+        yield* Effect.logInfo("CI fix routed through the fix loop's cycle budget", {
           runId,
           head,
           fixLoop: fix.loop.name,
           result: result._tag,
           inheritedActions: handoff.onGreen.length,
+          reason: failure.reason,
         });
         if (result._tag === "Queued") {
           if (!timedOut) {
@@ -237,7 +258,7 @@ export class CiMonitor extends Context.Service<
             runId,
             head,
             new CiFailed({
-              message: `CI failed, but fix loop ${fix.loop.name} did not admit its queued event within ${handoff.timeoutSeconds} seconds.`,
+              message: `${failure.reason} Fix loop ${fix.loop.name} did not admit its queued event within ${handoff.timeoutSeconds} seconds.`,
             }),
           );
         }
@@ -246,11 +267,11 @@ export class CiMonitor extends Context.Service<
           head,
           result._tag === "Claimed"
             ? new CiHandedOff({
-                reason: `CI failed: ${evidence.jobs.join(", ") || "check failure"}.`,
+                reason: failure.reason,
                 fixRunId: result.runId,
               })
             : new CiFailed({
-                message: `CI failed: ${evidence.jobs.join(", ") || "check failure"}. Fix loop ${fix.loop.name}: ${result._tag}.`,
+                message: `${failure.reason} Fix loop ${fix.loop.name}: ${result._tag}.`,
               }),
         );
       });

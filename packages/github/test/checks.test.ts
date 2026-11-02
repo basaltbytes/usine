@@ -54,16 +54,33 @@ const withClient = (respond: (url: string) => Response) =>
   );
 const json = (value: Schema.Json) =>
   new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
-it.effect("reads the live PR head and keeps absent checks pending", () =>
+it.effect.each([
+  { mergeable: "CONFLICTING", rollup: null, expected: "conflict" },
+  { mergeable: "UNKNOWN", rollup: null, expected: "pending" },
+  { mergeable: "MERGEABLE", rollup: null, expected: "pending" },
+  { mergeable: "CONFLICTING", rollup: "PENDING", expected: "pending" },
+  { mergeable: "CONFLICTING", rollup: "SUCCESS", expected: "success" },
+  { mergeable: "MERGEABLE", rollup: "SUCCESS", expected: "success" },
+  { mergeable: "MERGEABLE", rollup: "FAILURE", expected: "failure" },
+  { mergeable: "MERGEABLE", rollup: "ERROR", expected: "failure" },
+])("reads $mergeable with check rollup $rollup as $expected", ({ mergeable, rollup, expected }) =>
   Effect.gen(function* () {
     const snapshot = yield* (yield* GitHubChecks).snapshot(repository, ItemNumber.make(815));
     assert.strictEqual(snapshot.head, head);
-    assert.strictEqual(snapshot.state, "pending");
+    assert.strictEqual(snapshot.state, expected);
   }).pipe(
     Effect.provide(
       withClient(() =>
         json({
-          data: { repository: { pullRequest: { headRefOid: head, statusCheckRollup: null } } },
+          data: {
+            repository: {
+              pullRequest: {
+                headRefOid: head,
+                mergeable,
+                statusCheckRollup: rollup === null ? null : { state: rollup },
+              },
+            },
+          },
         }),
       ),
     ),

@@ -150,8 +150,14 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const checks = Layer.succeed(GitHubChecks)({
     snapshot: () => Ref.get(observed),
     failures: () =>
-      Effect.succeed(
-        new CheckFailureEvidence({ jobs: ["ci"], excerpt: "TypeError: failing CI log" }),
+      Ref.get(observed).pipe(
+        Effect.flatMap(({ state }) =>
+          state === "conflict"
+            ? Effect.die("A merge conflict has no failed check logs")
+            : Effect.succeed(
+                new CheckFailureEvidence({ jobs: ["ci"], excerpt: "TypeError: failing CI log" }),
+              ),
+        ),
       ),
   });
   const writer = Layer.succeed(GitHubItemWriter)({
@@ -166,9 +172,14 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     snapshot: () =>
       Ref.get(observed).pipe(
         Effect.map(
-          ({ head }) =>
+          ({ head, state }) =>
             new PullRequestSnapshot({
-              payload: PullRequestPayload.make({ ...payload, headRefOid: head }),
+              payload: PullRequestPayload.make({
+                ...payload,
+                headRefOid: head,
+                mergeable: state === "conflict" ? "CONFLICTING" : "UNKNOWN",
+                statusCheckRollup: state === "conflict" ? null : payload.statusCheckRollup,
+              }),
               contentHash: ContentHash.make("b".repeat(64)),
             }),
         ),
@@ -251,6 +262,37 @@ it.live("green CI observed after the deadline applies the recorded labels once",
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.live("a conflicting head without checks starts one fix before the CI deadline", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const monitor = yield* CiMonitor;
+        const sourceId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "conflict" }));
+        yield* monitor.reconcile(instance, Option.none());
+        yield* monitor.reconcile(instance, Option.none());
+        const source = yield* engine.inspect(sourceId);
+        assert(source.run.state._tag === "HandedOff");
+        assert.include(source.run.state.reason, "conflicts with its base branch");
+        const fix = yield* engine.inspect(source.run.state.fixRunId);
+        assert.strictEqual(fix.run.loop, loop.name);
+        assert.include(fix.task, "CONFLICTING and no checks exist");
+        assert.include(fix.task, "Merge the base branch");
+        assert.include(fix.task, head);
+        yield* engine.drain();
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+        assert.strictEqual(
+          runNeedsAttention(runView(new RunSummary(source), new Set(), new Map()), false),
+          false,
+        );
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.live("red CI observed after the deadline starts one budgeted fix with failure diagnostics", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -304,9 +346,9 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live(
-  "issue and PR completion actions survive successive CI fixes until the final head passes",
-  () =>
+it.live.each(["failure", "conflict"] as const)(
+  "issue and PR completion actions survive an initial %s and successive CI fixes",
+  (initialState) =>
     Effect.scoped(
       Effect.gen(function* () {
         const heads = [CommitSha.make("b".repeat(40)), CommitSha.make("c".repeat(40))];
@@ -338,7 +380,10 @@ it.live(
           for (const fixedHead of heads) {
             yield* Ref.set(
               setup.observed,
-              new CheckSnapshot({ head: failedHead, state: "failure" }),
+              new CheckSnapshot({
+                head: failedHead,
+                state: failedHead === head ? initialState : "failure",
+              }),
             );
             yield* monitor.reconcile(instance, Option.none());
             const source = yield* engine.inspect(sourceId);
