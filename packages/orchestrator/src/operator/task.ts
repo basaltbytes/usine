@@ -271,9 +271,8 @@ const makeTaskReader = Effect.gen(function* () {
     if (first === undefined) {
       return yield* new BoardItemNotFoundError({ repository: managed.name, item: number });
     }
-    const taskRuns = new Set(task.runs.map(({ id }) => id));
     const comments = summaries
-      .filter(({ run }) => taskRuns.has(run.id))
+      .filter(({ itemKey }) => memberKeys.has(itemKey))
       .sort(
         (a, b) =>
           DateTime.toEpochMillis(b.run.openedAt) - DateTime.toEpochMillis(a.run.openedAt) ||
@@ -289,7 +288,7 @@ const makeTaskReader = Effect.gen(function* () {
       needsYou: task.needsYou,
       items: [first, ...rest],
       runs: summaries
-        .filter(({ run }) => taskRuns.has(run.id))
+        .filter(({ itemKey }) => memberKeys.has(itemKey))
         .map((summary) => runView(summary, paused, access, waits))
         .sort((a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id)),
       comments,

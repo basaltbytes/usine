@@ -1,3 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
+import { runHistoryLoading, runHistoryFailed } from "~/features/projects/strings";
+import { taskQuery } from "~/lib/tasks/queries";
 import { ArrowSquareOutIcon, DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, RunSummaryView } from "@usine/orchestrator/operator";
@@ -41,35 +44,49 @@ export interface CardMoves {
 }
 
 type RunHistoryProps = {
-  readonly runs: ReadonlyArray<RunSummaryView>;
+  readonly item: BoardTaskView;
+  readonly displayedRun: RunSummaryView | null;
   readonly openRun: (runId: RunId) => void;
 };
 
-const RunHistory = ({ runs, openRun }: RunHistoryProps) => (
-  <DropdownMenuSub>
-    <DropdownMenuSubTrigger>Run history</DropdownMenuSubTrigger>
-    <DropdownMenuSubContent className="min-w-48">
-      {[...runs].reverse().map((run) => (
-        <DropdownMenuItem key={run.id} onClick={() => openRun(run.id)}>
-          <span className="truncate">{run.loop}</span>
-          <span className="ml-auto flex shrink-0 items-center gap-2 pl-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-2">
-              <StateMark state={run.state} />
-              {run.state}
+const RunHistory = ({ item, displayedRun, openRun }: RunHistoryProps) => {
+  const [open, setOpen] = useState(false);
+  const origin = item.items.find(({ kind }) => kind === "issue") ?? item;
+  const history = useQuery({
+    ...taskQuery(item.repository, origin.number),
+    enabled: open,
+  });
+  const runs = history.data?.runs.filter(({ id }) => id !== displayedRun?.id) ?? [];
+  return (
+    <DropdownMenuSub open={open} onOpenChange={setOpen}>
+      <DropdownMenuSubTrigger>Run history</DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="min-w-48">
+        {history.isPending && <DropdownMenuItem disabled>{runHistoryLoading}</DropdownMenuItem>}
+        {history.isError && (
+          <DropdownMenuItem onClick={() => history.refetch()}>{runHistoryFailed}</DropdownMenuItem>
+        )}
+        {runs.map((run) => (
+          <DropdownMenuItem key={run.id} onClick={() => openRun(run.id)}>
+            <span className="truncate">{run.loop}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-2 pl-4 text-xs text-muted-foreground">
+              <span className="flex items-center gap-2">
+                <StateMark state={run.state} />
+                {run.state}
+              </span>
+              <time
+                dateTime={run.openedAt}
+                title={openedTitle(run.openedAt)}
+                className="font-mono tabular-nums"
+              >
+                {elapsedLabel(run.openedAt)}
+              </time>
             </span>
-            <time
-              dateTime={run.openedAt}
-              title={openedTitle(run.openedAt)}
-              className="font-mono tabular-nums"
-            >
-              {elapsedLabel(run.openedAt)}
-            </time>
-          </span>
-        </DropdownMenuItem>
-      ))}
-    </DropdownMenuSubContent>
-  </DropdownMenuSub>
-);
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+};
 
 type CardMenuProps = {
   readonly readOnly: boolean;
@@ -97,7 +114,7 @@ export const CardMenu = ({
 }: CardMenuProps) => {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const subject = itemName(item);
-  const past = item.runs.filter(({ id }) => id !== run?.id);
+  const pastCount = item.runCount - (run === null ? 0 : 1);
   // If the latest Run succeeded or was canceled, there is no Run line, so Run again shows the Loop.
   const ended = item.run?.canRunAgain === true ? item.run : null;
   const groups: Array<{ readonly key: string; readonly content: ReactNode }> = [
@@ -117,7 +134,7 @@ export const CardMenu = ({
       )),
     },
   ];
-  if (run !== null || past.length > 0)
+  if (run !== null || pastCount > 0)
     groups.push({
       key: "runs",
       content: (
@@ -125,7 +142,7 @@ export const CardMenu = ({
           {run !== null && (
             <DropdownMenuItem onClick={() => openRun(run.id)}>Open run</DropdownMenuItem>
           )}
-          {past.length > 0 && <RunHistory runs={past} openRun={openRun} />}
+          {pastCount > 0 && <RunHistory item={item} displayedRun={run} openRun={openRun} />}
         </>
       ),
     });

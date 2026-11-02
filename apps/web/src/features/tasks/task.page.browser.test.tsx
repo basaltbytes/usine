@@ -15,7 +15,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
-import { taskQuery } from "~/features/tasks/queries";
+import { taskQuery } from "~/lib/tasks/queries";
 import { routeTree } from "~/route-tree.gen";
 import { overviewQuery } from "~/lib/overview";
 import { fullTask, quietTask, taskOverview, taskRepository } from "~/lib/tasks/fixture";

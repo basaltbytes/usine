@@ -10,7 +10,16 @@ import { CycleBudgets } from "@usine/engine/cycle-budget";
 import type { RunStoreError } from "@usine/engine/engine";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { RunReader, type RunSummary } from "@usine/engine/run-reader";
-import { Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
+import {
+  Array as EffectArray,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schema,
+} from "effect";
 import { type ProjectedItem, projectedItem } from "../../board/items.ts";
 import { taskCards } from "../../board/tasks.ts";
 import { runView } from "../projection.ts";
@@ -83,7 +92,7 @@ const makeStatistics = Effect.gen(function* () {
       return [];
     }
     const history = yield* reader.forItems(items.map(({ itemKey }) => itemKey));
-    const summaries = new Map(history.map((summary) => [summary.run.id, summary]));
+    const summaries = EffectArray.groupBy(history, ({ itemKey }) => itemKey);
     const cards = taskCards(
       repository,
       items,
@@ -97,7 +106,13 @@ const makeStatistics = Effect.gen(function* () {
         const at = mergedAt.get(itemKey);
         return at === undefined ? [] : [at];
       });
-      const runs = view.runs.flatMap(({ id }) => summaries.get(id) ?? []);
+      const runs = view.items
+        .flatMap(({ itemKey }) => summaries[itemKey] ?? [])
+        .sort(
+          (a, b) =>
+            DateTime.toEpochMillis(a.run.openedAt) - DateTime.toEpochMillis(b.run.openedAt) ||
+            a.run.id.localeCompare(b.run.id),
+        );
       const [first] = merges;
       return first === undefined || runs.length === 0
         ? []

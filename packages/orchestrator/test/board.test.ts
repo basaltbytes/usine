@@ -1,3 +1,4 @@
+import { boardRunSummary, boardTaskRuns } from "../src/operator/operator.ts";
 import { ProjectView } from "../src/operator/overview.ts";
 import { groupProjectViews } from "../src/operator/projects.ts";
 import { boardRepositories } from "@usine/config/project";
@@ -345,9 +346,10 @@ describe("Board projection", () => {
       assert.strictEqual(card?.run?.id, waiting.id);
       assert.strictEqual(card?.needsYou, true);
       assert.deepStrictEqual(
-        card?.runs.map(({ id }) => id),
-        [succeeded.id, waiting.id],
+        card === undefined ? undefined : boardTaskRuns(card).map(({ id }) => id),
+        [waiting.id],
       );
+      assert.strictEqual(card?.runCount, 2);
     }),
   );
 
@@ -367,7 +369,7 @@ describe("Board projection", () => {
       assert.strictEqual(card?.run?.id, waiting.id);
       assert.strictEqual(card?.needsYou, true);
       assert.deepStrictEqual(
-        card?.runs.map(({ id }) => id),
+        card === undefined ? undefined : boardTaskRuns(card).map(({ id }) => id),
         [failed.id, running.id, waiting.id],
       );
     }),
@@ -469,10 +471,12 @@ describe("Board projection", () => {
           card.items.map(({ number }) => number),
           [33, 98],
         );
-        assert.deepStrictEqual(
-          card.runs.map(({ id }) => id),
-          [development.id, reviewRun.id],
-        );
+        assert.strictEqual(card.runCount, 2);
+        assert.strictEqual(card.run?.id, reviewRun.id);
+        assert.deepStrictEqual(card.loopStates, [
+          { loop: development.loop, state: development.state },
+          { loop: reviewRun.loop, state: reviewRun.state },
+        ]);
         assert.strictEqual(card.needsYou, true);
         assert.strictEqual(card.conflicting, true);
         assert.strictEqual(board.lanes.at(-1)?.items.length, 0);
@@ -562,10 +566,8 @@ describe("Board projection", () => {
         );
         assert.strictEqual(card.itemKey, mergedPullRequest.itemKey);
         assert.strictEqual(card.pullRequest?.state, "pr-merged");
-        assert.deepStrictEqual(
-          card.runs.map(({ id }) => id),
-          [development.id, companion.id, reviewRun.id],
-        );
+        assert.strictEqual(card.runCount, 3);
+        assert.strictEqual(card.run?.id, reviewRun.id);
       }
     }),
   );
@@ -591,7 +593,7 @@ describe("Board projection", () => {
       ],
       labels: [bug],
       pullRequest: null,
-      runs: [],
+      ...boardRunSummary([], null, []),
       run: null,
       needsYou: false,
       conflicting: false,

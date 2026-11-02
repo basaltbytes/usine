@@ -190,7 +190,7 @@ export type OperatorObservationError =
   | ConfigurationStoreError;
 
 /** The number of closed Runs the overview keeps next to the open ones. */
-const OVERVIEW_CLOSED_RUNS = 100;
+const OVERVIEW_CLOSED_RUNS = 50;
 
 const sameAgent = Schema.toEquivalence(Agent);
 
@@ -201,6 +201,7 @@ const sameAgent = Schema.toEquivalence(Agent);
 interface BoardUsage {
   readonly runs: ReadonlyMap<RunId, RunUsageView>;
   readonly working: ReadonlyArray<RunSummary>;
+  readonly summaries: ReadonlyArray<RunSummaryView>;
 }
 
 interface CachedOverview {
@@ -218,8 +219,10 @@ const withRunUsage = (
   overview: ReadyOverview,
   changed: ReadonlySet<RunId>,
   usage: ReadonlyMap<RunId, RunUsageView>,
-): ReadyOverview =>
-  new ReadyOverview({
+  summaries: ReadonlyArray<RunSummaryView>,
+): ReadyOverview => {
+  const byItem = EffectArray.groupBy(summaries, ({ itemKey }) => itemKey);
+  return new ReadyOverview({
     ...overview,
     projects: overview.projects.map(
       (project) =>
@@ -228,11 +231,12 @@ const withRunUsage = (
           board: new BoardView({
             ...project.board,
             lanes: project.board.lanes.map((lane) => {
-              const items = lane.items.map((task) =>
-                task.runs.some(({ id }) => changed.has(id))
-                  ? new BoardTaskView({ ...task, usage: taskUsage(task.runs, usage) })
-                  : task,
-              );
+              const items = lane.items.map((task) => {
+                const runs = task.items.flatMap(({ itemKey }) => byItem[itemKey] ?? []);
+                return runs.some(({ id }) => changed.has(id))
+                  ? new BoardTaskView({ ...task, usage: taskUsage(runs, usage) })
+                  : task;
+              });
               return lane._tag === "WritableBoardLane"
                 ? new WritableBoardLaneView({ ...lane, items })
                 : new ReadOnlyBoardLaneView({ ...lane, items });
@@ -241,6 +245,7 @@ const withRunUsage = (
         }),
     ),
   });
+};
 
 const makeOperatorObservation = Effect.gen(function* () {
   const acknowledgements = yield* AttentionAcknowledgements;
@@ -362,11 +367,28 @@ const makeOperatorObservation = Effect.gen(function* () {
             itemLoops,
             runUsage,
             runEvents,
+            new Set(unconfirmedStops.map(({ runId }) => runId)),
           );
           const working = history.filter(({ attempts }) =>
             attempts.some(({ outcome }) => Option.isNone(outcome)),
           );
-          return { name, projectFindings, projectRuns, board, catalog, runUsage, working } as const;
+          const overviewRuns = runsByRepository.get(name) ?? [];
+          yield* Effect.logDebug("Bounded overview run history", {
+            repository: name,
+            historyRuns: projectRuns.length,
+            overviewRuns: overviewRuns.length,
+            closedLimit: OVERVIEW_CLOSED_RUNS,
+          });
+          return {
+            name,
+            projectFindings,
+            projectRuns,
+            overviewRuns,
+            board,
+            catalog,
+            runUsage,
+            working,
+          } as const;
         }),
       { concurrency: 4 },
     );
@@ -405,11 +427,11 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     const projects = groupProjectViews(
       instance.config,
-      projected.map(({ name, projectFindings, projectRuns, board, catalog }) => {
+      projected.map(({ name, projectFindings, overviewRuns, board, catalog }) => {
         return new ProjectView({
           repository: name,
           status: "clear",
-          runs: projectRuns,
+          runs: overviewRuns,
           board,
           labels: catalog.map(
             ({ name: label, color, description }) =>
@@ -426,6 +448,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     const usage: BoardUsage = {
       runs: new Map(projected.flatMap(({ runUsage }) => [...runUsage])),
       working: projected.flatMap(({ working }) => working),
+      summaries: projected.flatMap(({ projectRuns }) => projectRuns),
     };
     const loops = instance.loops.map(
       (loop) =>
@@ -633,7 +656,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     });
     return {
       ...cached,
-      overview: withRunUsage(cached.overview, changed, runs),
+      overview: withRunUsage(cached.overview, changed, runs, cached.usage.summaries),
       usage: { ...cached.usage, runs },
     };
   });
@@ -1537,6 +1560,8 @@ export {
   ProvisionerView,
 } from "./machines.ts";
 export {
+  boardRunSummary,
+  boardTaskRuns,
   BoardLaneId,
   BoardLaneOrigin,
   BoardItemLink,

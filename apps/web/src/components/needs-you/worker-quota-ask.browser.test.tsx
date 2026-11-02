@@ -1,5 +1,5 @@
 import { AttemptTask } from "@usine/core/attempt";
-import { AttemptView, RunView } from "@usine/orchestrator/operator";
+import { boardTaskRuns, boardRunSummary, AttemptView, RunView } from "@usine/orchestrator/operator";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -37,7 +37,7 @@ const fixture = () => {
     (candidate) => candidate._tag === "WritableBoardLane" && candidate.name === "Ready",
   );
   const template = lane?.items[0];
-  const previousRun = template?.runs[0];
+  const previousRun = template === undefined ? undefined : boardTaskRuns(template)[0];
   if (
     project === undefined ||
     lane?._tag !== "WritableBoardLane" ||
@@ -58,7 +58,12 @@ const fixture = () => {
     canApprove: false,
     machineWait: new MachineQuotaWait({ worker: need.worker, message: need.message }),
   });
-  const card = new BoardTaskView({ ...template, runs: [run], run, needsYou: false });
+  const card = new BoardTaskView({
+    ...template,
+    ...boardRunSummary([run], run, template.items),
+    run,
+    needsYou: false,
+  });
   const overview = new ReadyOverview({
     projects: [
       new ProjectView({

@@ -4,7 +4,12 @@ import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import { Array as EffectArray, Option, Order, Schema } from "effect";
-import { BoardItemLink, BoardPullRequestView, BoardTaskView } from "../operator/board.ts";
+import {
+  boardRunSummary,
+  BoardItemLink,
+  BoardPullRequestView,
+  BoardTaskView,
+} from "../operator/board.ts";
 import type { RunSummaryView } from "../operator/run.ts";
 import { type RunUsageView, taskUsage } from "../operator/usage.ts";
 import { type ProjectedItem, runNeedsAttention } from "./items.ts";
@@ -47,6 +52,7 @@ export const taskCards = (
   cycleBlockedItems: ReadonlyArray<ItemKey>,
   itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>>,
   runUsage: ReadonlyMap<RunId, RunUsageView>,
+  attentionRuns: ReadonlySet<RunId> = new Set(),
 ): ReadonlyArray<TaskCard> => {
   const runsByItem = EffectArray.groupBy(runs, ({ itemKey }) => itemKey);
   const nodes = items.map((item): TaskItem => ({
@@ -128,14 +134,15 @@ export const taskCards = (
       active ??
       history[0];
     const runs = history.map(({ run }) => run).reverse();
+    const links = ordered.map(({ item }) => itemLink(item));
     const view = new BoardTaskView({
       ...itemLink(current),
       repository,
       title: origin.item.title,
       labels: current.labels,
-      items: ordered.map(({ item }) => itemLink(item)),
+      items: links,
       pullRequest,
-      runs,
+      ...boardRunSummary(runs, preferred?.run ?? null, links, attentionRuns),
       run: preferred?.run ?? null,
       needsYou:
         history.some(({ item, run }) => runNeedsAttention(run, isSettledItemState(item.state))) ||

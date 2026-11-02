@@ -12,6 +12,7 @@ import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import {
+  boardRunSummary,
   AgentFailureView,
   ApprovalView,
   AttemptView,
@@ -287,6 +288,10 @@ export const quietTask = () =>
 
 const card = (task: TaskView) => {
   const current = task.items.find(({ itemKey }) => itemKey === task.current) ?? task.items[0];
+  const items = task.items.map(
+    ({ itemKey, kind, number, title, url, state }) =>
+      new BoardItemLink({ itemKey, kind, number, title, url, state }),
+  );
   return new BoardTaskView({
     repository: task.repository,
     itemKey: current.itemKey,
@@ -296,12 +301,9 @@ const card = (task: TaskView) => {
     url: current.url,
     state: current.state,
     labels: current.labels,
-    items: task.items.map(
-      ({ itemKey, kind, number, title, url, state }) =>
-        new BoardItemLink({ itemKey, kind, number, title, url, state }),
-    ),
+    items,
     pullRequest: null,
-    runs: [...task.runs].reverse(),
+    ...boardRunSummary([...task.runs].reverse(), task.runs[0] ?? null, items),
     run: task.runs[0] ?? null,
     needsYou: task.needsYou,
     conflicting: current.conflicting,

@@ -1,5 +1,5 @@
 import { AttemptTask } from "@usine/core/attempt";
-import { AttemptView, RunView } from "@usine/orchestrator/operator";
+import { boardTaskRuns, AttemptView, RunView } from "@usine/orchestrator/operator";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ import { overviewQuery } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { configurationFixture } from "~/lib/configuration/fixture";
-import { boardOverview, boardStalled } from "~/lib/projects/fixture";
+import { boardOverview, boardPlanRun, boardStalled } from "~/lib/projects/fixture";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
@@ -54,7 +54,10 @@ beforeEach(async () => {
             name: "Product",
             repository: RepositoryName.make("board-test/primary"),
             repositories: [RepositoryName.make("board-test/primary"), project.repository],
-            runs: project.board.lanes.flatMap(({ items }) => items.flatMap(({ runs }) => runs)),
+            runs: [
+              boardPlanRun(),
+              ...project.board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
+            ],
           }),
       ),
     }),
@@ -240,7 +243,7 @@ it("uses drawer actions while open and restores the underlying page commands aft
   });
   const run = boardOverview()
     .projects.flatMap(({ board }) =>
-      board.lanes.flatMap(({ items }) => items.flatMap(({ runs }) => runs)),
+      board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
     )
     .find(({ id }) => id === "run-salvage");
   if (run === undefined) throw new Error("Missing waiting run fixture");

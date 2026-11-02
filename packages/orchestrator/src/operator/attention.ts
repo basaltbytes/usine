@@ -6,8 +6,15 @@ import {
 } from "@usine/engine/attention";
 import type { RunReader } from "@usine/engine/run-reader";
 import { DateTime, Effect, Match, Option, Schema } from "effect";
-import { BoardTaskView, BoardView, ReadOnlyBoardLaneView, WritableBoardLaneView } from "./board.ts";
+import {
+  boardTaskRuns,
+  BoardTaskView,
+  BoardView,
+  ReadOnlyBoardLaneView,
+  WritableBoardLaneView,
+} from "./board.ts";
 import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT } from "./need.ts";
+import type { RunSummaryView } from "./run.ts";
 import { ProjectView, ReadyOverview } from "./overview.ts";
 
 const encodeNeed = Schema.encodeSync(NeedView);
@@ -41,7 +48,7 @@ export const needRepositories = (need: NeedView) =>
   });
 
 export const taskNeedsAttention = (
-  task: Pick<BoardTaskView, "items" | "runs">,
+  task: Pick<BoardTaskView, "items"> & { readonly runs: ReadonlyArray<Pick<RunSummaryView, "id">> },
   needs: ReadonlyArray<NeedView>,
 ): boolean =>
   needs.some((need) => {
@@ -75,7 +82,13 @@ export const projectAttention = (
           lanes: project.board.lanes.map((lane) => {
             const items = lane.items.map(
               (task) =>
-                new BoardTaskView({ ...task, needsYou: taskNeedsAttention(task, needsYou) }),
+                new BoardTaskView({
+                  ...task,
+                  needsYou: taskNeedsAttention(
+                    { items: task.items, runs: boardTaskRuns(task) },
+                    needsYou,
+                  ),
+                }),
             );
             return lane._tag === "WritableBoardLane"
               ? new WritableBoardLaneView({ ...lane, items })

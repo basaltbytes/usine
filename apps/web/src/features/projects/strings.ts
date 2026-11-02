@@ -15,3 +15,6 @@ export const cardAttentionLabel = "Needs attention";
 
 export const proposedLanesHint =
   "Proposed lanes are read-only. Add lanes with labels in Configuration > Projects to enable moves.";
+
+export const runHistoryLoading = "Loading runs…";
+export const runHistoryFailed = "Could not load runs. Retry";

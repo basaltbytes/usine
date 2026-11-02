@@ -1,5 +1,5 @@
+import { boardTaskRuns } from "@usine/orchestrator/operator";
 import { isSettledItemState } from "@usine/config/board";
-import type { LoopName } from "@usine/core/loop";
 import type { CommentKind } from "@usine/core/step/result";
 import type {
   BoardLaneView,
@@ -156,13 +156,14 @@ const taskStatus = (
   last: RunSummaryView,
   stalled: ReadonlyArray<StalledItemView>,
 ): TaskStatus => {
-  const running = newestIn(task.runs, "Running");
+  const runs = boardTaskRuns(task);
+  const running = newestIn(runs, "Running");
   if (running !== undefined) return { _tag: "Running", run: running };
-  const ci = newestIn(task.runs, "AwaitingCi");
+  const ci = newestIn(runs, "AwaitingCi");
   if (ci !== undefined) return { _tag: "AwaitingCi", run: ci };
-  const waiting = newestIn(task.runs, "Waiting");
+  const waiting = newestIn(runs, "Waiting");
   if (waiting !== undefined) return { _tag: "AwaitingApproval", run: waiting };
-  const queued = newestIn(task.runs, "Pending", "Queued");
+  const queued = newestIn(runs, "Pending", "Queued");
   if (queued !== undefined) {
     // The desk has one stall per Loop and Item, and a stall for an older closed Run on another Item
     // can come first; only the stall that references the queued Run explains it.
@@ -218,7 +219,7 @@ export const taskRows = (
   lanes
     .flatMap(({ items }) => items)
     .flatMap((task) => {
-      const last = task.runs.at(-1);
+      const last = boardTaskRuns(task).at(-1);
       return last === undefined ? [] : [{ task, last, status: taskStatus(task, last, stalled) }];
     })
     .map((row) => ({ row, place: rowPlace(row) }))
@@ -300,7 +301,7 @@ export interface TaskTotals {
 export const taskTotals = (rows: ReadonlyArray<TaskRow>, now: number): TaskTotals => {
   const costs = rows.flatMap(({ task }) => (task.usage.cost === null ? [] : [task.usage.cost]));
   return {
-    runs: rows.reduce((sum, { task }) => sum + task.runs.length, 0),
+    runs: rows.reduce((sum, { task }) => sum + task.runCount, 0),
     durationMillis: rows.reduce((sum, { task }) => sum + taskDuration(task.usage, now), 0),
     unmeasured: rows.reduce((sum, { task }) => sum + task.usage.unmeasured, 0),
     tokens: rows.reduce((sum, { task }) => sum + task.usage.tokens, 0),
@@ -348,20 +349,6 @@ export const totalsFigures = (totals: TaskTotals): ReadonlyArray<TotalsFigure> =
         },
       ]),
 ];
-
-/** A Loop that ran on a Task, with the state of its last Run there. */
-export interface TaskLoop {
-  readonly loop: LoopName;
-  readonly state: RunSummaryView["state"];
-}
-
-/** Returns each Loop that ran on the Task once, in first-run order, with the state of its last Run. */
-export const taskLoops = (task: Pick<BoardTaskView, "runs">): ReadonlyArray<TaskLoop> => {
-  // A Map keeps the order of first insertion when a later Run of the same Loop replaces the state.
-  const states = new Map<LoopName, RunSummaryView["state"]>();
-  for (const { loop, state } of task.runs) states.set(loop, state);
-  return [...states].map(([loop, state]) => ({ loop, state }));
-};
 
 export const commentKindLabel = (kind: CommentKind): string => {
   switch (kind) {

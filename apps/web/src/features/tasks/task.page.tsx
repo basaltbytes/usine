@@ -12,7 +12,7 @@ import { overviewQuery, projectId, projectForRepository } from "~/lib/overview";
 import { TaskComments } from "~/features/tasks/components/comments";
 import { TaskHeader } from "~/features/tasks/components/header";
 import { TaskPullRequests } from "~/features/tasks/components/pull-requests";
-import { taskQuery } from "~/features/tasks/queries";
+import { taskQuery } from "~/lib/tasks/queries";
 import { TaskRuns } from "~/features/tasks/components/runs/runs";
 
 type TaskLayoutProps = { readonly children: ReactNode };
