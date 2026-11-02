@@ -842,7 +842,14 @@ it("stops following when a wheel turn up scrolls the conversation at the latest 
 
 it("resumes following when a wheel turn past a tool output's end reaches the latest row", async () => {
   const output = await openLongOutput();
+  await userEvent.hover(output);
+  await ownScrollEnded();
+  viewport().scrollTop = viewport().scrollHeight - viewport().clientHeight - 100;
+  await expect.poll(atLatest).toBeCloseTo(100, 0);
   output.scrollTop = output.scrollHeight;
+  await expect
+    .poll(() => output.scrollHeight - output.clientHeight - output.scrollTop)
+    .toBeLessThan(1);
   await userEvent.wheel(output, { delta: { y: 800 } });
   await expect.poll(atLatest).toBeLessThan(9);
   // Chromium can update scrollTop before delivering the scroll event that resumes following.
@@ -855,6 +862,55 @@ it("resumes following when a wheel turn past a tool output's end reaches the lat
   mount([...events, ...longRead, message(48)]);
   await expect.poll(atLatest).toBeLessThan(9);
 });
+
+it("resumes following when a wheel's viewport movement arrives after several frames", async () => {
+  await openLongOutput();
+  await ownScrollEnded();
+  const element = viewport();
+  element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 800 }));
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  element.scrollTop = element.scrollHeight;
+  await expect
+    .poll(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide"));
+      return bookmark()?.position._tag;
+    })
+    .toBe("Latest");
+  mount([...events, ...longRead, message(48)]);
+  await expect.poll(atLatest).toBeLessThan(9);
+});
+
+it.each(["pointerdown", "keydown", "transcript update"] as const)(
+  "keeps inspection paused when %s replaces a pending wheel",
+  async (input) => {
+    const output = await openLongOutput();
+    await userEvent.hover(output);
+    await ownScrollEnded();
+    const element = viewport();
+    output.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 800 }));
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    if (input === "transcript update") mount([...events, ...longRead, message(48)]);
+    else
+      document.body.dispatchEvent(
+        input === "pointerdown"
+          ? new PointerEvent("pointerdown", { bubbles: true })
+          : new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }),
+      );
+    await new Promise<void>((resolve) => {
+      element.addEventListener("scroll", () => resolve(), { once: true });
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect.poll(atLatest).toBeLessThan(9);
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
+    expect(bookmark()?.position._tag).toBe("Anchor");
+    mount([...events, ...longRead, message(48), message(49)]);
+    await expect.element(page.getByRole("button", { name: /new updates?$/ })).toBeVisible();
+  },
+);
 
 it("scrolls the reader to a checkpoint chosen in the outline and stops following", async () => {
   mount(events, runId, undefined, [liveAttempt]);

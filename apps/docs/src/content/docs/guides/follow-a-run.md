@@ -21,6 +21,8 @@ A signed-in browser session with project viewer access or a higher role.
 
 The selected run has a shareable drawer URL with `?run=<id>`. The run page shows its attempts, conversation, and current activity. Schedule runs appear under **Runs without a card** on the board.
 
+The conversation follows new activity until you scroll away or inspect a tool. Scroll to the latest row or select **Jump to latest** to resume following. Scrolling past a tool output's end resumes following when the conversation reaches the latest row, including when the browser delays scrolling. Other interactions and incoming activity preserve a paused reading position.
+
 ## Run states
 
 | State | Meaning |

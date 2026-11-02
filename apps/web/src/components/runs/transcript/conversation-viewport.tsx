@@ -1,4 +1,11 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { MessageScrollerViewport, useMessageScroller } from "~/components/ui/message-scroller";
 
 const SCROLL_KEYS = ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "];
@@ -24,6 +31,8 @@ type ConversationViewportProps = {
   readonly viewportRef: RefObject<HTMLDivElement | null>;
   /** Whether the reader is at the latest row and follows new activity. */
   readonly following: boolean;
+  /** Changes when transcript updates can move the viewport without user input. */
+  readonly revision: number;
   /** Called when the operator scrolls the conversation. */
   readonly onNavigate: () => void;
   /** Called when the operator presses or activates something in the conversation, or scrolls a nested area. */
@@ -38,6 +47,7 @@ type ConversationViewportProps = {
 export const ConversationViewport = ({
   viewportRef,
   following,
+  revision,
   onNavigate,
   onInteract,
   children,
@@ -59,13 +69,23 @@ export const ConversationViewport = ({
       viewport.removeEventListener("touchmove", recordPosition);
     };
   }, [viewportRef]);
-  useEffect(
-    () => () => {
-      if (pendingScroll.current !== null) cancelAnimationFrame(pendingScroll.current.frame);
-      pendingScroll.current = null;
-    },
-    [],
-  );
+  const cancelPendingScroll = useCallback(() => {
+    const pending = pendingScroll.current;
+    if (pending === null) return;
+    cancelAnimationFrame(pending.frame);
+    pendingScroll.current = null;
+    const viewport = viewportRef.current;
+    if (pending.following && viewport !== null && viewport.scrollTop === pending.top)
+      scrollToEnd({ behavior: "instant" });
+  }, [scrollToEnd, viewportRef]);
+  useLayoutEffect(() => cancelPendingScroll, [cancelPendingScroll, revision]);
+  useEffect(() => {
+    const inputs = ["pointerdown", "keydown", "wheel", "touchmove"] as const;
+    for (const input of inputs) window.addEventListener(input, cancelPendingScroll, true);
+    return () => {
+      for (const input of inputs) window.removeEventListener(input, cancelPendingScroll, true);
+    };
+  }, [cancelPendingScroll]);
   // Navigation can enable following after the scroller has handled the native scroll event.
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -77,18 +97,18 @@ export const ConversationViewport = ({
   const observeScroll = (viewport: HTMLDivElement) => {
     const pending = pendingScroll.current;
     if (pending === null) return;
-    cancelAnimationFrame(pending.frame);
-    pendingScroll.current = null;
-    if (viewport.scrollTop !== pending.top) onNavigate();
-    else if (pending.following) scrollToEnd({ behavior: "instant" });
+    if (viewport.scrollTop !== pending.top) {
+      cancelPendingScroll();
+      onNavigate();
+    } else if (pending.following) scrollToEnd({ behavior: "instant" });
   };
   const scroll = (viewport: HTMLDivElement, top = viewport.scrollTop) => {
+    cancelPendingScroll();
     onInteract();
-    if (pendingScroll.current !== null) return;
     pendingScroll.current = {
       top,
       following: following && atLatest(viewport),
-      // Chromium can deliver the native scroll after the first animation frame.
+      // Restore following after input that moves nothing; a later native scroll still navigates.
       frame: requestAnimationFrame(() => {
         const pending = pendingScroll.current;
         if (pending !== null) pending.frame = requestAnimationFrame(() => observeScroll(viewport));
