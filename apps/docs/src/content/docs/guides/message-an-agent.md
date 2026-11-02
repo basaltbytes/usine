@@ -24,6 +24,6 @@ A parent waiting on a delegated child reads an operator message after the child 
 
 The API’s `Steer` action adds guidance without a hold. A steer addressed to the parent is forwarded to its child when exactly one child is live. The transcript shows **Forwarded to child** and a queued note until the child reads it. If the child refuses the steer or stops before reading it, the parent takes a separate turn to act on the guidance before ending the attempt. This also applies after an orchestrator restart. With no child or several live children, the parent takes that separate turn directly.
 
-The run page shows **Delivered to parent** when the parent reads the guidance. **Not acted on** means the steer was withdrawn or its session ended before reading it. An interruption withdraws an unread forwarded steer and leaves the parent paused until new guidance or release. See the [operator API](/reference/operator-api/).
+The run page shows **Delivered to parent** when the parent reads the guidance. **Not acted on** means the steer was withdrawn or its session ended before reading it. An interruption withdraws unread steers, including guidance queued for a separate parent turn after a child refuses delivery, and leaves the parent paused until new guidance or release. See the [operator API](/reference/operator-api/).
 
 A terminal resume action is available only while the checkout and required local credential still exist. Gateway-authenticated Codex sessions have no resume action because a terminal lacks the gateway credential.

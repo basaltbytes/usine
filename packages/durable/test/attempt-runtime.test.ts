@@ -104,6 +104,30 @@ const receipts = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
     ];
   });
 
+const refusingSteerBackend = Layer.effectContext(
+  Effect.gen(function* () {
+    const services = yield* Effect.context<ChildBackend | StubChildren>();
+    const base = Context.get(services, ChildBackend);
+    return Context.add(services, ChildBackend, {
+      launch: (request) =>
+        base.launch(request).pipe(
+          Effect.map((child) => ({
+            ...child,
+            intervene: () =>
+              Effect.fail(
+                new SessionOperationError({
+                  operation: "steer",
+                  sessionId: Option.some(child.session.id),
+                  message: "The child has already stopped accepting input",
+                  cause: "closed input",
+                }),
+              ),
+          })),
+        ),
+    });
+  }),
+).pipe(Layer.provide(stubChildBackendLayer));
+
 describe("durable AttemptRuntime", () => {
   it.live("relays one whole Attempt and reports the parent's final answer", () =>
     Effect.gen(function* () {
@@ -755,30 +779,7 @@ describe("durable AttemptRuntime", () => {
           assert.include(JSON.stringify(context.messages.at(-1)), "Fix the third finding.");
           return delegate("Fix the third finding.");
         };
-        const backend = Layer.effectContext(
-          Effect.gen(function* () {
-            const services = yield* Effect.context<ChildBackend | StubChildren>();
-            const base = Context.get(services, ChildBackend);
-            if (delivery === "unread") return services;
-            return Context.add(services, ChildBackend, {
-              launch: (request) =>
-                base.launch(request).pipe(
-                  Effect.map((child) => ({
-                    ...child,
-                    intervene: () =>
-                      Effect.fail(
-                        new SessionOperationError({
-                          operation: "steer",
-                          sessionId: Option.some(child.session.id),
-                          message: "The child has already stopped accepting input",
-                          cause: "closed input",
-                        }),
-                      ),
-                  })),
-                ),
-            });
-          }),
-        ).pipe(Layer.provide(stubChildBackendLayer));
+        const backend = delivery === "unread" ? stubChildBackendLayer : refusingSteerBackend;
         const harness = durableHarnessLayer({
           ...fauxParent([
             delegate("Fix the first two findings."),
@@ -895,50 +896,75 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("withdraws an unread forwarded steer when the operator interrupts its parent", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      yield* Effect.gen(function* () {
-        const runtime = yield* AttemptRuntime;
-        const request = attemptRequest("steering/interrupt/1");
-        const recording = recordingSink();
-        const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
-        const child = yield* (yield* StubChildren).next;
-        const operator = (action: AttemptChannel.OperatorAction) =>
-          runtime.intervene(
-            request.spec.attemptId,
-            new AttemptChannel.Intervention({
-              operator: "philippe",
-              target: new AttemptChannel.ParentTarget(),
-              action,
-            }),
-          );
-        yield* operator(new AttemptChannel.Steer({ message: "Fix the third finding." }));
-        yield* operator(new AttemptChannel.Interrupt());
-        yield* child.interrupted;
+  for (const delivery of ["forwarded", "refused"] as const) {
+    it.live(`withdraws a ${delivery} steer when the operator interrupts its parent`, () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
         yield* Effect.gen(function* () {
-          while (
-            !receipts(recording.outbound()).some(
-              ([action, , kind]) => action === "Steer" && kind === "rejected",
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest(`steering/interrupt/${delivery}/1`);
+          const recording = recordingSink();
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* (yield* StubChildren).next;
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ParentTarget(),
+                action,
+              }),
+            );
+          yield* operator(new AttemptChannel.Steer({ message: "Fix the third finding." }));
+          yield* operator(new AttemptChannel.Interrupt());
+          yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
+          yield* Effect.sleep("300 millis");
+          assert.isUndefined(execution.pollUnsafe());
+          assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+          yield* Effect.gen(function* () {
+            while (
+              !receipts(recording.outbound()).some(
+                ([action, , kind]) => action === "Steer" && kind === "rejected",
+              )
             )
-          )
-            yield* Effect.sleep("20 millis");
-        }).pipe(Effect.timeout("5 seconds"));
-        assert.strictEqual(execution.pollUnsafe(), undefined);
-        yield* operator(new AttemptChannel.Release());
-        const report = yield* Fiber.join(execution);
-        assert.strictEqual(report.message, "Continued after release.");
-        assertAdmitted(request.spec.attemptId, recording.outbound());
-      }).pipe(
-        Effect.provide(
-          layer({
-            database,
-            parent: [delegate("Fix the findings."), answer("Continued after release.")],
-          }),
-        ),
-      );
-    }).pipe(Effect.scoped),
-  );
+              yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          assert.strictEqual(execution.pollUnsafe(), undefined);
+          yield* operator(new AttemptChannel.Release());
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Continued after release.");
+          assertAdmitted(request.spec.attemptId, recording.outbound());
+          assert.deepStrictEqual(
+            receipts(recording.outbound()).filter(([action]) => action === "Steer"),
+            [
+              ["Steer", 1, "queued"],
+              ["Steer", 1, "rejected"],
+            ],
+          );
+        }).pipe(
+          Effect.provide(
+            attemptRuntimeLayer.pipe(
+              Layer.provideMerge(
+                durableHarnessLayer({
+                  ...fauxParent([
+                    delegate("Fix the findings."),
+                    answer("Continued after release."),
+                  ]),
+                  openStorage: Effect.tryPromise({
+                    try: () => openNodeSqliteStorage(database),
+                    catch: (cause) => durableError("open the test database", cause),
+                  }),
+                }),
+              ),
+              Layer.provideMerge(
+                delivery === "forwarded" ? stubChildBackendLayer : refusingSteerBackend,
+              ),
+            ),
+          ),
+        );
+      }).pipe(Effect.scoped),
+    );
+  }
 
   it.live(
     "completes `attached` once an execute call relays the Attempt's channel, which input sent before cannot reach",

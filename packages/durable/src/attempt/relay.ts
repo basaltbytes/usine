@@ -357,6 +357,8 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
         const parent = hub.parent.value;
         return harness.commit(async (tx) => {
           const submission = await tx.submissionByRequest(parent, input.requestId);
+          if (submission === undefined && (await tx.doc(HoldDoc, hub.taskId)).paused)
+            return "withdrawn";
           return submission?.status;
         }, context);
       }

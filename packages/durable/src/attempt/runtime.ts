@@ -409,12 +409,16 @@ const makeAttemptRuntime = Effect.gen(function* () {
     if (action._tag === "Interrupt") {
       const marked = yield* supervise(hub, (document) => {
         const already = document.paused;
+        const withdrawnGuidance = document.guidance.length;
+        document.guidance = [];
         document.paused = true;
-        return { already, state: stateOf(document, false) };
+        return { already, withdrawnGuidance, state: stateOf(document, false) };
       });
       if (Option.isNone(marked)) return yield* refuse("This session has already returned");
       if (marked.value.already) return marked.value.state;
-      yield* Effect.logInfo("Interrupting the Pi parent; it holds until the operator resumes it");
+      yield* Effect.logInfo("Interrupting the Pi parent; it holds until the operator resumes it", {
+        withdrawnGuidance: marked.value.withdrawnGuidance,
+      });
       yield* durable.use("abort the parent's turn", async (harness, context) => {
         const conversation = await harness.conversation(parent, context);
         await conversation?.abort(context);
