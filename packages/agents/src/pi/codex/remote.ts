@@ -81,7 +81,14 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     );
     const read = handle.stdout.pipe(
       Stream.decodeText(),
-      Stream.splitLines,
+      // An SSH drop can truncate the last frame. Replay it from the last completed offset.
+      Stream.mapAccum(
+        () => "",
+        (buffer, chunk) => {
+          const lines = (buffer + chunk).split("\n");
+          return [lines.pop() ?? "", lines];
+        },
+      ),
       Stream.runForEach((line) =>
         Effect.gen(function* () {
           if (line.length === 0) return;

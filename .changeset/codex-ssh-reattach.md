@@ -9,3 +9,5 @@ Keep remote Codex app-servers running through SSH drops and reattach to their pe
 Preserve the original task when an app-server exits before saving its first user message. Recovery continues saved work when the task is already recorded.
 
 Replay unread operator guidance when recovering a Codex thread. Report delivery after the recovered turn accepts the messages, and preserve unread guidance while the child waits for the operator to resume it.
+
+Replay incomplete output frames after an SSH disconnect, preserving the last complete output offset.

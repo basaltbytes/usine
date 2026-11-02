@@ -12,6 +12,8 @@ import { execPath } from "node:process";
 
 for (const failure of [
   "ssh-drop",
+  "ssh-frame-drop",
+  "ssh-frame-eof",
   "app-server-exit",
   "app-server-zero-exit",
   "initial-turn-exit",
@@ -109,7 +111,32 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
 const { spawn } = require('node:child_process');
 const relay = spawn('sh', ['-c', process.argv.at(-1)], { stdio: ['pipe', 'pipe', 'pipe'] });
 process.stdin.pipe(relay.stdin);
-relay.stdout.pipe(process.stdout);
+let buffered = '';
+let offset = 0;
+relay.stdout.on('data', data => {
+  if (!'${failure}'.startsWith('ssh-frame-')) {
+    process.stdout.write(data);
+    return;
+  }
+  buffered += data.toString();
+  let end;
+  while ((end = buffered.indexOf('\\n')) >= 0) {
+    const line = buffered.slice(0, end);
+    buffered = buffered.slice(end + 1);
+    const frame = JSON.parse(line);
+    if (frame.ready) fs.appendFileSync('${directory}/cursors', String(frame.offset) + '\\n');
+    if (!fs.existsSync('${directory}/dropped') && frame.stdout && Buffer.from(frame.stdout, 'base64').toString().includes('item/completed')) {
+      fs.writeFileSync('${directory}/dropped', String(offset));
+      process.stdout.write('${failure}' === 'ssh-frame-eof' ? line : line.slice(0, Math.floor(line.length / 2)), () => {
+        relay.kill();
+        process.exit(255);
+      });
+      return;
+    }
+    offset = frame.offset;
+    process.stdout.write(line + '\\n');
+  }
+});
 relay.stderr.pipe(process.stderr);
 relay.stdin.on('error', () => {});
 const timer = setInterval(() => {
@@ -163,9 +190,15 @@ relay.on('exit', code => { clearInterval(timer); process.exit(code || 0); });
           assert.strictEqual(yield* fs.readFileString(`${directory}/threads`), "thread-one\n");
           assert.strictEqual(
             yield* fs.readFileString(`${directory}/turn-started`),
-            failure === "ssh-drop" ? "yes\n" : "yes\nyes\n",
+            failure === "ssh-drop" || failure.startsWith("ssh-frame-") ? "yes\n" : "yes\nyes\n",
           );
-          if (failure !== "ssh-drop")
+          if (failure.startsWith("ssh-frame-"))
+            assert.strictEqual(
+              yield* fs.readFileString(`${directory}/cursors`),
+              `0\n${yield* fs.readFileString(`${directory}/dropped`)}\n`,
+              "reconnect replays from the last complete frame",
+            );
+          if (failure !== "ssh-drop" && !failure.startsWith("ssh-frame-"))
             assert.strictEqual(yield* fs.readFileString(`${directory}/resumed`), "thread-one\n");
           const saved = (yield* fs.readFileString(`${directory}/saved-inputs`)).trim().split("\n");
           const originalInput = JSON.stringify([
