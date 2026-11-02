@@ -1,3 +1,5 @@
+import { FactoryOverview, ProjectView } from "@usine/orchestrator/operator";
+import { Schema } from "effect";
 import { accessResponses } from "./src/features/members/browser-fixture.ts";
 import {
   workerPreflightResponses,
@@ -52,6 +54,28 @@ const delayedStatistics = new WeakMap<Page, { window: string; releases: Array<()
 const statisticsWindows = new WeakMap<Page, StatisticsRequests>();
 // The overview response delay after approval, as on a busy instance (#463).
 const SLOW_OVERVIEW_MS = 5_000;
+
+const projectResponses = async (page: Page, overview: () => string) => {
+  await page.unroute("**/api/projects/*");
+  await page.route("**/api/projects/*", (route) => {
+    const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1) ?? "");
+    const view = Schema.decodeUnknownSync(Schema.fromJsonString(FactoryOverview))(overview());
+    const project = view.projects.find(
+      (project) =>
+        (project.id ??
+          project.repository
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/gu, "-")
+            .replace(/^-|-$/gu, "")) === id,
+    );
+    return project === undefined
+      ? route.fulfill({
+          status: 404,
+          json: { error: "BoardProjectNotFoundError", message: "No project" },
+        })
+      : route.fulfill({ json: Schema.encodeSync(ProjectView)(project) });
+  });
+};
 
 export default mergeConfig(
   vite,
@@ -186,6 +210,7 @@ export default mergeConfig(
                   attemptId: string,
                 ) => {
                   let resolved = false;
+                  await projectResponses(page, () => (resolved ? after : before));
                   await page.route("**/api/desk", (route) =>
                     route.fulfill({
                       contentType: "application/json",
@@ -317,6 +342,7 @@ export default mergeConfig(
                     lateOverviews: 0,
                   };
                   approvals.set(page, exchange);
+                  await projectResponses(page, () => (exchange.answered ? after : before));
                   await page.unroute("**/api/desk");
                   await page.unroute("**/api/overview");
                   await page.unroute("**/api/runs/approval-run");
@@ -472,6 +498,7 @@ export default mergeConfig(
                 },
                 boardRunHistoryRequests: async ({ page }) => boardHistoryRequests.get(page) ?? [],
                 boardResponses: async ({ page }, overview: string, moveStatus: 200 | 503) => {
+                  await projectResponses(page, () => overview);
                   await page.unroute("**/api/overview");
                   await page.unroute("**/api/projects/board-test/*/items/*/lane");
                   await page.route("**/api/overview", (route) =>

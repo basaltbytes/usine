@@ -1,3 +1,5 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
@@ -36,7 +38,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { runDetailQuery } from "~/lib/runs/queries";
 import { routeTree } from "~/route-tree.gen";
@@ -172,6 +174,14 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   const host = document.createElement("div");
   document.body.append(host);
@@ -288,6 +298,14 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: [`/?run=${runId}`] }),
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   const host = document.createElement("div");
   document.body.append(host);
@@ -407,6 +425,13 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
   document.body.append(host);
   const root = createRoot(host);
   try {
+    const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+    if (cachedOverview !== undefined)
+      queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+    for (const project of cachedOverview?.projects ?? []) {
+      queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+      queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+    }
     await router.load();
     expect(queryClient.getQueryState(options.queryKey)?.error).toBeNull();
     expect(
@@ -534,6 +559,14 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: [`/projects/${repository}/runs/${runId}`] }),
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   const host = document.createElement("div");
   document.body.append(host);

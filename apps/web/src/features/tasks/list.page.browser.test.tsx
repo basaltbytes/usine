@@ -1,3 +1,5 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -13,7 +15,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { routeTree } from "~/route-tree.gen";
 import {
@@ -77,6 +79,14 @@ const mount = async (path: string, width = 1440) => {
     history: createMemoryHistory({ initialEntries: [path] }),
     context: { queryClient },
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   flushSync(() =>
     root.render(
@@ -270,7 +280,9 @@ it("says Needs attention for a failure no stall explains, then the last run's ou
   // It ended 80m ago, so it comes before #18, whose run was canceled a day ago.
   await expect.element(pinned).toBe(table().getByRole("row").nth(4).element());
 
-  queryClient.setQueryData(overviewQuery().queryKey, boardOverviewResolved());
+  const resolved = boardOverviewResolved().projects[0];
+  if (resolved === undefined) throw new Error("Missing project fixture");
+  queryClient.setQueryData(projectTasksQuery(projectId(resolved)).queryKey, resolved);
   await expect.element(pinned.getByRole("cell").nth(1)).toMatchTextContent(/^Failed · 1h ago$/u);
   await expect.element(page.getByText("3 in flight, 1 done", { exact: true })).toBeVisible();
 });

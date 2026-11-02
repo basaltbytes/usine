@@ -1,4 +1,5 @@
-import { notifyManager, useQueryClient } from "@tanstack/react-query";
+import { connectionQuery, type ConnectionState } from "~/lib/changes";
+import { notifyManager, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useEffect, useState, type ReactNode } from "react";
 
 declare module "@tanstack/react-query" {
@@ -18,13 +19,17 @@ type RefreshSource = {
   readonly failedSince: number | null;
 };
 
-export const RefreshContext = createContext<ReadonlyArray<RefreshSource>>([]);
+export const RefreshContext = createContext<{
+  readonly sources: ReadonlyArray<RefreshSource>;
+  readonly connection: ConnectionState;
+}>({ sources: [], connection: "connecting" });
 
 type RefreshProviderProps = { readonly children: ReactNode };
 
 /** Tracks successful reads and continuous failures for the page's active queries. */
 export const RefreshProvider = ({ children }: RefreshProviderProps) => {
   const client = useQueryClient();
+  const { data: connection = "connecting" } = useQuery(connectionQuery());
   const [sources, setSources] = useState<ReadonlyArray<RefreshSource>>([]);
   useEffect(() => {
     const cache = client.getQueryCache();
@@ -72,5 +77,5 @@ export const RefreshProvider = ({ children }: RefreshProviderProps) => {
       unsubscribe();
     };
   }, [client]);
-  return <RefreshContext value={sources}>{children}</RefreshContext>;
+  return <RefreshContext value={{ sources, connection }}>{children}</RefreshContext>;
 };

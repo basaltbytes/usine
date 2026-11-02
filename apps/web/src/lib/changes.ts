@@ -2,7 +2,7 @@ import { type QueryClient, queryOptions, skipToken } from "@tanstack/react-query
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
 
-type ConnectionState = "connecting" | "connected" | "disconnected";
+export type ConnectionState = "connecting" | "connected" | "disconnected";
 
 export const connectionQuery = () =>
   queryOptions({

@@ -1,3 +1,5 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { administratorPermissions, PermissionGrant, ProjectScope } from "@usine/core/access";
@@ -7,7 +9,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { page } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { sessionQuery } from "~/lib/permissions";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
@@ -63,6 +65,13 @@ for (const permission of ["none", "operate", "maintain"] as const) {
       document.body.append(host);
       const root = createRoot(host);
       try {
+        const cachedOverview = client.getQueryData(overviewQuery().queryKey);
+        if (cachedOverview !== undefined)
+          client.setQueryData(attentionQuery().queryKey, cachedOverview);
+        for (const project of cachedOverview?.projects ?? []) {
+          client.setQueryData(projectQuery(projectId(project)).queryKey, project);
+          client.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+        }
         await router.load();
         flushSync(() =>
           root.render(

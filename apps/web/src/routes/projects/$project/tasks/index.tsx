@@ -38,7 +38,6 @@ export const Route = createFileRoute("/projects/$project/tasks/")({
     const [overview] = await Promise.all([
       context.queryClient.ensureQueryData(overviewQuery()),
       context.queryClient.ensureQueryData(deskQuery()),
-      context.queryClient.ensureQueryData(projectTasksQuery(ProjectId.make(params.project))),
     ]);
     if (!overview.projects.some((project) => projectId(project) === params.project)) {
       const legacy = projectForRepository(
@@ -53,6 +52,7 @@ export const Route = createFileRoute("/projects/$project/tasks/")({
           replace: true,
         });
     }
+    await context.queryClient.ensureQueryData(projectTasksQuery(ProjectId.make(params.project)));
   },
   pendingComponent: RoutePending,
   errorComponent: RouteError,

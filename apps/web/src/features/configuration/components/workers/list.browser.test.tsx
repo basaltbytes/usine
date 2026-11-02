@@ -1,3 +1,6 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
+import { workersQuery } from "~/features/configuration/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { Schema } from "effect";
@@ -12,7 +15,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { creationFailuresLine, nextCreationLine } from "~/lib/workers/strings";
 import { routeTree } from "~/route-tree.gen";
@@ -54,6 +57,14 @@ const mount = async (path: string, width = 1280, height = 900) => {
     history: createMemoryHistory({ initialEntries: [path] }),
     context: { queryClient },
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   flushSync(() =>
     root.render(
@@ -208,7 +219,7 @@ it("disables preflight for a busy worker and shows the reason", async () => {
     .element(page.getByRole("button", { name: "Run preflight on eu-1", exact: true }))
     .toBeEnabled();
   queryClient.setQueryData(
-    configurationQuery().queryKey,
+    workersQuery().queryKey,
     new ConfigurationView({
       ...configuration,
       workers: configuration.workers.map((worker) =>

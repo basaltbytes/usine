@@ -11,7 +11,10 @@ import { useOpenRun } from "~/hooks/use-open-run";
 
 const BoardRoute = () => {
   const { project: slug } = Route.useParams();
-  const { data } = useSuspenseQuery(overviewQuery());
+  const { data } = useSuspenseQuery({
+    ...overviewQuery(),
+    select: (view) => ({ loops: view.loops, readOnly: view._tag === "NeedsSetup" }),
+  });
   const desk = useSuspenseQuery(deskQuery());
   const openRun = useOpenRun();
   const { data: project } = useSuspenseQuery(projectQuery(ProjectId.make(slug)));
@@ -22,7 +25,7 @@ const BoardRoute = () => {
       project={project}
       loops={data.loops}
       stalled={desk.data.notMoving}
-      disabled={data._tag === "NeedsSetup"}
+      disabled={data.readOnly}
       openRun={openRun}
     />
   );

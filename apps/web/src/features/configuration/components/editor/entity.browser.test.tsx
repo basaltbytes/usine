@@ -1,3 +1,5 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { ProjectId } from "@usine/core/project";
@@ -16,7 +18,7 @@ import { entityKey } from "~/features/configuration/lib/entities";
 import { entityQuery } from "~/features/configuration/queries";
 import { configurationFixture, configurationJson } from "~/lib/configuration/fixture";
 import { configurationQuery } from "~/lib/configuration/queries";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
@@ -85,6 +87,13 @@ const mount = async (
     context: { queryClient: client },
     history: createMemoryHistory({ initialEntries: [path] }),
   });
+
+  const cachedOverview = client.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined) client.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    client.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    client.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   flushSync(() =>
     root.render(

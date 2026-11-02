@@ -484,13 +484,13 @@ const handlers = HttpApiBuilder.group(
 export const apiRoutes = () =>
   Layer.mergeAll(
     HttpApiBuilder.layer(OperatorApi),
-    conditionalReads,
     HttpRouter.add(
       DocumentationApi.endpoints.openapi.method,
       DocumentationApi.endpoints.openapi.path,
       HttpServerResponse.jsonUnsafe(operatorOpenApi()),
     ),
   ).pipe(
+    Layer.provide(conditionalReads.layer),
     Layer.provide(handlers),
     Layer.provide(Changes.layer),
     Layer.provide(policy),
