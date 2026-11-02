@@ -11,6 +11,8 @@ import {
   StartedByInfraRetry,
   StartedByRetry,
 } from "@usine/core/attempt/start";
+import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
+import { CommitSha } from "@usine/core/repository";
 import { Event, EventId } from "@usine/core/event";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
@@ -430,7 +432,29 @@ describe("durable run engine", () => {
           infrastructureFailure,
           Effect.succeed(stepResult("retried")),
         ]);
-        const runtime = engineLayer(directory, executorLayer(plans));
+        const salvage = new SalvagePushed({
+          ref: SalvageRef.make("usine/salvage/lost-machine/1"),
+          commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+        });
+        const resumed: Array<Option.Option<SalvagePushed>> = [];
+        const runtime = engineLayer(
+          directory,
+          Layer.effect(
+            StepExecutor,
+            Effect.gen(function* () {
+              const executor = yield* StepExecutor;
+              return StepExecutor.of({
+                ...executor,
+                execute: (execution, io) =>
+                  Effect.gen(function* () {
+                    resumed.push(execution.resume);
+                    if (resumed.length === 1) yield* io.salvage(salvage);
+                    return yield* executor.execute(execution, io);
+                  }),
+              });
+            }),
+          ).pipe(Layer.provide(executorLayer(plans))),
+        );
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -443,6 +467,8 @@ describe("durable run engine", () => {
             ({ run }) => run.state._tag === "Succeeded",
           );
           assert.strictEqual(finished.attempts.length, 2);
+          assert.deepStrictEqual(resumed, [Option.none(), Option.some(salvage)]);
+          assert.deepStrictEqual(finished.attempts[0]?.salvage, Option.some(salvage));
           const firstOutcome = finished.attempts[0]?.outcome;
           assert(firstOutcome !== undefined);
           assert(Option.isSome(firstOutcome));

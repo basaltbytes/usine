@@ -40,12 +40,13 @@ export type AttemptRecord = {
   children: number;
   /**
    * The first blocker, question, or harness failure reported by a child, which fails the Attempt
-   * unless the parent relays one. A missing `kind` means `blocked`.
+   * unless the parent relays one. An infrastructure failure takes precedence over the parent's
+   * report. A missing `kind` means `blocked`.
    */
   childBlocker: {
     sessionId: string;
     message: string;
-    kind?: "blocked" | "question" | "failed" | "capacity";
+    kind?: "blocked" | "question" | "failed" | "capacity" | "infra";
   } | null;
   childBudgetExceeded: { attempted: number; max: number } | null;
   /** The next outbound and inbound sequence numbers. */

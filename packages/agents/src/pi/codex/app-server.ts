@@ -1,11 +1,11 @@
 import {
   Cause,
-  Context,
   Deferred,
   Effect,
   Fiber,
   Layer,
   Option,
+  type PlatformError,
   Queue,
   Ref,
   Schema,
@@ -13,73 +13,25 @@ import {
   Stream,
 } from "effect";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
-import type { AgentSessionId } from "@usine/core/agent/session";
-import { type ChildHost, childPidFile } from "../../child-host/child-host.ts";
+import { childPidFile } from "../../child-host/child-host.ts";
+import { RemoteCodexProcessLost, remoteCodexProcess } from "./remote.ts";
 import { hostCommand } from "../../child-host/command.ts";
-import { type WorkingDirectory, SessionOperationError } from "../../runtime.ts";
+import { SessionOperationError } from "../../runtime.ts";
 
-/** The settings of one app-server connection. */
-export interface CodexClient {
-  /** The checkout directory on `host`. */
-  readonly cwd: WorkingDirectory;
-  /** `None` during preflight, before a child session exists. */
-  readonly sessionId: Option.Option<AgentSessionId>;
-  /**
-   * The complete environment of the app server and its commands on a local host, or the variables
-   * exported on top of a remote host's environment.
-   */
-  readonly environment: Readonly<Record<string, string>>;
-  /** The local or remote host on which to start the app-server process. */
-  readonly host: ChildHost;
-}
-
-/** A server event received without a client request ID. */
-export interface CodexNotification {
-  /** The protocol method name used to select the notification decoder. */
-  readonly method: string;
-  /** The protocol payload, decoded by the child backend for the named method. */
-  readonly params: Schema.Json;
-}
-
-/** A JSON-RPC connection to the app server, scoped to its process. */
-export interface CodexConnection {
-  /** Closes stdin and waits for the app server to shut down its threads and commands. */
-  readonly close: Effect.Effect<void, SessionOperationError>;
-  /** Server events in receive order; fails if the process or its output stream fails. */
-  readonly notifications: Stream.Stream<CodexNotification, SessionOperationError>;
-  /**
-   * Sends `method` with its JSON `params` and waits up to 60 seconds for the matching response.
-   * Failures identify `operation`; the caller decodes the returned protocol payload.
-   */
-  readonly request: (
-    operation: SessionOperationError["operation"],
-    method: string,
-    params: Schema.Json,
-  ) => Effect.Effect<Schema.Json, SessionOperationError>;
-  /**
-   * Sends `method` with its JSON `params` without waiting for a response. Write failures identify
-   * `operation`, such as `launch` for the initialization acknowledgement.
-   */
-  readonly notify: (
-    operation: SessionOperationError["operation"],
-    method: string,
-    params: Schema.Json,
-  ) => Effect.Effect<void, SessionOperationError>;
-}
-
-/** The service that spawns the Codex app-server process and provides its JSON-RPC connection. */
-export class CodexAppServer extends Context.Service<
+import {
   CodexAppServer,
-  {
-    /**
-     * Starts the app server on `request.host` with its environment and session identity. The
-     * connection belongs to the calling scope; the caller initializes the JSON-RPC protocol.
-     */
-    readonly open: (
-      request: CodexClient,
-    ) => Effect.Effect<CodexConnection, SessionOperationError, Scope.Scope>;
-  }
->()("@usine/agents/pi/CodexAppServer") {}
+  type CodexClient,
+  type CodexConnection,
+  type CodexNotification,
+  operationError,
+} from "./connection.ts";
+export {
+  CodexAppServer,
+  type CodexClient,
+  type CodexConnection,
+  type CodexNotification,
+  operationError,
+} from "./connection.ts";
 
 const RpcSuccessResponse = Schema.Struct({
   id: Schema.Int,
@@ -106,19 +58,6 @@ const RPC_TIMEOUT = "60 seconds";
 const STDERR_TAIL_LINES = 5;
 const preview = (line: string): string => (line.length > 200 ? `${line.slice(0, 200)}…` : line);
 
-export const operationError = (
-  operation: SessionOperationError["operation"],
-  request: CodexClient,
-  message: string,
-  cause: unknown,
-): SessionOperationError =>
-  new SessionOperationError({
-    operation,
-    sessionId: request.sessionId,
-    message,
-    cause,
-  });
-
 interface PendingRequest {
   readonly operation: SessionOperationError["operation"];
   readonly response: Deferred.Deferred<Schema.Json, SessionOperationError>;
@@ -135,6 +74,14 @@ export const codexConfigArgs: ReadonlyArray<string> = [
   "check_for_update_on_startup=false",
   "analytics.enabled=false",
 ].flatMap((override) => ["-c", override]);
+
+const appServerArgs = (cwd: string) => [
+  "app-server",
+  "--stdio",
+  "-c",
+  repositoryTrustOverride(cwd),
+  ...codexConfigArgs,
+];
 
 /**
  * Returns the app-server command for `client` on its host. The process starts in the home directory,
@@ -158,17 +105,20 @@ export const codexAppServerCommand = (
         Option.map(client.sessionId, (sessionId) => childPidFile(client.cwd, sessionId)),
       ),
       command: "codex",
-      args: [
-        "app-server",
-        "--stdio",
-        "-c",
-        repositoryTrustOverride(client.cwd),
-        ...codexConfigArgs,
-      ],
+      args: appServerArgs(client.cwd),
     },
     stdin === undefined ? lifetime : { ...lifetime, stdin },
   );
 };
+
+interface CodexProcess {
+  readonly stdout: Stream.Stream<Uint8Array, SessionOperationError | PlatformError.PlatformError>;
+  readonly stderr: Stream.Stream<Uint8Array, SessionOperationError | PlatformError.PlatformError>;
+  readonly exitCode: Effect.Effect<number, SessionOperationError | PlatformError.PlatformError>;
+  readonly kill: (
+    options?: Parameters<ChildProcessSpawner.ChildProcessHandle["kill"]>[0],
+  ) => Effect.Effect<void, SessionOperationError | PlatformError.PlatformError>;
+}
 
 const makeCodexAppServer = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -189,18 +139,28 @@ const makeCodexAppServer = Effect.gen(function* () {
       const closing = yield* Ref.make(false);
       const failure = yield* Ref.make(Option.none<SessionOperationError>());
       const stderrTail = yield* Ref.make<ReadonlyArray<string>>([]);
-      const handle = yield* spawner
-        .spawn(
-          codexAppServerCommand(request, {
-            stream: Stream.fromQueue(input),
-            endOnDone: true,
-          }),
-        )
-        .pipe(
-          Effect.mapError((cause) =>
-            operationError("launch", request, "Codex app-server failed to start", cause),
-          ),
-        );
+      const process: Effect.Effect<CodexProcess, PlatformError.PlatformError, Scope.Scope> =
+        Effect.gen(function* () {
+          if (request.host._tag === "RemoteShell" && Option.isSome(request.sessionId)) {
+            return yield* remoteCodexProcess(
+              { ...request, host: request.host },
+              request.sessionId.value,
+              appServerArgs(request.cwd),
+              Stream.fromQueue(input),
+            ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+          }
+          return yield* spawner.spawn(
+            codexAppServerCommand(request, {
+              stream: Stream.fromQueue(input),
+              endOnDone: true,
+            }),
+          );
+        });
+      const handle = yield* process.pipe(
+        Effect.mapError((cause) =>
+          operationError("launch", request, "Codex app-server failed to start", cause),
+        ),
+      );
 
       const write = (message: Schema.Json, operation: SessionOperationError["operation"]) =>
         Queue.offer(input, encoder.encode(`${JSON.stringify(message)}\n`)).pipe(
@@ -355,7 +315,9 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.catch((cause) =>
           failAll(
-            operationError("stream", request, "Can't read Codex app-server diagnostics", cause),
+            cause instanceof SessionOperationError
+              ? cause
+              : operationError("stream", request, "Can't read Codex app-server diagnostics", cause),
           ),
         ),
         Effect.forkScoped,
@@ -371,14 +333,20 @@ const makeCodexAppServer = Effect.gen(function* () {
                       "stream",
                       request,
                       `Codex app-server exited with code ${String(exitCode)}`,
-                      { exitCode, stderr },
+                      request.host._tag === "RemoteShell" && Option.isSome(request.sessionId)
+                        ? new RemoteCodexProcessLost({ message: `exit code ${exitCode}` })
+                        : { exitCode, stderr },
                     ),
                   ),
             ),
           ),
         ),
         Effect.catch((cause) =>
-          failAll(operationError("stream", request, "Can't monitor Codex app-server", cause)),
+          failAll(
+            cause instanceof SessionOperationError
+              ? cause
+              : operationError("stream", request, "Can't monitor Codex app-server", cause),
+          ),
         ),
         Effect.forkScoped,
       );

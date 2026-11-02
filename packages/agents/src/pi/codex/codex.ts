@@ -1,5 +1,6 @@
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
+  AgentSessionId,
   ChildSession,
   PoolRateLimitsUpdated,
   ProviderRecovered,
@@ -24,6 +25,7 @@ import {
   ModelListResponse,
   RateLimitsUpdated,
   type ThreadStartParams,
+  type ThreadResumeParams,
   ThreadStartResponse,
   ToolItem,
   TurnActivity,
@@ -49,6 +51,7 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
 } from "../../runtime.ts";
+import { RemoteCodexProcessLost } from "./remote.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
@@ -95,7 +98,7 @@ const makeCodexChild = Effect.gen(function* () {
         environment: request.environment,
         host: request.host,
       };
-      const connection = yield* appServer.open(client);
+      let connection = yield* appServer.open(client);
       yield* initializeCodex(connection);
       let billing = yield* codexChildAccount(
         connection,
@@ -320,7 +323,7 @@ const makeCodexChild = Effect.gen(function* () {
         channel,
         send: steer,
         pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
-        beforeFinish: connection.close,
+        beforeFinish: Effect.suspend(() => connection.close),
       });
       yield* startTurn(request.prompt);
 
@@ -336,7 +339,57 @@ const makeCodexChild = Effect.gen(function* () {
         );
         yield* channel.fail(error);
       });
-      const consume = connection.notifications.pipe(
+      const resume = Effect.fn("CodexChildBackend.resume")(function* (error: AgentSessionError) {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.thread.id });
+        if (
+          request.host._tag !== "RemoteShell" ||
+          error._tag !== "SessionOperationError" ||
+          !(error.cause instanceof RemoteCodexProcessLost)
+        )
+          return yield* error;
+        yield* Effect.logWarning("Remote Codex app-server stopped; resuming its saved thread", {
+          sessionId: session.id,
+          threadId: thread.thread.id,
+        });
+        connection = yield* appServer.open({
+          ...client,
+          sessionId: Option.some(AgentSessionId.make(`${session.id}-resume`)),
+        });
+        yield* initializeCodex(connection);
+        billing = yield* codexChildAccount(
+          connection,
+          request.session.brain,
+          request.session.gatewayCredential,
+        );
+        const params: ThreadResumeParams = {
+          threadId: thread.thread.id,
+          model: requestedModel,
+          cwd: request.cwd,
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+        };
+        const response = yield* connection.request("launch", "thread/resume", json(params));
+        const restored = yield* decodeResponse(
+          ThreadStartResponse,
+          "launch",
+          client,
+          "thread resume response",
+          response,
+        );
+        if (restored.thread.id !== thread.thread.id)
+          return yield* operationError(
+            "launch",
+            client,
+            "Codex resumed a different thread",
+            restored.thread.id,
+          );
+        toolsInFlight.clear();
+        interrupting = false;
+        yield* startTurn(
+          "Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.",
+        );
+      });
+      const consumeNotifications = Stream.unwrap(Effect.sync(() => connection.notifications)).pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {
             if (method === "error") {
@@ -538,6 +591,9 @@ const makeCodexChild = Effect.gen(function* () {
             });
           }),
         ),
+      );
+      const consume = consumeNotifications.pipe(
+        Effect.catch((error) => resume(error).pipe(Effect.andThen(consumeNotifications))),
         Effect.flatMap(() =>
           Effect.all([channel.isTerminal, conversation.isClosing]).pipe(
             Effect.flatMap(([terminal, closing]) =>

@@ -8,8 +8,10 @@ import {
 } from "@earendil-works/pi-durable";
 import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
+  type AgentSessionError,
   ChildRequest,
   ChildSessionBudgetExceededError,
+  SessionOperationError,
   reportText,
   type RunningSession,
   WorkingDirectory,
@@ -194,12 +196,42 @@ export const subagentTool = (services: ExtensionServices) => {
       pool: sessionPool(session),
       taskExcerpt: excerpt,
     });
+    const recordInfrastructureFailure = (error: AgentSessionError) =>
+      error._tag === "SessionOperationError"
+        ? call("record the child's infrastructure failure", () =>
+            api.commit(async (tx) => {
+              const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
+              if (record.childBlocker === null)
+                record.childBlocker = { sessionId, message: error.message, kind: "infra" };
+            }, context),
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SessionOperationError({
+                  operation: "stream",
+                  sessionId: Option.some(sessionId),
+                  message: cause.message,
+                  cause,
+                }),
+            ),
+            Effect.andThen(
+              Effect.logWarning("Child infrastructure failure requires an automatic retry", {
+                attemptId: spec.attemptId,
+                sessionId,
+                message: error.message,
+              }),
+            ),
+          )
+        : Effect.void;
     // Annotate logs with the Attempt because this tool runs outside the Attempt's fiber. An abort
     // interrupts a launch that is still waiting through retry delays.
     const child = yield* untilAborted(
       services.backend
         .launch(childRequest)
-        .pipe(Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker })),
+        .pipe(
+          Effect.tapError(recordInfrastructureFailure),
+          Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker }),
+        ),
       context,
       session.id,
       Effect.logInfo("Abandoning the child launch of an aborted tool call", {
@@ -252,6 +284,7 @@ export const subagentTool = (services: ExtensionServices) => {
     );
     const outcome = yield* untilAborted(
       child.result.pipe(
+        Effect.tapError(recordInfrastructureFailure),
         Effect.map(Result.succeed),
         Effect.catchTag(
           ["AgentResultError", "AgentCapacityError", "AgentBlockedError", "AgentQuestionError"],

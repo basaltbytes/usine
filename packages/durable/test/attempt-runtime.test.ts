@@ -1722,6 +1722,31 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("keeps a child transport loss as infrastructure when the parent reports a blocker", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/824");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+        yield* (yield* (yield* StubChildren).next).crash("Codex machine disappeared");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.strictEqual(failure.message, "Codex machine disappeared");
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              delegate("Complete the task"),
+              answer("[usine:blocked]\nThe SSH connection failed."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("ends the Attempt with the parent's own blocker", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;

@@ -13,6 +13,8 @@ import type {
   ThreadItem,
   ThreadStartParams,
   ThreadStartResponse,
+  ThreadResumeParams,
+  ThreadResumeResponse,
   TurnInterruptParams,
   TurnStartParams,
   TurnStartResponse,
@@ -46,6 +48,12 @@ export type ModelListParamsConform = Assert<
 >;
 export type ThreadStartParamsConform = Assert<
   Extends<Mutable<Ours.ThreadStartParams>, ThreadStartParams>
+>;
+export type ThreadResumeParamsConform = Assert<
+  Extends<Mutable<Ours.ThreadResumeParams>, ThreadResumeParams>
+>;
+export type ThreadResumeResponseConform = Assert<
+  Decodes<typeof Ours.ThreadStartResponse, ThreadResumeResponse>
 >;
 export type TurnStartParamsConform = Assert<
   Extends<Mutable<Ours.TurnStartParams>, TurnStartParams>

@@ -42,3 +42,7 @@ Instance admin access, an instance using SSH workers, a Linux machine with Git, 
 The worker reports passing preflight, its selected runtime, and applied container limits. Start a test run and confirm its attempt lists the SSH worker.
 
 For later edits, run `EDITOR=vi usine config edit worker worker-one`. [Attempt containers](/reference/configuration/workers/#attempt-container) explains image requirements and shared caches. [Configure a gateway](/guides/configure-a-gateway/) to proxy credentials.
+
+## Codex connection recovery
+
+Remote Codex children continue running through an SSH disconnect. usine reconnects to the same app-server and reads buffered output. If the app-server exits, usine resumes its saved thread once before recording an infrastructure failure. The worker needs Node.js on its command path, including inside the attempt container.

@@ -139,3 +139,5 @@ Provider capacity refusals use `AgentCapacityError`, which maps to `ProviderCapa
 ## CI handoff
 
 For a loop with a CI policy, the task instructs the agent to push, record completion labels in a `[usine:awaiting-ci]` JSON answer, and end its session. The parent relays that answer unchanged. usine checks the harvested PR head and waits for CI before applying those labels. The agent must leave completion labels for the monitor. Other loops retain ordinary final answers.
+
+Remote Codex children run under a detached Node supervisor. Preflight checks that Node.js is available on the remote command path. An SSH drop reconnects to the same app-server and replays buffered output; sequence numbers prevent repeated input from starting another turn. If the app-server exits, the child resumes its saved thread once before reporting a failure. Preflight continues to use a short-lived process.

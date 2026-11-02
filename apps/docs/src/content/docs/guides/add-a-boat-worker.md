@@ -32,3 +32,9 @@ Instance admin access, an instance using SSH workers, a Boat account and CLI, an
 Preflight validates the token and account limits without creating a sandbox. A test run creates a sandbox, adds the public key, verifies its pinned SSH host key, and starts an attempt container. **Workers** shows the machine until cleanup retires it.
 
 Boat offers no region setting. Each sandbox has no account secrets, automatic snapshots, command monitoring, or automatic stop. Without a gateway, the attempt can read its token and provider keys. [Boat settings](/reference/configuration/workers/#boat-provisioner) describes snapshots and reuse.
+
+## SSH recovery
+
+A running Codex child survives an SSH disconnect. usine reconnects to the same app-server, reads buffered output, and continues the existing thread. If the app-server exits, usine resumes its saved thread once before reporting a failure.
+
+A confirmed machine loss ends the attempt as an infrastructure failure. usine retries automatically, up to the run's attempt cap, using the latest pushed salvage recorded on the run. Work that exists only on a deleted machine cannot be recovered. A child transport failure remains an infrastructure failure even if the parent reports an operator blocker.

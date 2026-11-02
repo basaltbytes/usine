@@ -94,6 +94,7 @@ const childReportFailure = ({
   message,
   kind,
 }: NonNullable<AttemptRecord["childBlocker"]>): AttemptFailure => {
+  if (kind === "infra") return new InfraFailure({ message, cause: message });
   if (kind === "question") return new QuestionFailure({ question: message });
   if (kind === "capacity") return new ProviderCapacityFailure({ message });
   if (kind === "failed") return new AgentFailure({ message });
@@ -390,7 +391,10 @@ export const attemptTask = (
           kind: relayed.value.kind ?? "blocked",
         });
       }
-      const outcome = Option.orElse(own, () => Option.map(relayed, childReportFailure));
+      const outcome =
+        Option.isSome(relayed) && relayed.value.kind === "infra"
+          ? Option.some(childReportFailure(relayed.value))
+          : Option.orElse(own, () => Option.map(relayed, childReportFailure));
       let finished = false;
       yield* commit(runtime, context, "record the parent's answer", async (tx) => {
         if (supervised(await tx.doc(HoldDoc, task.id), spec.attemptId)) return undefined;

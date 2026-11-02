@@ -38,6 +38,14 @@ export interface ThreadStartParams {
   readonly ephemeral?: boolean | null;
 }
 
+export interface ThreadResumeParams {
+  readonly threadId: string;
+  readonly model?: string | null;
+  readonly cwd?: string | null;
+  readonly approvalPolicy?: "never" | "on-request" | "untrusted" | null;
+  readonly sandbox?: "read-only" | "workspace-write" | "danger-full-access" | null;
+}
+
 interface TextInput {
   readonly type: "text";
   readonly text: string;
