@@ -6,6 +6,7 @@ import { GitHubApp } from "./github-app.ts";
 import type { GitHubAppError } from "./error.ts";
 import { queryGraphql } from "./graphql.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
+import { ActionsJob, FAILED_CONCLUSIONS, failedStepsExcerpt } from "./actions-log.ts";
 
 /** The current PR head and GitHub's aggregate check state; missing checks remain pending. */
 export class CheckSnapshot extends Schema.Class<CheckSnapshot>("CheckSnapshot")({
@@ -61,14 +62,6 @@ const Statuses = Schema.Struct({
     }),
   ),
 });
-const FAILED_CONCLUSIONS = new Set([
-  "failure",
-  "timed_out",
-  "cancelled",
-  "action_required",
-  "startup_failure",
-  "stale",
-]);
 
 /** Reads aggregate CI and failure diagnostics without starting an agent. */
 export class GitHubChecks extends Context.Service<
@@ -97,6 +90,30 @@ export class GitHubChecks extends Context.Service<
         if (response.status !== 200)
           return yield* statusError("read-ci-checks", response, yield* Clock.currentTimeMillis);
         return response;
+      });
+      const jobFailure = Effect.fn("GitHubChecks.jobFailure")(function* (
+        prefix: string,
+        job: string,
+      ) {
+        yield* Effect.annotateCurrentSpan({ job });
+        const metadata = yield* get(`${prefix}/actions/jobs/${job}`);
+        const steps = yield* HttpClientResponse.schemaBodyJson(ActionsJob)(metadata).pipe(
+          Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+        );
+        const response = yield* get(`${prefix}/actions/jobs/${job}/logs`);
+        const log = yield* response.text.pipe(
+          Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+        );
+        const output = failedStepsExcerpt(steps, log);
+        if (output.length === 0)
+          return yield* invalidResponse("read-ci-checks", "No failed step logs are available");
+        yield* Effect.logInfo("Read failed CI step logs", {
+          job,
+          steps: steps.steps
+            .filter(({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion))
+            .map(({ name }) => name),
+        });
+        return output;
       });
       return {
         snapshot: Effect.fn("GitHubChecks.snapshot")(function* (
@@ -158,15 +175,7 @@ export class GitHubChecks extends Context.Service<
             const log =
               job === undefined
                 ? Effect.succeed(check.output.text ?? check.output.summary ?? "")
-                : get(`${prefix}/actions/jobs/${job}/logs`).pipe(
-                    Effect.flatMap((response) =>
-                      response.text.pipe(
-                        Effect.mapError((error) =>
-                          invalidResponse("read-ci-checks", error.message),
-                        ),
-                      ),
-                    ),
-                  );
+                : jobFailure(prefix, job);
             const output = yield* log.pipe(
               Effect.catch((error) =>
                 error._tag === "GitHubRateLimitError"

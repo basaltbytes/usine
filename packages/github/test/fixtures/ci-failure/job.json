@@ -1,0 +1,44 @@
+{
+  "steps": [
+    {
+      "name": "Run pnpm --filter @usine/web exec playwright install-deps chromium",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 15,
+      "started_at": "2026-11-02T07:33:25Z",
+      "completed_at": "2026-11-02T07:33:43Z"
+    },
+    {
+      "name": "Run pnpm test",
+      "status": "completed",
+      "conclusion": "failure",
+      "number": 16,
+      "started_at": "2026-11-02T07:33:43Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Post Run pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 31,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 32,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    },
+    {
+      "name": "Complete job",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 33,
+      "started_at": "2026-11-02T07:36:40Z",
+      "completed_at": "2026-11-02T07:36:40Z"
+    }
+  ]
+}

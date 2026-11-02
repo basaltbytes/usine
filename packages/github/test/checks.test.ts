@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { assert, it } from "@effect/vitest";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
@@ -70,29 +71,120 @@ it.effect("reads the live PR head and keeps absent checks pending", () =>
   ),
 );
 
-it.effect("includes failed job names and bounds the end of Actions logs", () =>
+const failedCheckRun = {
+  name: "ci",
+  conclusion: "failure",
+  details_url: "https://github.com/basaltbytes/usine/actions/runs/1/job/2",
+  output: { summary: "Check summary", text: null },
+};
+const failedCheck = { total_count: 1, check_runs: [failedCheckRun] };
+// PR #827, Actions job 125150736388: the log retains the assertion and subsequent cleanup.
+const recordedJob = readFileSync(
+  new URL("./fixtures/ci-failure/job.json", import.meta.url),
+  "utf8",
+);
+const recordedLog = readFileSync(new URL("./fixtures/ci-failure/job.log", import.meta.url), "utf8");
+
+it.effect("keeps the recorded failing assertion and step name without post-job cleanup", () =>
   Effect.gen(function* () {
     const evidence = yield* (yield* GitHubChecks).failures(repository, head);
-    assert.deepStrictEqual(evidence.jobs, ["typecheck"]);
-    assert.include(evidence.excerpt, "final failure");
+    assert.deepStrictEqual(evidence.jobs, ["ci"]);
+    assert.include(evidence.excerpt, "Run pnpm test");
+    assert.include(evidence.excerpt, "expected -4391 to be greater than or equal to 0");
+    assert.include(evidence.excerpt, "conversation.browser.test.tsx:866:24");
+    assert.include(evidence.excerpt, "Process completed with exit code 1");
     assert.isAtMost(evidence.excerpt.length, 12000);
-    assert.notInclude(evidence.excerpt, "start of log");
+    assert.notInclude(evidence.excerpt, "Post job cleanup");
+    assert.notInclude(evidence.excerpt, "Pruning is unnecessary");
+    assert.notInclude(evidence.excerpt, "git config");
+    assert.notInclude(evidence.excerpt, "Cleaning up orphan processes");
   }).pipe(
     Effect.provide(
       withClient((url) =>
         url.includes("/logs")
-          ? new Response(`start of log${"x".repeat(15000)}final failure`)
-          : json({
-              total_count: 1,
-              check_runs: [
-                {
-                  name: "typecheck",
-                  conclusion: "failure",
-                  details_url: "https://github.com/basaltbytes/usine/actions/runs/1/job/2",
-                  output: { summary: null, text: null },
-                },
-              ],
-            }),
+          ? new Response(recordedLog)
+          : url.includes("/actions/jobs/")
+            ? new Response(recordedJob)
+            : json(failedCheck),
+      ),
+    ),
+  ),
+);
+
+it.effect("keeps failure-marker context and tails from each failed step within the limit", () =>
+  Effect.gen(function* () {
+    const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+    assert.deepStrictEqual(evidence.jobs, ["ci-0", "ci-1", "ci-2", "ci-3"]);
+    for (const text of [
+      "Typecheck",
+      "error TS2322",
+      "Lint",
+      "Error: invalid import",
+      "Tests",
+      "✗ rejects invalid input",
+      "expected 2 to equal 1",
+      "last line",
+    ])
+      assert.include(evidence.excerpt, text);
+    assert.notInclude(evidence.excerpt, "successful upload");
+    assert.notInclude(evidence.excerpt, "successful setup");
+    assert.isAtMost(evidence.excerpt.length, 12000);
+  }).pipe(
+    Effect.provide(
+      withClient((url) => {
+        const failures = [
+          "error TS2322: incompatible types",
+          "Error: invalid import",
+          "✗ rejects invalid input\nexpected 2 to equal 1",
+        ];
+        if (url.includes("/logs"))
+          return new Response(
+            [
+              "2026-11-02T07:33:00.1000000Z successful setup",
+              ...failures.flatMap((failure, index) => [
+                `2026-11-02T07:33:${10 + index * 10}.1000000Z preceding context ${"setup ".repeat(1000)}`,
+                `2026-11-02T07:33:${10 + index * 10}.2000000Z ${failure}`,
+                ...Array.from(
+                  { length: 100 },
+                  () => `2026-11-02T07:33:${10 + index * 10}.3000000Z ${"noise ".repeat(30)}`,
+                ),
+                `2026-11-02T07:33:${15 + index * 10}.1000000Z last line`,
+              ]),
+              "2026-11-02T07:33:40.1000000Z successful upload",
+            ].join("\n"),
+          );
+        if (url.includes("/actions/jobs/"))
+          return json({
+            steps: ["Typecheck", "Lint", "Tests"].map((name, index) => ({
+              name,
+              conclusion: "failure",
+              started_at: `2026-11-02T07:33:${10 + index * 10}Z`,
+              completed_at: `2026-11-02T07:33:${15 + index * 10}Z`,
+            })),
+          });
+        return json({
+          total_count: 4,
+          check_runs: Array.from({ length: 4 }, (_, index) => ({
+            ...failedCheckRun,
+            name: `ci-${index}`,
+            details_url: `https://github.com/basaltbytes/usine/actions/runs/1/job/${index + 2}`,
+          })),
+        });
+      }),
+    ),
+  ),
+);
+
+it.effect("uses check output when Actions step metadata is unavailable", () =>
+  Effect.gen(function* () {
+    const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+    assert.include(evidence.excerpt, "Check summary");
+  }).pipe(
+    Effect.provide(
+      withClient((url) =>
+        url.includes("/actions/jobs/")
+          ? new Response("forbidden", { status: 403 })
+          : json(failedCheck),
       ),
     ),
   ),
@@ -116,27 +208,25 @@ it.effect("reports legacy status contexts when no check run failed", () =>
   ),
 );
 
-it.effect("propagates rate limits from Actions logs for the polling backoff", () =>
-  Effect.gen(function* () {
-    const error = yield* (yield* GitHubChecks).failures(repository, head).pipe(Effect.flip);
-    assert.strictEqual(error._tag, "GitHubRateLimitError");
-  }).pipe(
-    Effect.provide(
-      withClient((url) =>
-        url.includes("/logs")
-          ? new Response("rate limited", { status: 429, headers: { "retry-after": "60" } })
-          : json({
-              total_count: 1,
-              check_runs: [
-                {
-                  name: "ci",
-                  conclusion: "failure",
-                  details_url: "https://github.com/basaltbytes/usine/actions/runs/1/job/2",
-                  output: { summary: null, text: null },
-                },
-              ],
-            }),
+for (const endpoint of ["metadata", "logs"]) {
+  it.effect(`propagates rate limits from Actions ${endpoint} for the polling backoff`, () =>
+    Effect.gen(function* () {
+      const error = yield* (yield* GitHubChecks).failures(repository, head).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "GitHubRateLimitError");
+    }).pipe(
+      Effect.provide(
+        withClient((url) => {
+          if (url.includes("/actions/jobs/")) {
+            if (endpoint === "metadata" || url.includes("/logs"))
+              return new Response("rate limited", {
+                status: 429,
+                headers: { "retry-after": "60" },
+              });
+            return new Response(recordedJob);
+          }
+          return json(failedCheck);
+        }),
       ),
     ),
-  ),
-);
+  );
+}
