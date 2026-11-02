@@ -44,6 +44,8 @@ The task doesn't store the host or environment. It stores the run spec, worker, 
 
 `AttemptRequest.gatewayCredential`, supplied the same way, is the credential kind that the worker's gateway uses for the children, from the worker's latest preflight, or none if they use their harness's login. The `subagent` tool records it on each child's `ChildSession` at start, so usage counts the child in the right pool. A preflight during the attempt applies to its next child.
 
+Every child receives the stored rendered loop task unchanged. The parent supplies supplemental context through `subagent.task`. The child's `SessionStarted.prompt` records its exact initial prompt for the run page, including its persona, task, parent context, and completion instructions. Older transcripts leave this field absent.
+
 Children aren't resumed after a restart: the tool call ends as interrupted with the output committed so far, and the parent model decides next.
 
 ## Operator input

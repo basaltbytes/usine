@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { AttemptTask } from "@usine/core/attempt";
 import { ModelId } from "@usine/core/agent/brain";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -129,13 +130,20 @@ const refusingSteerBackend = Layer.effectContext(
 ).pipe(Layer.provide(stubChildBackendLayer));
 
 describe("durable AttemptRuntime", () => {
-  it.live("relays one whole Attempt and reports the parent's final answer", () =>
+  it.live("preserves the task when the parent delegates a summary", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const children = yield* StubChildren;
-        const request = attemptRequest("run/step/1");
+        const initial = attemptRequest("run/step/1");
+        const task = AttemptTask.make(
+          "Review PR #818.\n\n  Add `ready-to-merge` on a clean review.\nDo not wait for CI.\n",
+        );
+        const request = new AttemptRequest({
+          ...initial,
+          spec: new AttemptChannel.RunSpec({ ...initial.spec, task }),
+        });
         const recording = recordingSink();
         const lastAnsweredAt = DateTime.makeUnsafe("2026-10-15T19:42:00Z");
         const silent = new AttemptChannel.WorkerUnresponsive({
@@ -151,7 +159,15 @@ describe("durable AttemptRuntime", () => {
         assert.deepStrictEqual(child.request.environment, workerEnvironment);
         assert.strictEqual(child.request.cwd, "/workspace/usine");
         assert.deepStrictEqual(child.request.host, new LocalProcess());
-        assert.match(child.request.prompt, /Fix the flaky test/u);
+        assert.include(child.request.prompt, `# Delegated task\n\n${task}\n`);
+        assert.include(
+          child.request.prompt,
+          "Manage labels precisely. Run required gates foreground.",
+        );
+        assert.isBelow(
+          child.request.prompt.indexOf("# Parent context"),
+          child.request.prompt.indexOf("# Delegated task"),
+        );
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
         assert.isTrue(Option.isNone(yield* runtime.unsupervised(request.spec.attemptId)));
         yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(42));
@@ -166,6 +182,15 @@ describe("durable AttemptRuntime", () => {
         assert.strictEqual(report.message, "Fixed the flaky test and opened a pull request.");
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
         const outbound = recording.outbound();
+        const launch = outbound.flatMap(({ payload }) =>
+          payload._tag === "SessionEvent" &&
+          payload.event._tag === "SessionStarted" &&
+          payload.event.session._tag === "ChildSession"
+            ? [payload.event]
+            : [],
+        );
+        assert.strictEqual(launch.length, 1);
+        assert.deepStrictEqual(launch[0]?.prompt, Option.some(child.request.prompt));
         assertAdmitted(request.spec.attemptId, outbound);
         assert.deepStrictEqual(
           trace(outbound).filter((tag) => tag.startsWith("Worker")),
@@ -203,7 +228,7 @@ describe("durable AttemptRuntime", () => {
           layer({
             database,
             parent: [
-              delegate("Fix the flaky test"),
+              delegate("Manage labels precisely. Run required gates foreground."),
               answer("Fixed the flaky test and opened a pull request."),
             ],
           }),

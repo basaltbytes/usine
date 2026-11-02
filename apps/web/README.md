@@ -365,3 +365,5 @@ Members without role bindings can still open Tokens and sign out. Other pages ex
 The run header, drawer, and board card show **Waiting for CI** as a link to the pushed PR's checks. CI waits remain in flight in task lists and do not appear as attempts waiting for a worker. The ended session retains its transcript while the orchestrator observes checks.
 
 After failed CI starts a fix run, the source run shows a neutral handoff with a link to the continuing run. Task lists and board cards show the fix run's status and link. Only failures without an accepted fix request operator attention.
+
+The run page lists **Prompt received by** disclosures in each attempt's details. Each disclosure shows the exact initial prompt sent to that child, including the rendered loop task and supplemental parent context. Older transcripts omit the disclosure.

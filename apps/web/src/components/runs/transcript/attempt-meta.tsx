@@ -6,6 +6,7 @@ import { Value } from "~/components/runs/transcript/value";
 import { Button } from "~/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
 import type { Chapter } from "~/lib/runs/transcript/document/model";
+import { childPromptLabel } from "~/lib/runs/strings";
 import { dayLabel, harnessLabel, poolLabel, windowLabel } from "~/lib/strings";
 
 type AttemptMetaProps = {
@@ -96,6 +97,27 @@ export const AttemptMeta = ({ chapter, runTask }: AttemptMetaProps) => {
         ))}
         {attempt?.operatorIntervened === true && <Meta label="Operator intervened" />}
       </p>
+      {chapter.sessions.map(({ session, prompt }) =>
+        session._tag === "ChildSession" && Option.isSome(prompt) ? (
+          <Collapsible key={session.id}>
+            <CollapsibleTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-mx-2 h-auto min-h-7 max-w-full justify-start gap-1 px-2 py-1 text-left text-xs font-normal whitespace-normal text-muted-foreground data-[panel-open]:[&_svg]:rotate-90"
+                />
+              }
+            >
+              <CaretRightIcon aria-hidden="true" className="shrink-0" />
+              <span className="wrap-anywhere">{childPromptLabel(session.agent, session.id)}</span>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-1">
+              <p className="text-sm whitespace-pre-wrap wrap-anywhere">{prompt.value}</p>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null,
+      )}
       {attempt !== undefined && attempt.task !== runTask && (
         <Collapsible>
           <CollapsibleTrigger

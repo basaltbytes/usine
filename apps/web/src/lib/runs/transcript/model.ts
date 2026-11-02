@@ -99,6 +99,7 @@ export interface TranscriptSession extends TranscriptPosition {
   readonly _tag: "Session";
   readonly session: AgentSession;
   readonly harnessSession: Option.Option<HarnessSession>;
+  readonly prompt: Option.Option<string>;
   readonly status: SessionStatus;
   readonly held: boolean;
   readonly paused: boolean;
@@ -422,6 +423,7 @@ export const projectTranscript = (
       latestSequence: group.latestSequence,
       session: group.session,
       harnessSession: group.harnessSession,
+      prompt: group.prompt,
       status: group.status,
       held: group.status === "Live" && group.held,
       paused: group.status === "Live" && group.paused,
