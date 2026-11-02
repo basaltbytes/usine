@@ -50,3 +50,11 @@ The engine deletes obsolete acknowledgements in one statement, passing current k
 ## Amendment (2026-10-28, #666): startup retention
 
 Overview refreshes defer acknowledgement pruning until both polling and schedule triggers have reported a cycle since startup. The pruning decision uses the same reports as the overview projection, including when the projection comes from the cache. An unreported source does not establish that its previous findings have recovered. Setup mode retains acknowledgements while the trigger services are idle. Once both sources report, the #646 pruning rule applies, including when their completed reports contain no failures.
+
+## Amendment (2026-11-02, #847): statement cache span retention
+
+Effect 4.0.6 cache entries retain their completed lookup fibers. The Node SQLite driver's prepared-statement cache therefore retains the parent span of the first query for each statement. Native spans record their completion exit, so a cached statement can retain an entire HTTP response through its request span. The production heap snapshot for #847 confirms this path.
+
+The local adapter wraps `execute`, `executeRaw`, and `executeValues` on the driver's single connection during layer construction, before exposing either SQL client service. Only these driver methods use the prepared-statement cache. Each cached execution uses an external parent span with the same trace ID, span ID, and sampling state, without the parent span object or its annotations. The surrounding SQL and request spans retain their existing relationships and attributes. Transactions, reserved connections, cache capacity, expiry, and backup use the same connection and synchronization.
+
+This adaptation belongs to the Node SQLite boundary. A workspace-only pnpm patch does not apply to plain npm installations of the published packages. The wrapper is included in `@usine/engine/local-sqlite` and requires no install hook. Regression tests force GC while that adapter remains open and advance the test clock across six hours of queries and statement expiry, including CI monitor polling with a persisted open CI wait.
