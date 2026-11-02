@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { DateTime, Schema } from "effect";
 import { unzipSync } from "fflate/browser";
 
 export const FAILED_CONCLUSIONS = new Set([
@@ -21,6 +21,8 @@ export const ActionsJob = Schema.Struct({
       name: Schema.NonEmptyString,
       conclusion: Schema.NullOr(Schema.String),
       number: PositiveInt,
+      started_at: Schema.NullOr(Schema.DateTimeUtcFromString),
+      completed_at: Schema.NullOr(Schema.DateTimeUtcFromString),
     }),
   ),
 });
@@ -56,7 +58,80 @@ const excerpt = (lines: ReadonlyArray<string>, limit: number): string => {
   return `${context}\n...\n${tail}`;
 };
 
-/** Extracts failed step files from an Actions log archive. Invalid ZIP data throws. */
+const decodeLines = (file: Uint8Array) =>
+  new TextDecoder()
+    .decode(file)
+    .replace(/^\uFEFF/u, "")
+    .split(/\r?\n/u);
+const stripTimestamp = (line: string) => line.replace(/^\d{4}-\d\d-\d\dT\S+Z /u, "");
+
+const combinedStepLogs = (job: typeof ActionsJob.Type, file: Uint8Array) => {
+  let second = "";
+  const lines = decodeLines(file).map((line) => {
+    second = line.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)\S*Z /u)?.[1] ?? second;
+    return { second, text: stripTimestamp(line) };
+  });
+  const steps = job.steps.flatMap((step) =>
+    step.conclusion === "skipped" || step.started_at === null || step.completed_at === null
+      ? []
+      : [
+          {
+            number: step.number,
+            name: step.name,
+            startSecond: DateTime.formatIso(step.started_at).slice(0, 19),
+            endSecond: DateTime.formatIso(step.completed_at).slice(0, 19),
+          },
+        ],
+  );
+  const starts = new Map<number, number>();
+  let before = lines.length;
+  // Work backwards so identical headers and post-job steps in one second remain separate.
+  for (let index = steps.length - 1; index >= 0; index--) {
+    const step = steps[index];
+    if (step === undefined) continue;
+    const header = step.name.startsWith("Post ")
+      ? "Post job cleanup."
+      : step.name === "Complete job"
+        ? "Cleaning up orphan processes"
+        : `##[group]${step.name.split("\n")[0]}`;
+    let start = -1;
+    for (let line = before - 1; line >= 0; line--) {
+      const entry = lines[line];
+      if (entry === undefined || entry.second > step.startSecond) continue;
+      if (entry.second < step.startSecond) break;
+      if (entry.text === header) {
+        start = line;
+        break;
+      }
+    }
+    const previous = steps[index - 1];
+    if (start === -1 && (previous === undefined || previous.endSecond < step.startSecond))
+      start = lines.findIndex((line) => line.second >= step.startSecond);
+    // Rounded timestamps alone cannot separate an unrecognized header in a shared second.
+    if (start === -1 || start >= before) continue;
+    starts.set(step.number, start);
+    before = start;
+  }
+  const logs = new Map<number, ReadonlyArray<string>>();
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    if (step === undefined) continue;
+    const start = starts.get(step.number);
+    const next = steps[index + 1];
+    const end = next === undefined ? lines.length : starts.get(next.number);
+    if (start === undefined || end === undefined) continue;
+    logs.set(
+      step.number,
+      lines
+        .slice(start, end)
+        .filter((line) => line.second <= step.endSecond)
+        .map((line) => line.text),
+    );
+  }
+  return logs;
+};
+
+/** Extracts failed steps from numbered files or a combined job log. Invalid ZIP data throws. */
 export const failedStepsExcerpt = (job: typeof ActionsJob.Type, archive: Uint8Array): string => {
   const failed = job.steps.filter(
     ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
@@ -74,19 +149,27 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, archive: Uint8Ar
     return file.match(/^(\d+)_.*\.txt$/u)?.[1];
   };
   const files = unzipSync(archive, {
-    filter: ({ name }) => failed.some(({ number }) => stepNumber(name) === String(number)),
+    filter: ({ name }) =>
+      failed.some(({ number }) => stepNumber(name) === String(number)) ||
+      (/^\d+_/u.test(name) && name.replace(/^\d+_/u, "") === `${folder}.txt`),
   });
+  const combined = Object.entries(files).filter(([path]) => !path.includes("/"));
+  const combinedFile = combined.length === 1 ? combined[0]?.[1] : undefined;
+  const fallback =
+    combinedFile === undefined
+      ? new Map<number, ReadonlyArray<string>>()
+      : combinedStepLogs(job, combinedFile);
   const sections: Array<string> = [];
   for (const step of failed) {
     const matches = Object.entries(files).filter(
       ([path]) => stepNumber(path) === String(step.number),
     );
     const file = matches[0]?.[1];
-    if (matches.length !== 1 || file === undefined || file.byteLength === 0) return "";
-    const lines = new TextDecoder()
-      .decode(file)
-      .split(/\r?\n/u)
-      .map((line) => line.replace(/^\uFEFF?\d{4}-\d\d-\d\dT\S+Z /u, ""));
+    const lines =
+      matches.length === 1 && file !== undefined && file.byteLength > 0
+        ? decodeLines(file).map(stripTimestamp)
+        : fallback.get(step.number);
+    if (lines === undefined || lines.length === 0) return "";
     sections.push(
       `${step.name}\n${excerpt(lines, Math.max(0, limit - step.name.length - 3))}`.slice(
         0,
