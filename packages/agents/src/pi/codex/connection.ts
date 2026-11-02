@@ -34,7 +34,8 @@ export interface CodexConnection {
   readonly notifications: Stream.Stream<CodexNotification, SessionOperationError>;
   /**
    * Sends `method` with its JSON `params` and waits up to 60 seconds for the matching response.
-   * Failures identify `operation`; the caller decodes the returned protocol payload.
+   * Failures identify `operation`; a failed connection returns its recorded failure unchanged.
+   * The caller decodes the returned protocol payload.
    */
   readonly request: (
     operation: SessionOperationError["operation"],

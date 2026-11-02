@@ -13,3 +13,5 @@ Replay unread operator guidance when recovering a Codex thread. Report delivery 
 Replay incomplete output frames after an SSH disconnect, preserving the last complete output offset.
 
 Discard incomplete input frames before journaling them so reconnecting preserves the running app-server. Acknowledge guidance included in resumed input when Codex reads it, preventing replay after another pause.
+
+Preserve the recorded process-loss error when the app-server exits before the first turn request starts, so recovery resumes the saved thread.

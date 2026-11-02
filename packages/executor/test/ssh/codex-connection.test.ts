@@ -1,13 +1,13 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
-import { codexChildBackendLayer, codexAppServerLive } from "@usine/agents/codex";
+import { CodexAppServer, codexChildBackendLayer, codexAppServerLive } from "@usine/agents/codex";
 import { ChildRequest, CodexChildBackend, WorkingDirectory } from "@usine/agents/runtime";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { WorkerName } from "@usine/core/worker";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
-import { Effect, FileSystem, Option, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Result, Stream } from "effect";
 import { execPath } from "node:process";
 
 for (const failure of [
@@ -20,6 +20,7 @@ for (const failure of [
   "app-server-zero-exit",
   "initial-turn-exit",
   "initial-turn-saved-exit",
+  "before-initial-turn-exit",
   "supervisor-exit",
   "resume-exit",
   "resume-zero-exit",
@@ -61,6 +62,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   } else if (request.method === 'thread/start') {
     fs.appendFileSync(process.env.CODEX_HOME + '/threads', 'thread-one\\n');
     process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one' }, model: 'test-model', instructionSources: [] } }) + '\\n');
+    if ('${failure}' === 'before-initial-turn-exit') process.exit(0);
   } else if (request.method === 'thread/resume') {
     if (['supervisor-exit', 'app-server-zero-exit'].includes('${failure}')) {
       const pids = JSON.parse(fs.readFileSync(process.env.CODEX_HOME + '/original-pids'));
@@ -212,7 +214,9 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
           assert.strictEqual(yield* fs.readFileString(`${directory}/threads`), "thread-one\n");
           assert.strictEqual(
             yield* fs.readFileString(`${directory}/turn-started`),
-            failure.startsWith("ssh-") ? "yes\n" : "yes\nyes\n",
+            failure.startsWith("ssh-") || failure === "before-initial-turn-exit"
+              ? "yes\n"
+              : "yes\nyes\n",
           );
           if (failure.startsWith("ssh-input-")) {
             assert.isTrue(yield* fs.exists(`${directory}/dropped`), "the SSH input was truncated");
@@ -244,7 +248,35 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
         }),
       ).pipe(
         Effect.provide(codexChildBackendLayer),
-        Effect.provide(codexAppServerLive),
+        Effect.provide(
+          failure === "before-initial-turn-exit"
+            ? Layer.effect(
+                CodexAppServer,
+                Effect.gen(function* () {
+                  const server = yield* CodexAppServer;
+                  return CodexAppServer.of({
+                    open: (client) =>
+                      server.open(client).pipe(
+                        Effect.map((connection) => ({
+                          ...connection,
+                          request: (operation, method, params) =>
+                            Effect.gen(function* () {
+                              const response = yield* connection.request(operation, method, params);
+                              if (method === "thread/start") {
+                                const recorded = yield* Stream.runDrain(
+                                  connection.notifications,
+                                ).pipe(Effect.result);
+                                assert(Result.isFailure(recorded), "process loss is recorded");
+                              }
+                              return response;
+                            }),
+                        })),
+                      ),
+                  });
+                }),
+              ).pipe(Layer.provide(codexAppServerLive))
+            : codexAppServerLive,
+        ),
         Effect.provide(NodeServices.layer),
       ),
     20_000,

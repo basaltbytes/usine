@@ -432,14 +432,7 @@ const makeCodexAppServer = Effect.gen(function* () {
               new Error("connection closed"),
             );
           const failed = yield* Ref.get(failure);
-          if (Option.isSome(failed)) {
-            return yield* operationError(
-              operation,
-              request,
-              "Codex app-server connection already failed",
-              failed.value,
-            );
-          }
+          if (Option.isSome(failed)) return yield* failed.value;
           const id = yield* Ref.getAndUpdate(nextId, (current) => current + 1);
           const response = yield* Deferred.make<Schema.Json, SessionOperationError>();
           yield* Ref.update(pending, (entries) =>
