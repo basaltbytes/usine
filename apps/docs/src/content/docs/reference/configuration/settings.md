@@ -95,4 +95,6 @@ The orchestrator exports protobuf batches every five seconds and flushes on shut
 
 Each poll cycle, HTTP request, and run has a trace. Run traces include attempts and link to the action that started them. Spans include repository, run, attempt, and worker identities; SQL spans exclude parameter values. Worker harnesses export no spans. `OTEL_RESOURCE_ATTRIBUTES` adds percent-encoded, comma-separated `key=value` resource attributes. Failed export requests retry up to three times, then discard buffered spans and pause export for 60 seconds.
 
+SQLite statement caching releases references to completed request spans and API response bodies while preserving SQL trace relationships. This applies with span export on or off.
+
 Changes to `tracing` and `auth` require a restart. See [Revision application](/reference/configuration/config/#revision-application).

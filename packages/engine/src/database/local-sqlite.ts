@@ -5,7 +5,17 @@ import { fileURLToPath } from "node:url";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import { sql } from "drizzle-orm";
-import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect";
+import {
+  Context,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  PlatformError,
+  Schema,
+  Tracer,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { CursorStore } from "../cursor/cursor.ts";
@@ -34,11 +44,49 @@ const startupError = (operation: string, cause: unknown) =>
 const runtimeStorePath = (path: Path.Path, instanceDirectory: InstanceDirectory) =>
   path.join(instanceDirectory, ".usine", "runtime.sqlite");
 
+const withExternalParentSpan = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.flatMap(Effect.serviceOption(Tracer.ParentSpan), (parent) =>
+    Option.match(parent, {
+      onNone: () => effect,
+      onSome: ({ spanId, traceId, sampled }) =>
+        Effect.provideService(
+          effect,
+          Tracer.ParentSpan,
+          Tracer.externalSpan({ spanId, traceId, sampled }),
+        ),
+    }),
+  );
+
 /** Returns `SqliteClient.layer`, failing with `onError` when the database can't be opened. */
 const openSqliteLayer = <E>(
   config: SqliteClient.SqliteClientConfig,
   onError: (cause: SqlError) => E,
-) => Layer.effectContext(Layer.build(SqliteClient.layer(config)).pipe(Effect.mapError(onError)));
+) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(SqliteClient.layer(config));
+      const client = Context.get(context, SqliteClient.SqliteClient);
+      // Wrap the single connection before sharing it, including transaction and reserved uses.
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* client.reserve;
+          const { execute, executeRaw, executeValues } = connection;
+          Object.assign(connection, {
+            execute: (...args: Parameters<typeof execute>) =>
+              withExternalParentSpan(execute(...args)),
+            executeRaw: (...args: Parameters<typeof executeRaw>) =>
+              withExternalParentSpan(executeRaw(...args)),
+            executeValues: (...args: Parameters<typeof executeValues>) =>
+              withExternalParentSpan(executeValues(...args)),
+          });
+        }),
+      );
+      yield* Effect.logDebug("SQLite statement cache span isolation installed", {
+        filename: config.filename,
+      });
+      return context;
+    }).pipe(Effect.mapError(onError)),
+  );
 
 const sqliteClientLayer = (instanceDirectory: InstanceDirectory) =>
   Layer.unwrap(

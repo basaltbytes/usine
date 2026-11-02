@@ -383,6 +383,8 @@ HTTP actions use the authenticated member for approvals, retries, interventions,
 
 Polling and statistics SQLite fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts). Local-worker tests that exercise Git hooks and executable files use the OS temporary directory.
 
+The CI monitor regression test keeps a persisted CI wait open across six simulated hours. It uses the real SQLite adapter and native tracing, and forces GC to verify that completed response bodies are collectable while statements remain cached.
+
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
 
 ## Idle upgrade waits
