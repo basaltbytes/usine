@@ -3,23 +3,46 @@ title: Concepts
 description: The instance, projects, loops, agents, runs, attempts, and workers you use in usine.
 ---
 
-An instance stores your configuration and run history. Its projects group repositories; each project's loops select work for agents.
+An instance stores your configuration and run history. Its projects group repositories; each project's loops select work for agents. The diagram separates the configuration you set up from the execution of a matching issue or pull request.
 
 ```mermaid
-flowchart TD
-  instance[Instance] --> project[Project]
-  project --> repos[Managed repositories]
-  project --> loop[Loop]
-  loop --> agent[Agent]
-  loop -->|trigger matches an item| run[Run]
-  run -->|one or more tries| attempt[Attempt]
-  agent -->|instructions and harness| attempt
-  worker[Worker] -->|runs child sessions| attempt
+---
+config:
+  flowchart:
+    nodeSpacing: 20
+    rankSpacing: 24
+    padding: 8
+---
+flowchart TB
+  accTitle: Configuration and execution
+  accDescr: An instance contains projects, agents, and workers. A project contains managed repositories and loops. A loop uses an agent. An issue or pull request matching the loop's trigger starts a run with one or more attempts. Each attempt runs the loop's agent on a worker.
+
+  subgraph configuration[Configuration]
+    subgraph instance[Instance]
+      subgraph project[Project]
+        repos[Managed repositories]
+        loop[Loop]
+      end
+      agent[Agent]
+      worker[Worker]
+      loop -. uses .-> agent
+    end
+  end
+
+  subgraph execution[Execution]
+    direction LR
+    item["Issue or<br/>pull request"] -->|matches trigger| run[Run]
+    run -->|1+ tries| attempt[Attempt]
+    attempt -->|runs| usedAgent["Loop's agent"]
+    attempt -->|runs on| usedWorker[Worker]
+  end
+
+  configuration ~~~ execution
 ```
 
 ## Instance
 
-An instance is one installation of usine with its own configuration, credentials, and runtime state, served by an orchestrator. Its instance folder contains `.usine/`; an instance repo is a Git repository for bootstrap and configuration import and export files. [Start an instance in the quickstart](/get-started/quickstart/).
+An instance is one installation of usine with its own configuration, credentials, and runtime state, served by an orchestrator. It contains projects, agents, and workers. Its instance folder contains `.usine/`; an instance repo is a Git repository for bootstrap and configuration import and export files. [Start an instance in the quickstart](/get-started/quickstart/).
 
 ## Project
 
@@ -27,23 +50,23 @@ A project is a named group of managed repositories with one board and the loops 
 
 ## Loop
 
-A loop defines a trigger and the agent run to start for each matching item in a project. An item is a GitHub issue or pull request; a trigger can select issues, pull requests, or schedule ticks. [Write a loop](/guides/write-a-loop/).
+A loop belongs to a project and defines a trigger and the agent run to start for each matching item in that project's repositories. It references one agent from the instance. An item is a GitHub issue or pull request; a trigger can select issues, pull requests, or schedule ticks. [Write a loop](/guides/write-a-loop/).
 
 ## Agent
 
-An agent is a named definition of standing instructions and a brain spec: its harness, model, and reasoning effort. The harness is the coding-agent CLI, such as Claude Code, Codex, or Pi. [Write an agent](/guides/write-an-agent/).
+An agent is an instance-level definition of standing instructions and a brain spec: its harness, model, and reasoning effort. Multiple loops can reference the same agent. The harness is the coding-agent CLI, such as Claude Code, Codex, or Pi. [Write an agent](/guides/write-an-agent/).
 
 ## Run
 
-A run is the work for one event of a loop. In the UI, a run can wait for approval, queue for a worker, run an attempt, or wait for CI before it closes as succeeded, failed, or canceled. [Approve and follow a run](/guides/operate-runs/).
+A run is the work for one event of a loop, such as an issue or pull request matching its trigger. A run has one or more attempts when execution starts, one per try. In the UI, a run can wait for approval, queue for a worker, run an attempt, or wait for CI before it closes as succeeded, failed, or canceled. [Approve and follow a run](/guides/operate-runs/).
 
 ## Attempt
 
-An attempt is one try of a run's step on a worker. Retrying a failed run creates another attempt in the same run, with its own transcript of session messages. [Retry an attempt](/guides/operate-runs/#retry-a-failed-run).
+An attempt is one try of a run's step, running the loop's agent on a worker. Retrying a failed run creates another attempt in the same run, with its own transcript of session messages. [Retry an attempt](/guides/operate-runs/#retry-a-failed-run).
 
 ## Worker
 
-A worker is a machine that runs an attempt's child sessions in a checkout. The default local worker uses the machine and user running `usine up`; the Pi parent session always runs in the orchestrator. [Add a worker](/guides/add-a-worker/) to run children on another machine.
+A worker is an instance-level machine configuration for running an attempt's child sessions in a checkout. The default local worker uses the machine and user running `usine up`; the Pi parent session always runs in the orchestrator. [Add a worker](/guides/add-a-worker/) to run children on another machine.
 
 ## Board and task
 
