@@ -126,7 +126,7 @@ export const RunSummary = ({ detail }: RunSummaryProps) => {
     case "Waiting":
       return <p className="text-muted-foreground">Waiting for approval</p>;
     case "Queued":
-      return detail.machine?.state === "creating" ? (
+      return detail.machine?.state === "creating" || detail.machine?.state === "preparing" ? (
         <MachineCreation machine={detail.machine} />
       ) : (
         <p className="text-muted-foreground">Approved, waiting for a free worker</p>

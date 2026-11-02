@@ -38,3 +38,9 @@ Boat offers no region setting. Each sandbox has no account secrets, automatic sn
 A running Codex child survives an SSH disconnect. usine reconnects to the same app-server, reads buffered output, and continues the existing thread. If the supervisor or app-server exits after the thread is saved, usine confirms that the remaining process group has stopped before resuming the thread once, including when the first turn request fails.
 
 A confirmed machine loss ends the attempt as an infrastructure failure. usine retries automatically, up to the run's attempt cap, using the latest pushed salvage recorded on the run. Work that exists only on a deleted machine cannot be recovered. A child transport failure remains an infrastructure failure even if the parent reports an operator blocker.
+
+## Image preparation
+
+The run page shows **Preparing the attempt image** during machine preflight and first-use cache preparation. The server logs whether the image is `present` or `absent`, the inspection duration, and the preflight pull duration. The pull's `downloaded` field compares the image IDs before and after the pull. The image user probe has its own duration. Each **Prepared shared cache volume** entry includes the complete script duration and `runDurationMillis` for its container run, in milliseconds.
+
+If a new machine lacks the attempt image, the server logs a warning with the image name before pulling it. Rebuild the snapshot with that image and update the worker's snapshot setting. Rebuild snapshots after an upgrade that changes the attempt image. A present image with a slow first container run can indicate slow reads from the restored disk; use the separate timings to identify the slow step.

@@ -2,7 +2,7 @@ import type { MachineView } from "@usine/orchestrator/operator";
 import { Elapsed } from "~/components/runs/transcript/activity";
 import { StateMark } from "~/components/status-badge";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
-import { providerLabel } from "~/lib/workers/strings";
+import { preparingAttemptImage, providerLabel } from "~/lib/workers/strings";
 
 type MachineStepProps = {
   readonly machine: MachineView;
@@ -14,7 +14,11 @@ export const MachineStep = ({ machine, attemptNumber }: MachineStepProps) => (
   <div className="relative rounded-md py-1.5 pr-2 pl-6">
     <StateMark state="Queued" className="absolute top-3 left-2.5" />
     <span className="block font-medium">
-      {machine.state === "creating" ? "Creating machine" : "Machine ready"}
+      {machine.state === "preparing"
+        ? preparingAttemptImage
+        : machine.state === "creating"
+          ? "Creating machine"
+          : "Machine ready"}
     </span>
     <span className="block truncate text-xs text-muted-foreground">
       {providerLabel[machine.provider]}

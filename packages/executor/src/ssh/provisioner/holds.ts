@@ -2,7 +2,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Option, Ref } from "effect";
-import { MachineHold } from "../../executor.ts";
+import { MachineHold, MachineStatus } from "../../executor.ts";
 import type { MachineDriver } from "./model.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { SshMachine } from "../model.ts";
@@ -14,11 +14,12 @@ export interface Held {
   readonly worker: WorkerName;
   readonly provider: MachineProvider;
   /**
-   * `creating` until the machine answers over SSH, `located` while it serves an Attempt,
+   * `creating` until the machine answers over SSH, `preparing` during machine preflight,
+   * `located` while it serves an Attempt,
    * `unlocated` when the machine must be looked up with the current worker configuration,
    * `idle` after cleanup while it is available for another attempt, and `deleting` until deletion succeeds.
    */
-  readonly state: "creating" | "located" | "unlocated" | "deleting" | "idle";
+  readonly state: "creating" | "preparing" | "located" | "unlocated" | "deleting" | "idle";
   readonly uses: number;
   readonly since: DateTime.Utc;
   readonly id: Option.Option<MachineId>;
@@ -37,6 +38,18 @@ export interface Held {
    */
   readonly checkout: boolean;
 }
+
+export const machineStatusOf = (entry: Held): MachineStatus =>
+  new MachineStatus({
+    worker: entry.worker,
+    provider: entry.provider,
+    state: entry.state === "located" || entry.state === "unlocated" ? "ready" : entry.state,
+    id: entry.id,
+    runId: entry.runId,
+    attemptId: entry.attemptId,
+    since: entry.since,
+    attempts: entry.uses,
+  });
 
 export const machineHolds = Effect.gen(function* () {
   const held = yield* Ref.make<ReadonlyMap<MachineHold, Held>>(new Map());

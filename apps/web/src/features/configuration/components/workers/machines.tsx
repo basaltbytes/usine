@@ -14,10 +14,12 @@ import { MachineFor } from "~/features/configuration/components/workers/machine-
 import { DetailSection } from "~/features/configuration/components/section";
 import { machineReuseCopy } from "~/features/configuration/strings";
 import { useNow } from "~/hooks/use-now";
+import { preparingAttemptImage } from "~/lib/workers/strings";
 import { elapsedLabel, timestampLabel } from "~/lib/strings";
 
 const machineState = {
   creating: { state: "Queued", label: "Creating" },
+  preparing: { state: "Queued", label: preparingAttemptImage },
   ready: { state: "live", label: "Ready" },
   idle: { state: "Waiting", label: machineReuseCopy.idle },
   deleting: { state: "Canceled", label: "Deleting" },

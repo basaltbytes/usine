@@ -10,7 +10,7 @@ import {
   type ContainerLimits,
   type WorkerName,
 } from "@usine/core/worker";
-import { Effect, Option, Redacted, Ref, Schema } from "effect";
+import { Duration, Effect, Option, Redacted, Ref, Schema } from "effect";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import type { RemoteCommands } from "./commands.ts";
 import { type ContainerRuntime, runtimeOptions } from "./runtime.ts";
@@ -18,6 +18,10 @@ import { type ContainerRuntime, runtimeOptions } from "./runtime.ts";
 export const PNPM_STORE_VOLUME = "usine-pnpm-store";
 export const PNPM_STORE_PATH = "/home/usine/.local/share/pnpm/store";
 export const PNPM_STORE_MOUNT = `${PNPM_STORE_VOLUME}:${PNPM_STORE_PATH}:nocopy`;
+
+const decodeRunDuration = Schema.decodeUnknownEffect(
+  Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+);
 
 const SHARED_CACHES = [
   { volume: PNPM_STORE_VOLUME, path: PNPM_STORE_PATH },
@@ -38,7 +42,9 @@ set -eu
 runtime=$1 image=$2 volume=$3 mount=$4 path=$5
 shift 5
 if [ "$runtime" = podman ]; then set -- --userns=keep-id --cgroupns=private --http-proxy=false; fi
-exec "$runtime" run --rm --network none "$@" --user 0 --volume "$mount" --entrypoint sh "$image" -ec '
+started=$(date +%s%3N)
+status=0
+"$runtime" run --rm --network none "$@" --user 0 --volume "$mount" --entrypoint sh "$image" -ec '
   owner=$(id -u usine)
   current=$(stat -c %u "$1")
   if [ "$current" = "$owner" ]; then exit 0; fi
@@ -48,7 +54,9 @@ exec "$runtime" run --rm --network none "$@" --user 0 --volume "$mount" --entryp
   fi
   chmod 0755 "$1"
   chown -h "$owner" "$1"
-' sh "$path" "$volume" "$runtime"
+' sh "$path" "$volume" "$runtime" || status=$?
+printf '%s\n' "$(($(date +%s%3N) - started))"
+exit "$status"
 `.trim();
 
 /** The labels on each container, so a later process finds the ones it left. */
@@ -290,29 +298,52 @@ export const containersFor = (commands: RemoteCommands) => {
     worker: WorkerName,
     runtime: ContainerRuntime,
   ) {
-    const fields = { worker, host: shell.destination, image };
+    const fields = { worker, host: shell.destination, image, runtime };
     yield* Effect.annotateCurrentSpan(fields);
     for (const { volume, mount, path } of SHARED_CACHES) {
-      const prepared = yield* commands.inspect(operation, shell, "sh", [
-        "-c",
-        PREPARE_CACHE_SCRIPT,
-        "sh",
-        runtime,
-        image,
-        volume,
-        mount,
-        path,
-      ]);
+      const [duration, prepared] = yield* commands
+        .inspect(operation, shell, "sh", [
+          "-c",
+          PREPARE_CACHE_SCRIPT,
+          "sh",
+          runtime,
+          image,
+          volume,
+          mount,
+          path,
+        ])
+        .pipe(Effect.timed);
       if (prepared.exitCode !== 0) {
         const message = `Can't prepare shared cache volume ${volume}: ${prepared.stderr.trim() || `exit code ${prepared.exitCode}`}`;
-        yield* Effect.logWarning(message, { ...fields, volume, exitCode: prepared.exitCode });
+        yield* Effect.logWarning(message, {
+          ...fields,
+          volume,
+          durationMillis: Duration.toMillis(duration),
+          exitCode: prepared.exitCode,
+        });
         return yield* new ExecutorOperationError({
           operation,
           message,
           cause: new Error(prepared.stderr),
         });
       }
-      yield* Effect.logInfo("Prepared shared cache volume", { ...fields, volume, path });
+      const runDurationMillis = yield* decodeRunDuration(prepared.stdout.trim()).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ExecutorOperationError({
+              operation,
+              message: `Invalid container run duration for cache volume ${volume}`,
+              cause,
+            }),
+        ),
+      );
+      yield* Effect.logInfo("Prepared shared cache volume", {
+        ...fields,
+        volume,
+        path,
+        runDurationMillis,
+        durationMillis: Duration.toMillis(duration),
+      });
     }
   });
 

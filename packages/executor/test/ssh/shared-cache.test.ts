@@ -15,8 +15,10 @@ set -eu
 if [ "$1" = volume ]; then
   if [ "$FAIL_STAGE" = volume ]; then echo "volume create failed" >&2; exit 1; fi
   mkdir -p "$STORE"
+  echo 100000 > "$CLOCK_FILE"
   exit 0
 fi
+echo 100037 > "$CLOCK_FILE"
 if [ "$RUNTIME_NAME" = podman ]; then
   case " $* " in *" --userns=keep-id "*) ;; *) echo missing-keep-id >&2; exit 1 ;; esac
 fi
@@ -52,6 +54,9 @@ it.each(
       '#!/bin/sh\nset -eu\n[ "$1" = -h ] && [ "$2" = "$IMAGE_UID" ] && [ "$3" = "$STORE" ]\necho "$2" > "$OWNER_FILE"\n',
       { mode: 0o755 },
     );
+    const clockFile = join(directory, "clock");
+    await writeFile(clockFile, "0");
+    await writeFile(join(directory, "date"), '#!/bin/sh\ncat "$CLOCK_FILE"\n', { mode: 0o755 });
     const ownerFile = join(directory, "owner");
     await writeFile(ownerFile, "0");
     await writeFile(
@@ -67,13 +72,15 @@ it.each(
           RUNTIME_NAME: runtimeName,
           IMAGE_UID: uid,
           OWNER_FILE: ownerFile,
+          CLOCK_FILE: clockFile,
           FAIL_STAGE: failStage,
         },
       });
 
     await assert.rejects(prepare(imageUid, "volume"), /volume create failed/u);
     await assert.rejects(stat(store), /ENOENT/u);
-    await prepare();
+    const first = await prepare();
+    assert.strictEqual(first.stdout, "37\n", "the run duration excludes volume creation");
     assert.strictEqual((await readFile(ownerFile, "utf8")).trim(), imageUid);
     assert.strictEqual((await stat(store)).mode & 0o777, 0o755);
     await mkdir(join(store, "v11"));

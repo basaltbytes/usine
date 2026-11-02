@@ -531,7 +531,7 @@ describe("Provisioned SSH Worker", () => {
         assert.isTrue(Option.isNone(second.checked));
         assert.strictEqual(memoryChecks(), 1);
         assert.strictEqual(resourceReads(), 1);
-        assert.strictEqual(cachePreparations(), 2);
+        assert.strictEqual(cachePreparations(), 4);
         assert.strictEqual(providers.hetzner.servers.size, 2);
 
         const prepared = yield* executor.prepare(request);

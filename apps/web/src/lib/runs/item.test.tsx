@@ -534,6 +534,26 @@ describe("provisioned machine", () => {
     );
   });
 
+  it("shows image preparation while a queued run's machine preflight runs", () => {
+    const queued = run({ state: "Queued", closedAt: null, attempts: [failed] });
+    const machine = machineFixture({
+      runId: queued.id,
+      state: "preparing",
+      id: "52341896",
+      since: new Date(Date.now() - 2 * 60_000).toISOString(),
+    });
+    assert.include(
+      outline(queued, machine),
+      "Preparing the attempt image Hetzner 52341896, for attempt 2",
+    );
+    const view = new RunDetailView({ ...detail(queued), machine });
+    assert.include(visible(heading(view)), "Preparing the attempt image");
+    assert.include(
+      renderToStaticMarkup(<RunSummary detail={view} />),
+      "Preparing the attempt image, machine started 2m ago",
+    );
+  });
+
   it("names the provider ID of the running Attempt's machine beside its Worker", () => {
     const running = run({ state: "Running", closedAt: null, attempts: [attempt(null)] });
     const machine = machineFixture({

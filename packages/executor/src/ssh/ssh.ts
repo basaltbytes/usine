@@ -142,6 +142,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       entries,
       machineAt,
       verifyMachine,
+      prepareContainers: (machine) => containers.isolation(machine).pipe(Effect.asVoid),
       reset: reset.reset,
       verifyGatewayAdmin,
       settings: options,
