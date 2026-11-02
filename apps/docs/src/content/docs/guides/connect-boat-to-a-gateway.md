@@ -27,7 +27,9 @@ A configured Boat worker, a paid Boat plan supporting saved snapshots, a gateway
    infra/boat/build-snapshot.sh usine-attempt <attempt-image> ~/.ssh/usine_boat
    ```
 
-   Set `BOAT_API_KEY` in this shell. Use the image from the matching release’s worker image setting. The script requires `curl`, `jq`, and OpenSSH and removes Tailscale identity before saving. Keep credentials and repository checkouts out of the source snapshot.
+   Set `BOAT_API_KEY` in this shell. Use the image from the matching release’s worker image setting. The script requires `curl`, `jq`, and OpenSSH and removes Tailscale identity before saving. It stops Docker and containerd and flushes filesystem writes before taking the snapshot. Keep credentials and repository checkouts out of the source snapshot.
+
+   After Boat reports the snapshot ready, the script creates a verification sandbox from it with a 15-minute TTL and checks that Docker can inspect the attempt image. It reports success only after this check and deletes both temporary sandboxes on exit. If the check fails, it exits with an error and prints containerd’s configured root and state paths and their disk usage. Check these diagnostics and rebuild before configuring the worker to use the snapshot. You can rerun the script with the same snapshot name.
 
 5. Edit the Boat worker. Set the gateway’s domain, SSH destination, admin-token variable, and provider list. Set provisioner snapshot `usine-attempt`, tailnet gateway address, client-ID variable `TAILSCALE_CLIENT_ID`, and client-secret variable `TAILSCALE_CLIENT_SECRET`. Save.
 
