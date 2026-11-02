@@ -183,7 +183,10 @@ describe("PollingTriggers label preflight", () => {
 
       assert.deepStrictEqual(
         cycle.failures.map(({ message }) => message),
-        ["catalog request failed", "change detection failed"],
+        [
+          "list-repository-labels: catalog request failed",
+          "poll-repository-changes: change detection failed",
+        ],
       );
       assert.deepStrictEqual(cycle.preflightFindings, []);
     }).pipe(Effect.provide(pollingTestLayer(github)));
