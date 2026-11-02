@@ -62,7 +62,8 @@ import {
   type ProjectionRevision,
   RunReader,
   type RunSnapshot,
-  type RunSummary,
+  type RunUsageSource,
+  type ItemRunHistory,
 } from "@usine/engine/run-reader";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter } from "@usine/github/item-writer";
@@ -141,7 +142,7 @@ import {
   runSummaryView,
   workerAccesses,
 } from "./projection.ts";
-import { RunUsageReader, type RunUsageView, taskUsage } from "./usage.ts";
+import { RunUsageReader, type RunUsageView, taskHistoryUsage, runUsageSource } from "./usage.ts";
 import {
   RunGitHubChanges,
   type RunGitHubChangesError,
@@ -190,7 +191,7 @@ export type OperatorObservationError =
   | ConfigurationStoreError;
 
 /** The number of closed Runs the overview keeps next to the open ones. */
-const OVERVIEW_CLOSED_RUNS = 100;
+const OVERVIEW_CLOSED_RUNS = 50;
 
 const sameAgent = Schema.toEquivalence(Agent);
 
@@ -200,7 +201,8 @@ const sameAgent = Schema.toEquivalence(Agent);
  */
 interface BoardUsage {
   readonly runs: ReadonlyMap<RunId, RunUsageView>;
-  readonly working: ReadonlyArray<RunSummary>;
+  readonly working: ReadonlyArray<RunUsageSource>;
+  readonly history: ReadonlyArray<ItemRunHistory>;
 }
 
 interface CachedOverview {
@@ -218,8 +220,10 @@ const withRunUsage = (
   overview: ReadyOverview,
   changed: ReadonlySet<RunId>,
   usage: ReadonlyMap<RunId, RunUsageView>,
-): ReadyOverview =>
-  new ReadyOverview({
+  history: ReadonlyArray<ItemRunHistory>,
+): ReadyOverview => {
+  const byItem = new Map(history.map((item) => [item.itemKey, item]));
+  return new ReadyOverview({
     ...overview,
     projects: overview.projects.map(
       (project) =>
@@ -228,11 +232,14 @@ const withRunUsage = (
           board: new BoardView({
             ...project.board,
             lanes: project.board.lanes.map((lane) => {
-              const items = lane.items.map((task) =>
-                task.runs.some(({ id }) => changed.has(id))
-                  ? new BoardTaskView({ ...task, usage: taskUsage(task.runs, usage) })
-                  : task,
-              );
+              const items = lane.items.map((task) => {
+                const items = task.items.flatMap(({ itemKey }) => byItem.get(itemKey) ?? []);
+                return items.some(({ usageSources }) =>
+                  usageSources.some(({ run }) => changed.has(run.id)),
+                )
+                  ? new BoardTaskView({ ...task, usage: taskHistoryUsage(items, usage) })
+                  : task;
+              });
               return lane._tag === "WritableBoardLane"
                 ? new WritableBoardLaneView({ ...lane, items })
                 : new ReadOnlyBoardLaneView({ ...lane, items });
@@ -241,6 +248,7 @@ const withRunUsage = (
         }),
     ),
   });
+};
 
 const makeOperatorObservation = Effect.gen(function* () {
   const acknowledgements = yield* AttentionAcknowledgements;
@@ -311,7 +319,10 @@ const makeOperatorObservation = Effect.gen(function* () {
           );
           const [history, matches] = yield* Effect.all(
             [
-              reader.forItems(boardItems.map(({ itemKey }) => itemKey)),
+              reader.board(
+                boardItems.map(({ itemKey }) => itemKey),
+                unconfirmedStops.map(({ runId }) => runId),
+              ),
               loopMatches.matching(instance, repository, boardItems),
             ] as const,
             { concurrency: "unbounded" },
@@ -321,7 +332,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             itemLoops.set(item.itemKey, [...(itemLoops.get(item.itemKey) ?? []), loop.name]);
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
-          for (const saved of history) {
+          for (const saved of history.runs) {
             const view = runSummaryView(saved, paused, access, waits, upgrade);
             merged.set(view.id, view);
           }
@@ -333,14 +344,14 @@ const makeOperatorObservation = Effect.gen(function* () {
           const [usages, runEvents] = yield* Effect.all(
             [
               Effect.forEach(
-                history,
+                history.items.flatMap(({ usageSources }) => usageSources),
                 (summary) =>
                   usageReader
                     .read(summary)
                     .pipe(Effect.map((usage) => [summary.run.id, usage] as const)),
                 { concurrency: 4 },
               ),
-              readRunningEvents(reader, history),
+              readRunningEvents(reader, history.runs),
             ] as const,
             { concurrency: "unbounded" },
           );
@@ -362,11 +373,30 @@ const makeOperatorObservation = Effect.gen(function* () {
             itemLoops,
             runUsage,
             runEvents,
+            new Set(unconfirmedStops.map(({ runId }) => runId)),
+            new Map(history.items.map((item) => [item.itemKey, item])),
           );
-          const working = history.filter(({ attempts }) =>
-            attempts.some(({ outcome }) => Option.isNone(outcome)),
-          );
-          return { name, projectFindings, projectRuns, board, catalog, runUsage, working } as const;
+          const working = history.items
+            .flatMap(({ usageSources }) => usageSources)
+            .filter(({ attempts }) => attempts.some(({ ended }) => !ended));
+          const overviewRuns = runsByRepository.get(name) ?? [];
+          yield* Effect.logDebug("Bounded overview run history", {
+            repository: name,
+            historyRuns: projectRuns.length,
+            overviewRuns: overviewRuns.length,
+            closedLimit: OVERVIEW_CLOSED_RUNS,
+          });
+          return {
+            name,
+            projectFindings,
+            projectRuns,
+            overviewRuns,
+            board,
+            catalog,
+            runUsage,
+            working,
+            history: history.items,
+          } as const;
         }),
       { concurrency: 4 },
     );
@@ -405,11 +435,11 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     const projects = groupProjectViews(
       instance.config,
-      projected.map(({ name, projectFindings, projectRuns, board, catalog }) => {
+      projected.map(({ name, projectFindings, overviewRuns, board, catalog }) => {
         return new ProjectView({
           repository: name,
           status: "clear",
-          runs: projectRuns,
+          runs: overviewRuns,
           board,
           labels: catalog.map(
             ({ name: label, color, description }) =>
@@ -426,6 +456,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     const usage: BoardUsage = {
       runs: new Map(projected.flatMap(({ runUsage }) => [...runUsage])),
       working: projected.flatMap(({ working }) => working),
+      history: projected.flatMap(({ history }) => history),
     };
     const loops = instance.loops.map(
       (loop) =>
@@ -564,7 +595,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     for (const { attemptId, runId, worker } of unconfirmedStops) {
       const run =
         allRuns.get(runId) ??
-        runSummaryView(yield* reader.inspect(runId), paused, access, waits, upgrade);
+        runSummaryView(yield* reader.summary(runId), paused, access, waits, upgrade);
       const attempt = run.attempts.find(({ id }) => id === attemptId);
       if (attempt === undefined) {
         yield* Effect.logWarning(
@@ -633,7 +664,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     });
     return {
       ...cached,
-      overview: withRunUsage(cached.overview, changed, runs),
+      overview: withRunUsage(cached.overview, changed, runs, cached.usage.history),
       usage: { ...cached.usage, runs },
     };
   });
@@ -830,7 +861,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
             { concurrency: "unbounded" },
           ),
-          usageReader.read(snapshot),
+          usageReader.read(runUsageSource(snapshot)),
           readUnrecordedEnds(reader, snapshot),
           settledItemState(snapshot.itemKey).pipe(
             Effect.provideService(ItemProjectionReader, itemReader),
@@ -1537,6 +1568,8 @@ export {
   ProvisionerView,
 } from "./machines.ts";
 export {
+  boardRunSummary,
+  boardTaskRuns,
   BoardLaneId,
   BoardLaneOrigin,
   BoardItemLink,

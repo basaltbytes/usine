@@ -43,6 +43,7 @@ import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
+  boardRunSummary,
   AgentFailureView,
   ApprovalView,
   BoardItemLink,
@@ -183,7 +184,7 @@ const overviewWith = (members: readonly [BoardItemLink, ...Array<BoardItemLink>]
                   labels: [],
                   items: members,
                   pullRequest: null,
-                  runs: [],
+                  ...boardRunSummary([], null, members),
                   run: null,
                   needsYou: false,
                   conflicting: false,

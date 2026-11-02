@@ -41224,10 +41224,51 @@
               }
             ]
           },
-          "runs": {
+          "runCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "attemptCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "runContext": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/_usine_orchestrator_RunSummaryViewEncoded"
+            }
+          },
+          "loopStates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "loop": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "Pending",
+                    "Waiting",
+                    "Queued",
+                    "Running",
+                    "AwaitingCi",
+                    "Succeeded",
+                    "HandedOff",
+                    "Failed",
+                    "Canceled"
+                  ]
+                }
+              },
+              "required": [
+                "loop",
+                "state"
+              ],
+              "additionalProperties": false
             }
           },
           "run": {
@@ -41268,7 +41309,10 @@
           "labels",
           "items",
           "pullRequest",
-          "runs",
+          "runCount",
+          "attemptCount",
+          "runContext",
+          "loopStates",
           "run",
           "needsYou",
           "conflicting",

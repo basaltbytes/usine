@@ -7,11 +7,12 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
+import { RunState } from "@usine/core/run/state";
 import { RunAgain } from "@usine/core/run/again";
 import { RunApproval } from "@usine/core/run/approval";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option, Schema, Struct } from "effect";
 import { TranscriptEntry } from "../transcript.ts";
 
 /** The full durable view of a Run. */
@@ -76,16 +77,21 @@ export class RunEvidence extends Schema.Class<RunEvidence>("@usine/engine/RunEvi
   transcript: Schema.Array(TranscriptEntry),
 }) {}
 
+/** Attempt metadata used by polling reads, without prompts or harvested comments. */
+export class AttemptSummary extends Schema.Class<AttemptSummary>("@usine/engine/AttemptSummary")(
+  Struct.omit(Attempt.fields, ["task", "comments"]),
+) {}
+
 /** The Run view used in operator Run lists. */
 export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
   /** The item identity associated with this run. */
   itemKey: ItemKey,
   /** The saved run identity and lifecycle state. */
   run: Run,
-  /** The run's agent action and its result, if an attempt succeeded. */
-  step: Step,
+  /** The first pull request produced by the run, if recorded. */
+  pullRequestUrl: Schema.NullOr(Schema.String),
   /** All recorded tries of the step, ordered by attempt number. */
-  attempts: Schema.Array(Attempt),
+  attempts: Schema.Array(AttemptSummary),
   /** The failed Attempt that the operator marked as resolved; its outcome is unchanged. */
   resolvedFailureAttemptId: Schema.Option(AttemptId),
   /**
@@ -101,11 +107,57 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
   runAgain: Schema.Option(RunAgain),
   /** The managed repo checked out for this run. */
   repository: RepositoryName,
-  /** The effective task, including the latest edit-and-retry amendment. */
-  task: AttemptTask,
-  /** The effective agent definition, including the latest edit-and-retry amendment. */
-  agent: Agent,
+  /** The selected agent’s name and child-session brain. */
+  agent: Schema.Struct(Struct.pick(Agent.fields, ["name", "brain"])),
 }) {}
+
+/** Builds polling metadata from a snapshot already loaded for a detail read. */
+export const summarizeRun = (snapshot: RunSnapshot): RunSummary =>
+  new RunSummary({
+    ...snapshot,
+    pullRequestUrl: Option.match(snapshot.step.result, {
+      onNone: () => null,
+      onSome: ({ facts }) =>
+        facts.find((fact) => fact._tag === "PullRequest")?.url.toString() ?? null,
+    }),
+    attempts: snapshot.attempts.map((attempt) => new AttemptSummary(attempt)),
+  });
+
+/** The metadata needed to attribute session usage without reading attempt prompts. */
+export class RunUsageSource extends Schema.Class<RunUsageSource>("@usine/engine/RunUsageSource")({
+  run: Schema.Struct({ id: RunId }),
+  attempts: Schema.Array(Schema.Struct({ id: AttemptId, ended: Schema.Boolean })),
+}) {}
+
+/** Historical totals and links for one board item, aggregated in storage. */
+export class ItemRunHistory extends Schema.Class<ItemRunHistory>("@usine/engine/ItemRunHistory")({
+  itemKey: ItemKey,
+  runCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  attemptCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  durationMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  unmeasured: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  runningSince: Schema.Array(Schema.String),
+  loops: Schema.Array(
+    Schema.Struct({
+      loop: LoopName,
+      state: RunState,
+      firstOpenedAt: Schema.String,
+      firstRunId: RunId,
+      latestOpenedAt: Schema.String,
+      latestRunId: RunId,
+    }),
+  ),
+  pullRequestUrls: Schema.Array(Schema.String),
+  usageSources: Schema.Array(RunUsageSource),
+}) {}
+
+/** SQL-selected board runs and aggregate history for the selected items. */
+export class BoardRunHistory extends Schema.Class<BoardRunHistory>("@usine/engine/BoardRunHistory")(
+  {
+    runs: Schema.Array(RunSummary),
+    items: Schema.Array(ItemRunHistory),
+  },
+) {}
 
 /** The number of Attempts on a Worker that startup reconciliation still visits, excluding discarded leftovers. */
 export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/WorkerAttempts")(

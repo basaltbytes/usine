@@ -6,6 +6,7 @@ import { GitHubLabelName } from "@usine/config/label";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import {
+  boardRunSummary,
   BoardItemLink,
   BoardLaneId,
   BoardTaskView,
@@ -81,7 +82,7 @@ const overview = (
                     labels: [label, ...additionalLabels.map((name) => GitHubLabelName.make(name))],
                     items: [link],
                     pullRequest: null,
-                    runs: [],
+                    ...boardRunSummary([], null, [link]),
                     run: null,
                     needsYou: false,
                     conflicting: false,

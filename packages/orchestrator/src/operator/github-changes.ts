@@ -1,3 +1,4 @@
+import type { AttemptSummary } from "@usine/engine/run-reader";
 import type { Worker } from "@usine/config/factory";
 import { BotLogin } from "@usine/core/worker";
 import { githubBotLogin } from "@usine/executor";
@@ -231,7 +232,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
   const cache = yield* Ref.make(new Map<string, ReadonlyArray<GitHubChangeView>>());
 
   // Attempts that ended before end times were recorded end at their last transcript row.
-  const windowFor = Effect.fn("RunGitHubChanges.windowFor")(function* (attempt: Attempt) {
+  const windowFor = Effect.fn("RunGitHubChanges.windowFor")(function* (attempt: AttemptSummary) {
     yield* Effect.annotateCurrentSpan({ attemptId: attempt.id, worker: attempt.worker });
     const recorded = windowOf(attempt);
     if (Option.isSome(recorded)) return recorded;
@@ -312,7 +313,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     }
 
     const itemRuns = yield* reader.forItems([snapshot.itemKey]);
-    const onItem = new Map<AttemptId, Attempt>(
+    const onItem = new Map<AttemptId, AttemptSummary>(
       [...itemRuns.flatMap(({ attempts }) => attempts), ...snapshot.attempts].map((attempt) => [
         attempt.id,
         attempt,

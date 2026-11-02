@@ -35,12 +35,13 @@ import {
   isNull,
   ne,
   notInArray,
+  or,
   sql,
   type SQL,
   type SQLWrapper,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
+import { Array as EffectArray, DateTime, Effect, Option, Schema, Struct } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
   approvals,
@@ -56,11 +57,13 @@ import {
   triggerEvents,
 } from "../database/schema.ts";
 import { RunNotFoundError } from "../engine/error.ts";
-import { RunSnapshot, RunSummary } from "../run-reader/model.ts";
+import { BoardRunHistory, RunSnapshot, RunSummary } from "../run-reader/model.ts";
 import { Submission } from "../engine/submission.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
-  type RunRow,
+  type RunSummaryRow,
+  decodeRunSummaryRows,
+  decodeAttemptSummaryRows,
   approvalFromRow,
   attemptFromRow,
   decodeAttemptRows,
@@ -95,6 +98,7 @@ import {
   submissionFromRow,
 } from "./codec.ts";
 
+import { boardHistoryQueries, runPullRequestUrl } from "./board.ts";
 import { loopItemQueries } from "./loop-items.ts";
 import { transcriptQueries } from "./transcript.ts";
 
@@ -104,7 +108,7 @@ export interface QueuedEvents {
   readonly eventIds: ReadonlyArray<EventId>;
 }
 
-const newestRunFirst = (left: RunRow, right: RunRow) =>
+const newestRunFirst = (left: RunSummaryRow, right: RunSummaryRow) =>
   DateTime.toEpochMillis(right.openedAt) - DateTime.toEpochMillis(left.openedAt) ||
   right.runId.localeCompare(left.runId);
 
@@ -179,6 +183,17 @@ export const attemptSelection = {
   outOfMemory: attempts.outOfMemoryJson,
 } as const;
 
+const runSummarySelection = {
+  ...Struct.omit(runSelection, ["task", "result", "revision", "parentModel", "stepName", "agent"]),
+  agent:
+    sql<Schema.Json>`json_object('name', json_extract(${runs.agentJson}, '$.name'), 'brain', json_extract(${runs.agentJson}, '$.brain'))`.mapWith(
+      runs.agentJson,
+    ),
+  pullRequestUrl: runPullRequestUrl,
+} as const;
+
+const attemptSummarySelection = Struct.omit(attemptSelection, ["task", "comments"]);
+
 const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
@@ -215,6 +230,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
   const selectRuns = () =>
     database
       .select(runSelection)
+      .from(runs)
+      .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+      .innerJoin(steps, eq(steps.runId, runs.runId))
+      .leftJoin(approvals, eq(approvals.runId, runs.runId))
+      .leftJoin(approvalEvents, eq(approvalEvents.eventId, approvals.eventId))
+      .leftJoin(runAgainEvents, eq(runAgainEvents.eventId, runs.eventId));
+
+  const selectRunSummaries = () =>
+    database
+      .select(runSummarySelection)
       .from(runs)
       .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
       .innerJoin(steps, eq(steps.runId, runs.runId))
@@ -327,23 +352,35 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const summariesWithAttempts = Effect.fn("RunStoreQueries.summariesWithAttempts")(function* (
-    storedRuns: ReadonlyArray<RunRow>,
+    storedRuns: ReadonlyArray<RunSummaryRow>,
   ) {
     const runIds = storedRuns.map(({ runId }) => runId);
     // Chunks keep each read below the driver's bind-parameter limit.
     const storedAttempts = (yield* Effect.forEach(EffectArray.chunksOf(runIds, 100), (ids) =>
       database
-        .select(attemptSelection)
+        .select(attemptSummarySelection)
         .from(attempts)
         .where(inArray(attempts.runId, ids))
         .orderBy(asc(attempts.runId), asc(attempts.attemptNumber))
         .execute()
-        .pipe(Effect.flatMap(decodeAttemptRows)),
+        .pipe(Effect.flatMap(decodeAttemptSummaryRows)),
     )).flat();
     const attemptsByRun = EffectArray.groupBy(storedAttempts, ({ runId }) => runId);
     return storedRuns.map((row): RunSummary =>
       runSummaryFromRow(row, attemptsByRun[row.runId] ?? []),
     );
+  });
+
+  const runSummary = Effect.fn("RunStoreQueries.runSummary")(function* (runId: RunId) {
+    yield* Effect.annotateCurrentSpan({ runId });
+    const rows = yield* selectRunSummaries()
+      .where(eq(runs.runId, runId))
+      .limit(1)
+      .execute()
+      .pipe(Effect.flatMap(decodeRunSummaryRows));
+    const [summary] = yield* summariesWithAttempts(rows);
+    if (summary === undefined) return yield* new RunNotFoundError({ runId });
+    return summary;
   });
 
   const itemRunSummaries = Effect.fn("RunStoreQueries.itemRunSummaries")(function* (
@@ -353,30 +390,97 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const storedRuns = (yield* Effect.forEach(
       EffectArray.chunksOf([...new Set(itemKeys)], 100),
       (keys) =>
-        selectRuns()
+        selectRunSummaries()
           .where(inArray(triggerEvents.itemKey, keys))
           .execute()
-          .pipe(Effect.flatMap(decodeRunRows)),
+          .pipe(Effect.flatMap(decodeRunSummaryRows)),
     ))
       .flat()
       .sort(newestRunFirst);
     return yield* summariesWithAttempts(storedRuns);
   });
 
+  const boardRunSummaries = Effect.fn("RunStoreQueries.boardRunSummaries")(function* (
+    itemKeys: ReadonlyArray<ItemKey>,
+    attentionRunIds: ReadonlyArray<RunId>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ itemKeys, attentionRunIds });
+    const items = yield* boardHistoryQueries(database).itemHistory(itemKeys);
+    const storedRuns = (yield* Effect.forEach(
+      EffectArray.chunksOf([...new Set(itemKeys)], 100),
+      (keys) => {
+        const ranked = database
+          .select({
+            runId: runs.runId,
+            state: runs.stateJson,
+            resolved: runs.resolvedFailureAttemptId,
+            latestAttempt: sql<
+              string | null
+            >`(select ${attempts.attemptId} from ${attempts} where ${attempts.runId} = ${runs.runId} order by ${attempts.attemptNumber} desc limit 1)`.as(
+              "latest_attempt",
+            ),
+            rank: sql<number>`row_number() over (partition by ${triggerEvents.itemKey} order by ${runs.openedAt} desc, ${runs.runId} desc)`.as(
+              "rank",
+            ),
+          })
+          .from(runs)
+          .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+          .where(
+            sql`${triggerEvents.itemKey} in (select value from json_each(${JSON.stringify(keys)}))`,
+          )
+          .as("board_current_runs");
+        const state = sql`json_extract(${ranked.state}, '$._tag')`;
+        const current = database
+          .select({ runId: ranked.runId })
+          .from(ranked)
+          .where(
+            or(
+              eq(ranked.rank, 1),
+              inArray(state, [...RunState.OPEN_STATE_TAGS]),
+              and(
+                eq(state, "Failed"),
+                or(isNull(ranked.resolved), ne(ranked.resolved, ranked.latestAttempt)),
+              ),
+              sql`${ranked.runId} in (select value from json_each(${JSON.stringify(attentionRunIds)}))`,
+            ),
+          );
+        return selectRunSummaries()
+          .where(
+            or(
+              inArray(runs.runId, current),
+              inArray(sql`json_extract(${runs.stateJson}, '$.fixRunId')`, current),
+            ),
+          )
+          .orderBy(desc(runs.openedAt), desc(runs.runId))
+          .execute()
+          .pipe(Effect.flatMap(decodeRunSummaryRows));
+      },
+    ))
+      .flat()
+      .sort(newestRunFirst);
+    const uniqueRuns = [...new Map(storedRuns.map((run) => [run.runId, run])).values()];
+    const summaries = yield* summariesWithAttempts(uniqueRuns);
+    yield* Effect.logDebug("Read current board runs", {
+      items: items.length,
+      runs: summaries.length,
+    });
+    return new BoardRunHistory({ items, runs: summaries });
+  });
+
   // Every open Run plus the newest `closedLimit` closed ones, so an old waiting Run stays listed.
   const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* (closedLimit: number) {
     const [openRuns, closedRuns] = yield* Effect.all([
-      selectRuns()
+      selectRunSummaries()
         .where(openState)
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .execute()
-        .pipe(Effect.flatMap(decodeRunRows)),
-      selectRuns()
+        .pipe(Effect.flatMap(decodeRunSummaryRows)),
+      selectRunSummaries()
         .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .limit(closedLimit)
         .execute()
-        .pipe(Effect.flatMap(decodeRunRows)),
+        .pipe(Effect.flatMap(decodeRunSummaryRows)),
     ]);
     const storedRuns = [...openRuns, ...closedRuns].sort(newestRunFirst);
     return yield* summariesWithAttempts(storedRuns);
@@ -408,7 +512,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     limit: number,
     repositories?: ReadonlyArray<RepositoryName>,
   ) {
-    const closedRuns = yield* selectRuns()
+    const closedRuns = yield* selectRunSummaries()
       .where(
         and(
           notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]),
@@ -420,7 +524,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .orderBy(desc(runs.closedAt), desc(runs.runId))
       .limit(limit)
       .execute()
-      .pipe(Effect.flatMap(decodeRunRows));
+      .pipe(Effect.flatMap(decodeRunSummaryRows));
     return yield* summariesWithAttempts(closedRuns);
   });
 
@@ -429,7 +533,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     since: Option.Option<DateTime.Utc>,
   ) {
     const closed = notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
-    const closedRuns = yield* selectRuns()
+    const closedRuns = yield* selectRunSummaries()
       .where(
         Option.match(since, {
           onNone: () => closed,
@@ -438,7 +542,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       )
       .orderBy(desc(runs.closedAt), desc(runs.runId))
       .execute()
-      .pipe(Effect.flatMap(decodeRunRows));
+      .pipe(Effect.flatMap(decodeRunSummaryRows));
     return yield* summariesWithAttempts(closedRuns);
   });
 
@@ -1107,10 +1211,12 @@ export const queriesFor = (database: RunDatabaseClient) => {
     revision,
     revokeQueued,
     revokeUnstarted,
+    runSummary,
     runSummaries,
     closedRunSummaries,
     closedRunSummariesSince,
     itemRunSummaries,
+    boardRunSummaries,
     runEvents,
     runForEvent,
     snapshot,

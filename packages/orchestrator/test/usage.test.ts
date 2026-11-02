@@ -23,7 +23,7 @@ import { WorkerName } from "@usine/core/worker";
 import { RunReader } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
 import { DateTime, Effect, Layer, Logger, Option } from "effect";
-import { RunUsageReader } from "../src/operator/usage.ts";
+import { RunUsageReader, runUsageSource } from "../src/operator/usage.ts";
 
 const now = DateTime.makeUnsafe("2026-10-26T09:00:00.000Z");
 const runId = RunId.make("run");
@@ -116,10 +116,12 @@ const readerOf = (reports: ReadonlyArray<TranscriptEntry>) =>
         runForEvent: () => Effect.die("unused"),
         latestPoolRateLimits: () => Effect.succeed([]),
         inspect: () => Effect.die("unused"),
+        summary: () => Effect.die("unused"),
         evidence: () => Effect.die("unused"),
         list: () => Effect.die("unused"),
         closed: () => Effect.die("unused"),
         closedSince: () => Effect.die("unused"),
+        board: () => Effect.die("unused"),
         forItems: () => Effect.die("unused"),
         events: () => Effect.die("unused"),
         revision: () => Effect.die("unused"),
@@ -139,7 +141,7 @@ describe("RunUsageReader", () => {
     "prices Codex sessions from the OpenAI table, marked an estimate only in the ChatGPT plan",
     () =>
       Effect.gen(function* () {
-        const usage = yield* (yield* RunUsageReader).read(source);
+        const usage = yield* (yield* RunUsageReader).read(runUsageSource(source));
         assert.deepStrictEqual(
           usage.sessions.map(({ session, pool }) => [session.id, pool]),
           [
@@ -185,8 +187,8 @@ describe("RunUsageReader", () => {
     });
     return Effect.gen(function* () {
       const reader = yield* RunUsageReader;
-      const usage = yield* reader.read(source);
-      yield* reader.read(source);
+      const usage = yield* reader.read(runUsageSource(source));
+      yield* reader.read(runUsageSource(source));
       assert.deepStrictEqual(costs(usage.sessions), [null, null]);
       assert.deepStrictEqual(costs(usage.pools), [null]);
       assert.strictEqual(warnings.length, 1);

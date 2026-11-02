@@ -28,7 +28,7 @@ export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/
   repository: RepositoryName,
   /** Whether the project needs attention, has active runs, or is clear. */
   status: ProjectStatus,
-  /** The project runs included in the overview, newest first. */
+  /** Every open run and the latest 50 closed runs across the instance, newest first within each repository. */
   runs: Schema.Array(RunSummaryView),
   /** The task cards grouped into the project lanes. */
   board: BoardView,

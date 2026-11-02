@@ -20,6 +20,7 @@ import vite from "./vite.config.ts";
 // Set on Workers from infra/hetzner/cloud-init.yaml, which use Debian's Chromium, not Playwright's.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const boardMoveRequests = new WeakMap<Page, Array<{ url: string; body: unknown }>>();
+const boardHistoryRequests = new WeakMap<Page, Array<string>>();
 const delayedMoves = new WeakMap<Page, Promise<Route>>();
 const delayedRunAgains = new WeakMap<Page, Promise<Route>>();
 const interventionRequests = new WeakMap<
@@ -461,6 +462,15 @@ export default mergeConfig(
                 statisticsRequests: async ({ page }) =>
                   statisticsWindows.get(page) ?? { tasks: [], runs: [] },
                 boardMoveRequests: async ({ page }) => boardMoveRequests.get(page) ?? [],
+                boardRunHistoryResponse: async ({ page }, body: string) => {
+                  const requests: Array<string> = [];
+                  boardHistoryRequests.set(page, requests);
+                  await page.route("**/api/projects/board-test/*/tasks/*", (route) => {
+                    requests.push(new URL(route.request().url()).pathname);
+                    return route.fulfill({ contentType: "application/json", body });
+                  });
+                },
+                boardRunHistoryRequests: async ({ page }) => boardHistoryRequests.get(page) ?? [],
                 boardResponses: async ({ page }, overview: string, moveStatus: 200 | 503) => {
                   await page.unroute("**/api/overview");
                   await page.unroute("**/api/projects/board-test/*/items/*/lane");

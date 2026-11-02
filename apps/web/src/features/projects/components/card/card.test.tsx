@@ -5,7 +5,7 @@ import { PermissionsContext } from "~/lib/permissions";
 import { CiHandoff } from "@usine/core/ci";
 import { CommitSha } from "@usine/core/repository";
 import { RunLine } from "./run-line";
-import { MachineQuotaWait } from "@usine/orchestrator/operator";
+import { boardTaskRuns, boardRunSummary, MachineQuotaWait } from "@usine/orchestrator/operator";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -126,6 +126,7 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
 
 const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
   const run = runOnItem(state, attempts);
+  const items = [issueLink(33, "Board lanes")];
   return new BoardTaskView({
     repository,
     itemKey,
@@ -133,20 +134,11 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     number: ItemNumber.make(33),
     title: "Board lanes",
     url: "https://github.com/basaltbytes/usine/issues/33",
-    items: [
-      new BoardItemLink({
-        itemKey,
-        kind: "issue",
-        number: ItemNumber.make(33),
-        title: "Board lanes",
-        url: "https://github.com/basaltbytes/usine/issues/33",
-        state: "issue-open",
-      }),
-    ],
+    items,
     state: "issue-open",
     labels: [],
     pullRequest: null,
-    runs: [run],
+    ...boardRunSummary([run], run, items),
     run,
     needsYou: state === "Failed",
     conflicting: false,
@@ -180,16 +172,34 @@ describe("Board Run failure copy", () => {
       openedAt: "2026-09-02T12:00:00.000Z",
     });
     assert.strictEqual(
-      itemFailure(new BoardTaskView({ ...card, runs: [...card.runs, review], run: review })),
+      itemFailure(
+        new BoardTaskView({
+          ...card,
+          ...boardRunSummary([...boardTaskRuns(card), review], review, card.items),
+          run: review,
+        }),
+      ),
       "new review failure",
     );
     const resolved = new RunSummaryView({ ...review, canResolveFailure: false });
     assert.strictEqual(
-      itemFailure(new BoardTaskView({ ...card, runs: [...card.runs, resolved], run: resolved })),
+      itemFailure(
+        new BoardTaskView({
+          ...card,
+          ...boardRunSummary([...boardTaskRuns(card), resolved], resolved, card.items),
+          run: resolved,
+        }),
+      ),
       "old development failure",
     );
     assert.strictEqual(
-      itemFailure(new BoardTaskView({ ...card, runs: [resolved], run: resolved })),
+      itemFailure(
+        new BoardTaskView({
+          ...card,
+          ...boardRunSummary([resolved], resolved, card.items),
+          run: resolved,
+        }),
+      ),
       null,
     );
   });
@@ -240,7 +250,7 @@ describe("Board Run failure copy", () => {
 describe("Runs without a Board card", () => {
   it("lists only the Runs whose Item has no card", () => {
     const carded = itemWithRun("Succeeded", [attempt(1, null)]);
-    const cardedRun = carded.runs[0];
+    const cardedRun = boardTaskRuns(carded)[0];
     assert(cardedRun !== undefined);
     const scheduled = new RunSummaryView({
       ...cardedRun,
@@ -354,7 +364,14 @@ describe("Board flow arrows", () => {
             loops: [LoopName.make("start-dev"), LoopName.make("triage")],
           }),
         ]),
-        lane("review", [new BoardTaskView({ ...card, loops: [], runs: [waiting], run: waiting })]),
+        lane("review", [
+          new BoardTaskView({
+            ...card,
+            loops: [],
+            ...boardRunSummary([waiting], waiting, card.items),
+            run: waiting,
+          }),
+        ]),
         lane("merge", []),
       ],
       [loop("triage", true), loop("start-dev", false), loop("review", false)],
@@ -394,7 +411,7 @@ describe("Board card stall note", () => {
     ...suppressed,
     ...canceledLink,
     items: [canceledLink],
-    runs: [canceledRun],
+    ...boardRunSummary([canceledRun], canceledRun, [canceledLink]),
     run: canceledRun,
     needsYou: false,
   });
@@ -403,7 +420,7 @@ describe("Board card stall note", () => {
     ...suppressed,
     ...pausedLink,
     items: [pausedLink],
-    runs: [],
+    ...boardRunSummary([], null, [pausedLink]),
     run: null,
     needsYou: false,
   });
@@ -490,7 +507,7 @@ describe("Board drag targets", () => {
       const project = new ProjectView({
         repository,
         status: "clear",
-        runs: card.runs,
+        runs: boardTaskRuns(card),
         labels: [],
         preflightFindings: [],
         board: new BoardView({
@@ -574,7 +591,7 @@ describe("Board card link", () => {
       ...pullRequest,
       title: withRun.title,
       items: [...withRun.items, pullRequest],
-      runs: [],
+      ...boardRunSummary([], null, [...withRun.items, pullRequest]),
       run: null,
     });
     const quietKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(12)]);
@@ -592,7 +609,7 @@ describe("Board card link", () => {
           state: "issue-open",
         }),
       ],
-      runs: [],
+      ...boardRunSummary([], null, []),
       run: null,
       needsYou: false,
     });
@@ -784,8 +801,7 @@ it("shows the continuing fix status and its link on a neutral handed-off board c
   });
   const item = new BoardTaskView({
     ...itemWithRun("Succeeded", []),
-    run: fix,
-    runs: [source, fix],
+    ...boardRunSummary([source, fix], fix, itemWithRun("Succeeded", []).items),
   });
   const lane = new ReadOnlyBoardLaneView({
     id: BoardLaneId.make("fallback:unmapped"),

@@ -2,7 +2,13 @@ import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { BoardView, DeskView, ProjectView, ReadyOverview } from "@usine/orchestrator/operator";
+import {
+  boardTaskRuns,
+  BoardView,
+  DeskView,
+  ProjectView,
+  ReadyOverview,
+} from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -282,7 +288,7 @@ it("says No runs yet when no task has a run", async () => {
             board: new BoardView({
               failures: [],
               lanes: project.board.lanes.filter(({ items }) =>
-                items.every(({ runs }) => runs.length === 0),
+                items.every(({ runCount }) => runCount === 0),
               ),
             }),
           }),
@@ -406,7 +412,7 @@ it("updates the running count beside Overview without counting waiting or queued
         (project) =>
           new ProjectView({
             ...project,
-            runs: project.board.lanes.flatMap(({ items }) => items.flatMap(({ runs }) => runs)),
+            runs: project.board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
           }),
       ),
     }),

@@ -18,7 +18,7 @@ import { TaskCost } from "~/features/tasks/components/list/cost";
 import { TaskTime } from "~/features/tasks/components/list/time";
 import { SIDE_CONTENT, USAGE_COLUMN, WIDE_COLUMN } from "~/features/tasks/lib/columns";
 import { tokensLabel } from "~/lib/strings";
-import { taskLoops, taskNumber, type TaskRow } from "~/lib/tasks/model";
+import { taskNumber, type TaskRow } from "~/lib/tasks/model";
 import { cn } from "~/lib/utils";
 
 const SIDE_COLUMN = "py-3 align-top whitespace-normal";
@@ -28,7 +28,7 @@ type RunsProps = { readonly task: BoardTaskView };
 
 /** Renders each Loop in first-run order with its last Run's state mark, then the Run count. */
 const Runs = ({ task }: RunsProps) => {
-  const loops = taskLoops(task);
+  const loops = task.loopStates;
   return (
     <span className={cn("flex items-baseline gap-2", SIDE_CONTENT)}>
       <span className="truncate" title={loops.map(({ loop }) => loop).join(" · ")}>
@@ -42,7 +42,7 @@ const Runs = ({ task }: RunsProps) => {
         ))}
       </span>
       <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
-        {task.runs.length}
+        {task.runCount}
       </span>
     </span>
   );

@@ -6,7 +6,7 @@ import { Option, Schema } from "effect";
 import { RouteError, RoutePending } from "~/components/route-status";
 import { TaskPage } from "~/features/tasks/task.page";
 import { TaskNotFound } from "~/features/tasks/components/not-found";
-import { taskQuery } from "~/features/tasks/queries";
+import { taskQuery } from "~/lib/tasks/queries";
 import { taskNotFound } from "~/features/tasks/strings";
 import { overviewQuery, projectId, projectForRepository } from "~/lib/overview";
 

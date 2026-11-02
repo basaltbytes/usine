@@ -1,3 +1,5 @@
+import { boardHistory } from "./support/run-reader.ts";
+import { summarizeRun } from "@usine/engine/run-reader";
 import {
   RequestPermissions,
   RoleBinding,
@@ -123,7 +125,7 @@ import {
 } from "../src/operator/transcript.ts";
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
 import { UnconfiguredWorkerNeed } from "../src/operator/need.ts";
-import { Operator } from "../src/operator/operator.ts";
+import { boardTaskRuns, Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
 import {
   ApprovalView,
@@ -516,15 +518,17 @@ const testLayer = (
         ).values(),
       ]),
     inspect: () => Effect.succeed(runSnapshot),
+    summary: () => Effect.succeed(summarizeRun(runSnapshot)),
     evidence: () => Effect.die("unused"),
     list: () =>
       Ref.updateAndGet(overviewReads, (reads) => reads + 1).pipe(
         Effect.andThen(Effect.yieldNow),
-        Effect.as([runSnapshot]),
+        Effect.as([summarizeRun(runSnapshot)]),
       ),
     closed: () => Effect.succeed([]),
     closedSince: () => Effect.die("unused"),
-    forItems: () => Effect.succeed([runSnapshot]),
+    board: () => Effect.succeed(boardHistory([summarizeRun(runSnapshot)])),
+    forItems: () => Effect.succeed([summarizeRun(runSnapshot)]),
     events: (runIds) =>
       Effect.succeed(
         runIds.includes(runSnapshot.run.id)
@@ -992,8 +996,8 @@ describe("Operator", () => {
           const boardWaits = Effect.map(operator.overview(instance), (view) =>
             view.projects.flatMap(({ board }) =>
               board.lanes.flatMap(({ items }) =>
-                items.flatMap(({ runs }) =>
-                  runs
+                items.flatMap((task) =>
+                  boardTaskRuns(task)
                     .filter(({ id }) => id === current.run.id)
                     .map(({ machineWait }) => machineWait),
                 ),
@@ -2001,7 +2005,7 @@ describe("Operator", () => {
           const overview = yield* (yield* Operator).overview(declared);
           const card = overview.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
-            .find(({ runs }) => runs.some(({ id }) => id === runId));
+            .find((task) => boardTaskRuns(task).some(({ id }) => id === runId));
           assert(card !== undefined);
           assert.deepStrictEqual(
             {
@@ -2040,7 +2044,7 @@ describe("Operator", () => {
           const later = yield* (yield* Operator).overview(declared);
           const laterCard = later.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
-            .find(({ runs }) => runs.some(({ id }) => id === runId));
+            .find((task) => boardTaskRuns(task).some(({ id }) => id === runId));
           assert.strictEqual(laterCard?.usage.tokens, 34_300);
           assert.deepStrictEqual(
             laterCard?.usage.pools.map(({ pool, tokens }) => [pool, tokens]),

@@ -1,3 +1,4 @@
+import { boardTaskRuns } from "@usine/orchestrator/operator";
 import type { BoardLaneId, BoardLaneView, LoopView, RunView } from "@usine/orchestrator/operator";
 import { Fragment } from "react";
 import { cn } from "~/lib/utils";
@@ -34,8 +35,8 @@ export const laneFlows = (
       )
         return [];
       const watching = new Set(lane.items.flatMap((task) => task.loops));
-      const open = lane.items.flatMap(({ runs }) =>
-        runs.filter(({ state, loop }) => AT_WORK.has(state) && watching.has(loop)),
+      const open = lane.items.flatMap((task) =>
+        boardTaskRuns(task).filter(({ state, loop }) => AT_WORK.has(state) && watching.has(loop)),
       );
       const flow: LaneFlow = {
         next,

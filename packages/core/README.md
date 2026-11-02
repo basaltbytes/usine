@@ -100,3 +100,5 @@ Authenticated operator actions use `ActingMember` and `requestActor` from `@usin
 `@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts.
 
 `HandedOff` is a closed, neutral run state with the failed head, reason, fix loop, and fix run ID. `CiHandedOff` settles a CI wait into this state and ends its attempt as `AttemptHandedOff`.
+
+Attempt timing and provider-retry helpers accept the metadata they use, so polling summaries can omit prompts and comments.

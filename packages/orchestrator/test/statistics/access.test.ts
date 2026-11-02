@@ -6,12 +6,10 @@ import { RequestPermissions, RoleBinding, ProjectScope, GitHubUserId } from "@us
 import { ProjectId } from "@usine/core/project";
 import { RepositoryName } from "@usine/core/repository";
 import { Agent } from "@usine/core/agent";
-import { AttemptTask } from "@usine/core/attempt";
 import { Run, RunId } from "@usine/core/run";
 import { EventId } from "@usine/core/event";
 import { LoopName } from "@usine/core/loop";
 import * as RunState from "@usine/core/run/state";
-import { Step, StepName } from "@usine/core/step";
 import { ItemKey } from "@usine/core/item";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -37,13 +35,13 @@ const summary = new RunSummary({
     state: new RunState.Succeeded(),
     openedAt: time,
   }),
-  step: new Step({ runId: id, name: StepName.make("run"), result: Option.none() }),
+  pullRequestUrl: null,
   attempts: [],
   resolvedFailureAttemptId: Option.none(),
   closedAt: Option.some(time),
   approval: Option.none(),
   runAgain: Option.none(),
-  task: AttemptTask.make("Work."),
+
   agent: Schema.decodeUnknownSync(Agent)({
     name: "developer",
     brain: { harness: "codex", model: "test", effort: "high" },

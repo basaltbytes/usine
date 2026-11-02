@@ -2,7 +2,12 @@ import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { HandedOff } from "@usine/core/run/state";
 import { LoopName } from "@usine/core/loop";
-import { BoardTaskView, RunSummaryView } from "@usine/orchestrator/operator";
+import {
+  boardTaskRuns,
+  boardRunSummary,
+  BoardTaskView,
+  RunSummaryView,
+} from "@usine/orchestrator/operator";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, it } from "vitest";
 import { boardOverview } from "~/lib/projects/fixture";
@@ -12,10 +17,10 @@ import { Status } from "./status";
 
 it("keeps a handed-off task in flight with the fix run status and link", () => {
   const lane = boardOverview().projects[0]?.board.lanes.find(({ items }) =>
-    items.some(({ runs }) => runs.length > 0),
+    items.some(({ runCount }) => runCount > 0),
   );
-  const task = lane?.items.find(({ runs }) => runs.length > 0);
-  const base = task?.runs[0];
+  const task = lane?.items.find(({ runCount }) => runCount > 0);
+  const base = task === undefined ? undefined : boardTaskRuns(task)[0];
   assert(lane !== undefined && task !== undefined && base !== undefined);
   const fix = new RunSummaryView({
     ...base,
@@ -40,7 +45,12 @@ it("keeps a handed-off task in flight with the fix run status and link", () => {
       fixRunId: fix.id,
     }),
   });
-  const item = new BoardTaskView({ ...task, runs: [source, fix], run: fix, needsYou: false });
+  const item = new BoardTaskView({
+    ...task,
+    ...boardRunSummary([source, fix], fix, task.items),
+    run: fix,
+    needsYou: false,
+  });
   const rows = taskRows([{ ...lane, items: [item] }], []);
   const row = rows[0];
   assert(row !== undefined);

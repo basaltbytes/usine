@@ -1,3 +1,4 @@
+import { boardTaskRuns } from "@usine/orchestrator/operator";
 import { CiHandoffLine } from "~/components/runs/ci";
 import { handedOff, waitingForCi } from "~/lib/runs/strings";
 import type { StalledItemView } from "@usine/orchestrator/operator";
@@ -68,7 +69,7 @@ type StatusProps = { readonly row: TaskRow; readonly now: number };
 export const Status = ({ row, now }: StatusProps) => {
   const { state, words, at } = statusLine(row, now);
   const displayed = "run" in row.status ? row.status.run : row.last;
-  const source = [...row.task.runs]
+  const source = [...boardTaskRuns(row.task)]
     .reverse()
     .find(
       ({ id, handoff }) =>

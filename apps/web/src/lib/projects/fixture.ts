@@ -15,6 +15,8 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import {
+  boardTaskRuns,
+  boardRunSummary,
   AgentFailureView,
   AttemptView,
   AwaitingApprovalView,
@@ -212,7 +214,7 @@ const task = (
       current.kind === "pr" && (state === "pr-open" || state === "pr-merged")
         ? new BoardPullRequestView({ number: current.number, url: current.url, state })
         : null,
-    runs,
+    ...boardRunSummary(runs, preferred ?? null, members),
     run: preferred ?? null,
     needsYou: runs.some(needsYou),
     conflicting: extra.conflicting ?? false,
@@ -255,6 +257,11 @@ const flaky = link(
 const bump = link(40, "pr", "Bump vite from 7.1.3 to 7.1.4");
 const node = link(44, "pr", "Pin the Node version of the release workflow");
 const backlog = link(50, "issue", "Investigate the reader's scroll restore on Safari");
+
+export const boardPlanRun = () =>
+  run("run-redesign-plan", redesign, "plan", "Succeeded", 180, [
+    attempt(1, minutesAgo(180), null, minutesAgo(150)),
+  ]);
 
 const salvageRun = run("run-salvage", salvage, "implement", "Waiting", 3, []);
 const droppedRun = run("run-dropped", dropped, "implement", "Canceled", 1440, [
@@ -316,9 +323,7 @@ const boardProject = () =>
             [redesign, redesignPr],
             ["in-progress", "ui"],
             [
-              run("run-redesign-plan", redesign, "plan", "Succeeded", 180, [
-                attempt(1, minutesAgo(180), null, minutesAgo(150)),
-              ]),
+              boardPlanRun(),
               run("run-redesign", redesignPr, "implement", "Running", 12, [
                 attempt(1, minutesAgo(12), "The Worker restarted", minutesAgo(7)),
                 attempt(2, minutesAgo(6), "running"),
@@ -427,8 +432,15 @@ export const changeTasks = (
 export const boardOverviewResolved = () =>
   changeTasks(boardOverview(), (task) => {
     if (task.itemKey !== pinned.itemKey) return task;
-    const runs = task.runs.map((run) => new RunSummaryView({ ...run, canResolveFailure: false }));
-    return new BoardTaskView({ ...task, runs, run: null, needsYou: false });
+    const runs = boardTaskRuns(task).map(
+      (run) => new RunSummaryView({ ...run, canResolveFailure: false }),
+    );
+    return new BoardTaskView({
+      ...task,
+      ...boardRunSummary(runs, null, task.items),
+      run: null,
+      needsYou: false,
+    });
   });
 
 /**
@@ -437,17 +449,22 @@ export const boardOverviewResolved = () =>
  * are lower bounds.
  */
 export const boardOverviewUnpriced = () =>
-  changeTasks(boardOverview(), (task) =>
-    task.itemKey !== redesignPr.itemKey
-      ? task
-      : new BoardTaskView({
-          ...task,
-          usage: taskUsageOf(task.runs, [
-            pool("apiKeys", 1_500, 0.75),
-            pool("claudePlan", 26_000, 9.2, true),
-          ]),
-        }),
-  );
+  changeTasks(boardOverview(), (task) => {
+    if (task.itemKey !== redesignPr.itemKey) return task;
+    const usage = taskUsageOf(
+      [],
+      [pool("apiKeys", 1_500, 0.75), pool("claudePlan", 26_000, 9.2, true)],
+    );
+    return new BoardTaskView({
+      ...task,
+      usage: new TaskUsageView({
+        ...task.usage,
+        tokens: usage.tokens,
+        pools: usage.pools,
+        cost: usage.cost,
+      }),
+    });
+  });
 
 /** Returns the Board with #18's canceled Attempt ended before end times were recorded, so the
  * Task's Attempt time is unknown. */
@@ -459,7 +476,7 @@ export const boardOverviewUntimed = () =>
     ]);
     return new BoardTaskView({
       ...task,
-      runs: [untimed],
+      ...boardRunSummary([untimed], untimed, task.items),
       run: untimed,
       usage: taskUsageOf([untimed]),
     });
@@ -496,7 +513,7 @@ export const boardOverviewDocumented = () =>
       ...task,
       title,
       items,
-      runs: [finished],
+      ...boardRunSummary([finished], finished, items),
       run: finished,
       usage: taskUsageOf([finished], [pool("claudePlan", 1_284_000, 12.62, true)]),
     });
@@ -509,14 +526,14 @@ export const boardOverviewDocumented = () =>
 export const boardOverviewDocumentedLongLoop = () =>
   changeTasks(boardOverviewDocumented(), (task) => {
     if (task.itemKey !== redesignPr.itemKey) return task;
-    const runs = task.runs.map((run) =>
+    const runs = boardTaskRuns(task).map((run) =>
       run.state === "Running"
         ? new RunSummaryView({ ...run, loop: LoopName.make("dependency_updates") })
         : run,
     );
     return new BoardTaskView({
       ...task,
-      runs,
+      ...boardRunSummary(runs, runs.find(({ id }) => id === task.run?.id) ?? null, task.items),
       run: runs.find(({ id }) => id === task.run?.id) ?? null,
     });
   });

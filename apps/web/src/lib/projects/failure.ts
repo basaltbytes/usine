@@ -1,3 +1,4 @@
+import { boardTaskRuns } from "@usine/orchestrator/operator";
 import { isSettledItemState } from "@usine/config/board";
 import type { BoardTaskView, RunSummaryView } from "@usine/orchestrator/operator";
 import { failureMessage } from "~/lib/runs/strings";
@@ -18,7 +19,9 @@ export interface RunFailure {
 
 /** Returns the newest Run whose failure needs attention, or `null`. */
 export const failedRun = (item: BoardTaskView): RunFailure | null => {
-  const run = [...item.runs].reverse().find((candidate) => failureNeedsYou(item, candidate));
+  const run = [...boardTaskRuns(item)]
+    .reverse()
+    .find((candidate) => failureNeedsYou(item, candidate));
   if (run === undefined) return null;
   const attempts = run.attempts;
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
