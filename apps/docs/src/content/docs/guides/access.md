@@ -1,5 +1,5 @@
 ---
-title: Access
+title: Manage access
 description: Sign in, grant member access, and create tokens for API clients.
 ---
 

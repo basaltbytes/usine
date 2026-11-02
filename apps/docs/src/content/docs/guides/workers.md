@@ -1,5 +1,5 @@
 ---
-title: Workers
+title: Manage workers
 description: Add capacity, connect gateways, and check or remove workers.
 ---
 

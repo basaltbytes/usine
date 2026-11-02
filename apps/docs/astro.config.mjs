@@ -5,11 +5,15 @@ import { defineConfig } from "astro/config";
 import lucode from "lucode-starlight";
 import starlightLinksValidator from "starlight-links-validator";
 import { guideGroups } from "./sidebar.mjs";
+import starlightLlmsTxt from "starlight-llms-txt";
 import { redirects } from "./redirects.mjs";
 import rehypePele from "./diagrams/rehype.mjs";
+import { llmsOutput, pageSeparator } from "./llms/output.mjs";
+
+const site = "https://docs.usine.dev";
 
 export default defineConfig({
-  site: "https://docs.usine.dev",
+  site,
   redirects,
   markdown: {
     processor: unified({ rehypePlugins: [rehypePele] }),
@@ -35,6 +39,7 @@ export default defineConfig({
             "usine is licensed under AGPL-3.0. The source is on [GitHub](https://github.com/basaltbytes/usine).",
         }),
         starlightLinksValidator(),
+        starlightLlmsTxt({ pageSeparator }),
       ],
       sidebar: [
         {
@@ -75,5 +80,6 @@ export default defineConfig({
         },
       ],
     }),
+    llmsOutput(site),
   ],
 });
