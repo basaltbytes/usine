@@ -252,7 +252,14 @@ describe("Codex child backend", () => {
                       messages.push(params);
                       return { turn: { id: `turn-${messages.length}` } };
                     }
-                    return responses[method === "thread/resume" ? "thread/start" : method] ?? {};
+                    if (method === "thread/resume")
+                      return {
+                        thread: {
+                          id: "thread-1",
+                          turns: [{ items: [{ type: "userMessage" }] }],
+                        },
+                      };
+                    return responses[method] ?? {};
                   }),
               } satisfies CodexConnection;
             }),

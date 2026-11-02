@@ -15,6 +15,7 @@ for (const failure of [
   "app-server-exit",
   "app-server-zero-exit",
   "initial-turn-exit",
+  "initial-turn-saved-exit",
   "supervisor-exit",
   "resume-exit",
   "resume-zero-exit",
@@ -67,10 +68,17 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       fs.writeFileSync(process.env.CODEX_HOME + '/original-stopped', 'yes');
     }
     fs.appendFileSync(process.env.CODEX_HOME + '/resumed', request.params.threadId + '\\n');
-    process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one' }, model: 'test-model', instructionSources: [] } }) + '\\n');
+    const turns = fs.existsSync(process.env.CODEX_HOME + '/saved-inputs')
+      ? fs.readFileSync(process.env.CODEX_HOME + '/saved-inputs', 'utf8').trim().split('\\n').map(line => ({ items: [{ type: 'userMessage', content: JSON.parse(line) }] }))
+      : [];
+    process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one', turns }, model: 'test-model', instructionSources: [] } }) + '\\n');
   } else if (request.method === 'turn/start') {
     fs.appendFileSync(process.env.CODEX_HOME + '/turn-started', 'yes\\n');
     if (['initial-turn-exit', 'resume-exit'].includes('${failure}') && !fs.existsSync(process.env.CODEX_HOME + '/resumed')) {
+      process.exit(1);
+    }
+    fs.appendFileSync(process.env.CODEX_HOME + '/saved-inputs', JSON.stringify(request.params.input) + '\\n');
+    if ('${failure}' === 'initial-turn-saved-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed')) {
       process.exit(1);
     }
     process.stdout.write(JSON.stringify({ id: request.id, result: { turn: { id: 'turn-one' } } }) + '\\n');
@@ -159,6 +167,16 @@ relay.on('exit', code => { clearInterval(timer); process.exit(code || 0); });
           );
           if (failure !== "ssh-drop")
             assert.strictEqual(yield* fs.readFileString(`${directory}/resumed`), "thread-one\n");
+          const saved = (yield* fs.readFileString(`${directory}/saved-inputs`)).trim().split("\n");
+          const originalInput = JSON.stringify([
+            { type: "text", text: "Finish this attempt.", text_elements: [] },
+          ]);
+          assert.strictEqual(
+            saved[0],
+            originalInput,
+            "the saved thread contains the original task",
+          );
+          assert.strictEqual(saved.filter((input) => input === originalInput).length, 1);
           if (failure === "supervisor-exit" || failure === "app-server-zero-exit")
             assert.strictEqual(yield* fs.readFileString(`${directory}/original-stopped`), "yes");
         }),

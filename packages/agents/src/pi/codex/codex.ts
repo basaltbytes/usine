@@ -26,6 +26,7 @@ import {
   RateLimitsUpdated,
   type ThreadStartParams,
   type ThreadResumeParams,
+  ThreadResumeResponse,
   ThreadStartResponse,
   ToolItem,
   TurnActivity,
@@ -369,10 +370,11 @@ const makeCodexChild = Effect.gen(function* () {
           cwd: request.cwd,
           approvalPolicy: "never",
           sandbox: "danger-full-access",
+          excludeTurns: false,
         };
         const response = yield* connection.request("launch", "thread/resume", json(params));
         const restored = yield* decodeResponse(
-          ThreadStartResponse,
+          ThreadResumeResponse,
           "launch",
           client,
           "thread resume response",
@@ -400,8 +402,18 @@ const makeCodexChild = Effect.gen(function* () {
           if (!idle) yield* conversation.finish(finalText ?? lastText ?? "Codex turn paused");
           return;
         }
+        const taskSaved = restored.thread.turns.some((turn) =>
+          turn.items.some((item) => item.type === "userMessage"),
+        );
+        yield* Effect.logInfo("Restored Codex child starts a turn", {
+          sessionId: session.id,
+          threadId: thread.thread.id,
+          taskSaved,
+        });
         yield* startTurn(
-          "Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.",
+          taskSaved
+            ? "Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work."
+            : request.prompt,
         );
       });
       yield* startTurn(request.prompt).pipe(Effect.catch(resume));
