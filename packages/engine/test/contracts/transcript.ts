@@ -22,7 +22,7 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Option } from "effect";
+import { DateTime, Effect, Logger, Option, References } from "effect";
 
 import { Submission } from "../../src/engine/submission.ts";
 import { RunReader } from "../../src/run-reader/run-reader.ts";
@@ -183,6 +183,11 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 ),
               }),
             });
+            const logLevels: Array<string> = [];
+            const logger = Logger.make<unknown, void>(({ logLevel }) => {
+              logLevels.push(logLevel);
+            });
+            const logging = Logger.layer([logger]);
             const other = new PoolRateLimitsUpdated({ ...high, pool: "claudePlan" });
             for (const [index, report] of [high, low].entries()) {
               const runId = RunId.make(`pool-run-${index}`);
@@ -207,16 +212,21 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
               const attemptId = started.execution.attempt.id;
               let sequence = 0;
               const append = (payload: AttemptChannel.OutboundPayload) =>
-                store.appendTranscript(
-                  "outbound",
-                  new AttemptChannel.OutboundEnvelope({
-                    version: AttemptChannel.PROTOCOL_VERSION,
-                    attemptId,
-                    sequence: AttemptChannel.Sequence.make(++sequence),
-                    sentAt: at,
-                    payload,
-                  }),
-                );
+                store
+                  .appendTranscript(
+                    "outbound",
+                    new AttemptChannel.OutboundEnvelope({
+                      version: AttemptChannel.PROTOCOL_VERSION,
+                      attemptId,
+                      sequence: AttemptChannel.Sequence.make(++sequence),
+                      sentAt: at,
+                      payload,
+                    }),
+                  )
+                  .pipe(
+                    Effect.provide(logging),
+                    Effect.provideService(References.MinimumLogLevel, "Debug"),
+                  );
               yield* append(new AttemptChannel.SessionEvent({ event: report }));
               if (index === 0) yield* append(new AttemptChannel.SessionEvent({ event: other }));
               for (let i = 0; i < 205; i++)
@@ -225,11 +235,22 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                     event: new TextOutput({ session, text: "More activity" }),
                   }),
                 );
+              yield* store.appendTranscript(
+                "outbound",
+                new AttemptChannel.OutboundEnvelope({
+                  version: AttemptChannel.PROTOCOL_VERSION,
+                  attemptId,
+                  sequence: AttemptChannel.Sequence.make(1),
+                  sentAt: DateTime.add(at, { days: 1 }),
+                  payload: new AttemptChannel.SessionEvent({ event: index === 0 ? low : high }),
+                }),
+              );
               assert.deepStrictEqual(
                 new Set(yield* reader.latestPoolRateLimits()),
                 new Set([report, other]),
               );
             }
+            assert.deepStrictEqual(logLevels, ["Debug", "Debug", "Debug"]);
           }).pipe(Effect.provide(fixture.open()));
         }).pipe(Effect.scoped),
     );

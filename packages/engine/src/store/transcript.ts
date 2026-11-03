@@ -57,7 +57,7 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
         })
         .returning({ sequence: sessionUsage.sequence })
         .execute();
-      yield* Effect.logInfo(
+      yield* Effect.logDebug(
         updated.length > 0
           ? "Session usage projection advanced"
           : "Token report did not exceed stored session usage",
@@ -82,7 +82,7 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
         })
         .returning({ sequence: poolRateLimits.sequence })
         .execute();
-      yield* Effect.logInfo(
+      yield* Effect.logDebug(
         updated.length > 0
           ? "Pool rate-limit projection advanced"
           : "Pool report did not advance transcript sequence",

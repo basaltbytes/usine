@@ -20,7 +20,7 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { eq, sql } from "drizzle-orm";
-import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Logger, Option, References, Schema } from "effect";
 
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { RunDatabase } from "../../src/database/database.ts";
@@ -70,6 +70,11 @@ describe("Attempt transcripts", () => {
             agent: testAgent.name,
             brain: testAgent.brain,
           });
+          const logLevels: Array<string> = [];
+          const logger = Logger.make<unknown, void>(({ logLevel }) => {
+            logLevels.push(logLevel);
+          });
+          const logging = Logger.layer([logger]);
           const events = [
             new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(100) }),
             new SessionTokensUpdated({
@@ -93,17 +98,23 @@ describe("Attempt transcripts", () => {
             }),
           ];
           for (const [index, event] of events.entries()) {
-            yield* store.appendTranscript(
-              "outbound",
-              new AttemptChannel.OutboundEnvelope({
-                version: AttemptChannel.PROTOCOL_VERSION,
-                attemptId,
-                sequence: AttemptChannel.Sequence.make(index + 1),
-                sentAt: DateTime.makeUnsafe("2026-10-20T00:00:00Z"),
-                payload: new AttemptChannel.SessionEvent({ event }),
-              }),
-            );
+            yield* store
+              .appendTranscript(
+                "outbound",
+                new AttemptChannel.OutboundEnvelope({
+                  version: AttemptChannel.PROTOCOL_VERSION,
+                  attemptId,
+                  sequence: AttemptChannel.Sequence.make(index + 1),
+                  sentAt: DateTime.makeUnsafe("2026-10-20T00:00:00Z"),
+                  payload: new AttemptChannel.SessionEvent({ event }),
+                }),
+              )
+              .pipe(
+                Effect.provide(logging),
+                Effect.provideService(References.MinimumLogLevel, "Debug"),
+              );
           }
+          assert.deepStrictEqual(logLevels, ["Debug", "Debug", "Debug", "Debug", "Debug", "Debug"]);
           yield* store.appendTranscript(
             "outbound",
             new AttemptChannel.OutboundEnvelope({
