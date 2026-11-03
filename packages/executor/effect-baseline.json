@@ -1,52 +1,29 @@
 {
-  "src/attempt-connections.ts": {
-    "newSchemaClass": 1
-  },
-  "src/child-command.ts": {
-    "newSchemaClass": 2
-  },
   "src/cloudflare/client.ts": {
-    "mapSomeToAsSome": 1,
-    "newSchemaClass": 1,
     "schemaClassMissingBrand": 1
   },
   "src/cloudflare/cloudflare.ts": {
     "nestedEffectGenYield": 1,
-    "newSchemaClass": 20,
     "yieldInCallArgument": 4
   },
   "src/cloudflare/shell/shell.ts": {
     "asyncFunction": 1,
     "globalTimers": 2,
     "newPromise": 2,
-    "newSchemaClass": 3,
     "preferBarrelImport": 2
   },
   "src/cloudflare/workers.ts": {
     "deterministicKeys": 1,
-    "newSchemaClass": 2,
-    "optionMatchToFromOption": 1,
-    "preferTypedSchemaDecoder": 1,
     "processEnv": 1
   },
   "src/credential-environment.ts": {
     "globalJson": 2
   },
   "src/durable-session.ts": {
-    "newSchemaClass": 9,
     "yieldInCallArgument": 3
-  },
-  "src/exe-dev/exe-dev.ts": {
-    "newSchemaClass": 1
-  },
-  "src/exe-dev/grants.ts": {
-    "newSchemaClass": 1
   },
   "src/exe-dev/model.ts": {
     "schemaClassMissingBrand": 1
-  },
-  "src/exe-dev/preflight.ts": {
-    "newSchemaClass": 1
   },
   "src/executor.ts": {
     "deterministicKeys": 3,
@@ -54,247 +31,140 @@
     "schemaClassMissingBrand": 11
   },
   "src/guard.ts": {
-    "newSchemaClass": 2,
     "yieldInCallArgument": 4
   },
-  "src/harness-preflight.ts": {
-    "newSchemaClass": 2
-  },
-  "src/local/credentials.ts": {
-    "newSchemaClass": 1
-  },
-  "src/local/local.ts": {
-    "newSchemaClass": 6
-  },
   "src/memory-preflight.ts": {
-    "newSchemaClass": 1,
     "schemaClassMissingBrand": 1
   },
   "src/prepared-attempt.ts": {
-    "newSchemaClass": 4,
     "yieldInCallArgument": 1
-  },
-  "src/provision.ts": {
-    "newSchemaClass": 6
-  },
-  "src/remote/commands.ts": {
-    "newSchemaClass": 2
-  },
-  "src/remote/container.ts": {
-    "newSchemaClass": 8
   },
   "src/remote/leftovers.ts": {
     "yieldInCallArgument": 1
   },
   "src/remote/liveness.ts": {
     "globalJson": 1,
-    "newSchemaClass": 4,
     "yieldInCallArgument": 1
   },
   "src/remote/reclaim.ts": {
     "returnEffectInGen": 2
   },
   "src/remote/remote.ts": {
-    "mapSomeToAsSome": 1,
-    "newSchemaClass": 5,
-    "unnecessaryPipeChain": 1,
     "yieldInCallArgument": 8
   },
-  "src/remote/sweep.ts": {
-    "newSchemaClass": 1,
-    "preferTypedSchemaDecoder": 1
-  },
   "src/salvage.ts": {
-    "newSchemaClass": 8,
-    "preferSucceedSomeOrNone": 1,
     "yieldInCallArgument": 1
   },
   "src/ssh/container.ts": {
-    "newSchemaClass": 1,
     "yieldInCallArgument": 1
   },
   "src/ssh/gateway/admin.ts": {
     "instanceOfSchema": 2,
-    "mapSomeToAsSome": 1,
-    "newSchemaClass": 1,
     "preferSchemaTaggedError": 1,
     "schemaClassMissingBrand": 1
   },
-  "src/ssh/gateway/attachments.ts": {
-    "newSchemaClass": 3
-  },
   "src/ssh/gateway/forward.ts": {
     "globalErrorInEffectFailure": 1,
-    "newSchemaClass": 3,
     "raceFirstWithSleepToTimeout": 1,
     "schemaClassMissingBrand": 1,
     "yieldInCallArgument": 2
   },
-  "src/ssh/gateway/preflight.ts": {
-    "newSchemaClass": 5
-  },
-  "src/ssh/image.ts": {
-    "newSchemaClass": 1
-  },
   "src/ssh/limits.ts": {
-    "newSchemaClass": 3,
     "schemaClassMissingBrand": 1
   },
-  "src/ssh/preflight.ts": {
-    "newSchemaClass": 1
-  },
   "src/ssh/provisioner/boat.ts": {
-    "newSchemaClass": 3,
-    "preferTypedSchemaDecoder": 1,
     "yieldInCallArgument": 1
   },
   "src/ssh/provisioner/checks.ts": {
-    "newSchemaClass": 9,
     "yieldInCallArgument": 2
   },
-  "src/ssh/provisioner/connection.ts": {
-    "newSchemaClass": 2
-  },
   "src/ssh/provisioner/drivers.ts": {
-    "newSchemaClass": 2,
     "yieldInCallArgument": 1
   },
   "src/ssh/provisioner/hetzner.ts": {
-    "newSchemaClass": 7,
     "yieldInCallArgument": 1
-  },
-  "src/ssh/provisioner/holds.ts": {
-    "newSchemaClass": 1
   },
   "src/ssh/provisioner/host-key.ts": {
     "yieldInCallArgument": 2
   },
   "src/ssh/provisioner/http.ts": {
-    "preferSchemaTaggedError": 2,
-    "preferTypedSchemaDecoder": 1
+    "preferSchemaTaggedError": 2
   },
   "src/ssh/provisioner/machines.ts": {
     "nestedEffectGenYield": 1,
-    "newSchemaClass": 9,
-    "unnecessaryPipeChain": 1,
     "yieldInCallArgument": 4
   },
   "src/ssh/provisioner/model.ts": {
     "schemaClassMissingBrand": 1
   },
-  "src/ssh/provisioner/reset.ts": {
-    "newSchemaClass": 4
-  },
   "src/ssh/provisioner/reuse.ts": {
-    "newSchemaClass": 3,
     "yieldInCallArgument": 3
   },
   "src/ssh/provisioner/starts.ts": {
-    "newSchemaClass": 2,
-    "preferTypedSchemaDecoder": 1,
     "yieldInCallArgument": 2
   },
-  "src/ssh/provisioner/tailnet/bootstrap.ts": {
-    "newSchemaClass": 2
-  },
-  "src/ssh/provisioner/tailnet/client.ts": {
-    "newSchemaClass": 1
-  },
-  "src/ssh/runtime.ts": {
-    "newSchemaClass": 1,
-    "preferTypedSchemaDecoder": 1
-  },
   "src/ssh/ssh.ts": {
-    "newSchemaClass": 1,
     "yieldInCallArgument": 1
   },
   "src/ssh/worker-records.ts": {
-    "newSchemaClass": 1,
-    "preferTypedSchemaDecoder": 1,
     "schemaClassMissingBrand": 1,
     "yieldInCallArgument": 1
   },
   "src/ssh/workers.ts": {
-    "deterministicKeys": 1,
-    "newSchemaClass": 2
-  },
-  "test/child-environment.test.ts": {
-    "newSchemaClass": 1
+    "deterministicKeys": 1
   },
   "test/claude-code.ts": {
     "nodeBuiltinImport": 1
   },
-  "test/claude-login-lock.test.ts": {
-    "multipleEffectProvide": 1,
-    "newSchemaClass": 4
-  },
   "test/cloudflare/cloudflare.test.ts": {
     "globalJsonInEffect": 3,
     "instanceOfSchema": 7,
-    "newSchemaClass": 11,
     "yieldInCallArgument": 4
   },
   "test/cloudflare/fake-worker.ts": {
     "asyncFunction": 1,
     "globalJson": 3,
     "newPromise": 1,
-    "newSchemaClass": 3,
     "nodeBuiltinImport": 1,
     "schemaSync": 2,
     "strictBooleanExpressions": 1
   },
   "test/durable-session.test.ts": {
-    "newSchemaClass": 5,
     "yieldInCallArgument": 8
-  },
-  "test/exe-dev/ceilings.test.ts": {
-    "newSchemaClass": 18
   },
   "test/exe-dev/launch.test.ts": {
     "globalJson": 1,
     "globalJsonInEffect": 1,
     "instanceOfSchema": 1,
-    "multipleEffectProvide": 1,
-    "newSchemaClass": 22,
-    "preferSucceedSomeOrNone": 1,
     "yieldInCallArgument": 14
   },
   "test/exe-dev/preparation.test.ts": {
     "globalJsonInEffect": 3,
-    "multipleEffectProvide": 2,
-    "newSchemaClass": 9,
     "yieldInCallArgument": 1
   },
   "test/exe-dev/support.ts": {
     "globalJsonInEffect": 2,
-    "newSchemaClass": 8,
     "preferBarrelImport": 1
   },
   "test/guard.test.ts": {
-    "newSchemaClass": 26,
     "yieldInCallArgument": 1
   },
   "test/harness-preflight.test.ts": {
-    "newSchemaClass": 3,
     "preferBarrelImport": 1,
     "yieldInCallArgument": 1
   },
   "test/salvage.test.ts": {
     "globalErrorInEffectFailure": 3,
-    "newSchemaClass": 6,
     "yieldInCallArgument": 2
   },
   "test/ssh/codex-connection.test.ts": {
     "globalJsonInEffect": 1,
     "multipleEffectProvide": 1,
-    "newSchemaClass": 4,
     "yieldInCallArgument": 9
   },
   "test/ssh/container.test.ts": {
     "globalJsonInEffect": 7,
     "instanceOfSchema": 4,
-    "multipleEffectProvide": 8,
-    "newSchemaClass": 10,
     "nodeBuiltinImport": 1
   },
   "test/ssh/gateway/environment.test.ts": {
@@ -303,8 +173,6 @@
   "test/ssh/gateway/gateway.test.ts": {
     "globalJsonInEffect": 4,
     "instanceOfSchema": 3,
-    "multipleEffectProvide": 7,
-    "newSchemaClass": 15,
     "yieldInCallArgument": 11
   },
   "test/ssh/gateway/gh.test.ts": {
@@ -318,34 +186,24 @@
   "test/ssh/gateway/support.ts": {
     "globalTimers": 1,
     "newPromise": 1,
-    "newSchemaClass": 2,
     "schemaStructWithTag": 1,
     "schemaSync": 2
   },
   "test/ssh/gateway/workers.test.ts": {
-    "multipleEffectProvide": 2,
-    "newSchemaClass": 1,
     "yieldInCallArgument": 1
   },
   "test/ssh/podman.test.ts": {
     "globalJson": 2,
     "globalJsonInEffect": 1,
-    "instanceOfSchema": 1,
-    "multipleEffectProvide": 3
+    "instanceOfSchema": 1
   },
   "test/ssh/provisioner/checks.test.ts": {
     "globalJson": 2,
     "globalJsonInEffect": 2,
-    "instanceOfSchema": 1,
-    "multipleEffectProvide": 3,
-    "newSchemaClass": 2
+    "instanceOfSchema": 1
   },
   "test/ssh/provisioner/cleanup.test.ts": {
-    "multipleEffectProvide": 3,
     "yieldInCallArgument": 7
-  },
-  "test/ssh/provisioner/connection.test.ts": {
-    "newSchemaClass": 1
   },
   "test/ssh/provisioner/drivers.test.ts": {
     "schemaSync": 1,
@@ -356,11 +214,7 @@
     "globalJson": 1,
     "schemaSync": 4
   },
-  "test/ssh/provisioner/fixtures.ts": {
-    "newSchemaClass": 2
-  },
   "test/ssh/provisioner/gateway-reuse.test.ts": {
-    "newSchemaClass": 2,
     "yieldInCallArgument": 1
   },
   "test/ssh/provisioner/host-key.test.ts": {
@@ -370,32 +224,21 @@
     "globalDate": 1,
     "globalDateInEffect": 1,
     "instanceOfSchema": 5,
-    "multipleEffectProvide": 1,
-    "newSchemaClass": 13,
-    "preferTypedSchemaDecoder": 1,
     "schemaSync": 1,
     "yieldInCallArgument": 9
   },
   "test/ssh/provisioner/recovery.test.ts": {
     "globalDateInEffect": 1,
-    "newSchemaClass": 1,
     "yieldInCallArgument": 1
   },
   "test/ssh/provisioner/reuse.test.ts": {
     "globalJson": 1,
     "globalJsonInEffect": 1,
-    "newSchemaClass": 1,
     "yieldInCallArgument": 2
-  },
-  "test/ssh/provisioner/support.ts": {
-    "newSchemaClass": 2
   },
   "test/ssh/provisioner/tailnet.test.ts": {
     "globalJsonInEffect": 2,
     "instanceOfSchema": 1,
-    "multipleEffectProvide": 1,
-    "newSchemaClass": 7,
-    "preferTypedSchemaDecoder": 1,
     "schemaSync": 1,
     "schemaSyncInEffect": 1,
     "yieldInCallArgument": 1
@@ -416,17 +259,10 @@
   "test/ssh/ssh.test.ts": {
     "globalJsonInEffect": 2,
     "instanceOfSchema": 1,
-    "multipleEffectProvide": 3,
-    "newSchemaClass": 4,
     "yieldInCallArgument": 3
-  },
-  "test/ssh/startup.test.ts": {
-    "preferSucceedSomeOrNone": 2
   },
   "test/ssh/support.ts": {
     "globalJson": 2,
-    "newSchemaClass": 8,
-    "optionMatchToFromOption": 1,
     "preferBarrelImport": 1
   }
 }

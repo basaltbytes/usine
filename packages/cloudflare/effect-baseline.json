@@ -14,32 +14,23 @@
   "src/registry.ts": {
     "deterministicKeys": 2,
     "errorPayloadShadowsName": 1,
-    "newSchemaClass": 1,
     "schemaClassMissingBrand": 1
   },
   "src/sandbox/ports.ts": {
     "deterministicKeys": 4,
-    "newSchemaClass": 1,
     "schemaClassMissingBrand": 2
   },
   "src/sandbox/sandbox.ts": {
     "asyncFunction": 1,
-    "mapMapErrorToMapBoth": 2,
-    "newSchemaClass": 21,
     "yieldInCallArgument": 4
   },
   "src/sandbox/stream.ts": {
-    "mapSomeToAsSome": 1,
-    "newSchemaClass": 6,
     "yieldInCallArgument": 2
   },
   "src/worker.ts": {
     "asyncFunction": 14,
     "effectTryWithoutCatch": 2,
     "globalFetch": 3,
-    "newSchemaClass": 3,
-    "preferSucceedSomeOrNone": 2,
-    "preferTypedSchemaDecoder": 2,
     "schemaSync": 5
   },
   "test/access.test.ts": {
@@ -53,8 +44,7 @@
     "processEnv": 1
   },
   "test/outbound.test.ts": {
-    "asyncFunction": 1,
-    "newSchemaClass": 7
+    "asyncFunction": 1
   },
   "test/process.test.ts": {
     "asyncFunction": 7,
@@ -65,7 +55,6 @@
   },
   "test/registry.test.ts": {
     "asyncFunction": 2,
-    "newSchemaClass": 2,
     "schemaSync": 1
   },
   "test/sandbox.test.ts": {
@@ -73,16 +62,13 @@
     "globalJson": 7,
     "globalTimers": 2,
     "newPromise": 6,
-    "preferTypedSchemaDecoder": 1,
     "schemaSync": 2
   },
   "test/stream.test.ts": {
-    "globalJsonInEffect": 1,
-    "newSchemaClass": 5
+    "globalJsonInEffect": 1
   },
   "test/support.ts": {
     "asyncFunction": 1,
-    "newPromise": 1,
-    "newSchemaClass": 4
+    "newPromise": 1
   }
 }

@@ -1,48 +1,29 @@
 {
   "src/agent.ts": {
-    "newSchemaClass": 2,
     "schemaClassMissingBrand": 2
   },
   "src/board.ts": {
     "schemaClassMissingBrand": 3
   },
-  "src/configuration/commit.ts": {
-    "newSchemaClass": 15,
-    "preferTypedSchemaDecoder": 1
-  },
   "src/configuration/entities.ts": {
-    "newSchemaClass": 5,
     "schemaSync": 3
   },
   "src/configuration/folder.ts": {
     "deterministicKeys": 1,
-    "mapMapErrorToMapBoth": 1,
-    "newSchemaClass": 5,
     "schemaSync": 1,
     "schemaSyncInEffect": 1
   },
   "src/configuration/format.ts": {
-    "mapMapErrorToMapBoth": 1,
-    "newSchemaClass": 5,
-    "preferTypedSchemaDecoder": 2,
     "schemaSync": 2
   },
   "src/configuration/forms.ts": {
-    "newSchemaClass": 1,
-    "preferTypedSchemaDecoder": 1,
     "schemaSync": 2
   },
   "src/configuration/model.ts": {
-    "newSchemaClass": 1,
     "schemaClassMissingBrand": 9
   },
-  "src/configuration/revert.ts": {
-    "newSchemaClass": 2
-  },
   "src/configuration/sqlite/store.ts": {
-    "newSchemaClass": 2,
     "preferBarrelImport": 1,
-    "preferTypedSchemaDecoder": 3,
     "yieldInCallArgument": 1
   },
   "src/configuration/store.ts": {
@@ -52,17 +33,10 @@
     "schemaClassMissingBrand": 15
   },
   "src/file.ts": {
-    "newSchemaClass": 1,
-    "schemaClassMissingBrand": 2,
-    "schemaNumber": 1
-  },
-  "src/frontmatter.ts": {
-    "newSchemaClass": 2
+    "schemaClassMissingBrand": 2
   },
   "src/instance-folder.ts": {
-    "deterministicKeys": 1,
-    "mapMapErrorToMapBoth": 1,
-    "newSchemaClass": 7
+    "deterministicKeys": 1
   },
   "src/instance/diagnostics.ts": {
     "schemaClassMissingBrand": 2
@@ -70,33 +44,22 @@
   "src/instance/instance.ts": {
     "schemaClassMissingBrand": 1
   },
-  "src/instance/references.ts": {
-    "newSchemaClass": 1
-  },
   "src/label.ts": {
     "schemaClassMissingBrand": 1
   },
   "src/loop.ts": {
-    "newSchemaClass": 1,
-    "preferSucceedSomeOrNone": 3,
-    "preferTypedSchemaDecoder": 1,
     "schemaClassMissingBrand": 2
   },
   "src/parser.ts": {
     "deterministicKeys": 1,
-    "mapMapErrorToMapBoth": 1,
-    "newSchemaClass": 16,
-    "preferTypedSchemaDecoder": 6,
     "schemaClassMissingBrand": 2,
     "schemaSync": 2
   },
   "src/payload-slices.ts": {
-    "newSchemaClass": 5,
     "schemaSync": 1
   },
   "src/project/operations.ts": {
     "globalJson": 1,
-    "newSchemaClass": 9,
     "schemaSync": 1
   },
   "src/project/project.ts": {
@@ -108,28 +71,20 @@
   "src/trigger.ts": {
     "schemaClassMissingBrand": 3
   },
-  "src/yaml/document.ts": {
-    "newSchemaClass": 2
-  },
   "src/yaml/writer.ts": {
     "schemaClassMissingBrand": 1,
     "yieldInCallArgument": 1
   },
   "test/config.test.ts": {
     "globalJsonInEffect": 1,
-    "newSchemaClass": 7,
     "schemaSync": 3,
     "schemaSyncInEffect": 3,
     "yieldInCallArgument": 3
   },
   "test/configuration-forms.test.ts": {
-    "newSchemaClass": 6,
     "yieldInCallArgument": 2
   },
   "test/configuration.test.ts": {
-    "allOfMapToForEach": 1,
-    "multipleEffectProvide": 2,
-    "newSchemaClass": 23,
     "schemaSync": 5,
     "yieldInCallArgument": 23
   },
@@ -137,8 +92,6 @@
     "yieldInCallArgument": 2
   },
   "test/projects.test.ts": {
-    "newSchemaClass": 4,
-    "preferTypedSchemaDecoder": 3,
     "schemaSync": 3,
     "schemaSyncInEffect": 3,
     "yieldInCallArgument": 2
