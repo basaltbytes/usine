@@ -1,4 +1,5 @@
 import { getTableName } from "drizzle-orm";
+import { projectMigrationDialect } from "./dialect.ts";
 import {
   loopItems,
   events,
@@ -63,6 +64,7 @@ const qualifyJson = (
 export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
   function* (projects: ReadonlyArray<RepositoryProject>) {
     const sql = yield* SqlClient.SqlClient;
+    const dialect = projectMigrationDialect(sql);
     const namespaces = new Map(
       projects.map(({ repository, project }) => [repository.toLowerCase(), project]),
     );
@@ -72,25 +74,25 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
     for (const { repository, project, loops } of projects) {
       // Item identities keep their repository, including schedule items without a number.
       yield* sql`UPDATE ${sql(getTableName(loopItems))} SET loop_name = ${project} || '/' || loop_name
-        WHERE instr(loop_name, '/') = 0 AND (item_key IN
+        WHERE ${dialect.unqualified(sql.literal("loop_name"))} AND (item_key IN
           (SELECT item_key FROM ${sql(getTableName(triggerEvents))} WHERE lower(repository) = lower(${repository}))
-          OR CASE WHEN json_valid(item_key) THEN lower(json_extract(item_key, '$[1]')) = lower(${repository}) ELSE 0 END)`;
-      yield* sql`UPDATE ${sql(getTableName(events))} AS event SET dedup_key = json_set(event.dedup_key, '$[0]', ${project} || '/' || json_extract(event.dedup_key, '$[0]'))
-        WHERE json_valid(event.dedup_key) AND EXISTS (
+          OR CASE WHEN ${dialect.jsonValid(sql.literal("item_key"))} THEN lower(${dialect.jsonExtract(sql.literal("item_key"), "$[1]")}) = lower(${repository}) ELSE 0 END)`;
+      yield* sql`UPDATE ${sql(getTableName(events))} AS event SET dedup_key = ${dialect.jsonSet(sql.literal("event.dedup_key"), "$[0]", sql`${project} || '/' || ${dialect.jsonExtract(sql.literal("event.dedup_key"), "$[0]")}`)}
+        WHERE ${dialect.jsonValid(sql.literal("event.dedup_key"))} AND EXISTS (
           SELECT 1 FROM ${sql(getTableName(triggerEvents))} AS trigger
           WHERE trigger.event_id = event.event_id AND lower(trigger.repository) = lower(${repository})
-            AND instr(trigger.loop_name, '/') = 0 AND json_extract(event.dedup_key, '$[0]') = trigger.loop_name)`;
+            AND ${dialect.unqualified(sql.literal("trigger.loop_name"))} AND ${dialect.jsonExtract(sql.literal("event.dedup_key"), "$[0]")} = trigger.loop_name)`;
       yield* sql`UPDATE ${sql(getTableName(cycleReservations))} SET loop = ${project} || '/' || loop
-        WHERE instr(loop, '/') = 0 AND item_key IN
+        WHERE ${dialect.unqualified(sql.literal("loop"))} AND item_key IN
           (SELECT item_key FROM ${sql(getTableName(itemCycleBudgets))} WHERE lower(repository) = lower(${repository}))`;
       yield* sql`UPDATE ${sql(getTableName(triggerEvents))} SET loop_name = ${project} || '/' || loop_name
-        WHERE lower(repository) = lower(${repository}) AND instr(loop_name, '/') = 0`;
+        WHERE lower(repository) = lower(${repository}) AND ${dialect.unqualified(sql.literal("loop_name"))}`;
       yield* sql`UPDATE ${sql(getTableName(runs))} SET loop_name = ${project} || '/' || loop_name
-        WHERE lower(repository) = lower(${repository}) AND instr(loop_name, '/') = 0`;
+        WHERE lower(repository) = lower(${repository}) AND ${dialect.unqualified(sql.literal("loop_name"))}`;
       if (loops.length > 0) {
         yield* sql`INSERT INTO ${sql(getTableName(loopRuntime))} (loop_name, paused)
           SELECT ${project} || '/' || loop_name, paused FROM ${sql(getTableName(loopRuntime))}
-          WHERE instr(loop_name, '/') = 0 AND ${sql.in(
+          WHERE ${dialect.unqualified(sql.literal("loop_name"))} AND ${sql.in(
             "loop_name",
             loops.map((loop) => loop.slice(project.length + 1)),
           )}
@@ -107,7 +109,7 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
       }
       const closed =
         yield* sql`SELECT ask_id AS key, ask_json AS value FROM ${sql(getTableName(cycleAskClosures))}
-        WHERE lower(json_extract(ask_json, '$.repository')) = lower(${repository})`;
+        WHERE lower(${dialect.jsonExtract(sql.literal("ask_json"), "$.repository")}) = lower(${repository})`;
       for (const row of closed) {
         const decoded = yield* Schema.decodeUnknownEffect(
           Schema.Struct({ key: Schema.String, value: Json }),
@@ -170,7 +172,7 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
         yield* sql`DELETE FROM ${sql(getTableName(attentionAcknowledgements))} WHERE id = ${saved.id} AND revision = ${saved.revision}`;
       }
     }
-    yield* sql`DELETE FROM ${sql(getTableName(loopRuntime))} WHERE instr(loop_name, '/') = 0`;
+    yield* sql`DELETE FROM ${sql(getTableName(loopRuntime))} WHERE ${dialect.unqualified(sql.literal("loop_name"))}`;
     yield* Effect.logInfo("Migrated runtime loop identities to projects", {
       repositories: projects.length,
     });
