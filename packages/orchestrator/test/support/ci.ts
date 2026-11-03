@@ -5,8 +5,7 @@ import { CiMonitor } from "../../src/ci.ts";
 export const idleCiMonitor = Layer.succeed(CiMonitor)({
   reconcile: () =>
     Effect.succeed({
-      repositories: [],
-      polledRepositories: [],
+      outcomes: [],
       failures: [],
       nextPollAt: Option.none(),
     }),

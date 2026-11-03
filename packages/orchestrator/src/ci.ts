@@ -27,6 +27,7 @@ import {
   latestPollAt,
   repositoryFailureLogFields,
 } from "./polling/cycle.ts";
+import type { RepositoryOutcome } from "./polling/failure-streaks.ts";
 import { observeItem } from "./polling/repository-sync.ts";
 
 /** Settles persisted CI waits during polling and webhook hints, without worker reservations. */
@@ -38,10 +39,8 @@ export class CiMonitor extends Context.Service<
       repository: Option.Option<RepositoryName>,
     ) => Effect.Effect<
       {
-        /** Repositories with persisted CI waits, including waits skipped during backoff. */
-        readonly repositories: ReadonlyArray<RepositoryName>;
-        /** Repositories whose CI observations completed without rate limiting. */
-        readonly polledRepositories: ReadonlyArray<RepositoryName>;
+        /** Settled observations and paused repositories with persisted CI waits. */
+        readonly outcomes: ReadonlyArray<RepositoryOutcome>;
         readonly failures: ReadonlyArray<RepositoryPollFailure>;
         readonly nextPollAt: Option.Option<DateTime.Utc>;
       },
@@ -332,8 +331,18 @@ export class CiMonitor extends Context.Service<
             }
           }
           return {
-            repositories: waits.map((wait) => wait.repository),
-            polledRepositories: [...polled.values()],
+            outcomes: [
+              ...new Map(
+                waits.map((wait) => [canonicalRepositoryName(wait.repository), wait.repository]),
+              ).entries(),
+            ].map(([key, repository]): RepositoryOutcome => ({
+              _tag: polled.has(key) ? "Polled" : "RateLimited",
+              source: "Ci",
+              repository,
+              failures: failures.filter(
+                (failure) => canonicalRepositoryName(failure.repository) === key,
+              ),
+            })),
             failures,
             nextPollAt: latestPollAt(backoffs),
           };

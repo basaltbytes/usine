@@ -1,5 +1,5 @@
-import { Duration, Effect, Option, Schedule, Schema } from "effect";
-import { GitHubApiError, InvalidGitHubResponseError } from "./error.ts";
+import { Duration, Effect, Match, Option, Schedule, Schema } from "effect";
+import { type GitHubApiError, type GitHubAppError, InvalidGitHubResponseError } from "./error.ts";
 
 export class GraphqlServerError extends Schema.TaggedError<GraphqlServerError>(
   "@usine/github/GraphqlServerError",
@@ -8,25 +8,34 @@ export class GraphqlServerError extends Schema.TaggedError<GraphqlServerError>(
 export const isTransientStatus = (status: number): boolean =>
   status === 502 || status === 503 || status === 504;
 
-export const retryTransientRequest = <A, E, R>(request: Effect.Effect<A, E, R>) =>
+type RequestFailure = GitHubAppError | GraphqlServerError;
+
+const isTransientFailure = (error: RequestFailure): error is GraphqlServerError | GitHubApiError =>
+  error._tag === "GraphqlServerError" ||
+  (error._tag === "GitHubApiError" && Option.exists(error.status, isTransientStatus));
+
+const transientFailureLogFields = (error: GraphqlServerError | GitHubApiError) =>
+  Match.valueTags(error, {
+    GraphqlServerError: ({ failure }) => ({ operation: failure.operation }),
+    GitHubApiError: ({ operation, status }) => ({
+      operation,
+      status: Option.getOrUndefined(status),
+    }),
+  });
+
+export const retryTransientRequest = <A, E extends RequestFailure, R>(
+  request: Effect.Effect<A, E, R>,
+) =>
   request.pipe(
     Effect.retry(($) =>
       $(Schedule.exponential("1 second", 3)).pipe(
         Schedule.jittered,
-        Schedule.while(({ input: error }) =>
-          Effect.succeed(
-            error instanceof GraphqlServerError ||
-              (error instanceof GitHubApiError && Option.exists(error.status, isTransientStatus)),
-          ),
-        ),
+        Schedule.while(({ input: error }) => isTransientFailure(error)),
         Schedule.upTo({ times: 2 }),
         Schedule.tap(({ input: error, attempt, duration }) => {
-          if (error instanceof GraphqlServerError || error instanceof GitHubApiError) {
-            const failure = error instanceof GraphqlServerError ? error.failure : error;
+          if (isTransientFailure(error)) {
             return Effect.logWarning("Transient GitHub request failed; retrying", {
-              operation: failure.operation,
-              status:
-                error instanceof GraphqlServerError ? 200 : Option.getOrUndefined(error.status),
+              ...transientFailureLogFields(error),
               errorTag: error._tag,
               retry: attempt,
               delayMs: Duration.toMillis(duration),

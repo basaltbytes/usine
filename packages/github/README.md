@@ -81,7 +81,7 @@ the snapshot keeps the events found and omits labels whose history is unavailabl
 Older stored payloads decode with an empty map. Actor changes affect the content
 hash; timestamp-only changes do not.
 
-Polling REST reads and GraphQL queries retry HTTP 502, 503, and 504 responses and GraphQL server errors up to twice. Delays are approximately one and three seconds, with 20% jitter. Each retry logs a warning with the operation, HTTP status, retry number, and delay. Other HTTP errors and invalid payloads return immediately; rate-limit responses retain their existing backoff.
+Polling REST reads and GraphQL queries retry HTTP 502, 503, and 504 responses and GraphQL server errors up to twice. Delays are approximately one and three seconds, with 20% jitter. Each retry logs a warning with the operation, error tag, retry number, and delay. HTTP failures also include the response status. Other HTTP errors and invalid payloads return immediately; rate-limit responses retain their existing backoff.
 
 GraphQL `NOT_FOUND` errors leave null fields for decoding and do not prevent retries of server errors in the same response. Permission and validation errors fail immediately, including in mixed responses.
 

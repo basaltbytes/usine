@@ -49,13 +49,17 @@ import {
   type InterruptedRepositoryCycle,
   latestPollAt,
   PollCycle,
-  type PollFailureStreak,
   RepositoryPoll,
   type RepositoryPollError,
   RepositoryPollFailure,
   repositoryFailureLogFields,
-  sustainedPollFailures,
 } from "./cycle.ts";
+import {
+  advance,
+  decisionLogFields,
+  type PollFailureStreak,
+  type RepositoryOutcome,
+} from "./failure-streaks.ts";
 import { changedItem, FailingItem, failingItemPollFailures } from "./evaluation-failures.ts";
 import { closeAsksOfClosedItems } from "./closed-item-asks.ts";
 import { evaluateChangedItem } from "./item-cycle.ts";
@@ -105,15 +109,14 @@ interface FailingItemRetries {
   readonly repositories: ReadonlySet<CursorKey>;
 }
 
-interface RepositoryCycle {
+type RepositoryCycle = {
   readonly changedItems: number;
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
-  readonly rateLimited: boolean;
-}
+} & ({ readonly _tag: "Polled" } | { readonly _tag: "RateLimited" });
 
 const cursorKey = (repository: ManagedRepo): CursorKey =>
   CursorKey.make(`github-poll:${canonicalRepositoryName(repository.name)}`);
@@ -458,8 +461,10 @@ export class PollingTriggers extends Context.Service<
             ],
             preflightFindings: preflight.preflightFindings,
             nextPollAt: latestPollAt([nextPollAt, openIssueCheck.nextPollAt]),
-            rateLimited:
-              Option.isSome(preflight.nextPollAt) || Option.isSome(openIssueCheck.nextPollAt),
+            _tag:
+              Option.isSome(preflight.nextPollAt) || Option.isSome(openIssueCheck.nextPollAt)
+                ? "RateLimited"
+                : "Polled",
           } satisfies RepositoryCycle;
         }).pipe(
           Effect.mapError((error): InterruptedRepositoryCycle => ({
@@ -530,25 +535,28 @@ export class PollingTriggers extends Context.Service<
           );
 
           const cycles: Array<RepositoryCycle> = [];
-          const failures: Array<RepositoryPollFailure> = [...ciCycle.failures];
           const backoffs: Array<Option.Option<DateTime.Utc>> = [ciCycle.nextPollAt];
           const preflightFindings: Array<LabelPreflightFinding> = [];
           const completedAt = yield* DateTime.now;
-          const configured = new Set(
-            watched.map(({ repository }) => canonicalRepositoryName(repository.name)),
-          );
-          const polled: Array<RepositoryName> = ciCycle.polledRepositories.filter(
-            (repository) => !configured.has(canonicalRepositoryName(repository)),
-          );
+          const outcomes: Array<RepositoryOutcome> = [...ciCycle.outcomes];
+          if (Option.isSome(ciCycle.nextPollAt)) {
+            outcomes.push(
+              ...watched.map(({ repository }): RepositoryOutcome => ({
+                _tag: "RateLimited",
+                repository: repository.name,
+                source: "Polling",
+                failures: [],
+              })),
+            );
+          }
           for (const { repository, result } of settled) {
             if (Result.isSuccess(result)) {
-              if (result.success.rateLimited) {
-                yield* Effect.logInfo("Rate-limited repository poll preserved its failure count", {
-                  repository: repository.repository.name,
-                });
-              } else {
-                polled.push(repository.repository.name);
-              }
+              outcomes.push({
+                _tag: result.success._tag,
+                repository: repository.repository.name,
+                source: "Polling",
+                failures: result.success.failures,
+              });
               cycles.push(result.success);
               preflightFindings.push(...result.success.preflightFindings);
               yield* Ref.update(completedPolls, (current) =>
@@ -561,13 +569,19 @@ export class PollingTriggers extends Context.Service<
             }
             const interrupted = result.failure._tag === "InterruptedRepositoryCycle";
             const error: RepositoryPollError = interrupted ? result.failure.error : result.failure;
+            const failures = interrupted ? result.failure.failures : [];
             if (interrupted) {
-              failures.push(...result.failure.failures);
               preflightFindings.push(...result.failure.preflightFindings);
               backoffs.push(result.failure.nextPollAt);
               yield* hints.defer(result.failure.nextPollAt);
             }
             if (error._tag === "GitHubRateLimitError") {
+              outcomes.push({
+                _tag: "RateLimited",
+                source: "Polling",
+                repository: repository.repository.name,
+                failures,
+              });
               // A rate-limit pause is scheduling input, not a repository failure.
               yield* Effect.logWarning("GitHub rate limit reached; delaying the next cycle", {
                 repository: repository.repository.name,
@@ -578,44 +592,34 @@ export class PollingTriggers extends Context.Service<
               yield* hints.defer(Option.some(error.retryAt));
               continue;
             }
-            polled.push(repository.repository.name);
             yield* Effect.logError("Repository poll cycle failed; siblings were unaffected", {
               repository: repository.repository.name,
               ...repositoryFailureLogFields(error),
             });
-            failures.push(
-              new RepositoryPollFailure({
+            outcomes.push({
+              _tag: "Failed",
+              source: "Polling",
+              repository: repository.repository.name,
+              failures,
+              failure: new RepositoryPollFailure({
                 repository: repository.repository.name,
                 errorTag: error._tag,
                 message: repositoryFailureLogFields(error).message,
               }),
-            );
+            });
           }
-          const previousStreaks = yield* Ref.get(failureStreaks);
-          const reported = sustainedPollFailures(
-            [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
-            previousStreaks,
-            [...watched.map(({ repository }) => repository.name), ...ciCycle.repositories],
-            polled,
+          const reported = advance(
+            yield* Ref.get(failureStreaks),
+            [
+              ...watched.map(({ repository }) => repository.name),
+              ...ciCycle.outcomes.map(({ repository }) => repository),
+            ],
+            outcomes,
           );
           yield* Ref.set(failureStreaks, reported.streaks);
-          for (const repository of polled) {
-            const consecutiveFailures = reported.streaks.get(
-              canonicalRepositoryName(repository),
-            )?.consecutiveFailures;
-            if (consecutiveFailures === undefined) {
-              if (previousStreaks.has(canonicalRepositoryName(repository))) {
-                yield* Effect.logInfo("GitHub repository poll recovered; cleared failure count", {
-                  repository,
-                });
-              }
-              continue;
-            }
-            yield* Effect.logInfo("GitHub poll failure attention threshold evaluated", {
-              repository,
-              consecutiveFailures,
-              reported: consecutiveFailures >= 3,
-            });
+          for (const decision of reported.decisions) {
+            const { level, ...fields } = decisionLogFields(decision);
+            yield* Effect.logWithLevel(level)("Repository poll failure streak updated", fields);
           }
           const polls = yield* Ref.get(completedPolls);
           const cycle = new PollCycle({

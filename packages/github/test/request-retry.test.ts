@@ -93,6 +93,10 @@ for (const serverError of [
 ]) {
   it.effect("caps GraphQL server retries and preserves the response diagnostic", () => {
     let requests = 0;
+    const warnings: Array<ReadonlyArray<unknown>> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn" && Array.isArray(message)) warnings.push(message);
+    });
     const client = HttpClient.make((request) =>
       Effect.sync(() => {
         requests++;
@@ -104,12 +108,20 @@ for (const serverError of [
       yield* TestClock.adjust("10 seconds");
       const result = yield* Fiber.join(fiber);
       assert.strictEqual(requests, 3);
+      assert.lengthOf(warnings, 2);
+      for (const warning of warnings) {
+        assert.deepInclude(warning[1], {
+          operation: "fetch-pull-request-snapshot",
+          errorTag: "GraphqlServerError",
+        });
+        assert.notProperty(warning[1], "status");
+      }
       assert.strictEqual(result._tag, "Failure");
       if (result._tag !== "Failure") return;
       assert.strictEqual(result.failure._tag, "InvalidGitHubResponseError");
       if (result.failure._tag !== "InvalidGitHubResponseError") return;
       assert.include(result.failure.detail, serverError.message);
-    });
+    }).pipe(Effect.provide(Logger.layer([logger])));
   });
 }
 

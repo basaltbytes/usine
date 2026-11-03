@@ -43,7 +43,7 @@ Usage includes output and uncached input tokens reported by harnesses. Subscript
 
 Connectivity warnings identify a silent worker or unreachable model provider and its recovery. They do not stop the attempt automatically. Inspect the warning, worker, and provider before [canceling](/guides/cancel-a-run/) or [messaging the agent](/guides/message-an-agent/).
 
-Polling retries GitHub HTTP 502, 503, and 504 responses and GraphQL server errors up to twice, with jittered delays of approximately one and three seconds. This includes CI check runs, commit statuses, job metadata, and log archives. Each retry logs a warning with the operation and HTTP status. Other HTTP errors return immediately, and rate-limit responses delay polling as before.
+Polling retries GitHub HTTP 502, 503, and 504 responses and GraphQL server errors up to twice, with jittered delays of approximately one and three seconds. This includes CI check runs, commit statuses, job metadata, and log archives. Each retry logs a warning with the operation and error tag. HTTP failures also include the response status. Other HTTP errors return immediately, and rate-limit responses delay polling as before.
 
 Open-issue checks retry GraphQL server errors even when the same response reports deleted issues as `NOT_FOUND`. Permission and validation errors fail immediately, including in responses that also contain server errors.
 

@@ -1,5 +1,5 @@
 import type { ConfigFileError } from "@usine/config/file";
-import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
+import { RepositoryName } from "@usine/core/repository";
 import { type RunEngineError, SubmissionResult } from "@usine/engine/engine";
 import type { ExpressionError } from "@usine/expression/expression-engine";
 import type { GitHubAppError } from "@usine/github/github-app";
@@ -22,48 +22,6 @@ export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
   /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
-
-export interface PollFailureStreak {
-  readonly consecutiveFailures: number;
-  readonly failures: ReadonlyArray<RepositoryPollFailure>;
-}
-
-const isGitHubFailure = (failure: RepositoryPollFailure): boolean =>
-  failure.errorTag === "GitHubApiError" || failure.errorTag === "InvalidGitHubResponseError";
-
-/** Reports GitHub failures after three consecutive failed repository cycles. */
-export const sustainedPollFailures = (
-  failures: ReadonlyArray<RepositoryPollFailure>,
-  previous: ReadonlyMap<string, PollFailureStreak>,
-  watched: ReadonlyArray<RepositoryName>,
-  polled: ReadonlyArray<RepositoryName>,
-) => {
-  const active = new Set(watched.map(canonicalRepositoryName));
-  const streaks = new Map([...previous].filter(([repository]) => active.has(repository)));
-  const failing = new Set(
-    failures.filter(isGitHubFailure).map(({ repository }) => canonicalRepositoryName(repository)),
-  );
-  for (const repository of polled.map(canonicalRepositoryName)) {
-    if (failing.has(repository)) {
-      streaks.set(repository, {
-        consecutiveFailures: (streaks.get(repository)?.consecutiveFailures ?? 0) + 1,
-        failures: failures.filter(
-          (failure) =>
-            isGitHubFailure(failure) && canonicalRepositoryName(failure.repository) === repository,
-        ),
-      });
-    } else streaks.delete(repository);
-  }
-  return {
-    streaks,
-    failures: [
-      ...failures.filter((failure) => !isGitHubFailure(failure)),
-      ...[...streaks.values()].flatMap((streak) =>
-        streak.consecutiveFailures >= 3 ? streak.failures : [],
-      ),
-    ],
-  };
-};
 
 /** When one managed repository last completed a poll in this process. */
 export class RepositoryPoll extends Schema.Class<RepositoryPoll>(
