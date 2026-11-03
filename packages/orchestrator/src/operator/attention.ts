@@ -19,12 +19,25 @@ import { ProjectView, ReadyOverview } from "./overview.ts";
 
 const encodeNeed = Schema.encodeSync(NeedView);
 
-/** Identifies the displayed content, including counts and failure details. */
-export const attentionKey = (need: NeedView): AttentionKey =>
-  new AttentionKey({
+/** Identifies the condition to dismiss; pool usage is grouped into threshold bands. */
+export const attentionKey = (need: NeedView): AttentionKey => {
+  const content =
+    need._tag === "PoolLimitNeed"
+      ? {
+          pool: need.pool,
+          window: need.window,
+          resetsAt: DateTime.formatIso(need.resetsAt),
+          band: [90, 95, 100].reduce(
+            (band, threshold) => (need.usedPercent >= threshold ? threshold : band),
+            POOL_LIMIT_WARNING_PERCENT,
+          ),
+        }
+      : encodeNeed(need);
+  return new AttentionKey({
     id: need.id,
-    revision: AttentionRevision.make(JSON.stringify(encodeNeed(need))),
+    revision: AttentionRevision.make(JSON.stringify(content)),
   });
+};
 
 export const needRepositories = (need: NeedView) =>
   Match.valueTags(need, {
