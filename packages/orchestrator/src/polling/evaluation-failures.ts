@@ -31,11 +31,13 @@ export class FailingItem extends Schema.Class<FailingItem>("@usine/orchestrator/
   failures: Schema.NonEmptyArray(LoopEvaluationFailure),
 }) {}
 
-/** Returns the detection entry that fetches a failing Item again. */
-export const changedItem = (failing: FailingItem): ChangedItem =>
-  failing.stream === "issue"
-    ? new ChangedIssue({ number: failing.number, updatedAt: failing.updatedAt })
-    : new ChangedPullRequest({ number: failing.number, updatedAt: failing.updatedAt });
+/** Returns the detection entry that fetches an Item the poll cursor kept again. */
+export const changedItem = (
+  kept: Pick<FailingItem, "stream" | "number" | "updatedAt">,
+): ChangedItem =>
+  kept.stream === "issue"
+    ? new ChangedIssue({ number: kept.number, updatedAt: kept.updatedAt })
+    : new ChangedPullRequest({ number: kept.number, updatedAt: kept.updatedAt });
 
 /** Returns the failing Item that an evaluation leaves, or `None` if every Loop evaluated. */
 export const failingItem = (
