@@ -31842,19 +31842,7 @@
                       "type": "string"
                     },
                     "interval": {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "Infinity",
-                            "-Infinity",
-                            "NaN"
-                          ]
-                        }
-                      ]
+                      "type": "number"
                     }
                   },
                   "required": [
@@ -33693,34 +33681,10 @@
                         "maxLength": 100
                       },
                       "createdAt": {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
-                        ]
+                        "type": "number"
                       },
                       "lastUsedAt": {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
-                        ]
+                        "type": "number"
                       },
                       "scopes": {
                         "type": "array",
@@ -36819,19 +36783,7 @@
             "exclusiveMinimum": 0
           },
           "addedAt": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "Infinity",
-                  "-Infinity",
-                  "NaN"
-                ]
-              }
-            ]
+            "type": "number"
           },
           "addedBy": {
             "anyOf": [
@@ -41392,14 +41344,6 @@
                       },
                       {
                         "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
                       }
                     ]
                   }
@@ -41844,14 +41788,6 @@
                         },
                         {
                           "type": "number"
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "Infinity",
-                            "-Infinity",
-                            "NaN"
-                          ]
                         }
                       ]
                     }
@@ -41893,14 +41829,6 @@
                       },
                       {
                         "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
                       }
                     ]
                   }
@@ -42636,14 +42564,6 @@
                       },
                       {
                         "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
                       }
                     ]
                   }
@@ -45575,32 +45495,12 @@
         "type": "object",
         "properties": {
           "usedPercent": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "Infinity",
-                  "-Infinity",
-                  "NaN"
-                ]
-              }
-            ]
+            "type": "number"
           },
           "windowDurationMinutes": {
             "anyOf": [
               {
                 "type": "number"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "Infinity",
-                  "-Infinity",
-                  "NaN"
-                ]
               },
               {
                 "type": "null"
@@ -46311,19 +46211,8 @@
             ]
           },
           "usedPercent": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "Infinity",
-                  "-Infinity",
-                  "NaN"
-                ]
-              }
-            ]
+            "type": "number",
+            "minimum": 80
           },
           "resetsAt": {
             "type": "string"

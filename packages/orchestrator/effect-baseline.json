@@ -222,7 +222,6 @@
   },
   "test/approval.test.ts": {
     "globalJson": 1,
-    "preferTypedSchemaDecoder": 1,
     "schemaSync": 2,
     "schemaSyncInEffect": 2,
     "yieldInCallArgument": 1
