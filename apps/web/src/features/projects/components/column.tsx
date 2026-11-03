@@ -1,14 +1,17 @@
-import type { ProjectId } from "@usine/core/project";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { laneItemsQuery } from "~/features/projects/queries";
+import { ProjectId } from "@usine/core/project";
 
 import { usePageCommands } from "~/components/command-palette/context";
-import { laneFoldCommand } from "~/lib/projects/strings";
+import { loadingTasks, retryTasks, laneFoldCommand } from "~/lib/projects/strings";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react";
 import { isSettledItemState } from "@usine/config/board";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { LabelBadge } from "~/components/label-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -64,7 +67,9 @@ const LaneRail = ({ lane, open }: LaneRailProps) => (
         <span className="max-h-60 truncate text-sm font-semibold [writing-mode:vertical-rl]">
           {lane.name}
         </span>{" "}
-        <span className="text-sm text-muted-foreground tabular-nums">{lane.items.length}</span>
+        <span className="text-sm text-muted-foreground tabular-nums">
+          {lane.totalItems ?? lane.items.length}
+        </span>
       </span>
     </button>
   </section>
@@ -109,7 +114,33 @@ export const BoardColumn = ({
   const targets = lanes.filter(
     (other) => other._tag === "WritableBoardLane" && other.id !== lane.id,
   );
-  const count = lane.items.length;
+  const history = useInfiniteQuery({
+    ...laneItemsQuery(project ?? ProjectId.make("missing"), lane.id),
+    enabled: project !== undefined && lane.totalItems !== undefined && !folded,
+  });
+  const items = lane.items;
+  const count = lane.totalItems ?? items.length;
+  const scroll = useRef<HTMLDivElement | null>(null);
+  const virtual = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scroll.current,
+    estimateSize: () => 150,
+    overscan: 5,
+    enabled: items.length >= 50,
+  });
+  const visible = virtual.getVirtualItems();
+  const last = visible.at(-1)?.index ?? 0;
+  useEffect(() => {
+    if (!folded && history.hasNextPage && !history.isFetchingNextPage && last >= items.length - 5)
+      void history.fetchNextPage();
+  }, [
+    folded,
+    history.hasNextPage,
+    history.isFetchingNextPage,
+    history.fetchNextPage,
+    last,
+    items.length,
+  ]);
   const [listRef, edges] = useScrollEdges();
   usePageCommands(
     foldable ? [{ label: laneFoldCommand(lane.name, folded), run: () => setFolded(!folded) }] : [],
@@ -157,7 +188,10 @@ export const BoardColumn = ({
       {/* Scrolls on its own, so each lane scrolls independently; the faded edges show that more cards
           are above or below. The negative margin keeps card rings and shadows inside the clip. */}
       <div
-        ref={listRef}
+        ref={(node) => {
+          scroll.current = node;
+          listRef(node);
+        }}
         aria-label={`${lane.name} cards`}
         tabIndex={edges.above || edges.below ? 0 : undefined}
         className={cn(
@@ -167,7 +201,7 @@ export const BoardColumn = ({
         )}
       >
         <SortableContext
-          items={lane.items.map(({ itemKey }) => itemKey)}
+          items={items.map(({ itemKey }) => itemKey)}
           strategy={verticalListSortingStrategy}
         >
           {count === 0 && (
@@ -175,26 +209,71 @@ export const BoardColumn = ({
               No tasks
             </p>
           )}
-          {lane.items.map((item) => {
-            const phase = moves.find(({ itemKey }) => itemKey === item.itemKey)?.phase;
-            const moveDisabled = pending || phase !== undefined;
-            return (
-              <BoardCard
-                key={item.itemKey}
-                item={item}
-                project={project}
-                showRepository={showRepository}
-                lane={lane}
-                catalog={catalog}
-                draggable={!moveDisabled && targets.length > 0}
-                phase={phase}
-                moves={{ targets, disabled: moveDisabled, onMove }}
-                stall={stallOf(item)}
-                readOnly={readOnly}
-                openRun={openRun}
-              />
-            );
-          })}
+          <div
+            style={
+              items.length >= 50
+                ? { height: virtual.getTotalSize(), position: "relative" }
+                : undefined
+            }
+            className="flex shrink-0 flex-col gap-2"
+          >
+            {(items.length >= 50
+              ? visible
+              : items.map((_, index) => ({ index, key: index, start: 0 }))
+            ).map((row) => {
+              const item = items[row.index];
+              if (item === undefined) return null;
+              const phase = moves.find(({ itemKey }) => itemKey === item.itemKey)?.phase;
+              const moveDisabled = pending || phase !== undefined;
+              return (
+                <div
+                  key={item.itemKey}
+                  data-index={row.index}
+                  ref={items.length >= 50 ? virtual.measureElement : undefined}
+                  style={
+                    items.length >= 50
+                      ? {
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${row.start}px)`,
+                          paddingBottom: 8,
+                        }
+                      : undefined
+                  }
+                >
+                  <BoardCard
+                    item={item}
+                    project={project}
+                    showRepository={showRepository}
+                    lane={lane}
+                    catalog={catalog}
+                    draggable={!moveDisabled && targets.length > 0}
+                    phase={phase}
+                    moves={{ targets, disabled: moveDisabled, onMove }}
+                    stall={stallOf(item)}
+                    readOnly={readOnly}
+                    openRun={openRun}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {history.isFetchingNextPage && (
+            <p role="status" className="text-xs text-muted-foreground">
+              {loadingTasks}
+            </p>
+          )}
+          {history.isError && (
+            <button
+              type="button"
+              onClick={() => void history.refetch()}
+              className="text-xs text-destructive"
+            >
+              {retryTasks}
+            </button>
+          )}
         </SortableContext>
       </div>
     </section>

@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import { type ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
@@ -97,6 +98,7 @@ const makeReader = Effect.gen(function* () {
 
 const makeWriter = Effect.gen(function* () {
   const database = yield* RunDatabase;
+  const bus = yield* ChangeBus;
   return {
     upsert: Effect.fn("ItemProjectionWriter.upsert")(function* (item: ItemProjection) {
       yield* Effect.annotateCurrentSpan({
@@ -138,6 +140,12 @@ const makeWriter = Effect.gen(function* () {
         });
         return false;
       }
+      yield* bus.publish([
+        {
+          audience: { _tag: "Repository", repository: item.repository },
+          target: { kind: "item", id: item.itemKey },
+        },
+      ]);
       yield* Effect.logDebug("Item projection updated from trigger polling", {
         repository: item.repository,
         item: item.number,
@@ -155,12 +163,18 @@ const makeWriter = Effect.gen(function* () {
         .update(itemProjections)
         .set({ goneAt: encodeGoneAt(Option.some(goneAt)) })
         .where(and(eq(itemProjections.itemKey, itemKey), isNull(itemProjections.goneAt)))
-        .returning({ itemKey: itemProjections.itemKey })
+        .returning({ itemKey: itemProjections.itemKey, repository: itemProjections.repository })
         .execute();
       if (marked.length === 0) {
         yield* Effect.logDebug("Item projection already gone or never stored", { itemKey });
         return false;
       }
+      yield* bus.publish(
+        marked.map(({ repository }) => ({
+          audience: { _tag: "Repository", repository },
+          target: { kind: "item", id: itemKey },
+        })),
+      );
       yield* Effect.logInfo("Item projection marked gone from GitHub", {
         itemKey,
         goneAt: DateTime.formatIso(goneAt),

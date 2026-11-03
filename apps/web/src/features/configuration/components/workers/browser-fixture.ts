@@ -41,6 +41,10 @@ export const workerPreflightResponses = async (
   await page.route("**/api/configuration", (route) =>
     route.fulfill({ contentType: "application/json", body: exchange.configuration }),
   );
+  await page.unroute("**/api/workers");
+  await page.route("**/api/workers", (route) =>
+    route.fulfill({ contentType: "application/json", body: exchange.configuration }),
+  );
   await page.route("**/api/workers/*/preflight", (route) => receive(route));
 };
 

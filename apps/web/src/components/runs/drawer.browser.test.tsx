@@ -1,3 +1,5 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
@@ -16,6 +18,8 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import {
+  MachineView,
+  MachineQuotaWait,
   AgentFailureView,
   GitHubPushFailureView,
   ApprovalNeed,
@@ -36,9 +40,11 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { runDetailQuery } from "~/lib/runs/queries";
+import { invalidateChanges } from "~/lib/changes";
+import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
@@ -172,6 +178,14 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   const host = document.createElement("div");
   document.body.append(host);
@@ -243,7 +257,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
   }
 });
 
-it("leaves a closed issue's failed run out of Needs attention and marks the issue closed in its drawer", async () => {
+it("marks a closed issue in its drawer and refreshes the agent definition warning after configuration changes", async () => {
   const onIssue = new RunView({
     ...run,
     itemKey: ItemKey.make('["github","resolution/project",1]'),
@@ -288,6 +302,14 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: [`/?run=${runId}`] }),
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   const host = document.createElement("div");
   document.body.append(host);
@@ -325,6 +347,142 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
     await expect
       .element(needs.getByRole("region", { name: "Run failed (1)", includeHidden: true }))
       .not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    const warning = drawer.getByText("The loaded definition of developer has changed.", {
+      exact: false,
+    });
+    await expect.element(warning).not.toBeInTheDocument();
+    const changed = JSON.stringify(
+      Schema.encodeSync(RunDetailView)(
+        new RunDetailView({
+          ...Schema.decodeUnknownSync(Schema.fromJsonString(RunDetailView))(detail),
+          agentDefinitionChanged: true,
+        }),
+      ),
+    );
+    await commands.failureResolutionResponses(overview, overview, changed, changed, attemptId);
+    await invalidateChanges(
+      queryClient,
+      new ChangeNotice({
+        revision: 1,
+        reset: false,
+        changes: [{ kind: "configuration", id: "instance" }],
+      }),
+    );
+    await expect.element(warning).toBeVisible();
+  } finally {
+    flushSync(() => root.unmount());
+    queryClient.clear();
+    host.remove();
+  }
+});
+
+it("refreshes an open queued run during machine preparation and quota backoff", async () => {
+  const queued = new RunView({
+    ...run,
+    state: "Queued",
+    closedAt: null,
+    attempts: [],
+    canRetry: false,
+    canResolveFailure: false,
+  });
+  const machine = new MachineView({
+    worker: WorkerName.make("pool"),
+    provider: "hetzner",
+    state: "creating",
+    id: null,
+    runId,
+    attemptId,
+    since: "2026-09-17T00:00:00Z",
+  });
+  const detail = new RunDetailView({
+    run: queued,
+    machine,
+    agentDefinitionChanged: false,
+    eventDedupKey: "event",
+    eventPayload: {},
+    transcript: [],
+    sessionState: [],
+    earlierTranscript: [],
+  });
+  const overview = new ReadyOverview({
+    projects: [
+      new ProjectView({
+        repository,
+        status: "clear",
+        runs: [queued],
+        board: new BoardView({ lanes: [], failures: [] }),
+        labels: [],
+        preflightFindings: [],
+      }),
+    ],
+    loops: [],
+    needsYou: [],
+  });
+  const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
+  const serve = (next: RunDetailView) => {
+    const json = JSON.stringify(Schema.encodeSync(RunDetailView)(next));
+    return commands.failureResolutionResponses(overviewJson, overviewJson, json, json, attemptId);
+  };
+  await serve(detail);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: [`/?run=${runId}`] }),
+  });
+  await router.load();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const refresh = () =>
+    invalidateChanges(
+      queryClient,
+      new ChangeNotice({
+        revision: 1,
+        reset: false,
+        changes: [{ kind: "run", id: runId }],
+      }),
+    );
+  try {
+    flushSync(() =>
+      root.render(
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
+      ),
+    );
+    const drawer = page.getByRole("dialog");
+    await expect.element(drawer.getByText(/^Creating a Hetzner machine,/)).toBeVisible();
+    const preparing = new RunDetailView({
+      ...detail,
+      machine: new MachineView({ ...machine, state: "preparing" }),
+    });
+    await serve(preparing);
+    await refresh();
+    await expect.element(drawer.getByText(/^Preparing the attempt image,/)).toBeVisible();
+    const message = "shared core limit exceeded";
+    await serve(
+      new RunDetailView({
+        ...detail,
+        machine: null,
+        run: new RunView({
+          ...queued,
+          machineWait: new MachineQuotaWait({ worker: machine.worker, message }),
+        }),
+      }),
+    );
+    await refresh();
+    await expect.element(drawer.getByText(message, { exact: false }).first()).toBeVisible();
+    await serve(preparing);
+    await refresh();
+    await expect
+      .element(drawer.getByText(message, { exact: false }).first())
+      .not.toBeInTheDocument();
+    await expect.element(drawer.getByText(/^Preparing the attempt image,/)).toBeVisible();
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();
@@ -407,6 +565,13 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
   document.body.append(host);
   const root = createRoot(host);
   try {
+    const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+    if (cachedOverview !== undefined)
+      queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+    for (const project of cachedOverview?.projects ?? []) {
+      queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+      queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+    }
     await router.load();
     expect(queryClient.getQueryState(options.queryKey)?.error).toBeNull();
     expect(
@@ -534,6 +699,14 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: [`/projects/${repository}/runs/${runId}`] }),
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   const host = document.createElement("div");
   document.body.append(host);

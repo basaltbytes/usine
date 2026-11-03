@@ -1,33 +1,43 @@
+import { ProjectId } from "@usine/core/project";
+import { projectQuery } from "~/features/projects/queries";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { RouteError, RoutePending } from "~/components/route-status";
 import { ProjectNotFound } from "~/components/project-not-found";
 import { ProjectBoard } from "~/features/projects/board.page";
 import { deskQuery } from "~/lib/desk/queries";
-import { overviewQuery, projectId } from "~/lib/overview";
+import { overviewQuery } from "~/lib/overview";
 import { useOpenRun } from "~/hooks/use-open-run";
+import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 
 const BoardRoute = () => {
   const { project: slug } = Route.useParams();
-  const { data } = useSuspenseQuery(overviewQuery());
+  const { data } = useSuspenseQuery({
+    ...overviewQuery(),
+    select: (view) => ({ loops: view.loops, readOnly: view._tag === "NeedsSetup" }),
+  });
   const desk = useSuspenseQuery(deskQuery());
   const openRun = useOpenRun();
-  const project = data.projects.find((entry) => projectId(entry) === slug);
-  // A refetch after the loader ran can remove the project.
-  if (project === undefined) return <ProjectNotFound />;
+  const { data: project, error } = useSuspenseQuery(projectQuery(ProjectId.make(slug)));
+  if (error instanceof OperatorHttpError && error.error === "BoardProjectNotFoundError")
+    return <ProjectNotFound />;
   return (
     <ProjectBoard
       project={project}
       loops={data.loops}
       stalled={desk.data.notMoving}
-      disabled={data._tag === "NeedsSetup"}
+      disabled={data.readOnly}
       openRun={openRun}
     />
   );
 };
 
 export const Route = createFileRoute("/projects/$project/")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(deskQuery()),
+  loader: ({ context, params }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(deskQuery()),
+      context.queryClient.ensureQueryData(projectQuery(ProjectId.make(params.project))),
+    ]),
   pendingComponent: RoutePending,
   errorComponent: RouteError,
   component: BoardRoute,

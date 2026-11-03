@@ -17,6 +17,7 @@ const pauseAfter = (failures: number, timings: ProvisionerTimings): Duration.Dur
 
 export const provisioningPausesFor = Effect.fn("WorkerScheduler.provisioningPausesFor")(function* (
   instances: Pick<CurrentInstance["Service"], "get">,
+  changed: (worker: WorkerName) => Effect.Effect<void>,
 ) {
   const timers = yield* FiberMap.make<WorkerName>();
   const exclusive = yield* Semaphore.make(1);
@@ -29,6 +30,7 @@ export const provisioningPausesFor = Effect.fn("WorkerScheduler.provisioningPaus
       next.delete(worker);
       return [current.get(worker), next];
     });
+    if (previous !== undefined) yield* changed(worker);
     if (previous !== undefined)
       yield* Effect.logInfo("Cleared worker provisioning pause", {
         worker,
@@ -69,6 +71,7 @@ export const provisioningPausesFor = Effect.fn("WorkerScheduler.provisioningPaus
           return [next, new Map(current).set(worker, next)] as const;
         }),
       );
+      yield* changed(worker);
       yield* Effect.logWarning(
         "A provisioned Worker could not create a machine; its Attempts wait and it tries again after a pause",
         {
@@ -90,6 +93,7 @@ export const provisioningPausesFor = Effect.fn("WorkerScheduler.provisioningPaus
             ),
           ),
         ),
+        Effect.tap((resumed) => (resumed ? changed(worker) : Effect.void)),
         Effect.tap((resumed) =>
           resumed
             ? Effect.logInfo("A provisioned Worker's pause ended; it creates machines again", {

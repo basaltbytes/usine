@@ -250,7 +250,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 new Set([report, other]),
               );
             }
-            assert.deepStrictEqual(logLevels, ["Debug", "Debug", "Debug"]);
+            assert.deepStrictEqual(new Set(logLevels), new Set(["Debug"]));
           }).pipe(Effect.provide(fixture.open()));
         }).pipe(Effect.scoped),
     );

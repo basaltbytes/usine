@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import type { Worker } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
@@ -35,6 +36,9 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
   executor: Pick<Executor["Service"], "preflight">,
   initialize: (worker: Worker) => Effect.Effect<void, ExecutorError>,
 ) {
+  const bus = yield* ChangeBus;
+  const changed = (worker: WorkerName) =>
+    bus.publish([{ audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } }]);
   const configuration = yield* Ref.make<PreflightConfiguration>({ workers: [], roster: [] });
   const records = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
   const blocked = yield* TxRef.make<ReadonlyMap<WorkerName, string>>(new Map());
@@ -73,7 +77,9 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
   ) {
     yield* Effect.annotateCurrentSpan({ worker: worker.name });
     return yield* Effect.acquireUseRelease(
-      TxRef.update(checking, (current) => new Set([...current, worker.name])),
+      TxRef.update(checking, (current) => new Set([...current, worker.name])).pipe(
+        Effect.andThen(changed(worker.name)),
+      ),
       () =>
         initialize(worker).pipe(
           Effect.andThen(executor.preflight(worker.name, roster, worker.maxConcurrentAttempts)),
@@ -92,7 +98,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
         TxRef.update(
           checking,
           (current) => new Set([...current].filter((name) => name !== worker.name)),
-        ),
+        ).pipe(Effect.andThen(changed(worker.name))),
     );
   });
 
@@ -110,12 +116,14 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
         errorTag: result.failure._tag,
         message: result.failure.message,
       });
+      yield* changed(name);
       return true;
     }
     yield* TxRef.update(
       blocked,
       (current) => new Map([...current].filter(([worker]) => worker !== name)),
     );
+    yield* changed(name);
     yield* Effect.logInfo("Worker preflight passed; scheduling resumed", { worker: name });
     return false;
   });
@@ -227,6 +235,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
                 worker: name,
               });
             }
+            yield* changed(name);
             return (yield* Ref.get(records)).get(name) ?? unchecked(name);
           }),
         ),

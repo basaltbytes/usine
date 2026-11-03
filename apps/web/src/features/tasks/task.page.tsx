@@ -1,5 +1,7 @@
+import { ProjectId } from "@usine/core/project";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { RepositoryFilter } from "~/components/repository-filter";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Navigate, useNavigate } from "@tanstack/react-router";
 import type { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
@@ -30,7 +32,12 @@ type TaskPageProps = {
 
 export const TaskPage = ({ repository, number }: TaskPageProps) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
-  const project = projectForRepository(overview.projects, repository);
+  const summary = projectForRepository(overview.projects, repository);
+  const projectOptions = projectTasksQuery(
+    summary === undefined ? ProjectId.make("missing") : projectId(summary),
+  );
+  const full = useQuery({ ...projectOptions, enabled: summary !== undefined });
+  const project = full.data ?? summary;
   const navigate = useNavigate();
   const openRun = useOpenRun();
   const task = useSuspenseQuery(taskQuery(repository, number));

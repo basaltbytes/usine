@@ -48,7 +48,7 @@ export const TaskHeader = ({ task, project, disabled }: TaskHeaderProps) => {
       : project.board.lanes.filter(
           (lane) => lane._tag === "WritableBoardLane" && lane.id !== placed.lane.id,
         );
-  // The overview polls every second while a move is pending, so the lane name comes from it.
+  // The project read confirms the lane after GitHub synchronizes the move.
   const laneName =
     project.board.lanes.find(({ id }) => id === pending?.toLane)?.name ??
     placed?.lane.name ??

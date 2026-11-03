@@ -134,7 +134,8 @@ it("enforces exact origins before credentialed handlers and sets security header
               headers: {
                 origin: "https://client.example",
                 "access-control-request-method": method,
-                "access-control-request-headers": "Authorization, Content-Type, X-Usine-CSRF",
+                "access-control-request-headers":
+                  "Authorization, Content-Type, X-Usine-CSRF, X-Usine-View, If-None-Match, Last-Event-ID",
               },
             });
             assert.equal(preflight.status, 204);
@@ -148,7 +149,7 @@ it("enforces exact origins before credentialed handlers and sets security header
             );
             assert.equal(
               preflight.headers.get("access-control-allow-headers"),
-              "authorization, content-type, x-usine-csrf",
+              "authorization, content-type, x-usine-csrf, x-usine-view, if-none-match, last-event-id",
             );
             assert.equal(preflight.headers.get("x-frame-options"), "DENY");
           }

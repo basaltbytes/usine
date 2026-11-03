@@ -8,7 +8,7 @@ import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
 import { hetznerSettings } from "./support.ts";
 import { attachmentsInForce, fakeGateway, gatewayAddress } from "../gateway/support.ts";
 import { fakeProviders } from "./fake-providers.ts";
-import { ROOT, RUN, sink, gatewayRuntimeOf } from "./fixtures.ts";
+import { MACHINE_RUN, ROOT, sink, gatewayRuntimeOf } from "./fixtures.ts";
 
 describe("Provisioned machine reuse behind a gateway", () => {
   for (const detachFails of [false, true]) {
@@ -40,7 +40,9 @@ describe("Provisioned machine reuse behind a gateway", () => {
         return Effect.gen(function* () {
           const executor = yield* Executor;
           const machines = yield* WorkerMachines;
-          const first = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+          const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+            TEST_AGENT.brain,
+          ]);
           yield* Effect.scoped(
             Effect.gen(function* () {
               const prepared = yield* executor.prepare(request);
@@ -59,7 +61,7 @@ describe("Provisioned machine reuse behind a gateway", () => {
             ...request,
             attemptId: AttemptId.make("remote-run/execute/2"),
           });
-          const second = yield* machines.create(WORKER, RUN, nextRequest.attemptId, [
+          const second = yield* machines.create(WORKER, MACHINE_RUN, nextRequest.attemptId, [
             TEST_AGENT.brain,
           ]);
           if (detachFails) assert.notEqual(second.id, first.id);

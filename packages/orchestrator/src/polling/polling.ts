@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import { CiMonitor } from "../ci.ts";
 import type { DeclaredLabel } from "@usine/config/label";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -184,6 +185,7 @@ export class PollingTriggers extends Context.Service<
   static readonly layer = Layer.effect(
     PollingTriggers,
     Effect.gen(function* () {
+      const bus = yield* ChangeBus;
       const ci = yield* CiMonitor;
       const cursors = yield* CursorStore;
       const github = yield* GitHubPolling;
@@ -572,7 +574,29 @@ export class PollingTriggers extends Context.Service<
             preflightFindings,
             nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
           });
-          yield* Ref.set(latest, Option.some(cycle));
+          const previous = yield* Ref.getAndSet(latest, Option.some(cycle));
+          yield* bus.publish(
+            watched.flatMap(({ repository }) => {
+              const audience = { _tag: "Repository", repository: repository.name } as const;
+              const findings = (value: PollCycle | undefined) =>
+                JSON.stringify([
+                  (value?.failures ?? []).filter(
+                    (failure) =>
+                      canonicalRepositoryName(failure.repository) ===
+                      canonicalRepositoryName(repository.name),
+                  ),
+                  (value?.preflightFindings ?? []).filter(
+                    (finding) =>
+                      canonicalRepositoryName(finding.repository) ===
+                      canonicalRepositoryName(repository.name),
+                  ),
+                ]);
+              const changed = findings(Option.getOrUndefined(previous)) !== findings(cycle);
+              return changed
+                ? [{ audience, target: { kind: "attention", id: "instance" } as const }]
+                : [];
+            }),
+          );
           return cycle;
         },
         Effect.provideContext(repositoryServices),

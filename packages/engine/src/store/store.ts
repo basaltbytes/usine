@@ -1,3 +1,7 @@
+import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
+import { latestPoolRateLimits } from "../run-reader/pool-rate-limits.ts";
+import { ChangeBus } from "@usine/core/changes";
+import { changeTransaction } from "./changes.ts";
 import { AttemptCanceled } from "@usine/core/attempt/outcome";
 import type { CiResolution } from "@usine/core/ci";
 import type { CommitSha } from "@usine/core/repository";
@@ -25,7 +29,19 @@ import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { type Comment, StepResult } from "@usine/core/step/result";
-import { Context, Crypto, DateTime, Effect, Layer, Match, Option, Result, Schema } from "effect";
+import {
+  Context,
+  Crypto,
+  DateTime,
+  Duration,
+  Effect,
+  FiberMap,
+  Layer,
+  Match,
+  Option,
+  Result,
+  Schema,
+} from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
   Claimed,
@@ -121,8 +137,52 @@ export type CancelOutcome =
 
 const makeRunStore = Effect.gen(function* () {
   const database = yield* RunDatabase;
+  const bus = yield* ChangeBus;
+  const poolResets = yield* FiberMap.make<string>();
+  const transact = changeTransaction(database, bus);
   const crypto = yield* Crypto.Crypto;
   const queries = queriesFor(database);
+
+  const schedulePoolResets = Effect.fn("RunStore.schedulePoolResets")(function* (
+    event: PoolRateLimitsUpdated,
+  ) {
+    yield* Effect.annotateCurrentSpan({ pool: event.pool });
+    for (const window of ["primary", "secondary"] as const) {
+      const key = `${event.pool}:${window}`;
+      yield* FiberMap.remove(poolResets, key);
+      const limit = event.rateLimits[window];
+      if (Option.isNone(limit) || Option.isNone(limit.value.resetsAt)) {
+        yield* Effect.logDebug("Pool reset has no deadline", { pool: event.pool, window });
+        continue;
+      }
+      const resetsAt = limit.value.resetsAt.value;
+      const delay = Duration.toMillis(DateTime.distance(yield* DateTime.now, resetsAt));
+      if (delay <= 0) {
+        yield* Effect.logDebug("Pool reset deadline has passed", { pool: event.pool, window });
+        continue;
+      }
+      yield* Effect.logDebug("Scheduled pool reset notification", {
+        pool: event.pool,
+        window,
+        resetsAt,
+      });
+      yield* FiberMap.run(
+        poolResets,
+        key,
+        Effect.sleep(delay).pipe(
+          Effect.andThen(
+            Effect.logInfo("Pool reset deadline reached", { pool: event.pool, window }),
+          ),
+          Effect.andThen(
+            bus.publish([
+              { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+            ]),
+          ),
+        ),
+      );
+    }
+  });
+  for (const event of yield* latestPoolRateLimits(database)) yield* schedulePoolResets(event);
 
   /** Opens the Submission's Run as `runId` unless the Item's cycle budget is used up. */
   const admitRun = Effect.fn("RunStore.admitRun")(function* (
@@ -254,9 +314,9 @@ const makeRunStore = Effect.gen(function* () {
       loop: submission.loop,
       itemKey: submission.itemKey,
     });
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const recorded = yield* tx.recordTriggerEvent(submission);
         const previous = yield* tx.loopItems.sighted(
           recorded.loop,
@@ -313,9 +373,9 @@ const makeRunStore = Effect.gen(function* () {
 
   const parkForApproval = Effect.fn("RunStore.parkForApproval")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(runId);
         if (current.run.state._tag !== "Pending") return current.run.state;
         const waiting = RunState.awaitApproval(current.run.state);
@@ -431,9 +491,9 @@ const makeRunStore = Effect.gen(function* () {
     live: Option.Option<AttemptId>,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, worker });
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(runId);
         const interruption = new InfraFailure({
           message: "The orchestrator stopped during the attempt",
@@ -538,8 +598,8 @@ const makeRunStore = Effect.gen(function* () {
     salvage: AttemptSalvage,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId, salvage: salvage._tag });
-    yield* database.transaction((transaction) =>
-      queriesFor(transaction).recordSalvage(attemptId, salvage),
+    yield* transact((transaction, record) =>
+      queriesFor(transaction, record).recordSalvage(attemptId, salvage),
     );
     yield* Effect.logInfo(
       "Attempt salvage recorded",
@@ -562,8 +622,8 @@ const makeRunStore = Effect.gen(function* () {
     comments: ReadonlyArray<Comment>,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId, comments: comments.length });
-    yield* database.transaction((transaction) =>
-      queriesFor(transaction).recordComments(attemptId, comments),
+    yield* transact((transaction, record) =>
+      queriesFor(transaction, record).recordComments(attemptId, comments),
     );
     yield* Effect.logInfo(
       "Recorded the comments an Attempt posted before it ended without success",
@@ -583,8 +643,8 @@ const makeRunStore = Effect.gen(function* () {
       container: kills.container,
       kills: kills.kills,
     });
-    const attempt = yield* database.transaction((transaction) =>
-      queriesFor(transaction).recordOutOfMemory(attemptId, kills),
+    const attempt = yield* transact((transaction, record) =>
+      queriesFor(transaction, record).recordOutOfMemory(attemptId, kills),
     );
     yield* Effect.logInfo("Recorded the processes the kernel killed in the Attempt's container", {
       attemptId,
@@ -613,8 +673,14 @@ const makeRunStore = Effect.gen(function* () {
   const discardLeftovers = Effect.fn("RunStore.discardLeftovers")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
     const discardedAt = yield* DateTime.now;
-    return yield* database.transaction((transaction) =>
-      leftoverQueries(transaction).discardLeftovers(worker, discardedAt),
+    return yield* transact((transaction, record) =>
+      leftoverQueries(transaction)
+        .discardLeftovers(worker, discardedAt)
+        .pipe(
+          Effect.tap(() =>
+            record({ audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } }),
+          ),
+        ),
     );
   }, persistence("discard attempt leftovers"));
 
@@ -628,9 +694,9 @@ const makeRunStore = Effect.gen(function* () {
     result: Result.Result<StepResult, AttemptFailure>,
   ) {
     yield* Effect.annotateCurrentSpan({ runId: attempt.runId, attemptId: attempt.id });
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(attempt.runId);
         const [route] = yield* tx.eventRouteByRun(attempt.runId);
         if (route === undefined) return yield* Effect.die("A run has no recorded event");
@@ -655,9 +721,9 @@ const makeRunStore = Effect.gen(function* () {
     operator: Option.Option<OperatorActor>,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(runId);
         const latest = current.attempts.at(-1);
         if (
@@ -701,9 +767,9 @@ const makeRunStore = Effect.gen(function* () {
     source: ApprovalSource,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, eventId: approval.id, channel: source.channel });
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         if (yield* tx.approvalExists(runId)) return false;
         const current = yield* tx.snapshot(runId);
         if (current.run.state._tag !== "Waiting") {
@@ -726,9 +792,9 @@ const makeRunStore = Effect.gen(function* () {
   ) {
     const { amendment, requestedBy } = request;
     yield* Effect.annotateCurrentSpan({ runId });
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(runId);
         const decision = retryRun(current);
         yield* Effect.logInfo("Operator retry decided", {
@@ -791,9 +857,9 @@ const makeRunStore = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ runId, agent: request.context.agent.name });
     const receivedAt = yield* DateTime.now;
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(runId);
         const { loop } = current.run;
         const { itemKey } = current;
@@ -879,9 +945,9 @@ const makeRunStore = Effect.gen(function* () {
 
   const cancel = Effect.fn("RunStore.cancel")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(runId);
         const decision = cancelRun(current, yield* ActingMember);
         yield* Effect.logInfo("Operator cancellation decided", {
@@ -916,9 +982,9 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("cancel run"));
 
   const revoke = Effect.fn("RunStore.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         yield* tx.loopItems.unmatched(loop, itemKey);
         const storedRuns = yield* tx.revokeUnstarted(loop, itemKey);
         for (const row of storedRuns) {
@@ -944,9 +1010,9 @@ const makeRunStore = Effect.gen(function* () {
     submission: Submission,
     runId: RunId,
   ) {
-    return yield* database.transaction((transaction) =>
+    return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
         const existing = yield* tx.runForEvent(submission.event.id);
         if (existing[0] !== undefined) {
           yield* Effect.logInfo("Queued Event already opened its Run", {
@@ -975,23 +1041,35 @@ const makeRunStore = Effect.gen(function* () {
     envelope: AttemptChannel.Envelope,
   ) {
     const receivedAt = yield* DateTime.now;
-    yield* database.transaction((transaction) =>
+    const inserted = yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction);
+        const tx = queriesFor(transaction, record);
+        if (!(yield* tx.appendTranscript(direction, envelope, receivedAt))) {
+          yield* Effect.logDebug("Transcript envelope already recorded; keeping the first copy", {
+            attemptId: envelope.attemptId,
+            direction,
+            sequence: envelope.sequence,
+          });
+          return false;
+        }
         if (direction === "outbound" && envelope.payload._tag === "Started") {
           yield* tx.updateAttemptParentModel(envelope.attemptId, envelope.payload.parentModel);
         }
         if (direction === "outbound" && envelope.payload._tag === "InterventionApplied") {
           yield* tx.markIntervened(envelope.attemptId);
         }
-        if (!(yield* tx.appendTranscript(direction, envelope, receivedAt)))
-          yield* Effect.logDebug("Transcript envelope already recorded; keeping the first copy", {
-            attemptId: envelope.attemptId,
-            direction,
-            sequence: envelope.sequence,
-          });
+        yield* tx.changedAttempt(envelope.attemptId);
+        return true;
       }),
     );
+    if (
+      inserted &&
+      direction === "outbound" &&
+      envelope.payload._tag === "SessionEvent" &&
+      envelope.payload.event._tag === "PoolRateLimitsUpdated"
+    ) {
+      yield* schedulePoolResets(envelope.payload.event);
+    }
   }, persistence("append attempt transcript"));
 
   const transcript = Effect.fn("RunStore.transcript")(function* (query: TranscriptQuery) {
@@ -999,7 +1077,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("read attempt transcript"));
 
   return {
-    ...ciQueries(database),
+    ...ciQueries(database, bus),
     approve,
     appendTranscript,
     beginAttempt,

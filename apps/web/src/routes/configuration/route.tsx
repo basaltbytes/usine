@@ -7,7 +7,10 @@ import {
 import { configurationQuery } from "~/lib/configuration/queries";
 
 export const Route = createFileRoute("/configuration")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(configurationQuery()),
+  loader: ({ context, location }) =>
+    location.pathname.replace(/\/$/u, "") === "/configuration/workers"
+      ? undefined
+      : context.queryClient.ensureQueryData(configurationQuery()),
   pendingComponent: ConfigurationPending,
   errorComponent: ConfigurationUnavailable,
   component: ConfigurationSection,

@@ -5,8 +5,22 @@ import { RepositoryName } from "@usine/core/repository";
 import { Effect, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RunSummaryView } from "./run.ts";
-import { BoardView, LabelView } from "./board.ts";
+import { BoardItemLink, BoardView, LabelView } from "./board.ts";
 import { NeedView } from "./need.ts";
+
+/** Item identities used by navigation, notifications, and run headings. */
+export class TaskIdentityView extends Schema.Class<TaskIdentityView>(
+  "@usine/orchestrator/TaskIdentityView",
+)({
+  ...BoardItemLink.fields,
+  repository: RepositoryName,
+  items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
+}) {}
+
+const identities = Schema.Array(TaskIdentityView).pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed([])),
+  Schema.withConstructorDefault(Effect.succeed([])),
+);
 
 /** The Project's summary status: clear, active, or needs operator attention. */
 export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
@@ -54,6 +68,8 @@ export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopVi
 export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
   "@usine/orchestrator/ReadyOverview",
 )("Ready", {
+  /** Compact task identities for screens that omit boards. */
+  identities,
   /** The configured projects with their boards and run summaries. */
   projects: Schema.Array(ProjectView),
   /** Loaded loops with their current pause state. */
@@ -68,6 +84,8 @@ export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
 export class NeedsSetupOverview extends Schema.TaggedClass<NeedsSetupOverview>(
   "@usine/orchestrator/NeedsSetupOverview",
 )("NeedsSetup", {
+  /** Compact task identities for screens that omit boards. */
+  identities,
   /** The setup failure tag. */
   errorTag: Schema.NonEmptyString,
   /** The projects available from stored configuration while setup is incomplete. */

@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { assert, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { completes, type StubParent } from "@usine/durable/testing";
@@ -23,7 +24,7 @@ import {
   TEST_AGENT,
   WORKER,
 } from "../support.ts";
-import { boatAddress, hetznerAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
+import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 import { hetznerSettings } from "./support.ts";
 
@@ -49,9 +50,10 @@ it.effect("keeps the same machine when a missing image pull succeeds on retry", 
     machine.state.beforePull = Effect.sync(() => {
       machine.state.pullError = pulls++ === 0 ? stderr : undefined;
     }).pipe(Effect.andThen(Deferred.succeed(started, undefined)));
+    const bus = yield* ChangeBus;
     const machines = yield* WorkerMachines;
     const creating = yield* machines
-      .create(WORKER, RUN, request.attemptId, [])
+      .create(WORKER, MACHINE_RUN, request.attemptId, [])
       .pipe(Effect.forkChild);
     yield* Deferred.await(started);
     while (
@@ -60,8 +62,20 @@ it.effect("keeps the same machine when a missing image pull succeeds on retry", 
     )
       yield* Effect.yieldNow;
     const [id] = providers.hetzner.servers.keys();
+    assert.strictEqual((yield* machines.machines)[0]?.state, "preparing");
+    assert.deepStrictEqual(
+      (yield* bus.open).history.at(-1)?.changes.filter(({ target }) => target.kind === "run"),
+      [
+        {
+          audience: { _tag: "Loop", loop: MACHINE_RUN.loop },
+          target: { kind: "run", id: MACHINE_RUN.id },
+        },
+      ],
+    );
+    const preparingRevision = (yield* bus.open).revision;
     yield* TestClock.adjust("4 seconds");
     assert.strictEqual(pulls, 1);
+    assert.strictEqual((yield* bus.open).revision, preparingRevision);
     assert.deepStrictEqual([...providers.hetzner.servers.keys()], [id]);
     yield* TestClock.adjust("1 second");
     const grant = yield* Fiber.join(creating);
@@ -78,6 +92,7 @@ it.effect("keeps the same machine when a missing image pull succeeds on retry", 
   }).pipe(
     Effect.scoped,
     Effect.provide(runtimeOf(machine, providers, imagePullAddress)),
+    Effect.provide(changeBusLayer),
     Effect.provide(logs.layer),
   );
 });
@@ -98,7 +113,7 @@ it.effect("fails preflight after three image pulls and logs the bounded last std
     }).pipe(Effect.andThen(Deferred.succeed(started, undefined)));
     const machines = yield* WorkerMachines;
     const creating = yield* machines
-      .create(WORKER, RUN, request.attemptId, [])
+      .create(WORKER, MACHINE_RUN, request.attemptId, [])
       .pipe(Effect.flip, Effect.forkChild);
     yield* Deferred.await(started);
     while (
@@ -157,7 +172,7 @@ it.live("uses the configured SSH wait and deletes the unreachable machine on tim
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
     const creating = yield* Effect.forkChild(
-      machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]).pipe(Effect.flip),
+      machines.create(WORKER, MACHINE_RUN, request.attemptId, [TEST_AGENT.brain]).pipe(Effect.flip),
     );
     yield* Effect.sleep("1 second");
     assert.isUndefined(creating.pollUnsafe());
@@ -182,14 +197,16 @@ it.live("reports the Boat SSH user's UID and image to rebuild on the first machi
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
     const failure = yield* machines
-      .create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain])
+      .create(WORKER, MACHINE_RUN, request.attemptId, [TEST_AGENT.brain])
       .pipe(Effect.flip);
     assert.strictEqual(failure._tag, "WorkerCapabilityError");
     assert.include(failure.message, image);
     assert.include(failure.message, "--build-arg USINE_UID=2345");
     assert.strictEqual(providers.boat.sandboxes.size, 0);
     machine.state.imageUserId = "2345";
-    const fixed = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+    const fixed = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+      TEST_AGENT.brain,
+    ]);
     assert.isTrue(Option.isSome(fixed.checked), "a failed check does not defer the next check");
     yield* machines.release(fixed.hold);
   }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
@@ -205,10 +222,17 @@ it.live(
       const machines = yield* WorkerMachines;
       const workers = yield* SshWorkers;
       const executor = yield* Executor;
-      const original = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+      const original = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+        TEST_AGENT.brain,
+      ]);
       yield* workers.addWorker(boatAddress);
       yield* executor.preflight(WORKER, [], 1);
-      const next = yield* machines.create(WORKER, RUN, AttemptId.make("replacement-attempt"), []);
+      const next = yield* machines.create(
+        WORKER,
+        MACHINE_RUN,
+        AttemptId.make("replacement-attempt"),
+        [],
+      );
       assert.strictEqual(next.provider, "boat");
       assert.strictEqual(providers.hetzner.servers.size, 1);
       assert.strictEqual(providers.boat.sandboxes.size, 1);
@@ -260,7 +284,9 @@ for (const replacementDocker of ["absent", "running"] as const) {
         const machines = yield* WorkerMachines;
         const workers = yield* SshWorkers;
         const executor = yield* Executor;
-        const original = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+        const original = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          TEST_AGENT.brain,
+        ]);
         const [server] = providers.hetzner.servers.values();
         assert(server?.publicIp !== undefined);
         yield* workers.addWorker(replacementAddress);
@@ -335,7 +361,7 @@ for (const [provider, address] of [
         const proceed = yield* Deferred.make<void>();
         const machines = yield* WorkerMachines;
         if (mode === "first-use") {
-          const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+          const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
           yield* machines.release(first.hold);
           logs.lines.length = 0;
           logs.warnings.length = 0;
@@ -346,7 +372,7 @@ for (const [provider, address] of [
           Effect.andThen(Deferred.await(proceed)),
         );
         const creating = yield* machines
-          .create(WORKER, RUN, request.attemptId, [])
+          .create(WORKER, MACHINE_RUN, request.attemptId, [])
           .pipe(Effect.forkChild);
         yield* Deferred.await(started);
         const preparing = (yield* machines.machines)[0];

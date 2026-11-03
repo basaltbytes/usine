@@ -4,7 +4,7 @@ import { refreshCopy } from "~/lib/strings";
 import { RefreshContext } from "./provider";
 
 export const RefreshStatus = () => {
-  const sources = useContext(RefreshContext);
+  const { sources, connection } = useContext(RefreshContext);
   const now = useNow(1_000);
   if (sources.length === 0) return null;
   const successful = sources.map((source) => source.updatedAt).filter((time) => time > 0);
@@ -32,6 +32,7 @@ export const RefreshStatus = () => {
           </time>
         </>
       )}
+      {connection === "disconnected" && <span role="status">{refreshCopy.disconnected}</span>}
       {failed.length > 0 && <span role="status">{refreshCopy.failed(failed.join(", "))}</span>}
     </p>
   );

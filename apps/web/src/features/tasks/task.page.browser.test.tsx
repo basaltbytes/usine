@@ -49,7 +49,23 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const method = init?.method ?? (input instanceof Request ? input.method : "GET");
   if (url.pathname === "/api/overview")
     return json(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)));
+  if (/^\/api\/projects\/[^/]+$/u.test(url.pathname)) {
+    const project = overview.projects[0];
+    if (project !== undefined) return json(JSON.stringify(Schema.encodeSync(ProjectView)(project)));
+    return json("{}", 404);
+  }
   if (url.pathname === "/api/agents") return json('["developer","reviewer"]');
+  const runHistory = /\/tasks\/(\d+)\/runs$/u.exec(url.pathname)?.[1];
+  if (runHistory !== undefined) {
+    const task = tasks.get(runHistory);
+    return json(
+      JSON.stringify({
+        runs: task === undefined ? [] : Schema.encodeSync(TaskView)(task).runs,
+        total: task?.runs.length ?? 0,
+        nextOffset: null,
+      }),
+    );
+  }
   const number = /\/tasks\/(\d+)$/u.exec(url.pathname)?.[1];
   if (number !== undefined) {
     taskRequests.push(number);
@@ -375,7 +391,9 @@ it("retries a failed direct link and retains the task during a failed refresh", 
     .element(page.getByRole("heading", { level: 1 }))
     .toMatchTextContent("Rework the conversation reader");
   taskUnavailable = false;
-  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  await queryClient.invalidateQueries({
+    queryKey: taskQuery(taskRepository, ItemNumber.make(40)).queryKey,
+  });
   await expect.element(page.getByText("Could not refresh the task")).not.toBeInTheDocument();
 });
 

@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, queryOptions, useQuery } from "@tanstack/react-query";
@@ -17,7 +18,7 @@ const start = new Date("2026-10-29T12:00:00Z");
 const primary = () =>
   queryOptions({
     queryKey: ["primary"],
-    meta: { refreshLabel: "Activity" },
+    meta: { refreshLabel: "Activity", changes: changes.kind("activity") },
     queryFn: async () => {
       if (failing) throw new Error("Server unavailable");
       return "ready";
@@ -27,7 +28,7 @@ const primary = () =>
 const secondary = () =>
   queryOptions({
     queryKey: ["secondary"],
-    meta: { refreshLabel: "Statistics" },
+    meta: { refreshLabel: "Statistics", changes: changes.kind("activity") },
     queryFn: async () => "ready",
     refetchInterval: 60_000,
   });
@@ -124,13 +125,13 @@ it("excludes cached queries from pages that are no longer mounted", async () => 
     .toBe(new Date(start.getTime() + 90_000).toISOString());
 });
 
-it("tracks the newest poll, ignores static and disabled observers, and drops queries that stop polling", async () => {
+it("tracks active event-driven queries and excludes disabled observers", async () => {
   const ConditionalPage = () => {
     useQuery({
       ...primary(),
       refetchInterval: (query) => (query.state.data === "finished" ? false : 2_000),
     });
-    useQuery({ ...secondary(), refetchInterval: false });
+    useQuery({ ...secondary(), enabled: false, refetchInterval: false });
     useQuery({ ...secondary(), enabled: () => false, refetchInterval: 60_000 });
     return <PageHeading title="Run" />;
   };
@@ -157,6 +158,6 @@ it("tracks the newest poll, ignores static and disabled observers, and drops que
     .toBe(new Date(start.getTime() + 5_000).toISOString());
   client.setQueryData(primary().queryKey, "finished");
   await expect
-    .element(page.getByLabelText("Last updated", { exact: true }))
-    .not.toBeInTheDocument();
+    .poll(() => host.querySelector("time")?.dateTime)
+    .toBe(new Date(start.getTime() + 10_000).toISOString());
 });

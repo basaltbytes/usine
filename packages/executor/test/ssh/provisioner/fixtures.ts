@@ -1,5 +1,6 @@
 import { Attachments } from "@usine/gateway";
 import { fakeGateway } from "../gateway/support.ts";
+import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import {
   ProvisionerTimings,
@@ -34,6 +35,7 @@ import { BOAT_TEST_API, fakeProviders, HETZNER_TEST_API } from "./fake-providers
 
 export const ROOT = WorkerRoot.make("/home/usine/.usine");
 export const RUN = RunId.make("remote-run");
+export const MACHINE_RUN = { id: RUN, loop: LoopName.make("project/developer") };
 export const KEY = "sk-ant-api-for-provisioned-tests";
 
 /** A provisioned Hetzner Worker without a Gateway, whose Attempts get an Anthropic API key. */

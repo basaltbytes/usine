@@ -77,16 +77,20 @@ export const applyMove = (
   const card = { ...moved, labels: moved.labels.filter((label) => !laneLabels.has(label)) };
   return lanes.map((lane) => {
     const items = lane.items.filter(({ itemKey }) => itemKey !== move.itemKey);
-    return lane.id === move.toLane ? { ...lane, items: [card, ...items] } : { ...lane, items };
+    const placed = lane.id === move.toLane ? [card, ...items] : items;
+    return lane.totalItems === undefined
+      ? { ...lane, items: placed }
+      : { ...lane, items: placed, totalItems: lane.totalItems + placed.length - lane.items.length };
   });
 };
 
 /** Returns the Runs whose Item has no card, such as schedule Runs and Runs on quarantined Items. */
 export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunSummaryView> => {
   const carded = new Set(
-    project.board.lanes.flatMap(({ items }) =>
-      items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
-    ),
+    project.board.cardedItemKeys ??
+      project.board.lanes.flatMap(({ items }) =>
+        items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
+      ),
   );
   return project.runs.filter(({ itemKey }) => !carded.has(itemKey));
 };

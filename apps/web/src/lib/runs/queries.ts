@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import type { RunId } from "@usine/core/run";
 import {
@@ -33,9 +34,11 @@ export const runDetailQuery = (queryClient: QueryClient, runId: RunId) => {
         earlierTranscript: current.earlierTranscript,
       });
     },
-    staleTime: 1_000,
+    staleTime: 30_000,
     structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
-    meta: { refreshLabel: "Run" },
-    refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
+    meta: {
+      refreshLabel: "Run",
+      changes: changes.any(changes.run(runId), changes.kind("configuration")),
+    },
   });
 };

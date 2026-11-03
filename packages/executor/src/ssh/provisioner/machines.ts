@@ -7,7 +7,7 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { safeSegment } from "@usine/core/repository";
 import type { AttemptId } from "@usine/core/attempt";
-import type { RunId } from "@usine/core/run";
+import type { Run } from "@usine/core/run";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
 import {
   Array as Arr,
@@ -199,7 +199,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const fields = {
       worker: found.worker,
       provider: found.provider,
-      runId: Option.getOrElse(found.runId, () => "none"),
+      runId: Option.match(found.run, { onNone: () => "none", onSome: ({ id }) => id }),
       attemptId: Option.getOrElse(found.attemptId, () => "none"),
       reason,
     };
@@ -344,14 +344,15 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   const create = Effect.fn("SshExecutor.createMachine")(
     function* (
       worker: WorkerName,
-      runId: RunId,
+      run: Pick<Run, "id" | "loop">,
       attemptId: AttemptId,
       brains: ReadonlyArray<BrainSpec>,
     ) {
+      const runId = run.id;
       yield* Effect.annotateCurrentSpan({ worker, runId, attemptId });
       const entry = yield* options.attemptEntry(worker, attemptId);
       const driver = yield* drivers.forEntry(entry);
-      const reused = yield* reuse.take(entry, runId, attemptId, brains, driver);
+      const reused = yield* reuse.take(entry, run, attemptId, brains, driver);
       if (Option.isSome(reused)) return reused.value;
       yield* Effect.gen(function* () {
         const earlier = yield* driver.list(instance, Option.some(worker));
@@ -402,7 +403,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         uses: 1,
         since,
         id: Option.none(),
-        runId: Option.some(runId),
+        run: Option.some(run),
         attemptId: Option.some(attemptId),
         machine: Option.none(),
         holder: "lease",
@@ -564,7 +565,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
             uses: 0,
             since: yield* DateTime.now,
             id: Option.none(),
-            runId: Option.none(),
+            run: Option.none(),
             attemptId: Option.some(attemptId),
             machine: Option.none(),
             holder,

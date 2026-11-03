@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import { LoopName } from "@usine/core/loop";
 import { asc, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
@@ -13,6 +14,7 @@ const persistence =
 
 const makeLoopControl = Effect.gen(function* () {
   const database = yield* RunDatabase;
+  const bus = yield* ChangeBus;
 
   const stateFor = Effect.fn("LoopControl.stateFor")(function* (loop: LoopName) {
     yield* Effect.annotateCurrentSpan({ loop });
@@ -56,6 +58,12 @@ const makeLoopControl = Effect.gen(function* () {
       })
       .execute()
       .pipe(persistence("write loop runtime state"));
+    yield* bus.publish([
+      {
+        audience: { _tag: "Loop", loop: next.loop },
+        target: { kind: "configuration", id: "instance" },
+      },
+    ]);
     yield* Effect.logInfo(next.paused ? "Loop paused" : "Loop unpaused", {
       loop: next.loop,
       paused: next.paused,

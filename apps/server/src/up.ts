@@ -1,3 +1,4 @@
+import { changeBusLayer } from "@usine/core/changes";
 import { startupListener, type StartupListener } from "./listener.ts";
 import { createServer } from "node:http";
 import { memberAccessLayer } from "./auth/access.ts";
@@ -415,8 +416,12 @@ export const up = (command: UpCommand) =>
       ).pipe(
         Effect.scoped,
         Effect.forever,
+        Effect.provideService(CurrentInstance, instances),
         Effect.provideContext(tracer),
         Effect.provideContext(configurationContext),
       );
     }),
-  ).pipe(Effect.provideService(References.MinimumLogLevel, command.logLevel));
+  ).pipe(
+    Effect.provide(changeBusLayer),
+    Effect.provideService(References.MinimumLogLevel, command.logLevel),
+  );
