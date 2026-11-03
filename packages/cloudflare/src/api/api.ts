@@ -155,21 +155,21 @@ export class ProcessStatus extends Schema.Class<ProcessStatus>("@usine/cloudflar
 /** The requested sandbox has no stored record. The API returns HTTP 404. */
 export class SandboxNotFound extends Schema.TaggedError<SandboxNotFound>()(
   "SandboxNotFound",
-  { name: SandboxName },
+  { sandbox: SandboxName },
   { httpApiStatus: 404 },
 ) {}
 
 /** The sandbox exists for another owner or Attempt. */
 export class SandboxConflict extends Schema.TaggedError<SandboxConflict>()(
   "SandboxConflict",
-  { name: SandboxName, owner: SandboxOwner, attempt: AttemptId },
+  { sandbox: SandboxName, owner: SandboxOwner, attempt: AttemptId },
   { httpApiStatus: 409 },
 ) {}
 
 /** The sandbox holds credentials issued at `current`, after the request's, which it refused. */
 export class StaleCredentials extends Schema.TaggedError<StaleCredentials>()(
   "StaleCredentials",
-  { name: SandboxName, issuedAt: Schema.DateTimeUtc, current: Schema.DateTimeUtc },
+  { sandbox: SandboxName, issuedAt: Schema.DateTimeUtc, current: Schema.DateTimeUtc },
   { httpApiStatus: 409 },
 ) {}
 
@@ -183,14 +183,14 @@ export class ImageNotFound extends Schema.TaggedError<ImageNotFound>()(
 /** The requested command has no readable process ID in the sandbox. The API returns HTTP 404. */
 export class ProcessNotFound extends Schema.TaggedError<ProcessNotFound>()(
   "ProcessNotFound",
-  { name: SandboxName, process: ProcessId },
+  { sandbox: SandboxName, process: ProcessId },
   { httpApiStatus: 404 },
 ) {}
 
 /** The container didn't start, stopped, or failed a command. `message` comes from the runtime. */
 export class ContainerUnavailable extends Schema.TaggedError<ContainerUnavailable>()(
   "ContainerUnavailable",
-  { name: SandboxName, message: Schema.String },
+  { sandbox: SandboxName, message: Schema.String },
   { httpApiStatus: 503 },
 ) {}
 
@@ -209,6 +209,12 @@ export const registryGroup = HttpApiGroup.make("registry").add(
   }),
 );
 
+const SandboxNotFoundJson = SandboxNotFound.pipe(Schema.encodeKeys({ sandbox: "name" }));
+const SandboxConflictJson = SandboxConflict.pipe(Schema.encodeKeys({ sandbox: "name" }));
+const StaleCredentialsJson = StaleCredentials.pipe(Schema.encodeKeys({ sandbox: "name" }));
+const ProcessNotFoundJson = ProcessNotFound.pipe(Schema.encodeKeys({ sandbox: "name" }));
+const ContainerUnavailableJson = ContainerUnavailable.pipe(Schema.encodeKeys({ sandbox: "name" }));
+
 /** The routes of one sandbox, served by its Durable Object. */
 export const sandboxGroup = HttpApiGroup.make("sandbox")
   .add(
@@ -216,38 +222,38 @@ export const sandboxGroup = HttpApiGroup.make("sandbox")
       params: sandbox,
       payload: CreateSandbox,
       success: SandboxSummary,
-      error: [SandboxConflict, StaleCredentials, ImageNotFound, ContainerUnavailable],
+      error: [SandboxConflictJson, StaleCredentialsJson, ImageNotFound, ContainerUnavailableJson],
     }),
     HttpApiEndpoint.get("get", "/v1/sandboxes/:name", {
       params: sandbox,
       success: SandboxSummary,
-      error: SandboxNotFound,
+      error: SandboxNotFoundJson,
     }),
     HttpApiEndpoint.put("credentials", "/v1/sandboxes/:name/credentials", {
       params: sandbox,
       payload: SandboxCredentials,
       success: SandboxSummary,
-      error: [SandboxNotFound, StaleCredentials, ContainerUnavailable],
+      error: [SandboxNotFoundJson, StaleCredentialsJson, ContainerUnavailableJson],
     }),
     HttpApiEndpoint.post("hold", "/v1/sandboxes/:name/hold", {
       params: sandbox,
       success: SandboxSummary,
-      error: [SandboxNotFound, ContainerUnavailable],
+      error: [SandboxNotFoundJson, ContainerUnavailableJson],
     }),
     HttpApiEndpoint.post("stop", "/v1/sandboxes/:name/stop", {
       params: sandbox,
       success: Stopped,
-      error: [SandboxNotFound, ContainerUnavailable],
+      error: [SandboxNotFoundJson, ContainerUnavailableJson],
     }),
     HttpApiEndpoint.delete("destroy", "/v1/sandboxes/:name", {
       params: sandbox,
       success: Destroyed,
-      error: ContainerUnavailable,
+      error: ContainerUnavailableJson,
     }),
     HttpApiEndpoint.get("process", "/v1/sandboxes/:name/processes/:process", {
       params: { ...sandbox, process: ProcessId },
       success: ProcessStatus,
-      error: [SandboxNotFound, ProcessNotFound, ContainerUnavailable],
+      error: [SandboxNotFoundJson, ProcessNotFoundJson, ContainerUnavailableJson],
     }),
   )
   .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" });

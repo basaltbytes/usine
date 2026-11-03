@@ -1126,7 +1126,7 @@ const makeRunStore = Effect.gen(function* () {
 export class RunStore extends Context.Service<
   RunStore,
   {
-    readonly awaitingCi: () => Effect.Effect<ReadonlyArray<RunSnapshot>, EnginePersistenceError>;
+    readonly awaitingCi: Effect.Effect<ReadonlyArray<RunSnapshot>, EnginePersistenceError>;
     readonly settleCi: (
       runId: RunId,
       head: CommitSha,

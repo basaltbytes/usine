@@ -1,6 +1,5 @@
 {
   "src/api/api.ts": {
-    "errorPayloadShadowsName": 5,
     "schemaClassMissingBrand": 18
   },
   "src/api/names.ts": {
@@ -13,7 +12,6 @@
   },
   "src/registry.ts": {
     "deterministicKeys": 2,
-    "errorPayloadShadowsName": 1,
     "schemaClassMissingBrand": 1
   },
   "src/sandbox/ports.ts": {
@@ -29,7 +27,6 @@
   },
   "src/worker.ts": {
     "asyncFunction": 14,
-    "effectTryWithoutCatch": 2,
     "globalFetch": 3,
     "schemaSync": 5
   },

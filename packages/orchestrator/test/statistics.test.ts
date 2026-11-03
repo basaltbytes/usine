@@ -860,7 +860,7 @@ describe("OperatorStatistics", () => {
         let historyReads = 0;
         const reader = Layer.succeed(RunReader)({
           runForEvent: () => Effect.die("unused"),
-          latestPoolRateLimits: () => Effect.succeed([]),
+          latestPoolRateLimits: Effect.succeed([]),
           inspect: () => Effect.die("unused"),
           summary: () => Effect.die("unused"),
           evidence: () => Effect.die("unused"),
@@ -877,14 +877,14 @@ describe("OperatorStatistics", () => {
               );
             }),
           events: () => Effect.die("unused"),
-          revision: () => Effect.succeedSome(ProjectionRevision.make(0)),
+          revision: Effect.succeedSome(ProjectionRevision.make(0)),
           transcript: (query) =>
             Effect.succeed(
               query._tag === "TranscriptUsageQuery" && query.attemptId === "implemented/1"
                 ? [tokenReport("implemented/1", 100_000, 2)]
                 : [],
             ),
-          attemptsByWorker: () => Effect.die("unused"),
+          attemptsByWorker: Effect.die("unused"),
           sightings: () => Effect.die("unused"),
         });
         const items = Layer.succeed(ItemProjectionReader)({

@@ -134,8 +134,8 @@ it.live(
             { discard: true },
           ),
         );
-        yield* capture("usage pool limits", reader.latestPoolRateLimits());
-        yield* capture("CI wait reconciliation", store.awaitingCi());
+        yield* capture("usage pool limits", reader.latestPoolRateLimits);
+        yield* capture("CI wait reconciliation", store.awaitingCi);
         yield* capture("polling admitted event", reader.runForEvent(DedupKey.make("dedup-0")));
         yield* capture(
           "polling blocking run",

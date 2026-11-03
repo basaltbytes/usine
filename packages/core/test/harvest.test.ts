@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Data, DateTime, Effect, Logger, Option } from "effect";
+import { DateTime, Effect, Logger, Option, Schema } from "effect";
 import { Agent, AgentName, AgentPersona } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 import { AttemptId, AttemptWindow, AttemptWindows } from "../src/attempt/attempt.ts";
@@ -38,7 +38,12 @@ const spec: HarvestSpec = {
   }),
 };
 
-class CommandFailed extends Data.TaggedError("CommandFailed")<{ readonly message: string }> {}
+class CommandFailed extends Schema.TaggedError<CommandFailed, { readonly Brand: unique symbol }>()(
+  "CommandFailed",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /** Returns an Attempt window that is open if `endedAt` is `null`. */
 const window = (attemptId: AttemptId, startedAt: string, endedAt: string | null = null) =>
@@ -124,7 +129,7 @@ describe("harvesting an Attempt's facts", () => {
     Effect.gen(function* () {
       const { facts, commands, warnings } = yield* harvest(
         [`${OTHER}\trefs/heads/main`, `${BASE}\trefs/pull/7/head`],
-        Effect.fail(new CommandFailed({ message: "gh exited with code 1" })),
+        Effect.fail(CommandFailed.make({ message: "gh exited with code 1" })),
       );
       assert.deepStrictEqual(
         facts.map((fact) => fact._tag),
@@ -174,7 +179,7 @@ describe("harvesting an Attempt's facts", () => {
     Effect.gen(function* () {
       const { facts, warnings } = yield* harvest(
         [`${HEAD}\trefs/heads/usine/fix`],
-        Effect.fail(new CommandFailed({ message: "gh exited with code 1" })),
+        Effect.fail(CommandFailed.make({ message: "gh exited with code 1" })),
       );
       assert.deepStrictEqual(
         facts.map((fact) => fact._tag),
@@ -637,7 +642,7 @@ describe("harvesting an Attempt's facts", () => {
           ],
         ];
         const unread = Effect.fail(
-          new CommandFailed({ message: "the run tables are unavailable" }),
+          CommandFailed.make({ message: "the run tables are unavailable" }),
         );
         const error = yield* harvest([], NEVER_ASKED, listed, itemRun("issues/12"), unread).pipe(
           Effect.flip,
@@ -740,7 +745,7 @@ describe("harvesting an Attempt's facts", () => {
       const { facts, warnings } = yield* harvest(
         [],
         NEVER_ASKED,
-        [[ISSUE_COMMENTS, Effect.fail(new CommandFailed({ message: "gh exited with code 1" }))]],
+        [[ISSUE_COMMENTS, Effect.fail(CommandFailed.make({ message: "gh exited with code 1" }))]],
         itemRun("issues/12"),
       );
       assert.deepStrictEqual(

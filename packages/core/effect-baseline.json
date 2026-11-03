@@ -93,8 +93,7 @@
   },
   "test/harvest.test.ts": {
     "globalJson": 2,
-    "globalJsonInEffect": 3,
-    "preferSchemaTaggedError": 1
+    "globalJsonInEffect": 3
   },
   "test/repository.test.ts": {
     "schemaSync": 1

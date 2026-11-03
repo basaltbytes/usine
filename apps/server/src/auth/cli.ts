@@ -50,7 +50,7 @@ export const signIn = Effect.fn("Cli.signIn")(function* (
         ),
         Effect.timeout("20 seconds"),
         Effect.mapError((error) =>
-          error instanceof AuthError
+          Schema.is(AuthError)(error)
             ? error
             : authFailure(
                 "Sign-in failed. Check the instance URL and GitHub App user authorization settings.",

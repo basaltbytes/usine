@@ -62,7 +62,10 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
               .then(
                 () => setError(editorCopy.alreadyExists),
                 (cause: unknown) => {
-                  if (cause instanceof OperatorHttpError && cause.error === "ConfigurationNotFound")
+                  if (
+                    Schema.is(OperatorHttpError)(cause) &&
+                    cause.error === "ConfigurationNotFound"
+                  )
                     setEditing(identifier.value);
                   else setError(rejectionMessage(cause));
                 },

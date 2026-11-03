@@ -3,8 +3,7 @@
     "schemaClassMissingBrand": 1
   },
   "src/cloudflare/cloudflare.ts": {
-    "nestedEffectGenYield": 1,
-    "yieldInCallArgument": 4
+    "yieldInCallArgument": 3
   },
   "src/cloudflare/shell/shell.ts": {
     "asyncFunction": 1,
@@ -27,7 +26,6 @@
   },
   "src/executor.ts": {
     "deterministicKeys": 3,
-    "instanceOfSchema": 1,
     "schemaClassMissingBrand": 11
   },
   "src/guard.ts": {
@@ -46,9 +44,6 @@
     "globalJson": 1,
     "yieldInCallArgument": 1
   },
-  "src/remote/reclaim.ts": {
-    "returnEffectInGen": 2
-  },
   "src/remote/remote.ts": {
     "yieldInCallArgument": 8
   },
@@ -59,13 +54,9 @@
     "yieldInCallArgument": 1
   },
   "src/ssh/gateway/admin.ts": {
-    "instanceOfSchema": 2,
-    "preferSchemaTaggedError": 1,
     "schemaClassMissingBrand": 1
   },
   "src/ssh/gateway/forward.ts": {
-    "globalErrorInEffectFailure": 1,
-    "raceFirstWithSleepToTimeout": 1,
     "schemaClassMissingBrand": 1,
     "yieldInCallArgument": 2
   },
@@ -87,11 +78,7 @@
   "src/ssh/provisioner/host-key.ts": {
     "yieldInCallArgument": 2
   },
-  "src/ssh/provisioner/http.ts": {
-    "preferSchemaTaggedError": 2
-  },
   "src/ssh/provisioner/machines.ts": {
-    "nestedEffectGenYield": 1,
     "yieldInCallArgument": 4
   },
   "src/ssh/provisioner/model.ts": {
@@ -118,7 +105,6 @@
   },
   "test/cloudflare/cloudflare.test.ts": {
     "globalJsonInEffect": 3,
-    "instanceOfSchema": 7,
     "yieldInCallArgument": 4
   },
   "test/cloudflare/fake-worker.ts": {
@@ -135,7 +121,6 @@
   "test/exe-dev/launch.test.ts": {
     "globalJson": 1,
     "globalJsonInEffect": 1,
-    "instanceOfSchema": 1,
     "yieldInCallArgument": 14
   },
   "test/exe-dev/preparation.test.ts": {
@@ -154,17 +139,14 @@
     "yieldInCallArgument": 1
   },
   "test/salvage.test.ts": {
-    "globalErrorInEffectFailure": 3,
     "yieldInCallArgument": 2
   },
   "test/ssh/codex-connection.test.ts": {
     "globalJsonInEffect": 1,
-    "multipleEffectProvide": 1,
     "yieldInCallArgument": 9
   },
   "test/ssh/container.test.ts": {
     "globalJsonInEffect": 7,
-    "instanceOfSchema": 4,
     "nodeBuiltinImport": 1
   },
   "test/ssh/gateway/environment.test.ts": {
@@ -172,7 +154,6 @@
   },
   "test/ssh/gateway/gateway.test.ts": {
     "globalJsonInEffect": 4,
-    "instanceOfSchema": 3,
     "yieldInCallArgument": 11
   },
   "test/ssh/gateway/gh.test.ts": {
@@ -194,13 +175,11 @@
   },
   "test/ssh/podman.test.ts": {
     "globalJson": 2,
-    "globalJsonInEffect": 1,
-    "instanceOfSchema": 1
+    "globalJsonInEffect": 1
   },
   "test/ssh/provisioner/checks.test.ts": {
     "globalJson": 2,
-    "globalJsonInEffect": 2,
-    "instanceOfSchema": 1
+    "globalJsonInEffect": 2
   },
   "test/ssh/provisioner/cleanup.test.ts": {
     "yieldInCallArgument": 7
@@ -223,7 +202,6 @@
   "test/ssh/provisioner/provisioned.test.ts": {
     "globalDate": 1,
     "globalDateInEffect": 1,
-    "instanceOfSchema": 5,
     "schemaSync": 1,
     "yieldInCallArgument": 9
   },
@@ -238,7 +216,6 @@
   },
   "test/ssh/provisioner/tailnet.test.ts": {
     "globalJsonInEffect": 2,
-    "instanceOfSchema": 1,
     "schemaSync": 1,
     "schemaSyncInEffect": 1,
     "yieldInCallArgument": 1
@@ -258,7 +235,6 @@
   },
   "test/ssh/ssh.test.ts": {
     "globalJsonInEffect": 2,
-    "instanceOfSchema": 1,
     "yieldInCallArgument": 3
   },
   "test/ssh/support.ts": {

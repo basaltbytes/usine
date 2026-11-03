@@ -111,11 +111,8 @@ const sqliteClientLayer = (instanceDirectory: InstanceDirectory) =>
       return openSqliteLayer({ filename: runtimeStorePath(path, instanceDirectory) }, (cause) =>
         startupError("open local database", cause),
       );
-    }).pipe(
-      Effect.mapError((cause) => startupError("prepare local database directory", cause)),
-      Effect.provide(NodeServices.layer),
-    ),
-  );
+    }).pipe(Effect.mapError((cause) => startupError("prepare local database directory", cause))),
+  ).pipe(Layer.provide(NodeServices.layer));
 
 /**
  * Returns a Node SQLite layer at `<instanceDirectory>/.usine/runtime.sqlite`, creating the
@@ -231,11 +228,8 @@ const existingSqliteLayer = (instanceDirectory: InstanceDirectory) =>
       return readOnlySqliteLayer(filename, (cause) =>
         startupError("open existing local database", cause),
       );
-    }).pipe(
-      Effect.mapError((cause) => startupError("open existing local database", cause)),
-      Effect.provide(NodeServices.layer),
-    ),
-  );
+    }).pipe(Effect.mapError((cause) => startupError("open existing local database", cause))),
+  ).pipe(Layer.provide(NodeServices.layer));
 
 /** Returns a layer that opens an existing `.usine/runtime.sqlite` read-only, without initializing or migrating it. */
 export const runReaderLayer = (
@@ -318,10 +312,10 @@ export const backup = Effect.fn("LocalSqlite.backup")(
         yield* fileSystem
           .writeFile(staged, new Uint8Array(), { mode: 0o600 })
           .pipe(failed("stage"));
-        const metadata = yield* Effect.flatMap(SqliteClient.SqliteClient, (client) =>
-          // Node's backup can't be canceled; wait before closing the database or deleting staging.
-          client.backup(staged).pipe(failed("copy"), Effect.uninterruptible),
-        ).pipe(Effect.provide(readOnlySqliteLayer(source, failure("open"))));
+        const backupContext = yield* Layer.build(readOnlySqliteLayer(source, failure("open")));
+        const client = Context.get(backupContext, SqliteClient.SqliteClient);
+        // Node's backup can't be canceled; wait before closing the database or deleting staging.
+        const metadata = yield* client.backup(staged).pipe(failed("copy"), Effect.uninterruptible);
         // A hard link atomically creates the destination without overwriting it.
         yield* fileSystem.link(staged, destination).pipe(failed("publish"));
         return metadata;
@@ -343,5 +337,4 @@ export const backup = Effect.fn("LocalSqlite.backup")(
       reason: error.reason,
     }),
   ),
-  Effect.provide(NodeServices.layer),
 );

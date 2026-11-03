@@ -1,5 +1,4 @@
 import { backup as backupDatabase, DatabaseSync } from "node:sqlite";
-import { NodeServices } from "@effect/platform-node";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Option, Path, type PlatformError, Schema } from "effect";
 import { durableStoragePath } from "./storage-path.ts";
@@ -117,5 +116,4 @@ export const backup = Effect.fn("DurableStorage.backup")(
       reason: error.reason,
     }),
   ),
-  Effect.provide(NodeServices.layer),
 );

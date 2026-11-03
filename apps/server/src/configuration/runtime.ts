@@ -1,7 +1,7 @@
+import { NodeServices } from "@effect/platform-node";
 import { localActor } from "@usine/core/operator";
 import { LoadedInstance } from "@usine/config/instance";
 import { InstancePath } from "@usine/config/file";
-import { NodeServices } from "@effect/platform-node";
 import {
   ConfigurationStore,
   ConfigurationStoreError,
@@ -115,7 +115,6 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
   const hasFiles = yield* Effect.flatMap(FileSystem.FileSystem, (fs) =>
     fs.exists(`${directory}/usine.yaml`),
   ).pipe(
-    Effect.provide(NodeServices.layer),
     Effect.mapError((cause) =>
       ConfigurationStoreError.make({ operation: "inspect initial configuration", cause }),
     ),

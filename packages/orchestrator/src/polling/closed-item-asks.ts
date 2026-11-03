@@ -11,7 +11,7 @@ export const closeAsksOfClosedItems = Effect.fn("PollingTriggers.closeAsksOfClos
   function* (repository: RepositoryName) {
     yield* Effect.annotateCurrentSpan({ repository });
     const budgets = yield* CycleBudgets;
-    const asks = (yield* budgets.asks()).filter(
+    const asks = (yield* budgets.asks).filter(
       (ask) => canonicalRepositoryName(ask.repository) === canonicalRepositoryName(repository),
     );
     for (const ask of asks) {

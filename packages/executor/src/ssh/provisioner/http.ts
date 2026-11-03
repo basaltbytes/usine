@@ -1,21 +1,25 @@
 import type { MachineProvider } from "@usine/core/worker";
-import { Data, Effect, Option, type Redacted, Schema } from "effect";
+import { Effect, Option, type Redacted, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 
 /** The timeout for one provider API request. */
 const REQUEST_TIMEOUT = "30 seconds";
 
 /** A provider API request that got no response or an unreadable one. */
-export class ProviderUnanswered extends Data.TaggedError("ProviderUnanswered")<{
-  readonly detail: string;
-}> {}
+export class ProviderUnanswered extends Schema.TaggedError<
+  ProviderUnanswered,
+  { readonly Brand: unique symbol }
+>()("ProviderUnanswered", { detail: Schema.String }) {}
 
 /** A provider API response with an error status, with the provider's error code and message. */
-class ProviderRefused extends Data.TaggedError("ProviderRefused")<{
-  readonly status: number;
-  readonly code: Option.Option<string>;
-  readonly message: string;
-}> {}
+class ProviderRefused extends Schema.TaggedError<
+  ProviderRefused,
+  { readonly Brand: unique symbol }
+>()("ProviderRefused", {
+  status: Schema.Int,
+  code: Schema.Option(Schema.String),
+  message: Schema.String,
+}) {}
 
 export type ProviderFailure = ProviderUnanswered | ProviderRefused;
 
@@ -96,30 +100,29 @@ export const providerApiFor = (
         Effect.timeout(REQUEST_TIMEOUT),
         Effect.mapError((cause) =>
           HttpClientError.isHttpClientError(cause)
-            ? new ProviderUnanswered({ detail: `no response (${cause.reason._tag})` })
-            : new ProviderUnanswered({ detail: `no response within ${REQUEST_TIMEOUT}` }),
+            ? ProviderUnanswered.make({ detail: `no response (${cause.reason._tag})` })
+            : ProviderUnanswered.make({ detail: `no response within ${REQUEST_TIMEOUT}` }),
         ),
       );
       const text = yield* response.text.pipe(
-        Effect.mapError(
-          () => new ProviderUnanswered({ detail: "the response body can't be read" }),
+        Effect.mapError(() =>
+          ProviderUnanswered.make({ detail: "the response body can't be read" }),
         ),
       );
       const body =
         text === ""
           ? null
           : yield* decodeJson(text).pipe(
-              Effect.mapError(
-                () =>
-                  new ProviderUnanswered({
-                    detail: `the response with status ${String(response.status)} isn't JSON`,
-                  }),
+              Effect.mapError(() =>
+                ProviderUnanswered.make({
+                  detail: `the response with status ${String(response.status)} isn't JSON`,
+                }),
               ),
             );
       const answer: ProviderResponse = { status: response.status, body };
       if (response.status >= 400) {
         const { code, message } = errorOf(answer);
-        return yield* new ProviderRefused({ status: response.status, code, message });
+        return yield* ProviderRefused.make({ status: response.status, code, message });
       }
       return answer;
     });
@@ -131,11 +134,10 @@ export const providerApiFor = (
         response: ProviderResponse,
       ): Effect.Effect<S["Type"], ProviderUnanswered, S["DecodingServices"]> =>
         Schema.decodeEffect(schema)(response.body).pipe(
-          Effect.mapError(
-            () =>
-              new ProviderUnanswered({
-                detail: `the response to ${operation} doesn't have the documented shape`,
-              }),
+          Effect.mapError(() =>
+            ProviderUnanswered.make({
+              detail: `the response to ${operation} doesn't have the documented shape`,
+            }),
           ),
         );
 

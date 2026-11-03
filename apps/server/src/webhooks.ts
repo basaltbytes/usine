@@ -63,6 +63,8 @@ const makeWebhookHandler: (
     yield* Effect.annotateCurrentSpan({ mode: webhooks.mode });
     if (webhooks.mode !== "endpoint") {
       yield* Effect.logInfo("Webhook endpoint disabled", { mode: webhooks.mode });
+      // The caller runs the prepared webhook response action.
+      // @effect-diagnostics-next-line returnEffectInGen:off
       return Effect.succeed(HttpServerResponse.empty({ status: 404 }));
     }
     const secret = yield* Config.schema(Secret, "USINE_GITHUB_WEBHOOK_SECRET").pipe(
@@ -159,6 +161,8 @@ const makeWebhookHandler: (
       return HttpServerResponse.empty({ status: 204 });
     });
 
+    // The caller runs the prepared webhook response action.
+    // @effect-diagnostics-next-line returnEffectInGen:off
     return receive().pipe(
       Effect.catchTag("WebhookRequestError", (error) =>
         Effect.logWarning("Webhook delivery rejected", {

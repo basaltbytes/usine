@@ -40,7 +40,6 @@
     "effecttsgo/missed-pipeable-opportunity": "error",
     "effecttsgo/missing-effect-error": "error",
     "effecttsgo/missing-star-in-yield-effect-gen": "error",
-    "effecttsgo/multiple-effect-provide": "error",
     "effecttsgo/new-schema-class": "error",
     "effecttsgo/option-match-to-from-option": "error",
     "effecttsgo/overridden-schema-constructor": "error",

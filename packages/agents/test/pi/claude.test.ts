@@ -447,7 +447,8 @@ describe("Claude child backend", () => {
         Effect.gen(function* () {
           const session = yield* (yield* ChildBackend).launch(request());
           const error = yield* Effect.flip(session.result);
-          assert(error instanceof SessionOperationError);
+          const matchesError = Schema.is(SessionOperationError)(error);
+          assert(matchesError);
           assert.strictEqual(error.operation, "stream");
           assert.match(error.message, /invalid completion update/u);
         }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
@@ -561,7 +562,8 @@ describe("Claude child backend", () => {
         Effect.gen(function* () {
           const session = yield* (yield* ChildBackend).launch(request());
           const error = yield* Effect.flip(session.result);
-          assert(error instanceof SessionOperationError);
+          const matchesError = Schema.is(SessionOperationError)(error);
+          assert(matchesError);
           assert.strictEqual(error.operation, "stream");
         }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
@@ -757,7 +759,7 @@ describe("Claude child backend", () => {
           tool_use_id: "read-1",
         },
         "read-1",
-        { signal: new AbortController().signal },
+        { signal: yield* Effect.abortSignal },
       ).then(
         () => "resumed",
         () => "interrupted",
@@ -919,7 +921,7 @@ describe("Claude child backend", () => {
             CLAUDE_CODE_ENTRYPOINT: "sdk-ts",
             NODE_OPTIONS: undefined,
           },
-          signal: new AbortController().signal,
+          signal: yield* Effect.abortSignal,
         });
         const exitCode = yield* Effect.callback<number | null>((resume) => {
           child.once("exit", (code) => resume(Effect.succeed(code)));
@@ -994,7 +996,8 @@ describe("Claude child backend", () => {
         request(undefined, undefined, exitingHost(1)),
       );
       const error = yield* Effect.flip(session.result);
-      assert(error instanceof SessionOperationError);
+      const matchesError = Schema.is(SessionOperationError)(error);
+      assert(matchesError);
       assert.strictEqual(error.message, "Claude output stream failed");
       assert.deepStrictEqual(resumed, []);
       assert.deepStrictEqual(worker.commands, []);
@@ -1012,7 +1015,8 @@ describe("Claude child backend", () => {
         request(undefined, undefined, exitingHost(SSH_FAILURE)),
       );
       const error = yield* joinAdvancingClock(yield* Effect.forkChild(Effect.flip(session.result)));
-      assert(error instanceof SessionOperationError);
+      const matchesError = Schema.is(SessionOperationError)(error);
+      assert(matchesError);
       assert.strictEqual(error.message, "Claude output stream failed");
       assert.lengthOf(worker.commands, 6, "one stop per resume try");
       assert.deepStrictEqual(resumed, [], "no Claude process starts before the old one stops");
@@ -1038,7 +1042,8 @@ describe("Claude child backend", () => {
         Effect.gen(function* () {
           const backend = yield* ChildBackend;
           const error = yield* Effect.flip(backend.launch(request("claude-never-existed")));
-          assert(error instanceof UnknownModelError);
+          const matchesError = Schema.is(UnknownModelError)(error);
+          assert(matchesError);
           assert.strictEqual(error.model, "claude-never-existed");
         }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
@@ -1159,8 +1164,9 @@ describe("Claude child backend", () => {
           const backend = yield* ChildBackend;
           const session = yield* backend.launch(request());
           const error = yield* Effect.flip(session.result);
-          assert.strictEqual(error instanceof AgentCapacityError, capacity);
-          if (!capacity) assert(error instanceof AgentResultError);
+          assert.strictEqual(Schema.is(AgentCapacityError)(error), capacity);
+          const matchesError = Schema.is(AgentResultError)(error);
+          if (!capacity) assert(matchesError);
         }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
@@ -1175,7 +1181,8 @@ describe("Claude child backend", () => {
         const backend = yield* ChildBackend;
         const session = yield* backend.launch(request());
         const error = yield* Effect.flip(session.result);
-        assert(error instanceof SessionOperationError);
+        const matchesError = Schema.is(SessionOperationError)(error);
+        assert(matchesError);
         assert.strictEqual(error.operation, "stream");
         assert.match(error.message, /closed without a result/u);
       }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),

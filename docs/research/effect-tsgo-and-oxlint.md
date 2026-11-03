@@ -161,7 +161,7 @@ Per diagnostic:
 | `schemaSync` | Effect-native | off | 389 | 69 | 320 | 139 | no | orchestrator 129, server 66, core 51 |
 | `asyncFunction` | Effect-native | off | 310 | 56 | 254 | 74 | no | server 173, durable 51, cloudflare 42 |
 | `preferTypedSchemaDecoder` | Style | suggestion | 210 | 62 | 148 | 108 | yes | orchestrator 97, server 38, core 20 |
-| `multipleEffectProvide` | Anti-pattern | warning | 185 | 2 | 183 | 57 | yes | agents 74, executor 36, engine 31 |
+| `multipleEffectProvide` | Anti-pattern | warning | 185 | 2 | 183 | 57 | unsafe | agents 74, executor 36, engine 31 |
 | `globalJson` | Effect-native | off | 175 | 35 | 140 | 87 | no | server 37, orchestrator 28, executor 22 |
 | `globalJsonInEffect` | Effect-native | off | 163 | 19 | 144 | 79 | no | engine 40, executor 29, orchestrator 28 |
 | `nodeBuiltinImport` | Effect-native | off | 161 | 26 | 135 | 79 | no | server 66, gateway 34, executor 13 |
@@ -220,6 +220,8 @@ Per diagnostic:
 | `flatMapIdentityToFlatten` | Style | suggestion | 1 | 1 | 0 | 1 | yes | server 1 |
 
 `tooling/test/sqlite.mts` has one `nodeBuiltinImport`. It belongs to no package, so no baseline gates it.
+
+`multipleEffectProvide` is excluded from `tooling/oxlint/effect-fix.json`: its autofix can discard layer dependencies and change override precedence. Compose dependent layers with `Layer.provideMerge` in the original provider order, then provide the combined layer once. The diagnostic remains enabled.
 
 Autofix "yes" means the upstream fix is safe in bulk. `tooling/oxlint/effect-fix.json` holds those rules except the ones left to a reviewed change: `instanceOfSchema`, `deterministicKeys`, `missingReturnYieldStar`, `effectFnIife`, and `schemaStructWithTag`. Its 60 rules account for 5,375 of the 9,335 violations. On `packages/github`, `pnpm effect:fix` converged in two passes and lowered the package from 248 to 139 violations; after `oxfmt`, the package type-checked and its 141 tests passed.
 
@@ -342,7 +344,7 @@ The cleanup runs as five changes, grouped by kind of change across the repositor
 
 | Change | Rules | Count |
 | --- | --- | --- |
-| Autofix sweep | Every rule in `tooling/oxlint/effect-fix.json`. Reproduce with `pnpm effect:fix && pnpm effect:baseline`. Largest: `newSchemaClass` 4,734, `preferTypedSchemaDecoder` 211, `multipleEffectProvide` 185, `preferSucceedSomeOrNone` 98, `schemaNumber` 55. | 5,375 in 568 files |
+| Autofix sweep | Every rule in `tooling/oxlint/effect-fix.json`. Reproduce with `pnpm effect:fix && pnpm effect:baseline`. Largest: `newSchemaClass` 4,734, `preferTypedSchemaDecoder` 211, `preferSucceedSomeOrNone` 98, `schemaNumber` 55. | 5,375 in 568 files |
 | Correctness | `instanceOfSchema` 126, `strictEffectProvide` 33, `lazyEffect` 23, `anyUnknownInErrorContext` 13, `effectTryWithoutCatch` 11, `errorPayloadShadowsName` 7, `preferSchemaTaggedError` 7 (including the 3 `Data.TaggedError` checks in `packages/executor/src/ssh/gateway/admin.ts`), `globalErrorInEffectFailure` 7, `unknownInEffectCatch` 5, `effectFnIife` 4, `schemaClassObjectLiteral` 4, `missingReturnYieldStar` 2 | 242 in 98 files |
 | `yieldInCallArgument` | One rule; its bulk autofix is unsafe. | 1,212 in 224 files |
 | Schema | `schemaClassMissingBrand` 637, `schemaSync` 389, `schemaSyncInEffect` 140, `redundantSchemaTagIdentifier` 18, `schemaStructWithTag` 15 | 1,199 in 295 files |

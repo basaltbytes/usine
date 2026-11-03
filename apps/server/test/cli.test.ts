@@ -170,7 +170,8 @@ describe("usine CLI", () => {
     assert.strictEqual(flag.port, 8_125);
     assert.strictEqual(environment.allowVolatileInstance, true);
     assert.strictEqual(plain.allowVolatileInstance, false);
-    assert(unknown instanceof CliUsageError);
+    const matchesUnknown = Schema.is(CliUsageError)(unknown);
+    assert(matchesUnknown);
   });
 
   it("recognises instance folders under temp roots and leaves others alone", () => {
@@ -216,9 +217,11 @@ describe("usine CLI", () => {
     const environmentError = await Effect.runPromise(
       parseCli(["up"], { ...noEnvironment, port: Option.some("not-a-port") }).pipe(Effect.flip),
     );
-    assert(flagError instanceof CliUsageError);
+    const matchesFlagError = Schema.is(CliUsageError)(flagError);
+    assert(matchesFlagError);
     assert.match(flagError.message, /between 1 and 65535/);
-    assert(environmentError instanceof CliUsageError);
+    const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
+    assert(matchesEnvironmentError);
     assert.match(environmentError.message, /^USINE_PORT/);
   });
 
@@ -240,9 +243,11 @@ describe("usine CLI", () => {
     const environmentError = await Effect.runPromise(
       parseCli(["up"], { ...noEnvironment, logLevel: Option.some("") }).pipe(Effect.flip),
     );
-    assert(flagError instanceof CliUsageError);
+    const matchesFlagError = Schema.is(CliUsageError)(flagError);
+    assert(matchesFlagError);
     assert.match(flagError.message, /^--log-level must be trace, debug, info, warn, or error/);
-    assert(environmentError instanceof CliUsageError);
+    const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
+    assert(matchesEnvironmentError);
     assert.match(environmentError.message, /^USINE_LOG_LEVEL/);
   });
 
@@ -281,13 +286,14 @@ describe("usine CLI", () => {
       const error = await Effect.runPromise(
         parseCli(["up", "--origin", value], noEnvironment).pipe(Effect.flip),
       );
-      assert(error instanceof CliUsageError, value);
+      assert(Schema.is(CliUsageError)(error), value);
       assert.match(error.message, /^--origin must be the http or https URL of the UI/u);
     }
     const environmentError = await Effect.runPromise(
       parseCli(["up"], { ...noEnvironment, origin: Option.some(`${serve}/ui`) }).pipe(Effect.flip),
     );
-    assert(environmentError instanceof CliUsageError);
+    const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
+    assert(matchesEnvironmentError);
     assert.match(environmentError.message, /^USINE_ORIGIN/u);
   });
 
@@ -310,7 +316,8 @@ describe("usine CLI", () => {
       }),
     );
 
-    assert(error instanceof PortInUseError);
+    const matchesError = Schema.is(PortInUseError)(error);
+    assert(matchesError);
     assert.strictEqual(error.port, port);
   });
 
@@ -322,7 +329,8 @@ describe("usine CLI", () => {
     const refused = await Effect.runPromise(
       refuseTakenPort(port).pipe(Effect.flip, Effect.provide(NodeServices.layer)),
     );
-    assert(refused instanceof PortInUseError);
+    const matchesRefused = Schema.is(PortInUseError)(refused);
+    assert(matchesRefused);
     assert.deepStrictEqual(refused.holder, Option.some(process.pid));
 
     await new Promise((resolve) => listener.close(resolve));
@@ -345,7 +353,8 @@ describe("usine CLI", () => {
       ),
     );
 
-    assert(error instanceof BrowserOpenError);
+    const matchesError = Schema.is(BrowserOpenError)(error);
+    assert(matchesError);
     assert(observed !== undefined && observed._tag === "StandardCommand");
     assert.strictEqual(observed.options.detached, false);
     assert.strictEqual(observed.options.forceKillAfter, "1 second");

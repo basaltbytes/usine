@@ -338,7 +338,7 @@ describe("Boat tailnet", () => {
               assert.notInclude(call.line + call.input, "sk-ant-oat01-test");
               assert.notInclude(call.line + call.input, "test-client-secret");
             }
-            assert(context.request.host instanceof RemoteShell);
+            assert(Schema.is(RemoteShell)(context.request.host));
             assert.notInclude(context.request.host.ssh.args, "-J");
             assert.strictEqual(context.request.environment.HTTPS_PROXY, "");
             assert.deepStrictEqual(

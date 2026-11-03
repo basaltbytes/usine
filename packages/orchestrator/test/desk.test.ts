@@ -370,7 +370,7 @@ const deskLayer = (
   const all = [...runs, ...stopped.runs];
   const reader = Layer.succeed(RunReader)({
     runForEvent: () => Effect.die("unused"),
-    latestPoolRateLimits: () => Effect.succeed([]),
+    latestPoolRateLimits: Effect.succeed([]),
     inspect: () => Effect.die("unused"),
     summary: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
@@ -397,10 +397,10 @@ const deskLayer = (
     board: () => Effect.die("unused"),
     forItems: (keys) => Effect.succeed(all.filter(({ itemKey }) => keys.includes(itemKey))),
     events: () => Effect.die("unused"),
-    revision: () => Effect.die("unused"),
+    revision: Effect.die("unused"),
     transcript: (query) =>
       Effect.succeed(query.attemptId === AttemptId.make("running-8-attempt") ? transcript : []),
-    attemptsByWorker: () => Effect.die("unused"),
+    attemptsByWorker: Effect.die("unused"),
     sightings: (keys) => Effect.succeed(sightings.filter(({ itemKey }) => keys.includes(itemKey))),
   });
   const polling = Layer.succeed(PollingTriggers)({
@@ -487,7 +487,7 @@ const deskLayer = (
     Layer.provide(configurationLayer),
     Layer.provide(
       Layer.mock(AttentionAcknowledgements)({
-        list: () => Effect.succeed([]),
+        list: Effect.succeed([]),
         prune: () => Effect.void,
       }),
     ),
@@ -497,7 +497,7 @@ const deskLayer = (
         polling,
         schedules,
         slots,
-        Layer.succeed(CycleBudgets)({ ...emptyCycleBudgets, asks: () => Effect.succeed([ask]) }),
+        Layer.succeed(CycleBudgets)({ ...emptyCycleBudgets, asks: Effect.succeed([ask]) }),
         Layer.succeed(ItemProjectionReader)({
           get: () => Effect.die("the desk reads no single Item"),
           list: () => Effect.succeed(items),

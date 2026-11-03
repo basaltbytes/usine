@@ -72,7 +72,7 @@ export class GitHubItemWriter extends Context.Service<
             mutation: ItemLabelMutation,
           ) {
             yield* Effect.annotateCurrentSpan({ repository, item });
-            const token = yield* app.installationToken();
+            const token = yield* app.installationToken;
             let applied: typeof LabelResponse.Type = [];
             if (mutation.add.length > 0) {
               const addResponse = yield* send(

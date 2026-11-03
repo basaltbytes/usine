@@ -407,11 +407,11 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
         const target = yield* openHarness(operation);
         const outcome = yield* Effect.tryPromise({
           try: (signal) => run(target.harness, withAbortSignal(signal, BACKGROUND_CONTEXT)),
-          catch: (cause) => cause,
+          catch: (cause) => durableError(operation, cause),
         }).pipe(Effect.result);
         if (Result.isSuccess(outcome)) return outcome.success;
-        const cause = outcome.failure;
-        if (!failedHarness(target, cause)) return yield* durableError(operation, cause);
+        const cause = outcome.failure.cause;
+        if (!failedHarness(target, cause)) return yield* outcome.failure;
         if (attempt === 1) {
           yield* Effect.logInfo("Repeating a durable call after its harness failed", {
             operation,
@@ -419,7 +419,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
           });
           continue;
         }
-        return yield* durableError(operation, cause);
+        return yield* outcome.failure;
       }
     }).pipe(Effect.withSpan(`DurableHarness.use.${operation}`));
 
@@ -447,11 +447,11 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
       yield* beforeResume(target.harness, target.storage);
       const started = yield* Effect.try({
         try: () => target.harness.resume(),
-        catch: (cause) => cause,
+        catch: (cause) => durableError(RESUME_OPERATION, cause),
       }).pipe(Effect.result);
       if (Result.isFailure(started)) {
-        if (failedHarness(target, started.failure)) yield* openHarness(RESUME_OPERATION);
-        return yield* durableError(RESUME_OPERATION, started.failure);
+        if (failedHarness(target, started.failure.cause)) yield* openHarness(RESUME_OPERATION);
+        return yield* started.failure;
       }
       resumed = Option.some(beforeResume);
       yield* Effect.logInfo("Resumed durable task scheduling", {

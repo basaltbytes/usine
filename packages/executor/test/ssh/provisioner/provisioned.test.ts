@@ -159,7 +159,7 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
 
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.host.destination, "usine@10.42.0.5");
         const jump = given.host.ssh.args.indexOf("-J");
         assert.strictEqual(given.host.ssh.args[jump + 1], "usine-gateway");
@@ -206,7 +206,7 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         );
 
         yield* (yield* executor.prepare(codexRequest)).launch(sink);
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
         assert.isString(given.host.sshEnvironment.USINE_GATEWAY_TOKEN);
         assert.include(
@@ -328,7 +328,7 @@ describe("Provisioned SSH Worker", () => {
           `${ROOT}/workers/eu-one/attempts/remote-run_execute_1`,
         );
         yield* prepared.launch(sink);
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         // Its Claude children take this machine's login lock, not the Worker's.
         assert.deepStrictEqual(given.machine, Option.some(grant.id));
         const destination = `usine@${server.publicIp ?? ""}`;
@@ -475,7 +475,7 @@ describe("Provisioned SSH Worker", () => {
           );
           yield* prepared.launch(sink);
           const [server] = providers.hetzner.servers.values();
-          assert(server !== undefined && given !== undefined && given.host instanceof RemoteShell);
+          assert(server !== undefined && given !== undefined && Schema.is(RemoteShell)(given.host));
           assert.strictEqual(given.host.destination, `usine@${server.publicIp ?? ""}`);
           if (Option.isSome(hold)) yield* machines.release(hold.value);
           assert.strictEqual(providers.hetzner.servers.size, 0);
@@ -851,7 +851,7 @@ describe("Provisioned SSH Worker", () => {
         );
 
         yield* (yield* executor.prepare(codexRequest)).launch(sink);
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
         assert.strictEqual(given.host.sshEnvironment.OPENAI_API_KEY, OPENAI_KEY);
         const config = machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "";

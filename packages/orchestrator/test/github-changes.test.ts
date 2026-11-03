@@ -233,7 +233,7 @@ const testLayer = (
 ) => {
   const reader = Layer.succeed(RunReader)({
     runForEvent: () => Effect.die("unused"),
-    latestPoolRateLimits: () => Effect.succeed([]),
+    latestPoolRateLimits: Effect.succeed([]),
     inspect: () => Ref.get(current),
     summary: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
@@ -260,9 +260,9 @@ const testLayer = (
         ]),
       ),
     events: () => Effect.die("unused"),
-    revision: () => Effect.die("unused"),
+    revision: Effect.die("unused"),
     transcript: (query) => Effect.succeed(query.attemptId === first.id ? [lastRow] : []),
-    attemptsByWorker: () => Effect.die("unused"),
+    attemptsByWorker: Effect.die("unused"),
     sightings: () => Effect.die("unused"),
   });
   const history = Layer.succeed(GitHubItemHistory)({

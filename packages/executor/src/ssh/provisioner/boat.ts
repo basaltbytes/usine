@@ -146,14 +146,14 @@ const endpointOf = (
   Effect.gen(function* () {
     const target = destinationOf(answer);
     if (Option.isNone(target))
-      return yield* new ProviderUnanswered({
+      return yield* ProviderUnanswered.make({
         detail: "Boat reported no SSH address for the sandbox",
       });
     const destination = yield* Schema.decodeEffect(SshDestination)(
       `${answer.sshUser ?? "user"}@${target.value.host}`,
     ).pipe(
-      Effect.mapError(
-        () => new ProviderUnanswered({ detail: "Boat reported an invalid SSH destination" }),
+      Effect.mapError(() =>
+        ProviderUnanswered.make({ detail: "Boat reported an invalid SSH destination" }),
       ),
     );
     return {
@@ -369,7 +369,7 @@ export const boatDriverFor = (
             .pipe(Effect.flatMap(api.decode(SandboxConnection, "read the sandbox connection")));
           if (ENDED.has(sandbox.state)) return Option.none<MachineEndpoint>();
           if (!RUNNING.has(sandbox.state))
-            return yield* new ProviderUnanswered({ detail: `Boat sandbox is ${sandbox.state}` });
+            return yield* ProviderUnanswered.make({ detail: `Boat sandbox is ${sandbox.state}` });
           return Option.some(
             yield* endpointOf({
               machineIp: sandbox.ip ?? null,
@@ -391,7 +391,7 @@ export const boatDriverFor = (
             orElse: () =>
               Effect.fail(
                 apiError("refresh the sandbox connection")(
-                  new ProviderUnanswered({ detail: "lookup did not finish within 30 seconds" }),
+                  ProviderUnanswered.make({ detail: "lookup did not finish within 30 seconds" }),
                 ),
               ),
           }),

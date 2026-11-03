@@ -17,7 +17,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Fiber, Layer, Logger, Option, Queue, Stream } from "effect";
+import { Effect, Fiber, Layer, Logger, Option, Queue, Stream, Schema } from "effect";
 import {
   AgentResultError,
   AgentCapacityError,
@@ -473,7 +473,8 @@ describe("Pi child backend", () => {
             }),
           ),
         );
-        assert(error instanceof AgentResultError);
+        const matchesError = Schema.is(AgentResultError)(error);
+        assert(matchesError);
         assert.match(error.message, /^Pi children run only on local workers/u);
         assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
         assert.strictEqual(started, false);
@@ -489,7 +490,8 @@ describe("Pi child backend", () => {
       Effect.gen(function* () {
         const backend = yield* PiChildBackend;
         const error = yield* Effect.flip(backend.launch(childRequest));
-        assert(error instanceof UnknownModelError);
+        const matchesError = Schema.is(UnknownModelError)(error);
+        assert(matchesError);
         assert.strictEqual(error.harness, "pi");
       }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
     );
@@ -522,7 +524,8 @@ describe("Pi child backend", () => {
       Effect.gen(function* () {
         const backend = yield* PiChildBackend;
         const error = yield* Effect.flip(backend.launch(childRequest));
-        assert(error instanceof PoolUnavailableError);
+        const matchesError = Schema.is(PoolUnavailableError)(error);
+        assert(matchesError);
         assert.strictEqual(error.pool, "apiKeys");
         assert.strictEqual(error.model, model);
         assert.strictEqual(disposed, true);
@@ -624,7 +627,8 @@ describe("Pi child backend", () => {
       Effect.gen(function* () {
         const backend = yield* PiChildBackend;
         const error = yield* Effect.flip(backend.launch(childRequest));
-        assert(error instanceof SessionOperationError);
+        const matchesError = Schema.is(SessionOperationError)(error);
+        assert(matchesError);
         assert.strictEqual(error.operation, "launch");
       }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
     );
@@ -709,7 +713,8 @@ describe("Pi child backend", () => {
           const running = yield* (yield* PiChildBackend).launch(childRequest);
           if (scenario.outcome === "capacity") {
             const error = yield* Effect.flip(running.result);
-            assert(error instanceof AgentCapacityError);
+            const matchesError = Schema.is(AgentCapacityError)(error);
+            assert(matchesError);
             assert.strictEqual(error.message, scenario.message);
             assert.deepStrictEqual(error.sessionId, Option.some(childRequest.session.id));
           } else {

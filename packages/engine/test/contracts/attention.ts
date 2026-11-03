@@ -41,27 +41,27 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
             const reader = yield* RunReader;
             for (const acknowledgement of [previous, current, recovered])
               yield* store.dismiss(acknowledgement);
-            const before = yield* reader.revision();
+            const before = yield* reader.revision;
             yield* store.prune(keys);
-            assert.deepStrictEqual(yield* store.list(), [current]);
-            const after = yield* reader.revision();
+            assert.deepStrictEqual(yield* store.list, [current]);
+            const after = yield* reader.revision;
             assert.notDeepEqual(after, before);
             yield* store.prune(keys);
-            assert.deepStrictEqual(yield* store.list(), [current]);
-            assert.deepStrictEqual(yield* reader.revision(), after);
-          }).pipe(Effect.provide(open()));
+            assert.deepStrictEqual(yield* store.list, [current]);
+            assert.deepStrictEqual(yield* reader.revision, after);
+          }).pipe(Effect.provide(open));
           yield* Effect.gen(function* () {
             const store = yield* AttentionAcknowledgements;
             const reader = yield* RunReader;
-            assert.deepStrictEqual(yield* store.list(), [current]);
-            const before = yield* reader.revision();
+            assert.deepStrictEqual(yield* store.list, [current]);
+            const before = yield* reader.revision;
             yield* store.prune([]);
-            assert.deepStrictEqual(yield* store.list(), []);
-            const after = yield* reader.revision();
+            assert.deepStrictEqual(yield* store.list, []);
+            const after = yield* reader.revision;
             assert.notDeepEqual(after, before);
             yield* store.prune([]);
-            assert.deepStrictEqual(yield* reader.revision(), after);
-          }).pipe(Effect.provide(open()));
+            assert.deepStrictEqual(yield* reader.revision, after);
+          }).pipe(Effect.provide(open));
         }).pipe(Effect.scoped),
     );
 
@@ -85,28 +85,28 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
           yield* Effect.gen(function* () {
             const store = yield* AttentionAcknowledgements;
             const reader = yield* RunReader;
-            const before = yield* reader.revision();
+            const before = yield* reader.revision;
             yield* store.dismiss(acknowledgement);
-            const after = yield* reader.revision();
+            const after = yield* reader.revision;
             assert.notDeepEqual(before, after);
             yield* store.dismiss(
               AttentionAcknowledgement.make({ ...acknowledgement, dismissedBy: Option.none() }),
             );
-            assert.deepStrictEqual(yield* reader.revision(), after);
-            assert.deepStrictEqual(yield* store.list(), [acknowledgement]);
+            assert.deepStrictEqual(yield* reader.revision, after);
+            assert.deepStrictEqual(yield* store.list, [acknowledgement]);
             yield* store.dismiss(next);
-          }).pipe(Effect.provide(open()));
+          }).pipe(Effect.provide(open));
           yield* Effect.gen(function* () {
             const store = yield* AttentionAcknowledgements;
             const reader = yield* RunReader;
-            assert.sameDeepMembers([...(yield* store.list())], [acknowledgement, next]);
-            const before = yield* reader.revision();
+            assert.sameDeepMembers([...(yield* store.list)], [acknowledgement, next]);
+            const before = yield* reader.revision;
             yield* store.undo(AttentionKey.make(acknowledgement));
-            assert.notDeepEqual(yield* reader.revision(), before);
-            assert.deepStrictEqual(yield* store.list(), [next]);
+            assert.notDeepEqual(yield* reader.revision, before);
+            assert.deepStrictEqual(yield* store.list, [next]);
             yield* store.undo(AttentionKey.make(acknowledgement));
-            assert.deepStrictEqual(yield* store.list(), [next]);
-          }).pipe(Effect.provide(open()));
+            assert.deepStrictEqual(yield* store.list, [next]);
+          }).pipe(Effect.provide(open));
         }).pipe(Effect.scoped),
     );
   });

@@ -88,16 +88,26 @@ const REPLACED: ClientEnd = { _tag: "Replaced" };
 
 const ListenerAddress = Schema.Struct({ port: Schema.Int });
 
+class LocalPortError extends Schema.TaggedError<
+  LocalPortError,
+  { readonly Brand: unique symbol }
+>()("LocalPortError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {}
+
 /** Returns a free port on 127.0.0.1 picked by the kernel, released for the SSH client to listen on. */
-const freeLocalPort = Effect.callback<number, Error>((resume) => {
+const freeLocalPort = Effect.callback<number, LocalPortError>((resume) => {
   const server = createServer();
-  server.once("error", (cause) => resume(Effect.fail(cause)));
+  server.once("error", (cause) =>
+    resume(Effect.fail(LocalPortError.make({ message: cause.message, cause }))),
+  );
   server.listen(0, "127.0.0.1", () => {
     const address = Schema.decodeUnknownOption(ListenerAddress)(server.address());
     server.close(() =>
       resume(
         Option.match(address, {
-          onNone: () => Effect.fail(new Error("the listener reported no port")),
+          onNone: () => LocalPortError.make({ message: "the listener reported no port" }),
           onSome: ({ port }) => Effect.succeed(port),
         }),
       ),
@@ -313,9 +323,9 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
             reason: end.reason,
           },
         );
-        const trigger = yield* Effect.raceFirst(
-          Effect.sleep(pause).pipe(Effect.as("pause elapsed")),
-          Deferred.await(generation.replace).pipe(Effect.as("request")),
+        const trigger = yield* Deferred.await(generation.replace).pipe(
+          Effect.as("request"),
+          Effect.timeoutOrElse({ duration: pause, orElse: () => Effect.succeed("pause elapsed") }),
         );
         yield* Effect.logInfo("Reopening the forward to the Gateway's admin API", {
           ...fields,

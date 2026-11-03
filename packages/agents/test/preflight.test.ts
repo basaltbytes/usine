@@ -186,7 +186,8 @@ describe("worker harness readiness", () => {
         const server = account(Effect.succeed(null));
         return Effect.gen(function* () {
           const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
-          assert(error instanceof HarnessUnavailableError);
+          const matchesError = Schema.is(HarnessUnavailableError)(error);
+          assert(matchesError);
           assert.strictEqual(error.capability, result.capability);
           assert.strictEqual(server.opened(), 0);
           assert(!JSON.stringify(error).includes("credential-shaped"));
@@ -216,7 +217,8 @@ describe("worker harness readiness", () => {
               );
             } else {
               const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
-              assert(error instanceof HarnessUnavailableError);
+              const matchesError = Schema.is(HarnessUnavailableError)(error);
+              assert(matchesError);
               assert.strictEqual(error.capability, "login");
             }
             assert.strictEqual(server.opened(), 1);
@@ -288,7 +290,8 @@ describe("worker harness readiness", () => {
             const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
               Effect.flip,
             );
-            assert(error instanceof HarnessUnavailableError);
+            const matchesError = Schema.is(HarnessUnavailableError)(error);
+            assert(matchesError);
             assert.strictEqual(error.capability, "login");
             assert.strictEqual(error.message, subscriptionLogin);
           }
@@ -320,7 +323,8 @@ describe("worker harness readiness", () => {
           const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
             Effect.flip,
           );
-          assert(error instanceof HarnessUnavailableError);
+          const matchesError = Schema.is(HarnessUnavailableError)(error);
+          assert(matchesError);
           assert.strictEqual(error.capability, "login");
           assert.strictEqual(
             error.message,
@@ -371,7 +375,8 @@ describe("worker harness readiness", () => {
           const error = yield* verifyHarness(brain("pi"), local, workerEnvironment).pipe(
             Effect.flip,
           );
-          assert(error instanceof HarnessUnavailableError);
+          const matchesError = Schema.is(HarnessUnavailableError)(error);
+          assert(matchesError);
           assert.strictEqual(error.capability, "login");
         }
         assert.strictEqual(disposed, 1);
@@ -455,7 +460,8 @@ describe("worker harness readiness", () => {
   it.effect("refuses Pi on a remote host without starting the SDK", () =>
     Effect.gen(function* () {
       const error = yield* verifyHarness(brain("pi"), remote, {}).pipe(Effect.flip);
-      assert(error instanceof HarnessUnavailableError);
+      const matchesError = Schema.is(HarnessUnavailableError)(error);
+      assert(matchesError);
       assert.strictEqual(error.message, "Pi children run only on local workers");
     }).pipe(
       Effect.provide(

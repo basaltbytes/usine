@@ -244,7 +244,9 @@ export class ConfigurationEditor extends Context.Service<
             query.kind === "loop" && query.identifier !== undefined
               ? (yield* resolveKey(
                   yield* store.read,
-                  yield* entityKey({ kind: "loop", identifier: query.identifier }),
+                  yield* entityKey(
+                    ConfigurationEntityRequest.make({ kind: "loop", identifier: query.identifier }),
+                  ),
                 )).identifier
               : query.identifier;
           const history = yield* store.list(Option.none());

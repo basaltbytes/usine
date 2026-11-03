@@ -12,7 +12,6 @@ const maxPasses = 10;
 const config = JSON.parse(readFileSync(join(root, "tooling/oxlint/effect-fix.json"), "utf8"));
 const temporary = mkdtempSync(join(tmpdir(), "usine-effect-fix-"));
 const configPath = join(temporary, "rules.json");
-const crashing = new Set();
 
 const run = (command, args) => {
   const result = spawnSync(command, args, {
@@ -81,17 +80,6 @@ const diagnostics = (result) => {
 const fix = (rule, targets) => {
   const before = snapshot();
   const result = lint({ [rule]: config.rules[rule] }, targets, true);
-  if (
-    result.status !== 0 &&
-    rule === "effecttsgo/multiple-effect-provide" &&
-    result.stderr.includes("panic: Debug failure. False expression.") &&
-    result.stderr.includes("runMultipleEffectProvideFix")
-  ) {
-    for (const file of changedSince(before)) writeFileSync(join(root, file), before.get(file));
-    crashing.add(targets[0]);
-    console.error(`Skipped ${rule} in ${targets[0]}:\n${result.stderr}`);
-    return;
-  }
   const remaining = diagnostics(result);
   console.log(
     `${rule}: changed ${changedSince(before).length} files; ${remaining.length} diagnostics remain.`,
@@ -107,9 +95,7 @@ try {
       const targets = [
         ...new Set(found.filter((item) => item.code === code).map((item) => item.filename)),
       ];
-      if (rule === "effecttsgo/multiple-effect-provide") {
-        for (const file of targets) if (!crashing.has(file)) fix(rule, [file]);
-      } else if (targets.length > 0) fix(rule, targets);
+      if (targets.length > 0) fix(rule, targets);
     }
     const changed = changedSince(before);
     console.log(`Pass ${count} changed ${changed.length} files.`);
@@ -123,10 +109,6 @@ try {
     if (format.status !== 0) failed(format);
     console.log(`Formatted ${changed.length} changed files.`);
   }
-  if (crashing.size > 0)
-    console.log(
-      `multipleEffectProvide files skipped after the upstream crash:\n${[...crashing].sort().join("\n")}`,
-    );
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

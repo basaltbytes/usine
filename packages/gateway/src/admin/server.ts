@@ -90,7 +90,7 @@ const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", 
       "list",
       Effect.fn("GatewayAdmin.list")(function* () {
         const attachments = yield* Attachments;
-        const current = yield* attachments.list();
+        const current = yield* attachments.list;
         return AttachmentList.make({ attachments: current.map(AttachmentSummary.fromAttachment) });
       }),
     ),

@@ -376,21 +376,21 @@ export class ScheduleTriggers extends Context.Service<
                 next: nextScheduledAt(cron, now),
               };
             },
-            catch: (cause) => cause,
+            catch: (cause) => CronBoundaryError.make({ cause }),
           }).pipe(Effect.result);
           if (Result.isFailure(computed)) {
             yield* Effect.logError("Schedule cron boundaries could not be computed", {
               loop: schedule.loop.name,
               cron: schedule.trigger.cron,
               tz: schedule.trigger.tz,
-              message: String(computed.failure),
+              message: String(computed.failure.cause),
             });
             cronFailures.push(
               ScheduleCronFailure.make({
                 loop: schedule.loop.name,
                 cron: schedule.trigger.cron,
                 tz: schedule.trigger.tz,
-                message: String(computed.failure),
+                message: String(computed.failure.cause),
               }),
             );
             continue;
@@ -603,3 +603,10 @@ export class ScheduleTriggers extends Context.Service<
     }),
   );
 }
+
+class CronBoundaryError extends Schema.TaggedError<
+  CronBoundaryError,
+  { readonly Brand: unique symbol }
+>()("CronBoundaryError", {
+  cause: Schema.Defect(),
+}) {}

@@ -380,7 +380,7 @@ const observation = (
 ) => {
   const reader = Layer.succeed(RunReader)({
     runForEvent: () => Effect.die("unused"),
-    latestPoolRateLimits: () => Effect.succeed([]),
+    latestPoolRateLimits: Effect.succeed([]),
     inspect: (id) => {
       const run = runs.find(({ run }) => run.id === id);
       return run === undefined ? Effect.die("Missing run fixture") : Effect.succeed(run);
@@ -396,9 +396,9 @@ const observation = (
         Effect.as(runs.filter(({ itemKey }) => keys.includes(itemKey)).map(summarizeRun)),
       ),
     events: (runIds) => Effect.succeed(runEvents.filter(({ runId }) => runIds.includes(runId))),
-    revision: () => Effect.succeedNone,
+    revision: Effect.succeedNone,
     transcript: () => Effect.succeed([]),
-    attemptsByWorker: () => Effect.succeed([]),
+    attemptsByWorker: Effect.succeed([]),
     sightings: () => Effect.die("A Task reads no Loop sightings"),
   });
   const controls = Layer.succeed(LoopControl)({
@@ -432,7 +432,7 @@ const observation = (
     Layer.provide(configurationLayer),
     Layer.provide(
       Layer.mock(AttentionAcknowledgements)({
-        list: () => Effect.succeed([]),
+        list: Effect.succeed([]),
         prune: () => Effect.void,
       }),
     ),

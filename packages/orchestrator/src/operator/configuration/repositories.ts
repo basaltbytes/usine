@@ -40,23 +40,11 @@ export const repositoryEditorChanges = (snapshot: Configuration, entity: Configu
       snapshot.instance.value.config.version === 1
     )
       return { entity, changes: [] };
-    const fields = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(entity.value).pipe(
-      Effect.mapError((error) =>
-        ConfigurationInvalid.make({
-          problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
-        }),
-      ),
-    );
+    const fields = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(entity.value);
     if (!("lanes" in fields)) return { entity, changes: [] };
     const repository = yield* Schema.decodeUnknownEffect(ManagedRepo)(fields, {
       onExcessProperty: "error",
-    }).pipe(
-      Effect.mapError((error) =>
-        ConfigurationInvalid.make({
-          problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
-        }),
-      ),
-    );
+    });
     const project = snapshot.instance.value.config.projects.find((project) =>
       project.includes(repository.name),
     );
@@ -77,4 +65,10 @@ export const repositoryEditorChanges = (snapshot: Configuration, entity: Configu
         }),
       ],
     };
-  });
+  }).pipe(
+    Effect.mapError((error) =>
+      ConfigurationInvalid.make({
+        problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
+      }),
+    ),
+  );

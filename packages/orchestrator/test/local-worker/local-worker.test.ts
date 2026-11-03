@@ -933,12 +933,12 @@ describe("local worker", () => {
             "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
         });
         const unreadableApp = Layer.succeed(GitHubApp)({
-          installation: () => Effect.fail(missing),
-          botAccount: () => Effect.fail(missing),
-          repositories: () => Effect.die("unused installation repositories"),
-          installationToken: () => Effect.die("unused"),
+          installation: Effect.fail(missing),
+          botAccount: Effect.fail(missing),
+          repositories: Effect.die("unused installation repositories"),
+          installationToken: Effect.die("unused"),
           projectAccess: () => Effect.die("unused"),
-          installationUrl: () => Effect.die("unused installation URL"),
+          installationUrl: Effect.die("unused installation URL"),
           configureWebhook: () => Effect.die("unused webhook configuration"),
           deliveries: () => Effect.die("unused webhook deliveries"),
           workerToken: () => Effect.die("unused"),

@@ -177,7 +177,7 @@ const makeCodexAppServer = Effect.gen(function* () {
                 ),
           ),
           Effect.mapError((cause) =>
-            cause instanceof SessionOperationError
+            Schema.is(SessionOperationError)(cause)
               ? cause
               : operationError(operation, request, "Can't write to Codex app-server", cause),
           ),
@@ -291,7 +291,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.catch((error) =>
           failAll(
-            error instanceof SessionOperationError
+            Schema.is(SessionOperationError)(error)
               ? error
               : operationError("stream", request, "Can't read Codex app-server output", error),
           ),
@@ -315,7 +315,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.catch((cause) =>
           failAll(
-            cause instanceof SessionOperationError
+            Schema.is(SessionOperationError)(cause)
               ? cause
               : operationError("stream", request, "Can't read Codex app-server diagnostics", cause),
           ),
@@ -343,7 +343,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.catch((cause) =>
           failAll(
-            cause instanceof SessionOperationError
+            Schema.is(SessionOperationError)(cause)
               ? cause
               : operationError("stream", request, "Can't monitor Codex app-server", cause),
           ),
@@ -368,7 +368,7 @@ const makeCodexAppServer = Effect.gen(function* () {
             );
         });
       const close = yield* Effect.cached(
-        Effect.fn("CodexAppServer.close")(function* () {
+        Effect.gen(function* () {
           yield* Effect.annotateCurrentSpan({
             sessionId: Option.getOrUndefined(request.sessionId),
           });
@@ -401,7 +401,11 @@ const makeCodexAppServer = Effect.gen(function* () {
             );
           yield* Queue.end(notifications);
           yield* Effect.logDebug("Codex app-server shutdown completed", { exitCode });
-        })().pipe(Effect.tapError(failAll), Effect.uninterruptible),
+        }).pipe(
+          Effect.withSpan("CodexAppServer.close"),
+          Effect.tapError(failAll),
+          Effect.uninterruptible,
+        ),
       );
       yield* Effect.addFinalizer(() =>
         close.pipe(

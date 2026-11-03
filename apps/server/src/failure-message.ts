@@ -275,8 +275,8 @@ export const failureMessage = (failure: CliFailure): string =>
           }),
     InstanceManifestError: ({ path, reason }) =>
       `Could not read ${path} (${clause(reason)}). Fix the file, then run the command again.`,
-    PackageLookupError: ({ name, spec, reason }) =>
-      `Could not find ${name}@${spec} on the npm registry (${clause(reason)}). Check the version, and the registry in .npmrc.`,
+    PackageLookupError: ({ packageName, spec, reason }) =>
+      `Could not find ${packageName}@${spec} on the npm registry (${clause(reason)}). Check the version, and the registry in .npmrc.`,
     UpgradeFileError: ({ path, reason }) =>
       `usine upgrade stopped: could not access ${path} (${clause(reason)}).`,
     UpgradeFailedError: (failure) =>

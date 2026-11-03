@@ -17,12 +17,12 @@ const token = InstallationToken.make({
 });
 const unused = () => Effect.die("unused GitHub App operation");
 const app = Layer.succeed(GitHubApp)({
-  installation: unused,
-  repositories: unused,
-  installationToken: () => Effect.succeed(token),
-  botAccount: unused,
+  installation: unused(),
+  repositories: unused(),
+  installationToken: Effect.succeed(token),
+  botAccount: unused(),
   projectAccess: unused,
-  installationUrl: unused,
+  installationUrl: unused(),
   configureWebhook: unused,
   deliveries: unused,
   workerToken: unused,

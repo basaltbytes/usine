@@ -114,7 +114,7 @@ const readerOf = (reports: ReadonlyArray<TranscriptEntry>) =>
     Layer.provide(
       Layer.succeed(RunReader)({
         runForEvent: () => Effect.die("unused"),
-        latestPoolRateLimits: () => Effect.succeed([]),
+        latestPoolRateLimits: Effect.succeed([]),
         inspect: () => Effect.die("unused"),
         summary: () => Effect.die("unused"),
         evidence: () => Effect.die("unused"),
@@ -124,9 +124,9 @@ const readerOf = (reports: ReadonlyArray<TranscriptEntry>) =>
         board: () => Effect.die("unused"),
         forItems: () => Effect.die("unused"),
         events: () => Effect.die("unused"),
-        revision: () => Effect.die("unused"),
+        revision: Effect.die("unused"),
         transcript: () => Effect.succeed(reports),
-        attemptsByWorker: () => Effect.die("unused"),
+        attemptsByWorker: Effect.die("unused"),
         sightings: () => Effect.die("unused"),
       }),
     ),

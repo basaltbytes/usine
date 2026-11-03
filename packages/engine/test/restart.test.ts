@@ -1312,7 +1312,7 @@ describe("engine restart", () => {
           const engine = Context.get(context, RunEngine);
           const reader = Context.get(context, RunReader);
           assert.deepStrictEqual(
-            (yield* reader.attemptsByWorker()).map(({ worker, attempts, running }) => [
+            (yield* reader.attemptsByWorker).map(({ worker, attempts, running }) => [
               worker,
               attempts,
               running,
@@ -1329,7 +1329,7 @@ describe("engine restart", () => {
           );
           assert.deepStrictEqual(yield* Ref.get(discarded), []);
           assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("local")), 1);
-          assert.deepStrictEqual(yield* reader.attemptsByWorker(), []);
+          assert.deepStrictEqual(yield* reader.attemptsByWorker, []);
           // The executor removes what the discarded Attempts left outside their checkouts.
           assert.deepStrictEqual(yield* Ref.get(discarded), [
             [WorkerName.make("local"), delivered.attempts.map(({ id }) => id)],

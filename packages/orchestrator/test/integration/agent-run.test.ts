@@ -81,14 +81,23 @@ const requestJson = Effect.fn("agentIntegration.requestJson")(function* <A>(opti
   };
   if (options.method !== undefined) init.method = options.method;
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
-  const response = yield* Effect.tryPromise(() => fetch(options.url, init));
+  const response = yield* Effect.tryPromise({
+    try: () => fetch(options.url, init),
+    catch: (cause) => RequestFailed.make({ cause }),
+  });
   if (response.status !== options.expectedStatus) {
-    const detail = yield* Effect.tryPromise(() => response.text());
+    const detail = yield* Effect.tryPromise({
+      try: () => response.text(),
+      catch: (cause) => RequestFailed.make({ cause }),
+    });
     return yield* Effect.die(
       `GitHub returned ${response.status} for ${options.method ?? "GET"} ${options.url}: ${detail}`,
     );
   }
-  const value = yield* Effect.tryPromise(() => response.json());
+  const value = yield* Effect.tryPromise({
+    try: () => response.json(),
+    catch: (cause) => RequestFailed.make({ cause }),
+  });
   return yield* Schema.decodeUnknownEffect(options.schema)(value);
 });
 
@@ -98,18 +107,23 @@ const requestEmpty = Effect.fn("agentIntegration.requestEmpty")(function* (optio
   readonly token: string;
   readonly url: string;
 }) {
-  const response = yield* Effect.tryPromise(() =>
-    fetch(options.url, {
-      method: options.method,
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${options.token}`,
-        "x-github-api-version": "2026-03-10",
-      },
-    }),
-  );
+  const response = yield* Effect.tryPromise({
+    try: () =>
+      fetch(options.url, {
+        method: options.method,
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${options.token}`,
+          "x-github-api-version": "2026-03-10",
+        },
+      }),
+    catch: (cause) => RequestFailed.make({ cause }),
+  });
   if (response.status !== options.expectedStatus) {
-    const detail = yield* Effect.tryPromise(() => response.text());
+    const detail = yield* Effect.tryPromise({
+      try: () => response.text(),
+      catch: (cause) => RequestFailed.make({ cause }),
+    });
     return yield* Effect.die(
       `GitHub returned ${response.status} for ${options.method} ${options.url}: ${detail}`,
     );
@@ -315,7 +329,7 @@ describe("live agent loop", () => {
         const engine = Context.get(context, RunEngine);
         const polling = Context.get(context, PollingTriggers);
         const api = repositoryApi(repository);
-        const installationToken = yield* app.installationToken();
+        const installationToken = yield* app.installationToken;
         const token = Redacted.value(installationToken.value);
 
         const listComments = () =>
@@ -416,3 +430,8 @@ describe("live agent loop", () => {
     720_000,
   );
 });
+
+class RequestFailed extends Schema.TaggedError<RequestFailed, { readonly Brand: unique symbol }>()(
+  "RequestFailed",
+  { cause: Schema.Defect() },
+) {}

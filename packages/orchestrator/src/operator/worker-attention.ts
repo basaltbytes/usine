@@ -90,7 +90,7 @@ export const workerAttentionFor = (
         );
     }
     if (needs.length === 0) return overview;
-    const { needsYou, dismissedNeeds } = partitionNeeds(needs, yield* acknowledgements.list());
+    const { needsYou, dismissedNeeds } = partitionNeeds(needs, yield* acknowledgements.list);
     const visible = [...overview.needsYou, ...needsYou];
     yield* Effect.logDebug("Refreshed worker attention", {
       workers: [...workers.keys()],

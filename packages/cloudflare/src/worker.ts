@@ -298,7 +298,10 @@ export class AttemptSandbox extends DurableObject<Env> {
     const registry = env.REGISTRY.getByName(REGISTRY);
     const directory: SandboxDirectory["Service"] = {
       record: (sandbox) =>
-        Effect.tryPromise(() => registry.record(encodeSummary(sandbox))).pipe(
+        Effect.tryPromise({
+          try: () => registry.record(encodeSummary(sandbox)),
+          catch: (cause) => RegistryRequestFailed.make({ cause }),
+        }).pipe(
           Effect.tapError(() =>
             Effect.logError("Could not record the sandbox in the registry", {
               sandbox: sandbox.name,
@@ -307,7 +310,10 @@ export class AttemptSandbox extends DurableObject<Env> {
           Effect.ignore,
         ),
       forget: (name) =>
-        Effect.tryPromise(() => registry.forget(name)).pipe(
+        Effect.tryPromise({
+          try: () => registry.forget(name),
+          catch: (cause) => RegistryRequestFailed.make({ cause }),
+        }).pipe(
           Effect.tapError(() =>
             Effect.logError("Could not remove the sandbox from the registry", { sandbox: name }),
           ),
@@ -404,7 +410,7 @@ export class SandboxRegistry extends DurableObject<Env> {
     };
     const lookup: SandboxLookup["Service"] = {
       get: (name) => {
-        const failed = (reason: string) => SandboxLookupFailed.make({ name, reason });
+        const failed = (reason: string) => SandboxLookupFailed.make({ sandbox: name, reason });
         return Effect.tryPromise({
           try: () =>
             env.SANDBOX.getByName(name).fetch(`https://sandbox.internal/v1/sandboxes/${name}`),
@@ -549,3 +555,8 @@ declare global {
     }
   }
 }
+
+class RegistryRequestFailed extends Schema.TaggedError<
+  RegistryRequestFailed,
+  { readonly Brand: unique symbol }
+>()("RegistryRequestFailed", { cause: Schema.Defect() }) {}

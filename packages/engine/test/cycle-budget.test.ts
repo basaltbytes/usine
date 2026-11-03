@@ -220,7 +220,7 @@ describe("Item cycle budgets", () => {
                   yield* store.claimQueued(queued.value.submission, idFor(queued.value.submission)),
                 ),
               );
-              assert.strictEqual((yield* (yield* CycleBudgets).asks())[0]?.completedCycles, 3);
+              assert.strictEqual((yield* (yield* CycleBudgets).asks)[0]?.completedCycles, 3);
               const tick = yield* store.nextQueued(idFor(scheduled));
               assert(Option.isSome(tick) && Option.isNone(tick.value.submission.cycleLimit));
             }),
@@ -251,7 +251,7 @@ describe("Item cycle budgets", () => {
           assert(Option.isNone(yield* store.claimQueued(queued, idFor(queued))));
           // Even after the first polling page commits, an Item on a later page must
           // receive fresh evaluation before its old continuation is eligible.
-          const reset = (yield* budgets.pendingResets())[0];
+          const reset = (yield* budgets.pendingResets)[0];
           assert(reset !== undefined);
           yield* budgets.acknowledgeReset(reset);
           assert(Option.isNone(yield* store.claimQueued(queued, idFor(queued))));
@@ -298,7 +298,7 @@ describe("Item cycle budgets", () => {
                 (yield* Effect.flip(store.snapshot(idFor(next))))._tag,
                 "RunNotFoundError",
               );
-              assert.deepStrictEqual(yield* budgets.asks(), [blocked.result.ask]);
+              assert.deepStrictEqual(yield* budgets.asks, [blocked.result.ask]);
               return blocked.result.ask;
             }),
           );
@@ -307,7 +307,7 @@ describe("Item cycle budgets", () => {
             Effect.gen(function* () {
               const store = yield* RunStore;
               const budgets = yield* CycleBudgets;
-              assert.deepStrictEqual(yield* budgets.asks(), [ask]);
+              assert.deepStrictEqual(yield* budgets.asks, [ask]);
               for (const value of [
                 submission("review", 4),
                 submission("review", 5),
@@ -317,15 +317,15 @@ describe("Item cycle budgets", () => {
                 assert(blocked.result._tag === "CycleBlocked");
                 assert.strictEqual(blocked.result.ask.id, ask.id);
               }
-              const updated = (yield* budgets.asks())[0];
+              const updated = (yield* budgets.asks)[0];
               assert(updated !== undefined);
               assert.strictEqual(updated.loop, ask.loop);
               assert.strictEqual(updated.blockedLoop, "finisher");
               yield* store.revoke(LoopName.make("fix"), ItemKey.make("pr-72"));
-              assert.deepStrictEqual(yield* budgets.asks(), [updated]);
+              assert.deepStrictEqual(yield* budgets.asks, [updated]);
               yield* complete(submission("review", 1, "another-pr"));
               yield* budgets.reset(ask.id, event("operator-reset-1"));
-              assert.deepStrictEqual(yield* budgets.asks(), []);
+              assert.deepStrictEqual(yield* budgets.asks, []);
             }),
           );
           yield* inDatabase(
@@ -333,7 +333,7 @@ describe("Item cycle budgets", () => {
             Effect.gen(function* () {
               const store = yield* RunStore;
               const budgets = yield* CycleBudgets;
-              assert.strictEqual((yield* budgets.pendingResets()).length, 1);
+              assert.strictEqual((yield* budgets.pendingResets).length, 1);
               yield* budgets.reset(ask.id, event("operator-reset-1"));
               for (let round = 5; round <= 7; round += 1)
                 yield* complete(afterReset(submission("review", round)));
@@ -342,7 +342,7 @@ describe("Item cycle budgets", () => {
               assert(blocked.result._tag === "CycleBlocked");
               const newerAsk = blocked.result.ask;
               yield* budgets.reset(ask.id, event("operator-reset-1"));
-              assert.deepStrictEqual(yield* budgets.asks(), [newerAsk]);
+              assert.deepStrictEqual(yield* budgets.asks, [newerAsk]);
               assert.strictEqual(
                 (yield* Effect.flip(budgets.reset(ask.id, event("different-answer"))))._tag,
                 "CycleBudgetResetRejectedError",
@@ -370,14 +370,14 @@ describe("Item cycle budgets", () => {
             assert(blocked.result._tag === "CycleBlocked");
             const opened = blocked.result.ask;
             assert.isTrue(yield* budgets.close(opened.id, "ItemClosed"));
-            assert.deepStrictEqual(yield* budgets.asks(), []);
+            assert.deepStrictEqual(yield* budgets.asks, []);
             assert.isFalse(yield* budgets.close(opened.id, "ItemClosed"));
             assert.strictEqual(
               (yield* Effect.flip(budgets.reset(opened.id, event("late-reset"))))._tag,
               "CycleBudgetResetRejectedError",
             );
             assert.strictEqual(yield* budgets.generation(ItemKey.make("pr-72")), 0);
-            assert.deepStrictEqual(yield* budgets.pendingResets(), []);
+            assert.deepStrictEqual(yield* budgets.pendingResets, []);
             return opened;
           }),
         );
@@ -400,7 +400,7 @@ describe("Item cycle budgets", () => {
             assert(blocked.result._tag === "CycleBlocked");
             assert.notStrictEqual(blocked.result.ask.id, ask.id);
             assert.strictEqual(blocked.result.ask.completedCycles, 3);
-            assert.deepStrictEqual(yield* budgets.asks(), [blocked.result.ask]);
+            assert.deepStrictEqual(yield* budgets.asks, [blocked.result.ask]);
           }),
         );
       }),
@@ -420,7 +420,7 @@ describe("Item cycle budgets", () => {
           );
           assert(blocked.result._tag === "CycleBlocked");
           assert.isTrue(yield* budgets.close(blocked.result.ask.id, "ItemClosed"));
-          assert.deepStrictEqual(yield* budgets.asks(), []);
+          assert.deepStrictEqual(yield* budgets.asks, []);
           return blocked.result.ask;
         });
         const first = yield* inDatabase(
@@ -477,7 +477,7 @@ describe("Item cycle budgets", () => {
             yield* store.finishAttempt(retried.execution.attempt, success);
             yield* complete(submission("review", 3));
             yield* complete(submission("review", 4));
-            assert.deepStrictEqual(yield* budgets.asks(), []);
+            assert.deepStrictEqual(yield* budgets.asks, []);
             const next = submission("review", 5);
             const blocked = yield* store.recordAndClaim(next, idFor(next));
             assert(blocked.result._tag === "CycleBlocked");
@@ -510,7 +510,7 @@ describe("Item cycle budgets", () => {
           );
           yield* store.finishAttempt(started.execution.attempt, success);
           assert(Option.isNone(yield* store.claimQueued(next, idFor(next))));
-          assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
+          assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);
           for (let tick = 1; tick <= 5; tick += 1)
             yield* complete(
               Submission.make({

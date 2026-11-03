@@ -186,7 +186,8 @@ describe("Codex app-server transport", () => {
       yield* Deferred.await(process.stdinClosed);
       yield* TestClock.adjust("1 minute");
       const error = yield* Fiber.join(scoped);
-      assert(error instanceof SessionOperationError);
+      const matchesError = Schema.is(SessionOperationError)(error);
+      assert(matchesError);
       assert.strictEqual(yield* Deferred.isDone(process.killed), true);
       assert.strictEqual(yield* Deferred.isDone(process.exit), true);
     }),
@@ -217,7 +218,8 @@ describe("Codex app-server transport", () => {
           );
           const outcome = yield* Fiber.join(pending);
           assert(Result.isFailure(outcome));
-          assert(outcome.failure instanceof SessionOperationError);
+          const matchesOutcomeFailure = Schema.is(SessionOperationError)(outcome.failure);
+          assert(matchesOutcomeFailure);
           assert.strictEqual(outcome.failure.operation, "steer");
         }),
       ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
@@ -241,7 +243,8 @@ describe("Codex app-server transport", () => {
           yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(2));
           const outcome = yield* Fiber.join(closing);
           assert(Result.isFailure(outcome));
-          assert(outcome.failure instanceof SessionOperationError);
+          const matchesOutcomeFailure = Schema.is(SessionOperationError)(outcome.failure);
+          assert(matchesOutcomeFailure);
         }),
       ).pipe(
         Effect.provide(
@@ -285,7 +288,8 @@ describe("Codex app-server transport", () => {
           assert.deepStrictEqual(yield* Fiber.join(replied), { accepted: true });
           const outcome = yield* Fiber.join(unanswered);
           assert(Result.isFailure(outcome));
-          assert(outcome.failure instanceof SessionOperationError);
+          const matchesOutcomeFailure = Schema.is(SessionOperationError)(outcome.failure);
+          assert(matchesOutcomeFailure);
           assert.strictEqual(outcome.failure.operation, "interrupt");
         }).pipe(Effect.ensuring(Deferred.succeed(readOutput, undefined))),
       ).pipe(
@@ -429,7 +433,8 @@ describe("Codex app-server transport", () => {
           yield* awaitStdinLines(process, 1);
           yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(1));
           const error = yield* Effect.flip(Fiber.join(pending));
-          assert(error instanceof SessionOperationError);
+          const matchesError = Schema.is(SessionOperationError)(error);
+          assert(matchesError);
           assert.match(error.message, /exited with code 1/u);
           assert.deepStrictEqual(error.cause, {
             exitCode: 1,
@@ -459,7 +464,8 @@ describe("Codex app-server transport", () => {
           yield* awaitStdinLines(process, 1);
           yield* TestClock.adjust("61 seconds");
           const error = yield* Effect.flip(Fiber.join(pending));
-          assert(error instanceof SessionOperationError);
+          const matchesError = Schema.is(SessionOperationError)(error);
+          assert(matchesError);
           assert.match(error.message, /didn't respond to initialize/u);
         }),
       ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));

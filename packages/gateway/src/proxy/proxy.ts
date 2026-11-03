@@ -1,5 +1,5 @@
 import { canonicalRepositoryName } from "@usine/core/repository";
-import { Context, Data, Effect, Layer, Match, Option, Result, Schema } from "effect";
+import { Context, Effect, Layer, Match, Option, Result, Schema } from "effect";
 import {
   Headers,
   HttpClient,
@@ -10,7 +10,7 @@ import {
 import type { Attachment, LiveAttachment } from "../attachment/attachment.ts";
 import { Attachments } from "../attachment/store.ts";
 import {
-  type CallerClaims,
+  CallerClaims,
   CallerTokens,
   presentedToken,
   withoutCallerCredentials,
@@ -71,20 +71,20 @@ const REFUSAL_STATUS = {
 } as const satisfies Record<RefusalReason, number>;
 
 /** A refusal, with the caller's claims once its token is verified, and the response status. */
-class Refused extends Data.TaggedError("Refused")<{
-  readonly reason: RefusalReason;
-  readonly message: string;
-  readonly caller: Option.Option<CallerClaims>;
-  readonly status: number;
-}> {}
+class Refused extends Schema.TaggedError<Refused, { readonly Brand: unique symbol }>()("Refused", {
+  reason: RefusalReason,
+  message: Schema.String,
+  caller: Schema.Option(CallerClaims),
+  status: Schema.Int,
+}) {}
 
 /** Returns a refusal for a request whose caller token isn't verified yet. */
 const refused = (reason: RefusalReason, message: string) =>
-  new Refused({ reason, message, caller: Option.none(), status: REFUSAL_STATUS[reason] });
+  Refused.make({ reason, message, caller: Option.none(), status: REFUSAL_STATUS[reason] });
 
 /** Returns a refusal for a verified caller. */
 const refusedCaller = (claims: CallerClaims, reason: RefusalReason, message: string) =>
-  new Refused({ reason, message, caller: Option.some(claims), status: REFUSAL_STATUS[reason] });
+  Refused.make({ reason, message, caller: Option.some(claims), status: REFUSAL_STATUS[reason] });
 
 /**
  * Returns the refusal for a ChatGPT login without a usable access token: 503 while a later
@@ -92,7 +92,7 @@ const refusedCaller = (claims: CallerClaims, reason: RefusalReason, message: str
  * refresh token, which Codex doesn't.
  */
 const loginUnavailable = (claims: CallerClaims, error: ChatGptLoginUnavailable) =>
-  new Refused({
+  Refused.make({
     reason: "provider-login-unavailable",
     message: error.message,
     caller: Option.some(claims),
@@ -239,22 +239,22 @@ export class GatewayProxy extends Context.Service<
           );
         yield* confirmRename(client, settings.github, attachment, newName.value).pipe(
           Effect.andThen(attachments.learnNewName(attachment.id, newName.value)),
-          Effect.catchTag("AttachmentPersistenceError", ({ operation }) =>
-            Effect.logError("Could not persist the repository's new name", {
-              ...renamed,
-              operation,
-            }),
-          ),
-          Effect.catchTag("RenameUnconfirmed", ({ reason, detail }) =>
-            Effect.logWarning(
-              "GitHub's API didn't confirm the new name of an attached repository",
-              {
+          Effect.catchTags({
+            AttachmentPersistenceError: ({ operation }) =>
+              Effect.logError("Could not persist the repository's new name", {
                 ...renamed,
-                reason,
-                detail,
-              },
-            ),
-          ),
+                operation,
+              }),
+            RenameUnconfirmed: ({ reason, detail }) =>
+              Effect.logWarning(
+                "GitHub's API didn't confirm the new name of an attached repository",
+                {
+                  ...renamed,
+                  reason,
+                  detail,
+                },
+              ),
+          }),
         );
       });
 

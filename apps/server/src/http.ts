@@ -477,21 +477,20 @@ const handlers = HttpApiBuilder.group(
 /**
  * Returns the operator API routes.
  */
-export const apiRoutes = () =>
-  Layer.mergeAll(
-    HttpApiBuilder.layer(OperatorApi),
-    HttpRouter.add(
-      DocumentationApi.endpoints.openapi.method,
-      DocumentationApi.endpoints.openapi.path,
-      HttpServerResponse.jsonUnsafe(operatorOpenApi()),
-    ),
-  ).pipe(
-    Layer.provide(conditionalReads.layer),
-    Layer.provide(handlers),
-    Layer.provide(Changes.layer),
-    Layer.provide(policy),
-    Layer.provide(NodeHttpServer.layerHttpServices),
-  );
+export const apiRoutes = Layer.mergeAll(
+  HttpApiBuilder.layer(OperatorApi),
+  HttpRouter.add(
+    DocumentationApi.endpoints.openapi.method,
+    DocumentationApi.endpoints.openapi.path,
+    HttpServerResponse.jsonUnsafe(operatorOpenApi()),
+  ),
+).pipe(
+  Layer.provide(conditionalReads.layer),
+  Layer.provide(handlers),
+  Layer.provide(Changes.layer),
+  Layer.provide(policy),
+  Layer.provide(NodeHttpServer.layerHttpServices),
+);
 
 export const staticRoutes = (webRoot: string) => {
   const assetsRoot = resolve(webRoot, "assets");
@@ -561,7 +560,7 @@ export const serverLayer = (
   const routes = Layer.mergeAll(
     setupHttp?.protected.pipe(Layer.provide(authenticated.guard.layer)) ?? Layer.empty,
     setupHttp?.callback ?? Layer.empty,
-    apiRoutes().pipe(Layer.provide(authenticated.guard.layer)),
+    apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
     staticRoutes(webRoot),
     authenticated.routes,
     webhooks,

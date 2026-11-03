@@ -3,7 +3,6 @@
     "schemaClassMissingBrand": 3
   },
   "src/checks.ts": {
-    "catchConditionalRefailToCatchIf": 1,
     "deterministicKeys": 1,
     "schemaClassMissingBrand": 2,
     "yieldInCallArgument": 2
@@ -20,7 +19,6 @@
   },
   "src/github-app.ts": {
     "deterministicKeys": 1,
-    "lazyEffect": 5,
     "yieldInCallArgument": 1
   },
   "src/http.ts": {
@@ -79,14 +77,12 @@
     "globalDateInEffect": 1,
     "globalJson": 5,
     "globalJsonInEffect": 2,
-    "instanceOfSchema": 1,
     "nodeBuiltinImport": 1,
     "schemaSync": 5,
     "schemaSyncInEffect": 3,
     "yieldInCallArgument": 3
   },
   "test/integration/github-app.test.ts": {
-    "effectTryWithoutCatch": 2,
     "globalFetchInEffect": 2,
     "globalJsonInEffect": 1,
     "yieldInCallArgument": 1
@@ -116,7 +112,6 @@
     "globalDateInEffect": 1,
     "globalJson": 2,
     "globalJsonInEffect": 1,
-    "instanceOfSchema": 5,
     "schemaSync": 5,
     "schemaSyncInEffect": 3,
     "yieldInCallArgument": 3

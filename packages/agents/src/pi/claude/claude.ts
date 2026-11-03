@@ -305,6 +305,8 @@ const makeClaudeChild = Effect.gen(function* () {
     );
     yield* Deferred.await(held);
     yield* Effect.logDebug("Holding the Claude login lock to launch the child", fields);
+    // The caller releases the Claude login lock after launch.
+    // @effect-diagnostics-next-line returnEffectInGen:off
     return Deferred.succeed(released, undefined).pipe(Effect.asVoid);
   });
 

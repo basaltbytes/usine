@@ -15,7 +15,7 @@ export const boardMovesContract = (adapter: PersistenceAdapter) => {
         Effect.gen(function* () {
           const moves = yield* BoardMoves;
           const reader = yield* RunReader;
-          const revision = yield* reader.revision();
+          const revision = yield* reader.revision;
           const first = BoardMoveRecord.make({
             repository: lifecycleSubmission.repository,
             itemKey: lifecycleSubmission.itemKey,
@@ -48,7 +48,7 @@ export const boardMovesContract = (adapter: PersistenceAdapter) => {
             first,
             second,
           ]);
-          assert.deepStrictEqual(yield* reader.revision(), revision);
+          assert.deepStrictEqual(yield* reader.revision, revision);
         }),
       ),
     );

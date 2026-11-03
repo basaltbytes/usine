@@ -92,7 +92,7 @@ it.effect("isolates project statistics from cached admin results and hides worke
           }),
         ]),
       list: () => Effect.succeed([]),
-      revision: () => Effect.succeedSome(ProjectionRevision.make(1)),
+      revision: Effect.succeedSome(ProjectionRevision.make(1)),
       transcript: () => Effect.succeed([]),
     });
     yield* OperatorStatistics.use(({ runStatistics }) =>

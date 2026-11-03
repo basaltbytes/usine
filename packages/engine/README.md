@@ -8,6 +8,8 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 
 ## Stores and readers
 
+Operations without arguments are Effect values: `yield* reader.revision`, `yield* engine.reconcile`, and `yield* budgets.asks`. This also applies to `awaitingCi`, `drain`, `recoverWorkspaces`, `latestPoolRateLimits`, `pendingResets`, and attention acknowledgement `list`. Each execution reads current state.
+
 - `CursorStore` stores typed keys with JSON values, for efficiency-only trigger cursors such as GitHub watermarks and ETags. Deleting one safely replays events; the ledger deduplicates.
 - `LoopControl` stores loop pause state; pausing never edits the loop file.
 - `ItemProjectionReader` and `ItemProjectionWriter` store the latest issue and pull request snapshots from polling, which the board reads after a restart without querying GitHub. `get` returns one item's projection; `list` returns the newest items first, up to `limit`; `openIssues` returns the numbers of open issues not marked gone. Writes change the projection revision only if the content hash changes.
@@ -21,8 +23,8 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 - `forItems(itemKeys)`: every saved run and its attempts for those items, outside the recent-history window.
 - `events(runIds)`: in one batch, the event that opened each run. Its payload is the item as the trigger saw it, before the agent changed it.
 - `evidence(runId)`: the run snapshot and all its transcript entries, in append order and unpaged, from one snapshot, consistent while attempts complete or append.
-- `attemptsByWorker()`: per worker, the attempts that startup still visits, and how many are open.
-- `revision()`: lets callers reuse an unchanged projection.
+- `attemptsByWorker`: per worker, the attempts that startup still visits, and how many are open.
+- `revision`: lets callers reuse an unchanged projection.
 
 Transcript usage reads the stored highest token report for each attempt session. Appending a new outbound token report updates that projection in the transcript transaction only if its token total increases. Duplicate envelopes preserve the first stored report. Pool-limit reads use the latest report per billing pool by global append order. Worker and session-state reads search indexed envelope tags. [Transcript read measurements](../../docs/performance/transcript-reads/report.md) cover migration cost, replay parity, and plans with and without SQLite statistics.
 
@@ -182,7 +184,7 @@ const program = Effect.gen(function* () {
 
 `runReaderLayer(instanceDirectory)` (`/local-sqlite`) provides only `RunReader`, on a read-only connection, for maintenance commands. It needs an existing database and never creates tables, migrates, or changes the journal mode. A missing, unreadable, or incompatible database fails with `EnginePersistenceError`.
 
-`backup(instanceDirectory, destination)` (`/local-sqlite`) copies every runtime table and committed WAL data while other connections stay open. It opens the source read-only, without migrations. The destination must be a new file in an existing directory that supports hard links; the copy is complete, owner-only, and never overwrites a file. `RuntimeStoreBackupError` gives the failed operation (`open`, `stage`, `copy`, or `publish`), both paths, and the underlying message or code. Logs report failures, or the pages copied. If interrupted, the adapter waits for Node's backup to finish before closing and deleting temporary files.
+`backup(instanceDirectory, destination)` (`/local-sqlite`) requires `FileSystem` and `Path`; provide `NodeServices.layer` at the application entry point. It copies every runtime table and committed WAL data while other connections stay open. It opens the source read-only, without migrations. The destination must be a new file in an existing directory that supports hard links; the copy is complete, owner-only, and never overwrites a file. `RuntimeStoreBackupError` gives the failed operation (`open`, `stage`, `copy`, or `publish`), both paths, and the underlying message or code. Logs report failures, or the pages copied. If interrupted, the adapter waits for Node's backup to finish before closing and deleting temporary files.
 
 `layerWithDatabase` (`/engine`) takes another SQLite-compatible layer providing `RunDatabase` (`/database`) with atomic transactions, plus the platform `Crypto` layer that hashes dedup keys into run ids. Cloudflare D1 doesn't work with Drizzle RC.4, because its Effect driver can't run the store's transactions.
 
@@ -232,7 +234,7 @@ Operator audit fields accept `OperatorActor`: a GitHub login or the reserved `lo
 
 ## CI waits
 
-`Submission.ciFailureHead` identifies CI fix events for queued-head rechecks. `Submission.ciPolicy` saves the loop's requirement with the event. A successful result with a verified CI handoff, or a harvested pushed PR under a required policy, ends the attempt in `AwaitingCi` and releases its worker. These open runs reserve no slot and start no fiber after restart. `RunEngine.awaitingCi()` reads the durable waits; `settleCi(runId, expectedHead, resolution)` atomically updates their run and attempt outcomes, preserves the session end time, and ignores stale observations. Operator cancel also cancels the waiting attempt.
+`Submission.ciFailureHead` identifies CI fix events for queued-head rechecks. `Submission.ciPolicy` saves the loop's requirement with the event. A successful result with a verified CI handoff, or a harvested pushed PR under a required policy, ends the attempt in `AwaitingCi` and releases its worker. These open runs reserve no slot and start no fiber after restart. `RunEngine.awaitingCi` reads the durable waits; `settleCi(runId, expectedHead, resolution)` atomically updates their run and attempt outcomes, preserves the session end time, and ignores stale observations. Operator cancel also cancels the waiting attempt.
 
 An admitted CI fix closes its source run as `HandedOff` with the fix run ID and failure reason. The source attempt also ends neutrally. A same-loop fix for the recorded failed head can pass cycle-budget admission while the source awaits CI, since its attempt has ended. Refused fixes and exhausted budgets leave the source failed.
 

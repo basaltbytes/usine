@@ -47,11 +47,8 @@ const makeSetup = Effect.fn("Setup.make")(function* (
   const pending = new Map<TokenHash, number>();
   const marker = path.join(directory, ".usine/github-app-setup");
   const origin = auth.authentication.origin;
-  const fileServices = Layer.merge(
-    Layer.succeed(FileSystem.FileSystem, fs),
-    Layer.succeed(Path.Path, path),
-  );
-  const credentials = loadLocalCredentials(directory).pipe(Effect.provide(fileServices));
+  const fileServices = Context.make(FileSystem.FileSystem, fs).pipe(Context.add(Path.Path, path));
+  const credentials = loadLocalCredentials(directory).pipe(Effect.provideContext(fileServices));
   const appLayer = (value: GitHubCredentials["Service"]) =>
     GitHubApp.layer.pipe(
       Layer.provide(Layer.succeed(GitHubCredentials, value)),
@@ -67,8 +64,7 @@ const makeSetup = Effect.fn("Setup.make")(function* (
   const save = (secrets: GitHubAppSecrets) =>
     Effect.gen(function* () {
       // Import the signing key before replacing the file.
-      yield* Effect.void.pipe(
-        Effect.provide(appLayer(secrets)),
+      yield* Effect.scoped(Layer.build(appLayer(secrets))).pipe(
         Effect.mapError(() =>
           authFailure(
             "The private key cannot sign for this App. Generate a new RSA key in the App settings.",
@@ -77,7 +73,7 @@ const makeSetup = Effect.fn("Setup.make")(function* (
         ),
       );
       yield* writeLocalSecrets(directory, secrets).pipe(
-        Effect.provide(fileServices),
+        Effect.provideContext(fileServices),
         Effect.mapError((error) => authFailure(error.message, 500)),
       );
     });
@@ -105,34 +101,36 @@ const makeSetup = Effect.fn("Setup.make")(function* (
       yield* Effect.logInfo("GitHub App setup needs credentials", { state: state._tag });
       return state;
     }
-    return yield* Effect.gen(function* () {
-      const app = yield* GitHubApp;
-      const installation = yield* app.installation().pipe(Effect.result);
-      if (Result.isFailure(installation)) {
-        const error = installation.failure;
-        if (error._tag !== "InstallationDiscoveryError") return yield* error;
-        yield* Effect.logInfo("GitHub App setup needs an installation", {
-          reason: error.reason,
-          appId: loaded.success.appId,
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(appLayer(loaded.success));
+        const app = Context.get(context, GitHubApp);
+        const installation = yield* app.installation.pipe(Effect.result);
+        if (Result.isFailure(installation)) {
+          const error = installation.failure;
+          if (error._tag !== "InstallationDiscoveryError") return yield* error;
+          yield* Effect.logInfo("GitHub App setup needs an installation", {
+            reason: error.reason,
+            appId: loaded.success.appId,
+          });
+          return {
+            _tag: "NeedsInstallation" as const,
+            url: yield* app.installationUrl,
+            message: error.message,
+          };
+        }
+        const signIn = (yield* auth.store.members).length === 0;
+        const state: SetupState =
+          !signIn && (yield* registered)
+            ? { _tag: "Ready" }
+            : { _tag: "Repositories", signIn, github: yield* auth.github.available };
+        yield* Effect.logInfo("GitHub App setup installation found", {
+          state: state._tag,
+          installationId: installation.success.id,
         });
-        return {
-          _tag: "NeedsInstallation" as const,
-          url: yield* app.installationUrl(),
-          message: error.message,
-        };
-      }
-      const signIn = (yield* auth.store.members).length === 0;
-      const state: SetupState =
-        !signIn && (yield* registered)
-          ? { _tag: "Ready" }
-          : { _tag: "Repositories", signIn, github: yield* auth.github.available };
-      yield* Effect.logInfo("GitHub App setup installation found", {
-        state: state._tag,
-        installationId: installation.success.id,
-      });
-      return state;
-    }).pipe(
-      Effect.provide(appLayer(loaded.success)),
+        return state;
+      }),
+    ).pipe(
       Effect.timeout("20 seconds"),
       Effect.tapError((error) =>
         Effect.logWarning("GitHub App setup inspection failed", {
@@ -150,7 +148,7 @@ const makeSetup = Effect.fn("Setup.make")(function* (
   });
   return {
     running: mode === "runtime",
-    activate: Effect.fn("Setup.activate")(function* () {
+    activate: Effect.gen(function* () {
       if (mode === "runtime") {
         yield* Effect.logInfo("GitHub App runtime is already active");
         return;
@@ -158,7 +156,7 @@ const makeSetup = Effect.fn("Setup.make")(function* (
       yield* credentials.pipe(Effect.mapError((error) => authFailure(error.message, 409)));
       yield* Effect.logInfo("GitHub App runtime activation requested");
       yield* Deferred.succeed(changed, undefined);
-    })(),
+    }).pipe(Effect.withSpan("Setup.activate")),
     changed: Deferred.await(changed),
     status: status(),
     begin: Effect.fn("Setup.begin")((request: typeof ManifestRequest.Type) =>

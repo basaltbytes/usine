@@ -13,7 +13,7 @@ const make = Effect.gen(function* () {
   const polling = yield* PollingTriggers;
 
   const poll = Effect.fn("WebhookDeliveries.poll")(function* (instance: LoadedInstance) {
-    const installation = yield* app.installation();
+    const installation = yield* app.installation;
     yield* Effect.annotateCurrentSpan({ installationId: installation.id });
     const key = CursorKey.make(`github-deliveries:${installation.id}`);
     const after = yield* cursors.read(key, WebhookDeliveryId);

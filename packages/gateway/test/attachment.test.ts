@@ -57,7 +57,7 @@ describe("Attachments", () => {
           assert.strictEqual(tokenOf(renewed), "ghs_second");
           assert(renewed._tag === "LiveAttachment");
           assert.isTrue(renewed.serves(RepositoryName.make("ACME/Renamed")));
-          assert.strictEqual((yield* attachments.list()).length, 1);
+          assert.strictEqual((yield* attachments.list).length, 1);
         }),
       ),
   );
@@ -92,7 +92,7 @@ describe("Attachments", () => {
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "LiveAttachment");
         yield* TestClock.adjust("45 seconds");
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "ExpiredAttachment");
-        assert.deepStrictEqual(yield* attachments.list(), []);
+        assert.deepStrictEqual(yield* attachments.list, []);
         // The sweep at the next whole minute removes it.
         yield* TestClock.adjust("15 seconds");
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "MissingAttachment");

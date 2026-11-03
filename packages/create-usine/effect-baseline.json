@@ -1,7 +1,4 @@
 {
-  "src/main.ts": {
-    "strictEffectProvide": 1
-  },
   "src/scaffold.ts": {
     "globalJsonInEffect": 1,
     "schemaClassMissingBrand": 1

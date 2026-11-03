@@ -17,7 +17,7 @@ export const configurationRepositories = Effect.fn("Http.configurationRepositori
     return yield* unavailable();
   }
   // The UI removes registered repositories using the current configuration query.
-  return yield* app.value.repositories().pipe(
+  return yield* app.value.repositories.pipe(
     Effect.tapError((error) =>
       Effect.logWarning("Installation repository lookup failed", { errorTag: error._tag }),
     ),

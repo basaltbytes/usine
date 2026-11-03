@@ -1,6 +1,6 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { ChildSession } from "@usine/core/agent/session";
-import { Effect, Fiber, Option } from "effect";
+import { Effect, Fiber, Option, Schema } from "effect";
 import {
   AgentCapacityError,
   type AgentSessionError,
@@ -63,7 +63,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
             Option.some(options.session.id),
             lastAssistant.errorMessage,
           );
-          if (failure instanceof AgentCapacityError) return Effect.fail(failure);
+          if (Schema.is(AgentCapacityError)(failure)) return Effect.fail(failure);
         }
         return conversation.finish(
           options.lastText() ?? lastPiMessageText(options.sdk.messages) ?? "Pi session completed",

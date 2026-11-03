@@ -60,6 +60,13 @@ const launchArguments = (launch: InstanceLaunch): ReadonlyArray<string> => {
   return args;
 };
 
+class LogReadError extends Schema.TaggedError<LogReadError, { readonly Brand: unique symbol }>()(
+  "LogReadError",
+  {
+    cause: Schema.Defect(),
+  },
+) {}
+
 /** Returns the last lines of `log` after byte `offset`. */
 const logTail = (log: string, offset: number) =>
   Effect.try({
@@ -75,7 +82,7 @@ const logTail = (log: string, offset: number) =>
         closeSync(descriptor);
       }
     },
-    catch: (cause) => cause,
+    catch: (cause) => LogReadError.make({ cause }),
   }).pipe(
     Effect.tapError((cause) =>
       Effect.logWarning("Could not read the instance log", { log, cause }),

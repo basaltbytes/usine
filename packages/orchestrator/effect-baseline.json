@@ -16,7 +16,6 @@
   },
   "src/current-instance/current-instance.ts": {
     "deterministicKeys": 1,
-    "returnEffectInGen": 2,
     "schemaClassMissingBrand": 2
   },
   "src/label-reconciler.ts": {
@@ -45,7 +44,6 @@
   },
   "src/operator/configuration/editor.ts": {
     "deterministicKeys": 1,
-    "schemaClassObjectLiteral": 1,
     "yieldInCallArgument": 6
   },
   "src/operator/configuration/loops/model.ts": {
@@ -56,7 +54,6 @@
     "schemaClassMissingBrand": 8
   },
   "src/operator/configuration/repositories.ts": {
-    "redundantMapError": 1,
     "schemaSync": 2,
     "schemaSyncInEffect": 1
   },
@@ -169,14 +166,12 @@
     "yieldInCallArgument": 1
   },
   "src/polling/polling.ts": {
-    "catchConditionalRefailToCatchIf": 1,
     "deterministicKeys": 1,
     "globalJson": 2,
     "schemaClassMissingBrand": 1,
     "yieldInCallArgument": 2
   },
   "src/polling/repository-sync.ts": {
-    "instanceOfSchema": 1,
     "schemaSync": 1,
     "yieldInCallArgument": 1
   },
@@ -187,34 +182,21 @@
     "schemaClassMissingBrand": 1
   },
   "src/schedule-triggers.ts": {
-    "anyUnknownInErrorContext": 1,
     "deterministicKeys": 1,
     "globalJson": 2,
     "globalJsonInEffect": 2,
     "schemaClassMissingBrand": 4,
-    "unknownInEffectCatch": 1,
     "yieldInCallArgument": 1
   },
-  "src/scheduler/preflight.ts": {
-    "missingReturnYieldStar": 1
-  },
-  "src/scheduler/provisioning.ts": {
-    "missingReturnYieldStar": 1
-  },
   "src/scheduler/scheduler.ts": {
-    "returnEffectInGen": 2,
     "schemaClassMissingBrand": 1,
     "yieldInCallArgument": 2
-  },
-  "src/trigger-condition.ts": {
-    "instanceOfSchema": 1
   },
   "src/trigger-submission.ts": {
     "schemaClassMissingBrand": 1
   },
   "src/webhooks.ts": {
-    "deterministicKeys": 1,
-    "effectFnIife": 2
+    "deterministicKeys": 1
   },
   "src/worker-status.ts": {
     "deterministicKeys": 1,
@@ -295,7 +277,6 @@
   },
   "test/integration/agent-run.test.ts": {
     "cryptoRandomUUIDInEffect": 2,
-    "effectTryWithoutCatch": 5,
     "globalFetchInEffect": 2,
     "globalJson": 1,
     "globalJsonInEffect": 1,
@@ -311,7 +292,6 @@
   },
   "test/integration/polling-triggers.test.ts": {
     "cryptoRandomUUIDInEffect": 1,
-    "effectTryWithoutCatch": 1,
     "globalDateInEffect": 2,
     "globalFetchInEffect": 1,
     "globalJson": 1,
@@ -401,18 +381,15 @@
   },
   "test/schedule-triggers.test.ts": {
     "globalJsonInEffect": 1,
-    "instanceOfSchema": 3,
     "schemaSync": 3,
     "yieldInCallArgument": 1
   },
   "test/scheduler-machines.test.ts": {
-    "instanceOfSchema": 1,
     "schemaSync": 4,
     "schemaSyncInEffect": 3,
     "yieldInCallArgument": 14
   },
   "test/scheduler.test.ts": {
-    "instanceOfSchema": 1,
     "schemaSync": 2,
     "schemaSyncInEffect": 2,
     "yieldInCallArgument": 27

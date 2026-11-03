@@ -90,49 +90,26 @@ process.exit(2);`,
 test("rules run separately and only files changed by fixes are formatted", async (t) => {
   const project = await fixture(
     t,
-    { "effecttsgo/new-schema-class": "error", "effecttsgo/multiple-effect-provide": "error" },
-    `if (!fixing && Object.keys(config.rules).length > 1) {
-  console.log(JSON.stringify({ diagnostics: [
-    { filename: "changed.ts", code: "effecttsgo(new-schema-class)" },
-    { filename: "crash.ts", code: "effecttsgo(multiple-effect-provide)" },
-    { filename: "changed.ts", code: "effecttsgo(multiple-effect-provide)" },
-  ] }));
-  process.exit(1);
+    { "effecttsgo/new-schema-class": "error", "effecttsgo/unnecessary-pipe": "error" },
+    `if (!fixing) {
+  const content = fs.readFileSync("changed.ts", "utf8");
+  const diagnostics = [];
+  if (config.rules["effecttsgo/new-schema-class"] && content === "before\\n")
+    diagnostics.push({ filename: "changed.ts", code: "effecttsgo(new-schema-class)" });
+  if (config.rules["effecttsgo/unnecessary-pipe"] && content !== "both rules fixed\\n")
+    diagnostics.push({ filename: "changed.ts", code: "effecttsgo(unnecessary-pipe)" });
+  console.log(JSON.stringify({ diagnostics }));
+  process.exit(diagnostics.length > 0 ? 1 : 0);
 }
-if (rule === "effecttsgo/new-schema-class") {
-  if (!fixing) report(["changed.ts"]);
-  if (fs.readFileSync("changed.ts", "utf8") === "before\\n") fs.writeFileSync("changed.ts", "fixed\\n");
-  report([]);
-}
-if (!fixing) report(["crash.ts", "changed.ts"]);
-if (args.at(-1) === "crash.ts") {
-  fs.writeFileSync("crash.ts", "partial fix\\n");
-  process.stderr.write("panic: Debug failure. False expression.\\ninternal/fixables.runMultipleEffectProvideFix\\n");
-  process.exit(1);
-}
-fs.writeFileSync("changed.ts", "both rules fixed\\n");
+if (Object.keys(config.rules).length !== 1) throw new Error("rules must run separately");
+fs.writeFileSync("changed.ts", rule === "effecttsgo/new-schema-class" ? "first rule fixed\\n" : "both rules fixed\\n");
 report([]);`,
   );
   const result = project.run();
   assert.equal(result.status, 0, result.stderr);
   assert.equal(await project.read("changed.ts"), "both rules fixed\n");
-  assert.equal(await project.read("crash.ts"), "before\n");
   assert.equal(await project.read("unchanged.ts"), "existing local edit\n");
   assert.deepEqual(JSON.parse(await project.read("formatted.json")), ["changed.ts"]);
-  assert.match(result.stdout, /files skipped after the upstream crash:\ncrash.ts/u);
-});
-
-test("a different multiple-effect-provide failure is fatal", async (t) => {
-  const project = await fixture(
-    t,
-    { "effecttsgo/multiple-effect-provide": "error" },
-    `if (!fixing) report(["crash.ts"]);
-process.stderr.write("configuration error\\n");
-process.exit(1);`,
-  );
-  const result = project.run();
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /configuration error/u);
 });
 
 test("overlapping fixes converge when Oxlint reports remaining lint errors with exit 1", async (t) => {

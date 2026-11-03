@@ -1,3 +1,4 @@
+import { EnginePersistenceError } from "../src/engine/error.ts";
 import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -34,6 +35,7 @@ import {
   Tracer,
   TxRef,
 } from "effect";
+import type { SqlError } from "effect/sql";
 import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import {
@@ -318,7 +320,7 @@ describe("durable run engine", () => {
           const engine = yield* RunEngine;
           const reader = yield* RunReader;
           const controls = yield* LoopControl;
-          const initialRevision = Option.getOrThrow(yield* reader.revision());
+          const initialRevision = Option.getOrThrow(yield* reader.revision);
           const first = yield* engine.submit(
             submission({ number: 1, item: "listed-one", approval: "required" }),
           );
@@ -358,10 +360,10 @@ describe("durable run engine", () => {
           );
           assert.strictEqual(history[0]?.attempts.length, 1);
           assert.deepStrictEqual(yield* reader.forItems([]), []);
-          const runRevision = Option.getOrThrow(yield* reader.revision());
+          const runRevision = Option.getOrThrow(yield* reader.revision);
           assert(runRevision > initialRevision);
           yield* controls.pause(LoopName.make("review"));
-          assert(Option.getOrThrow(yield* reader.revision()) > runRevision);
+          assert(Option.getOrThrow(yield* reader.revision) > runRevision);
         }).pipe(Effect.provide(runtime));
       }),
     ),
@@ -807,7 +809,7 @@ describe("durable run engine", () => {
           assert(running._tag === "Claimed");
           yield* waitFor(engine, running.runId, ({ attempts }) => attempts.length === 1);
 
-          const counts = Effect.map(reader.attemptsByWorker(), (counted) =>
+          const counts = Effect.map(reader.attemptsByWorker, (counted) =>
             counted.map(({ worker, attempts, running }) => [worker, attempts, running]),
           );
           assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
@@ -1286,11 +1288,16 @@ const flakyDatabase = (directory: InstanceDirectory, failures: Failures) =>
     RunDatabase,
     Effect.gen(function* () {
       const database = yield* RunDatabase;
-      const transaction = (...args: Parameters<RunDatabaseClient["transaction"]>) =>
-        Effect.suspend(() => {
-          if (failures.left <= 0) return database.transaction(...args);
+      const transaction = <A, E, R>(work: (tx: RunDatabaseClient) => Effect.Effect<A, E, R>) =>
+        Effect.suspend((): Effect.Effect<A, E | SqlError.SqlError | EnginePersistenceError, R> => {
+          if (failures.left <= 0) return database.transaction(work);
           failures.left -= 1;
-          return Effect.fail(new Error("database is locked"));
+          return Effect.fail(
+            EnginePersistenceError.make({
+              operation: "transaction",
+              cause: new Error("database is locked"),
+            }),
+          );
         });
       return new Proxy(database, {
         get: (target, property) => {

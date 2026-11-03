@@ -576,7 +576,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               operator,
             }),
           );
-          const services = fixture.open();
+          const services = fixture.open;
           const before = yield* Effect.scoped(
             Effect.gen(function* () {
               const store = yield* RunStore;
@@ -614,15 +614,15 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
                 Result.fail(AgentFailure.make({ message: "Handled outside usine" })),
               );
               const evidence = yield* reader.evidence(runId);
-              const revision = yield* reader.revision();
+              const revision = yield* reader.revision;
               yield* TestClock.adjust("15 minutes");
               yield* store.resolveFailure(runId, attempt.id, operator);
-              const resolvedRevision = yield* reader.revision();
+              const resolvedRevision = yield* reader.revision;
               assert(Option.isSome(revision) && Option.isSome(resolvedRevision));
               assert(resolvedRevision.value > revision.value);
               yield* TestClock.adjust("5 minutes");
               yield* store.resolveFailure(runId, attempt.id, Option.none());
-              assert.deepStrictEqual(yield* reader.revision(), resolvedRevision);
+              assert.deepStrictEqual(yield* reader.revision, resolvedRevision);
               return evidence;
             }).pipe(Effect.provide(services)),
           );
@@ -762,7 +762,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             (yield* store.finishAttempt(restarted.execution.attempt, Result.fail(failure)))._tag,
             "RunFailed",
           );
-        }).pipe(Effect.provide(fixture.open()));
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
     it.live("an approved Run records its source once and is Queued until its attempt starts", () =>
@@ -828,7 +828,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert.strictEqual(started._tag, "AttemptStarted");
           assert.strictEqual(yield* state(), "Running");
-        }).pipe(Effect.provide(fixture.open()));
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
     it.live("reports a run closed while queued instead of starting an attempt", () =>
@@ -864,7 +864,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           assert.strictEqual(started._tag, "RunClosed");
           const snapshot = yield* store.snapshot(runId);
           assert.strictEqual(snapshot.attempts.length, 0);
-        }).pipe(Effect.provide(fixture.open()));
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
   });

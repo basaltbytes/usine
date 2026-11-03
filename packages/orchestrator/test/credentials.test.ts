@@ -34,12 +34,12 @@ describe("GitHub credential provider", () => {
       repositoryId: RepositoryId.make(99),
     });
     const app = Layer.succeed(GitHubApp)({
-      installation: () => Effect.die("unused"),
-      repositories: () => Effect.die("unused installation repositories"),
-      installationToken: () => Effect.die("unused"),
-      botAccount: () => Effect.die("unused"),
+      installation: Effect.die("unused"),
+      repositories: Effect.die("unused installation repositories"),
+      installationToken: Effect.die("unused"),
+      botAccount: Effect.die("unused"),
       projectAccess: () => Effect.succeed([project]),
-      installationUrl: () => Effect.die("unused installation URL"),
+      installationUrl: Effect.die("unused installation URL"),
       configureWebhook: () => Effect.die("unused webhook configuration"),
       deliveries: () => Effect.die("unused webhook deliveries"),
       workerToken: (_project, permissions) =>
@@ -81,12 +81,12 @@ describe("GitHub credential provider failures", () => {
     gitHubCredentialLayer.pipe(
       Layer.provide(
         Layer.succeed(GitHubApp)({
-          installation: () => Effect.die("unused"),
-          repositories: () => Effect.die("unused installation repositories"),
-          installationToken: () => Effect.die("unused"),
-          botAccount: () => Effect.die("unused"),
+          installation: Effect.die("unused"),
+          repositories: Effect.die("unused installation repositories"),
+          installationToken: Effect.die("unused"),
+          botAccount: Effect.die("unused"),
           projectAccess: () => Effect.succeed(projects),
-          installationUrl: () => Effect.die("unused installation URL"),
+          installationUrl: Effect.die("unused installation URL"),
           configureWebhook: () => Effect.die("unused webhook configuration"),
           deliveries: () => Effect.die("unused webhook deliveries"),
           workerToken: () => Effect.fail(mint),

@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { useQuery } from "@tanstack/react-query";
 import type {
   ConfigurationEntityKey,
@@ -24,7 +25,7 @@ type ConflictProps = {
 export const Conflict = ({ entity, before, number, reload }: ConflictProps) => {
   const current = useQuery({ ...entityQuery(entity), staleTime: 0, refetchOnMount: "always" });
   const deleted =
-    current.error instanceof OperatorHttpError && current.error.error === "ConfigurationNotFound";
+    Schema.is(OperatorHttpError)(current.error) && current.error.error === "ConfigurationNotFound";
   const text = deleted ? "" : current.data?.text;
   const loadedNumber = deleted ? number : current.data?.number;
   return (

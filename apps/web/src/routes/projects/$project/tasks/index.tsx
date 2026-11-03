@@ -17,7 +17,7 @@ const TasksRoute = () => {
   const { repository } = Route.useSearch();
   const navigate = Route.useNavigate();
   const desk = useSuspenseQuery(deskQuery());
-  if (error instanceof OperatorHttpError && error.error === "BoardProjectNotFoundError")
+  if (Schema.is(OperatorHttpError)(error) && error.error === "BoardProjectNotFoundError")
     return <ProjectNotFound />;
   return (
     <TaskList

@@ -9,7 +9,7 @@ import { LoopName } from "@usine/core/loop";
 import { SshDestination, WorkerRoot, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect";
+import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../src/remote/commands.ts";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
@@ -126,7 +126,7 @@ describe("SSH Worker", () => {
           windows: aloneOnItem(),
         });
 
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.host.destination, DESTINATION);
         assert.deepStrictEqual(given.host.ssh.args.slice(-6), [
           "-p",

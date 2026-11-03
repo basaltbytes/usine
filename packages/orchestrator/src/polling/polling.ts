@@ -694,12 +694,9 @@ export class PollingTriggers extends Context.Service<
           if (Option.isSome(ciCycle.nextPollAt)) return;
           if (Option.isNone(hint.item)) {
             const cycle = yield* pollRepository(watched).pipe(
-              Effect.catch((failure) => {
-                if (failure._tag !== "InterruptedRepositoryCycle") return Effect.fail(failure);
-                return hints
-                  .defer(failure.nextPollAt)
-                  .pipe(Effect.andThen(Effect.fail(failure.error)));
-              }),
+              Effect.catchTag("InterruptedRepositoryCycle", (failure) =>
+                hints.defer(failure.nextPollAt).pipe(Effect.andThen(Effect.fail(failure.error))),
+              ),
             );
             yield* Effect.logInfo("Hint refreshed the repository", {
               repository: hint.repository,

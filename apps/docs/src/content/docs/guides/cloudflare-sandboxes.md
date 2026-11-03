@@ -40,3 +40,5 @@ Preflight checks the Access token, image, provider keys, and harness versions in
 A sandbox can reach GitHub, configured providers, and the allowed package hosts. It has no interactive terminal. A dropped command stream can reattach to stored output. On a platform stop, usine attempts to salvage the checkout and retries through an infrastructure failure.
 
 A retained sandbox stays billable while held for recovery. Startup reattaches live attempts or salvages retained work. A stopped container loses its disk, so recovery depends on pushed salvage. If a sandbox remains after an attempt, inspect the orchestrator and Worker logs before deleting it. [Cloudflare settings](/reference/configuration/workers/#cloudflare-connection) lists fields and defaults.
+
+Sandbox API error responses identify the error with `_tag` and the affected sandbox with `name`. Worker logs retain the error type when reporting a sandbox failure.

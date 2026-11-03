@@ -6,7 +6,11 @@ import { NodeServices } from "@effect/platform-node";
 import { Effect, Schema } from "effect";
 import { afterEach, assert, describe, it } from "vitest";
 import { Port, SERVER_HOST } from "../../src/cli.ts";
-import { lsofListeningPorts, procListeningPorts } from "../../src/instance/ports.ts";
+import {
+  ListeningPortsError,
+  lsofListeningPorts,
+  procListeningPorts,
+} from "../../src/instance/ports.ts";
 import { ProcessId } from "../../src/instance/record.ts";
 
 const children: Array<ChildProcess> = [];
@@ -57,7 +61,7 @@ const lookups: ReadonlyArray<{
   readonly source: string;
   readonly lookup: (
     pid: ProcessId,
-  ) => Effect.Effect<ReadonlyArray<Port>, unknown, NodeServices.NodeServices>;
+  ) => Effect.Effect<ReadonlyArray<Port>, ListeningPortsError, NodeServices.NodeServices>;
   readonly available: boolean;
 }> = [
   { source: "/proc", lookup: procListeningPorts, available: process.platform === "linux" },

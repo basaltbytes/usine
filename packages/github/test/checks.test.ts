@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { assert, it } from "@effect/vitest";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
-import { DateTime, Effect, Fiber, Layer, Option, Redacted, type Schema } from "effect";
+import { DateTime, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { TestClock } from "effect/testing";
 import { strToU8, zipSync } from "fflate/browser";
@@ -24,19 +24,18 @@ const token = InstallationToken.make({
 });
 
 const appLayer = Layer.succeed(GitHubApp)({
-  installation: () =>
-    Effect.succeed(
-      Installation.make({
-        id: InstallationId.make(77),
-        accountLogin: "basaltbytes",
-        appSlug: AppSlug.make("usine-basaltbytes"),
-      }),
-    ),
-  repositories: () => Effect.die("unused installation repositories"),
-  installationToken: () => Effect.succeed(token),
-  botAccount: () => Effect.die("unused"),
+  installation: Effect.succeed(
+    Installation.make({
+      id: InstallationId.make(77),
+      accountLogin: "basaltbytes",
+      appSlug: AppSlug.make("usine-basaltbytes"),
+    }),
+  ),
+  repositories: Effect.die("unused installation repositories"),
+  installationToken: Effect.succeed(token),
+  botAccount: Effect.die("unused"),
   projectAccess: () => Effect.die("unused"),
-  installationUrl: () => Effect.die("unused installation URL"),
+  installationUrl: Effect.die("unused installation URL"),
   configureWebhook: () => Effect.die("unused webhook configuration"),
   deliveries: () => Effect.die("unused webhook deliveries"),
   workerToken: () => Effect.die("unused"),

@@ -39,18 +39,18 @@ export const repositoryLabelProjectionContract = (adapter: PersistenceAdapter) =
           const reader = yield* RepositoryLabelProjectionReader;
           const writer = yield* RepositoryLabelProjectionWriter;
           const runs = yield* RunReader;
-          const before = yield* runs.revision();
+          const before = yield* runs.revision;
           assert(Option.isSome(before));
 
           assert.strictEqual(yield* writer.replace(projection), true);
-          const changed = yield* runs.revision();
+          const changed = yield* runs.revision;
           assert(Option.isSome(changed));
           assert.strictEqual(changed.value, before.value + 1);
           assert.deepStrictEqual(yield* reader.get(repository), Option.some(projection));
 
           assert.strictEqual(yield* writer.replace(projection), false);
-          assert.deepStrictEqual(yield* runs.revision(), changed);
-        }).pipe(Effect.provide(fixture.open()));
+          assert.deepStrictEqual(yield* runs.revision, changed);
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
   });

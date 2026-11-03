@@ -10,7 +10,7 @@ import {
   ProvisionerSeconds,
   ProvisionerTimings,
 } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Option, Layer } from "effect";
+import { Deferred, Effect, Fiber, Option, Layer, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { AttemptId } from "@usine/core/attempt";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
@@ -275,7 +275,7 @@ for (const replacementDocker of ["absent", "running"] as const) {
         },
       };
       const parent: StubParent = (context) => {
-        assert(context.request.host instanceof RemoteShell);
+        assert(Schema.is(RemoteShell)(context.request.host));
         destinations.push(context.request.host.destination);
         if (context.request.host.destination !== DESTINATION || replacementDocker === "running") {
           assert.isDefined(context.request.host.container, "the attempt runs in its container");

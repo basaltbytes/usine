@@ -35,19 +35,19 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
           const writer = yield* ItemProjectionWriter;
           const runs = yield* RunReader;
           assert.deepStrictEqual(yield* reader.get(item.itemKey), Option.none());
-          const before = yield* runs.revision();
+          const before = yield* runs.revision;
           assert(Option.isSome(before));
 
           assert.strictEqual(yield* writer.upsert(item), true);
           assert.deepStrictEqual(yield* reader.get(item.itemKey), Option.some(item));
-          const changed = yield* runs.revision();
+          const changed = yield* runs.revision;
           assert(Option.isSome(changed));
           assert.strictEqual(changed.value, before.value + 1);
           assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [item]);
 
           assert.strictEqual(yield* writer.upsert(item), false);
-          assert.deepStrictEqual(yield* runs.revision(), changed);
-        }).pipe(Effect.provide(fixture.open()));
+          assert.deepStrictEqual(yield* runs.revision, changed);
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
     it.live("records an Item GitHub no longer has as gone until a poll observes it again", () =>
@@ -70,13 +70,13 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
           const runs = yield* RunReader;
           assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), false);
           yield* writer.upsert(item);
-          const before = yield* runs.revision();
+          const before = yield* runs.revision;
 
           assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), true);
           const gone = ItemProjection.make({ ...item, goneAt: Option.some(goneAt) });
           assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [gone]);
           assert(Option.isSome(before));
-          assert.deepStrictEqual(yield* runs.revision(), Option.some(before.value + 1));
+          assert.deepStrictEqual(yield* runs.revision, Option.some(before.value + 1));
           assert.strictEqual(
             yield* writer.markGone(item.itemKey, DateTime.makeUnsafe("2026-10-19T13:00:00Z")),
             false,
@@ -86,7 +86,7 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
           // The same content observed again means GitHub has the Item after all.
           assert.strictEqual(yield* writer.upsert(item), true);
           assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [item]);
-        }).pipe(Effect.provide(fixture.open()));
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
     it.live("lists the open issues of one repository that are not marked gone", () =>
@@ -129,7 +129,7 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
             ItemNumber.make(12),
             ItemNumber.make(28),
           ]);
-        }).pipe(Effect.provide(fixture.open()));
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
   });

@@ -215,7 +215,7 @@ export class GitHubItemHistory extends Context.Service<
           after: string | null,
         ) {
           yield* Effect.annotateCurrentSpan({ repository, item });
-          const token = yield* app.installationToken();
+          const token = yield* app.installationToken;
           const { name, owner } = splitRepositoryName(repository);
           const data = yield* queryGraphql(
             http,

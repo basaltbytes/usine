@@ -89,7 +89,7 @@ class Users extends Context.Service<
   Users,
   {
     readonly findById: (id: UserId) => Effect.Effect<User, UserNotFoundError>
-    readonly all: () => Effect.Effect<readonly User[]>
+    readonly all: Effect.Effect<readonly User[]>
   }
 >()("@app/Users") {
   static readonly layer = Layer.effect(
@@ -100,10 +100,10 @@ class Users extends Context.Service<
         const response = yield* http.get(`/users/${id}`)
         return yield* HttpClientResponse.schemaBodyJson(User)(response)
       })
-      const all = Effect.fn("Users.all")(function* () {
+      const all = Effect.gen(function* () {
         const response = yield* http.get("/users")
         return yield* HttpClientResponse.schemaBodyJson(Schema.Array(User))(response)
-      })
+      }).pipe(Effect.withSpan("Users.all"))
       return { findById, all }
     })
   )
@@ -280,6 +280,7 @@ Write logs so that a reader can tell from them why nothing happened, not just wh
 
 | Do Not | Do Instead |
 |--------|-----------|
+| `error instanceof SomeError` | `Effect.catchTag`, `Schema.is(SomeError)` or `Match.valueTags` |
 | `console.log(...)` | `Effect.log(...)` with structured data |
 | `process.env.KEY` | `Config.String("KEY")` or `Config.Redacted("KEY")` |
 | `throw new Error()` inside `Effect.gen` | `yield* new TaggedError({...})` or `Effect.fail(...)` |

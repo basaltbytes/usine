@@ -285,7 +285,7 @@ export const eventually = Effect.fn("GatewayTest.eventually")(function* (
 /** Returns the in-memory Gateway's attachments. */
 export const attachmentsInForce = Effect.gen(function* () {
   const store = yield* Attachments;
-  return yield* store.list();
+  return yield* store.list;
 });
 
 /** Returns the claims the Gateway decodes from a caller token it issued. */

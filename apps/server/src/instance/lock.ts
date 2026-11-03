@@ -126,8 +126,7 @@ export const holdInstance = Effect.fn("Server.holdInstance")(function* (
   const files = instanceFiles(directory);
   const lockError = (cause: unknown) =>
     InstanceLockError.make({ directory, reason: reasonOf(cause) });
-  const refuse = Effect.fn("Server.refuseInstance")(function* (cause: unknown) {
-    if (!Schema.is(SqliteBusy)(cause)) return yield* lockError(cause);
+  const refuse = Effect.fn("Server.refuseInstance")(function* () {
     const holder = yield* readPid(files);
     yield* Effect.logWarning("Another usine process holds the instance folder", {
       instanceDirectory: directory,
@@ -141,10 +140,13 @@ export const holdInstance = Effect.fn("Server.holdInstance")(function* (
   yield* Effect.acquireRelease(
     Effect.try({
       try: () => takeLock(files.lock),
-      catch: (cause) => cause,
+      catch: (cause) =>
+        Schema.is(SqliteBusy)(cause)
+          ? InstanceInUseError.make({ directory, holder: Option.none() })
+          : lockError(cause),
     }),
     (database) => Effect.sync(() => database.close()),
-  ).pipe(Effect.catch(refuse));
+  ).pipe(Effect.catchTag("InstanceInUseError", refuse));
   yield* Effect.acquireRelease(
     Effect.all([
       fileSystem.writeFileString(files.pid, `${record.pid}\n`),

@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Console, Context, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { createServer } from "node:http";
@@ -122,21 +122,23 @@ await Effect.runPromise(
         } finally {
           await new Promise<void>((resolve) => server.close(() => resolve()));
         }
-        console.log(
-          JSON.stringify(
-            {
-              node: process.version,
-              bytes: (await stat(`${directory}/.usine/runtime.sqlite`)).size,
-              query,
-              rows: (
-                await Effect.runPromiseWith(effectContext)(
-                  sql`SELECT count(*) AS count FROM usine_attempt_transcripts`,
-                )
-              )[0],
-              report,
-            },
-            null,
-            2,
+        await Effect.runPromiseWith(effectContext)(
+          Console.log(
+            JSON.stringify(
+              {
+                node: process.version,
+                bytes: (await stat(`${directory}/.usine/runtime.sqlite`)).size,
+                query,
+                rows: (
+                  await Effect.runPromiseWith(effectContext)(
+                    sql`SELECT count(*) AS count FROM usine_attempt_transcripts`,
+                  )
+                )[0],
+                report,
+              },
+              null,
+              2,
+            ),
           ),
         );
       });

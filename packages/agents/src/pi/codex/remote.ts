@@ -143,7 +143,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     ),
     Effect.tap(() => Effect.logInfo("Confirmed the remote Codex process group stopped", fields)),
     Effect.mapError((cause) =>
-      cause instanceof SessionOperationError
+      Schema.is(SessionOperationError)(cause)
         ? cause
         : operationError(
             "interrupt",
@@ -179,12 +179,12 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     yield* Effect.logInfo("Remote Codex app-server exited", fields);
   }).pipe(
     Effect.mapError((cause) =>
-      cause instanceof SessionOperationError
+      Schema.is(SessionOperationError)(cause)
         ? cause
         : operationError("stream", client, "Could not reattach the remote Codex app-server", cause),
     ),
     Effect.catchTag("SessionOperationError", (error) =>
-      error.cause instanceof RemoteCodexProcessLost
+      Schema.is(RemoteCodexProcessLost)(error.cause)
         ? stopRemote.pipe(Effect.andThen(error))
         : error,
     ),

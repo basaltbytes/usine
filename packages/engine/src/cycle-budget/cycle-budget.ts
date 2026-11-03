@@ -28,7 +28,7 @@ import { cycleQueries } from "./queries.ts";
 const persistence = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.mapError((cause) =>
-      cause instanceof CycleBudgetResetRejectedError
+      Schema.is(CycleBudgetResetRejectedError)(cause)
         ? cause
         : EnginePersistenceError.make({ operation: "update cycle budget", cause }),
     ),
@@ -43,7 +43,7 @@ export class CycleBudgets extends Context.Service<
       itemKey: ItemKey,
     ) => Effect.Effect<CycleGeneration, EnginePersistenceError>;
     /** Returns all unanswered cycle-budget Asks, including those for Items whose labels no longer match. */
-    readonly asks: () => Effect.Effect<ReadonlyArray<CycleBudgetAsk>, EnginePersistenceError>;
+    readonly asks: Effect.Effect<ReadonlyArray<CycleBudgetAsk>, EnginePersistenceError>;
     /** Records the answer to the Ask and requests fresh trigger evaluation; repeated calls are idempotent. */
     readonly reset: (
       askId: CycleBudgetAskId,
@@ -59,10 +59,7 @@ export class CycleBudgets extends Context.Service<
       reason: CycleBudgetAskCloseReason,
     ) => Effect.Effect<boolean, EnginePersistenceError>;
     /** Returns the resets that still wait for a durable polling-cursor restart. */
-    readonly pendingResets: () => Effect.Effect<
-      ReadonlyArray<CycleBudgetReset>,
-      EnginePersistenceError
-    >;
+    readonly pendingResets: Effect.Effect<ReadonlyArray<CycleBudgetReset>, EnginePersistenceError>;
     /** Acknowledges the reset for its generation only, after fresh polling progress is recorded. */
     readonly acknowledgeReset: (
       reset: CycleBudgetReset,
@@ -93,7 +90,7 @@ export class CycleBudgets extends Context.Service<
           onSome: (row) => row.generation,
         });
       });
-      const asks = Effect.fn("CycleBudgets.asks")(() =>
+      const asks = Effect.suspend(() =>
         queries
           .asks()
           .pipe(
@@ -101,7 +98,7 @@ export class CycleBudgets extends Context.Service<
               EnginePersistenceError.make({ operation: "read cycle asks", cause }),
             ),
           ),
-      );
+      ).pipe(Effect.withSpan("CycleBudgets.asks"));
       const reset = Effect.fn("CycleBudgets.reset")(function* (
         askId: CycleBudgetAskId,
         answer: Event,
@@ -243,7 +240,7 @@ export class CycleBudgets extends Context.Service<
           ),
         );
       });
-      const pendingResets = Effect.fn("CycleBudgets.pendingResets")(() =>
+      const pendingResets = Effect.suspend(() =>
         queries.pendingResets().pipe(
           Effect.mapBoth({
             onSuccess: (rows) => rows.map((row) => CycleBudgetReset.make(row)),
@@ -251,7 +248,7 @@ export class CycleBudgets extends Context.Service<
               EnginePersistenceError.make({ operation: "read pending cycle resets", cause }),
           }),
         ),
-      );
+      ).pipe(Effect.withSpan("CycleBudgets.pendingResets"));
       const acknowledgeReset = Effect.fn("CycleBudgets.acknowledgeReset")(function* (
         reset: CycleBudgetReset,
       ) {

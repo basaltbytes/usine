@@ -80,14 +80,25 @@ class Unreachable extends Schema.TaggedError<Unreachable>()("Unreachable", {
  * than the CONNECT host; or the host resolved to a private address. `serverName` is the
  * ClientHello's server name, if any.
  */
-class TunnelRefused extends Data.TaggedError("TunnelRefused")<{
-  readonly reason: "not-tls" | "server-name-missing" | "server-name-mismatch" | "private-address";
-  readonly detail: string;
-  readonly serverName: Option.Option<string>;
-}> {}
+class TunnelRefused extends Schema.TaggedError<TunnelRefused, { readonly Brand: unique symbol }>()(
+  "TunnelRefused",
+  {
+    reason: Schema.Literals([
+      "not-tls",
+      "server-name-missing",
+      "server-name-mismatch",
+      "private-address",
+    ]),
+    detail: Schema.String,
+    serverName: Schema.Option(Schema.String),
+  },
+) {}
 
 /** The error when the client closes a tunnel before sending any bytes. */
-class TunnelAbandoned extends Data.TaggedError("TunnelAbandoned") {}
+class TunnelAbandoned extends Schema.TaggedError<
+  TunnelAbandoned,
+  { readonly Brand: unique symbol }
+>()("TunnelAbandoned", {}) {}
 
 /** A fatal TLS `unrecognized_name` alert (RFC 8446, section 6), sent so the client can report why the handshake ended. */
 const UNRECOGNIZED_NAME_ALERT = Buffer.from([0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x70]);
@@ -95,7 +106,7 @@ const UNRECOGNIZED_NAME_ALERT = Buffer.from([0x15, 0x03, 0x03, 0x00, 0x02, 0x02,
 const CLIENT_HELLO_TIMEOUT = "5 seconds";
 
 const notTls = (detail: string) =>
-  new TunnelRefused({ reason: "not-tls", detail, serverName: Option.none() });
+  TunnelRefused.make({ reason: "not-tls", detail, serverName: Option.none() });
 
 /**
  * Buffers a tunnel's first bytes, including `head`, until they contain a complete ClientHello
@@ -137,7 +148,7 @@ const clientHello = (client: Duplex, head: Buffer) =>
       resume(
         Effect.fail(
           reader.bytes.length === 0
-            ? new TunnelAbandoned()
+            ? TunnelAbandoned.make()
             : notTls("the client closed the tunnel before its ClientHello was complete"),
         ),
       );
@@ -168,7 +179,7 @@ const pinnedServerName = (
 ): Effect.Effect<{ readonly buffered: Buffer; readonly serverName: string }, TunnelRefused> => {
   if (hello.encryptedClientHello)
     return Effect.fail(
-      new TunnelRefused({
+      TunnelRefused.make({
         reason: "server-name-missing",
         detail: "the ClientHello encrypts its server name (ECH), so it cannot be checked",
         serverName: hello.serverName,
@@ -176,7 +187,7 @@ const pinnedServerName = (
     );
   if (Option.isNone(hello.serverName))
     return Effect.fail(
-      new TunnelRefused({
+      TunnelRefused.make({
         reason: "server-name-missing",
         detail: "the ClientHello names no server",
         serverName: Option.none(),
@@ -186,7 +197,7 @@ const pinnedServerName = (
   return comparableHost(serverName) === comparableHost(host)
     ? Effect.succeed({ buffered: hello.buffered, serverName })
     : Effect.fail(
-        new TunnelRefused({
+        TunnelRefused.make({
           reason: "server-name-mismatch",
           detail: `the ClientHello asks for ${serverName}, not the CONNECT host`,
           serverName: hello.serverName,
@@ -441,7 +452,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
         resolve(decision).pipe(
           Effect.catchTag("EgressRefused", (refused) =>
             Effect.fail(
-              new TunnelRefused({
+              TunnelRefused.make({
                 reason: "private-address",
                 detail: `${refused.host} resolves to a private address`,
                 serverName: Option.some(serverName),

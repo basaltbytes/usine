@@ -17,7 +17,18 @@ import {
   StubStorage,
   stubAttemptRuntime,
 } from "@usine/durable/testing";
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Redacted, Ref, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Stream,
+  Schema,
+} from "effect";
 import { FetchHttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { fileURLToPath } from "node:url";
@@ -157,7 +168,7 @@ const echoingParent =
     Effect.gen(function* () {
       seen.push(context.request);
       const host = context.request.host;
-      assert(host instanceof RemoteShell);
+      assert(Schema.is(RemoteShell)(host));
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const handle = yield* spawner.spawn(
         ChildProcess.make(
@@ -229,7 +240,7 @@ describe("cloudflare Worker", () => {
           worker.state.requests.indexOf(`DELETE /v1/sandboxes/${SANDBOX}`),
         );
         const [given] = seen;
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.host.destination, SANDBOX);
         assert.strictEqual(
           given.host.sshEnvironment[SHELL_ENVIRONMENT.accessClientSecret],
@@ -569,7 +580,7 @@ describe("cloudflare Worker", () => {
           .prepare(CheckoutRequest.make({ ...request, agent: brain("codex") }))
           .pipe(Effect.flip);
         const pi = yield* cloudflare.preflight(WORKER, [brain("pi").brain], 1).pipe(Effect.flip);
-        assert(codex instanceof WorkerCapabilityError && pi instanceof WorkerCapabilityError);
+        assert(Schema.is(WorkerCapabilityError)(codex) && Schema.is(WorkerCapabilityError)(pi));
         assert.strictEqual(codex.capability, "harness-login");
         assert.include(codex.message, "openai");
         assert.strictEqual(pi.capability, "toolchain");
@@ -604,7 +615,8 @@ describe("cloudflare Worker", () => {
         Effect.provide(executor(worker, credentials, completes, new StubStorage(), [OPENAI])),
       );
 
-      assert(refused instanceof WorkerCapabilityError);
+      const matchesRefused = Schema.is(WorkerCapabilityError)(refused);
+      assert(matchesRefused);
       assert.strictEqual(refused.capability, "toolchain");
       assert.include(refused.message, "codex-cli 0.150.0");
       assert.deepStrictEqual(probes, [
@@ -639,7 +651,9 @@ describe("cloudflare Worker", () => {
         Effect.provide(executor(worker, mintingProvider())),
       );
 
-      assert(refused instanceof WorkerCapabilityError && missing instanceof WorkerCapabilityError);
+      assert(
+        Schema.is(WorkerCapabilityError)(refused) && Schema.is(WorkerCapabilityError)(missing),
+      );
       assert.strictEqual(refused.capability, "credentials");
       assert.strictEqual(missing.capability, "toolchain");
       assert.include(missing.message, 'no image "usine"');

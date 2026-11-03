@@ -8,7 +8,7 @@ import {
   GatewayAdminApi,
   type LlmProviderList,
 } from "@usine/gateway/admin";
-import { Data, DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
+import { DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import type { SshWorkerGateway } from "../model.ts";
@@ -63,17 +63,20 @@ const ADMIN_REQUEST_TIMEOUT = "30 seconds";
  * The error when an admin request through the open forward gets no response. `since` is when
  * the first unanswered request after the last response was sent.
  */
-class GatewayAdminUnanswered extends Data.TaggedError("GatewayAdminUnanswered")<{
-  readonly gateway: string;
-  readonly since: DateTime.Utc;
-  readonly detail: string;
-}> {}
+class GatewayAdminUnanswered extends Schema.TaggedError<
+  GatewayAdminUnanswered,
+  { readonly Brand: unique symbol }
+>()("GatewayAdminUnanswered", {
+  gateway: Schema.String,
+  since: Schema.DateTimeUtc,
+  detail: Schema.String,
+}) {}
 
 /** Returns the failure reason, built only from the forward's state or the failure's tag and status. */
 const reason = (failure: { readonly _tag: string }): string => {
-  if (failure instanceof GatewayForwardClosed)
+  if (Schema.is(GatewayForwardClosed)(failure))
     return `the forward through ${failure.gateway} has been closed since ${DateTime.formatIso(failure.since)}: ${failure.reason}`;
-  if (failure instanceof GatewayAdminUnanswered)
+  if (Schema.is(GatewayAdminUnanswered)(failure))
     return `the admin API through ${failure.gateway} hasn't responded since ${DateTime.formatIso(failure.since)}: ${failure.detail}`;
   if (HttpClientError.isHttpClientError(failure))
     return failure.response === undefined
@@ -106,9 +109,9 @@ const unanswered = (failure: { readonly _tag: string }): boolean =>
 
 /** Returns the log field with the time the admin API became unreachable, if the failure has it. */
 const sinceFields = (failure: { readonly _tag: string }) => {
-  if (failure instanceof GatewayForwardClosed)
+  if (Schema.is(GatewayForwardClosed)(failure))
     return { closedSince: DateTime.formatIso(failure.since) };
-  if (failure instanceof GatewayAdminUnanswered)
+  if (Schema.is(GatewayAdminUnanswered)(failure))
     return { unansweredSince: DateTime.formatIso(failure.since) };
   return {};
 };
@@ -147,7 +150,7 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
         ),
       );
       if (Result.isFailure(sent) && unanswered(sent.failure))
-        return yield* new GatewayAdminUnanswered({
+        return yield* GatewayAdminUnanswered.make({
           gateway: forward.gateway,
           since: yield* forward.unanswered(sentAt),
           detail: reason(sent.failure),
@@ -173,7 +176,7 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
     if (Result.isFailure(opened)) return yield* retried(opened.failure.generation, opened.failure);
     const answered = yield* Effect.result(through(opened.success));
     if (Result.isSuccess(answered)) return answered.success;
-    if (!(answered.failure instanceof GatewayAdminUnanswered))
+    if (!Schema.is(GatewayAdminUnanswered)(answered.failure))
       return yield* Effect.fail(answered.failure);
     return yield* retried(opened.success.generation, answered.failure);
   });

@@ -54,7 +54,7 @@ const logged = (lines: ReadonlyArray<string>, needle: string) =>
   Effect.suspend(() => {
     const line = lines.find((candidate) => candidate.includes(needle));
     return line === undefined
-      ? Effect.fail(new Error(`no log line contains ${needle}`))
+      ? Effect.fail(LogLineMissing.make({ message: `no log line contains ${needle}` }))
       : Effect.succeed(line);
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
 
@@ -528,3 +528,10 @@ describe("the Node gateway", () => {
       ),
   );
 });
+
+class LogLineMissing extends Schema.TaggedError<
+  LogLineMissing,
+  { readonly Brand: unique symbol }
+>()("LogLineMissing", {
+  message: Schema.String,
+}) {}

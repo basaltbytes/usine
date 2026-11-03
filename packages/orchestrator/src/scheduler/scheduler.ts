@@ -504,6 +504,8 @@ export const stepExecutorLayer = (
             yield* Effect.logDebug(
               "The reload adds no worker or brain and changes no slots, so it runs no worker preflight",
             );
+            // The caller applies this worker reload after preflight succeeds.
+            // @effect-diagnostics-next-line returnEffectInGen:off
             return apply;
           }
           const added = new Set(change.added.map(({ name }) => name));
@@ -528,6 +530,8 @@ export const stepExecutorLayer = (
           }).pipe(
             Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
           );
+          // The caller applies this worker reload after preflight succeeds.
+          // @effect-diagnostics-next-line returnEffectInGen:off
           return apply;
         },
         (effect) => preflight.exclusive.withPermit(effect),
@@ -868,7 +872,7 @@ export const stepExecutorLayer = (
       const writerFor = Effect.fn("WorkerScheduler.writer")(
         function* (attemptId: AttemptId) {
           yield* Effect.annotateCurrentSpan({ attemptId });
-          const commitAuthor = yield* app.botAccount();
+          const commitAuthor = yield* app.botAccount;
           const botLogin = githubBotLogin(executor.kind, commitAuthor.login);
           return { commitAuthor, botLogin };
         },
@@ -1006,7 +1010,7 @@ export const stepExecutorLayer = (
         intervene: executor.intervene,
         recover: (attempt, record) =>
           executor
-            .recover(attempt, record, app.botAccount().pipe(Effect.mapError(botAccountFailure)))
+            .recover(attempt, record, app.botAccount.pipe(Effect.mapError(botAccountFailure)))
             .pipe(
               Effect.catchIf(Schema.is(ExecutorError), (error) =>
                 Effect.fail(asAttemptFailure(error)),

@@ -466,7 +466,7 @@ export const attemptTask = (
       settled.reason === "model_error" &&
       Schema.is(Schema.String)(settled.detail)
         ? Option.some(harnessFailure(Option.none(), settled.detail)).pipe(
-            Option.filter((error) => error instanceof AgentCapacityError),
+            Option.filter((error) => Schema.is(AgentCapacityError)(error)),
           )
         : Option.none<AgentCapacityError>();
     yield* commit(runtime, context, "record the unanswered turn", () =>

@@ -83,7 +83,7 @@ it.live(
           const other = yield* first.submit(submission({ number: 2, item: "other" }));
           assert(other._tag === "Claimed");
           yield* waitFor(first, other.runId, ({ run }) => run.state._tag === "Succeeded");
-          yield* first.drain();
+          yield* first.drain;
           assert.strictEqual(yield* TxRef.get(worker.leased), 0);
           yield* Scope.close(firstScope, Exit.void);
           const secondScope = yield* Scope.make();
@@ -91,7 +91,7 @@ it.live(
             yield* Scope.provide(Layer.build(runtime), secondScope),
             RunEngine,
           );
-          const waits = yield* second.awaitingCi();
+          const waits = yield* second.awaitingCi;
           assert.strictEqual(waits.length, 1);
           const restored = waits[0];
           assert(restored?.run.state._tag === "AwaitingCi");
@@ -103,14 +103,14 @@ it.live(
             ),
             policy.fixLoop,
           );
-          yield* second.reconcile();
+          yield* second.reconcile;
           yield* second.settleCi(accepted.runId, head, CiPassed.make());
           yield* second.settleCi(accepted.runId, head, CiFailed.make({ message: "late red" }));
           const completed = yield* second.inspect(accepted.runId);
           assert.strictEqual(completed.run.state._tag, "Succeeded");
           assert.strictEqual(completed.attempts.length, 1);
           assert.deepStrictEqual(completed.attempts[0]?.endedAt, waiting.attempts[0]?.endedAt);
-          assert.strictEqual((yield* second.awaitingCi()).length, 0);
+          assert.strictEqual((yield* second.awaitingCi).length, 0);
           yield* Scope.close(secondScope, Exit.void);
         }),
       ),
@@ -258,7 +258,7 @@ it.live.each([1, 2])(
           } else {
             assert.strictEqual(settled.run.state._tag, "Failed");
             assert.strictEqual(RunState.operatorActions(settled.run.state).canResolveFailure, true);
-            assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
+            assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);
           }
         }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
       }),

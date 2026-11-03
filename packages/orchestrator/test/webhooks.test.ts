@@ -17,7 +17,7 @@ it.effect(
       const bus = yield* ChangeBus;
       const revision = (yield* bus.open).revision;
       const saved = yield* Ref.make<ReadonlyArray<AttentionAcknowledgement>>([]);
-      const attention = webhookAttentionFor(health, { list: () => Ref.get(saved) });
+      const attention = webhookAttentionFor(health, { list: Ref.get(saved) });
       const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });
       const config = {
         mode: "endpoint",

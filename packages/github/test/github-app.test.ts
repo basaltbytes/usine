@@ -144,19 +144,17 @@ describe("GitHubApp", () => {
       return Effect.gen(function* () {
         const app = yield* GitHubApp;
         assert.equal(
-          yield* app.installationUrl(),
+          yield* app.installationUrl,
           "https://github.com/apps/usine-basaltbytes/installations/new",
         );
-        const wide = yield* app.installationToken();
+        const wide = yield* app.installationToken;
         assert.strictEqual(wide.scope._tag, "InstallationWide");
         assert.strictEqual(Redacted.value(wide.value), "installation-secret");
         assert(!String(wide).includes("installation-secret"));
         // The slug is the App's bot login, which attributes timeline changes to the factory.
-        assert.strictEqual((yield* app.installation()).appSlug, "usine-basaltbytes");
+        assert.strictEqual((yield* app.installation).appSlug, "usine-basaltbytes");
 
-        assert.deepStrictEqual(yield* app.repositories(), [
-          RepositoryName.make("basaltbytes/usine"),
-        ]);
+        assert.deepStrictEqual(yield* app.repositories, [RepositoryName.make("basaltbytes/usine")]);
         const access = yield* app.projectAccess([
           RepositoryName.make("BasaltBytes/Usine"),
           RepositoryName.make("basaltbytes/missing"),
@@ -164,7 +162,7 @@ describe("GitHubApp", () => {
         assert.strictEqual(access[0]?._tag, "CoveredProject");
         assert.strictEqual(access[1]?._tag, "ProjectNotInstalledError");
         const covered = access[0];
-        assert(covered instanceof CoveredProject);
+        assert(Schema.is(CoveredProject)(covered));
 
         const worker = yield* app.workerToken(covered, "write");
         assert.strictEqual(worker.scope._tag, "SingleRepository");
@@ -247,17 +245,17 @@ describe("GitHubApp", () => {
 
     return Effect.gen(function* () {
       const app = yield* GitHubApp;
-      const outage = yield* app.botAccount().pipe(Effect.flip);
+      const outage = yield* app.botAccount.pipe(Effect.flip);
       assert(outage._tag === "GitHubApiError");
       assert.strictEqual(outage.operation, "read-bot-account");
-      const account = yield* app.botAccount();
+      const account = yield* app.botAccount;
       assert.strictEqual(account.login, "usine-basaltbytes[bot]");
       // The bot account's ID, not the App's 12345, links commits to the bot.
       assert.strictEqual(
         account.noreplyEmail,
         "323694641+usine-basaltbytes[bot]@users.noreply.github.com",
       );
-      assert.deepStrictEqual(yield* app.botAccount(), account);
+      assert.deepStrictEqual(yield* app.botAccount, account);
       assert.strictEqual(lookups.length, 2);
       assert.strictEqual(lookups[1]?.headers.authorization, "Bearer installation-secret");
     }).pipe(Effect.provide(appLayer(client)));
@@ -327,8 +325,8 @@ describe("GitHubApp", () => {
 
     return Effect.gen(function* () {
       const app = yield* GitHubApp;
-      yield* app.installationToken();
-      const second = yield* app.installationToken();
+      yield* app.installationToken;
+      const second = yield* app.installationToken;
       assert.strictEqual(mints, 2);
       assert.strictEqual(Redacted.value(second.value), "short-lived-2");
     }).pipe(Effect.provide(appLayer(client)));
@@ -387,7 +385,7 @@ describe("GitHubApp", () => {
         }),
         "write",
       );
-      const shared = yield* app.installationToken();
+      const shared = yield* app.installationToken;
       assert.strictEqual(DateTime.toEpochMillis(worker.expiresAt), now + 60 * 60_000);
       assert.strictEqual(DateTime.toEpochMillis(shared.expiresAt), now + 60 * 60_000);
     }).pipe(Effect.provide(appLayer(client)));
@@ -477,7 +475,7 @@ describe("GitHubApp", () => {
 
     return Effect.gen(function* () {
       const app = yield* GitHubApp;
-      const failure = yield* app.installation().pipe(Effect.flip);
+      const failure = yield* app.installation.pipe(Effect.flip);
       assert.strictEqual(failure._tag, "InstallationDiscoveryError");
       assert.isTrue(isRefusal(failure));
     }).pipe(Effect.provide(appLayer(client)));
@@ -497,7 +495,7 @@ describe("GitHubApp", () => {
 
     return Effect.gen(function* () {
       const app = yield* GitHubApp;
-      const failure = yield* app.installation().pipe(Effect.flip);
+      const failure = yield* app.installation.pipe(Effect.flip);
       assert.strictEqual(failure._tag, "AppPermissionError");
       if (failure._tag === "AppPermissionError") {
         assert.deepStrictEqual(failure.missing, ["contents:write"]);

@@ -7,7 +7,7 @@ import {
   ConfigurationInvalidRefusal,
   StaleRevisionRefusal,
 } from "@usine/orchestrator/operator/http";
-import { Result, type Schema } from "effect";
+import { Result, Schema } from "effect";
 import { CommandButton } from "~/components/command-palette/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -57,20 +57,19 @@ export const ConfigurationEditorForm = ({
   const changeDraft = (next: Draft) => {
     setEditor(next);
     setProblems([]);
-    if (write.error instanceof ConfigurationInvalidRefusal) write.reset();
+    if (Schema.is(ConfigurationInvalidRefusal)(write.error)) write.reset();
   };
   const text = editor.mode === "text" ? editor.text : formText(entity, editor.value);
-  const serverProblems =
-    write.error instanceof ConfigurationInvalidRefusal
-      ? write.error.problems.filter((problem) => problem.entity.key === entity.key)
-      : [];
+  const serverProblems = Schema.is(ConfigurationInvalidRefusal)(write.error)
+    ? write.error.problems.filter((problem) => problem.entity.key === entity.key)
+    : [];
   return (
     <form
       className="flex min-w-0 flex-col gap-4"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        if (write.isPending || write.error instanceof StaleRevisionRefusal) return;
+        if (write.isPending || Schema.is(StaleRevisionRefusal)(write.error)) return;
         if (editor.mode === "form") {
           const validated = validateForm(entity, editor.value);
           if (Result.isFailure(validated)) {
@@ -142,7 +141,7 @@ export const ConfigurationEditorForm = ({
         </ul>
       )}
       {write.isError &&
-        (write.error instanceof StaleRevisionRefusal ? (
+        (Schema.is(StaleRevisionRefusal)(write.error) ? (
           <Conflict
             entity={entity}
             before={base.text}
@@ -170,7 +169,7 @@ export const ConfigurationEditorForm = ({
         <CommandButton
           command={editorCopy.save}
           type="submit"
-          disabled={write.isPending || write.error instanceof StaleRevisionRefusal}
+          disabled={write.isPending || Schema.is(StaleRevisionRefusal)(write.error)}
         >
           {write.isPending ? editorCopy.saving : editorCopy.save}
         </CommandButton>

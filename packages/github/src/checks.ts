@@ -85,7 +85,7 @@ export class GitHubChecks extends Context.Service<
       const app = yield* GitHubApp;
       const http = yield* HttpClient.HttpClient;
       const get = Effect.fn("GitHubChecks.get")(function* (path: string) {
-        const token = yield* app.installationToken();
+        const token = yield* app.installationToken;
         const response = yield* http
           .execute(HttpClientRequest.get(`${API_ROOT}/${path}`).pipe(authorized(token.value)))
           .pipe(Effect.mapError((error) => transportError("read-ci-checks", error)));
@@ -141,7 +141,7 @@ export class GitHubChecks extends Context.Service<
           const { owner, name } = splitRepositoryName(repository);
           const result = yield* queryGraphql(
             http,
-            yield* app.installationToken(),
+            yield* app.installationToken,
             "read-ci-checks",
             HEAD_QUERY,
             { owner, name, number: item },
@@ -197,15 +197,15 @@ export class GitHubChecks extends Context.Service<
                 ? Effect.succeed(check.output.text ?? check.output.summary ?? "")
                 : jobFailure(prefix, job, archives);
             const output = yield* log.pipe(
-              Effect.catch((error) =>
-                error._tag === "GitHubRateLimitError"
-                  ? Effect.fail(error)
-                  : Effect.logWarning("CI job log unavailable; using the check output", {
-                      repository,
-                      head,
-                      job: check.name,
-                      errorTag: error._tag,
-                    }).pipe(Effect.as(check.output.text ?? check.output.summary ?? error.message)),
+              Effect.catchIf(
+                (error) => error._tag !== "GitHubRateLimitError",
+                (error) =>
+                  Effect.logWarning("CI job log unavailable; using the check output", {
+                    repository,
+                    head,
+                    job: check.name,
+                    errorTag: error._tag,
+                  }).pipe(Effect.as(check.output.text ?? check.output.summary ?? error.message)),
               ),
             );
             excerpts.push(`${check.name}\n${output.slice(-2800)}`);

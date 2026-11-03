@@ -24,7 +24,7 @@ it.effect(
           // denied one waits interruptibly for teardown.
           assert.strictEqual(denied.pollUnsafe(), undefined);
           yield* Fiber.interrupt(denied);
-          yield* admission.drain();
+          yield* admission.drain;
         }).pipe(
           Effect.provide(AttemptAdmission.layer),
           Effect.provideService(RunEngineShutdown, shutdown),
@@ -55,7 +55,7 @@ it.effect(
         yield* admission.waitForUpgrade(ReleaseVersion.make("1.2.3"));
         yield* Deferred.await(released);
         assert.strictEqual(yield* Ref.get(attempt), false);
-        yield* admission.drain();
+        yield* admission.drain;
         yield* admission.cancelUpgrade;
         const denied = yield* Effect.forkScoped(
           admission.withAttempt(RunId.make("after-cancel"), Effect.void, () =>

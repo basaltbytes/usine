@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import {
   ConfigurationInvalidRefusal,
   ConfigurationRevertRefusal,
@@ -10,7 +11,7 @@ type WriteFailureProps = { readonly error: Error };
 export const WriteFailure = ({ error }: WriteFailureProps) => (
   <div role="alert" className="min-w-0 space-y-2 wrap-anywhere">
     <ErrorAlert message={rejectionMessage(error)} />
-    {error instanceof ConfigurationInvalidRefusal && (
+    {Schema.is(ConfigurationInvalidRefusal)(error) && (
       <ul className="space-y-1 text-destructive">
         {error.problems.map((problem, index) => (
           <li key={index}>
@@ -23,7 +24,7 @@ export const WriteFailure = ({ error }: WriteFailureProps) => (
         ))}
       </ul>
     )}
-    {error instanceof ConfigurationRevertRefusal && (
+    {Schema.is(ConfigurationRevertRefusal)(error) && (
       <ul className="text-destructive">
         {error.entities.map((key) => (
           <li key={key.key}>{key.key}</li>

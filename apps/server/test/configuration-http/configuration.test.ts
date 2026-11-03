@@ -528,18 +528,18 @@ it("serves installation repositories, live labels and supported harnesses, and r
         installation: unused,
         installationToken: unused,
         botAccount: unused,
-        projectAccess: unused,
-        installationUrl: () => Effect.die("unused installation URL"),
+        projectAccess: () => unused,
+        installationUrl: Effect.die("unused installation URL"),
         configureWebhook: () => Effect.die("unused webhook configuration"),
         deliveries: () => Effect.die("unused webhook deliveries"),
-        workerToken: unused,
-        repositories: () => Effect.succeed([repository]),
+        workerToken: () => unused,
+        repositories: Effect.succeed([repository]),
       });
       const polling = Layer.succeed(GitHubPolling)({
-        changes: unused,
-        baseRefHead: unused,
-        snapshot: unused,
-        missingIssues: unused,
+        changes: () => unused,
+        baseRefHead: () => unused,
+        snapshot: () => unused,
+        missingIssues: () => unused,
         labels: (name) =>
           name === repository
             ? Effect.succeed(

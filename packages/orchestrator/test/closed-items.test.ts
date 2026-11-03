@@ -355,7 +355,7 @@ describe("Items no Loop acts on", () => {
           update(items, 468, { state: "MERGED" });
           const merged = yield* polling.poll(instance);
           assert.deepStrictEqual(merged.submissions, []);
-          assert.deepStrictEqual(yield* budgets.asks(), []);
+          assert.deepStrictEqual(yield* budgets.asks, []);
           assert.deepStrictEqual(yield* needTags(instance), []);
           assert.strictEqual(yield* budgets.generation(gitHubItemKey(repository, 468)), 0);
           // The budget wasn't reset, so the reopened pull request is at its limit again.
@@ -696,7 +696,7 @@ describe("Items no Loop acts on", () => {
           update(items, 177, { state: "CLOSED" });
           yield* polling.poll(instance);
           assert.deepStrictEqual(yield* needTags(instance), []);
-          assert.deepStrictEqual(yield* budgets.asks(), []);
+          assert.deepStrictEqual(yield* budgets.asks, []);
         }),
       );
     },

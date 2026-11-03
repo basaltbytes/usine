@@ -31,19 +31,18 @@ const token = InstallationToken.make({
 });
 
 const appLayer = Layer.succeed(GitHubApp)({
-  installation: () =>
-    Effect.succeed(
-      Installation.make({
-        id: InstallationId.make(77),
-        accountLogin: "basaltbytes",
-        appSlug: AppSlug.make("usine-basaltbytes"),
-      }),
-    ),
-  repositories: () => Effect.die("unused installation repositories"),
-  installationToken: () => Effect.succeed(token),
-  botAccount: () => Effect.die("not used by polling tests"),
+  installation: Effect.succeed(
+    Installation.make({
+      id: InstallationId.make(77),
+      accountLogin: "basaltbytes",
+      appSlug: AppSlug.make("usine-basaltbytes"),
+    }),
+  ),
+  repositories: Effect.die("unused installation repositories"),
+  installationToken: Effect.succeed(token),
+  botAccount: Effect.die("not used by polling tests"),
   projectAccess: () => Effect.die("not used by polling tests"),
-  installationUrl: () => Effect.die("unused installation URL"),
+  installationUrl: Effect.die("unused installation URL"),
   configureWebhook: () => Effect.die("unused webhook configuration"),
   deliveries: () => Effect.die("unused webhook deliveries"),
   workerToken: () => Effect.die("not used by polling tests"),
@@ -243,8 +242,8 @@ describe("GitHubPolling", () => {
         const first = yield* polling.changes(repository, PollCursor.empty);
         assert.strictEqual(first._tag, "RepositoryChanges");
         if (first._tag !== "RepositoryChanges") return;
-        assert(first.items[0] instanceof ChangedIssue);
-        assert(first.items[1] instanceof ChangedPullRequest);
+        assert(Schema.is(ChangedIssue)(first.items[0]));
+        assert(Schema.is(ChangedPullRequest)(first.items[1]));
         assert(Option.isSome(first.cursor.entityTag));
         assert.strictEqual(first.cursor.entityTag.value, 'W/"state-1"');
         assert(Option.isSome(first.cursor.watermark));
@@ -393,8 +392,8 @@ describe("GitHubPolling", () => {
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
       const catalog = yield* polling.labels(repository, Option.none());
-      assert(catalog instanceof RepositoryLabelCatalog);
-      if (!(catalog instanceof RepositoryLabelCatalog)) return;
+      assert(Schema.is(RepositoryLabelCatalog)(catalog));
+      if (!Schema.is(RepositoryLabelCatalog)(catalog)) return;
       assert(Option.isSome(catalog.entityTag));
       if (Option.isNone(catalog.entityTag)) return;
       assert.deepStrictEqual(
@@ -415,7 +414,7 @@ describe("GitHubPolling", () => {
       );
       assert.strictEqual(requests[1]?.url, "https://api.github.com/repositories/1/labels?page=2");
       const unchanged = yield* polling.labels(repository, catalog.entityTag);
-      assert(unchanged instanceof RepositoryLabelsNotModified);
+      assert(Schema.is(RepositoryLabelsNotModified)(unchanged));
       assert.strictEqual(requests.length, 3);
       assert.strictEqual(requests[2]?.headers["if-none-match"], catalog.entityTag.value);
     }).pipe(Effect.provide(pollingLayer(client)));

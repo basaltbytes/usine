@@ -36,7 +36,7 @@ const instance = LoadedInstance.make({
   quarantinedLoops: [],
   warnings: [],
 });
-const revision = () => Effect.succeedSome(ProjectionRevision.make(0));
+const revision = Effect.succeedSome(ProjectionRevision.make(0));
 
 describe("Statistics cache", () => {
   it.effect(
@@ -76,7 +76,7 @@ describe("Statistics cache", () => {
       let current = Option.some(ProjectionRevision.make(0));
       let reads = 0;
       const cached = cacheStatistics(
-        () => Effect.sync(() => current),
+        Effect.sync(() => current),
         () => Effect.sync(() => ++reads),
       );
       assert.strictEqual(yield* cached(instance, "7d"), 1);
@@ -118,7 +118,7 @@ describe("Statistics cache", () => {
       const release = yield* Deferred.make<void>();
       let reads = 0;
       const cached = cacheStatistics(
-        () => Effect.sync(() => Option.some(ProjectionRevision.make(current))),
+        Effect.sync(() => Option.some(ProjectionRevision.make(current))),
         () =>
           Effect.gen(function* () {
             reads += 1;

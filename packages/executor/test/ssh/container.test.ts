@@ -8,7 +8,7 @@ import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/work
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import { ChatGptLogin, HostFilePath, OpenAiProvider, UpstreamBase } from "@usine/gateway";
-import { Deferred, Effect, Fiber, Layer, Option, References } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, References, Schema } from "effect";
 import { readFileSync } from "node:fs";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import { ATTEMPT_IMAGE, type SshWorkerAddress, SshWorkers } from "../../src/ssh/ssh.ts";
@@ -257,7 +257,7 @@ describe("SSH Worker with Docker", () => {
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
 
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.deepStrictEqual(given.host.container, { runtime: "docker", name: CONTAINER });
         assert.deepStrictEqual(running, [CONTAINER]);
         const { words, input } = runOf(machine, CONTAINER);
@@ -548,7 +548,7 @@ describe("SSH Worker with Docker", () => {
           `type=bind,"source=${WORKER_ROOT}/gh","destination=${WORKER_ROOT}/gh",readonly`,
           `type=bind,"source=/run/usine-gateway","destination=/run/usine-gateway",readonly`,
         ]);
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.host.sshEnvironment.GH_TOKEN, undefined);
         assert(!given.host.ssh.args.some((arg) => arg.startsWith("SendEnv=")));
         for (const { command, line } of machine.state.calls) {
@@ -588,7 +588,7 @@ describe("SSH Worker with Docker", () => {
         assert.include(logs.lines.join("\n"), "SSH Worker has no Docker or Podman");
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
-        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.host.container, undefined);
         assert(linesOf(machine).some((line) => line.includes("'worktree' 'add'")));
         assert(!linesOf(machine).some((line) => line.startsWith("exec 'docker' 'run' ")));
@@ -830,7 +830,7 @@ describe("SSH Worker with Docker", () => {
           yield* prepared.launch(sink);
           const calls = machine.state.calls.slice(before);
           assert(!calls.some(({ line }) => line.includes("partialClone")), "the checkout stays");
-          assert(given !== undefined && given.host instanceof RemoteShell);
+          assert(given !== undefined && Schema.is(RemoteShell)(given.host));
           assert.deepStrictEqual(given.host.container, { runtime: "docker", name: CONTAINER });
           const restarted = calls.findIndex(({ line }) => line.startsWith("exec 'docker' 'run' "));
           const written = calls.findIndex(({ line }) => writesCredential(line));

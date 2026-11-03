@@ -125,7 +125,7 @@ const fakeLayer = (
   states: ReadonlyArray<LoopRuntimeState> = [],
 ) => {
   const runs = Layer.succeed(RunEngine)({
-    awaitingCi: () => Effect.succeed([]),
+    awaitingCi: Effect.succeed([]),
     settleCi: () => Effect.void,
     resolveFailure: () => Effect.void,
     intervene: () => Effect.void,
@@ -133,8 +133,8 @@ const fakeLayer = (
     cancel: () => Effect.die("unused"),
     discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
-    reconcile: () => Effect.die("unused"),
-    drain: () => Effect.void,
+    reconcile: Effect.die("unused"),
+    drain: Effect.void,
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
     upgradeDrain: Effect.succeedNone,
@@ -436,7 +436,7 @@ describe("ScheduleTriggers", () => {
         assert.strictEqual(cycle.submissions.length, 1);
         assert.strictEqual(cycle.failures.length, 1);
         const failure = cycle.failures[0];
-        assert(failure instanceof ScheduleTickFailure);
+        assert(Schema.is(ScheduleTickFailure)(failure));
         assert.strictEqual(failure.repository, "basaltbytes/failing");
         assert.strictEqual(failure.errorTag, "EnginePersistenceError");
         assert.deepStrictEqual(
@@ -485,7 +485,7 @@ describe("ScheduleTriggers", () => {
         assert.strictEqual(cycle.submissions.length, 1);
         assert.strictEqual(cycle.failures.length, 1);
         const failure = cycle.failures[0];
-        assert(failure instanceof ScheduleTickFailure);
+        assert(Schema.is(ScheduleTickFailure)(failure));
         assert.strictEqual(failure.loop, broken.name);
         assert.strictEqual(failure.errorTag, "ConfigFileError");
         assert.deepStrictEqual(
@@ -514,7 +514,7 @@ describe("ScheduleTriggers", () => {
         assert.strictEqual(cycle.submissions.length, 0);
         assert.strictEqual(cycle.failures.length, 1);
         const failure = cycle.failures[0];
-        assert(failure instanceof ScheduleCronFailure);
+        assert(Schema.is(ScheduleCronFailure)(failure));
         assert.strictEqual(failure.loop, "scheduled-maintenance");
         assert.strictEqual(failure.tz, "Europe/Warsaw");
         // With no computable boundary the run loop falls back to its idle wake.

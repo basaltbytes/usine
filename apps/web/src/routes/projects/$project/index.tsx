@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { ProjectId } from "@usine/core/project";
 import { projectQuery } from "~/features/projects/queries";
 import { useSuspenseQuery } from "@tanstack/react-query";
@@ -19,7 +20,7 @@ const BoardRoute = () => {
   const desk = useSuspenseQuery(deskQuery());
   const openRun = useOpenRun();
   const { data: project, error } = useSuspenseQuery(projectQuery(ProjectId.make(slug)));
-  if (error instanceof OperatorHttpError && error.error === "BoardProjectNotFoundError")
+  if (Schema.is(OperatorHttpError)(error) && error.error === "BoardProjectNotFoundError")
     return <ProjectNotFound />;
   return (
     <ProjectBoard

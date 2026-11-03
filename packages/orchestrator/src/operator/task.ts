@@ -199,7 +199,7 @@ const makeTaskReader = Effect.gen(function* () {
           .pipe(Effect.flatMap((runs) => readBoardItems(itemReader, managed.name, runs))),
         repositoryLabels.get(managed.name),
         controls.states,
-        budgets.asks(),
+        budgets.asks,
         workerStatus.provisioning,
       ] as const,
       { concurrency: "unbounded" },
