@@ -32,6 +32,10 @@ An open screen receives change notices over one server-sent events connection an
 
 The **No project access** page checks permissions every minute. When an admin grants access, the page opens your projects automatically. Task pages refresh after label changes on any linked item and merge conflict changes on any linked pull request, including older pull requests.
 
+Open run drawers and run pages refresh after configuration changes. If an agent definition changes, failed runs show the warning that **Edit and retry** uses the current definition.
+
 Board moves appear immediately. A failed label write restores the card's previous lane and displays the error. An accepted move remains visible until GitHub synchronization confirms the lane. Open **Done** and scroll to load all its cards; loaded cards support **Move to** and dragging to a writable lane. Long lanes and run histories load more rows as you scroll.
+
+**Runs without a card** includes only runs whose items have no board card. Runs on cards in **Done** stay out of this section, including before you load the lane.
 
 If you serve the UI through a reverse proxy, disable response buffering for `/api/changes` and allow a long-lived response. The endpoint sends a heartbeat every 15 seconds.

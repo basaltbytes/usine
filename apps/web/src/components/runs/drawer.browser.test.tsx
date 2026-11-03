@@ -41,6 +41,8 @@ import { commands, page, userEvent } from "vitest/browser";
 import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { runDetailQuery } from "~/lib/runs/queries";
+import { invalidateChanges } from "~/lib/changes";
+import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
@@ -253,7 +255,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
   }
 });
 
-it("leaves a closed issue's failed run out of Needs attention and marks the issue closed in its drawer", async () => {
+it("marks a closed issue in its drawer and refreshes the agent definition warning after configuration changes", async () => {
   const onIssue = new RunView({
     ...run,
     itemKey: ItemKey.make('["github","resolution/project",1]'),
@@ -343,6 +345,29 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
     await expect
       .element(needs.getByRole("region", { name: "Run failed (1)", includeHidden: true }))
       .not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    const warning = drawer.getByText("The loaded definition of developer has changed.", {
+      exact: false,
+    });
+    await expect.element(warning).not.toBeInTheDocument();
+    const changed = JSON.stringify(
+      Schema.encodeSync(RunDetailView)(
+        new RunDetailView({
+          ...Schema.decodeUnknownSync(Schema.fromJsonString(RunDetailView))(detail),
+          agentDefinitionChanged: true,
+        }),
+      ),
+    );
+    await commands.failureResolutionResponses(overview, overview, changed, changed, attemptId);
+    await invalidateChanges(
+      queryClient,
+      new ChangeNotice({
+        revision: 1,
+        reset: false,
+        changes: [{ kind: "configuration", id: "instance" }],
+      }),
+    );
+    await expect.element(warning).toBeVisible();
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();

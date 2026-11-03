@@ -43,6 +43,7 @@ export const invalidateChanges = (client: QueryClient, notice: ChangeNotice) =>
               key === "upgrade" ||
               key === "overview" ||
               key === "agents" ||
+              key === "run" ||
               key === "project" ||
               key === "search"
             );

@@ -43,6 +43,9 @@ export const pagedBoard = (project: ProjectView): ProjectView =>
     ...project,
     board: new BoardView({
       ...project.board,
+      cardedItemKeys: project.board.lanes.flatMap(({ items }) =>
+        items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
+      ),
       lanes: project.board.lanes.map((lane) =>
         historyLane(lane)
           ? lane._tag === "ReadOnlyBoardLane"

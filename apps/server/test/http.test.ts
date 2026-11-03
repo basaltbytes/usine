@@ -33,7 +33,7 @@ import { join } from "node:path";
 import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
 import { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/config/label";
-import { LaneName } from "@usine/config/board";
+import { LaneName, StateLaneSource } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -1510,6 +1510,81 @@ it("returns a private validator and an empty 304 for unchanged authorized reads"
   const shell = await request({ "x-usine-view": "shell", "if-none-match": etag });
   assert.strictEqual(shell.status, 200);
   assert.include(shell.headers.get("vary") ?? "", "x-usine-view");
+});
+
+it("retains all linked card membership when the board read omits settled cards", async () => {
+  const item = task.items[0];
+  const original = overview.projects[0];
+  assert(item !== undefined && original !== undefined);
+  const member = new BoardItemLink(item);
+  const current = new BoardItemLink({
+    ...member,
+    itemKey: ItemKey.make("github:basaltbytes/usine:42"),
+    kind: "pr",
+    number: ItemNumber.make(42),
+    state: "pr-merged",
+  });
+  const card = new BoardTaskView({
+    ...current,
+    repository: repositoryName,
+    items: [member, current],
+    ...boardRunSummary([run], run, [member, current]),
+    run,
+    pullRequest: null,
+    needsYou: false,
+    loops: [],
+    usage: new TaskUsageView({
+      durationMillis: 0,
+      runningSince: [],
+      unmeasured: 0,
+      tokens: TokenCount.make(0),
+      pools: [],
+      cost: null,
+    }),
+  });
+  const project = new ProjectView({
+    ...original,
+    board: new BoardView({
+      failures: [],
+      lanes: [
+        new ReadOnlyBoardLaneView({
+          id: BoardLaneId.make("Done"),
+          name: LaneName.make("Done"),
+          origin: "authored",
+          sources: [new StateLaneSource({ state: "pr-merged" })],
+          items: [card],
+        }),
+      ],
+    }),
+  });
+  const read = Layer.effect(
+    FactoryBackend,
+    Effect.map(FactoryBackend, (service) => ({
+      ...service,
+      overview: Effect.succeed(new ReadyOverview({ ...overview, projects: [project] })),
+    })),
+  ).pipe(Layer.provide(backend));
+  const boardApp = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(read)), {
+    disableLogger: true,
+  });
+  try {
+    const response = await boardApp.handler(
+      new Request("http://localhost/api/projects/workspace", {
+        headers: { "x-usine-view": "board" },
+      }),
+    );
+    assert.strictEqual(response.status, 200);
+    const paged = Schema.decodeUnknownSync(ProjectView)(await response.json());
+    assert.deepStrictEqual(paged.board.cardedItemKeys, [member.itemKey, current.itemKey]);
+    assert.deepStrictEqual(paged.board.lanes[0]?.items, []);
+    assert.strictEqual(paged.board.lanes[0]?.totalItems, 1);
+    assert.deepStrictEqual(
+      paged.runs.map(({ id }) => id),
+      project.runs.map(({ id }) => id),
+    );
+  } finally {
+    await boardApp.dispose();
+  }
 });
 
 it("streams small changes and replays missed revisions without payloads", async () => {

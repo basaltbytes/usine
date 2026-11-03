@@ -215,6 +215,8 @@ export class BoardProjectionError extends Schema.TaggedError<BoardProjectionErro
 export class BoardView extends Schema.Class<BoardView>("@usine/orchestrator/BoardView")({
   /** The configured or proposed lanes, including the unmapped lane when needed. */
   lanes: Schema.Array(BoardLaneView),
+  /** All linked item keys with cards, including cards omitted from paginated lanes. */
+  cardedItemKeys: Schema.optionalKey(Schema.Array(ItemKey)),
   /** Items excluded from projection because their stored data could not be decoded. */
   failures: Schema.Array(BoardProjectionError),
 }) {}

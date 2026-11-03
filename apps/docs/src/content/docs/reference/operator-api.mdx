@@ -40,3 +40,5 @@ Read `GET /api/runs/:runId` for the run's task, result message, each attempt's t
 Successful operator JSON reads return an `ETag`. Authentication and setup responses use `Cache-Control: no-store`. Send it as `If-None-Match`; an unchanged response returns HTTP 304 with no body. Validators are private to the authenticated representation.
 
 `X-Usine-View: shell` on `/api/overview` returns navigation and compact task identities. `X-Usine-View: attention` returns attention entries. `X-Usine-View: board` on `/api/projects/:project` returns settled lane counts; read their cards from `/api/projects/:project/lanes/:lane/items?offset=0` in pages of 50. `X-Usine-View: task` on a repository task read returns the first 25 runs and `runsTotal`; read subsequent pages from `/api/projects/:owner/:repository/tasks/:item/runs?offset=25`. Page responses include `nextOffset`, which is null at the end. `GET /api/workers` returns worker configuration and slot usage.
+
+The board representation includes `board.cardedItemKeys` for every linked item with a card, including cards in unloaded pages. Use these keys to distinguish runs without cards from runs on paginated cards.

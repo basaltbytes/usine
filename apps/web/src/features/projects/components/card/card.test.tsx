@@ -283,6 +283,18 @@ describe("Runs without a Board card", () => {
       runsWithoutCard(project).map(({ id }) => id),
       [scheduled.id],
     );
+    const paginated = new ProjectView({
+      ...project,
+      board: new BoardView({
+        ...project.board,
+        cardedItemKeys: carded.items.map(({ itemKey }) => itemKey),
+        lanes: project.board.lanes.map((lane) => ({ ...lane, items: [], totalItems: 1 })),
+      }),
+    });
+    assert.deepStrictEqual(
+      runsWithoutCard(paginated).map(({ id }) => id),
+      [scheduled.id],
+    );
   });
 });
 

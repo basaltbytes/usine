@@ -87,9 +87,10 @@ export const applyMove = (
 /** Returns the Runs whose Item has no card, such as schedule Runs and Runs on quarantined Items. */
 export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunSummaryView> => {
   const carded = new Set(
-    project.board.lanes.flatMap(({ items }) =>
-      items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
-    ),
+    project.board.cardedItemKeys ??
+      project.board.lanes.flatMap(({ items }) =>
+        items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
+      ),
   );
   return project.runs.filter(({ itemKey }) => !carded.has(itemKey));
 };
