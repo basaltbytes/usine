@@ -21,6 +21,8 @@ import { creationFailuresLine, nextCreationLine } from "~/lib/workers/strings";
 import { routeTree } from "~/route-tree.gen";
 import { configurationFixture } from "~/lib/configuration/fixture";
 import "~/index.css";
+import { ChangeNotice } from "@usine/orchestrator/operator/http";
+import { invalidateChanges } from "~/lib/changes";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -40,6 +42,7 @@ beforeEach(() => {
     new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
   );
   queryClient.setQueryData(configurationQuery().queryKey, configuration);
+  queryClient.setQueryData(workersQuery().queryKey, configuration);
 });
 
 afterEach(() => {
@@ -176,6 +179,26 @@ it("says on the Workers list that a worker's machine creation is paused", async 
     )
     .toBeVisible();
   await expect.element(row(/^boat-pool/u).getByText("Deferred", { exact: true })).toBeVisible();
+});
+
+it("fetches current workers on a first visit after cached configuration is invalidated", async () => {
+  await commands.workerPreflightResponses(encodeConfiguration(configuration));
+  await queryClient.fetchQuery({ ...configurationQuery(), staleTime: 0 });
+  queryClient.removeQueries({ queryKey: workersQuery().queryKey });
+  const updated = withPreflight({ _tag: "Passed", checkedAt: "2026-10-30T12:01:00Z" });
+  await commands.workerPreflightResponses(encodeConfiguration(updated));
+  await invalidateChanges(
+    queryClient,
+    new ChangeNotice({
+      revision: 1,
+      reset: false,
+      changes: [{ kind: "worker", id: "eu-1" }],
+    }),
+  );
+  expect(queryClient.getQueryState(configurationQuery().queryKey)?.isInvalidated).toBe(true);
+  await mount("/configuration/workers");
+  await expect.element(row(/eu-1/u).getByText("Passed", { exact: true })).toBeVisible();
+  expect(queryClient.getQueryData(configurationQuery().queryKey)).toEqual(configuration);
 });
 
 declare module "vitest/browser" {

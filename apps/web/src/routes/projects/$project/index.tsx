@@ -8,6 +8,7 @@ import { ProjectBoard } from "~/features/projects/board.page";
 import { deskQuery } from "~/lib/desk/queries";
 import { overviewQuery } from "~/lib/overview";
 import { useOpenRun } from "~/hooks/use-open-run";
+import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 
 const BoardRoute = () => {
   const { project: slug } = Route.useParams();
@@ -17,9 +18,9 @@ const BoardRoute = () => {
   });
   const desk = useSuspenseQuery(deskQuery());
   const openRun = useOpenRun();
-  const { data: project } = useSuspenseQuery(projectQuery(ProjectId.make(slug)));
-  // A refetch after the loader ran can remove the project.
-  if (project === undefined) return <ProjectNotFound />;
+  const { data: project, error } = useSuspenseQuery(projectQuery(ProjectId.make(slug)));
+  if (error instanceof OperatorHttpError && error.error === "BoardProjectNotFoundError")
+    return <ProjectNotFound />;
   return (
     <ProjectBoard
       project={project}

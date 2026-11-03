@@ -32,6 +32,8 @@ An open screen receives change notices over one server-sent events connection an
 
 During sustained activity, ongoing reads finish and update the screen. Changes received during a read trigger a subsequent refresh, so the screen continues updating while attempts produce new output.
 
+Opening **Configuration > Workers** loads current worker state, including changes made while you viewed another screen. If an admin removes the project you are viewing, its board and task list display **Project not found** after the next refresh.
+
 The **No project access** page checks permissions every minute. When an admin grants access, the page opens your projects automatically. Task pages refresh after label changes on any linked item and merge conflict changes on any linked pull request, including older pull requests. Task history menus refresh for the same linked-item changes. Linking an issue to an open pull-request task refreshes its title, membership, history, and task links. Resetting or closing a cycle-budget ask clears the task’s **Needs you** state when no other finding needs attention, including while its loop is paused.
 
 Open run drawers and run pages refresh during machine preparation and quota backoff, including for members with project access only. They also refresh after configuration changes. If an agent definition changes, failed runs show the warning that **Edit and retry** uses the current definition.

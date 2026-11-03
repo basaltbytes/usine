@@ -27,6 +27,8 @@ import { overviewQuery, attentionQuery } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { routeTree } from "~/route-tree.gen";
 import { boardOverview } from "~/lib/projects/fixture";
+import { ChangeNotice } from "@usine/orchestrator/operator/http";
+import { invalidateChanges } from "~/lib/changes";
 import "~/index.css";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -200,6 +202,46 @@ it("scrolls a long lane on its own and fades the edges that hide cards", async (
   expect(cards.className).not.toContain("mask-b-from");
   expect(getComputedStyle(cards).maskImage).not.toBe("none");
   expect(lane("Ready").getBoundingClientRect().top).toBe(otherLane);
+});
+
+it.each([404, 503])("handles a board refresh returning HTTP %s", async (status) => {
+  await mountBoard(1024);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+    if (!url.pathname.startsWith("/api/projects/")) return originalFetch(input, init);
+    return new Response(
+      JSON.stringify({
+        error: status === 404 ? "BoardProjectNotFoundError" : "BackendUnavailableError",
+        message: status === 404 ? "Project removed" : "Temporarily unavailable",
+      }),
+      { status, headers: { "content-type": "application/json" } },
+    );
+  };
+  queryClient.setQueryDefaults(projectQuery(projectId(project)).queryKey, { retry: false });
+  try {
+    await invalidateChanges(
+      queryClient,
+      new ChangeNotice({
+        revision: 1,
+        reset: false,
+        changes: [{ kind: "project", id: projectId(project) }],
+      }),
+    );
+    if (status === 404) {
+      await expect.element(page.getByText("Project not found", { exact: true })).toBeVisible();
+      await expect
+        .element(page.getByLabelText(`${repository} project board`))
+        .not.toBeInTheDocument();
+    } else {
+      await expect.element(page.getByLabelText(`${repository} project board`)).toBeVisible();
+      await expect
+        .element(page.getByText("Project not found", { exact: true }))
+        .not.toBeInTheDocument();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 it("loads every Done card as the virtual lane scrolls", async () => {

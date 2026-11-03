@@ -28,6 +28,8 @@ import {
   boardStalled,
 } from "~/lib/projects/fixture";
 import "~/index.css";
+import { ChangeNotice } from "@usine/orchestrator/operator/http";
+import { invalidateChanges } from "~/lib/changes";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
@@ -103,6 +105,40 @@ const mount = async (path: string, width = 1440) => {
 };
 
 const table = () => page.getByRole("table", { name: "board-test/repo tasks" });
+
+it.each([404, 503])("handles a task list refresh returning HTTP %s", async (status) => {
+  await mount(list);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        error: status === 404 ? "BoardProjectNotFoundError" : "BackendUnavailableError",
+        message: status === 404 ? "Project removed" : "Temporarily unavailable",
+      }),
+      { status, headers: { "content-type": "application/json" } },
+    );
+  try {
+    await invalidateChanges(
+      queryClient,
+      new ChangeNotice({
+        revision: 1,
+        reset: false,
+        changes: [{ kind: "project", id: "board-test-repo" }],
+      }),
+    );
+    if (status === 404) {
+      await expect.element(page.getByText("Project not found", { exact: true })).toBeVisible();
+      await expect.element(table()).not.toBeInTheDocument();
+    } else {
+      await expect.element(table()).toBeVisible();
+      await expect
+        .element(page.getByText("Project not found", { exact: true }))
+        .not.toBeInTheDocument();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 const rowOf = (title: RegExp) => table().getByRole("row").filter({ hasText: title });
 /** Returns the Task and Status cell text of each row, in table order. */
 const rowTexts = () =>

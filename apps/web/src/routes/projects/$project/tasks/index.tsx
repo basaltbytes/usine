@@ -9,15 +9,16 @@ import { ProjectNotFound } from "~/components/project-not-found";
 import { deskQuery } from "~/lib/desk/queries";
 import { overviewQuery, projectId, projectForRepository } from "~/lib/overview";
 import { TaskList } from "~/features/tasks/list.page";
+import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 
 const TasksRoute = () => {
   const { project: slug } = Route.useParams();
-  const { data: project } = useSuspenseQuery(projectTasksQuery(ProjectId.make(slug)));
+  const { data: project, error } = useSuspenseQuery(projectTasksQuery(ProjectId.make(slug)));
   const { repository } = Route.useSearch();
   const navigate = Route.useNavigate();
   const desk = useSuspenseQuery(deskQuery());
-  // A refetch after the loader ran can remove the project.
-  if (project === undefined) return <ProjectNotFound />;
+  if (error instanceof OperatorHttpError && error.error === "BoardProjectNotFoundError")
+    return <ProjectNotFound />;
   return (
     <TaskList
       project={project}
