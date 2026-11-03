@@ -209,6 +209,7 @@ const task = (
     state,
     labels: labels.map((label) => GitHubLabelName.make(label)),
     items: members,
+    // If the Task has a pull request, the current Item is the newest one.
     pullRequest:
       current.kind === "pr" && (state === "pr-open" || state === "pr-merged")
         ? BoardPullRequestView.make({ number: current.number, url: current.url, state })
@@ -332,6 +333,7 @@ const boardProject = () =>
                 attempt(2, minutesAgo(6), "running"),
               ]),
             ],
+            // The plan Run is priced; the implement Run is on the ChatGPT plan.
             {
               pools: [
                 pool("apiKeys", 1500, 0.75),

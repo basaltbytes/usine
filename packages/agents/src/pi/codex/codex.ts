@@ -194,6 +194,7 @@ const makeCodexChild = Effect.gen(function* () {
       const harnessSession = HarnessSession.make({
         id: thread.thread.id,
         cwd: request.cwd,
+        // Codex saves its sessions under CODEX_HOME, which `codex resume` needs to find them.
         home: Option.fromNullishOr(request.environment.CODEX_HOME).pipe(
           Option.filter((home) => home.length > 0),
         ),

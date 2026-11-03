@@ -10,7 +10,7 @@ import {
   ProvisionerSeconds,
   ProvisionerTimings,
 } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Option, Layer } from "effect";
+import { Deferred, Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { AttemptId } from "@usine/core/attempt";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";

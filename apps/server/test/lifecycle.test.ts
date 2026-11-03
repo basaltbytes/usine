@@ -495,6 +495,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     try {
       const launch = InstanceLaunch.make({
         node: process.execPath,
+        // Runs without listening for longer than the probe takes, then exits on its own.
         nodeOptions: ["--eval", "setTimeout(() => {}, 5000)"],
         script: FIXTURE,
         port,

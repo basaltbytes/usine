@@ -197,6 +197,7 @@ describe("RunUsageReader", () => {
       Effect.provide([
         readerOf([
           report(1, child("unknown", "codex", "gpt-7-nova"), null, Option.some(breakdown)),
+          // Recorded before Codex reports had a breakdown: unpriced, but its model has rates.
           report(2, child("older", "codex", "gpt-5.6-terra"), null, Option.none()),
         ]),
         Logger.layer([logger]),

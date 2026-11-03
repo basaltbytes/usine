@@ -4,7 +4,7 @@ import {
   HarnessReady,
   HarnessUnavailableError,
 } from "@usine/core/agent/capability";
-import { Effect, Option, Schema, Layer } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { homedir } from "node:os";
 import type { ChildHost } from "../child-host/child-host.ts";
 import { SessionOperationError, WorkingDirectory } from "../runtime.ts";

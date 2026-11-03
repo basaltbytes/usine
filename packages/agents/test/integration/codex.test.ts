@@ -18,8 +18,9 @@ const live = <A, E>(
 ) =>
   effect.pipe(
     Effect.provide(
-      Layer.mergeAll(codexChildBackendLayer, NodeServices.layer).pipe(
+      codexChildBackendLayer.pipe(
         Layer.provideMerge(codexAppServerLive),
+        Layer.provideMerge(NodeServices.layer),
       ),
     ),
   );

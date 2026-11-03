@@ -24,7 +24,7 @@ import {
   SettingsInForce,
   UpstreamBase,
 } from "@usine/gateway";
-import { DateTime, Deferred, Effect, Fiber, Option, Redacted, Layer } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../../src/remote/commands.ts";

@@ -167,6 +167,7 @@ const run = RunView.make({
 const detail = RunDetailView.make({
   agentDefinitionChanged: false,
   sessionState: [],
+  // An approved Run that the operator ran again, so the detail round trip includes both records.
   run: RunView.make({
     ...run,
     state: "Queued",

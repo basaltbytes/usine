@@ -237,6 +237,7 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
       instanceType: request.instanceType,
       createdAt: Option.match(current, { onNone: () => now, onSome: ({ createdAt }) => createdAt }),
       leaseUntil: DateTime.addDuration(now, LEASE),
+      // A hold lasts until the sandbox is destroyed, through a reattachment.
       held: Option.exists(current, ({ held }) => held),
       credentials: request.credentials,
     });

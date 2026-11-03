@@ -3,7 +3,7 @@ import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { TestClock } from "effect/testing";
 import { ReleaseVersion } from "@usine/core/upgrade";
 import { RunId } from "@usine/core/run";
-import { Deferred, Effect, Fiber, Ref, Layer } from "effect";
+import { Deferred, Effect, Fiber, Ref } from "effect";
 import { RunEngineShutdown } from "../src/engine/shutdown.ts";
 import { AttemptAdmission } from "../src/engine/admission.ts";
 

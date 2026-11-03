@@ -289,6 +289,7 @@ const runs = [
           ),
           Option.some("2026-10-03T10:30:00.000Z"),
         ),
+        // A failed Attempt keeps the comments it posted on the Attempt itself.
         comments: [
           Comment.make({
             url: new URL(`https://github.com/${repository}/issues/40#issuecomment-2`),

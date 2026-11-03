@@ -77,6 +77,7 @@ export const visibleInstance = (instance: LoadedInstance) =>
         repos: instance.config.repos.filter(({ name }) =>
           visibleRepository(instance, grants, name),
         ),
+        // Configuration requires at least one worker; statistics suppress worker aggregates separately.
       }),
       loops: instance.loops.filter(({ name }) => visibleLoop(grants, name)),
     });

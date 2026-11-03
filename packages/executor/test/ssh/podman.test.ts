@@ -3,7 +3,7 @@ import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import type { ContainerOutOfMemoryKills } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { completes, type StubParent } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber, Option, Layer } from "effect";
+import { Deferred, Effect, Fiber, Option } from "effect";
 import { Executor } from "../../src/executor.ts";
 import { ATTEMPT_IMAGE } from "../../src/ssh/ssh.ts";
 import { fakeGateway, gatewayRuntime } from "./gateway/support.ts";

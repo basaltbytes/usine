@@ -15,7 +15,7 @@ import {
   RepositoryLabelCatalog,
   RepositoryNotModified,
 } from "@usine/github/polling";
-import { DateTime, Effect, Logger, Option, Schema, Layer } from "effect";
+import { DateTime, Effect, Logger, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { baseBranches, memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
 

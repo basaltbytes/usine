@@ -1,7 +1,7 @@
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { OperatorLogin } from "@usine/core/operator";
 import { assert, it } from "@effect/vitest";
-import { Effect, Option, Ref, Layer } from "effect";
+import { Effect, Option, Ref } from "effect";
 import { TestClock } from "effect/testing";
 import { AttentionAcknowledgement } from "@usine/engine/attention";
 import { WebhookHealth } from "../src/webhooks.ts";

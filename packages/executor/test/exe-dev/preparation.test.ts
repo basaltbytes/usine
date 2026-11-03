@@ -9,7 +9,7 @@ import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
 import { TestClock } from "effect/testing";
-import { Cause, Effect, Exit, Fiber, Logger, Option, Scope, Layer } from "effect";
+import { Cause, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
 
 import {
   aloneOnItem,
