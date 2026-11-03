@@ -60,7 +60,7 @@
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "ws": "8.22.0"
+    "ws": "8.22.1"
   },
   "peerDependencies": {
     "effect": "catalog:"
