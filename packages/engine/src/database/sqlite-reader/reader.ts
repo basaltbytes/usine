@@ -1,10 +1,16 @@
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Data, Deferred, Duration, Effect, Match, Option, Ref, Schedule } from "effect";
+import { Data, Deferred, Duration, Effect, Match, Option, Ref, Schedule, Stream } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient, Statement } from "effect/sql";
 import type { Connection } from "effect/sql/SqlConnection";
 import type { SqlError } from "effect/sql/SqlError";
-import { connectionError, readConnection, spawnWorker, type ReadConnection } from "./connection.ts";
+import {
+  connectionError,
+  readConnection,
+  spawnWorker,
+  type ReadConnection,
+  type ReadQueries,
+} from "./connection.ts";
 import type { SqliteReaderState } from "./status.ts";
 import { isReadQuery } from "./query.ts";
 
@@ -135,6 +141,22 @@ const routedSqliteClient = (
     reactiveMailbox: writer.reactiveMailbox,
   } satisfies Partial<SqliteClient.SqliteClient>);
 
+const snapshotConnection = (queries: ReadQueries): Connection => {
+  const rows: Connection["execute"] = (sql, params, transform) => {
+    const result = queries.rows(sql, params);
+    return transform === undefined ? result : Effect.map(result, transform);
+  };
+  return {
+    execute: rows,
+    executeUnprepared: rows,
+    executeRaw: queries.rows,
+    executeValues: queries.values,
+    executeValuesUnprepared: queries.values,
+    executeStream: (...args) =>
+      Stream.fromEffect(rows(...args)).pipe(Stream.flatMap(Stream.fromIterable)),
+  };
+};
+
 /** Keeps transactions and reserved connections on the writer; standalone SELECTs use WAL snapshots. */
 export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* (
   writer: SqliteClient.SqliteClient,
@@ -195,5 +217,27 @@ export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* 
     transactionAcquirer: writer.reserve,
     transactionService: writer.transactionService,
   }).pipe(Effect.provide(Reactivity.layer));
-  return { client: routedSqliteClient(routed, writer), state: reader.state };
+  const readSnapshot = Effect.fn("LocalSqlite.readSnapshot")(
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Effect.flatMap(Effect.serviceOption(writer.transactionService), (transaction) => {
+        if (Option.isSome(transaction)) return effect;
+        return Effect.flatMap(
+          reader.current,
+          Option.match({
+            onNone: () =>
+              Effect.logDebug("SQLite read snapshot using main connection").pipe(
+                Effect.andThen(writer.withTransaction(effect)),
+              ),
+            onSome: (current) =>
+              current.snapshot((queries) =>
+                Effect.provideService(effect, writer.transactionService, [
+                  snapshotConnection(queries),
+                  0,
+                ]),
+              ),
+          }),
+        );
+      }),
+  );
+  return { client: routedSqliteClient(routed, writer), state: reader.state, readSnapshot };
 });

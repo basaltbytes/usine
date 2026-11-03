@@ -31,7 +31,7 @@ The reference covers the operator HTTP API, including sign-in, members, and toke
 
 `GET /api/overview` returns project and board summaries with item titles, states, labels, counts, and identities. Its runs use `RunSummaryView` and its attempts use `AttemptSummaryView`. `GET /api/desk` uses the same summary types for running, stalled, and recent runs.
 
-Each run summary read uses one transaction for run state and attempts. Board reads include history counts, timing, and loop states in that same database snapshot. Concurrent completion and retries preserve consistent run state, attempt outcomes, and operator actions. The overview run list reads open runs and recent closed runs together, so each run appears once.
+Each run summary read uses one read-only snapshot for run state and attempts. The SQLite worker executes these reads so long overview, board, and run-list queries permit transcript appends and health responses to continue. Board reads include history counts, timing, and loop states in that same database snapshot. Concurrent completion and retries preserve consistent run state, attempt outcomes, and operator actions. The overview run list reads open runs and recent closed runs together, so each run appears once. Run detail and evidence use the same snapshot boundary. During SQLite reader recovery, these snapshots use a transaction on the main connection, where long reads can delay responses.
 
 Read `GET /api/runs/:runId` for the run's task, result message, each attempt's task, event payload, and transcript. The task endpoint, `GET /api/projects/:owner/:repository/tasks/:item`, also returns full run and attempt records. The board's **Run again** action reads run detail before submitting the saved task and agent.
 

@@ -1,8 +1,8 @@
-import { Deferred, Effect, Option, Schema, type Scope } from "effect";
+import { Deferred, Effect, Option, Ref, Schema, Semaphore, type Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { ConnectionError, SqlError, classifySqliteError } from "effect/sql/SqlError";
 import { Worker } from "node:worker_threads";
-import { Response } from "./protocol.ts";
+import { type Command, Response } from "./protocol.ts";
 
 export const spawnWorker = (filename: string) =>
   new Worker(
@@ -24,7 +24,7 @@ export const connectionError = (cause: unknown) =>
 const Rows = Schema.Array(Schema.Record(Schema.String, Schema.Unknown));
 const Values = Schema.Array(Schema.Array(Schema.Unknown));
 
-export interface ReadConnection {
+export interface ReadQueries {
   readonly rows: (
     sql: string,
     params: ReadonlyArray<unknown>,
@@ -33,6 +33,12 @@ export interface ReadConnection {
     sql: string,
     params: ReadonlyArray<unknown>,
   ) => Effect.Effect<typeof Values.Type, SqlError>;
+}
+
+export interface ReadConnection extends ReadQueries {
+  readonly snapshot: <A, E, R>(
+    use: (queries: ReadQueries) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | SqlError, R>;
   readonly failure: Effect.Effect<never, SqlError>;
 }
 
@@ -44,16 +50,18 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
   yield* Effect.annotateCurrentSpan({ filename });
   const run = Effect.runForkWith(yield* Effect.context<never>());
   const pending = new Map<number, (result: Effect.Effect<unknown, SqlError>) => void>();
-  let stopped: SqlError | undefined;
+  const stopped = yield* Ref.make(Option.none<SqlError>());
+  const access = yield* Semaphore.make(1);
   const failure = yield* Deferred.make<never, SqlError>();
-  let sequence = 0;
+  const sequence = yield* Ref.make(0);
   const stop = (cause: unknown) => {
-    if (stopped !== undefined) return;
-    stopped = connectionError(cause);
+    if (Option.isSome(Ref.getUnsafe(stopped))) return;
+    const error = connectionError(cause);
+    run(Ref.set(stopped, Option.some(error)));
     // Publish fallback before resuming failed reads.
     run(onStopped);
-    Deferred.doneUnsafe(failure, Effect.fail(stopped));
-    for (const resume of pending.values()) resume(Effect.fail(stopped));
+    Deferred.doneUnsafe(failure, Effect.fail(error));
+    for (const resume of pending.values()) resume(Effect.fail(error));
     pending.clear();
   };
   const worker = yield* Effect.acquireRelease(
@@ -91,25 +99,27 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
           ),
     );
   });
-  const request = (sql: string, params: ReadonlyArray<unknown>, values: boolean) =>
-    Effect.flatMap(Effect.service(SqlClient.SafeIntegers), (safeIntegers) =>
-      Effect.callback<unknown, SqlError>((resume) => {
-        if (stopped !== undefined) {
-          resume(Effect.fail(stopped));
-          return;
-        }
-        const id = ++sequence;
-        pending.set(id, resume);
-        try {
-          worker.postMessage({ id, sql, params, values, safeIntegers });
-        } catch (cause) {
-          pending.delete(id);
-          resume(Effect.fail(connectionError(cause)));
-        }
-        return Effect.sync(() => {
-          pending.delete(id);
-        });
-      }),
+  const request = (command: Command) =>
+    Effect.flatMap(
+      Ref.updateAndGet(sequence, (id) => id + 1),
+      (id) =>
+        Effect.callback<unknown, SqlError>((resume) => {
+          const unavailable = Ref.getUnsafe(stopped);
+          if (Option.isSome(unavailable)) {
+            resume(Effect.fail(unavailable.value));
+            return;
+          }
+          pending.set(id, resume);
+          try {
+            worker.postMessage({ id, command });
+          } catch (cause) {
+            pending.delete(id);
+            resume(Effect.fail(connectionError(cause)));
+          }
+          return Effect.sync(() => {
+            pending.delete(id);
+          });
+        }),
     ).pipe(
       Effect.tapError((error) =>
         Effect.logError("SQLite read failed", {
@@ -118,17 +128,73 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
         }),
       ),
     );
-  const rows = (sql: string, params: ReadonlyArray<unknown>) =>
-    request(sql, params, false).pipe(
-      Effect.flatMap((result) =>
-        Schema.decodeUnknownEffect(Rows)(result).pipe(Effect.mapError(connectionError)),
+  const queries = (session: number | null): ReadQueries => {
+    const query = (sql: string, params: ReadonlyArray<unknown>, values: boolean) =>
+      Effect.flatMap(Effect.service(SqlClient.SafeIntegers), (safeIntegers) =>
+        request({ _tag: "Query", session, sql, params, values, safeIntegers }),
+      );
+    return {
+      rows: (sql, params) =>
+        query(sql, params, false).pipe(
+          Effect.flatMap((result) =>
+            Schema.decodeUnknownEffect(Rows)(result).pipe(Effect.mapError(connectionError)),
+          ),
+        ),
+      values: (sql, params) =>
+        query(sql, params, true).pipe(
+          Effect.flatMap((result) =>
+            Schema.decodeUnknownEffect(Values)(result).pipe(Effect.mapError(connectionError)),
+          ),
+        ),
+    };
+  };
+  const standalone = queries(null);
+  const snapshot: ReadConnection["snapshot"] = (use) =>
+    access.withPermit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const closed = yield* Ref.make(false);
+          const session = yield* Effect.acquireRelease(
+            request({ _tag: "BeginSnapshot" }).pipe(
+              Effect.flatMap((result) => Schema.decodeUnknownEffect(Schema.Int)(result)),
+              Effect.mapError(connectionError),
+            ),
+            (session) =>
+              Effect.gen(function* () {
+                if (yield* Ref.get(closed)) return;
+                yield* request({ _tag: "EndSnapshot", session, commit: false }).pipe(
+                  Effect.tap(() =>
+                    Effect.logDebug("SQLite read snapshot rolled back", { filename, session }),
+                  ),
+                  Effect.catch((error) =>
+                    Effect.gen(function* () {
+                      yield* Effect.logError(
+                        "SQLite read snapshot cleanup failed; retiring worker",
+                        { filename, session, error },
+                      );
+                      yield* Effect.sync(() => stop(error));
+                    }),
+                  ),
+                );
+              }),
+          );
+          yield* Effect.annotateCurrentSpan({ filename, session });
+          yield* Effect.logDebug("SQLite read snapshot opened", { filename, session });
+          const result = yield* use(queries(session));
+          yield* Effect.uninterruptible(
+            request({ _tag: "EndSnapshot", session, commit: true }).pipe(
+              Effect.andThen(Ref.set(closed, true)),
+            ),
+          );
+          yield* Effect.logDebug("SQLite read snapshot committed", { filename, session });
+          return result;
+        }),
       ),
     );
-  const values = (sql: string, params: ReadonlyArray<unknown>) =>
-    request(sql, params, true).pipe(
-      Effect.flatMap((result) =>
-        Schema.decodeUnknownEffect(Values)(result).pipe(Effect.mapError(connectionError)),
-      ),
-    );
-  return { rows, values, failure: Deferred.await(failure) };
+  return {
+    rows: (sql, params) => access.withPermit(standalone.rows(sql, params)),
+    values: (sql, params) => access.withPermit(standalone.values(sql, params)),
+    snapshot,
+    failure: Deferred.await(failure),
+  };
 });

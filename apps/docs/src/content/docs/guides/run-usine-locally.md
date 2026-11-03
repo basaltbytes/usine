@@ -48,7 +48,7 @@ To close the terminal while the instance runs, [start it detached](/guides/keep-
 
 ## Event-loop delay
 
-While `usine up` runs, the server logs `Event-loop delay` once per minute with `p99Millis`, `maxMillis`, and `intervalSeconds`. The monitor samples every 10 ms and resets after each report. Check `maxMillis` for isolated stalls and `p99Millis` for sustained delay. A long standalone SQLite read runs on a read-only worker connection so transcript appends and HTTP health responses can continue. Transactions use the main connection to preserve atomic reads and writes.
+While `usine up` runs, the server logs `Event-loop delay` once per minute with `p99Millis`, `maxMillis`, and `intervalSeconds`. The monitor samples every 10 ms and resets after each report. Check `maxMillis` for isolated stalls and `p99Millis` for sustained delay. Standalone SQLite reads and run-reader snapshots run on a read-only worker connection so transcript appends and HTTP health responses can continue during long overview, board, and run-list queries. Each snapshot reads related records from one committed database state. Write transactions use the main connection to preserve atomic reads and writes.
 
 If the SQLite read worker stops, the server logs the cause at Error and fails its in-flight reads. Later reads use the main connection, where long reads can delay appends and HTTP responses. The server retries worker startup after 1 second, 5 seconds, 30 seconds, and then every 5 minutes. A replacement serves reads after a successful probe; successful recovery resets the retry delay.
 

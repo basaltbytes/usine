@@ -14,13 +14,13 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 - `RepositoryLabelProjectionReader` and `RepositoryLabelProjectionWriter` store each repo's full label catalog from polling, so repos without items still get proposed lanes. Writes change the revision only if the label set changes.
 - `BoardMoves` (`/board-moves`) stores each board move: repo, item, send time, source and destination lanes, and labels added and removed. The orchestrator records a move before sending its labels, so the factory app's label change for the operator isn't taken for an agent's. `onItem(itemKey, since)` returns an item's moves from `since`, oldest first. Moves don't change the revision.
 
-`RunReader` reads each summary, including its run state, attempts, and board aggregates, from one transaction. Concurrent completion and retries preserve a consistent database snapshot.
+`RunReader` reads each summary, including its run state, attempts, and board aggregates, from one read snapshot. Concurrent completion and retries preserve a consistent database snapshot.
 
-- `list()`: lightweight run summaries, newest first, without event payloads or a snapshot read per run. Open runs, recent closed runs, and their attempts use one transaction, so concurrent completions preserve a consistent list with one entry per run.
+- `list()`: lightweight run summaries, newest first, without event payloads or a snapshot read per run. Open runs, recent closed runs, and their attempts use one snapshot, so concurrent completions preserve a consistent list with one entry per run.
 - `closed({ limit })`: the runs that closed last, by their last attempt's end.
 - `forItems(itemKeys)`: every saved run and its attempts for those items, outside the recent-history window.
 - `events(runIds)`: in one batch, the event that opened each run. Its payload is the item as the trigger saw it, before the agent changed it.
-- `evidence(runId)`: the run snapshot and all its transcript entries, in append order and unpaged, from one transaction, consistent while attempts complete or append.
+- `evidence(runId)`: the run snapshot and all its transcript entries, in append order and unpaged, from one snapshot, consistent while attempts complete or append.
 - `attemptsByWorker()`: per worker, the attempts that startup still visits, and how many are open.
 - `revision()`: lets callers reuse an unchanged projection.
 
@@ -192,9 +192,9 @@ pnpm --filter @usine/engine db:generate --name <migration_name>
 
 ## Shared runtime database
 
-`localSqliteLayer(directory)` provides `RunDatabase` and the matching `SqlClient`. The `layer` and `observationLayer` functions in `/local-sqlite` accept that database layer as their second argument. Applications can build the database layer once and pass its context to the engine and the configuration store; each package maintains its own migration ledger in the runtime file.
+`localSqliteLayer(directory)` provides `RunDatabase`, the matching `SqlClient`, and `ReadSnapshot` from `/database`. The `layer` and `observationLayer` functions in `/local-sqlite` accept that database layer as their second argument. Applications can build the database layer once and pass its context to the engine and the configuration store; each package maintains its own migration ledger in the runtime file.
 
-Standalone `SELECT` statements, including `WITH ... SELECT`, run on a read-only worker connection. WAL lets the main connection append transcripts and commit other writes while that read runs. Statements in transactions and operations on reserved connections use the main connection, including reads of uncommitted data and temporary tables. Run snapshots read the run and its attempts in one transaction to keep lifecycle state consistent. Use a transaction or reserved connection for connection-local state, such as temporary tables, `changes()`, and `last_insert_rowid()`. Pragmas and other statement kinds use the main connection.
+Standalone `SELECT` statements, including `WITH ... SELECT`, run on a read-only worker connection. WAL lets the main connection append transcripts and commit other writes while that read runs. Statements in transactions and operations on reserved connections use the main connection, including reads of uncommitted data and temporary tables. Every multi-statement `RunReader` read uses `ReadSnapshot.run(database, effect)` to read run state, attempts, transcripts, and board aggregates from one committed snapshot on the worker. The scoped session runs `BEGIN` and `COMMIT`; failures and interruption roll it back before another read uses the connection. Unrelated reads wait outside the session. Inside a write transaction, snapshot reads reuse that transaction and see its uncommitted state. While the worker is unavailable, snapshots use a transaction on the main connection. Other adapters use a database transaction unless they provide `ReadSnapshot`. Use a transaction or reserved connection for connection-local state, such as temporary tables, `changes()`, and `last_insert_rowid()`. Pragmas and other statement kinds use the main connection.
 
 The worker has a bounded prepared-statement cache. Its errors use the existing `SqlError` channel; a worker exit fails in-flight reads. Closing the database layer terminates the worker. Large result transfer and application-side decoding still consume main-thread time. [Event-loop measurements](../../docs/performance/sqlite-event-loop/report.md) compare this adapter with synchronous and asynchronous drivers.
 

@@ -17,7 +17,7 @@ import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { DateTime, Effect, FileSystem, Layer, Option, Result } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { TestClock } from "effect/testing";
-import { RunDatabase } from "../../src/database/database.ts";
+import { ReadSnapshot, RunDatabase } from "../../src/database/database.ts";
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
 import { withReadWorker } from "../../src/database/sqlite-reader/reader.ts";
 import { Submission } from "../../src/engine/submission.ts";
@@ -28,6 +28,8 @@ import { lifecycleSubmission } from "./support.ts";
 for (const [method, phase, selection, transition] of [
   ["list", "closed runs", /"closed_at" is not null/u, "completion"],
   ["list", "attempts", /from "usine_attempts"/u, "completion"],
+  ["inspect", "attempts", /from "usine_attempts"/u, "completion"],
+  ["evidence", "attempts", /from "usine_attempts"/u, "completion"],
   ["summary", "attempts", /from "usine_attempts"/u, "completion"],
   ["forItems", "attempts", /from "usine_attempts"/u, "completion"],
   ["board", "loop history", /"board_loop_history"/u, "completion"],
@@ -53,10 +55,9 @@ for (const [method, phase, selection, transition] of [
             Result.fail(new AgentFailure({ message: "Retry during summary read" })),
           );
         }
-        // A read-only transaction lets the other connection commit between SELECTs.
+        // The worker snapshot lets the other connection commit between SELECTs.
         const connection = yield* SqliteClient.make({
           filename: `${directory}/.usine/runtime.sqlite`,
-          readonly: true,
         });
         const routed = yield* withReadWorker(connection);
         let changed = false;
@@ -94,6 +95,10 @@ for (const [method, phase, selection, transition] of [
             switch (method) {
               case "list":
                 return reader.list({ closedLimit: 10 });
+              case "inspect":
+                return reader.inspect(runId).pipe(Effect.map((snapshot) => [snapshot]));
+              case "evidence":
+                return reader.evidence(runId).pipe(Effect.map(({ snapshot }) => [snapshot]));
               case "summary":
                 return reader.summary(runId).pipe(Effect.map((summary) => [summary]));
               case "forItems":
@@ -155,7 +160,13 @@ for (const [method, phase, selection, transition] of [
             transition === "completion" ? "Succeeded" : "Failed",
           );
           assert(Option.isSome(finishedAttempt.endedAt));
-        }).pipe(Effect.provide(RunReader.layer), Effect.provide(RunDatabase.layer(database)));
+        }).pipe(
+          Effect.provide(RunReader.layer),
+          Effect.provide(RunDatabase.layer(database)),
+          Effect.provideService(ReadSnapshot, {
+            run: (_database, effect) => routed.readSnapshot(effect),
+          }),
+        );
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
   );

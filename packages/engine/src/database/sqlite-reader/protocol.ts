@@ -10,12 +10,27 @@ export const Params = Schema.Array(
   ]),
 );
 
+export const Command = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("Query"),
+    session: Schema.NullOr(Schema.Int),
+    sql: Schema.String,
+    params: Schema.Array(Schema.Unknown),
+    values: Schema.Boolean,
+    safeIntegers: Schema.Boolean,
+  }),
+  Schema.Struct({ _tag: Schema.Literal("BeginSnapshot") }),
+  Schema.Struct({
+    _tag: Schema.Literal("EndSnapshot"),
+    session: Schema.Int,
+    commit: Schema.Boolean,
+  }),
+]);
+export type Command = typeof Command.Type;
+
 export const Request = Schema.Struct({
   id: Schema.Int,
-  sql: Schema.String,
-  params: Schema.Array(Schema.Unknown),
-  values: Schema.Boolean,
-  safeIntegers: Schema.Boolean,
+  command: Command,
 });
 
 export const Response = Schema.Union([

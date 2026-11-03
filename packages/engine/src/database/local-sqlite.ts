@@ -34,7 +34,7 @@ import { EnginePersistenceError, type RunEngineError } from "../engine/error.ts"
 import { RunReader } from "../run-reader/run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
 import type { TriggerCondition } from "../trigger-condition.ts";
-import { RunDatabase } from "./database.ts";
+import { ReadSnapshot, RunDatabase } from "./database.ts";
 import { withReadWorker } from "./sqlite-reader/reader.ts";
 import { SqliteReader, type SqliteReaderState } from "./sqlite-reader/status.ts";
 
@@ -96,6 +96,7 @@ const openSqliteLayer = <E>(
       return context.pipe(
         Context.add(SqlClient.SqlClient, routed.client),
         Context.add(SqliteClient.SqliteClient, routed.client),
+        Context.add(ReadSnapshot, { run: (_database, effect) => routed.readSnapshot(effect) }),
         Context.add(SqliteReader, { state: routed.state }),
       );
     }).pipe(Effect.mapError(onError)),
