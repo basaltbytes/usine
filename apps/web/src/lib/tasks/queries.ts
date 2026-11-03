@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { queryOptions } from "@tanstack/react-query";
 import type { ItemNumber } from "@usine/core/item";
 import { type RepositoryName, splitRepositoryName } from "@usine/core/repository";
@@ -13,7 +14,7 @@ export const taskQuery = (repository: RepositoryName, number: ItemNumber) => {
     staleTime: 30_000,
     meta: {
       refreshLabel: "Task",
-      itemKeys: [JSON.stringify(["github", repository.toLowerCase(), number])],
+      changes: changes.repository(repository),
     },
   });
 };
@@ -25,7 +26,7 @@ export const taskHistoryQuery = (repository: RepositoryName, number: ItemNumber)
     staleTime: 30_000,
     meta: {
       refreshLabel: "Task",
-      itemKeys: [JSON.stringify(["github", repository.toLowerCase(), number])],
+      changes: changes.repository(repository),
     },
     queryKey: ["task", repository, number, "history"] as const,
     queryFn: () =>

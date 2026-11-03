@@ -4,13 +4,8 @@ import {
   queryOptions,
   skipToken,
 } from "@tanstack/react-query";
-import { GitHubItemKey } from "@usine/core/item";
-import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
-import { Option, Schema } from "effect";
-
-const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
-const decodeRepository = Schema.decodeUnknownOption(RepositoryName);
+import { Schema } from "effect";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
@@ -45,52 +40,7 @@ export const invalidateChanges = (client: QueryClient, notice: ChangeNotice) =>
     predicate: (query) => {
       if (query.meta?.refreshLabel === undefined) return false;
       if (notice.reset) return true;
-      return notice.changes.some(({ kind, id }) => {
-        const [key, entity] = query.queryKey;
-        switch (kind) {
-          case "project":
-            return (key === "project" && entity === id) || key === "search";
-          case "run":
-            return (
-              (key === "run" && entity === id) ||
-              (key === "run-github-changes" && entity === id) ||
-              key === "statistics"
-            );
-          case "attempt":
-            return query.meta?.attemptId === id;
-          case "item": {
-            const item = decodeItemKey(id);
-            const repository = decodeRepository(entity);
-            return (
-              query.meta?.itemKeys?.includes(id) === true ||
-              (key === "task" &&
-                Option.isSome(item) &&
-                Option.isSome(repository) &&
-                canonicalRepositoryName(repository.value) ===
-                  canonicalRepositoryName(item.value[1]))
-            );
-          }
-          case "worker":
-            return key === "desk" || key === "workers" || key === "configuration";
-          case "configuration":
-            return (
-              key === "configuration" ||
-              key === "configuration-editor" ||
-              key === "upgrade" ||
-              key === "overview" ||
-              key === "agents" ||
-              key === "run" ||
-              key === "project" ||
-              key === "search"
-            );
-          case "navigation":
-            return (key === "overview" && entity !== "attention") || key === "search";
-          case "attention":
-            return key === "overview" && entity === "attention";
-          case "activity":
-            return key === "desk" || key === "statistics";
-        }
-      });
+      return notice.changes.some((target) => query.meta?.changes?.(target) === true);
     },
   });
 
@@ -112,7 +62,7 @@ export const connectChanges = (
     const now = new Date();
     const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
     return setTimeout(() => {
-      void refreshQueries(client, { queryKey: ["statistics"] });
+      void refreshQueries(client, { predicate: (query) => query.meta?.utcDayRollover === true });
       rollover = scheduleRollover();
     }, midnight - now.getTime());
   };

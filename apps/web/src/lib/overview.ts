@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { ProjectId } from "@usine/core/project";
 import { queryOptions } from "@tanstack/react-query";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
@@ -44,7 +45,7 @@ export const overviewQuery = () =>
     queryKey: ["overview"] as const,
     queryFn: () => api((client) => client.overview(), "shell"),
     staleTime: 60_000,
-    meta: { refreshLabel: "Overview" },
+    meta: { refreshLabel: "Overview", changes: changes.kind("navigation", "configuration") },
   });
 
 export const projectId = (project: ProjectView): ProjectId =>
@@ -69,7 +70,10 @@ export const searchQuery = () =>
     queryKey: ["search"] as const,
     queryFn: () => api((client) => client.overview()),
     staleTime: 60_000,
-    meta: { refreshLabel: "Search" },
+    meta: {
+      refreshLabel: "Search",
+      changes: changes.kind("project", "configuration", "navigation"),
+    },
   });
 
 /** Attention reads are separate from navigation so board changes do not refresh the tray. */
@@ -78,5 +82,5 @@ export const attentionQuery = () =>
     queryKey: ["overview", "attention"] as const,
     queryFn: () => api((client) => client.overview(), "attention"),
     staleTime: 30_000,
-    meta: { refreshLabel: "Needs attention" },
+    meta: { refreshLabel: "Needs attention", changes: changes.kind("attention") },
   });

@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import type { RepositoryName } from "@usine/core/repository";
 import { overviewQuery, projectForRepository } from "./overview";
 import { queryOptions, useQuery } from "@tanstack/react-query";
@@ -24,7 +25,7 @@ export const sessionQuery = () =>
     staleTime: 60_000,
     refetchInterval: (query) =>
       canReadOverview(query.state.data?.permissions ?? []) ? false : 60_000,
-    meta: { refreshLabel: "Session" },
+    meta: { refreshLabel: "Session", changes: changes.kind() },
   });
 export const PermissionsContext = createContext<ReadonlyArray<PermissionGrant>>([]);
 export const canReadOverview = (grants: ReadonlyArray<PermissionGrant>) =>

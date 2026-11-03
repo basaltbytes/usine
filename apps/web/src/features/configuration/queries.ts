@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import type { WorkerName } from "@usine/core/worker";
 import type { RepositoryName } from "@usine/core/repository";
 import {
@@ -45,7 +46,7 @@ export const upgradeQuery = () =>
   queryOptions({
     queryKey: ["upgrade"] as const,
     queryFn: () => api((client) => client.upgradeStatus({})),
-    meta: { refreshLabel: "Upgrades" },
+    meta: { refreshLabel: "Upgrades", changes: changes.kind("configuration") },
     staleTime: 30_000,
     retry: 3,
   });
@@ -55,14 +56,14 @@ const configurationEditorKeys = ["configuration-editor"] as const;
 export const entityQuery = (key: ConfigurationEntityKey) =>
   queryOptions({
     queryKey: [...configurationEditorKeys, "entity", key.kind, key.identifier],
-    meta: { refreshLabel: "Configuration" },
+    meta: { refreshLabel: "Configuration", changes: changes.kind("configuration") },
     queryFn: () => api((client) => client.configurationEntity({ params: key })),
   });
 
 export const revisionsQuery = (key?: ConfigurationEntityKey) =>
   infiniteQueryOptions({
     queryKey: [...configurationEditorKeys, "history", key?.kind, key?.identifier],
-    meta: { refreshLabel: "Configuration" },
+    meta: { refreshLabel: "Configuration", changes: changes.kind("configuration") },
     initialPageParam: undefined,
     queryFn: ({ pageParam }: { readonly pageParam: ConfigurationRevisionNumber | undefined }) =>
       api((client) =>
@@ -229,5 +230,5 @@ export const workersQuery = () =>
     queryKey: ["configuration", "workers"] as const,
     queryFn: () => api((client) => client.workers()),
     staleTime: 30_000,
-    meta: { refreshLabel: "Workers" },
+    meta: { refreshLabel: "Workers", changes: changes.kind("configuration", "worker") },
   });

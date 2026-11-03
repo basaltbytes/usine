@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import {
   infiniteQueryOptions,
   keepPreviousData,
@@ -13,7 +14,11 @@ export const projectQuery = (project: ProjectId) =>
     queryKey: ["project", project, "board"] as const,
     queryFn: () => api((client) => client.project({ params: { project } }), "board"),
     staleTime: 30_000,
-    meta: { refreshLabel: "Board", projectId: project },
+    meta: {
+      refreshLabel: "Board",
+      projectId: project,
+      changes: changes.any(changes.project(project), changes.kind("configuration")),
+    },
   });
 
 export const laneItemsQuery = (project: ProjectId, lane: BoardLaneId) =>
@@ -27,7 +32,11 @@ export const laneItemsQuery = (project: ProjectId, lane: BoardLaneId) =>
     getNextPageParam: (page) => page.nextOffset ?? undefined,
     staleTime: 30_000,
     placeholderData: keepPreviousData,
-    meta: { refreshLabel: "Board", projectId: project },
+    meta: {
+      refreshLabel: "Board",
+      projectId: project,
+      changes: changes.any(changes.project(project), changes.kind("configuration")),
+    },
   });
 
 /** Subscribes to pages loaded by a column without fetching folded lanes. */
@@ -35,7 +44,11 @@ export const loadedLaneItemsQuery = (project: ProjectId, lane: BoardLaneId) =>
   queryOptions({
     queryKey: laneItemsQuery(project, lane).queryKey,
     enabled: false,
-    meta: { refreshLabel: "Board", projectId: project },
+    meta: {
+      refreshLabel: "Board",
+      projectId: project,
+      changes: changes.any(changes.project(project), changes.kind("configuration")),
+    },
     select: (data: InfiniteData<{ readonly items: ReadonlyArray<BoardTaskView> }>) =>
       data.pages.flatMap(({ items }) => items),
   });

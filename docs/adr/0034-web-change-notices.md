@@ -12,6 +12,8 @@ Elapsed times derive from timestamps in the browser. Known attention deadlines, 
 
 The browser schedules statistics invalidation at each UTC midnight. Active task and run statistics refresh as their rolling windows advance; inactive statistics become stale for their next read. A read already in progress finishes before the rollover refresh starts. The timer ends when the app closes its change subscription.
 
+Query factories declare their change predicates in typed TanStack Query metadata beside their query keys. Refreshable queries require a predicate; statistics also declare UTC day rollover. The subscription evaluates these declarations for scoped notices and uses the same refresh path for resets and rollover. Server notice delivery resolves each audience to an access scope, checks read permission, and then expands authorized targets into dependent reads. Each subscription stores its replay cursor in an Effect `Ref`.
+
 Navigation and attention reads omit board payloads. Navigation retains compact task identities for headings and notifications. Project reads supply boards. Settled lanes load cards in pages of 50; task run history loads in pages of 25. Both lists virtualize long histories. Command search loads its searchable projection when opened. Route loaders prefetch screen data, and intent preloading fetches task and run links on hover or focus.
 
 Successful JSON reads have private ETags. Authorization precedes conditional response handling, and validators vary by browser credentials and read representation. Browsers revalidate cached reads without transferring an unchanged body. The stream disables caching and proxy buffering.

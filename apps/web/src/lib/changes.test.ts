@@ -1,3 +1,5 @@
+import { ConfigurationEntityId, ConfigurationEntityKey } from "@usine/config/configuration";
+import { changes } from "~/lib/query-changes";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { GitHubItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
@@ -7,7 +9,132 @@ import { Schema } from "effect";
 import { assert, expect, it, vi } from "vitest";
 import { fullTask, quietTask, taskRepository } from "~/lib/tasks/fixture";
 import { taskHistoryQuery, taskQuery } from "~/lib/tasks/queries";
+import { ProjectId } from "@usine/core/project";
+import { RunId } from "@usine/core/run";
+import { BoardLaneId } from "@usine/orchestrator/operator";
+import {
+  entityQuery,
+  revisionsQuery,
+  upgradeQuery,
+  workersQuery,
+} from "~/features/configuration/queries";
+import { statisticsQuery, runStatisticsQuery } from "~/features/overview/queries";
+import { laneItemsQuery, loadedLaneItemsQuery, projectQuery } from "~/features/projects/queries";
+import { runGitHubChangesQuery } from "~/features/runs/queries";
+import { projectTasksQuery, taskRunsQuery } from "~/features/tasks/queries";
+import { agentsQuery, configurationQuery } from "~/lib/configuration/queries";
+import { deskQuery } from "~/lib/desk/queries";
+import { attentionQuery, overviewQuery, searchQuery } from "~/lib/overview";
+import { sessionQuery } from "~/lib/permissions";
+import { runDetailQuery } from "~/lib/runs/queries";
 import { invalidateChanges } from "./changes";
+
+it("uses each query's declared dependencies even when its cache key changes", async () => {
+  const client = new QueryClient();
+  const project = ProjectId.make("visible");
+  const lane = BoardLaneId.make("done");
+  const run = RunId.make("run");
+  const task = fullTask();
+  const queries = {
+    board: projectQuery(project),
+    lane: laneItemsQuery(project, lane),
+    loadedLane: loadedLaneItemsQuery(project, lane),
+    tasks: projectTasksQuery(project),
+    detail: taskQuery(task.repository, task.number),
+    history: taskHistoryQuery(task.repository, task.number),
+    runs: taskRunsQuery(task),
+    run: runDetailQuery(client, run),
+    github: runGitHubChangesQuery({ id: run, attempts: [] }),
+    configuration: configurationQuery(),
+    agents: agentsQuery(),
+    entity: entityQuery(
+      new ConfigurationEntityKey({
+        kind: "agent",
+        identifier: ConfigurationEntityId.make("developer"),
+      }),
+    ),
+    revisions: revisionsQuery(),
+    upgrade: upgradeQuery(),
+    workers: workersQuery(),
+    navigation: overviewQuery(),
+    search: searchQuery(),
+    attention: attentionQuery(),
+    activity: deskQuery(),
+    statistics: statisticsQuery("7d"),
+    runStatistics: runStatisticsQuery("30d"),
+    session: sessionQuery(),
+  };
+  const entries = Object.entries(queries);
+  const cases: ReadonlyArray<{
+    readonly changes: ChangeNotice["changes"];
+    readonly expected: ReadonlyArray<keyof typeof queries>;
+  }> = [
+    {
+      changes: [{ kind: "project", id: project }],
+      expected: ["board", "lane", "loadedLane", "tasks", "search"],
+    },
+    { changes: [{ kind: "project", id: "other" }], expected: ["search"] },
+    {
+      changes: [{ kind: "run", id: run }],
+      expected: ["run", "github", "statistics", "runStatistics"],
+    },
+    { changes: [{ kind: "run", id: "other" }], expected: ["statistics", "runStatistics"] },
+    { changes: [{ kind: "item", id: task.current }], expected: ["detail", "history", "runs"] },
+    { changes: [{ kind: "item", id: "invalid" }], expected: [] },
+    { changes: [{ kind: "attempt", id: "other" }], expected: [] },
+    {
+      changes: [{ kind: "worker", id: "worker" }],
+      expected: ["configuration", "workers", "activity"],
+    },
+    {
+      changes: [{ kind: "configuration", id: "instance" }],
+      expected: [
+        "board",
+        "lane",
+        "loadedLane",
+        "tasks",
+        "run",
+        "configuration",
+        "agents",
+        "entity",
+        "revisions",
+        "upgrade",
+        "workers",
+        "navigation",
+        "search",
+      ],
+    },
+    { changes: [{ kind: "navigation", id: "instance" }], expected: ["navigation", "search"] },
+    { changes: [{ kind: "attention", id: "instance" }], expected: ["attention"] },
+    {
+      changes: [{ kind: "activity", id: "instance" }],
+      expected: ["activity", "statistics", "runStatistics"],
+    },
+  ];
+  try {
+    for (const { changes: targets, expected } of cases) {
+      for (const [name, { meta }] of entries)
+        await client.fetchQuery({
+          queryKey: ["renamed", name],
+          meta: meta ?? {},
+          queryFn: async () => 1,
+        });
+      await invalidateChanges(
+        client,
+        new ChangeNotice({ revision: 1, reset: false, changes: targets }),
+      );
+      const invalidated = entries.flatMap(([name]) =>
+        client.getQueryState(["renamed", name])?.isInvalidated ? [name] : [],
+      );
+      expect(invalidated.sort()).toEqual([...expected].sort());
+    }
+    await invalidateChanges(client, new ChangeNotice({ revision: 2, reset: true, changes: [] }));
+    for (const [name] of entries)
+      expect(client.getQueryState(["renamed", name])?.isInvalidated).toBe(true);
+  } finally {
+    client.clear();
+  }
+});
 
 it("retains a pending refresh when the ongoing read fails", async () => {
   vi.useFakeTimers();
@@ -18,7 +145,7 @@ it("retains a pending refresh when the ongoing read fails", async () => {
     queryKey,
     initialData: 0,
     staleTime: Infinity,
-    meta: { refreshLabel: "Board" },
+    meta: { refreshLabel: "Board", changes: changes.kind("project") },
     queryFn: async () => {
       reads++;
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -58,7 +185,7 @@ it.each([false, true])(
       queryKey,
       initialData: 0,
       staleTime: Infinity,
-      meta: { refreshLabel: "Board" },
+      meta: { refreshLabel: "Board", changes: changes.kind("project") },
       queryFn: async () => {
         reads++;
         const snapshot = current;

@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
 import type { ProjectId } from "@usine/core/project";
 import { splitRepositoryName } from "@usine/core/repository";
@@ -10,7 +11,11 @@ export const projectTasksQuery = (project: ProjectId) =>
     queryFn: () => api((client) => client.project({ params: { project } })),
     staleTime: 30_000,
     placeholderData: keepPreviousData,
-    meta: { refreshLabel: "Tasks", projectId: project },
+    meta: {
+      refreshLabel: "Tasks",
+      projectId: project,
+      changes: changes.any(changes.project(project), changes.kind("configuration")),
+    },
   });
 
 export const taskRunsQuery = (task: TaskView) => {
@@ -40,6 +45,12 @@ export const taskRunsQuery = (task: TaskView) => {
       pageParams: [0],
     },
     staleTime: 30_000,
-    meta: { refreshLabel: "Runs", itemKeys: task.items.map(({ itemKey }) => itemKey) },
+    meta: {
+      refreshLabel: "Runs",
+      changes: changes.any(
+        changes.repository(task.repository),
+        changes.item(task.items.map(({ itemKey }) => itemKey)),
+      ),
+    },
   });
 };

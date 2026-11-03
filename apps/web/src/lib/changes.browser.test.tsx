@@ -33,7 +33,10 @@ const board = (id: string) =>
       return count;
     },
     staleTime: Infinity,
-    meta: { refreshLabel: "Board" },
+    meta: {
+      refreshLabel: "Board",
+      changes: (target) => target.kind === "project" && target.id === id,
+    },
   });
 const Boards = () => {
   const one = useQuery(board("one"));

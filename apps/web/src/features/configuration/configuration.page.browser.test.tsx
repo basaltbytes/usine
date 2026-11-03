@@ -14,6 +14,7 @@ import { configurationQuery } from "~/lib/configuration/queries";
 import { dayTimeLabel } from "~/lib/strings";
 import { routeTree } from "~/route-tree.gen";
 import { configurationFixture } from "~/lib/configuration/fixture";
+import { workersQuery } from "./queries";
 import "~/index.css";
 
 let host: HTMLDivElement;
@@ -32,6 +33,7 @@ beforeEach(() => {
     new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
   );
   queryClient.setQueryData(configurationQuery().queryKey, configurationFixture());
+  queryClient.setQueryData(workersQuery().queryKey, configurationFixture());
 });
 
 afterEach(() => {

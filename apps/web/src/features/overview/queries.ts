@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 import type { StatisticsWindow } from "@usine/orchestrator/operator";
 import { api } from "~/lib/api";
@@ -10,7 +11,11 @@ export const statisticsQuery = (window: StatisticsWindow) =>
     queryKey: ["statistics", window] as const,
     queryFn: () => api((client) => client.statistics({ query: { window } })),
     staleTime: STATISTICS_REFRESH_MS,
-    meta: { refreshLabel: "Statistics" },
+    meta: {
+      refreshLabel: "Statistics",
+      changes: changes.kind("run", "activity"),
+      utcDayRollover: true,
+    },
     placeholderData: keepPreviousData,
   });
 
@@ -20,6 +25,10 @@ export const runStatisticsQuery = (window: StatisticsWindow) =>
     queryKey: ["statistics", "runs", window] as const,
     queryFn: () => api((client) => client.runStatistics({ query: { window } })),
     staleTime: STATISTICS_REFRESH_MS,
-    meta: { refreshLabel: "Statistics" },
+    meta: {
+      refreshLabel: "Statistics",
+      changes: changes.kind("run", "activity"),
+      utcDayRollover: true,
+    },
     placeholderData: keepPreviousData,
   });

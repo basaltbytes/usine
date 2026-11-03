@@ -2,17 +2,6 @@ import { connectionQuery, type ConnectionState } from "~/lib/changes";
 import { notifyManager, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useEffect, useState, type ReactNode } from "react";
 
-declare module "@tanstack/react-query" {
-  interface Register {
-    queryMeta: {
-      readonly refreshLabel?: string;
-      readonly itemKeys?: ReadonlyArray<string>;
-      readonly attemptId?: string;
-      readonly projectId?: string;
-    };
-  }
-}
-
 type RefreshSource = {
   readonly label: string;
   readonly updatedAt: number;

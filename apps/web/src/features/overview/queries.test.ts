@@ -21,9 +21,10 @@ it.each(["7d", "30d", "all"] as const)(
     const disconnect = connectChanges(client, () => source);
     source.onopen?.(new Event("open"));
     const observers = [statisticsQuery(window), runStatisticsQuery(window)].map(
-      ({ queryKey }) =>
+      ({ queryKey, meta }) =>
         new QueryObserver(client, {
           queryKey,
+          meta: meta ?? {},
           staleTime: Infinity,
           queryFn: async () => new Date().toISOString().slice(0, 10),
         }),
@@ -70,9 +71,10 @@ it("refreshes statistics again when a read started before UTC midnight finishes 
   const source = new Source();
   const disconnect = connectChanges(client, () => source);
   source.onopen?.(new Event("open"));
-  const { queryKey } = statisticsQuery("7d");
+  const { queryKey, meta } = statisticsQuery("7d");
   const observer = new QueryObserver(client, {
     queryKey,
+    meta: meta ?? {},
     queryFn: async () => {
       const day = new Date().toISOString().slice(0, 10);
       await new Promise((resolve) => setTimeout(resolve, 1_000));

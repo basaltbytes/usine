@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 import type { RunView } from "@usine/orchestrator/operator";
 import { api } from "~/lib/api";
@@ -15,7 +16,7 @@ export const runGitHubChangesQuery = (run: Pick<RunView, "id" | "attempts">) => 
     queryFn: () => api((client) => client.githubChanges({ params: { runId: run.id } })),
     placeholderData: keepPreviousData,
     staleTime: LIVE_REFRESH_MILLIS,
-    meta: { refreshLabel: "GitHub changes" },
+    meta: { refreshLabel: "GitHub changes", changes: changes.run(run.id) },
     retry: 1,
   });
 };

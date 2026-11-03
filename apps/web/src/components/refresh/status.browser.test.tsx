@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider, queryOptions, useQuery } from "@tanstack/react-query";
@@ -17,7 +18,7 @@ const start = new Date("2026-10-29T12:00:00Z");
 const primary = () =>
   queryOptions({
     queryKey: ["primary"],
-    meta: { refreshLabel: "Activity" },
+    meta: { refreshLabel: "Activity", changes: changes.kind("activity") },
     queryFn: async () => {
       if (failing) throw new Error("Server unavailable");
       return "ready";
@@ -27,7 +28,7 @@ const primary = () =>
 const secondary = () =>
   queryOptions({
     queryKey: ["secondary"],
-    meta: { refreshLabel: "Statistics" },
+    meta: { refreshLabel: "Statistics", changes: changes.kind("activity") },
     queryFn: async () => "ready",
     refetchInterval: 60_000,
   });
