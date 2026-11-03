@@ -1,0 +1,381 @@
+{
+  "node": "v22.23.4",
+  "sqlite": "3.53.4",
+  "env": {
+    "GOMAXPROCS": "1",
+    "GOMEMLIMIT": "256MiB"
+  },
+  "effect_settings": {
+    "journal_mode": [
+      {
+        "journal_mode": "wal"
+      }
+    ],
+    "synchronous": [
+      {
+        "synchronous": 2
+      }
+    ],
+    "wal_autocheckpoint": [
+      {
+        "wal_autocheckpoint": 1000
+      }
+    ],
+    "busy_timeout": [
+      {
+        "timeout": 5000
+      }
+    ],
+    "page_size": [
+      {
+        "page_size": 4096
+      }
+    ]
+  },
+  "pi_settings": {
+    "journal_mode": {
+      "journal_mode": "wal"
+    },
+    "synchronous": {
+      "synchronous": 1
+    },
+    "wal_autocheckpoint": {
+      "wal_autocheckpoint": 1000
+    },
+    "busy_timeout": {
+      "timeout": 5000
+    },
+    "page_size": {
+      "page_size": 4096
+    }
+  },
+  "baseline": {
+    "settings": {
+      "journal_mode": "wal",
+      "synchronous": 2,
+      "wal_autocheckpoint": 1000,
+      "busy_timeout": 5000,
+      "page_size": 4096
+    },
+    "phases": [
+      {
+        "phase": "steady",
+        "elapsed_s": 60.05754568900001,
+        "commits": 310,
+        "wal_max_bytes": 4120032
+      },
+      {
+        "phase": "burst_with_reader",
+        "elapsed_s": 14.04025179000001,
+        "commits": 100,
+        "wal_max_bytes": 4120032
+      },
+      {
+        "phase": "reader_released",
+        "elapsed_s": 5.0158581660000054,
+        "commits": 18,
+        "wal_max_bytes": 4120032
+      }
+    ],
+    "commits": 428,
+    "p50_ms": 72.57753700000103,
+    "p99_ms": 874.9500709999993,
+    "max_ms": 1244.232799999998,
+    "wal_max_bytes": 4120032,
+    "wal_final_bytes": 4120032,
+    "replica_bytes": 0,
+    "rss_max_kib": null,
+    "cpu_s": null,
+    "marker": null
+  },
+  "auto1000": {
+    "settings": {
+      "journal_mode": "wal",
+      "synchronous": 2,
+      "wal_autocheckpoint": 1000,
+      "busy_timeout": 5000,
+      "page_size": 4096
+    },
+    "phases": [
+      {
+        "phase": "steady",
+        "elapsed_s": 60.64005720599998,
+        "commits": 197,
+        "wal_max_bytes": 3263072
+      },
+      {
+        "phase": "burst_with_reader",
+        "elapsed_s": 32.49325688500001,
+        "commits": 100,
+        "wal_max_bytes": 3263072
+      },
+      {
+        "phase": "reader_released",
+        "elapsed_s": 5.202562303999992,
+        "commits": 22,
+        "wal_max_bytes": 3263072
+      }
+    ],
+    "commits": 319,
+    "p50_ms": 152.39409900002647,
+    "p99_ms": 1558.7195080000092,
+    "max_ms": 2079.3544059999986,
+    "wal_max_bytes": 3263072,
+    "wal_final_bytes": 3263072,
+    "replica_bytes": 1405932,
+    "rss_max_kib": 36424,
+    "cpu_s": 2,
+    "marker": {
+      "db_path": "<measurement-directory>/auto1000/runtime.sqlite",
+      "txid": 93,
+      "replica_txid": 93,
+      "duration_ms": 106
+    }
+  },
+  "auto0": {
+    "settings": {
+      "journal_mode": "wal",
+      "synchronous": 2,
+      "wal_autocheckpoint": 0,
+      "busy_timeout": 5000,
+      "page_size": 4096
+    },
+    "phases": [
+      {
+        "phase": "steady",
+        "elapsed_s": 60.043941758,
+        "commits": 299,
+        "wal_max_bytes": 4268352
+      },
+      {
+        "phase": "burst_with_reader",
+        "elapsed_s": 13.479305622000014,
+        "commits": 200,
+        "wal_max_bytes": 4268352
+      },
+      {
+        "phase": "reader_released",
+        "elapsed_s": 5.134813670000003,
+        "commits": 39,
+        "wal_max_bytes": 4268352
+      }
+    ],
+    "commits": 538,
+    "p50_ms": 73.07651099999202,
+    "p99_ms": 834.0057199999865,
+    "max_ms": 1077.9185489999945,
+    "wal_max_bytes": 4268352,
+    "wal_final_bytes": 4268352,
+    "replica_bytes": 1953803,
+    "rss_max_kib": 34924,
+    "cpu_s": 0.72,
+    "marker": {
+      "db_path": "<measurement-directory>/auto0/runtime.sqlite",
+      "txid": 87,
+      "replica_txid": 87,
+      "duration_ms": 435
+    }
+  },
+  "pi-auto1000": {
+    "settings": {
+      "journal_mode": "wal",
+      "synchronous": 1,
+      "wal_autocheckpoint": 1000,
+      "busy_timeout": 5000,
+      "page_size": 4096
+    },
+    "phases": [
+      {
+        "phase": "steady",
+        "elapsed_s": 60.01780371100001,
+        "commits": 1157,
+        "wal_max_bytes": 4478472
+      },
+      {
+        "phase": "burst_with_reader",
+        "elapsed_s": 10.24070402200002,
+        "commits": 4100,
+        "wal_max_bytes": 70550912
+      },
+      {
+        "phase": "reader_released",
+        "elapsed_s": 5.027976915999956,
+        "commits": 83,
+        "wal_max_bytes": 70600352
+      }
+    ],
+    "commits": 5340,
+    "p50_ms": 0.03247099998407066,
+    "p99_ms": 1.7629590000142343,
+    "max_ms": 629.5495239999727,
+    "wal_max_bytes": 70600352,
+    "wal_final_bytes": 70600352,
+    "replica_bytes": 15100056,
+    "rss_max_kib": 35732,
+    "cpu_s": 0.77,
+    "marker": {
+      "db_path": "<measurement-directory>/pi-auto1000/runtime.sqlite",
+      "txid": 105,
+      "replica_txid": 105,
+      "duration_ms": 241
+    }
+  },
+  "pi-auto0": {
+    "settings": {
+      "journal_mode": "wal",
+      "synchronous": 1,
+      "wal_autocheckpoint": 0,
+      "busy_timeout": 5000,
+      "page_size": 4096
+    },
+    "phases": [
+      {
+        "phase": "steady",
+        "elapsed_s": 60.03582861899998,
+        "commits": 1159,
+        "wal_max_bytes": 4556752
+      },
+      {
+        "phase": "burst_with_reader",
+        "elapsed_s": 10.408464342000022,
+        "commits": 3200,
+        "wal_max_bytes": 55076192
+      },
+      {
+        "phase": "reader_released",
+        "elapsed_s": 5.044427125999995,
+        "commits": 83,
+        "wal_max_bytes": 55142112
+      }
+    ],
+    "commits": 4442,
+    "p50_ms": 0.019275999977253377,
+    "p99_ms": 2.833760999958031,
+    "max_ms": 829.9570950000198,
+    "wal_max_bytes": 55142112,
+    "wal_final_bytes": 55142112,
+    "replica_bytes": 19289768,
+    "rss_max_kib": 36960,
+    "cpu_s": 0.85,
+    "marker": {
+      "db_path": "<measurement-directory>/pi-auto0/runtime.sqlite",
+      "txid": 107,
+      "replica_txid": 107,
+      "duration_ms": 61
+    }
+  },
+  "runtime_fixture": {
+    "bytes": 788402176,
+    "backup_bytes": 788402176,
+    "backup_s": 35.446779576,
+    "page_count": 192481,
+    "freelist_count": 47999,
+    "rows": 143999
+  },
+  "durable_fixture": {
+    "bytes": 157667328,
+    "backup_bytes": 157667328,
+    "backup_s": 8.608587854999932,
+    "page_count": 38493,
+    "freelist_count": 9599,
+    "rows": 28799
+  },
+  "initial_replication": {
+    "wall_s": 92.58547117799998,
+    "markers": [
+      {
+        "db_path": "<measurement-directory>/large/runtime.sqlite",
+        "txid": 2,
+        "replica_txid": 2,
+        "duration_ms": 89419
+      },
+      {
+        "db_path": "<measurement-directory>/large/durable.sqlite",
+        "txid": 2,
+        "replica_txid": 2,
+        "duration_ms": 58
+      }
+    ],
+    "replica_bytes": [
+      1908042575,
+      304833663
+    ],
+    "rss_max_kib": 81824,
+    "cpu_s": 74.65
+  },
+  "rollback": {
+    "boundary": "2026-11-03T11:27:48.705Z",
+    "markers": [
+      {
+        "db_path": "<measurement-directory>/large/runtime.sqlite",
+        "txid": 2,
+        "replica_txid": 2,
+        "duration_ms": 89419
+      },
+      {
+        "db_path": "<measurement-directory>/large/durable.sqlite",
+        "txid": 2,
+        "replica_txid": 2,
+        "duration_ms": 58
+      }
+    ],
+    "attempts": [
+      [
+        {
+          "wall_s": 26.03610403200014,
+          "user_s": 2.820916,
+          "system_s": 1.847705,
+          "max_rss_kib": 75796,
+          "full_integrity_s": 1.7990752299999586,
+          "bytes": 788402176
+        },
+        {
+          "wall_s": 4.093515562999983,
+          "user_s": 0.46340499999999996,
+          "system_s": 0.14177399999999998,
+          "max_rss_kib": 45252,
+          "full_integrity_s": 0.03071778700000141,
+          "bytes": 157667328
+        }
+      ],
+      [
+        {
+          "wall_s": 21.258304996000106,
+          "user_s": 2.508905,
+          "system_s": 4.254147,
+          "max_rss_kib": 98540,
+          "full_integrity_s": 1.6321729060000507,
+          "bytes": 788402176
+        },
+        {
+          "wall_s": 3.94888416699996,
+          "user_s": 0.507972,
+          "system_s": 0.167293,
+          "max_rss_kib": 45304,
+          "full_integrity_s": 0.031639510000008156,
+          "bytes": 157667328
+        }
+      ],
+      [
+        {
+          "wall_s": 20.184933368999964,
+          "user_s": 2.289332,
+          "system_s": 2.30991,
+          "max_rss_kib": 93664,
+          "full_integrity_s": 0.1403320010000607,
+          "bytes": 788402176
+        },
+        {
+          "wall_s": 3.9441616740000427,
+          "user_s": 0.47684699999999997,
+          "system_s": 0.224131,
+          "max_rss_kib": 43776,
+          "full_integrity_s": 0.02815676500007976,
+          "bytes": 157667328
+        }
+      ]
+    ],
+    "timestamp_wall_s": 18.460029128000087,
+    "exact_txid_and_timestamp_verified": true
+  }
+}
