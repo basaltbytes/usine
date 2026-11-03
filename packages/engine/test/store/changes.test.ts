@@ -240,3 +240,87 @@ it.effect(
       }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer), Effect.provide(changeBusLayer), Effect.scoped),
 );
+
+it.effect("restores only the latest future pool reset deadlines after a store restart", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = InstanceDirectory.make(
+      yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
+    );
+    const bus = yield* ChangeBus;
+    const now = yield* DateTime.now;
+    const withStore = <A, E, R>(operation: Effect.Effect<A, E, R | RunStore>) =>
+      operation.pipe(
+        Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))),
+        Effect.scoped,
+      );
+    yield* withStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const run = RunId.make("restart-pool-run");
+        yield* store.recordAndClaim(lifecycleSubmission, run);
+        const started = yield* store.beginAttempt(run, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        const attempt = started.execution.attempt;
+        for (const [index, pool, primaryMinutes, secondaryMinutes] of [
+          [1, "chatgptPlan", 1, 1],
+          [2, "chatgptPlan", 2, 3],
+          [3, "claudePlan", -1, -1],
+        ] as const) {
+          const window = (minutes: number) =>
+            Option.some(
+              new RateLimitWindow({
+                usedPercent: 90,
+                windowDurationMinutes: Option.some(60),
+                resetsAt: Option.some(DateTime.add(now, { minutes })),
+              }),
+            );
+          yield* store.appendTranscript(
+            "outbound",
+            new OutboundEnvelope({
+              version: PROTOCOL_VERSION,
+              attemptId: attempt.id,
+              sequence: Sequence.make(index),
+              sentAt: now,
+              payload: new SessionEvent({
+                event: new PoolRateLimitsUpdated({
+                  session: new ParentSession({
+                    id: AgentSessionId.make("restart-pool-session"),
+                    agent: attempt.agent,
+                    brain: attempt.brain,
+                  }),
+                  pool,
+                  login: Option.none(),
+                  rateLimits: new RateLimitsSnapshot({
+                    limitId: Option.none(),
+                    limitName: Option.none(),
+                    primary: window(primaryMinutes),
+                    secondary: window(secondaryMinutes),
+                  }),
+                }),
+              }),
+            }),
+          );
+        }
+      }),
+    );
+    const beforeRestart = (yield* bus.open).revision;
+    yield* withStore(
+      Effect.gen(function* () {
+        yield* RunStore;
+        yield* TestClock.adjust("1 minute");
+        assert.strictEqual((yield* bus.open).revision, beforeRestart);
+        for (const count of [1, 2]) {
+          yield* TestClock.adjust("1 minute");
+          const snapshot = yield* bus.open;
+          assert.strictEqual(snapshot.revision, beforeRestart + count);
+          assert.deepStrictEqual(snapshot.history.at(-1)?.changes, [
+            { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+          ]);
+        }
+        yield* TestClock.adjust("1 hour");
+        assert.strictEqual((yield* bus.open).revision, beforeRestart + 2);
+      }),
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.provide(changeBusLayer), Effect.scoped),
+);

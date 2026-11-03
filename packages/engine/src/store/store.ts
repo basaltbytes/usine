@@ -1,3 +1,5 @@
+import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
+import { latestPoolRateLimits } from "../run-reader/pool-rate-limits.ts";
 import { ChangeBus } from "@usine/core/changes";
 import { changeTransaction } from "./changes.ts";
 import { AttemptCanceled } from "@usine/core/attempt/outcome";
@@ -140,6 +142,47 @@ const makeRunStore = Effect.gen(function* () {
   const transact = changeTransaction(database, bus);
   const crypto = yield* Crypto.Crypto;
   const queries = queriesFor(database);
+
+  const schedulePoolResets = Effect.fn("RunStore.schedulePoolResets")(function* (
+    event: PoolRateLimitsUpdated,
+  ) {
+    yield* Effect.annotateCurrentSpan({ pool: event.pool });
+    for (const window of ["primary", "secondary"] as const) {
+      const key = `${event.pool}:${window}`;
+      yield* FiberMap.remove(poolResets, key);
+      const limit = event.rateLimits[window];
+      if (Option.isNone(limit) || Option.isNone(limit.value.resetsAt)) {
+        yield* Effect.logInfo("Pool reset has no deadline", { pool: event.pool, window });
+        continue;
+      }
+      const resetsAt = limit.value.resetsAt.value;
+      const delay = Duration.toMillis(DateTime.distance(yield* DateTime.now, resetsAt));
+      if (delay <= 0) {
+        yield* Effect.logInfo("Pool reset deadline has passed", { pool: event.pool, window });
+        continue;
+      }
+      yield* Effect.logInfo("Scheduled pool reset notification", {
+        pool: event.pool,
+        window,
+        resetsAt,
+      });
+      yield* FiberMap.run(
+        poolResets,
+        key,
+        Effect.sleep(delay).pipe(
+          Effect.andThen(
+            Effect.logInfo("Pool reset deadline reached", { pool: event.pool, window }),
+          ),
+          Effect.andThen(
+            bus.publish([
+              { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+            ]),
+          ),
+        ),
+      );
+    }
+  });
+  for (const event of yield* latestPoolRateLimits(database)) yield* schedulePoolResets(event);
 
   /** Opens the Submission's Run as `runId` unless the Item's cycle budget is used up. */
   const admitRun = Effect.fn("RunStore.admitRun")(function* (
@@ -1021,29 +1064,11 @@ const makeRunStore = Effect.gen(function* () {
     );
     if (
       inserted &&
+      direction === "outbound" &&
       envelope.payload._tag === "SessionEvent" &&
       envelope.payload.event._tag === "PoolRateLimitsUpdated"
     ) {
-      const event = envelope.payload.event;
-      for (const window of ["primary", "secondary"] as const) {
-        const key = `${event.pool}:${window}`;
-        yield* FiberMap.remove(poolResets, key);
-        const limit = event.rateLimits[window];
-        if (Option.isSome(limit) && Option.isSome(limit.value.resetsAt)) {
-          const delay = DateTime.distance(yield* DateTime.now, limit.value.resetsAt.value);
-          yield* FiberMap.run(
-            poolResets,
-            key,
-            Effect.sleep(Math.max(0, Duration.toMillis(delay))).pipe(
-              Effect.andThen(
-                bus.publish([
-                  { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
-                ]),
-              ),
-            ),
-          );
-        }
-      }
+      yield* schedulePoolResets(envelope.payload.event);
     }
   }, persistence("append attempt transcript"));
 

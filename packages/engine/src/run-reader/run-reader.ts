@@ -1,12 +1,13 @@
 import { Context, type DateTime, Effect, Layer, Option, Schema } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { attemptTranscripts, events as storedEvents, runs } from "../database/schema.ts";
+import { eq } from "drizzle-orm";
+import { events as storedEvents, runs } from "../database/schema.ts";
 import type { DedupKey } from "@usine/core/event";
 import type { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
 import { RunDatabase } from "../database/database.ts";
+import { latestPoolRateLimits } from "./pool-rate-limits.ts";
 import {
   type LoopSighting,
   ProjectionRevision,
@@ -114,42 +115,6 @@ const makeRunReader = Effect.gen(function* () {
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
     queries.transcript(query).pipe(persistence("read attempt transcript")),
   );
-  const latestPoolRateLimits = Effect.fn("RunReader.latestPoolRateLimits")(function* () {
-    const rows = yield* database
-      .select({
-        event: sql<string>`json_extract(${attemptTranscripts.envelope}, '$.payload.event')`,
-      })
-      .from(attemptTranscripts)
-      .where(
-        inArray(
-          attemptTranscripts.sequence,
-          database
-            .select({ sequence: sql<number>`max(${attemptTranscripts.sequence})` })
-            .from(attemptTranscripts)
-            .where(
-              and(
-                eq(attemptTranscripts.direction, "outbound"),
-                sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'`,
-                sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'PoolRateLimitsUpdated'`,
-              ),
-            )
-            .groupBy(sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event.pool')`),
-        ),
-      )
-      .execute();
-    const events = yield* Schema.decodeUnknownEffect(
-      Schema.Array(
-        Schema.Struct({
-          event: Schema.fromJsonString(PoolRateLimitsUpdated),
-        }),
-      ),
-    )(rows, { onExcessProperty: "error" });
-    yield* Effect.annotateCurrentSpan({ pools: events.map(({ event }) => event.pool) });
-    yield* Effect.logDebug("Read latest pool rate limits", {
-      pools: events.map(({ event }) => event.pool),
-    });
-    return events.map(({ event }) => event);
-  }, persistence("read latest pool rate limits"));
   const attemptsByWorker = Effect.fn("RunReader.attemptsByWorker")(() =>
     leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count attempts by worker")),
   );
@@ -170,7 +135,7 @@ const makeRunReader = Effect.gen(function* () {
     events,
     revision,
     transcript,
-    latestPoolRateLimits,
+    latestPoolRateLimits: () => latestPoolRateLimits(database),
     attemptsByWorker,
     sightings,
   } as const;

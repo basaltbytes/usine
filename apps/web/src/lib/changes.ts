@@ -1,4 +1,5 @@
 import { type QueryClient, queryOptions, skipToken } from "@tanstack/react-query";
+import type { TaskView } from "@usine/orchestrator/operator";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
 
@@ -33,7 +34,14 @@ export const invalidateChanges = (client: QueryClient, notice: ChangeNotice) =>
           case "attempt":
             return query.meta?.attemptId === id;
           case "item":
-            return query.meta?.itemKeys?.includes(id) === true;
+            return (
+              query.meta?.itemKeys?.includes(id) === true ||
+              (key === "task" &&
+                (query.queryKey[3] === undefined || query.queryKey[3] === "history") &&
+                client
+                  .getQueryData<TaskView>(query.queryKey)
+                  ?.items.some(({ itemKey }) => itemKey === id) === true)
+            );
           case "worker":
             return key === "desk" || key === "workers" || key === "configuration";
           case "configuration":

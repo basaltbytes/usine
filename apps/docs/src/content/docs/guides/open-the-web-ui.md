@@ -30,7 +30,7 @@ For a shared address, [expose the instance over HTTPS](/guides/expose-an-instanc
 
 An open screen receives change notices over one server-sent events connection and reads only the affected data. The refresh indicator reports when live updates disconnect. During disconnection, the screen checks for changes every minute and resumes live updates when the connection recovers.
 
-The **No project access** page checks permissions every minute. When an admin grants access, the page opens your projects automatically. Task pages refresh after label changes on any linked item and merge conflict changes on any linked pull request, including older pull requests.
+The **No project access** page checks permissions every minute. When an admin grants access, the page opens your projects automatically. Task pages refresh after label changes on any linked item and merge conflict changes on any linked pull request, including older pull requests. Task history menus refresh for the same linked-item changes.
 
 Open run drawers and run pages refresh after configuration changes. If an agent definition changes, failed runs show the warning that **Edit and retry** uses the current definition.
 
@@ -41,3 +41,5 @@ Board moves appear immediately. A failed label write restores the card's previou
 If you serve the UI through a reverse proxy, disable response buffering for `/api/changes` and allow a long-lived response. The endpoint sends a heartbeat every 15 seconds.
 
 Change notices publish after state writes commit. The stream filters identifiers using your current project access and checks credentials before each notice and every 15 seconds. Reconnecting replays up to 256 notices; an expired cursor or a slow connection requests a fresh read. Elapsed times update in the browser from recorded timestamps.
+
+Pool rate warnings clear at their recorded reset times, including after the orchestrator restarts. A newer report replaces the previous reset times.
