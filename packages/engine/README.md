@@ -24,6 +24,8 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 - `attemptsByWorker()`: per worker, the attempts that startup still visits, and how many are open.
 - `revision()`: lets callers reuse an unchanged projection.
 
+Transcript usage reads the stored highest token report for each attempt session. Appending a new outbound token report updates that projection in the transcript transaction only if its token total increases. Duplicate envelopes preserve the first stored report. Pool-limit reads use the latest report per billing pool by global append order. Worker and session-state reads search indexed envelope tags. [Transcript read measurements](../../docs/performance/transcript-reads/report.md) cover migration cost, replay parity, and plans with and without SQLite statistics.
+
 The local adapter applies runtime migrations before exposing the store. Run-state and history indexes support the current readers, and attempt ordering uses a run-and-number index. [Runtime store measurements](../../docs/performance/runtime-store/report.md) include the captured SQL, query plans, and migration timing.
 
 ## Runtime rules

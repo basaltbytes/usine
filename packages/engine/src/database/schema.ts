@@ -1,5 +1,6 @@
 import type { Schema } from "effect";
 import { AttentionRevision } from "../attention/model.ts";
+import type { AgentSessionId, BillingPool, TokenCount } from "@usine/core/agent/session";
 import { ModelId } from "@usine/core/agent/brain";
 import { AgentName } from "@usine/core/agent";
 import { AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
@@ -327,6 +328,16 @@ export const attemptTranscripts = snakeCase.table(
     channelSequence: integer({ mode: "number" }).$type<AttemptChannel.Sequence>().notNull(),
     envelope: text({ mode: "json" }).$type<unknown>().notNull(),
     receivedAt: text().notNull(),
+    payloadTag: text().generatedAlwaysAs(sql`json_extract(envelope, '$.payload._tag')`, {
+      mode: "virtual",
+    }),
+    eventTag: text().generatedAlwaysAs(sql`json_extract(envelope, '$.payload.event._tag')`, {
+      mode: "virtual",
+    }),
+    sessionId: text().generatedAlwaysAs(
+      sql`coalesce(json_extract(envelope, '$.payload.event.session.id'), json_extract(envelope, '$.payload.intervention.target.sessionId'))`,
+      { mode: "virtual" },
+    ),
   },
   (table) => [
     check(
@@ -341,14 +352,40 @@ export const attemptTranscripts = snakeCase.table(
       table.channelSequence,
     ),
     index("usine_attempt_transcript_tail").on(table.attemptId, table.sequence),
-    index("usine_attempt_transcript_pool_limits").on(
-      sql`json_extract(${table.envelope}, '$.payload.event.pool')`,
+    index("usine_attempt_transcript_kind").on(
+      table.attemptId,
+      table.payloadTag,
+      table.eventTag,
       table.sequence,
-    ).where(sql`${table.direction} = 'outbound'
-        and json_extract(${table.envelope}, '$.payload._tag') = 'SessionEvent'
-        and json_extract(${table.envelope}, '$.payload.event._tag') = 'PoolRateLimitsUpdated'`),
+    ),
   ],
 );
+
+/** The highest token report of each attempt session, copied from its transcript row. */
+export const sessionUsage = snakeCase.table(
+  "usine_session_usage",
+  {
+    attemptId: text()
+      .$type<AttemptId>()
+      .notNull()
+      .references(() => attempts.attemptId),
+    sessionId: text().$type<AgentSessionId>().notNull(),
+    totalTokens: integer().$type<TokenCount>().notNull(),
+    sequence: integer().notNull(),
+    receivedAt: text().notNull(),
+    envelope: text({ mode: "json" }).$type<unknown>().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.attemptId, table.sessionId] })],
+);
+
+/** The latest rate-limit report of each billing pool, copied from its transcript row. */
+export const poolRateLimits = snakeCase.table("usine_pool_rate_limits", {
+  pool: text().$type<BillingPool>().primaryKey(),
+  sequence: integer().notNull(),
+  attemptId: text().$type<AttemptId>().notNull(),
+  receivedAt: text().notNull(),
+  envelope: text({ mode: "json" }).$type<unknown>().notNull(),
+});
 
 /**
  * The approval Event each approved Run consumed, with its source. Older rows have no `channel`
