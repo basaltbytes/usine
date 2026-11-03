@@ -93,7 +93,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "check": "tsc -p tsconfig.check.json",
+    "check": "node ../../scripts/effect-diagnostics/check.mjs tsconfig.check.json",
+    "effect:baseline": "node ../../scripts/effect-diagnostics/check.mjs --update tsconfig.check.json",
     "test": "vitest run --exclude 'test/integration/**'",
     "test:integration": "vitest run test/integration/polling-triggers.test.ts",
     "test:integration:agent": "vitest run test/integration/agent-run.test.ts",

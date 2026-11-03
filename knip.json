@@ -12,7 +12,7 @@
   ],
   "workspaces": {
     ".": {
-      "entry": ["infra/hetzner/gateway/apply.mjs"],
+      "entry": ["infra/hetzner/gateway/apply.mjs", "scripts/effect-diagnostics/*.mjs"],
       "project": []
     },
     "packages/agents": {
@@ -28,7 +28,8 @@
     },
     "tooling/tsconfig": {
       "entry": [],
-      "project": []
+      "project": [],
+      "ignoreDependencies": ["@effect/language-service"]
     },
     "apps/docs": {
       "ignoreDependencies": ["@usine/orchestrator"]

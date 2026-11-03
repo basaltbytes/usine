@@ -22,7 +22,8 @@
   },
   "scripts": {
     "build": "tsc -b && node scripts/release.mjs",
-    "check": "tsc -p tsconfig.check.json",
+    "check": "node ../../scripts/effect-diagnostics/check.mjs tsconfig.check.json",
+    "effect:baseline": "node ../../scripts/effect-diagnostics/check.mjs --update tsconfig.check.json",
     "test": "vitest run"
   },
   "dependencies": {

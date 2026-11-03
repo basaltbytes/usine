@@ -78,7 +78,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "check": "tsc -p tsconfig.check.json",
+    "check": "node ../../scripts/effect-diagnostics/check.mjs tsconfig.check.json",
+    "effect:baseline": "node ../../scripts/effect-diagnostics/check.mjs --update tsconfig.check.json",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "test": "vitest run"
   },

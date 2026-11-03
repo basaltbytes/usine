@@ -1,0 +1,125 @@
+{
+  "src/attempt-runtime.ts": {
+    "deterministicKeys": 1,
+    "newSchemaClass": 2,
+    "schemaClassMissingBrand": 6
+  },
+  "src/attempt/documents.ts": {
+    "schemaSync": 1
+  },
+  "src/attempt/events.ts": {
+    "newSchemaClass": 3
+  },
+  "src/attempt/outcome.ts": {
+    "newSchemaClass": 10,
+    "schemaSync": 2
+  },
+  "src/attempt/parent.ts": {
+    "newSchemaClass": 7
+  },
+  "src/attempt/relay.ts": {
+    "asyncFunction": 8,
+    "newSchemaClass": 22,
+    "schemaSync": 1
+  },
+  "src/attempt/repair.ts": {
+    "asyncFunction": 3
+  },
+  "src/attempt/request.ts": {
+    "newSchemaClass": 1,
+    "schemaSync": 1,
+    "yieldInCallArgument": 1
+  },
+  "src/attempt/runtime.ts": {
+    "asyncFunction": 11,
+    "mapMapErrorToMapBoth": 1,
+    "newSchemaClass": 13,
+    "schemaClassMissingBrand": 1,
+    "schemaSync": 1,
+    "strictBooleanExpressions": 1
+  },
+  "src/attempt/steering.ts": {
+    "asyncFunction": 1,
+    "newSchemaClass": 3,
+    "schemaSync": 1
+  },
+  "src/attempt/subagent.ts": {
+    "asyncFunction": 5,
+    "newSchemaClass": 7,
+    "yieldInCallArgument": 1
+  },
+  "src/attempt/task.ts": {
+    "asyncFunction": 6,
+    "instanceOfSchema": 1,
+    "missedPipeableOpportunity": 1,
+    "newSchemaClass": 10
+  },
+  "src/attempt/watch.ts": {
+    "asyncFunction": 1,
+    "newPromise": 1
+  },
+  "src/backup.ts": {
+    "newSchemaClass": 2,
+    "schemaClassMissingBrand": 1,
+    "strictEffectProvide": 1
+  },
+  "src/harness.ts": {
+    "anyUnknownInErrorContext": 2,
+    "deterministicKeys": 1,
+    "globalDate": 3,
+    "globalDateInEffect": 2,
+    "newSchemaClass": 4,
+    "schemaClassMissingBrand": 2,
+    "strictBooleanExpressions": 2,
+    "unknownInEffectCatch": 2
+  },
+  "src/http-dispatcher.ts": {
+    "processEnvInEffect": 2,
+    "strictBooleanExpressions": 2
+  },
+  "src/live.ts": {
+    "strictEffectProvide": 1
+  },
+  "src/testing.ts": {
+    "instanceOfSchema": 1,
+    "newSchemaClass": 31,
+    "yieldInCallArgument": 2
+  },
+  "test/attempt-runtime.test.ts": {
+    "asyncFunction": 8,
+    "globalJson": 5,
+    "globalJsonInEffect": 1,
+    "multipleEffectProvide": 1,
+    "newSchemaClass": 91,
+    "schemaSync": 1,
+    "schemaSyncInEffect": 1,
+    "yieldInCallArgument": 26
+  },
+  "test/fixtures/http-dispatcher.ts": {
+    "asyncFunction": 1,
+    "globalFetch": 5,
+    "globalJson": 3,
+    "globalTimers": 1,
+    "newPromise": 2,
+    "nodeBuiltinImport": 3,
+    "processEnv": 4,
+    "schemaNumber": 2,
+    "schemaSync": 2
+  },
+  "test/harness.test.ts": {
+    "asyncFunction": 4,
+    "globalDate": 1
+  },
+  "test/live.test.ts": {
+    "asyncFunction": 1,
+    "nodeBuiltinImport": 3
+  },
+  "test/storage.test.ts": {
+    "asyncFunction": 2,
+    "nodeBuiltinImport": 2
+  },
+  "test/support.ts": {
+    "newSchemaClass": 5,
+    "nodeBuiltinImport": 2
+  }
+}

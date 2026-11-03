@@ -15,10 +15,10 @@ allowBuilds:
 
 catalog:
   "@changesets/cli": 3.0.3
-  "@effect/language-service": 0.87.5
   "@effect/platform-node": 4.0.6
   "@effect/platform-node-shared": 4.0.6
   "@effect/sql-sqlite-node": 4.0.6
+  "@effect/tsgo": 0.64.1
   "@effect/vitest": 4.0.6
   "@oxlint/plugins": 1.90.0
   "@vitest/browser-playwright": 5.0.5
@@ -28,6 +28,7 @@ catalog:
   knip: 6.43.0
   oxfmt: 0.75.0
   oxlint: 1.90.0
+  oxlint-tsgolint: 7.0.2005
   turbo: 2.11.10
   typescript: 7.0.2
   vitest: 5.0.5
