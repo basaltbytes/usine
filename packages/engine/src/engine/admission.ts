@@ -1,6 +1,17 @@
+import { ChangeBus } from "@usine/core/changes";
 import type { RunId } from "@usine/core/run";
 import type { ReleaseVersion } from "@usine/core/upgrade";
-import { Context, DateTime, Deferred, Effect, Layer, Option, Ref, type Scope } from "effect";
+import {
+  Context,
+  DateTime,
+  Deferred,
+  Effect,
+  FiberMap,
+  Layer,
+  Option,
+  Ref,
+  type Scope,
+} from "effect";
 import { RunEngineShutdown } from "./shutdown.ts";
 import { UpgradeDrain, UpgradeWait } from "./upgrade.ts";
 
@@ -31,6 +42,11 @@ export class AttemptAdmission extends Context.Service<
       const shutdown = Option.isSome(hostShutdown)
         ? hostShutdown.value
         : yield* Deferred.make<void>();
+      const bus = yield* ChangeBus;
+      const timers = yield* FiberMap.make<"upgrade">();
+      const changed = bus.publish([
+        { audience: { _tag: "Readers" }, target: { kind: "configuration", id: "instance" } },
+      ]);
       const active = yield* Ref.make<ReadonlySet<RunId>>(new Set());
       const waiting = yield* Ref.make<ReadonlySet<RunId>>(new Set());
       const empty = yield* Deferred.make<void>();
@@ -73,12 +89,22 @@ export class AttemptAdmission extends Context.Service<
         attempt: (resource: A) => Effect.Effect<B, E2, R2>,
       ) {
         yield* Effect.annotateCurrentSpan({ runId });
-        const removeWaiting = Ref.update(
+        const removeWaiting = Ref.modify(
           waiting,
-          (runs) => new Set([...runs].filter((id) => id !== runId)),
+          (runs) => [runs.has(runId), new Set([...runs].filter((id) => id !== runId))] as const,
+        ).pipe(
+          Effect.flatMap((removed) =>
+            removed && Option.isSome(Ref.getUnsafe(gate).upgrade) ? changed : Effect.void,
+          ),
         );
         return yield* Effect.acquireUseRelease(
-          Ref.update(waiting, (runs) => new Set([...runs, runId])),
+          Ref.update(waiting, (runs) => new Set([...runs, runId])).pipe(
+            Effect.andThen(
+              Effect.suspend(() =>
+                Option.isSome(Ref.getUnsafe(gate).upgrade) ? changed : Effect.void,
+              ),
+            ),
+          ),
           () =>
             Effect.gen(function* () {
               while (true) {
@@ -138,6 +164,12 @@ export class AttemptAdmission extends Context.Service<
           return previous.upgrade.value.empty;
         }
         yield* Deferred.succeed(previous.changed, undefined);
+        yield* changed;
+        yield* FiberMap.run(
+          timers,
+          "upgrade",
+          Effect.sleep("10 minutes").pipe(Effect.andThen(changed)),
+        );
         yield* Effect.annotateCurrentSpan({ target });
         yield* Effect.logWarning("Idle upgrade defers new attempts until restart or cancellation", {
           target,
@@ -155,6 +187,8 @@ export class AttemptAdmission extends Context.Service<
         });
         yield* Deferred.succeed(previous.changed, undefined);
         if (Option.isSome(previous.upgrade)) {
+          yield* FiberMap.remove(timers, "upgrade");
+          yield* changed;
           yield* Effect.annotateCurrentSpan({ target: previous.upgrade.value.wait.target });
           yield* Effect.logInfo("Upgrade wait canceled", {
             target: previous.upgrade.value.wait.target,

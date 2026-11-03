@@ -194,6 +194,9 @@ importers:
         specifier: 'catalog:'
         version: 4.0.6
     devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.6(effect@4.0.6)(vitest@5.0.5)
       '@hyperjump/json-schema':
         specifier: 1.18.0
         version: 1.18.0(@hyperjump/browser@1.6.0)

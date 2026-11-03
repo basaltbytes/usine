@@ -1,4 +1,5 @@
-import { Context, DateTime, Effect, Layer, Ref } from "effect";
+import { ChangeBus } from "@usine/core/changes";
+import { Context, DateTime, Effect, FiberMap, Layer, Ref } from "effect";
 
 /** Endpoint delivery health is independent of self-write hints and polling. */
 export class WebhookHealth extends Context.Service<
@@ -13,8 +14,19 @@ export class WebhookHealth extends Context.Service<
   static readonly layer = Layer.effect(
     WebhookHealth,
     Effect.gen(function* () {
+      const bus = yield* ChangeBus;
+      const changed = bus.publish([
+        { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+      ]);
       let startedAt = yield* DateTime.now;
       const received = yield* Ref.make(false);
+      const timers = yield* FiberMap.make<"silence">();
+      const arm = FiberMap.run(
+        timers,
+        "silence",
+        Effect.sleep("10 minutes").pipe(Effect.andThen(changed)),
+      );
+      yield* arm;
       return {
         get startedAt() {
           return startedAt;
@@ -22,10 +34,14 @@ export class WebhookHealth extends Context.Service<
         reset: Effect.fn("WebhookHealth.reset")(function* () {
           startedAt = yield* DateTime.now;
           yield* Ref.set(received, false);
+          yield* arm;
+          yield* changed;
           yield* Effect.logInfo("Webhook delivery health reset after configuration change");
         })(),
         received: Effect.fn("WebhookHealth.received")(function* () {
           if (!(yield* Ref.getAndSet(received, true))) {
+            yield* FiberMap.remove(timers, "silence");
+            yield* changed;
             yield* Effect.logInfo(
               "Received the first verified webhook delivery since endpoint activation",
             );

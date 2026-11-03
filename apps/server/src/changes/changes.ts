@@ -1,111 +1,111 @@
 import { ChangeAccess } from "./access.ts";
-import {
-  InstanceScope,
-  permits,
-  RequestPermissions,
-  type PermissionGrant,
-} from "@usine/core/access";
+import { InstanceScope, permits, ProjectScope, type PermissionGrant } from "@usine/core/access";
+import { ChangeBus, type ScopedChange, type ChangeTarget } from "@usine/core/changes";
+import { ProjectId } from "@usine/core/project";
+import { CurrentInstance } from "@usine/orchestrator/current-instance";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
-import { Clock, Context, Effect, Layer, Option, Schedule, Stream, SynchronizedRef } from "effect";
+import { Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
-import type { FactoryBackend } from "../backend.ts";
-import { ServerUpgrades } from "../upgrade/control.ts";
-import { changedTargets, snapshot, type Snapshot } from "./snapshot.ts";
 
-type Journal = {
-  readonly sampledAt: number;
-  readonly snapshot: Snapshot;
-  readonly revision: number;
-  readonly history: ReadonlyArray<ChangeNotice>;
-};
-
-/** Keeps bounded replay journals isolated by the request's effective permissions. */
 const makeChanges = Effect.gen(function* () {
-  const journals = yield* SynchronizedRef.make(new Map<string, Journal>());
-  let revision = Date.now();
+  const bus = yield* ChangeBus;
+  const instances = yield* Effect.serviceOption(CurrentInstance);
   const stream = Effect.fn("Http.changes")(function* (
-    backend: FactoryBackend["Service"],
     request: HttpServerRequest.HttpServerRequest,
     grants: ReadonlyArray<PermissionGrant>,
   ) {
     const verify = yield* ChangeAccess;
-    const key = JSON.stringify(grants);
-    const upgrades = yield* Effect.serviceOption(ServerUpgrades);
+    const targets = Effect.fn("Http.changes.authorizedTargets")(function* (
+      changes: ReadonlyArray<ScopedChange>,
+    ) {
+      const projects = Option.isSome(instances) ? (yield* instances.value.get).config.projects : [];
+      const result = new Map<string, ChangeTarget>();
+      const add = (target: ChangeTarget) => result.set(`${target.kind}:${target.id}`, target);
+      for (const { audience, target } of changes) {
+        const project =
+          audience._tag === "Repository"
+            ? projects.find((project) => project.includes(audience.repository))?.id
+            : audience._tag === "Project"
+              ? audience.project
+              : audience._tag === "Loop"
+                ? Option.getOrUndefined(SchemaProject(audience.loop.split("/")[0]))
+                : undefined;
+        const allowed =
+          audience._tag === "Readers"
+            ? grants.some(({ permission }) => permission === "read" || permission === "admin")
+            : permits(
+                grants,
+                "read",
+                project === undefined ? new InstanceScope() : new ProjectScope({ project }),
+              );
+        if (!allowed) continue;
+        add(target);
+        if (target.kind === "activity" || target.kind === "navigation") continue;
+        if (project !== undefined) add({ kind: "project", id: project });
+        add({ kind: "attention", id: "instance" });
+        add({ kind: "activity", id: "instance" });
+        if (target.kind !== "worker") add({ kind: "navigation", id: "instance" });
+      }
+      return [...result.values()];
+    });
     const supplied = request.headers["last-event-id"];
-    let cursor = supplied === undefined ? undefined : Number(supplied);
-    let ticks = 0;
     yield* Effect.logDebug("Change stream opened", { resume: supplied ?? "initial" });
-    const read = SynchronizedRef.modifyEffect(journals, (current) =>
+    const frames = Stream.unwrap(
       Effect.gen(function* () {
-        yield* verify;
-        const sampledAt = yield* Clock.currentTimeMillis;
-        const previous = current.get(key);
-        let journal = previous;
-        if (journal === undefined || sampledAt - journal.sampledAt >= 750) {
-          const [overview, desk, configuration, upgrade] = yield* Effect.all(
-            [
-              backend.overview,
-              backend.desk,
-              backend.configuration,
-              permits(grants, "admin", new InstanceScope()) && Option.isSome(upgrades)
-                ? upgrades.value.status.pipe(Effect.map(Option.some))
-                : Effect.succeed(Option.none()),
-            ],
-            { concurrency: "unbounded" },
-          );
-          const next = snapshot(overview, desk, configuration, upgrade);
-          const changes = previous === undefined ? [] : changedTargets(previous.snapshot, next);
-          const notice =
-            changes.length === 0
-              ? undefined
-              : new ChangeNotice({ revision: ++revision, reset: false, changes });
-          journal = {
-            sampledAt,
-            snapshot: next,
-            revision: notice?.revision ?? previous?.revision ?? ++revision,
-            history:
-              notice === undefined
-                ? (previous?.history ?? [])
-                : [...(previous?.history ?? []), notice].slice(-256),
-          };
-        }
-        const updated = new Map(current);
-        updated.delete(key);
-        updated.set(key, journal);
-        if (updated.size > 16) {
-          const oldestKey = updated.keys().next().value;
-          if (oldestKey !== undefined) updated.delete(oldestKey);
-        }
-        const oldest = journal.history[0]?.revision ?? journal.revision;
-        const reset =
-          previous === undefined ||
-          cursor === undefined ||
-          !Number.isSafeInteger(cursor) ||
-          cursor < oldest - 1 ||
-          cursor > journal.revision;
-        const notices = reset
-          ? [new ChangeNotice({ revision: journal.revision, reset: true, changes: [] })]
-          : journal.history.filter(({ revision }) => revision > (cursor ?? 0));
-        cursor = journal.revision;
-        if (notices.length > 0)
-          yield* Effect.logDebug("Change notices sent", {
-            revision: journal.revision,
-            notices: notices.length,
-            reset,
+        const { revision, history, live } = yield* bus.open;
+        let cursor = supplied === undefined ? NaN : Number(supplied);
+        const oldest = history[0]?.revision ?? revision + 1;
+        const reset = !Number.isSafeInteger(cursor) || cursor < oldest - 1 || cursor > revision;
+        const frame = (notice: ChangeNotice) =>
+          `id: ${notice.revision}\nevent: change\ndata: ${JSON.stringify(notice)}\n\n`;
+        const send = Effect.fn("Http.changes.send")(function* (notice: (typeof history)[number]) {
+          if (notice.revision <= cursor) return "";
+          yield* Effect.annotateCurrentSpan({ revision: notice.revision });
+          yield* verify;
+          const gap = notice.revision > cursor + 1;
+          cursor = notice.revision;
+          const changes = gap ? [] : yield* targets(notice.changes);
+          if (!gap && changes.length === 0) return "";
+          yield* Effect.logDebug("Change notice sent", {
+            revision: cursor,
+            reset: gap,
+            targets: changes.length,
           });
-        const frames = notices.map(
-          (notice) => `id: ${notice.revision}\nevent: change\ndata: ${JSON.stringify(notice)}\n\n`,
+          return frame(new ChangeNotice({ revision: cursor, reset: gap, changes }));
+        });
+        const initial = reset
+          ? Effect.gen(function* () {
+              yield* verify;
+              cursor = revision;
+              yield* Effect.logDebug("Change stream reset", {
+                revision,
+                resume: supplied ?? "initial",
+              });
+              return (
+                frame(new ChangeNotice({ revision, reset: true, changes: [] })) + ": heartbeat\n\n"
+              );
+            })
+          : Effect.forEach(
+              history.filter((notice) => notice.revision > cursor),
+              send,
+            ).pipe(Effect.map((frames) => frames.join("") + ": heartbeat\n\n"));
+        const heartbeat = Stream.fromEffectSchedule(
+          verify.pipe(Effect.as(": heartbeat\n\n")),
+          Schedule.spaced("15 seconds"),
+        ).pipe(Stream.drop(1));
+        return Stream.concat(
+          Stream.fromEffect(initial),
+          Stream.merge(live.pipe(Stream.mapEffect(send)), heartbeat),
         );
-        if (ticks++ % 15 === 0) frames.push(": heartbeat\n\n");
-        return [frames.join(""), updated] as const;
       }),
-    );
-    const stream = Stream.fromEffectSchedule(read, Schedule.spaced(1_000)).pipe(
-      Stream.provideService(RequestPermissions, grants),
-      Stream.tapError((error) => Effect.logWarning("Change stream read failed", { error })),
+    ).pipe(
+      Stream.filter((frame) => frame.length > 0),
+      Stream.tapError((error) =>
+        Effect.logWarning("Change stream closed after credential validation failed", { error }),
+      ),
       Stream.encodeText,
     );
-    return HttpServerResponse.stream(stream, {
+    return HttpServerResponse.stream(frames, {
       headers: {
         "content-type": "text/event-stream",
         "cache-control": "no-store",
@@ -115,6 +115,8 @@ const makeChanges = Effect.gen(function* () {
   });
   return { stream };
 });
+
+const SchemaProject = Schema.decodeUnknownOption(ProjectId);
 
 export class Changes extends Context.Service<Changes, Effect.Success<typeof makeChanges>>()(
   "@usine/server/Changes",

@@ -1,3 +1,4 @@
+import { ChangeBus, type ChangeAudience } from "@usine/core/changes";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
@@ -29,12 +30,16 @@ export class AttentionAcknowledgements extends Context.Service<
      */
     readonly dismiss: (
       acknowledgement: AttentionAcknowledgement,
+      audiences?: ReadonlyArray<ChangeAudience>,
     ) => Effect.Effect<void, EnginePersistenceError>;
     /**
      * Deletes the dismissal matching both `key.id` and `key.revision`; does nothing if no record
      * matches.
      */
-    readonly undo: (key: AttentionKey) => Effect.Effect<void, EnginePersistenceError>;
+    readonly undo: (
+      key: AttentionKey,
+      audiences?: ReadonlyArray<ChangeAudience>,
+    ) => Effect.Effect<void, EnginePersistenceError>;
     /**
      * Deletes acknowledgements without a matching current ID and revision.
      * Include dismissed entries in `current`; an empty list clears all acknowledgements.
@@ -51,6 +56,14 @@ export class AttentionAcknowledgements extends Context.Service<
     AttentionAcknowledgements,
     Effect.gen(function* () {
       const database = yield* RunDatabase;
+      const bus = yield* ChangeBus;
+      const notify = (audiences: ReadonlyArray<ChangeAudience>) =>
+        bus.publish(
+          audiences.map((audience) => ({
+            audience,
+            target: { kind: "attention", id: "instance" },
+          })),
+        );
       return {
         list: Effect.fn("AttentionAcknowledgements.list")(function* () {
           const rows = yield* database.select().from(attentionAcknowledgements).execute();
@@ -85,9 +98,10 @@ export class AttentionAcknowledgements extends Context.Service<
         }, persistence("prune attention acknowledgements")),
         dismiss: Effect.fn("AttentionAcknowledgements.dismiss")(function* (
           acknowledgement: AttentionAcknowledgement,
+          audiences: ReadonlyArray<ChangeAudience> = [{ _tag: "Instance" }],
         ) {
           yield* Effect.annotateCurrentSpan({ needId: acknowledgement.id });
-          yield* database
+          const inserted = yield* database
             .insert(attentionAcknowledgements)
             .values({
               ...acknowledgement,
@@ -95,15 +109,20 @@ export class AttentionAcknowledgements extends Context.Service<
               dismissedAt: DateTime.formatIso(acknowledgement.dismissedAt),
             })
             .onConflictDoNothing()
+            .returning({ id: attentionAcknowledgements.id })
             .execute();
+          if (inserted.length > 0) yield* notify(audiences);
           yield* Effect.logInfo("Attention entry dismissed", {
             needId: acknowledgement.id,
             dismissedBy: acknowledgement.dismissedBy,
           });
         }, persistence("dismiss attention entry")),
-        undo: Effect.fn("AttentionAcknowledgements.undo")(function* (key: AttentionKey) {
+        undo: Effect.fn("AttentionAcknowledgements.undo")(function* (
+          key: AttentionKey,
+          audiences: ReadonlyArray<ChangeAudience> = [{ _tag: "Instance" }],
+        ) {
           yield* Effect.annotateCurrentSpan({ needId: key.id });
-          yield* database
+          const removed = yield* database
             .delete(attentionAcknowledgements)
             .where(
               and(
@@ -111,7 +130,9 @@ export class AttentionAcknowledgements extends Context.Service<
                 eq(attentionAcknowledgements.revision, key.revision),
               ),
             )
+            .returning({ id: attentionAcknowledgements.id })
             .execute();
+          if (removed.length > 0) yield* notify(audiences);
           yield* Effect.logInfo("Attention dismissal undone", { needId: key.id });
         }, persistence("undo attention dismissal")),
       };

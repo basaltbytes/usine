@@ -1,3 +1,5 @@
+import { ChangeBus } from "@usine/core/changes";
+import { changeTransaction } from "../store/changes.ts";
 import { CycleBudgetAsk, CycleBudgetAskId, CycleGeneration } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
 import { Event } from "@usine/core/event";
@@ -74,6 +76,7 @@ export class CycleBudgets extends Context.Service<
     CycleBudgets,
     Effect.gen(function* () {
       const database = yield* RunDatabase;
+      const transact = changeTransaction(database, yield* ChangeBus);
       const queries = cycleQueries(database);
       const generation = Effect.fn("CycleBudgets.generation")(function* (itemKey: ItemKey) {
         yield* Effect.annotateCurrentSpan({ itemKey });
@@ -103,79 +106,81 @@ export class CycleBudgets extends Context.Service<
         answer: Event,
       ) {
         yield* Effect.annotateCurrentSpan({ askId, eventId: answer.id });
-        yield* database
-          .transaction((transaction) =>
-            Effect.gen(function* () {
-              const previous = yield* transaction
-                .select()
-                .from(cycleResets)
-                .where(eq(cycleResets.askId, askId))
-                .execute();
-              if (previous[0]?.eventId === answer.id) {
-                yield* Effect.logInfo("Cycle budget reset answer already recorded", {
-                  askId,
-                  eventId: answer.id,
-                });
-                return;
-              }
-              const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);
-              if (ask === undefined) return yield* new CycleBudgetResetRejectedError({ askId });
-              const budget = yield* cycleQueries(transaction).get(ask.itemKey);
-              if (Option.isNone(budget))
-                return yield* Effect.die(new Error("Open cycle ask has no budget"));
-              const generation = budget.value.generation + 1;
-              yield* transaction
-                .insert(events)
-                .values({
-                  eventId: answer.id,
-                  dedupKey: answer.dedupKey,
-                  payloadJson: encodePayload(answer.payload),
-                  receivedAt: encodeDateTime(answer.receivedAt),
-                })
-                .execute();
-              yield* transaction
-                .insert(cycleResets)
-                .values({ askId, eventId: answer.id, itemKey: ask.itemKey })
-                .execute();
-              yield* transaction
-                .update(itemCycleBudgets)
-                .set({ generation, askJson: null, resetPending: true })
-                .where(eq(itemCycleBudgets.itemKey, ask.itemKey))
-                .execute();
-              // Unstarted Runs move their reservation to the new generation. Started Runs keep the
-              // old one, and retries don't charge again.
-              yield* transaction
-                .update(cycleReservations)
-                .set({ generation })
-                .where(
-                  and(
-                    eq(cycleReservations.itemKey, ask.itemKey),
-                    inArray(
-                      cycleReservations.runId,
-                      transaction
-                        .select({ runId: runs.runId })
-                        .from(runs)
-                        .where(
-                          inArray(sql`json_extract(${runs.stateJson}, '$._tag')`, [
-                            ...RunState.UNSTARTED_STATE_TAGS,
-                          ]),
-                        ),
-                    ),
-                  ),
-                )
-                .execute();
-              yield* Effect.logInfo("Operator reset Item cycle budget", {
+        yield* transact((transaction, record) =>
+          Effect.gen(function* () {
+            const previous = yield* transaction
+              .select()
+              .from(cycleResets)
+              .where(eq(cycleResets.askId, askId))
+              .execute();
+            if (previous[0]?.eventId === answer.id) {
+              yield* Effect.logInfo("Cycle budget reset answer already recorded", {
                 askId,
                 eventId: answer.id,
-                itemKey: ask.itemKey,
-                repository: ask.repository,
-                generation,
-                completedCycles: ask.completedCycles,
-                counts: ask.counts,
               });
-            }),
-          )
-          .pipe(persistence);
+              return;
+            }
+            const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);
+            if (ask === undefined) return yield* new CycleBudgetResetRejectedError({ askId });
+            const budget = yield* cycleQueries(transaction).get(ask.itemKey);
+            if (Option.isNone(budget))
+              return yield* Effect.die(new Error("Open cycle ask has no budget"));
+            const generation = budget.value.generation + 1;
+            yield* transaction
+              .insert(events)
+              .values({
+                eventId: answer.id,
+                dedupKey: answer.dedupKey,
+                payloadJson: encodePayload(answer.payload),
+                receivedAt: encodeDateTime(answer.receivedAt),
+              })
+              .execute();
+            yield* transaction
+              .insert(cycleResets)
+              .values({ askId, eventId: answer.id, itemKey: ask.itemKey })
+              .execute();
+            yield* transaction
+              .update(itemCycleBudgets)
+              .set({ generation, askJson: null, resetPending: true })
+              .where(eq(itemCycleBudgets.itemKey, ask.itemKey))
+              .execute();
+            // Unstarted Runs move their reservation to the new generation. Started Runs keep the
+            // old one, and retries don't charge again.
+            yield* transaction
+              .update(cycleReservations)
+              .set({ generation })
+              .where(
+                and(
+                  eq(cycleReservations.itemKey, ask.itemKey),
+                  inArray(
+                    cycleReservations.runId,
+                    transaction
+                      .select({ runId: runs.runId })
+                      .from(runs)
+                      .where(
+                        inArray(sql`json_extract(${runs.stateJson}, '$._tag')`, [
+                          ...RunState.UNSTARTED_STATE_TAGS,
+                        ]),
+                      ),
+                  ),
+                ),
+              )
+              .execute();
+            yield* record({
+              audience: { _tag: "Repository", repository: ask.repository },
+              target: { kind: "attention", id: "instance" },
+            });
+            yield* Effect.logInfo("Operator reset Item cycle budget", {
+              askId,
+              eventId: answer.id,
+              itemKey: ask.itemKey,
+              repository: ask.repository,
+              generation,
+              completedCycles: ask.completedCycles,
+              counts: ask.counts,
+            });
+          }),
+        ).pipe(persistence);
       });
       const close = Effect.fn("CycleBudgets.close")(function* (
         askId: CycleBudgetAskId,
@@ -183,49 +188,51 @@ export class CycleBudgets extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ askId, reason });
         const closedAt = encodeDateTime(yield* DateTime.now);
-        return yield* database
-          .transaction((transaction) =>
-            Effect.gen(function* () {
-              const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);
-              if (ask === undefined) {
-                yield* Effect.logInfo("Cycle-budget Ask is no longer open; nothing to close", {
-                  askId,
-                  reason,
-                });
-                return false;
-              }
-              const askJson = Schema.encodeSync(CycleBudgetAsk)(ask);
-              // An Item that matches again in the same generation raises an Ask with the same ID.
-              yield* transaction
-                .insert(cycleAskClosures)
-                .values({ askId, itemKey: ask.itemKey, reason, askJson, closedAt })
-                .onConflictDoUpdate({
-                  target: cycleAskClosures.askId,
-                  set: { reason, askJson, closedAt },
-                })
-                .execute();
-              yield* transaction
-                .update(itemCycleBudgets)
-                .set({ askJson: null })
-                .where(eq(itemCycleBudgets.itemKey, ask.itemKey))
-                .execute();
-              yield* Effect.logInfo("Closed cycle-budget Ask without a reset", {
+        return yield* transact((transaction, record) =>
+          Effect.gen(function* () {
+            const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);
+            if (ask === undefined) {
+              yield* Effect.logInfo("Cycle-budget Ask is no longer open; nothing to close", {
                 askId,
                 reason,
-                itemKey: ask.itemKey,
-                repository: ask.repository,
-                loop: ask.loop,
-                completedCycles: ask.completedCycles,
-                counts: ask.counts,
               });
-              return true;
-            }),
-          )
-          .pipe(
-            Effect.mapError(
-              (cause) => new EnginePersistenceError({ operation: "close cycle ask", cause }),
-            ),
-          );
+              return false;
+            }
+            const askJson = Schema.encodeSync(CycleBudgetAsk)(ask);
+            // An Item that matches again in the same generation raises an Ask with the same ID.
+            yield* transaction
+              .insert(cycleAskClosures)
+              .values({ askId, itemKey: ask.itemKey, reason, askJson, closedAt })
+              .onConflictDoUpdate({
+                target: cycleAskClosures.askId,
+                set: { reason, askJson, closedAt },
+              })
+              .execute();
+            yield* transaction
+              .update(itemCycleBudgets)
+              .set({ askJson: null })
+              .where(eq(itemCycleBudgets.itemKey, ask.itemKey))
+              .execute();
+            yield* record({
+              audience: { _tag: "Repository", repository: ask.repository },
+              target: { kind: "attention", id: "instance" },
+            });
+            yield* Effect.logInfo("Closed cycle-budget Ask without a reset", {
+              askId,
+              reason,
+              itemKey: ask.itemKey,
+              repository: ask.repository,
+              loop: ask.loop,
+              completedCycles: ask.completedCycles,
+              counts: ask.counts,
+            });
+            return true;
+          }),
+        ).pipe(
+          Effect.mapError(
+            (cause) => new EnginePersistenceError({ operation: "close cycle ask", cause }),
+          ),
+        );
       });
       const pendingResets = Effect.fn("CycleBudgets.pendingResets")(() =>
         queries.pendingResets().pipe(

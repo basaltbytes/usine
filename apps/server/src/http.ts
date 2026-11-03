@@ -212,7 +212,6 @@ const handlers = HttpApiBuilder.group(
       .handleRaw("changes", () =>
         Effect.gen(function* () {
           return yield* changes.stream(
-            yield* FactoryBackend,
             yield* HttpServerRequest.HttpServerRequest,
             yield* RequestPermissions,
           );

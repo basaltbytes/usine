@@ -1,3 +1,4 @@
+import type { RecordChange } from "./changes.ts";
 import { CiPolicy } from "@usine/core/ci";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
@@ -202,7 +203,37 @@ const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS
 const storedAgent = (agent: Agent): Schema.Json =>
   Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
 
-export const queriesFor = (database: RunDatabaseClient) => {
+export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) => {
+  const changedRun = (runId: RunId) =>
+    Effect.gen(function* () {
+      if (record === undefined) return;
+      const [row] = yield* database
+        .select({ repository: runs.repository, itemKey: triggerEvents.itemKey })
+        .from(runs)
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+        .where(eq(runs.runId, runId))
+        .execute();
+      if (row === undefined) return;
+      const audience = { _tag: "Repository", repository: row.repository } as const;
+      yield* record({ audience, target: { kind: "run", id: runId } });
+      yield* record({ audience, target: { kind: "item", id: row.itemKey } });
+    });
+  const changedAttempt = (attemptId: AttemptId) =>
+    Effect.gen(function* () {
+      if (record === undefined) return;
+      const [row] = yield* database
+        .select({ repository: runs.repository, runId: runs.runId })
+        .from(attempts)
+        .innerJoin(runs, eq(runs.runId, attempts.runId))
+        .where(eq(attempts.attemptId, attemptId))
+        .execute();
+      if (row === undefined) return;
+      yield* record({
+        audience: { _tag: "Repository", repository: row.repository },
+        target: { kind: "attempt", id: attemptId },
+      });
+      yield* changedRun(row.runId);
+    });
   // `.execute()` stays explicit (ADR 0020).
   const eventRouteByDedup = Effect.fn("RunStoreQueries.eventRouteByDedup")(function* (
     dedupKey: DedupKey,
@@ -574,6 +605,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     if (updated.length === 0) {
       return yield* new RunNotFoundError({ runId });
     }
+    yield* changedRun(runId);
   });
 
   const resolveFailure = Effect.fn("RunStoreQueries.resolveFailure")(function* (
@@ -592,6 +624,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ resolvedFailureAttemptId: attemptId })
       .where(eq(runs.runId, runId))
       .execute();
+    yield* changedAttempt(attemptId);
   });
 
   const addAttempt = Effect.fn("RunStoreQueries.addAttempt")(function* (attempt: Attempt) {
@@ -615,6 +648,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         startJson: Option.match(attempt.start, { onNone: () => null, onSome: encodeAttemptStart }),
       })
       .execute();
+    yield* changedAttempt(attempt.id);
   });
 
   const recordReattach = Effect.fn("RunStoreQueries.recordReattach")(function* (
@@ -627,6 +661,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ reattachedAt: encodeDateTime(reattachedAt) })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
+    yield* changedAttempt(attemptId);
   });
 
   /** Returns the operator retry for the Run's next Attempt, or `None`. */
@@ -650,6 +685,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       })
       .where(eq(runs.runId, runId))
       .execute();
+    yield* changedRun(runId);
   });
 
   const recordSalvage = Effect.fn("RunStoreQueries.recordSalvage")(function* (
@@ -676,6 +712,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           ),
         )
         .execute();
+    yield* changedAttempt(attemptId);
   });
 
   const recordComments = Effect.fn("RunStoreQueries.recordComments")(function* (
@@ -688,6 +725,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ commentsJson: encodeComments(comments) })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
+    yield* changedAttempt(attemptId);
   });
 
   /**
@@ -718,6 +756,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ outOfMemoryJson: encodeOutOfMemory(containers) })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
+
+    yield* changedAttempt(attemptId);
     return totalOutOfMemoryKills(containers);
   });
 
@@ -731,6 +771,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ outcomeJson: encodeOutcome(outcome), endedAt: encodeDateTime(endedAt) })
       .where(and(eq(attempts.attemptId, attemptId), isNull(attempts.outcomeJson)))
       .execute();
+    yield* changedAttempt(attemptId);
   });
 
   const settleCiAttempt = Effect.fn("RunStoreQueries.settleCiAttempt")(function* (
@@ -747,6 +788,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         ),
       )
       .execute();
+    yield* changedRun(runId);
   });
 
   const amend = Effect.fn("RunStoreQueries.amend")(function* (
@@ -763,6 +805,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       })
       .where(eq(runs.runId, runId))
       .execute();
+    yield* changedRun(runId);
   });
 
   const markIntervened = Effect.fn("RunStoreQueries.markIntervened")(function* (
@@ -774,6 +817,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ operatorIntervened: true })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
+    yield* changedAttempt(attemptId);
   });
 
   const updateAttemptParentModel = Effect.fn("RunStoreQueries.updateAttemptParentModel")(function* (
@@ -785,6 +829,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ parentModel })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
+    yield* changedAttempt(attemptId);
   });
 
   const updateStepResult = Effect.fn("RunStoreQueries.updateStepResult")(function* (
@@ -797,6 +842,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .set({ result: encodeStepResult(result) })
       .where(and(eq(steps.runId, runId), eq(steps.stepName, stepName)))
       .execute();
+    yield* changedRun(runId);
   });
 
   const approvalExists = Effect.fn("RunStoreQueries.approvalExists")(function* (runId: RunId) {
@@ -827,6 +873,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         approver: Option.getOrNull(source.approver),
       })
       .execute();
+    yield* changedRun(runId);
   });
 
   const createRun = Effect.fn("RunStoreQueries.createRun")(function* (
@@ -881,6 +928,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .values({ runId, stepName: submission.step, result: null })
       .onConflictDoNothing()
       .execute();
+    yield* changedRun(runId);
   });
 
   const runForEvent = Effect.fn("RunStoreQueries.runForEvent")(function* (eventId: EventId) {
@@ -1051,7 +1099,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         and(
           eq(triggerEvents.loopName, current.loop),
           eq(triggerEvents.itemKey, current.itemKey),
-          cycleQueries(database).currentEvent,
+          cycleQueries(database, record).currentEvent,
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
         ),
@@ -1099,7 +1147,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           isNull(ignoredEvents.eventId),
           isNull(itemCycleBudgets.askJson),
           isNull(loopItems.suppressedByRunId),
-          cycleQueries(database).currentEvent,
+          cycleQueries(database, record).currentEvent,
         ),
       )
       .execute();
@@ -1179,9 +1227,10 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   return {
+    changedAttempt,
     salvageCandidates,
     salvageCandidate,
-    cycles: cycleQueries(database),
+    cycles: cycleQueries(database, record),
     loopItems: loopItemQueries(database),
     ...transcriptQueries(database),
     addAttempt,

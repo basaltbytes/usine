@@ -39,3 +39,5 @@ Board moves appear immediately. A failed label write restores the card's previou
 **Runs without a card** includes only runs whose items have no board card. Runs on cards in **Done** stay out of this section, including before you load the lane.
 
 If you serve the UI through a reverse proxy, disable response buffering for `/api/changes` and allow a long-lived response. The endpoint sends a heartbeat every 15 seconds.
+
+Change notices publish after state writes commit. The stream filters identifiers using your current project access and checks credentials before each notice and every 15 seconds. Reconnecting replays up to 256 notices; an expired cursor or a slow connection requests a fresh read. Elapsed times update in the browser from recorded timestamps.

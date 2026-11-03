@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import {
   ReleaseVersion,
   type UpgradeChannel,
@@ -32,6 +33,7 @@ it("checks the selected channel and waits for all admitted attempts before insta
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
+        const bus = yield* ChangeBus;
         const f = yield* fixture;
         const upgrades = yield* makeUpgrades({
           running: previous,
@@ -44,10 +46,20 @@ it("checks the selected channel and waits for all admitted attempts before insta
         expect(yield* Ref.get(f.requests)).toEqual(["next"]);
         expect((yield* upgrades.status).phase).toBe("waiting");
         expect(yield* Deferred.isDone(f.launched)).toBe(false);
+        const journal = yield* bus.open;
+        expect(journal.history).toHaveLength(2);
+        expect(
+          journal.history.every(
+            ({ changes }) => changes.length === 1 && changes[0]?.target.kind === "configuration",
+          ),
+        ).toBe(true);
+        yield* upgrades.check();
+        expect((yield* bus.open).revision).toBe(journal.revision);
         yield* Deferred.succeed(f.drained, undefined);
         expect(yield* Deferred.await(f.launched)).toBe(target);
+        expect((yield* bus.open).revision).toBe(journal.revision + 1);
       }),
-    ),
+    ).pipe(Effect.provide(changeBusLayer)),
   );
 });
 

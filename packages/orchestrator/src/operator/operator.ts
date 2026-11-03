@@ -20,6 +20,7 @@ import {
 } from "@usine/engine/attention";
 import {
   attentionKey,
+  attentionAudiences,
   partitionNeeds,
   taskNeedsAttention,
   projectAttention,
@@ -1025,12 +1026,13 @@ const makeOperator = Effect.gen(function* () {
         dismissedBy: yield* requestActor(instance.config.operator),
         dismissedAt: yield* DateTime.now,
       }),
+      attentionAudiences(key),
     );
   });
   const undoDismissNeed = Effect.fn("Operator.undoDismissNeed")(function* (key: AttentionKey) {
     yield* requirePermission("admin", new InstanceScope());
     yield* Effect.annotateCurrentSpan({ needId: key.id });
-    yield* acknowledgements.undo(key);
+    yield* acknowledgements.undo(key, attentionAudiences(key));
   });
 
   const requireRunOperation = Effect.fn("Operator.requireRunOperation")(function* (
@@ -1702,7 +1704,7 @@ export {
   TranscriptAttemptNotFoundError,
 } from "./transcript.ts";
 
-export { attentionKey, projectAttention } from "./attention.ts";
+export { attentionKey, attentionAudiences, projectAttention } from "./attention.ts";
 
 export { ConfigurationEditor, type ConfigurationEditorError } from "./configuration/editor.ts";
 

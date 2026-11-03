@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { noCycleBudgets } from "./support/polling.ts";
@@ -665,6 +666,7 @@ describe("PollingTriggers", () => {
       };
 
       return Effect.gen(function* () {
+        const bus = yield* ChangeBus;
         const polling = yield* PollingTriggers;
         const current = yield* SubscriptionRef.make(instanceWith([issueLoop("start-dev")]));
         const fiber = yield* Effect.forkChild(
@@ -675,6 +677,21 @@ describe("PollingTriggers", () => {
         );
         yield* Effect.yieldNow;
         assert.strictEqual(changeRequests, 2);
+        const journal = yield* bus.open;
+        assert.strictEqual(journal.history.length, 1);
+        assert.deepStrictEqual(
+          journal.history[0]?.changes,
+          config.repos.flatMap(({ name }) => [
+            {
+              audience: { _tag: "Repository", repository: name },
+              target: { kind: "activity", id: "instance" },
+            },
+            {
+              audience: { _tag: "Repository", repository: name },
+              target: { kind: "attention", id: "instance" },
+            },
+          ]),
+        );
         yield* TestClock.adjust("30 seconds");
         yield* SubscriptionRef.set(
           current,
@@ -685,7 +702,11 @@ describe("PollingTriggers", () => {
         yield* TestClock.adjust("1 second");
         assert.strictEqual(changeRequests, 4);
         yield* Fiber.interrupt(fiber);
-      }).pipe(Effect.provide(pollingTestLayer(github)));
+      }).pipe(
+        Effect.provide(pollingTestLayer(github)),
+        Effect.provide(changeBusLayer),
+        Effect.scoped,
+      );
     },
   );
 

@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -116,6 +117,8 @@ describe("CurrentInstance", () => {
   it.live("reports the Loops, Agents, and labels a reload added or changed", () =>
     withFolder((root) =>
       Effect.gen(function* () {
+        const bus = yield* ChangeBus;
+        const before = (yield* bus.open).revision;
         const instances = yield* CurrentInstance;
         yield* writeInstanceFiles(root, [
           [
@@ -126,6 +129,16 @@ describe("CurrentInstance", () => {
           ["loops/triage.md", loopFile("developer")],
         ]);
         const report = yield* instances.reload;
+        const journal = yield* bus.open;
+        assert.strictEqual(journal.revision, before + 1);
+        assert(
+          journal.history
+            .at(-1)
+            ?.changes.some(
+              ({ audience, target }) =>
+                audience._tag === "Readers" && target.kind === "configuration",
+            ),
+        );
         assert.deepStrictEqual(report.loops, {
           added: [LoopName.make("triage")],
           removed: [],
@@ -148,8 +161,8 @@ describe("CurrentInstance", () => {
           ["start-dev", "triage"],
         );
         assert.strictEqual(current.agents[0]?.model, "gpt-5.7-sol");
-      }),
-    ),
+      }).pipe(Effect.scoped),
+    ).pipe(Effect.provide(changeBusLayer), Effect.scoped),
   );
 
   it.live("keeps the running instance when the configuration store cannot be read", () =>

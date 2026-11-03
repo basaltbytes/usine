@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
@@ -52,6 +53,9 @@ export const machineStatusOf = (entry: Held): MachineStatus =>
   });
 
 export const machineHolds = Effect.gen(function* () {
+  const bus = yield* ChangeBus;
+  const changed = (entry: Held) =>
+    bus.publish([{ audience: { _tag: "Instance" }, target: { kind: "worker", id: entry.worker } }]);
   const held = yield* Ref.make<ReadonlyMap<MachineHold, Held>>(new Map());
   const nextHold = yield* Ref.make(0);
   const register = (fields: Omit<Held, "hold">) =>
@@ -61,18 +65,21 @@ export const machineHolds = Effect.gen(function* () {
         hold: MachineHold.make(`machine-${String(count)}`),
       })),
       Effect.tap((entry) => Ref.update(held, (current) => new Map(current).set(entry.hold, entry))),
+      Effect.tap(changed),
     );
   const update = (hold: MachineHold, change: (entry: Held) => Held) =>
-    Ref.update(held, (current) => {
+    Ref.modify(held, (current) => {
       const entry = current.get(hold);
-      return entry === undefined ? current : new Map(current).set(hold, change(entry));
-    });
+      if (entry === undefined) return [Option.none<Held>(), current] as const;
+      const next = change(entry);
+      return [Option.some(next), new Map(current).set(hold, next)] as const;
+    }).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: changed })));
   const unregister = (hold: MachineHold) =>
-    Ref.update(held, (current) => {
+    Ref.modify(held, (current) => {
       const next = new Map(current);
       next.delete(hold);
-      return next;
-    });
+      return [Option.fromNullishOr(current.get(hold)), next] as const;
+    }).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: changed })));
   const entryOf = (hold: MachineHold) =>
     Ref.get(held).pipe(Effect.map((current) => Option.fromNullishOr(current.get(hold))));
   const byAttempt = (attemptId: AttemptId) =>
@@ -106,7 +113,7 @@ export const machineHolds = Effect.gen(function* () {
           next.delete(idle.hold);
           next.set(claimed.hold, claimed);
           return [Option.some(claimed), next] as const;
-        }),
+        }).pipe(Effect.tap(Option.match({ onNone: () => Effect.void, onSome: changed }))),
       ),
     );
   const retireIdle = (hold: MachineHold) =>
@@ -114,6 +121,14 @@ export const machineHolds = Effect.gen(function* () {
       const entry = current.get(hold);
       if (entry?.state !== "idle") return [false, current] as const;
       return [true, new Map(current).set(hold, { ...entry, state: "deleting" })] as const;
-    });
+    }).pipe(
+      Effect.tap((retired) =>
+        retired
+          ? entryOf(hold).pipe(
+              Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: changed })),
+            )
+          : Effect.void,
+      ),
+    );
   return { held, register, update, unregister, entryOf, byAttempt, takeIdle, retireIdle };
 });

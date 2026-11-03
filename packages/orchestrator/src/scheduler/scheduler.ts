@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { positionFor, positionFields } from "./position.ts";
 import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
@@ -285,6 +286,9 @@ export const stepExecutorLayer = (
       const positionOf = positionFor(instances, yield* ExpressionEngine);
       const app = yield* GitHubApp;
       const workers = yield* validateWorkers(executor.kind, config.workers);
+      const bus = yield* ChangeBus;
+      const changedWorker = (worker: WorkerName) =>
+        bus.publish([{ audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } }]);
       const pool = yield* TxRef.make(slotPoolOf(workers, new Map()));
       const pending = yield* TxPriorityQueue.empty<Reservation>(leaseOrder);
       const nextOrder = yield* Ref.make(0);
@@ -401,6 +405,12 @@ export const stepExecutorLayer = (
           current,
           slotPoolOf(declared, current),
         ]);
+        yield* bus.publish(
+          [...new Set([...before.keys(), ...declared.map(({ name }) => name)])].map((worker) => ({
+            audience: { _tag: "Instance" },
+            target: { kind: "worker", id: worker },
+          })),
+        );
         const running = (worker: WorkerName) => before.get(worker)?.leased ?? 0;
         yield* Effect.forEach(change.resized, ({ worker, from }) =>
           Effect.logInfo("Worker slots resized by a reload; running Attempts continue", {
@@ -532,6 +542,7 @@ export const stepExecutorLayer = (
                 ).pipe(Effect.andThen(membership.withPermit(removeUnused(worker, "Removed")))),
             }),
           ),
+          Effect.andThen(changedWorker(worker)),
         );
 
       /** Deletes the machine that `machine` holds, if any, before the slot frees. */
@@ -612,6 +623,7 @@ export const stepExecutorLayer = (
       const dispatch = Effect.forever(
         Effect.gen(function* () {
           const { worker, reservation, passed } = yield* nextAssignment;
+          yield* changedWorker(worker);
           const lease = yield* makeLease(worker, Option.none(), Option.some(reservation.runId));
           const assign = yield* Ref.modify(reservation.state, (state) =>
             state._tag === "Pending"
@@ -658,6 +670,7 @@ export const stepExecutorLayer = (
             );
             return { worker, release: Effect.void } satisfies WorkerLease;
           }
+          yield* changedWorker(worker);
           const fields = { worker, running: slots.leased + 1, slots: slots.capacity };
           if (slots.leased < slots.capacity)
             yield* Effect.logInfo(
@@ -698,6 +711,9 @@ export const stepExecutorLayer = (
               Effect.andThen(Effect.all([TxPriorityQueue.toArray(pending), availablePool])),
             ),
           );
+          yield* bus.publish([
+            { audience: { _tag: "Loop", loop: run.loop }, target: { kind: "run", id: run.runId } },
+          ]);
           const fields = {
             ...run,
             ...positionFields(reservation.position),
@@ -730,6 +746,14 @@ export const stepExecutorLayer = (
                 // slot doesn't stay there.
                 Effect.tap(() =>
                   TxPriorityQueue.removeIf(pending, (waiting) => waiting === reservation),
+                ),
+                Effect.tap(() =>
+                  bus.publish([
+                    {
+                      audience: { _tag: "Loop", loop: run.loop },
+                      target: { kind: "run", id: run.runId },
+                    },
+                  ]),
                 ),
                 Effect.flatMap(
                   Option.match({ onNone: () => Effect.void, onSome: (lease) => lease.release }),

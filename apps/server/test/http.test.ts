@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import {
   RequestPermissions,
   RoleBinding,
@@ -112,7 +113,7 @@ import {
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
-import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { afterAll, assert, describe, it } from "vitest";
@@ -1588,144 +1589,66 @@ it("retains all linked card membership when the board read omits settled cards",
 });
 
 it("streams small changes and replays missed revisions without payloads", async () => {
-  let current = overview;
-  const changing = Layer.effect(
-    FactoryBackend,
-    Effect.map(FactoryBackend, (service) => ({ ...service, overview: Effect.sync(() => current) })),
-  ).pipe(Layer.provide(backend));
-  const streamApp = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(changing)), {
-    disableLogger: true,
-  });
-  const open = (last?: string) =>
-    streamApp.handler(
-      new Request("http://localhost/api/changes", {
-        headers: last === undefined ? {} : { "last-event-id": last },
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(changeBusLayer);
+        const bus = Context.get(context, ChangeBus);
+        yield* Effect.promise(async () => {
+          const streamApp = HttpRouter.toWebHandler(
+            apiRoutes().pipe(
+              Layer.provide(Layer.succeed(ChangeBus, bus)),
+              HttpRouter.provideRequest(backend),
+            ),
+            {
+              disableLogger: true,
+            },
+          );
+          const open = (last?: string) =>
+            streamApp.handler(
+              new Request("http://localhost/api/changes", {
+                headers: last === undefined ? {} : { "last-event-id": last },
+              }),
+            );
+          try {
+            const response = await open();
+            assert.strictEqual(response.headers.get("content-type"), "text/event-stream");
+            const reader = response.body?.getReader();
+            assert(reader !== undefined);
+            const first = new TextDecoder().decode((await reader.read()).value);
+            assert.include(first, ": heartbeat");
+            const cursor = /id: (\d+)/u.exec(first)?.[1];
+            assert(cursor !== undefined);
+            await Effect.runPromise(
+              bus.publish([
+                { audience: new InstanceScope(), target: { kind: "project", id: "workspace" } },
+              ]),
+            );
+            const changed = new TextDecoder().decode((await reader.read()).value);
+            assert.include(changed, '"kind":"project","id":"workspace"');
+            assert.notInclude(changed, "Renamed workspace");
+            assert.isBelow(changed.length, 1_024);
+            await reader.cancel();
+            const resumed = await open(cursor);
+            const replayReader = resumed.body?.getReader();
+            assert(replayReader !== undefined);
+            const replay = new TextDecoder().decode((await replayReader.read()).value);
+            assert.include(replay, '"reset":false');
+            assert.include(replay, '"kind":"project","id":"workspace"');
+            await replayReader.cancel();
+            for (const invalidCursor of ["not-a-revision", "0", String(Number.MAX_SAFE_INTEGER)]) {
+              const reset = await open(invalidCursor);
+              const resetReader = reset.body?.getReader();
+              assert(resetReader !== undefined);
+              const frame = new TextDecoder().decode((await resetReader.read()).value);
+              assert.include(frame, '"reset":true');
+              await resetReader.cancel();
+            }
+          } finally {
+            await streamApp.dispose();
+          }
+        });
       }),
-    );
-  try {
-    const response = await open();
-    assert.strictEqual(response.headers.get("content-type"), "text/event-stream");
-    const reader = response.body?.getReader();
-    assert(reader !== undefined);
-    const first = new TextDecoder().decode((await reader.read()).value);
-    assert.include(first, ": heartbeat");
-    const cursor = /id: (\d+)/u.exec(first)?.[1];
-    assert(cursor !== undefined);
-    current = new ReadyOverview({
-      ...overview,
-      projects: overview.projects.map(
-        (project) => new ProjectView({ ...project, name: "Renamed workspace" }),
-      ),
-    });
-    const changed = new TextDecoder().decode((await reader.read()).value);
-    assert.include(changed, '"kind":"project","id":"workspace"');
-    assert.notInclude(changed, "Renamed workspace");
-    assert.isBelow(changed.length, 1_024);
-    await reader.cancel();
-    const resumed = await open(cursor);
-    const replayReader = resumed.body?.getReader();
-    assert(replayReader !== undefined);
-    const replay = new TextDecoder().decode((await replayReader.read()).value);
-    assert.include(replay, '"reset":false');
-    assert.include(replay, '"kind":"project","id":"workspace"');
-    await replayReader.cancel();
-    for (const invalidCursor of ["not-a-revision", "0", String(Number.MAX_SAFE_INTEGER)]) {
-      const reset = await open(invalidCursor);
-      const resetReader = reset.body?.getReader();
-      assert(resetReader !== undefined);
-      const frame = new TextDecoder().decode((await resetReader.read()).value);
-      assert.include(frame, '"reset":true');
-      await resetReader.cancel();
-    }
-  } finally {
-    await streamApp.dispose();
-  }
-});
-
-it("emits item notices when a non-current linked pull request gains conflicts or labels", async () => {
-  const older = new BoardItemLink({
-    itemKey: ItemKey.make("github:basaltbytes/usine:41"),
-    kind: "pr",
-    number: ItemNumber.make(41),
-    title: "Older pull request",
-    url: "https://github.com/basaltbytes/usine/pull/41",
-    state: "pr-open",
-  });
-  const newer = new BoardItemLink({
-    ...older,
-    itemKey: ItemKey.make("github:basaltbytes/usine:42"),
-    number: ItemNumber.make(42),
-    title: "Current pull request",
-    url: "https://github.com/basaltbytes/usine/pull/42",
-  });
-  const view = (member: BoardItemLink) =>
-    new ReadyOverview({
-      ...overview,
-      projects: overview.projects.map(
-        (project) =>
-          new ProjectView({
-            ...project,
-            board: new BoardView({
-              failures: [],
-              lanes: [
-                new ReadOnlyBoardLaneView({
-                  id: BoardLaneId.make("Review"),
-                  name: LaneName.make("Review"),
-                  origin: "authored",
-                  sources: [],
-                  items: [
-                    new BoardTaskView({
-                      ...newer,
-                      repository: repositoryName,
-                      items: [member, newer],
-                      ...boardRunSummary([], null, [member, newer]),
-                      run: null,
-                      pullRequest: null,
-                      needsYou: false,
-                      loops: [],
-                      usage: new TaskUsageView({
-                        durationMillis: 0,
-                        runningSince: [],
-                        unmeasured: 0,
-                        tokens: TokenCount.make(0),
-                        pools: [],
-                        cost: null,
-                      }),
-                    }),
-                  ],
-                }),
-              ],
-            }),
-          }),
-      ),
-    });
-  let current = view(older);
-  const changing = Layer.effect(
-    FactoryBackend,
-    Effect.map(FactoryBackend, (service) => ({
-      ...service,
-      overview: Effect.sync(() => current),
-    })),
-  ).pipe(Layer.provide(backend));
-  const streamApp = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(changing)), {
-    disableLogger: true,
-  });
-  try {
-    const response = await streamApp.handler(new Request("http://localhost/api/changes"));
-    const reader = response.body?.getReader();
-    assert(reader !== undefined);
-    await reader.read();
-    for (const member of [
-      new BoardItemLink({ ...older, conflicting: true }),
-      new BoardItemLink({ ...older, conflicting: true, labels: [GitHubLabelName.make("review")] }),
-    ]) {
-      current = view(member);
-      const frame = new TextDecoder().decode((await reader.read()).value);
-      assert.include(frame, `"kind":"item","id":"${older.itemKey}"`);
-      assert.notInclude(frame, "Older pull request");
-    }
-    await reader.cancel();
-  } finally {
-    await streamApp.dispose();
-  }
+    ),
+  );
 });

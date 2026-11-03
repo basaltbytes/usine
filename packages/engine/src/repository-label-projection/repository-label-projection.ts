@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import { RepositoryName } from "@usine/core/repository";
 import { eq, ne } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
@@ -59,6 +60,7 @@ const makeReader = Effect.gen(function* () {
 
 const makeWriter = Effect.gen(function* () {
   const database = yield* RunDatabase;
+  const bus = yield* ChangeBus;
   return {
     replace: Effect.fn("RepositoryLabelProjectionWriter.replace")(function* (
       projection: RepositoryLabelProjection,
@@ -86,6 +88,12 @@ const makeWriter = Effect.gen(function* () {
         repository: projection.repository,
         labels: projection.labels.length,
       });
+      yield* bus.publish([
+        {
+          audience: { _tag: "Repository", repository: projection.repository },
+          target: { kind: "configuration", id: "instance" },
+        },
+      ]);
       return true;
     }, persistence("write repository label projection")),
   } as const;

@@ -1,3 +1,5 @@
+import type { ChangeBus } from "@usine/core/changes";
+import { changeTransaction } from "./changes.ts";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import {
   AttemptCanceled,
@@ -17,7 +19,7 @@ import { persistence } from "./codec.ts";
 import { queriesFor } from "./queries.ts";
 
 /** Durable CI waits share the run transaction and keep the attempt's session end time. */
-export const ciQueries = (database: RunDatabase["Service"]) => ({
+export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBus.Service) => ({
   awaitingCi: Effect.fn("RunStore.awaitingCi")(
     function* () {
       const rows = yield* database
@@ -40,9 +42,12 @@ export const ciQueries = (database: RunDatabase["Service"]) => ({
     resolution: CiResolution,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, head, resolution: resolution._tag });
-    return yield* database.transaction((transaction) =>
+    return yield* changeTransaction(
+      database,
+      bus,
+    )((transaction, record) =>
       Effect.gen(function* () {
-        const queries = queriesFor(transaction);
+        const queries = queriesFor(transaction, record);
         const current = yield* queries.snapshot(runId);
         if (current.run.state._tag !== "AwaitingCi" || current.run.state.handoff.head !== head) {
           yield* Effect.logInfo(

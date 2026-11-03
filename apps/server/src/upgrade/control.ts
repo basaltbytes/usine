@@ -1,7 +1,8 @@
+import { ChangeBus } from "@usine/core/changes";
 import type { Settings } from "@usine/config/factory";
 import { ReleaseVersion, UpgradeChannel, type UpgradeRecord } from "@usine/core/upgrade";
 import { UpgradeRequest, UpgradeView } from "@usine/orchestrator/operator/http";
-import { Context, Effect, Fiber, Layer, Option, Ref, Schema, Semaphore } from "effect";
+import { Context, Effect, Equal, Fiber, Layer, Option, Ref, Schema, Semaphore } from "effect";
 import { compareVersions } from "../instance/manifest.ts";
 
 export class UpgradeError extends Schema.TaggedError<UpgradeError>("@usine/server/UpgradeError")(
@@ -54,6 +55,10 @@ class UpgradeCandidate extends Schema.Class<UpgradeCandidate>("@usine/server/Upg
 }) {}
 
 export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options: UpgradeOptions) {
+  const bus = yield* ChangeBus;
+  const changed = bus.publish([
+    { audience: { _tag: "Instance" }, target: { kind: "configuration", id: "instance" } },
+  ]);
   const scope = yield* Effect.scope;
   const lock = yield* Semaphore.make(1);
   const canceled = yield* Ref.make(Option.none<ReleaseVersion>());
@@ -171,6 +176,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
         yield* lock.withPermit(
           Effect.gen(function* () {
             yield* Ref.set(progress, { phase: "installing", target: target.value });
+            yield* changed;
             yield* platform.launch(target.value);
           }),
         );
@@ -181,6 +187,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
               phase: "failed",
               message: `${error.message} Restart the service to resume attempt admission.`,
             });
+            yield* changed;
             yield* Effect.logError("Server upgrade failed", {
               previous: options.running,
               target: target.value,
@@ -191,6 +198,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       );
       const fiber = yield* work.pipe(Effect.interruptible, Effect.forkIn(scope));
       yield* Ref.set(progress, { phase: "waiting", target: target.value, fiber });
+      yield* changed;
     },
     (effect) => lock.withPermit(Effect.uninterruptible(effect)),
   );
@@ -209,6 +217,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       yield* options.resume;
       yield* Ref.set(canceled, Option.some(current.target));
       yield* Ref.set(progress, { phase: "idle" });
+      yield* changed;
       yield* Effect.logInfo("Pending server upgrade canceled; deferred runs can resume", {
         target: current.target,
       });
@@ -219,7 +228,8 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
   const check = Effect.fn("Server.checkUpgrade")(function* () {
     const settings = yield* options.settings;
     if (settings.upgradeMode === "off" || Option.isNone(options.platform)) {
-      yield* Ref.set(available, Option.none());
+      const previous = yield* Ref.getAndSet(available, Option.none());
+      if (Option.isSome(previous)) yield* changed;
       yield* Effect.logDebug("Server upgrade check skipped", {
         running: options.running,
         mode: settings.upgradeMode,
@@ -235,12 +245,11 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     });
     const newer = compareVersions(target, options.running) > 0;
     if (newer) yield* options.platform.value.checkDependencies(target);
-    yield* Ref.set(
-      available,
-      newer
-        ? Option.some(new UpgradeCandidate({ channel: settings.upgradeChannel, version: target }))
-        : Option.none(),
-    );
+    const candidate = newer
+      ? Option.some(new UpgradeCandidate({ channel: settings.upgradeChannel, version: target }))
+      : Option.none();
+    const previous = yield* Ref.getAndSet(available, candidate);
+    if (!Equal.equals(previous, candidate)) yield* changed;
     yield* Effect.logInfo("Server upgrade check completed", {
       previous: options.running,
       target,

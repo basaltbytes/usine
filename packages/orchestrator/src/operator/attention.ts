@@ -1,3 +1,4 @@
+import type { ChangeAudience } from "@usine/core/changes";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import {
   AttentionKey,
@@ -162,3 +163,13 @@ export const poolAttentionFor = (
       dismissedNeeds: [...overview.dismissedNeeds, ...dismissedNeeds],
     });
   });
+
+/** Uses the validated attention revision to scope dismissal notices like the displayed entry. */
+export const attentionAudiences = (key: AttentionKey): ReadonlyArray<ChangeAudience> => {
+  const need = Schema.decodeUnknownOption(Schema.fromJsonString(NeedView))(key.revision);
+  if (Option.isNone(need)) return [{ _tag: "Instance" }];
+  const repositories = needRepositories(need.value);
+  return repositories.length === 0
+    ? [{ _tag: "Instance" }]
+    : repositories.map((repository) => ({ _tag: "Repository", repository }));
+};
