@@ -269,10 +269,7 @@ describe("PollingTriggers open-issue check", () => {
         const polling = yield* PollingTriggers;
         const failed = yield* polling.poll(instance);
         assert.strictEqual(requests, 1);
-        assert.deepStrictEqual(
-          failed.failures.map(({ errorTag }) => errorTag),
-          ["GitHubApiError"],
-        );
+        assert.deepStrictEqual(failed.failures, []);
 
         yield* TestClock.adjust("9 minutes");
         const skipped = yield* polling.poll(instance);

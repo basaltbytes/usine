@@ -81,6 +81,8 @@ the snapshot keeps the events found and omits labels whose history is unavailabl
 Older stored payloads decode with an empty map. Actor changes affect the content
 hash; timestamp-only changes do not.
 
+Polling REST reads and GraphQL queries retry HTTP 502, 503, and 504 responses and GraphQL server errors up to twice. Delays are approximately one and three seconds, with 20% jitter. Each retry logs a warning with the operation, HTTP status, retry number, and delay. Other HTTP errors and invalid payloads return immediately; rate-limit responses retain their existing backoff.
+
 Change detection separates `nextPollAt`, the earliest next conditional poll, from `backoffUntil`, a delay from `Retry-After` or rate-limit pressure. Self-write hints can fetch a snapshot within the poll interval while respecting backoff.
 
 The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's event ledger deduplicates. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`.

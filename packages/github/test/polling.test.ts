@@ -2,7 +2,8 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
-import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Clock, DateTime, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../src/github-app.ts";
 import {
@@ -524,12 +525,14 @@ describe("GitHubPolling", () => {
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      const failure = yield* polling
+      const pending = yield* polling
         .snapshot(
           repository,
           new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
         )
-        .pipe(Effect.flip);
+        .pipe(Effect.flip, Effect.forkChild);
+      yield* TestClock.adjust("10 seconds");
+      const failure = yield* Fiber.join(pending);
       assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
       if (failure._tag === "InvalidGitHubResponseError") {
         assert.match(failure.detail, /Something went wrong/u);

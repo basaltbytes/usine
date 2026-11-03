@@ -48,10 +48,12 @@ import {
   type InterruptedRepositoryCycle,
   latestPollAt,
   PollCycle,
+  type PollFailureStreak,
   RepositoryPoll,
   type RepositoryPollError,
   RepositoryPollFailure,
   repositoryFailureLogFields,
+  sustainedPollFailures,
 } from "./cycle.ts";
 import {
   changedItem,
@@ -192,6 +194,7 @@ export class PollingTriggers extends Context.Service<
       const latest = yield* Ref.make(Option.none<PollCycle>());
       // Kept across cycles, so a repository whose poll fails keeps its last completion time.
       const completedPolls = yield* Ref.make<ReadonlyMap<string, RepositoryPoll>>(new Map());
+      const failureStreaks = yield* Ref.make<ReadonlyMap<string, PollFailureStreak>>(new Map());
       const hints = yield* ItemHints;
       const ownership = yield* Semaphore.make(1);
       // A failing Item is fetched again only on its repository's first completed cycle in a process
@@ -546,8 +549,10 @@ export class PollingTriggers extends Context.Service<
           const backoffs: Array<Option.Option<DateTime.Utc>> = [ciCycle.nextPollAt];
           const preflightFindings: Array<LabelPreflightFinding> = [];
           const completedAt = yield* DateTime.now;
+          const polled: Array<RepositoryName> = [];
           for (const { repository, result } of settled) {
             if (Result.isSuccess(result)) {
+              polled.push(repository.repository.name);
               cycles.push(result.success);
               preflightFindings.push(...result.success.preflightFindings);
               yield* Ref.update(completedPolls, (current) =>
@@ -577,6 +582,7 @@ export class PollingTriggers extends Context.Service<
               yield* hints.defer(Option.some(error.retryAt));
               continue;
             }
+            polled.push(repository.repository.name);
             yield* Effect.logError("Repository poll cycle failed; siblings were unaffected", {
               repository: repository.repository.name,
               ...repositoryFailureLogFields(error),
@@ -589,6 +595,32 @@ export class PollingTriggers extends Context.Service<
               }),
             );
           }
+          const previousStreaks = yield* Ref.get(failureStreaks);
+          const reported = sustainedPollFailures(
+            [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
+            previousStreaks,
+            watched.map(({ repository }) => repository.name),
+            polled,
+          );
+          yield* Ref.set(failureStreaks, reported.streaks);
+          for (const repository of polled) {
+            const consecutiveFailures = reported.streaks.get(
+              canonicalRepositoryName(repository),
+            )?.consecutiveFailures;
+            if (consecutiveFailures === undefined) {
+              if (previousStreaks.has(canonicalRepositoryName(repository))) {
+                yield* Effect.logInfo("GitHub repository poll recovered; cleared failure count", {
+                  repository,
+                });
+              }
+              continue;
+            }
+            yield* Effect.logInfo("GitHub poll failure attention threshold evaluated", {
+              repository,
+              consecutiveFailures,
+              reported: consecutiveFailures >= 3,
+            });
+          }
           const polls = yield* Ref.get(completedPolls);
           const cycle = new PollCycle({
             repositoryPolls: watched.flatMap(({ repository }) =>
@@ -600,7 +632,7 @@ export class PollingTriggers extends Context.Service<
             changedItems: cycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
             submissions: cycles.flatMap(({ submissions }) => submissions),
             revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
-            failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
+            failures: reported.failures,
             preflightFindings,
             nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
           });
