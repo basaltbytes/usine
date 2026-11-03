@@ -1,0 +1,599 @@
+{
+  "src/auth/access.ts": {
+    "catchConditionalRefailToCatchIf": 2,
+    "deterministicKeys": 1,
+    "instanceOfSchema": 2,
+    "newSchemaClass": 7,
+    "preferBarrelImport": 1,
+    "schemaSync": 2
+  },
+  "src/auth/api.ts": {
+    "schemaNumber": 2
+  },
+  "src/auth/authentication.ts": {
+    "cryptoRandomUUIDInEffect": 1,
+    "deterministicKeys": 1,
+    "mapSomeToAsSome": 1,
+    "newSchemaClass": 3,
+    "yieldInCallArgument": 2
+  },
+  "src/auth/cli.ts": {
+    "instanceOfSchema": 1,
+    "schemaNumber": 1
+  },
+  "src/auth/crypto.ts": {
+    "nodeBuiltinImport": 1
+  },
+  "src/auth/github.ts": {
+    "deterministicKeys": 1,
+    "preferSucceedSomeOrNone": 1,
+    "yieldInCallArgument": 2
+  },
+  "src/auth/http.ts": {
+    "globalJson": 2,
+    "newSchemaClass": 4,
+    "optionMatchToFromOption": 2,
+    "schemaNumber": 1,
+    "strictBooleanExpressions": 1,
+    "yieldInCallArgument": 2
+  },
+  "src/auth/local.ts": {
+    "cryptoRandomUUIDInEffect": 1,
+    "preferTypedSchemaDecoder": 1
+  },
+  "src/auth/memory.ts": {
+    "newSchemaClass": 2
+  },
+  "src/auth/model.ts": {
+    "newSchemaClass": 2,
+    "redundantSchemaTagIdentifier": 1,
+    "schemaClassMissingBrand": 4,
+    "schemaNumber": 4
+  },
+  "src/auth/sqlite.ts": {
+    "catchConditionalRefailToCatchIf": 5,
+    "instanceOfSchema": 5,
+    "newSchemaClass": 1,
+    "preferBarrelImport": 1
+  },
+  "src/auth/store.ts": {
+    "deterministicKeys": 1
+  },
+  "src/backend.ts": {
+    "deterministicKeys": 1,
+    "newSchemaClass": 4,
+    "schemaClassMissingBrand": 1
+  },
+  "src/changes/changes.ts": {
+    "deterministicKeys": 1,
+    "globalJson": 1,
+    "newSchemaClass": 2
+  },
+  "src/changes/policy.ts": {
+    "newSchemaClass": 2
+  },
+  "src/changes/reads.ts": {
+    "newSchemaClass": 11
+  },
+  "src/cli.ts": {
+    "mapMapErrorToMapBoth": 1,
+    "newSchemaClass": 18,
+    "nodeBuiltinImport": 1,
+    "preferBarrelImport": 1,
+    "preferTypedSchemaDecoder": 7,
+    "redundantSchemaTagIdentifier": 1,
+    "schemaClassMissingBrand": 17,
+    "schemaNumber": 3,
+    "strictBooleanExpressions": 3,
+    "unnecessaryPipeChain": 1
+  },
+  "src/command.ts": {
+    "newSchemaClass": 4,
+    "schemaClassMissingBrand": 1,
+    "yieldInCallArgument": 1
+  },
+  "src/conditional-reads.ts": {
+    "nodeBuiltinImport": 1,
+    "strictBooleanExpressions": 1
+  },
+  "src/configuration/catalog.ts": {
+    "newSchemaClass": 1
+  },
+  "src/configuration/cli.ts": {
+    "mapSomeToAsSome": 1,
+    "newSchemaClass": 6,
+    "nodeBuiltinImport": 1,
+    "optionMatchToFromOption": 1,
+    "preferSucceedSomeOrNone": 1,
+    "strictEffectProvide": 1,
+    "yieldInCallArgument": 4
+  },
+  "src/configuration/command.ts": {
+    "newSchemaClass": 6,
+    "redundantSchemaTagIdentifier": 5,
+    "schemaClassMissingBrand": 5
+  },
+  "src/configuration/http.ts": {
+    "newSchemaClass": 8
+  },
+  "src/configuration/runtime.ts": {
+    "newSchemaClass": 5,
+    "strictEffectProvide": 1
+  },
+  "src/configuration/store.ts": {
+    "newSchemaClass": 4
+  },
+  "src/detach.ts": {
+    "anyUnknownInErrorContext": 1,
+    "newSchemaClass": 7,
+    "nodeBuiltinImport": 2,
+    "schemaClassMissingBrand": 4,
+    "unknownInEffectCatch": 1
+  },
+  "src/export-run.ts": {
+    "newSchemaClass": 3,
+    "schemaClassMissingBrand": 1,
+    "strictEffectProvide": 1
+  },
+  "src/http.ts": {
+    "flatMapToMap": 1,
+    "lazyEffect": 1,
+    "newSchemaClass": 16,
+    "nodeBuiltinImport": 2,
+    "preferTypedSchemaDecoder": 1,
+    "yieldInCallArgument": 2
+  },
+  "src/instance/environment.ts": {
+    "mapSomeToAsSome": 1,
+    "newSchemaClass": 1,
+    "nodeBuiltinImport": 1,
+    "schemaClassMissingBrand": 1
+  },
+  "src/instance/id.ts": {
+    "cryptoRandomUUIDInEffect": 1,
+    "newSchemaClass": 1,
+    "preferTypedSchemaDecoder": 1,
+    "schemaClassMissingBrand": 1
+  },
+  "src/instance/lock.ts": {
+    "anyUnknownInErrorContext": 1,
+    "newSchemaClass": 3,
+    "schemaClassMissingBrand": 2,
+    "unknownInEffectCatch": 1
+  },
+  "src/instance/manifest.ts": {
+    "mapMapErrorToMapBoth": 1,
+    "newSchemaClass": 4,
+    "nodeBuiltinImport": 1,
+    "preferTypedSchemaDecoder": 1,
+    "schemaClassMissingBrand": 3,
+    "yieldInCallArgument": 1
+  },
+  "src/instance/operator-api.ts": {
+    "newSchemaClass": 1,
+    "schemaClassMissingBrand": 2
+  },
+  "src/instance/ports.ts": {
+    "newSchemaClass": 3,
+    "preferTypedSchemaDecoder": 1,
+    "schemaClassMissingBrand": 1
+  },
+  "src/instance/record.ts": {
+    "globalJson": 1,
+    "newSchemaClass": 3,
+    "nodeBuiltinImport": 2,
+    "preferTypedSchemaDecoder": 1,
+    "schemaClassMissingBrand": 3,
+    "schemaNumber": 1,
+    "schemaSync": 1,
+    "yieldInCallArgument": 1
+  },
+  "src/instance/state.ts": {
+    "newSchemaClass": 4,
+    "schemaClassMissingBrand": 4
+  },
+  "src/instance/systemd.ts": {
+    "mapMapErrorToMapBoth": 1,
+    "newSchemaClass": 1,
+    "preferTypedSchemaDecoder": 1,
+    "schemaClassMissingBrand": 1,
+    "schemaNumber": 1,
+    "yieldInCallArgument": 1
+  },
+  "src/listener.ts": {
+    "flatMapIdentityToFlatten": 1
+  },
+  "src/main.ts": {
+    "missedPipeableOpportunity": 1,
+    "provideMergeAllToArray": 1,
+    "strictEffectProvide": 1,
+    "yieldInCallArgument": 1
+  },
+  "src/openapi.ts": {
+    "strictBooleanExpressions": 2
+  },
+  "src/registry.ts": {
+    "errorPayloadShadowsName": 1,
+    "mapMapErrorToMapBoth": 1,
+    "newSchemaClass": 4,
+    "preferTypedSchemaDecoder": 2,
+    "schemaClassMissingBrand": 1
+  },
+  "src/restart.ts": {
+    "newSchemaClass": 2
+  },
+  "src/setup/control.ts": {
+    "deterministicKeys": 1,
+    "effectFnIife": 1,
+    "globalJsonInEffect": 1,
+    "newSchemaClass": 1,
+    "preferTypedSchemaDecoder": 1,
+    "strictEffectProvide": 4,
+    "yieldInCallArgument": 1
+  },
+  "src/setup/http.ts": {
+    "yieldInCallArgument": 1
+  },
+  "src/status.ts": {
+    "preferSucceedSomeOrNone": 1,
+    "yieldInCallArgument": 6
+  },
+  "src/stop.ts": {
+    "newSchemaClass": 5,
+    "schemaClassMissingBrand": 6
+  },
+  "src/system-sleep.ts": {
+    "schemaNumber": 1
+  },
+  "src/tracing.ts": {
+    "newSchemaClass": 1,
+    "preferTypedSchemaDecoder": 1,
+    "schemaClassMissingBrand": 1
+  },
+  "src/up.ts": {
+    "multipleEffectProvide": 1,
+    "newSchemaClass": 2,
+    "nodeBuiltinImport": 2,
+    "strictEffectProvide": 15,
+    "yieldInCallArgument": 1
+  },
+  "src/upgrade/client.ts": {
+    "newSchemaClass": 2
+  },
+  "src/upgrade/control.ts": {
+    "deterministicKeys": 1,
+    "newSchemaClass": 8,
+    "schemaClassMissingBrand": 2,
+    "yieldInCallArgument": 3
+  },
+  "src/upgrade/platform.ts": {
+    "globalJsonInEffect": 1,
+    "newSchemaClass": 4,
+    "nodeBuiltinImport": 1,
+    "preferTypedSchemaDecoder": 2,
+    "yieldInCallArgument": 2
+  },
+  "src/upgrade/upgrade.ts": {
+    "mapMapErrorToMapBoth": 1,
+    "mapSomeToAsSome": 1,
+    "newSchemaClass": 6,
+    "nodeBuiltinImport": 1,
+    "schemaClassMissingBrand": 4,
+    "yieldInCallArgument": 4
+  },
+  "src/webhooks.ts": {
+    "newSchemaClass": 6,
+    "nodeBuiltinImport": 1,
+    "preferTypedSchemaDecoder": 1,
+    "returnEffectInGen": 2,
+    "schemaClassMissingBrand": 2,
+    "yieldInCallArgument": 1
+  },
+  "test/auth/access.test.ts": {
+    "asyncFunction": 1,
+    "newSchemaClass": 2,
+    "schemaSync": 1,
+    "yieldInCallArgument": 7
+  },
+  "test/auth/fixture.ts": {
+    "newSchemaClass": 2
+  },
+  "test/auth/github.test.ts": {
+    "asyncFunction": 1,
+    "globalJson": 1,
+    "globalJsonInEffect": 1,
+    "preferSucceedSomeOrNone": 1,
+    "preferTypedSchemaDecoder": 1
+  },
+  "test/auth/http.test.ts": {
+    "asyncFunction": 9,
+    "globalJson": 1,
+    "newSchemaClass": 2,
+    "schemaSync": 2,
+    "schemaSyncInEffect": 2,
+    "yieldInCallArgument": 14
+  },
+  "test/auth/local.test.ts": {
+    "asyncFunction": 1,
+    "yieldInCallArgument": 2
+  },
+  "test/auth/migration.test.ts": {
+    "asyncFunction": 1,
+    "yieldInCallArgument": 2
+  },
+  "test/auth/permissions.test.ts": {
+    "asyncFunction": 1,
+    "newSchemaClass": 3,
+    "yieldInCallArgument": 1
+  },
+  "test/auth/scopes.test.ts": {
+    "asyncFunction": 5,
+    "newSchemaClass": 17,
+    "yieldInCallArgument": 2
+  },
+  "test/auth/store.test.ts": {
+    "asyncFunction": 6,
+    "multipleEffectProvide": 5,
+    "newSchemaClass": 14,
+    "yieldInCallArgument": 16
+  },
+  "test/backup.test.ts": {
+    "asyncFunction": 4,
+    "nodeBuiltinImport": 3
+  },
+  "test/changes.test.ts": {
+    "anyUnknownInErrorContext": 6,
+    "globalJsonInEffect": 1,
+    "multipleEffectProvide": 6,
+    "newSchemaClass": 15,
+    "preferTypedSchemaDecoder": 1,
+    "schemaSync": 1
+  },
+  "test/changes/policy.test.ts": {
+    "newSchemaClass": 12
+  },
+  "test/cli.test.ts": {
+    "asyncFunction": 18,
+    "instanceOfSchema": 10,
+    "newPromise": 2,
+    "preferBarrelImport": 1,
+    "schemaSync": 1
+  },
+  "test/configuration-http/access.test.ts": {
+    "newSchemaClass": 4,
+    "schemaSync": 1,
+    "schemaSyncInEffect": 1,
+    "yieldInCallArgument": 4
+  },
+  "test/configuration-http/configuration.test.ts": {
+    "globalJsonInEffect": 2,
+    "newSchemaClass": 3,
+    "preferTypedSchemaDecoder": 1,
+    "schemaSync": 5,
+    "schemaSyncInEffect": 4,
+    "yieldInCallArgument": 49
+  },
+  "test/configuration-http/support.ts": {
+    "asyncFunction": 1,
+    "globalJsonInEffect": 1,
+    "lazyEffect": 1,
+    "newSchemaClass": 4,
+    "preferSucceedSomeOrNone": 1
+  },
+  "test/configuration.test.ts": {
+    "asyncFunction": 12,
+    "globalFetch": 6,
+    "globalJson": 5,
+    "globalTimers": 1,
+    "newPromise": 3,
+    "nodeBuiltinImport": 3,
+    "schemaSync": 9,
+    "strictBooleanExpressions": 2
+  },
+  "test/export-run.test.ts": {
+    "asyncFunction": 11,
+    "newSchemaClass": 14,
+    "nodeBuiltinImport": 3,
+    "preferSucceedSomeOrNone": 1,
+    "preferTypedSchemaDecoder": 3,
+    "schemaSync": 3
+  },
+  "test/failure-message.test.ts": {
+    "newSchemaClass": 9
+  },
+  "test/hetzner-orchestrator.test.ts": {
+    "nodeBuiltinImport": 3,
+    "schemaSync": 1
+  },
+  "test/http.test.ts": {
+    "asyncFunction": 14,
+    "effectTryWithoutCatch": 1,
+    "globalFetchInEffect": 1,
+    "globalJson": 8,
+    "globalJsonInEffect": 4,
+    "newPromise": 1,
+    "newSchemaClass": 81,
+    "nodeBuiltinImport": 2,
+    "preferTypedSchemaDecoder": 1,
+    "runEffectInsideEffect": 1,
+    "schemaSync": 11,
+    "yieldInCallArgument": 17
+  },
+  "test/instance/environment.test.ts": {
+    "asyncFunction": 3,
+    "nodeBuiltinImport": 2
+  },
+  "test/instance/id.test.ts": {
+    "asyncFunction": 2,
+    "instanceOfSchema": 1,
+    "nodeBuiltinImport": 2
+  },
+  "test/instance/lock.test.ts": {
+    "asyncFunction": 4,
+    "globalJsonInEffect": 1,
+    "instanceOfSchema": 2,
+    "newSchemaClass": 2,
+    "nodeBuiltinImport": 2,
+    "schemaSync": 1,
+    "schemaSyncInEffect": 1,
+    "yieldInCallArgument": 4
+  },
+  "test/instance/manifest.test.ts": {
+    "asyncFunction": 4,
+    "globalJson": 1,
+    "newSchemaClass": 1
+  },
+  "test/instance/ports.test.ts": {
+    "anyUnknownInErrorContext": 1,
+    "asyncFunction": 1,
+    "newPromise": 2,
+    "nodeBuiltinImport": 3,
+    "preferTypedSchemaDecoder": 1,
+    "processEnv": 1,
+    "schemaSync": 3
+  },
+  "test/instance/state.test.ts": {
+    "asyncFunction": 7,
+    "globalJson": 2,
+    "globalJsonInEffect": 1,
+    "newSchemaClass": 4,
+    "nodeBuiltinImport": 3,
+    "schemaSync": 2,
+    "schemaSyncInEffect": 1
+  },
+  "test/instance/systemd.test.ts": {
+    "asyncFunction": 1
+  },
+  "test/lifecycle.test.ts": {
+    "asyncFunction": 21,
+    "globalJson": 6,
+    "newPromise": 4,
+    "newSchemaClass": 7,
+    "nodeBuiltinImport": 4,
+    "processEnv": 1,
+    "schemaSync": 1
+  },
+  "test/logger.test.ts": {
+    "asyncFunction": 1,
+    "globalDate": 2
+  },
+  "test/operator-read-latency.test.ts": {
+    "asyncFunction": 1,
+    "globalJson": 2,
+    "globalJsonInEffect": 3,
+    "newSchemaClass": 14,
+    "preferSucceedSomeOrNone": 1,
+    "preferTypedSchemaDecoder": 4,
+    "schemaSync": 7,
+    "schemaSyncInEffect": 3
+  },
+  "test/reload-signal.test.ts": {
+    "nodeBuiltinImport": 1
+  },
+  "test/security.test.ts": {
+    "asyncFunction": 5,
+    "globalJsonInEffect": 3,
+    "nodeBuiltinImport": 2,
+    "processEnvInEffect": 2
+  },
+  "test/setup/configuration.test.ts": {
+    "yieldInCallArgument": 2
+  },
+  "test/setup/setup.test.ts": {
+    "globalDate": 2,
+    "globalJsonInEffect": 5,
+    "multipleEffectProvide": 1,
+    "nodeBuiltinImport": 1,
+    "schemaSync": 1,
+    "schemaSyncInEffect": 1,
+    "yieldInCallArgument": 16
+  },
+  "test/shutdown.test.ts": {
+    "nodeBuiltinImport": 1
+  },
+  "test/startup.test.ts": {
+    "asyncFunction": 1,
+    "multipleEffectProvide": 1,
+    "newSchemaClass": 4,
+    "preferSucceedSomeOrNone": 1,
+    "yieldInCallArgument": 3
+  },
+  "test/status.test.ts": {
+    "asyncFunction": 6,
+    "globalJson": 1,
+    "newPromise": 3,
+    "newSchemaClass": 2,
+    "nodeBuiltinImport": 3,
+    "schemaSync": 1
+  },
+  "test/system-sleep.test.ts": {
+    "asyncFunction": 2,
+    "globalJson": 2,
+    "multipleEffectProvide": 1
+  },
+  "test/tracing.test.ts": {
+    "asyncFunction": 6,
+    "globalJson": 1,
+    "multipleEffectProvide": 1,
+    "newPromise": 2,
+    "newSchemaClass": 4,
+    "nodeBuiltinImport": 1,
+    "schemaNumber": 1,
+    "schemaSync": 1,
+    "unnecessaryEffectGen": 1
+  },
+  "test/upgrade/control.test.ts": {
+    "asyncFunction": 12,
+    "newSchemaClass": 11,
+    "preferTypedSchemaDecoder": 1,
+    "schemaSync": 1,
+    "schemaSyncInEffect": 1,
+    "yieldInCallArgument": 23
+  },
+  "test/upgrade/helper.test.ts": {
+    "asyncFunction": 2,
+    "globalDate": 2,
+    "globalJson": 1,
+    "newPromise": 2,
+    "nodeBuiltinImport": 4,
+    "preferTypedSchemaDecoder": 1,
+    "processEnv": 1,
+    "schemaNumber": 1,
+    "schemaSync": 2,
+    "schemaSyncInEffect": 1,
+    "strictBooleanExpressions": 2
+  },
+  "test/upgrade/platform.test.ts": {
+    "asyncFunction": 2,
+    "newSchemaClass": 5,
+    "nodeBuiltinImport": 2,
+    "yieldInCallArgument": 6
+  },
+  "test/upgrade/upgrade.test.ts": {
+    "asyncFunction": 6,
+    "globalJson": 2,
+    "newPromise": 1,
+    "newSchemaClass": 7,
+    "nodeBuiltinImport": 3,
+    "processEnv": 2,
+    "schemaSync": 1
+  },
+  "test/webhooks.test.ts": {
+    "globalJsonInEffect": 2,
+    "multipleEffectProvide": 4,
+    "newSchemaClass": 6,
+    "nodeBuiltinImport": 1,
+    "preferTypedSchemaDecoder": 1,
+    "schemaSync": 1,
+    "yieldInCallArgument": 4
+  },
+  "test/worker-preflight.test.ts": {
+    "asyncFunction": 1,
+    "multipleEffectProvide": 1,
+    "newSchemaClass": 7,
+    "preferTypedSchemaDecoder": 2,
+    "schemaSync": 6,
+    "schemaSyncInEffect": 5,
+    "yieldInCallArgument": 6
+  }
+}

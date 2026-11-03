@@ -1,0 +1,313 @@
+{
+  "src/components/ai-elements/code-block.tsx": {
+    "strictBooleanExpressions": 3
+  },
+  "src/components/command-palette/button.tsx": {
+    "strictBooleanExpressions": 2
+  },
+  "src/components/command-palette/palette.browser.test.tsx": {
+    "newSchemaClass": 6
+  },
+  "src/components/command-palette/palette.tsx": {
+    "strictBooleanExpressions": 1
+  },
+  "src/components/member-shell.browser.test.tsx": {
+    "newSchemaClass": 3
+  },
+  "src/components/needs-you/dismiss.tsx": {
+    "newSchemaClass": 2
+  },
+  "src/components/needs-you/needs-you.browser.test.tsx": {
+    "newSchemaClass": 17
+  },
+  "src/components/needs-you/unconfigured-worker-ask.browser.test.tsx": {
+    "newSchemaClass": 1
+  },
+  "src/components/needs-you/worker-quota-ask.browser.test.tsx": {
+    "newSchemaClass": 11
+  },
+  "src/components/runs/drawer.browser.test.tsx": {
+    "newSchemaClass": 58,
+    "preferTypedSchemaDecoder": 1
+  },
+  "src/components/runs/intervention/contextual-actions.browser.test.tsx": {
+    "newSchemaClass": 23
+  },
+  "src/components/runs/intervention/edit-and-retry.tsx": {
+    "newSchemaClass": 1,
+    "strictBooleanExpressions": 1
+  },
+  "src/components/runs/intervention/session-composer.tsx": {
+    "newSchemaClass": 4
+  },
+  "src/components/runs/transcript/activity.test.tsx": {
+    "newSchemaClass": 2
+  },
+  "src/components/runs/transcript/conversation.browser.test.tsx": {
+    "newSchemaClass": 66,
+    "preferTypedSchemaDecoder": 2
+  },
+  "src/components/runs/transcript/grouping/burst.test.tsx": {
+    "newSchemaClass": 75
+  },
+  "src/components/runs/transcript/tool/content.tsx": {
+    "schemaNumber": 1,
+    "strictBooleanExpressions": 4
+  },
+  "src/components/ui/attachment.tsx": {
+    "strictBooleanExpressions": 3
+  },
+  "src/components/ui/calendar.tsx": {
+    "strictBooleanExpressions": 5,
+    "unnecessaryArrowBlock": 2
+  },
+  "src/components/ui/carousel.tsx": {
+    "strictBooleanExpressions": 10
+  },
+  "src/components/ui/chart.tsx": {
+    "strictBooleanExpressions": 40
+  },
+  "src/components/ui/combobox.tsx": {
+    "strictBooleanExpressions": 6
+  },
+  "src/components/ui/drawer.tsx": {
+    "strictBooleanExpressions": 2
+  },
+  "src/components/ui/field.tsx": {
+    "strictBooleanExpressions": 28
+  },
+  "src/components/ui/input-group.tsx": {
+    "strictBooleanExpressions": 2
+  },
+  "src/components/ui/pagination.tsx": {
+    "strictBooleanExpressions": 2
+  },
+  "src/components/ui/sidebar.tsx": {
+    "strictBooleanExpressions": 10,
+    "unnecessaryArrowBlock": 2
+  },
+  "src/components/ui/toast.tsx": {
+    "strictBooleanExpressions": 2
+  },
+  "src/features/configuration/components/editor/browser-fixture.ts": {
+    "nodeBuiltinImport": 2
+  },
+  "src/features/configuration/components/editor/conflict.tsx": {
+    "instanceOfSchema": 1
+  },
+  "src/features/configuration/components/editor/create.tsx": {
+    "instanceOfSchema": 1,
+    "newSchemaClass": 1,
+    "preferTypedSchemaDecoder": 2
+  },
+  "src/features/configuration/components/editor/entity.browser.test.tsx": {
+    "newSchemaClass": 7,
+    "preferTypedSchemaDecoder": 1
+  },
+  "src/features/configuration/components/editor/failure.tsx": {
+    "instanceOfSchema": 2
+  },
+  "src/features/configuration/components/editor/form.tsx": {
+    "instanceOfSchema": 5
+  },
+  "src/features/configuration/components/forms/fields.tsx": {
+    "strictBooleanExpressions": 1
+  },
+  "src/features/configuration/components/forms/loop/browser-fixture.ts": {
+    "strictBooleanExpressions": 1
+  },
+  "src/features/configuration/components/forms/loop/preview.tsx": {
+    "newSchemaClass": 1,
+    "unnecessaryArrowBlock": 1
+  },
+  "src/features/configuration/components/forms/loop/selector.tsx": {
+    "preferTypedSchemaDecoder": 1
+  },
+  "src/features/configuration/components/loops/list.test.tsx": {
+    "newSchemaClass": 2
+  },
+  "src/features/configuration/components/loops/resume.tsx": {
+    "newSchemaClass": 1
+  },
+  "src/features/configuration/components/repositories/list.browser.test.tsx": {
+    "newSchemaClass": 2
+  },
+  "src/features/configuration/components/upgrades.browser.test.tsx": {
+    "newSchemaClass": 4
+  },
+  "src/features/configuration/components/upgrades.tsx": {
+    "newSchemaClass": 1
+  },
+  "src/features/configuration/components/workers/list.browser.test.tsx": {
+    "newSchemaClass": 6
+  },
+  "src/features/configuration/configuration.page.browser.test.tsx": {
+    "newSchemaClass": 1
+  },
+  "src/features/configuration/lib/entities.ts": {
+    "newSchemaClass": 1
+  },
+  "src/features/configuration/lib/forms.ts": {
+    "schemaNumber": 1
+  },
+  "src/features/configuration/queries.ts": {
+    "newSchemaClass": 4
+  },
+  "src/features/members/access.browser.test.tsx": {
+    "newSchemaClass": 11
+  },
+  "src/features/members/members.page.browser.test.tsx": {
+    "newSchemaClass": 1
+  },
+  "src/features/members/queries.ts": {
+    "schemaNumber": 2
+  },
+  "src/features/overview/components/dismissed-needs.browser.test.tsx": {
+    "newSchemaClass": 4
+  },
+  "src/features/overview/components/statistics/statistics.browser.test.tsx": {
+    "newSchemaClass": 1
+  },
+  "src/features/overview/overview.page.test.tsx": {
+    "newSchemaClass": 15,
+    "preferTypedSchemaDecoder": 1
+  },
+  "src/features/overview/overview.page.tsx": {
+    "unnecessaryArrowBlock": 1
+  },
+  "src/features/projects/board.page.browser.test.tsx": {
+    "newSchemaClass": 14
+  },
+  "src/features/projects/components/card/card.browser.test.tsx": {
+    "newSchemaClass": 13
+  },
+  "src/features/projects/components/card/card.test.tsx": {
+    "newSchemaClass": 83
+  },
+  "src/features/projects/components/card/face.tsx": {
+    "strictBooleanExpressions": 1
+  },
+  "src/features/projects/multi-repository.browser.test.tsx": {
+    "newSchemaClass": 12
+  },
+  "src/features/runs/components/workspace.tsx": {
+    "newSchemaClass": 2
+  },
+  "src/features/tasks/components/list/status.test.tsx": {
+    "newSchemaClass": 4
+  },
+  "src/features/tasks/list.page.browser.test.tsx": {
+    "newSchemaClass": 9
+  },
+  "src/features/tasks/task.page.browser.test.tsx": {
+    "newSchemaClass": 2
+  },
+  "src/features/tasks/task.page.tsx": {
+    "instanceOfSchema": 1
+  },
+  "src/features/tokens/components/scopes.browser.test.tsx": {
+    "newSchemaClass": 2
+  },
+  "src/features/tokens/components/scopes.tsx": {
+    "newSchemaClass": 3
+  },
+  "src/features/tokens/queries.ts": {
+    "schemaNumber": 2
+  },
+  "src/features/tokens/tokens.page.browser.test.tsx": {
+    "newSchemaClass": 1
+  },
+  "src/features/tokens/tokens.page.tsx": {
+    "strictBooleanExpressions": 2
+  },
+  "src/hooks/projects/moves.browser.test.tsx": {
+    "newSchemaClass": 25,
+    "strictBooleanExpressions": 2
+  },
+  "src/hooks/runs/actions.ts": {
+    "instanceOfSchema": 1,
+    "newSchemaClass": 4
+  },
+  "src/hooks/runs/transcript.ts": {
+    "newSchemaClass": 1
+  },
+  "src/hooks/use-mobile.ts": {
+    "strictBooleanExpressions": 1
+  },
+  "src/hooks/use-project-links.test.tsx": {
+    "newSchemaClass": 2
+  },
+  "src/lib/changes.test.ts": {
+    "newSchemaClass": 10,
+    "strictBooleanExpressions": 1
+  },
+  "src/lib/desk/fixture.ts": {
+    "newSchemaClass": 96
+  },
+  "src/lib/needs-you/strings.test.ts": {
+    "newSchemaClass": 10,
+    "preferTypedSchemaDecoder": 1
+  },
+  "src/lib/overview.test.ts": {
+    "newSchemaClass": 1
+  },
+  "src/lib/permissions.tsx": {
+    "newSchemaClass": 3
+  },
+  "src/lib/projects/fixture.ts": {
+    "newSchemaClass": 62
+  },
+  "src/lib/runs/intervention/action-plan.test.ts": {
+    "newSchemaClass": 15
+  },
+  "src/lib/runs/item.test.tsx": {
+    "missedPipeableOpportunity": 5,
+    "newSchemaClass": 80
+  },
+  "src/lib/runs/item.ts": {
+    "schemaNumber": 1
+  },
+  "src/lib/runs/queries.ts": {
+    "newSchemaClass": 3
+  },
+  "src/lib/runs/strings.test.ts": {
+    "newSchemaClass": 4
+  },
+  "src/lib/runs/transcript/cache.ts": {
+    "newSchemaClass": 1
+  },
+  "src/lib/runs/transcript/document/model.test.ts": {
+    "newSchemaClass": 81
+  },
+  "src/lib/runs/transcript/fetch.ts": {
+    "newSchemaClass": 2
+  },
+  "src/lib/runs/transcript/model.test.tsx": {
+    "newSchemaClass": 85
+  },
+  "src/lib/runs/transcript/navigation/model.test.ts": {
+    "newSchemaClass": 12
+  },
+  "src/lib/runs/transcript/reader/memory.ts": {
+    "schemaNumber": 1,
+    "schemaStructWithTag": 2
+  },
+  "src/lib/tasks/fixture.ts": {
+    "newSchemaClass": 33
+  },
+  "src/lib/tasks/model.test.ts": {
+    "newSchemaClass": 21
+  },
+  "src/routes/projects/$project/index.tsx": {
+    "instanceOfSchema": 1
+  },
+  "src/routes/projects/$project/tasks/$number.tsx": {
+    "instanceOfSchema": 1
+  },
+  "src/routes/projects/$project/tasks/index.tsx": {
+    "instanceOfSchema": 1
+  },
+  "vitest.config.ts": {
+    "preferTypedSchemaDecoder": 1
+  }
+}

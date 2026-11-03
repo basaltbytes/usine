@@ -1,0 +1,196 @@
+{
+  "src/admin/api.ts": {
+    "newSchemaClass": 3,
+    "schemaClassMissingBrand": 7
+  },
+  "src/admin/server.ts": {
+    "newSchemaClass": 6
+  },
+  "src/attachment/attachment.ts": {
+    "schemaClassMissingBrand": 9
+  },
+  "src/attachment/store.ts": {
+    "deterministicKeys": 1,
+    "lazyEffect": 2,
+    "newSchemaClass": 7
+  },
+  "src/caller/caller.ts": {
+    "deterministicKeys": 1,
+    "newSchemaClass": 3,
+    "schemaClassMissingBrand": 2,
+    "schemaSync": 1
+  },
+  "src/chatgpt/auth-file.ts": {
+    "cryptoRandomUUID": 1,
+    "globalJsonInEffect": 1,
+    "newSchemaClass": 5,
+    "schemaClassMissingBrand": 2,
+    "schemaNumber": 1
+  },
+  "src/chatgpt/logins.ts": {
+    "deterministicKeys": 1,
+    "newSchemaClass": 4,
+    "schemaClassMissingBrand": 1,
+    "yieldInCallArgument": 4
+  },
+  "src/egress/egress.ts": {
+    "newSchemaClass": 9,
+    "schemaClassMissingBrand": 5
+  },
+  "src/github/download.ts": {
+    "newSchemaClass": 4,
+    "redundantSchemaTagIdentifier": 1,
+    "schemaClassMissingBrand": 1
+  },
+  "src/github/rename.ts": {
+    "newSchemaClass": 4,
+    "schemaClassMissingBrand": 1
+  },
+  "src/llm/llm.ts": {
+    "schemaClassMissingBrand": 6
+  },
+  "src/node/attachments.ts": {
+    "cryptoRandomUUIDInEffect": 1,
+    "mapSomeToAsSome": 1,
+    "newSchemaClass": 1,
+    "nodeBuiltinImport": 2,
+    "preferSucceedSomeOrNone": 1,
+    "schemaSync": 1
+  },
+  "src/node/connections.ts": {
+    "nodeBuiltinImport": 1
+  },
+  "src/node/egress-proxy.ts": {
+    "newSchemaClass": 7,
+    "nodeBuiltinImport": 2,
+    "preferSchemaTaggedError": 2,
+    "schemaClassMissingBrand": 3
+  },
+  "src/node/environment.ts": {
+    "newSchemaClass": 8,
+    "schemaClassMissingBrand": 2,
+    "yieldInCallArgument": 1
+  },
+  "src/node/main.ts": {
+    "provideMergeAllToArray": 1
+  },
+  "src/node/node.ts": {
+    "deterministicKeys": 1,
+    "nodeBuiltinImport": 1
+  },
+  "src/node/reload.ts": {
+    "deterministicKeys": 1,
+    "mapSomeToAsSome": 1
+  },
+  "src/proxy/proxy.ts": {
+    "deterministicKeys": 1,
+    "multipleCatchTag": 1,
+    "preferSchemaTaggedError": 1,
+    "yieldInCallArgument": 1
+  },
+  "src/settings.ts": {
+    "deterministicKeys": 2
+  },
+  "test/attachment.test.ts": {
+    "newSchemaClass": 5,
+    "yieldInCallArgument": 5
+  },
+  "test/caller.test.ts": {
+    "multipleEffectProvide": 2,
+    "newSchemaClass": 4,
+    "schemaSync": 1,
+    "schemaSyncInEffect": 1,
+    "yieldInCallArgument": 7
+  },
+  "test/chatgpt.test.ts": {
+    "deterministicKeys": 1,
+    "globalJson": 2,
+    "globalJsonInEffect": 3,
+    "newPromise": 1,
+    "newSchemaClass": 7,
+    "nodeBuiltinImport": 3,
+    "yieldInCallArgument": 40
+  },
+  "test/client-hello.test.ts": {
+    "yieldInCallArgument": 1
+  },
+  "test/download.test.ts": {
+    "globalJson": 1,
+    "newSchemaClass": 2,
+    "yieldInCallArgument": 5
+  },
+  "test/e2e/e2e.test.ts": {
+    "newPromise": 1,
+    "newSchemaClass": 2,
+    "nodeBuiltinImport": 4,
+    "processEnv": 2,
+    "unnecessaryPipeChain": 1,
+    "yieldInCallArgument": 2
+  },
+  "test/fixtures.ts": {
+    "globalJson": 3,
+    "schemaSync": 2
+  },
+  "test/main.test.ts": {
+    "asyncFunction": 4,
+    "globalDate": 2,
+    "globalFetch": 1,
+    "globalJson": 1,
+    "globalTimers": 1,
+    "newPromise": 6,
+    "nodeBuiltinImport": 4,
+    "processEnv": 2,
+    "schemaSync": 1
+  },
+  "test/node.test.ts": {
+    "asyncFunction": 1,
+    "globalErrorInEffectFailure": 1,
+    "globalFetchInEffect": 1,
+    "globalJson": 3,
+    "globalJsonInEffect": 3,
+    "newSchemaClass": 2,
+    "nodeBuiltinImport": 1,
+    "yieldInCallArgument": 16
+  },
+  "test/persistence.test.ts": {
+    "asyncFunction": 2,
+    "globalJsonInEffect": 1,
+    "newSchemaClass": 2,
+    "nodeBuiltinImport": 2,
+    "yieldInCallArgument": 4
+  },
+  "test/placeholder-swap/chatgpt-login.test.ts": {
+    "globalJson": 3,
+    "newSchemaClass": 4,
+    "nodeBuiltinImport": 5,
+    "processEnv": 1,
+    "processEnvInEffect": 1,
+    "yieldInCallArgument": 2
+  },
+  "test/placeholder-swap/placeholder-swap.test.ts": {
+    "globalJson": 4,
+    "newSchemaClass": 4,
+    "nodeBuiltinImport": 5,
+    "processEnv": 2,
+    "processEnvInEffect": 1,
+    "yieldInCallArgument": 1
+  },
+  "test/proxy.test.ts": {
+    "deterministicKeys": 1,
+    "globalJson": 1,
+    "globalJsonInEffect": 1,
+    "newSchemaClass": 16,
+    "yieldInCallArgument": 21
+  },
+  "test/reload.test.ts": {
+    "globalErrorInEffectFailure": 1,
+    "globalJson": 1,
+    "instanceOfSchema": 1,
+    "newSchemaClass": 2,
+    "nodeBuiltinImport": 3,
+    "yieldInCallArgument": 24
+  },
+  "test/tunnel.ts": {
+    "nodeBuiltinImport": 1
+  }
+}

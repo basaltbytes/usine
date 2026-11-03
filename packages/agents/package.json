@@ -61,7 +61,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.conformance.json",
+    "check": "node ../../scripts/effect-diagnostics.mjs tsconfig.check.json tsconfig.conformance.json",
+    "effect:baseline": "node ../../scripts/effect-diagnostics.mjs --update tsconfig.check.json tsconfig.conformance.json",
     "test": "vitest run --exclude 'test/integration/**'",
     "test:integration:claude": "vitest run test/integration/claude.test.ts",
     "test:integration:codex": "vitest run test/integration/codex.test.ts",

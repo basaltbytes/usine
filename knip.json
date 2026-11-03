@@ -28,7 +28,8 @@
     },
     "tooling/tsconfig": {
       "entry": [],
-      "project": []
+      "project": [],
+      "ignoreDependencies": ["@effect/language-service"]
     },
     "apps/docs": {
       "ignoreDependencies": ["@usine/orchestrator"]

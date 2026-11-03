@@ -1,0 +1,219 @@
+{
+  "src/child-host/child-host.ts": {
+    "schemaClassMissingBrand": 2
+  },
+  "src/pi/claude/claude.ts": {
+    "asyncFunction": 1,
+    "mapSomeToAsSome": 1,
+    "newSchemaClass": 8,
+    "nodeBuiltinImport": 1,
+    "returnEffectInGen": 1,
+    "yieldInCallArgument": 1
+  },
+  "src/pi/claude/codec.ts": {
+    "instanceOfSchema": 1,
+    "newSchemaClass": 8,
+    "schemaNumber": 5
+  },
+  "src/pi/claude/sdk.ts": {
+    "asyncFunction": 2,
+    "deterministicKeys": 1,
+    "globalJson": 1,
+    "newPromise": 1,
+    "schemaSync": 1
+  },
+  "src/pi/codex/account.ts": {
+    "newSchemaClass": 1,
+    "schemaSync": 2,
+    "schemaSyncInEffect": 2
+  },
+  "src/pi/codex/app-server.ts": {
+    "effectFnIife": 1,
+    "globalJson": 2,
+    "instanceOfSchema": 4,
+    "newSchemaClass": 1,
+    "schemaNumber": 2
+  },
+  "src/pi/codex/codec.ts": {
+    "globalJson": 2,
+    "mapSomeToAsSome": 1,
+    "newSchemaClass": 3,
+    "preferTypedSchemaDecoder": 2,
+    "schemaNumber": 1,
+    "schemaSync": 1
+  },
+  "src/pi/codex/codex.ts": {
+    "instanceOfSchema": 1,
+    "newSchemaClass": 14
+  },
+  "src/pi/codex/connection.ts": {
+    "deterministicKeys": 1,
+    "newSchemaClass": 1
+  },
+  "src/pi/codex/remote.ts": {
+    "globalJsonInEffect": 1,
+    "instanceOfSchema": 3,
+    "newSchemaClass": 2,
+    "schemaClassMissingBrand": 1,
+    "yieldInCallArgument": 2
+  },
+  "src/pi/codex/supervisor.ts": {
+    "globalJson": 1
+  },
+  "src/pi/conversation.ts": {
+    "newSchemaClass": 5
+  },
+  "src/pi/pi.ts": {
+    "newSchemaClass": 10
+  },
+  "src/pi/sdk.ts": {
+    "asyncFunction": 1,
+    "deterministicKeys": 1
+  },
+  "src/pi/session.ts": {
+    "globalJson": 2,
+    "newSchemaClass": 8,
+    "schemaSync": 1
+  },
+  "src/pi/turns.ts": {
+    "instanceOfSchema": 1,
+    "strictBooleanExpressions": 4
+  },
+  "src/pi/usage.ts": {
+    "newSchemaClass": 1
+  },
+  "src/preflight/command.ts": {
+    "flatMapConditionalToFilterOrFail": 1,
+    "newSchemaClass": 4
+  },
+  "src/preflight/preflight.ts": {
+    "multipleEffectProvide": 1,
+    "newSchemaClass": 6,
+    "strictEffectProvide": 2
+  },
+  "src/prompt.ts": {
+    "globalJson": 1
+  },
+  "src/protocol/codex.ts": {
+    "schemaNumber": 3
+  },
+  "src/runtime.ts": {
+    "deterministicKeys": 5,
+    "newSchemaClass": 15,
+    "schemaClassMissingBrand": 11
+  },
+  "test/child-host.test.ts": {
+    "asyncFunction": 2,
+    "globalTimers": 2,
+    "newPromise": 4,
+    "newSchemaClass": 2,
+    "nodeBuiltinImport": 3
+  },
+  "test/integration/claude.test.ts": {
+    "multipleEffectProvide": 1,
+    "newSchemaClass": 1,
+    "processEnv": 1,
+    "schemaSync": 1,
+    "yieldInCallArgument": 2
+  },
+  "test/integration/codex.test.ts": {
+    "multipleEffectProvide": 1,
+    "newSchemaClass": 1,
+    "processEnv": 1,
+    "schemaSync": 1,
+    "yieldInCallArgument": 2
+  },
+  "test/integration/contract.ts": {
+    "cryptoRandomUUIDInEffect": 1,
+    "newSchemaClass": 4,
+    "yieldInCallArgument": 5
+  },
+  "test/integration/pi.test.ts": {
+    "multipleEffectProvide": 2,
+    "newSchemaClass": 1,
+    "processEnv": 1,
+    "schemaSync": 1,
+    "yieldInCallArgument": 2
+  },
+  "test/openai-prices.test.ts": {
+    "newSchemaClass": 1
+  },
+  "test/pi/children.test.ts": {
+    "multipleEffectProvide": 1,
+    "newSchemaClass": 6
+  },
+  "test/pi/claude.test.ts": {
+    "abortControllerInEffect": 2,
+    "asyncFunction": 4,
+    "globalJson": 2,
+    "instanceOfSchema": 8,
+    "multipleEffectProvide": 21,
+    "newPromise": 2,
+    "newSchemaClass": 11,
+    "nodeBuiltinImport": 2,
+    "preferTypedSchemaDecoder": 1,
+    "schemaSync": 1,
+    "schemaSyncInEffect": 1,
+    "yieldInCallArgument": 3
+  },
+  "test/pi/codex/app-server.test.ts": {
+    "globalJson": 1,
+    "globalJsonInEffect": 2,
+    "instanceOfSchema": 6,
+    "multipleEffectProvide": 9,
+    "newSchemaClass": 6,
+    "yieldInCallArgument": 4
+  },
+  "test/pi/codex/codex.test.ts": {
+    "globalJson": 1,
+    "globalJsonInEffect": 4,
+    "instanceOfSchema": 7,
+    "multipleEffectProvide": 18,
+    "newSchemaClass": 26
+  },
+  "test/pi/conversation.test.ts": {
+    "instanceOfSchema": 4,
+    "newSchemaClass": 22,
+    "yieldInCallArgument": 2
+  },
+  "test/pi/pi.test.ts": {
+    "globalJson": 1,
+    "instanceOfSchema": 5,
+    "multipleEffectProvide": 10,
+    "newPromise": 5,
+    "newSchemaClass": 10,
+    "nodeBuiltinImport": 2,
+    "processEnvInEffect": 2
+  },
+  "test/pi/usage.test.ts": {
+    "newSchemaClass": 1,
+    "schemaSync": 1
+  },
+  "test/preflight.test.ts": {
+    "asyncFunction": 5,
+    "globalJson": 3,
+    "globalJsonInEffect": 1,
+    "instanceOfSchema": 6,
+    "multipleEffectProvide": 10,
+    "newSchemaClass": 7,
+    "nodeBuiltinImport": 2,
+    "preferTypedSchemaDecoder": 1,
+    "provideLayerSucceedToProvideService": 1,
+    "schemaSync": 1,
+    "yieldInCallArgument": 4
+  },
+  "test/prompt.test.ts": {
+    "newSchemaClass": 2
+  },
+  "test/provider-capacity.test.ts": {
+    "newSchemaClass": 1,
+    "preferTypedSchemaDecoder": 1,
+    "schemaSync": 1
+  },
+  "test/runtime.test.ts": {
+    "instanceOfSchema": 1,
+    "newSchemaClass": 14,
+    "preferTypedSchemaDecoder": 1,
+    "schemaSync": 2
+  }
+}
