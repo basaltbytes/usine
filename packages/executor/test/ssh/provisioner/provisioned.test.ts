@@ -360,9 +360,7 @@ describe("Provisioned SSH Worker", () => {
         assert.include(logs.lines.join("\n"), "Deleted the machine");
       }).pipe(
         Effect.scoped,
-        Effect.provide(
-          Layer.mergeAll(runtimeOf(machine, providers, hetznerAddress, { parent }), logs.layer),
-        ),
+        Effect.provide([runtimeOf(machine, providers, hetznerAddress, { parent }), logs.layer]),
       );
     },
   );

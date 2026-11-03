@@ -17,7 +17,11 @@ const live = <A, E>(
   effect: Effect.Effect<A, E, CodexChildBackend | FileSystem.FileSystem | Path.Path>,
 ) =>
   effect.pipe(
-    Effect.provide(Layer.mergeAll(codexChildBackendLayer, codexAppServerLive, NodeServices.layer)),
+    Effect.provide(
+      Layer.mergeAll(codexChildBackendLayer, NodeServices.layer).pipe(
+        Layer.provideMerge(codexAppServerLive),
+      ),
+    ),
   );
 
 describe("Codex child live contract", () => {

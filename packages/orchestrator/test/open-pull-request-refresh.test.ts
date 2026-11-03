@@ -390,7 +390,7 @@ describe("open pull request refresh", () => {
         });
         assert.strictEqual(warnings.length, 1);
         assert.match(warnings[0] ?? "", /Could not read the base branch head/u);
-      }).pipe(Effect.provide(Layer.mergeAll(testLayer(github, cursors), Logger.layer([logger]))));
+      }).pipe(Effect.provide([testLayer(github, cursors), Logger.layer([logger])]));
     },
   );
 });

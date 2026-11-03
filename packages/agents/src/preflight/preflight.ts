@@ -195,7 +195,4 @@ export const preflight = (
   brain: BrainSpec,
   host: ChildHost,
   environment: Readonly<Record<string, string>>,
-) =>
-  verifyHarness(brain, host, environment).pipe(
-    Effect.provide(Layer.mergeAll(codexAppServerLive, piSdkLive)),
-  );
+) => verifyHarness(brain, host, environment).pipe(Effect.provide([codexAppServerLive, piSdkLive]));

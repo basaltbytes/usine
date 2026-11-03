@@ -91,9 +91,7 @@ it.effect("keeps the same machine when a missing image pull succeeds on retry", 
     yield* machines.release(grant.hold);
   }).pipe(
     Effect.scoped,
-    Effect.provide(
-      Layer.mergeAll(runtimeOf(machine, providers, imagePullAddress), changeBusLayer, logs.layer),
-    ),
+    Effect.provide([runtimeOf(machine, providers, imagePullAddress), changeBusLayer, logs.layer]),
   );
 });
 
@@ -150,7 +148,7 @@ it.effect("fails preflight after three image pulls and logs the bounded last std
     );
   }).pipe(
     Effect.scoped,
-    Effect.provide(Layer.mergeAll(runtimeOf(machine, providers, imagePullAddress), logs.layer)),
+    Effect.provide([runtimeOf(machine, providers, imagePullAddress), logs.layer]),
   );
 });
 
@@ -400,10 +398,7 @@ for (const [provider, address] of [
           1,
         );
         yield* machines.release(grant.hold);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(Layer.mergeAll(runtimeOf(machine, providers, address), logs.layer)),
-      );
+      }).pipe(Effect.scoped, Effect.provide([runtimeOf(machine, providers, address), logs.layer]));
     },
   );
 }

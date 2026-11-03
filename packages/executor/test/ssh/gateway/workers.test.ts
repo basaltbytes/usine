@@ -72,9 +72,7 @@ describe("SSH Workers added and removed while the executor runs", () => {
         );
       }).pipe(
         Effect.scoped,
-        Effect.provide(
-          Layer.mergeAll(gatewayRuntime(machine, mintingProvider(), gateway), logs.layer),
-        ),
+        Effect.provide([gatewayRuntime(machine, mintingProvider(), gateway), logs.layer]),
       );
     },
   );
@@ -120,9 +118,7 @@ describe("SSH Workers added and removed while the executor runs", () => {
         assert.include(logged, "Closed the forward to the Gateway's admin API");
       }).pipe(
         Effect.scoped,
-        Effect.provide(
-          Layer.mergeAll(gatewayRuntime(machine, mintingProvider(), gateway), logs.layer),
-        ),
+        Effect.provide([gatewayRuntime(machine, mintingProvider(), gateway), logs.layer]),
       );
     },
   );

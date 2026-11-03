@@ -86,5 +86,5 @@ it.effect("publishes upgrade admission changes and its attention deadline once",
       assert.deepStrictEqual(notice.changes, [
         { audience: { _tag: "Readers" }, target: { kind: "configuration", id: "instance" } },
       ]);
-  }).pipe(Effect.provide(Layer.mergeAll(AttemptAdmission.layer, changeBusLayer)), Effect.scoped),
+  }).pipe(Effect.provide([AttemptAdmission.layer, changeBusLayer]), Effect.scoped),
 );

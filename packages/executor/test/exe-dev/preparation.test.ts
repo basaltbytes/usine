@@ -506,10 +506,7 @@ describe("exe.dev preparation", () => {
       assert.strictEqual(ssh.state.commands.length, issued);
       yield* Scope.close(secondScope, Exit.void);
       assert.strictEqual(detaches(), 1);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(Layer.mergeAll(runtime(ssh.layer), Logger.layer([logger]))),
-    );
+    }).pipe(Effect.scoped, Effect.provide([runtime(ssh.layer), Logger.layer([logger])]));
   });
 
   it.effect(
@@ -549,10 +546,7 @@ describe("exe.dev preparation", () => {
         yield* Scope.close(owner, Exit.void);
         yield* Scope.close(owner, Exit.void);
         assert.strictEqual(ssh.state.commands.length, completed);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(Layer.mergeAll(runtime(ssh.layer), Logger.layer([logger]))),
-      );
+      }).pipe(Effect.scoped, Effect.provide([runtime(ssh.layer), Logger.layer([logger])]));
     },
   );
 

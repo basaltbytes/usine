@@ -18,7 +18,13 @@ describe("Pi child live contract", () => {
     () =>
       Effect.gen(function* () {
         return yield* steeringContract(yield* PiChildBackend, brain);
-      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer, piSdkLive, NodeServices.layer))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(piChildBackendLayer, NodeServices.layer).pipe(
+            Layer.provideMerge(piSdkLive),
+          ),
+        ),
+      ),
     210_000,
   );
 
@@ -27,7 +33,13 @@ describe("Pi child live contract", () => {
     () =>
       Effect.gen(function* () {
         return yield* interruptionContract(yield* PiChildBackend, brain);
-      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer, piSdkLive, NodeServices.layer))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(piChildBackendLayer, NodeServices.layer).pipe(
+            Layer.provideMerge(piSdkLive),
+          ),
+        ),
+      ),
     150_000,
   );
 });

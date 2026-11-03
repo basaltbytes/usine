@@ -61,5 +61,5 @@ it.effect(
       assert.strictEqual((yield* bus.open).revision, revision + 2);
       assert.deepStrictEqual((yield* attention(overview, config)).needsYou, []);
       assert.deepStrictEqual((yield* attention(overview, config)).dismissedNeeds, []);
-    }).pipe(Effect.provide(Layer.mergeAll(WebhookHealth.layer, changeBusLayer)), Effect.scoped),
+    }).pipe(Effect.provide([WebhookHealth.layer, changeBusLayer]), Effect.scoped),
 );
