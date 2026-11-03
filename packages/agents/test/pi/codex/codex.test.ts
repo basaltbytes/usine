@@ -42,6 +42,7 @@ import {
   type CodexConnection,
   type CodexNotification,
 } from "../../../src/pi/codex/app-server.ts";
+import { RemoteCodexProcessLost } from "../../../src/pi/codex/remote.ts";
 import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
@@ -218,6 +219,214 @@ describe("Codex child backend", () => {
         }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
       }).pipe(Effect.scoped),
   );
+  for (const state of ["working", "queued", "paused", "interrupting", "idle"] as const) {
+    it.effect(`preserves unread guidance and ${state} state after app-server recovery`, () =>
+      Effect.gen(function* () {
+        const original = yield* Queue.make<CodexNotification, SessionOperationError | Cause.Done>();
+        const restored = yield* Queue.make<CodexNotification, Cause.Done>();
+        const idle = yield* Queue.make<void>();
+        const recovered = yield* Deferred.make<void>();
+        const recoveryTurn = yield* Deferred.make<void>();
+        const acceptRecoveryTurn = yield* Deferred.make<void>();
+        const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
+        const messages: Schema.Json[] = [];
+        const guidance = [
+          "Do not publish; run the linter first.",
+          "Check the final diff too.",
+        ] as const;
+        const reads: Array<Option.Option<InterventionState>> = [];
+        let opens = 0;
+        const server = Layer.succeed(CodexAppServer)({
+          open: () =>
+            Effect.sync(() => {
+              const notifications =
+                opens++ === 0
+                  ? Stream.fromQueue(original)
+                  : Stream.unwrap(
+                      Deferred.succeed(recovered, undefined).pipe(
+                        Effect.as(Stream.fromQueue(restored)),
+                      ),
+                    );
+              return {
+                notifications,
+                notify: () => Effect.void,
+                close: Queue.end(restored),
+                request: (_operation, method, params) =>
+                  Effect.sync(() => {
+                    if (method === "turn/start") {
+                      messages.push(params);
+                      return { turn: { id: `turn-${messages.length}` } };
+                    }
+                    if (method === "thread/resume")
+                      return {
+                        thread: {
+                          id: "thread-1",
+                          turns: [{ items: [{ type: "userMessage" }] }],
+                        },
+                      };
+                    return responses[method] ?? {};
+                  }).pipe(
+                    Effect.tap(() =>
+                      method === "turn/start" &&
+                      messages.length === 2 &&
+                      (state === "working" || state === "queued")
+                        ? Deferred.succeed(recoveryTurn, undefined).pipe(
+                            Effect.andThen(Deferred.await(acceptRecoveryTurn)),
+                          )
+                        : Effect.void,
+                    ),
+                  ),
+              } satisfies CodexConnection;
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const host = new RemoteShell({
+            ssh: { command: "ssh", args: [] },
+            sshEnvironment: {},
+            destination: "worker",
+          });
+          const running = yield* (yield* CodexChildBackend).launch(
+            request(undefined, undefined, host),
+          );
+          const result = yield* Effect.forkScoped(running.result);
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) =>
+                event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+              ),
+            ),
+          );
+          if (state === "queued") yield* running.intervene(new Interrupt(), noDelivery);
+          for (const message of guidance) {
+            const taken = yield* running.intervene(new OperatorMessage({ message }), (delivered) =>
+              Effect.sync(() => {
+                reads.push(delivered);
+              }),
+            );
+            assert.strictEqual(taken.queued, true);
+          }
+          assert.strictEqual(reads.length, 0, "queued guidance has not been read");
+          if (state === "paused" || state === "interrupting")
+            yield* running.intervene(new Interrupt(), noDelivery);
+          if (state === "paused" || state === "idle") {
+            yield* Queue.offer(original, {
+              method: "turn/completed",
+              params: {
+                turn: {
+                  id: "turn-1",
+                  status: state === "idle" ? "completed" : "interrupted",
+                  error: null,
+                },
+              },
+            });
+            yield* Queue.take(idle);
+          }
+          yield* Queue.fail(
+            original,
+            new SessionOperationError({
+              operation: "stream",
+              sessionId: Option.some(running.session.id),
+              message: "App-server exited",
+              cause: new RemoteCodexProcessLost({ message: "App-server exited" }),
+            }),
+          );
+          if (state === "working" || state === "queued") {
+            yield* Deferred.await(recoveryTurn);
+            assert.strictEqual(reads.length, 0, "recovery has not accepted the guidance yet");
+            yield* Deferred.succeed(acceptRecoveryTurn, undefined);
+          }
+          yield* Deferred.await(recovered);
+          if (state === "interrupting") yield* Queue.take(idle);
+          assert.strictEqual(result.pollUnsafe(), undefined);
+          if (state === "working" || state === "queued") {
+            assert.strictEqual(messages.length, 2, "recovery continues the working turn");
+            assert.strictEqual(reads.length, guidance.length, "replayed guidance is delivered");
+          } else {
+            assert.strictEqual(messages.length, 1, "recovery waits for operator guidance");
+            assert.strictEqual(reads.length, state === "idle" ? guidance.length : 0);
+            yield* running.intervene(
+              new OperatorMessage({ message: "Continue with my correction" }),
+              noDelivery,
+            );
+            assert.strictEqual(messages.length, 2);
+            assert.include(JSON.stringify(messages[1]), "Continue with my correction");
+          }
+          if (state !== "idle") {
+            const recoveredInput = JSON.stringify(messages[1]);
+            for (const message of guidance) assert.include(recoveredInput, message);
+            assert(recoveredInput.indexOf(guidance[0]) < recoveredInput.indexOf(guidance[1]));
+          }
+          let finalTurn = "turn-2";
+          if (state === "paused" || state === "interrupting") {
+            yield* Queue.offer(restored, {
+              method: "item/started",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-2",
+                item: {
+                  type: "userMessage",
+                  id: "replayed-guidance",
+                  clientId: null,
+                  content: [
+                    {
+                      type: "text",
+                      text: [...guidance, "Continue with my correction"].join("\n\n"),
+                      text_elements: [],
+                    },
+                  ],
+                },
+              },
+            });
+            for (let spin = 0; reads.length < guidance.length; spin += 1) {
+              if (spin > 1_000) return assert.fail("replayed guidance was never reported as read");
+              yield* Effect.yieldNow;
+            }
+            yield* running.intervene(new Interrupt(), noDelivery);
+            yield* Queue.offer(restored, {
+              method: "turn/completed",
+              params: { turn: { id: "turn-2", status: "interrupted", error: null } },
+            });
+            yield* Queue.take(idle);
+            yield* running.intervene(
+              new OperatorMessage({ message: "Continue again" }),
+              noDelivery,
+            );
+            assert.strictEqual(messages.length, 3);
+            assert.include(JSON.stringify(messages[2]), "Continue again");
+            for (const message of guidance) assert.notInclude(JSON.stringify(messages[2]), message);
+            assert.strictEqual(reads.length, guidance.length, "guidance is delivered only once");
+            finalTurn = "turn-3";
+          }
+          yield* Queue.offer(restored, {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              turnId: finalTurn,
+              item: { type: "agentMessage", id: "answer", text: "Corrected result" },
+            },
+          });
+          yield* Queue.offer(restored, {
+            method: "turn/completed",
+            params: { turn: { id: finalTurn, status: "completed", error: null } },
+          });
+          yield* Queue.take(idle);
+          yield* running.intervene(new Release(), noDelivery);
+          assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
+          assert.strictEqual(
+            messages.length,
+            finalTurn === "turn-3" ? 3 : 2,
+            "queued guidance does not start a duplicate turn",
+          );
+          assert.strictEqual(reads.length, guidance.length);
+          assert(reads.every(Option.isSome));
+          assert.strictEqual(opens, 2);
+        }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
+      }).pipe(Effect.scoped),
+    );
+  }
+
   it.effect("reports a message steered into a running turn read once Codex records it", () =>
     Effect.gen(function* () {
       const notifications = yield* Queue.make<CodexNotification, Cause.Done>();

@@ -72,6 +72,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       probeCommand(host, environment, brain.harness, capability, command, args);
     switch (brain.harness) {
       case "codex": {
+        if (host._tag === "RemoteShell") yield* probe("binary", "node", ["--version"]);
         const version = yield* probe("binary", "codex", [...codexConfigArgs, "--version"]);
         const unsupported = unsupportedCodexVersion(version);
         if (Option.isSome(unsupported)) return yield* unsupported.value;

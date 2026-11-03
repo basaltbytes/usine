@@ -394,6 +394,20 @@ describe("worker harness readiness", () => {
     });
   }
 
+  it.effect("refuses remote Codex when its supervisor cannot run Node.js", () =>
+    Effect.gen(function* () {
+      const error = yield* verifyHarness(coder, remote, {}).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "HarnessUnavailableError");
+      assert.match(error.message, /node --version failed/u);
+    }).pipe(
+      Effect.provide(
+        commands({ [overSsh("exec 'node' '--version'")]: { stdout: "", exitCode: 127 } }),
+      ),
+      Effect.provide(account(Effect.succeed({})).layer),
+      Effect.provide(unusedPi),
+    ),
+  );
+
   it.effect("checks Claude on a remote host through one SSH command per probe", () =>
     Effect.gen(function* () {
       assert.deepStrictEqual(
