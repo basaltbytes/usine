@@ -29,3 +29,11 @@ Follow work from approval through its attempts and outcome. Use these guides to 
 The overview lists every selected board task, including completed tasks in the Done lane. Each card includes its run count, total usage, and the run summaries needed for its current state and actions. The task list shows each loop's latest state and totals across the task's complete history.
 
 The overview response includes every open run and the latest 50 closed runs across the instance. Needs attention includes unresolved failures even when they are older than this list. Open a task or a run to read its complete history and prompts. The board card's **Run history** menu loads the task's full run list when you open it.
+
+## Pool usage warnings
+
+**Needs attention** shows a pool usage warning when a primary or secondary window reaches 80% and its reset time is in the future. The entry shows the current percentage and reset time.
+
+Select **Dismiss** to hide the warning within its usage band: 80–89%, 90–94%, 95–99%, or 100% and above. Fractional percentages stay in the band below the next threshold. For example, a warning dismissed at 80% stays dismissed through 89.9% and appears again at 90%. A changed reset time also makes it appear again. **Undo** restores a dismissed warning.
+
+A report below 80% or reaching the reset time clears the warning. Pool warnings provide information; scheduling continues.

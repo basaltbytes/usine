@@ -12,7 +12,7 @@ import { assert, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/config/label";
 import { RepositoryName } from "@usine/core/repository";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
-import { PreflightFindingNeed } from "../src/operator/need.ts";
+import { PoolLimitNeed, PreflightFindingNeed } from "../src/operator/need.ts";
 import { attentionKey, partitionNeeds, poolLimitNeeds } from "../src/operator/attention.ts";
 
 it("shows a changed preflight finding again and ignores acknowledgements of a different entry", () => {
@@ -90,5 +90,42 @@ it("warns at 80 percent for either window and skips expired or undated windows",
       poolLimitNeeds([changed], now).map(({ window }) => window),
       ["secondary"],
     );
+  }
+});
+
+it("keeps pool warnings dismissed within each threshold band and separates pools and windows", () => {
+  const original = new PoolLimitNeed({
+    id: "pool-limit:chatgptPlan:primary",
+    pool: "chatgptPlan",
+    login: Option.none(),
+    window: "primary",
+    usedPercent: 80,
+    resetsAt: DateTime.makeUnsafe("2026-11-03T12:00:00Z"),
+  });
+  for (const [band, lastPercent] of [
+    [80, 89.99],
+    [90, 94.99],
+    [95, 99.99],
+    [100, 110],
+  ] as const) {
+    const need = new PoolLimitNeed({ ...original, usedPercent: band });
+    const acknowledgements = [attentionKey(need)];
+    const updated = new PoolLimitNeed({ ...need, usedPercent: lastPercent });
+    assert.deepStrictEqual(partitionNeeds([updated], acknowledgements), {
+      needsYou: [],
+      dismissedNeeds: [updated],
+    });
+    for (const changed of [
+      new PoolLimitNeed({ ...need, pool: "claudePlan" }),
+      new PoolLimitNeed({ ...need, window: "secondary" }),
+      ...[90, 95, 100]
+        .filter((threshold) => threshold > band)
+        .map((usedPercent) => new PoolLimitNeed({ ...need, usedPercent })),
+    ]) {
+      assert.deepStrictEqual(partitionNeeds([changed], acknowledgements), {
+        needsYou: [changed],
+        dismissedNeeds: [],
+      });
+    }
   }
 });
