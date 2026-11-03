@@ -45,3 +45,11 @@ macOS or Linux with Node.js 22.22 or later, npm, Git, and a GitHub account that 
 While the instance runs, `usine status` from its folder reports its PID, version, uptime, and listener. The web UI opens setup or your signed-in instance. After stopping, `usine status` reports that the instance is stopped and exits with code 3.
 
 To close the terminal while the instance runs, [start it detached](/guides/keep-the-orchestrator-running/). For an always-on machine, [host usine on a Linux server](/guides/host-usine-on-linux/).
+
+## Event-loop delay
+
+While `usine up` runs, the server logs `Event-loop delay` once per minute with `p99Millis`, `maxMillis`, and `intervalSeconds`. The monitor samples every 10 ms and resets after each report. Check `maxMillis` for isolated stalls and `p99Millis` for sustained delay. Standalone SQLite reads and run-reader snapshots run on a read-only worker connection so transcript appends and HTTP health responses can continue during long overview, board, and run-list queries. Each snapshot reads related records from one committed database state. Write transactions use the main connection to preserve atomic reads and writes.
+
+If the SQLite read worker stops, the server logs the cause at Error and fails its in-flight reads. Later reads use the main connection, where long reads can delay appends and HTTP responses. The server retries worker startup after 1 second, 5 seconds, 30 seconds, and then every 5 minutes. A replacement serves reads after a successful probe; successful recovery resets the retry delay.
+
+Read `GET /api/health` to check `sqliteReader`: `worker` means standalone reads use the worker, `fallback` means they use the main connection while waiting to retry, and `respawning` means a replacement is starting and reads still use the main connection. The endpoint remains a liveness check and returns HTTP 200 in each state.

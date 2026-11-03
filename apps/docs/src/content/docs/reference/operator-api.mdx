@@ -23,9 +23,15 @@ Paths use `/api/...`. The schema’s `info.version` is `unversioned`; `GET /api/
 
 The reference covers the operator HTTP API, including sign-in, members, and tokens. Static UI assets and the separate signature-verified GitHub webhook listener are outside this contract.
 
+## SQLite reader health
+
+`GET /api/health` is public and returns `{ "ok": true, "sqliteReader": "worker" }` during normal operation. `sqliteReader` changes to `fallback` while the server uses the main connection and waits to retry worker startup, or `respawning` while a replacement starts and passes its probe. Reads use the main connection in both states. The endpoint returns HTTP 200 throughout recovery; long reads on the main connection can delay responses. The server logs worker failures and retries after 1 second, 5 seconds, 30 seconds, and then every 5 minutes. Recovery resets this delay.
+
 ## Polling summaries and detail
 
 `GET /api/overview` returns project and board summaries with item titles, states, labels, counts, and identities. Its runs use `RunSummaryView` and its attempts use `AttemptSummaryView`. `GET /api/desk` uses the same summary types for running, stalled, and recent runs.
+
+Each run summary read uses one read-only snapshot for run state and attempts. The SQLite worker executes these reads so long overview, board, and run-list queries permit transcript appends and health responses to continue. Board reads include history counts, timing, and loop states in that same database snapshot. Concurrent completion and retries preserve consistent run state, attempt outcomes, and operator actions. The overview run list reads open runs and recent closed runs together, so each run appears once. Run detail and evidence use the same snapshot boundary. During SQLite reader recovery, these snapshots use a transaction on the main connection, where long reads can delay responses.
 
 Read `GET /api/runs/:runId` for the run's task, result message, each attempt's task, event payload, and transcript. The task endpoint, `GET /api/projects/:owner/:repository/tasks/:item`, also returns full run and attempt records. The board's **Run again** action reads run detail before submitting the saved task and agent.
 

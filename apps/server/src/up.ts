@@ -18,7 +18,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubPolling } from "@usine/github/polling";
 import { ServerUpgrades } from "./upgrade/control.ts";
 import { systemUpgradePlatform } from "./upgrade/platform.ts";
-import { localSqliteLayer } from "@usine/engine/local-sqlite";
+import { localSqliteLayer, SqliteReader } from "@usine/engine/local-sqlite";
 import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { configurationLayer, initializeConfiguration } from "./configuration/runtime.ts";
@@ -78,6 +78,7 @@ import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 import { warnIfSystemSleeps } from "./system-sleep.ts";
 import { tracingLayer } from "./tracing.ts";
+import { monitorEventLoop } from "./event-loop.ts";
 
 // Untraced: a span around a server that never returns would parent every request span.
 const serve = Effect.fnUntraced(function* (options: {
@@ -320,6 +321,7 @@ export const up = (command: UpCommand) =>
   Effect.scoped(
     Effect.gen(function* () {
       const { port, origin } = command;
+      yield* monitorEventLoop;
       const directory = InstanceDirectory.make(process.cwd());
       yield* refuseVolatileInstance(directory, command.allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
@@ -399,6 +401,7 @@ export const up = (command: UpCommand) =>
         authentication: Context.get(authContext, Authentication),
         store: Context.get(authStoreContext, AuthStore),
         github: Context.get(githubContext, GitHubSignIn),
+        sqliteReader: Context.get(databaseContext, SqliteReader),
       };
       // Built before the runtime, so the exporter flushes the runtime's last spans when it closes.
       const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(

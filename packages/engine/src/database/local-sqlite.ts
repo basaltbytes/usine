@@ -34,7 +34,11 @@ import { RunReader } from "../run-reader/run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
 import type { TriggerCondition } from "../trigger-condition.ts";
 import { foreignKeys, migrationNameColumn } from "./dialect.ts";
-import { RunDatabase } from "./database.ts";
+import { ReadSnapshot, RunDatabase } from "./database.ts";
+import { withReadWorker } from "./sqlite-reader/reader.ts";
+import { SqliteReader, type SqliteReaderState } from "./sqlite-reader/status.ts";
+
+export { SqliteReader, SqliteReaderState } from "./sqlite-reader/status.ts";
 
 const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
@@ -84,7 +88,17 @@ const openSqliteLayer = <E>(
       yield* Effect.logDebug("SQLite statement cache span isolation installed", {
         filename: config.filename,
       });
-      return context;
+      if (config.readonly === true)
+        return Context.add(context, SqliteReader, {
+          state: Effect.succeed<SqliteReaderState>("fallback"),
+        });
+      const routed = yield* withReadWorker(client);
+      return context.pipe(
+        Context.add(SqlClient.SqlClient, routed.client),
+        Context.add(SqliteClient.SqliteClient, routed.client),
+        Context.add(ReadSnapshot, { run: (_database, effect) => routed.readSnapshot(effect) }),
+        Context.add(SqliteReader, { state: routed.state }),
+      );
     }).pipe(Effect.mapError(onError)),
   );
 
@@ -106,7 +120,7 @@ const sqliteClientLayer = (instanceDirectory: InstanceDirectory) =>
 /**
  * Returns a Node SQLite layer at `<instanceDirectory>/.usine/runtime.sqlite`, creating the
  * directory and applying engine migrations. Provides `RunDatabase` and its matching `SqlClient`;
- * reuse the layer to share one connection (ADR 0020).
+ * reuse the layer to share the writer and read worker (ADR 0020).
  */
 export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
   const sqlClient = sqliteClientLayer(instanceDirectory);

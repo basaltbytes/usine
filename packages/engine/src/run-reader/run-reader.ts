@@ -6,7 +6,7 @@ import type { DedupKey } from "@usine/core/event";
 import type { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
-import { RunDatabase } from "../database/database.ts";
+import { ReadSnapshot, RunDatabase } from "../database/database.ts";
 import { latestPoolRateLimits } from "./pool-rate-limits.ts";
 import {
   type LoopSighting,
@@ -27,9 +27,10 @@ import { queriesFor } from "../store/queries.ts";
 const makeRunReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
   const queries = queriesFor(database);
+  const snapshot = yield* ReadSnapshot;
 
   const inspect = Effect.fn("RunReader.inspect")((runId: RunId) =>
-    queries.snapshot(runId).pipe(persistence("read run")),
+    snapshot.run(database, queries.snapshot(runId)).pipe(persistence("read run")),
   );
   const runForEvent = Effect.fn("RunReader.runForEvent")(function* (dedupKey: DedupKey) {
     yield* Effect.annotateCurrentSpan({ dedupKey });
@@ -48,10 +49,10 @@ const makeRunReader = Effect.gen(function* () {
   }, persistence("read the run admitted for an event"));
   const evidence = Effect.fn("RunReader.evidence")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
-    const evidence = yield* database
-      .transaction((transaction) =>
+    const evidence = yield* snapshot
+      .run(
+        database,
         Effect.gen(function* () {
-          const queries = queriesFor(transaction);
           const snapshot = yield* queries.snapshot(runId);
           const transcripts = yield* Effect.forEach(snapshot.attempts, ({ id }) =>
             queries.transcript(new TranscriptAllQuery({ attemptId: id })),
@@ -70,12 +71,25 @@ const makeRunReader = Effect.gen(function* () {
     });
     return evidence;
   });
-  const summary = Effect.fn("RunReader.summary")((runId: RunId) =>
-    queries.runSummary(runId).pipe(persistence("read run summary")),
-  );
-  const list = Effect.fn("RunReader.list")((options: { readonly closedLimit: number }) =>
-    queries.runSummaries(options.closedLimit).pipe(persistence("list runs")),
-  );
+  const summary = Effect.fn("RunReader.summary")(function* (runId: RunId) {
+    yield* Effect.annotateCurrentSpan({ runId });
+    const summary = yield* snapshot
+      .run(database, queries.runSummary(runId))
+      .pipe(persistence("read run summary"));
+    yield* Effect.logDebug("Read run summary", { runId, state: summary.run.state._tag });
+    return summary;
+  });
+  const list = Effect.fn("RunReader.list")(function* (options: { readonly closedLimit: number }) {
+    yield* Effect.annotateCurrentSpan({ closedLimit: options.closedLimit });
+    const summaries = yield* snapshot
+      .run(database, queries.runSummaries(options.closedLimit))
+      .pipe(persistence("list runs"));
+    yield* Effect.logDebug("Read run list", {
+      closedLimit: options.closedLimit,
+      runs: summaries.length,
+    });
+    return summaries;
+  });
   const closed = Effect.fn("RunReader.closed")(function* (options: {
     readonly limit: number;
     readonly repositories?: ReadonlyArray<RepositoryName>;
@@ -84,8 +98,8 @@ const makeRunReader = Effect.gen(function* () {
       limit: options.limit,
       repositories: options.repositories ?? "all",
     });
-    const summaries = yield* queries
-      .closedRunSummaries(options.limit, options.repositories)
+    const summaries = yield* snapshot
+      .run(database, queries.closedRunSummaries(options.limit, options.repositories))
       .pipe(persistence("list closed runs"));
     yield* Effect.logDebug("Read closed runs", {
       limit: options.limit,
@@ -94,21 +108,36 @@ const makeRunReader = Effect.gen(function* () {
     });
     return summaries;
   });
-  const closedSince = Effect.fn("RunReader.closedSince")((since: Option.Option<DateTime.Utc>) =>
-    queries.closedRunSummariesSince(since).pipe(persistence("list runs closed since a time")),
-  );
+  const closedSince = Effect.fn("RunReader.closedSince")(function* (
+    since: Option.Option<DateTime.Utc>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ since });
+    const summaries = yield* snapshot
+      .run(database, queries.closedRunSummariesSince(since))
+      .pipe(persistence("list runs closed since a time"));
+    yield* Effect.logDebug("Read runs closed since a time", { since, runs: summaries.length });
+    return summaries;
+  });
   const revision = Effect.fn("RunReader.revision")(() =>
     queries.revision().pipe(persistence("read projection revision")),
   );
-  const forItems = Effect.fn("RunReader.forItems")((itemKeys: ReadonlyArray<ItemKey>) =>
-    queries.itemRunSummaries(itemKeys).pipe(persistence("read item run histories")),
-  );
-  const board = Effect.fn("RunReader.board")(
-    (itemKeys: ReadonlyArray<ItemKey>, attentionRunIds: ReadonlyArray<RunId>) =>
-      queries
-        .boardRunSummaries(itemKeys, attentionRunIds)
-        .pipe(persistence("read current board runs and history totals")),
-  );
+  const forItems = Effect.fn("RunReader.forItems")(function* (itemKeys: ReadonlyArray<ItemKey>) {
+    yield* Effect.annotateCurrentSpan({ itemKeys });
+    const summaries = yield* snapshot
+      .run(database, queries.itemRunSummaries(itemKeys))
+      .pipe(persistence("read item run histories"));
+    yield* Effect.logDebug("Read item run histories", { itemKeys, runs: summaries.length });
+    return summaries;
+  });
+  const board = Effect.fn("RunReader.board")(function* (
+    itemKeys: ReadonlyArray<ItemKey>,
+    attentionRunIds: ReadonlyArray<RunId>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ itemKeys, attentionRunIds });
+    return yield* snapshot
+      .run(database, queries.boardRunSummaries(itemKeys, attentionRunIds))
+      .pipe(persistence("read current board runs and history totals"));
+  });
   const events = Effect.fn("RunReader.events")((runIds: ReadonlyArray<RunId>) =>
     queries.runEvents(runIds).pipe(persistence("read the events of runs")),
   );
@@ -141,7 +170,10 @@ const makeRunReader = Effect.gen(function* () {
   } as const;
 });
 
-/** The service that reads saved Run state and transcripts without starting or recovering execution. */
+/**
+ * Reads saved run state and transcripts without starting or recovering execution.
+ * Each summary read returns run state, attempts, and board aggregates from one snapshot.
+ */
 export class RunReader extends Context.Service<
   RunReader,
   {
@@ -153,9 +185,9 @@ export class RunReader extends Context.Service<
     readonly runForEvent: (
       dedupKey: DedupKey,
     ) => Effect.Effect<Option.Option<RunId>, RunStoreError>;
-    /** Returns a Run snapshot and all its transcript entries, in append order, from one transaction. */
+    /** Returns a Run snapshot and all its transcript entries, in append order, from one snapshot. */
     readonly evidence: (runId: RunId) => Effect.Effect<RunEvidence, RunStoreError>;
-    /** Returns every open Run plus the newest `closedLimit` closed ones, newest first. */
+    /** Returns every open Run plus the newest `closedLimit` closed ones and their Attempts from one snapshot, newest first. */
     readonly list: (options: {
       readonly closedLimit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;

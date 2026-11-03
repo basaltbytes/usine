@@ -262,6 +262,13 @@ describe("queued Event trigger re-check", () => {
           // The first approval applies only to its own Run; the queued Event's Run waits for
           // approval before any Attempt.
           const secondRunId = yield* runIdFor(second);
+          yield* engine.inspect(secondRunId).pipe(
+            Effect.retry({
+              while: (error) => error._tag === "RunNotFoundError",
+              times: 500,
+              schedule: Schedule.spaced("10 millis"),
+            }),
+          );
           const parked = yield* waitFor(
             engine,
             secondRunId,

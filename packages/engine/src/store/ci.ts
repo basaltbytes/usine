@@ -28,7 +28,9 @@ export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBu
         .from(runs)
         .where(sql`${jsonExtract(runs.stateJson, "$._tag")} = 'AwaitingCi'`)
         .execute();
-      return yield* Effect.forEach(rows, ({ runId }) => queriesFor(database).snapshot(runId));
+      return yield* Effect.forEach(rows, ({ runId }) =>
+        database.transaction((transaction) => queriesFor(transaction).snapshot(runId)),
+      );
     },
     persistence("read CI waits"),
     Effect.catchTags({

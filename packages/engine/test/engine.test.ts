@@ -1383,6 +1383,12 @@ describe("store failures in a Run's fiber", () => {
             engine,
             accepted.runId,
             ({ run }) => run.state._tag === "Succeeded",
+          ).pipe(
+            Effect.retry({
+              while: (error) => error._tag === "EnginePersistenceError",
+              schedule: Schedule.spaced("10 millis"),
+              times: 500,
+            }),
           );
           assert.strictEqual(finished.attempts.length, 1);
           assert.strictEqual(yield* Ref.get(reserved), 2);

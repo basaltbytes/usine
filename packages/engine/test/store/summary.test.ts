@@ -1,5 +1,6 @@
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { assert, it } from "@effect/vitest";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import { AgentFailure } from "@usine/core/attempt/failure";
@@ -14,13 +15,162 @@ import { WorkerName } from "@usine/core/worker";
 import { EffectLogger } from "drizzle-orm/effect-core";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { DateTime, Effect, FileSystem, Layer, Option, Result } from "effect";
+import { Reactivity } from "effect/reactivity";
 import { TestClock } from "effect/testing";
-import { RunDatabase } from "../../src/database/database.ts";
+import { ReadSnapshot, RunDatabase } from "../../src/database/database.ts";
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
+import { withReadWorker } from "../../src/database/sqlite-reader/reader.ts";
 import { Submission } from "../../src/engine/submission.ts";
 import { RunReader } from "../../src/run-reader/run-reader.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission } from "./support.ts";
+
+for (const [method, phase, selection, transition] of [
+  ["list", "closed runs", /"closed_at" is not null/u, "completion"],
+  ["list", "attempts", /from "usine_attempts"/u, "completion"],
+  ["inspect", "attempts", /from "usine_attempts"/u, "completion"],
+  ["evidence", "attempts", /from "usine_attempts"/u, "completion"],
+  ["summary", "attempts", /from "usine_attempts"/u, "completion"],
+  ["forItems", "attempts", /from "usine_attempts"/u, "completion"],
+  ["board", "loop history", /"board_loop_history"/u, "completion"],
+  ["board", "current runs", /from "usine_attempts"/u, "completion"],
+  ["closed", "attempts", /from "usine_attempts"/u, "retry"],
+  ["closedSince", "attempts", /from "usine_attempts"/u, "retry"],
+] as const) {
+  it.live(`${method} stays coherent when ${transition} commits before reading ${phase}`, () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
+      );
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("changing-during-summary");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        if (transition === "retry") {
+          yield* store.finishAttempt(
+            started.execution.attempt,
+            Result.fail(new AgentFailure({ message: "Retry during summary read" })),
+          );
+        }
+        // The worker snapshot lets the other connection commit between SELECTs.
+        const connection = yield* SqliteClient.make({
+          filename: `${directory}/.usine/runtime.sqlite`,
+        });
+        const routed = yield* withReadWorker(connection);
+        let changed = false;
+        const logger = Layer.succeed(EffectLogger)({
+          logQuery: (query) =>
+            Effect.gen(function* () {
+              if (changed || !selection.test(query)) return;
+              if (transition === "completion") {
+                yield* store.finishAttempt(
+                  started.execution.attempt,
+                  Result.succeed(
+                    new StepResult({ message: "Completed during summary read", facts: [] }),
+                  ),
+                );
+              } else {
+                assert(yield* store.retry(runId));
+                const retried = yield* store.beginAttempt(
+                  runId,
+                  WorkerName.make("local"),
+                  Option.none(),
+                );
+                assert(retried._tag === "AttemptStarted");
+              }
+              changed = true;
+            }).pipe(Effect.orDie),
+        });
+        const database = yield* SQLiteDrizzle.make().pipe(
+          Effect.provide(logger),
+          Effect.provide(SQLiteDrizzle.DefaultServices),
+          Effect.provideService(SqliteClient.SqliteClient, routed.client),
+        );
+        yield* Effect.gen(function* () {
+          const reader = yield* RunReader;
+          const read = () => {
+            switch (method) {
+              case "list":
+                return reader.list({ closedLimit: 10 });
+              case "inspect":
+                return reader.inspect(runId).pipe(Effect.map((snapshot) => [snapshot]));
+              case "evidence":
+                return reader.evidence(runId).pipe(Effect.map(({ snapshot }) => [snapshot]));
+              case "summary":
+                return reader.summary(runId).pipe(Effect.map((summary) => [summary]));
+              case "forItems":
+                return reader.forItems([lifecycleSubmission.itemKey]);
+              case "board":
+                return reader.board([lifecycleSubmission.itemKey], []).pipe(
+                  Effect.map((history) => {
+                    const item = history.items[0];
+                    const run = history.runs[0];
+                    assert(item !== undefined && run !== undefined);
+                    assert.strictEqual(item.loops[0]?.state._tag, run.run.state._tag);
+                    assert.strictEqual(item.attemptCount, run.attempts.length);
+                    assert.strictEqual(
+                      item.runningSince.length,
+                      run.attempts.filter(({ endedAt }) => Option.isNone(endedAt)).length,
+                    );
+                    assert.strictEqual(
+                      item.usageSources[0]?.attempts[0]?.ended,
+                      Option.isSome(run.attempts[0]?.outcome ?? Option.none()),
+                    );
+                    return history.runs;
+                  }),
+                );
+              case "closed":
+                return reader.closed({ limit: 10 });
+              case "closedSince":
+                return reader.closedSince(Option.none());
+            }
+          };
+          const listed = yield* read();
+          assert(changed, "lifecycle change must commit between summary queries");
+          assert.strictEqual(listed.length, 1);
+          const summary = listed[0];
+          assert(summary !== undefined);
+          assert.strictEqual(summary.run.id, runId);
+          assert.strictEqual(
+            summary.run.state._tag,
+            transition === "completion" ? "Running" : "Failed",
+          );
+          assert.strictEqual(summary.attempts.length, 1);
+          const attempt = summary.attempts[0];
+          assert(attempt !== undefined);
+          assert.strictEqual(Option.isSome(attempt.outcome), transition === "retry");
+          assert.strictEqual(Option.isSome(attempt.endedAt), transition === "retry");
+          const after = yield* reader.forItems([lifecycleSubmission.itemKey]);
+          assert.strictEqual(after.length, 1);
+          const finished = after[0];
+          assert(finished !== undefined);
+          assert.strictEqual(finished.run.id, runId);
+          assert.strictEqual(
+            finished.run.state._tag,
+            transition === "completion" ? "Succeeded" : "Running",
+          );
+          assert.strictEqual(finished.attempts.length, transition === "completion" ? 1 : 2);
+          const finishedAttempt = finished.attempts[0];
+          assert(finishedAttempt !== undefined);
+          assert.strictEqual(
+            Option.getOrNull(finishedAttempt.outcome)?._tag,
+            transition === "completion" ? "Succeeded" : "Failed",
+          );
+          assert(Option.isSome(finishedAttempt.endedAt));
+        }).pipe(
+          Effect.provide(RunReader.layer),
+          Effect.provide(RunDatabase.layer(database)),
+          Effect.provideService(ReadSnapshot, {
+            run: (_database, effect) => routed.readSnapshot(effect),
+          }),
+        );
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
+  );
+}
 
 it.effect(
   "polling SQL excludes long text and selects recent and current runs before decoding",
