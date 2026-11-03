@@ -34,8 +34,8 @@ import {
   gte,
   inArray,
   isNull,
+  isNotNull,
   ne,
-  notInArray,
   or,
   sql,
   type SQL,
@@ -461,27 +461,31 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
           )
           .as("board_current_runs");
         const state = sql`json_extract(${ranked.state}, '$._tag')`;
-        const current = database
-          .select({ runId: ranked.runId })
-          .from(ranked)
-          .where(
-            or(
-              eq(ranked.rank, 1),
-              inArray(state, [...RunState.OPEN_STATE_TAGS]),
-              and(
-                eq(state, "Failed"),
-                or(isNull(ranked.resolved), ne(ranked.resolved, ranked.latestAttempt)),
+        const current = () =>
+          database
+            .select({ runId: ranked.runId })
+            .from(ranked)
+            .where(
+              or(
+                eq(ranked.rank, 1),
+                inArray(state, [...RunState.OPEN_STATE_TAGS]),
+                and(
+                  eq(state, "Failed"),
+                  or(isNull(ranked.resolved), ne(ranked.resolved, ranked.latestAttempt)),
+                ),
+                sql`${ranked.runId} in (select value from json_each(${JSON.stringify(attentionRunIds)}))`,
               ),
-              sql`${ranked.runId} in (select value from json_each(${JSON.stringify(attentionRunIds)}))`,
+            );
+        const selectedRuns = current().unionAll(
+          database
+            .select({ runId: runs.runId })
+            .from(runs)
+            .where(
+              inArray(sql`cast(json_extract(${runs.stateJson}, '$.fixRunId') as text)`, current()),
             ),
-          );
+        );
         return selectRunSummaries()
-          .where(
-            or(
-              inArray(runs.runId, current),
-              inArray(sql`json_extract(${runs.stateJson}, '$.fixRunId')`, current),
-            ),
-          )
+          .where(inArray(runs.runId, selectedRuns))
           .orderBy(desc(runs.openedAt), desc(runs.runId))
           .execute()
           .pipe(Effect.flatMap(decodeRunSummaryRows));
@@ -507,7 +511,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
         .execute()
         .pipe(Effect.flatMap(decodeRunSummaryRows)),
       selectRunSummaries()
-        .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
+        .where(eq(sql<number>`${runs.closedAt} is not null`, 1))
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .limit(closedLimit)
         .execute()
@@ -546,7 +550,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     const closedRuns = yield* selectRunSummaries()
       .where(
         and(
-          notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]),
+          isNotNull(runs.closedAt),
           repositories === undefined
             ? undefined
             : sql`lower(${runs.repository}) in (select value from json_each(${JSON.stringify(repositories.map(canonicalRepositoryName))}))`,
@@ -563,7 +567,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
   const closedRunSummariesSince = Effect.fn("RunStoreQueries.closedRunSummariesSince")(function* (
     since: Option.Option<DateTime.Utc>,
   ) {
-    const closed = notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
+    const closed = isNotNull(runs.closedAt);
     const closedRuns = yield* selectRunSummaries()
       .where(
         Option.match(since, {
