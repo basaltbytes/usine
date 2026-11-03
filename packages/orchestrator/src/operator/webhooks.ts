@@ -17,13 +17,13 @@ export const webhookAttentionFor = (
     yield* Effect.logDebug("Webhook endpoint has received no verified delivery for ten minutes", {
       startedAt,
     });
-    const need = new WebhookSilenceNeed({
+    const need = WebhookSilenceNeed.make({
       id: "webhook-silence",
       startedAt,
       publicUrl: webhooks.publicUrl.href,
     });
     const { needsYou, dismissedNeeds } = partitionNeeds([need], yield* acknowledgements.list());
-    return new ReadyOverview({
+    return ReadyOverview.make({
       ...overview,
       needsYou: [...overview.needsYou, ...needsYou],
       dismissedNeeds: [...overview.dismissedNeeds, ...dismissedNeeds],

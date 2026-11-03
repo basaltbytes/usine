@@ -20,7 +20,7 @@ import { configurationDiff, configurationEntities } from "../src/configuration/e
 const parser = makeConfigParser(makeExpressionEngine());
 const legacy = (repositories: ReadonlyArray<string>, names: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const config = Schema.decodeUnknownSync(UsineConfig)({
+    const config = Schema.decodeSync(UsineConfig)({
       version: 1,
       repos: repositories.map((name) => ({
         name,
@@ -37,7 +37,7 @@ const legacy = (repositories: ReadonlyArray<string>, names: ReadonlyArray<string
         "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement.\n",
       ),
     );
-    return new LoadedInstance({
+    return LoadedInstance.make({
       config,
       agents: [agent],
       loops,
@@ -50,7 +50,7 @@ const legacy = (repositories: ReadonlyArray<string>, names: ReadonlyArray<string
 it.effect("restricts a project's loops to its repositories before applying selectors", () =>
   Effect.gen(function* () {
     const original = yield* legacy(["acme/one", "acme/two", "acme/orphan"], ["implement"]);
-    const config = Schema.decodeUnknownSync(UsineConfig)({
+    const config = Schema.decodeSync(UsineConfig)({
       version: 2,
       repos: original.config.repos.map(({ name }) => ({ name })),
       projects: [
@@ -64,10 +64,10 @@ it.effect("restricts a project's loops to its repositories before applying selec
     });
     const source = original.loops[0];
     if (source === undefined) return yield* Effect.die("fixture loop missing");
-    const loop = new LoopFile({ ...source, name: LoopName.make("workspace/implement") });
-    const selected = new LoopFile({
+    const loop = LoopFile.make({ ...source, name: LoopName.make("workspace/implement") });
+    const selected = LoopFile.make({
       ...loop,
-      selector: Option.some(Schema.decodeUnknownSync(Selector)({ repos: ["acme/two"] })),
+      selector: Option.some(Schema.decodeSync(Selector)({ repos: ["acme/two"] })),
     });
     expect(
       config.repos.filter((repo) => matchesLoop(config, loop, repo)).map(({ name }) => name),
@@ -78,8 +78,8 @@ it.effect("restricts a project's loops to its repositories before applying selec
     expect(boardRepositories(config).map(({ name }) => name)).toEqual(["acme/one", "acme/two"]);
     for (const repo of boardRepositories(config))
       expect(labelsForRepository(config, repo.name).map(({ name }) => name)).toContain("ready");
-    expect(
-      () => new UsineConfig({ ...config, projects: [...config.projects, ...config.projects] }),
+    expect(() =>
+      UsineConfig.make({ ...config, projects: [...config.projects, ...config.projects] }),
     ).toThrow();
   }),
 );

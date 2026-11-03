@@ -11,6 +11,8 @@ import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
 
 it.effect("cached SQLite statements release completed responses across six hours of polling", () =>
   Effect.gen(function* () {
+    const effectContext = yield* Effect.context<never>();
+
     class ResponsePayload {
       readonly body = JSON.stringify({ data: "x".repeat(1024 * 1024) });
     }
@@ -47,7 +49,7 @@ it.effect("cached SQLite statements release completed responses across six hours
               Effect.provideService(Statement.SpanPropagationEnabled, propagate),
               Effect.provideContext(context),
             );
-            yield* Effect.promise(() => Effect.runPromise(request));
+            yield* Effect.promise(() => Effect.runPromiseWith(effectContext)(request));
           }
         }
       }

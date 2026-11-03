@@ -97,7 +97,7 @@ export const sendingShell = (
 ): RemoteShell => {
   const entries = Object.entries(variables);
   if (entries.length === 0) return shell;
-  return new RemoteShell({
+  return RemoteShell.make({
     ssh: {
       command: shell.ssh.command,
       args: [...shell.ssh.args, "-o", `SendEnv=${entries.map(([name]) => name).join(" ")}`],
@@ -116,7 +116,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
   const environment = yield* allowlistedEnvironment(SSH_ENVIRONMENT_ALLOWLIST);
 
   const shellFor = (ssh: SshCommand, destination: SshDestination) =>
-    new RemoteShell({ ssh, sshEnvironment: environment, destination });
+    RemoteShell.make({ ssh, sshEnvironment: environment, destination });
 
   const executeRaw = Effect.fn("RemoteExecutor.executeRaw")(function* (
     operation: ExecutorOperation,

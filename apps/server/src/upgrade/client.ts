@@ -30,7 +30,7 @@ export const requestSystemUpgrade = Effect.fn("Cli.requestSystemUpgrade")(
       return;
     }
     yield* client.operator.requestUpgrade({
-      payload: new UpgradeRequest({
+      payload: UpgradeRequest.make({
         timing: command.options.force ? "now" : "idle",
         version: Option.some(target),
       }),
@@ -39,5 +39,5 @@ export const requestSystemUpgrade = Effect.fn("Cli.requestSystemUpgrade")(
       `Upgrade to ${target} requested. Follow progress in Settings or the upgrade service journal.`,
     );
   },
-  Effect.mapError((error) => new UpgradeError({ message: error.message })),
+  Effect.mapError((error) => UpgradeError.make({ message: error.message })),
 );

@@ -1,6 +1,5 @@
 {
   "src/access.ts": {
-    "newSchemaClass": 4,
     "redundantSchemaTagIdentifier": 1,
     "schemaClassMissingBrand": 5,
     "yieldInCallArgument": 1
@@ -16,17 +15,12 @@
     "schemaClassMissingBrand": 2
   },
   "src/agent/session.ts": {
-    "preferSucceedSomeOrNone": 1,
-    "schemaClassMissingBrand": 17,
-    "schemaNumber": 2
+    "schemaClassMissingBrand": 17
   },
   "src/attempt/attempt.ts": {
-    "newSchemaClass": 3,
-    "preferSucceedSomeOrNone": 1,
     "schemaClassMissingBrand": 8
   },
   "src/attempt/channel.ts": {
-    "preferSucceedSomeOrNone": 1,
     "schemaClassMissingBrand": 21
   },
   "src/attempt/failure.ts": {
@@ -46,13 +40,10 @@
     "schemaStructWithTag": 3
   },
   "src/ci.ts": {
-    "newSchemaClass": 1,
-    "preferTypedSchemaDecoder": 1,
     "redundantSchemaTagIdentifier": 4,
     "schemaClassMissingBrand": 7
   },
   "src/cycle-budget.ts": {
-    "newSchemaClass": 2,
     "schemaClassMissingBrand": 3
   },
   "src/event.ts": {
@@ -68,16 +59,12 @@
     "schemaClassMissingBrand": 1
   },
   "src/run/state.ts": {
-    "newSchemaClass": 12,
-    "preferSucceedSomeOrNone": 1,
     "schemaClassMissingBrand": 13
   },
   "src/step/harvest.ts": {
-    "newSchemaClass": 11,
     "schemaClassMissingBrand": 1
   },
   "src/step/result.ts": {
-    "preferSucceedSomeOrNone": 1,
     "schemaClassMissingBrand": 4
   },
   "src/step/step.ts": {
@@ -89,43 +76,30 @@
   "src/worker.ts": {
     "schemaClassMissingBrand": 4
   },
-  "test/access.test.ts": {
-    "newSchemaClass": 7
-  },
   "test/agent.test.ts": {
-    "newSchemaClass": 6,
-    "preferTypedSchemaDecoder": 1,
     "schemaSync": 3
   },
   "test/attempt-channel.test.ts": {
-    "newSchemaClass": 43,
-    "preferTypedSchemaDecoder": 12,
     "schemaSync": 33
   },
   "test/attempt.test.ts": {
-    "newSchemaClass": 11,
-    "preferTypedSchemaDecoder": 3,
     "schemaSync": 8
   },
   "test/ci.test.ts": {
     "globalJson": 2
   },
   "test/cycle-budget.test.ts": {
-    "preferTypedSchemaDecoder": 2,
     "schemaSync": 4
   },
   "test/harvest.test.ts": {
     "globalJson": 2,
     "globalJsonInEffect": 3,
-    "newSchemaClass": 8,
     "preferSchemaTaggedError": 1
   },
   "test/repository.test.ts": {
-    "preferTypedSchemaDecoder": 1,
     "schemaSync": 1
   },
   "test/run-state.test.ts": {
-    "newSchemaClass": 24,
     "schemaSync": 2
   }
 }

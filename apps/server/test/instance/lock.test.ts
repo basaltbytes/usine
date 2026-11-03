@@ -34,15 +34,15 @@ const instanceFolder = () => {
   return InstanceDirectory.make(folder);
 };
 
-const record = new InstanceRecord({
+const record = InstanceRecord.make({
   pid: ProcessId.make(process.pid),
   version: "1.2.3",
   startedAt: DateTime.makeUnsafe("2026-10-25T16:00:00.000Z"),
-  launch: new InstanceLaunch({
+  launch: InstanceLaunch.make({
     node: process.execPath,
     nodeOptions: ["--enable-source-maps"],
     script: "/opt/usine/dist/main.js",
-    port: Port.make(8_111),
+    port: Port.make(8111),
     logLevel: "Info",
     allowVolatileInstance: false,
   }),

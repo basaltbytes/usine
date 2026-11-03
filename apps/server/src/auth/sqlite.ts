@@ -81,7 +81,7 @@ export const sqliteAuthLayer = Layer.effect(
             )
           )
             return yield* authFailure("This GitHub login belongs to another member.", 409);
-          const renamed = new Member({ ...member, login: identity.login });
+          const renamed = Member.make({ ...member, login: identity.login });
           const value = yield* Schema.encodeEffect(MemberJson)(renamed);
           yield* sql`UPDATE usine_members SET login = ${identity.login}, value = ${value} WHERE id = ${identity.id}`;
           yield* Effect.logInfo("Member login updated", {

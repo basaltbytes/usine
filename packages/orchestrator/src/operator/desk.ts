@@ -350,18 +350,18 @@ const stallReason = ({
     // The engine doesn't stop an Attempt that already runs, but starts no other one.
     const running = open.attempts.at(-1)?.outcome === null;
     if (Option.isSome(stop) && open.state !== "Waiting" && !running)
-      return Option.some(new WaitingForStopView({ run: open, stop: stop.value }));
+      return Option.some(WaitingForStopView.make({ run: open, stop: stop.value }));
     if (open.upgradeWait !== null)
-      return Option.some(new WaitingForUpgradeView({ run: open, wait: open.upgradeWait }));
+      return Option.some(WaitingForUpgradeView.make({ run: open, wait: open.upgradeWait }));
     switch (open.state) {
       case "Running":
       case "AwaitingCi":
         return Option.none();
       case "Waiting":
-        return Option.some(new AwaitingApprovalView({ run: open }));
+        return Option.some(AwaitingApprovalView.make({ run: open }));
       default:
         return Option.some(
-          new QueuedForWorkerView({
+          QueuedForWorkerView.make({
             run: open,
             ahead: queue.get(open.id)?.ahead ?? null,
             priority: queue.get(open.id)?.position.priority ?? null,
@@ -370,7 +370,7 @@ const stallReason = ({
         );
     }
   }
-  if (paused) return Option.some(new LoopPausedView());
+  if (paused) return Option.some(LoopPausedView.make());
   const runOf = (runId: RunSummaryView["id"]) =>
     Option.fromNullishOr(runs.find(({ id }) => id === runId));
   const suppressing = Option.flatMap(
@@ -378,9 +378,9 @@ const stallReason = ({
     runOf,
   );
   if (Option.isSome(suppressing)) {
-    return Option.some(new SuppressedForOperatorView({ run: suppressing.value }));
+    return Option.some(SuppressedForOperatorView.make({ run: suppressing.value }));
   }
-  if (Option.isSome(ask)) return Option.some(new CycleBudgetUsedUpView({ ask: ask.value }));
+  if (Option.isSome(ask)) return Option.some(CycleBudgetUsedUpView.make({ ask: ask.value }));
   const owner = Option.flatMap(
     Option.flatMap(sighting, ({ run }) => run),
     runOf,
@@ -388,11 +388,11 @@ const stallReason = ({
   if (Option.isSome(owner)) {
     return Option.some(
       owner.value.state === "Failed"
-        ? new RunFailedView({ run: owner.value })
-        : new ClosedUnchangedView({ run: owner.value }),
+        ? RunFailedView.make({ run: owner.value })
+        : ClosedUnchangedView.make({ run: owner.value }),
     );
   }
-  return Option.some(new AwaitingPollView());
+  return Option.some(AwaitingPollView.make());
 };
 
 /**
@@ -446,7 +446,7 @@ const attemptActivity = (
     if (isActivity(entry)) lastActivity = entry;
     const payload = entry.envelope.payload;
     if (payload._tag === "WorkerUnresponsive") {
-      worker = new WorkerSilentView({
+      worker = WorkerSilentView.make({
         worker: payload.worker,
         lastAnsweredAt: DateTime.formatIso(payload.lastAnsweredAt),
       });
@@ -457,7 +457,7 @@ const attemptActivity = (
       if (event._tag === "ProviderRetrying") {
         providers.set(
           event.session.id,
-          new ProviderRetryingView({
+          ProviderRetryingView.make({
             agent: event.session.agent,
             message: event.message,
             retries: event.retries,
@@ -540,13 +540,13 @@ const makeDesk = Effect.gen(function* () {
     const [entries, worker] = yield* Effect.all(
       [
         reader.transcript(
-          new TranscriptPageQuery({
+          TranscriptPageQuery.make({
             attemptId: attempt.id,
             before: Option.none(),
             limit: RECENT_TRANSCRIPT_ROWS,
           }),
         ),
-        reader.transcript(new TranscriptWorkerQuery({ attemptId: attempt.id })),
+        reader.transcript(TranscriptWorkerQuery.make({ attemptId: attempt.id })),
       ],
       { concurrency: "unbounded" },
     );
@@ -572,7 +572,7 @@ const makeDesk = Effect.gen(function* () {
       [
         reader.list({ closedLimit: 0 }),
         reader.closed(
-          permits(grants, "read", new InstanceScope())
+          permits(grants, "read", InstanceScope.make())
             ? { limit: CLOSED_RUNS_READ }
             : {
                 limit: CLOSED_RUNS_READ,
@@ -623,7 +623,7 @@ const makeDesk = Effect.gen(function* () {
         const projected = yield* Effect.result(projectedItem(stored));
         // The Board reports an Item it can't project in Needs you.
         if (Result.isFailure(projected)) continue;
-        links.set(projected.success.itemKey, new BoardItemLink(projected.success));
+        links.set(projected.success.itemKey, BoardItemLink.make(projected.success));
       }
     }
 
@@ -653,7 +653,7 @@ const makeDesk = Effect.gen(function* () {
               runs.get(stop.runId)?.attempts.find(({ id }) => id === stop.attemptId),
             ),
             ({ number }) =>
-              new UnconfirmedStopView({
+              UnconfirmedStopView.make({
                 runId: stop.runId,
                 attemptNumber: number,
                 worker: stop.worker,
@@ -703,7 +703,7 @@ const makeDesk = Effect.gen(function* () {
         }),
       });
       notMoving.push(
-        new StalledItemView({
+        StalledItemView.make({
           repository: item.repository,
           loop: loop.name,
           item: link,
@@ -720,15 +720,13 @@ const makeDesk = Effect.gen(function* () {
           : [];
       }),
       ({ run, attempt }) =>
-        Effect.map(
-          recentActivity(attempt),
-          (activity) =>
-            new RunningAttemptView({
-              run,
-              attempt,
-              item: links.get(run.itemKey) ?? null,
-              ...activity,
-            }),
+        Effect.map(recentActivity(attempt), (activity) =>
+          RunningAttemptView.make({
+            run,
+            attempt,
+            item: links.get(run.itemKey) ?? null,
+            ...activity,
+          }),
         ),
       { concurrency: 4 },
     );
@@ -737,7 +735,7 @@ const makeDesk = Effect.gen(function* () {
       .filter((summary) => visible(summary.repository) && !replacedBeforeStart(summary))
       .map((summary) => {
         const run = runSummaryView(summary, paused, access, waits, upgrade);
-        return new ClosedRunView({
+        return ClosedRunView.make({
           run,
           item: links.get(run.itemKey) ?? null,
           closedAt: closedAt(run),
@@ -755,10 +753,10 @@ const makeDesk = Effect.gen(function* () {
     ].map((name) => {
       const slot = slotsByWorker.get(name);
       const preflight = preflightByWorker.get(name);
-      return new WorkerView({
+      return WorkerView.make({
         name,
         upgradeWait: upgrade?.wait ?? null,
-        slots: new WorkerSlotsView({
+        slots: WorkerSlotsView.make({
           capacity:
             slot?.capacity ??
             instance.config.workers.find((worker) => worker.name === name)?.maxConcurrentAttempts ??
@@ -786,7 +784,7 @@ const makeDesk = Effect.gen(function* () {
       const poll = completed.find(
         ({ repository }) => canonicalRepositoryName(repository) === canonicalRepositoryName(name),
       );
-      return new RepositoryPollView({
+      return RepositoryPollView.make({
         repository: name,
         polledAt: poll === undefined ? null : DateTime.formatIso(poll.completedAt),
       });
@@ -799,11 +797,11 @@ const makeDesk = Effect.gen(function* () {
       lastOutcomes: lastOutcomes.length,
       workers: workers.length,
     });
-    return new DeskView({
+    return DeskView.make({
       running: running.filter(({ run }) => visible(run.repository)),
       notMoving: [...notMoving].filter(({ repository }) => visible(repository)).sort(stalledOrder),
       lastOutcomes,
-      workers: permits(grants, "admin", new InstanceScope()) ? workers : [],
+      workers: permits(grants, "admin", InstanceScope.make()) ? workers : [],
       polls: polls.filter(({ repository }) => visible(repository)),
     });
   });

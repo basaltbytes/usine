@@ -28,14 +28,14 @@ interface Scripted {
 }
 
 /** A failed git command as an executor reports it: the exit code in the message and git's stderr as the cause. */
-const PUSH_REJECTED = new ExecutorOperationError({
+const PUSH_REJECTED = ExecutorOperationError.make({
   operation: "cleanup",
   message: "git exited with code 128",
   cause: new Error("remote: Repository not found.\n"),
 });
 
 /** GitHub's refusal of a push with a file over its size limit, as git reports it. */
-const LARGE_FILE_REFUSED = new ExecutorOperationError({
+const LARGE_FILE_REFUSED = ExecutorOperationError.make({
   operation: "cleanup",
   message: "git exited with code 1",
   cause: new Error(
@@ -49,7 +49,7 @@ const LARGE_FILE_REFUSED = new ExecutorOperationError({
 });
 
 /** A failed git command whose cause is an `Error` without a message, such as Effect's `TimeoutError`. */
-const NO_CAUSE_MESSAGE = new ExecutorOperationError({
+const NO_CAUSE_MESSAGE = ExecutorOperationError.make({
   operation: "cleanup",
   message: "Can't run ssh",
   cause: new Cause.TimeoutError(),
@@ -238,7 +238,7 @@ describe("salvageWorktree", () => {
 
   it.effect("pushes a rejected checkout again only once its commit changes", () =>
     Effect.gen(function* () {
-      const rejected = new SalvageRejected({ path: WORKTREE, commit: AHEAD, message: "GH001" });
+      const rejected = SalvageRejected.make({ path: WORKTREE, commit: AHEAD, message: "GH001" });
       const unchanged = yield* salvage({ head: () => AHEAD, status: "" }, Option.some(rejected));
       assert.deepStrictEqual(unchanged.result, Option.some(rejected));
       assert(!commandsOf(unchanged.calls).includes("push"));
@@ -256,7 +256,7 @@ describe("salvageWorktree", () => {
     "keeps the recorded rejection when %s fails, so that the next recovery doesn't push the refused commit",
     (stage) =>
       Effect.gen(function* () {
-        const rejected = new SalvageRejected({ path: WORKTREE, commit: AHEAD, message: "GH001" });
+        const rejected = SalvageRejected.make({ path: WORKTREE, commit: AHEAD, message: "GH001" });
         const failed = yield* salvage(
           { head: () => AHEAD, status: "?? unfinished.ts\n", [stage]: "fails" },
           Option.some(rejected),
@@ -279,7 +279,11 @@ describe("salvageWorktree", () => {
     "retains a checkout whose head moved past the rejected commit when its commit fails",
     () =>
       Effect.gen(function* () {
-        const rejected = new SalvageRejected({ path: WORKTREE, commit: REFUSED, message: "GH001" });
+        const rejected = SalvageRejected.make({
+          path: WORKTREE,
+          commit: REFUSED,
+          message: "GH001",
+        });
         const { result } = yield* salvage(
           { head: () => AHEAD, status: "?? unfinished.ts\n", commit: "fails" },
           Option.some(rejected),

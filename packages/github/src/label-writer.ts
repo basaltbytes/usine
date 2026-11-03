@@ -86,7 +86,7 @@ export class GitHubLabelWriter extends Context.Service<
             ).pipe(
               Effect.mapError((error) => invalidResponse("create-repository-label", error.message)),
             );
-            return new RepositoryLabel({
+            return RepositoryLabel.make({
               name: created.name,
               color: created.color,
               description: Option.fromNullishOr(created.description),

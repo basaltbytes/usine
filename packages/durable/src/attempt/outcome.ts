@@ -67,7 +67,7 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
   const outcome = task.state.outcome;
   if (outcome === undefined) {
     return Result.fail(
-      new InfraFailure({ message: "The attempt task is still running", cause: task.state.status }),
+      InfraFailure.make({ message: "The attempt task is still running", cause: task.state.status }),
     );
   }
   switch (outcome.status) {
@@ -75,37 +75,36 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
       return Option.match(decodeResult(outcome.result), {
         onNone: () =>
           Result.fail(
-            new DefectFailure({
+            DefectFailure.make({
               message: "The attempt task completed without a final message",
               cause: outcome.result,
             }),
           ),
         onSome: ({ message, answeredOperator }) =>
           Result.succeed(
-            new AttemptReport({ message, answeredOperator: answeredOperator ?? false }),
+            AttemptReport.make({ message, answeredOperator: answeredOperator ?? false }),
           ),
       });
     case "failed":
       return Result.fail(
-        Option.getOrElse(
-          decodeFailure(outcome.error.detail),
-          () => new InfraFailure({ message: outcome.error.message, cause: outcome.error }),
+        Option.getOrElse(decodeFailure(outcome.error.detail), () =>
+          InfraFailure.make({ message: outcome.error.message, cause: outcome.error }),
         ),
       );
     case "aborted":
       return Result.fail(
-        new AgentFailure({ message: "The attempt was canceled, and its parent stopped" }),
+        AgentFailure.make({ message: "The attempt was canceled, and its parent stopped" }),
       );
     case "faulted":
       return Result.fail(
-        new DefectFailure({
+        DefectFailure.make({
           message: `The attempt task faulted: ${outcome.error.message}`,
           cause: outcome.error,
         }),
       );
     case "orphaned":
       return Result.fail(
-        new InfraFailure({
+        InfraFailure.make({
           message: `The attempt task can no longer run: ${outcome.reason}`,
           cause: outcome.reason,
         }),
@@ -130,11 +129,11 @@ export const finishedOf = (
   if (!record.terminalRelayed || task.state.outcome?.status === "aborted") return Option.none();
   return Option.some(
     Result.match(settledOf(task), {
-      onFailure: (failure): FinishedAttempt => new ParentFailed({ failure }),
+      onFailure: (failure): FinishedAttempt => ParentFailed.make({ failure }),
       onSuccess: (report) =>
         Option.match(Option.flatMap(Option.fromUndefinedOr(record.result), decodeHarvested), {
-          onNone: (): FinishedAttempt => new ParentReported({ report }),
-          onSome: (result) => new ResultRecorded({ result }),
+          onNone: (): FinishedAttempt => ParentReported.make({ report }),
+          onSome: (result) => ResultRecorded.make({ result }),
         }),
     }),
   );

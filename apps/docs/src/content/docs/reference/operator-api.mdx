@@ -7,6 +7,8 @@ import OperatorApiReference from "../../../components/operator-api-reference.ast
 
 The operator API reads instance state, manages configuration, and operates runs. This reference renders the committed [OpenAPI 3.1 document](/openapi.json). For the contract of a running instance, request `GET /api/openapi.json` from that instance. The schema endpoint is public and contains no instance configuration or credentials.
 
+Token timestamps and device authorization polling intervals use finite JSON numbers.
+
 ## Authentication
 
 Send an instance token as `Authorization: Bearer <token>`. Browser clients can use the `usine_session` cookie; writes with a session also require `X-Usine-CSRF`. See [Sign in](/guides/sign-in/) for browser sessions, and [Create a device token](/guides/create-a-device-token/) for token issuance. The document marks health, sign-in, and schema operations as public. `GET /api/auth/session` returns effective permissions as `{permission, scope}` grants. Roles and token ceilings both limit access; a forbidden operation returns HTTP 403. Lists include only projects with read access.

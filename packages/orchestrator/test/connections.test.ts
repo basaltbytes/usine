@@ -64,7 +64,7 @@ for (const restart of [false, true]) {
             const connections = yield* workerConnectionsFor<SshWorkerAddress>(
               `${root}/.usine/attempt-connections`,
               (worker) =>
-                sshWorkerAddressesOf(new UsineConfig({ ...config, workers: [worker] })).pipe(
+                sshWorkerAddressesOf(UsineConfig.make({ ...config, workers: [worker] })).pipe(
                   Effect.map((addresses) => {
                     const address = addresses[0];
                     assert(address !== undefined);
@@ -92,7 +92,7 @@ for (const restart of [false, true]) {
           Effect.gen(function* () {
             const before = machine.state.calls.length;
             yield* Effect.scoped(
-              executor.prepare(new CheckoutRequest({ ...request, reattach: true })),
+              executor.prepare(CheckoutRequest.make({ ...request, reattach: true })),
             );
             const retained = machine.state.calls.slice(before);
             assert(retained.some(({ command }) => command.args.includes("original-host")));
@@ -100,7 +100,7 @@ for (const restart of [false, true]) {
             const offset = machine.state.calls.length;
             yield* Effect.scoped(
               executor.prepare(
-                new CheckoutRequest({ ...request, attemptId: AttemptId.make("next/execute/1") }),
+                CheckoutRequest.make({ ...request, attemptId: AttemptId.make("next/execute/1") }),
               ),
             );
             assert(

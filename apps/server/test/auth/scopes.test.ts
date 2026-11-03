@@ -16,9 +16,9 @@ import { secretHash } from "../../src/auth/crypto.ts";
 it("keeps local attribution separate from members and limits issued tokens to current grants", async () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const alpha = new ProjectScope({ project: ProjectId.make("alpha") });
-      const beta = new ProjectScope({ project: ProjectId.make("beta") });
-      let grants: ReadonlyArray<PermissionGrant> = new RoleBinding({
+      const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+      const beta = ProjectScope.make({ project: ProjectId.make("beta") });
+      let grants: ReadonlyArray<PermissionGrant> = RoleBinding.make({
         name: "alice-alpha",
         member: alice.id,
         role: "maintainer",
@@ -38,7 +38,7 @@ it("keeps local attribution separate from members and limits issued tokens to cu
         .pipe(Effect.flip);
       assert.equal(refused.status, 403);
       const issued = yield* auth.createToken(secret, TokenName.make("Read alpha"), [
-        new PermissionGrant({ permission: "read", scope: alpha }),
+        PermissionGrant.make({ permission: "read", scope: alpha }),
       ]);
       const access = yield* auth.authenticate(Redacted.value(issued.secret));
       assert.isTrue(permits(access.permissions, "read", alpha));
@@ -65,15 +65,17 @@ for (const initialRole of ["none", "viewer"] as const)
   it(`updates the same browser session when a ${initialRole} member gains an operator binding`, async () =>
     Effect.runPromise(
       Effect.gen(function* () {
-        const alpha = new ProjectScope({ project: ProjectId.make("alpha") });
-        const binding = new RoleBinding({
+        const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+        const binding = RoleBinding.make({
           name: "alice-alpha",
           member: alice.id,
           role: "operator",
           scope: alpha,
         });
         let grants: ReadonlyArray<PermissionGrant> =
-          initialRole === "none" ? [] : new RoleBinding({ ...binding, role: "viewer" }).permissions;
+          initialRole === "none"
+            ? []
+            : RoleBinding.make({ ...binding, role: "viewer" }).permissions;
         const { authentication: auth, store } = yield* authFixture([alice], alice, () => grants);
         const started = yield* auth.startWeb(false);
         const session = yield* auth.finishWeb(Redacted.value(started.state), "code");
@@ -89,7 +91,7 @@ for (const initialRole of ["none", "viewer"] as const)
             alpha,
           ),
         );
-        grants = new RoleBinding({ ...binding, role: "maintainer" }).permissions;
+        grants = RoleBinding.make({ ...binding, role: "maintainer" }).permissions;
         assert.isFalse(
           permits(
             (yield* auth.authenticate(Redacted.value(device.secret))).permissions,
@@ -107,8 +109,8 @@ for (const initialRole of ["none", "viewer"] as const)
 it("uses current bindings for a browser session with a stored scope ceiling", async () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const alpha = new ProjectScope({ project: ProjectId.make("alpha") });
-      const binding = new RoleBinding({
+      const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+      const binding = RoleBinding.make({
         name: "alice-alpha",
         member: alice.id,
         role: "operator",
@@ -121,16 +123,16 @@ it("uses current bindings for a browser session with a stored scope ceiling", as
       );
       const now = yield* Clock.currentTimeMillis;
       yield* store.issue(
-        new InstanceToken({
+        InstanceToken.make({
           id: TokenId.make("existing-browser"),
           memberId: alice.id,
           name: TokenName.make("Browser"),
           hash: secretHash("existing-browser-secret"),
-          scopes: new RoleBinding({ ...binding, role: "viewer" }).permissions,
+          scopes: RoleBinding.make({ ...binding, role: "viewer" }).permissions,
           kind: "session",
           createdAt: now,
           lastUsedAt: now,
-          expiresAt: now + 60_000,
+          expiresAt: now + 60000,
         }),
       );
       assert.isTrue(
@@ -146,8 +148,8 @@ it("uses current bindings for a browser session with a stored scope ceiling", as
 it("removes access from an existing browser session when its binding is removed", async () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const alpha = new ProjectScope({ project: ProjectId.make("alpha") });
-      let grants: ReadonlyArray<PermissionGrant> = new RoleBinding({
+      const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+      let grants: ReadonlyArray<PermissionGrant> = RoleBinding.make({
         name: "alice-alpha",
         member: alice.id,
         role: "operator",
@@ -168,8 +170,8 @@ it("removes access from an existing browser session when its binding is removed"
 it("keeps device sign-in scopes at the current binding snapshot after a promotion", async () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const alpha = new ProjectScope({ project: ProjectId.make("alpha") });
-      const binding = new RoleBinding({
+      const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+      const binding = RoleBinding.make({
         name: "alice-alpha",
         member: alice.id,
         role: "viewer",
@@ -183,7 +185,7 @@ it("keeps device sign-in scopes at the current binding snapshot after a promotio
       assert.isTrue(Option.isSome(issued));
       if (Option.isNone(issued)) return;
       const secret = Redacted.value(issued.value.secret);
-      grants = new RoleBinding({ ...binding, role: "operator" }).permissions;
+      grants = RoleBinding.make({ ...binding, role: "operator" }).permissions;
       const access = yield* auth.authenticate(secret);
       assert.isTrue(permits(access.permissions, "read", alpha));
       assert.isFalse(permits(access.permissions, "operate", alpha));

@@ -1,7 +1,7 @@
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { OperatorLogin } from "@usine/core/operator";
 import { assert, it } from "@effect/vitest";
-import { Effect, Option, Ref } from "effect";
+import { Effect, Option, Ref, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { AttentionAcknowledgement } from "@usine/engine/attention";
 import { WebhookHealth } from "../src/webhooks.ts";
@@ -18,7 +18,7 @@ it.effect(
       const revision = (yield* bus.open).revision;
       const saved = yield* Ref.make<ReadonlyArray<AttentionAcknowledgement>>([]);
       const attention = webhookAttentionFor(health, { list: () => Ref.get(saved) });
-      const overview = new ReadyOverview({ projects: [], loops: [], needsYou: [] });
+      const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });
       const config = {
         mode: "endpoint",
         publicUrl: new URL("https://usine.example/webhooks/github"),
@@ -39,13 +39,12 @@ it.effect(
       assert.strictEqual(warning.needsYou[0]?._tag, "WebhookSilenceNeed");
       yield* Ref.set(
         saved,
-        warning.needsYou.map(
-          (need) =>
-            new AttentionAcknowledgement({
-              ...attentionKey(need),
-              dismissedBy: Option.some(OperatorLogin.make("operator")),
-              dismissedAt: health.startedAt,
-            }),
+        warning.needsYou.map((need) =>
+          AttentionAcknowledgement.make({
+            ...attentionKey(need),
+            dismissedBy: Option.some(OperatorLogin.make("operator")),
+            dismissedAt: health.startedAt,
+          }),
         ),
       );
       const dismissed = yield* attention(overview, config);
@@ -62,5 +61,8 @@ it.effect(
       assert.strictEqual((yield* bus.open).revision, revision + 2);
       assert.deepStrictEqual((yield* attention(overview, config)).needsYou, []);
       assert.deepStrictEqual((yield* attention(overview, config)).dismissedNeeds, []);
-    }).pipe(Effect.provide(WebhookHealth.layer), Effect.provide(changeBusLayer), Effect.scoped),
+    }).pipe(
+      Effect.provide(WebhookHealth.layer.pipe(Layer.provideMerge(changeBusLayer))),
+      Effect.scoped,
+    ),
 );

@@ -72,7 +72,7 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
     yield* Effect.logInfo("Refusing to restart: usine is not running in the instance folder", {
       instanceDirectory: directory,
     });
-    return yield* new InstanceNotRunningError({ command: "restart", directory });
+    return yield* InstanceNotRunningError.make({ command: "restart", directory });
   }
   if (state._tag === "Running") {
     const { record } = state;
@@ -90,7 +90,7 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
       "Refusing to restart: a process holds the instance lock, but the pid file names no running process",
       { instanceDirectory: directory },
     );
-    return yield* new UnrecordedInstanceError({ command: "restart", directory, pid: state.pid });
+    return yield* UnrecordedInstanceError.make({ command: "restart", directory, pid: state.pid });
   }
   yield* readAdminToken(directory);
   const pid = state.pid.value;

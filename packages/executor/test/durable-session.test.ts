@@ -12,10 +12,10 @@ import { durableSessionFor, type DurableCheckout } from "../src/durable-session.
 import { AttemptWorkspace, WorktreePath } from "../src/executor.ts";
 import { recording, request } from "./exe-dev/support.ts";
 
-const workspace = new AttemptWorkspace({
+const workspace = AttemptWorkspace.make({
   worker: request.worker,
   worktree: WorktreePath.make("/workspace/usine"),
-  spec: new AttemptChannel.RunSpec({
+  spec: AttemptChannel.RunSpec.make({
     ...request,
     baseCommit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
     parentModel: Option.some(PARENT_MODEL),
@@ -24,7 +24,7 @@ const workspace = new AttemptWorkspace({
 });
 
 const checkout: DurableCheckout = {
-  host: new LocalProcess(),
+  host: LocalProcess.make(),
   machine: Option.none(),
   environment: {},
   gatewayCredential: Effect.succeedNone,
@@ -80,7 +80,7 @@ describe("durable session settlement", () => {
               append: (_direction, envelope) =>
                 envelope._tag === "OutboundEnvelope" &&
                 (envelope.payload._tag === "Final" || envelope.payload._tag === "Failed")
-                  ? Effect.fail(new RunawayFailure({ ceiling: "tokens" }))
+                  ? Effect.fail(RunawayFailure.make({ ceiling: "tokens" }))
                   : Effect.void,
             };
             const failure = yield* session.launch(workspace, sink, checkout).pipe(Effect.flip);
@@ -138,7 +138,7 @@ describe("durable session settlement", () => {
             envelope._tag === "OutboundEnvelope" && envelope.payload._tag === "Final"
               ? Deferred.succeed(terminal, undefined).pipe(
                   Effect.andThen(Deferred.await(draining)),
-                  Effect.andThen(new RunawayFailure({ ceiling: "tokens" })),
+                  Effect.andThen(RunawayFailure.make({ ceiling: "tokens" })),
                 )
               : Effect.void,
         };

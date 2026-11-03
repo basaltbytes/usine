@@ -33,7 +33,7 @@ import { PollingTriggers } from "../src/polling-triggers.ts";
 import { memoryCursorStore, pollingTestLayer, unmovedBaseRefHead } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const agent = new AgentFile({
+const agent = AgentFile.make({
   name: AgentName.make("developer"),
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
@@ -42,21 +42,21 @@ const agent = new AgentFile({
   parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
-const loop = new LoopFile({
+const loop = LoopFile.make({
   name: LoopName.make("start-dev"),
-  trigger: new IssueTrigger({ on: "issue", if: Source.make("true") }),
-  selector: Option.some(new Selector({ repos: Option.some([repository]), tags: Option.none() })),
+  trigger: IssueTrigger.make({ on: "issue", if: Source.make("true") }),
+  selector: Option.some(Selector.make({ repos: Option.some([repository]), tags: Option.none() })),
   approval: "required",
   step: StepName.make("run"),
   agent: agent.name,
   body: PromptTemplate.make("Implement it."),
 });
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   labels: [{ name: "ready", color: "A2EEEF" }],
   repos: [{ name: repository }],
 });
-const instance = new LoadedInstance({
+const instance = LoadedInstance.make({
   config,
   agents: [agent],
   invalidAgents: [],
@@ -64,7 +64,7 @@ const instance = new LoadedInstance({
   quarantinedLoops: [],
   warnings: [],
 });
-const emptyCatalog = new RepositoryLabelCatalog({
+const emptyCatalog = RepositoryLabelCatalog.make({
   entityTag: Option.none(),
   labels: [],
 });
@@ -91,7 +91,7 @@ describe("PollingTriggers label preflight", () => {
       changes: (_repository, cursor) =>
         Effect.sync(() => {
           operations.push("changes");
-          return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+          return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
         }),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
@@ -99,7 +99,7 @@ describe("PollingTriggers label preflight", () => {
       create: (_repository, label) =>
         Effect.sync(() => {
           operations.push(`create:${label.name}`);
-          return new RepositoryLabel({
+          return RepositoryLabel.make({
             name: label.name,
             color: Option.getOrElse(label.color, () => RepositoryLabelColor.make("ededed")),
             description: label.description,
@@ -123,7 +123,7 @@ describe("PollingTriggers label preflight", () => {
       missingIssues: () => Effect.succeed([]),
       labels: () =>
         Effect.fail(
-          new GitHubApiError({
+          GitHubApiError.make({
             operation: "list-repository-labels",
             status: Option.some(502),
             message: "GitHub returned HTTP status 502",
@@ -132,7 +132,7 @@ describe("PollingTriggers label preflight", () => {
       changes: (_repository, cursor) =>
         Effect.sync(() => {
           operations.push("changes");
-          return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+          return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
         }),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
@@ -157,7 +157,7 @@ describe("PollingTriggers label preflight", () => {
       missingIssues: () => Effect.succeed([]),
       labels: () =>
         Effect.fail(
-          new GitHubApiError({
+          GitHubApiError.make({
             operation: "list-repository-labels",
             status: Option.some(502),
             message: "catalog request failed",
@@ -165,7 +165,7 @@ describe("PollingTriggers label preflight", () => {
         ),
       changes: () =>
         Effect.fail(
-          new GitHubApiError({
+          GitHubApiError.make({
             operation: "poll-repository-changes",
             status: Option.some(500),
             message: "change detection failed",
@@ -201,21 +201,21 @@ describe("PollingTriggers label preflight", () => {
       labels: () =>
         rateLimited
           ? Effect.fail(
-              new GitHubRateLimitError({
+              GitHubRateLimitError.make({
                 operation: "list-repository-labels",
                 retryAt,
                 message: "catalog rate-limited",
               }),
             )
           : Effect.fail(
-              new GitHubApiError({
+              GitHubApiError.make({
                 operation: "list-repository-labels",
                 status: Option.some(502),
                 message: "catalog request failed",
               }),
             ),
       changes: (_repository, cursor) =>
-        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
     const writer: GitHubLabelWriter["Service"] = {
@@ -248,9 +248,9 @@ describe("PollingTriggers label preflight", () => {
     const github: GitHubPolling["Service"] = {
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
-      labels: () => Effect.succeed(new RepositoryLabelsNotModified()),
+      labels: () => Effect.succeed(RepositoryLabelsNotModified.make()),
       changes: (_repository, cursor) =>
-        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
     const writer: GitHubLabelWriter["Service"] = {
@@ -262,10 +262,10 @@ describe("PollingTriggers label preflight", () => {
         Effect.sync(() => {
           operations.push("projection");
           return Option.some(
-            new RepositoryLabelProjection({
+            RepositoryLabelProjection.make({
               repository: name,
               labels: [
-                new StoredRepositoryLabel({
+                StoredRepositoryLabel.make({
                   name: "ready",
                   color: Option.some("a2eeef"),
                   description: Option.none(),
@@ -293,16 +293,16 @@ describe("PollingTriggers label preflight", () => {
       missingIssues: () => Effect.succeed([]),
       labels: () =>
         Effect.succeed(
-          new RepositoryLabelCatalog({ entityTag: Option.some(catalogEntityTag), labels: [] }),
+          RepositoryLabelCatalog.make({ entityTag: Option.some(catalogEntityTag), labels: [] }),
         ),
       changes: (_repository, cursor) =>
-        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
     const writer: GitHubLabelWriter["Service"] = {
       create: (_repository, label) =>
         Effect.succeed(
-          new RepositoryLabel({
+          RepositoryLabel.make({
             name: label.name,
             color: Option.getOrElse(label.color, () => RepositoryLabelColor.make("ededed")),
             description: label.description,
@@ -332,20 +332,20 @@ describe("PollingTriggers label preflight", () => {
           Effect.sync(() => {
             catalogRequests.push(Option.getOrElse(entityTag, () => "none"));
             return catalogRequests.length === 1
-              ? new RepositoryLabelCatalog({
+              ? RepositoryLabelCatalog.make({
                   entityTag: Option.some(catalogEntityTag),
                   labels: [
-                    new RepositoryLabel({
+                    RepositoryLabel.make({
                       name: RepositoryLabelName.make("ready"),
                       color: RepositoryLabelColor.make("a2eeef"),
                       description: Option.none(),
                     }),
                   ],
                 })
-              : new RepositoryLabelsNotModified();
+              : RepositoryLabelsNotModified.make();
           }),
         changes: (_repository, cursor) =>
-          Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+          Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
         snapshot: () => Effect.die("an unchanged repository has no snapshots"),
       };
       const writer: GitHubLabelWriter["Service"] = {
@@ -380,7 +380,7 @@ describe("PollingTriggers label preflight", () => {
       changes: (_repository, cursor) =>
         Effect.sync(() => {
           operations.push("changes");
-          return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+          return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
         }),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
@@ -389,7 +389,7 @@ describe("PollingTriggers label preflight", () => {
         Effect.sync(() => operations.push("create")).pipe(
           Effect.flatMap(() =>
             Effect.fail(
-              new GitHubApiError({
+              GitHubApiError.make({
                 operation: "create-repository-label",
                 status: Option.some(500),
                 message: "GitHub returned HTTP status 500",
@@ -420,7 +420,7 @@ describe("PollingTriggers label preflight", () => {
       labels: () => Effect.succeed(emptyCatalog),
       changes: () =>
         Effect.fail(
-          new GitHubRateLimitError({
+          GitHubRateLimitError.make({
             operation: "poll-repository-changes",
             retryAt: changesRetryAt,
             message: "change polling rate-limited",
@@ -431,7 +431,7 @@ describe("PollingTriggers label preflight", () => {
     const writer: GitHubLabelWriter["Service"] = {
       create: () =>
         Effect.fail(
-          new GitHubRateLimitError({
+          GitHubRateLimitError.make({
             operation: "create-repository-label",
             retryAt: creationRetryAt,
             message: "label creation rate-limited",

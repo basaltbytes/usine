@@ -54,7 +54,7 @@ export const decodeResponse = <S extends Schema.Top>(
   label: string,
   value: Schema.Json,
 ): Effect.Effect<S["Type"], SessionOperationError, S["DecodingServices"]> =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
+  Schema.decodeEffect(schema)(value).pipe(
     Effect.mapError((cause) =>
       operationError(operation, client, `Codex returned an invalid ${label}`, cause),
     ),
@@ -67,8 +67,8 @@ export const decodeNotification = <S extends Schema.Top>(
   sessionId: AgentSessionId,
   value: Schema.Json,
 ): Effect.Effect<Option.Option<S["Type"]>, never, S["DecodingServices"]> =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
-    Effect.map(Option.some),
+  Schema.decodeEffect(schema)(value).pipe(
+    Effect.asSome,
     Effect.catch((cause) =>
       Effect.logWarning(`Skipping an undecodable Codex ${label}`, { cause, sessionId }).pipe(
         Effect.as(Option.none()),
@@ -98,14 +98,14 @@ export const toolName = (item: typeof ToolItem.Type): string => {
 
 /** Converts a rate-limit window, with reset timestamps in UTC and absent values as `None`. */
 export const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWindow =>
-  new CoreRateLimitWindow({
+  CoreRateLimitWindow.make({
     usedPercent: window.usedPercent,
     windowDurationMinutes: Option.fromNullishOr(window.windowDurationMins),
     resetsAt: Option.fromNullishOr(window.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
   });
 
 const decodeHttpStatus = Schema.decodeUnknownOption(
-  Schema.Struct({ httpStatusCode: Schema.NullOr(Schema.Number) }),
+  Schema.Struct({ httpStatusCode: Schema.NullOr(Schema.Finite) }),
 );
 
 /** Classifies the final turn error, preferring Codex's error code to message matching. */
@@ -131,6 +131,6 @@ export const turnFailure = (
         ),
       );
   return capacity
-    ? new AgentCapacityError({ sessionId: Option.some(sessionId), message })
-    : new AgentResultError({ sessionId: Option.some(sessionId), message });
+    ? AgentCapacityError.make({ sessionId: Option.some(sessionId), message })
+    : AgentResultError.make({ sessionId: Option.some(sessionId), message });
 };

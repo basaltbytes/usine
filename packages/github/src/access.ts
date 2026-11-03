@@ -119,11 +119,11 @@ export const deriveProjectAccess = (
   return registry.map((repository) => {
     const match = byName.get(repository.toLowerCase());
     return match === undefined
-      ? new ProjectNotInstalledError({
+      ? ProjectNotInstalledError.make({
           repository,
           message: `The GitHub App installation has no access to "${repository}"`,
         })
-      : new CoveredProject({
+      : CoveredProject.make({
           installationId: installation.id,
           repository,
           repositoryId: match.id,

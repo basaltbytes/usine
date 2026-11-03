@@ -45,11 +45,11 @@ export const harnessCredentialGap = (
       }
     })();
     return Option.some(
-      new WorkerCapabilityError({
+      WorkerCapabilityError.make({
         worker,
         capability: "harness-login",
         message,
-        cause: new HarnessUnavailableError({ harness, capability: "login", message }),
+        cause: HarnessUnavailableError.make({ harness, capability: "login", message }),
       }),
     );
   }
@@ -99,7 +99,7 @@ export const machineChecksFor = (
         duration: Duration.seconds(provisioner.provisioner.timings.sshWait),
         orElse: () =>
           Effect.fail(
-            new WorkerCapabilityError({
+            WorkerCapabilityError.make({
               worker,
               capability: "machine",
               message: "Machine preflight timed out",
@@ -110,7 +110,7 @@ export const machineChecksFor = (
       Effect.catchTags({
         ExecutorOperationError: (error) =>
           Effect.fail(
-            new WorkerCapabilityError({
+            WorkerCapabilityError.make({
               worker,
               capability: "machine",
               message: `The check of the new machine of worker "${worker}" couldn't run: ${error.message}`,
@@ -119,7 +119,7 @@ export const machineChecksFor = (
           ),
         CredentialUnavailableError: (error) =>
           Effect.fail(
-            new WorkerCapabilityError({
+            WorkerCapabilityError.make({
               worker,
               capability: "credentials",
               message: error.message,
@@ -129,7 +129,7 @@ export const machineChecksFor = (
       }),
     );
     if (Option.isSome(provisioner.provisioner.reuse) && Option.isSome(report.degraded))
-      return yield* new WorkerCapabilityError({
+      return yield* WorkerCapabilityError.make({
         worker,
         capability: "container",
         message: "Machine reuse requires container isolation",
@@ -137,7 +137,7 @@ export const machineChecksFor = (
       });
     const checkedAt = DateTime.toEpochMillis(yield* DateTime.now);
     checkedOn.set(machine.address, checkedAt);
-    return Option.some(new MachineCheck({ brains, containerLimits: report.containerLimits }));
+    return Option.some(MachineCheck.make({ brains, containerLimits: report.containerLimits }));
   });
 
   return { check: checkMachine };
@@ -173,7 +173,7 @@ export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function
   const worker = machine.address.name;
   const host = machine.shell.destination;
   yield* Effect.annotateCurrentSpan({ worker, host });
-  const shell = new RemoteShell({
+  const shell = RemoteShell.make({
     ssh: {
       command: machine.shell.ssh.command,
       args: [...machine.shell.ssh.args, "-o", "ConnectTimeout=10"],
@@ -195,7 +195,7 @@ export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function
       return;
     }
     if (result.exitCode !== SSH_FAILURE)
-      return yield* new WorkerCapabilityError({
+      return yield* WorkerCapabilityError.make({
         worker,
         capability: "machine",
         message: `The new machine of worker "${worker}" at ${host} can't create the root ${machine.address.root}`,

@@ -4,15 +4,12 @@
   },
   "src/expression-engine.ts": {
     "deterministicKeys": 1,
-    "schemaClassMissingBrand": 2,
-    "schemaNumber": 1
+    "schemaClassMissingBrand": 2
   },
   "src/marcbachmann-cel.ts": {
-    "newSchemaClass": 7,
     "schemaSync": 1
   },
   "test/expression.test.ts": {
-    "newSchemaClass": 24,
     "schemaSync": 2,
     "yieldInCallArgument": 6
   }

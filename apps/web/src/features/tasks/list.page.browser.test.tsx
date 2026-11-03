@@ -50,7 +50,7 @@ let respond: typeof globalThis.fetch = missingTask;
 globalThis.fetch = (...args) => respond(...args);
 
 const desk = (notMoving: ReturnType<typeof boardStalled>) =>
-  new DeskView({ running: [], notMoving, lastOutcomes: [], workers: [], polls: [] });
+  DeskView.make({ running: [], notMoving, lastOutcomes: [], workers: [], polls: [] });
 
 let host: HTMLDivElement;
 let root: Root;
@@ -125,7 +125,7 @@ it.each([404, 503])(
     try {
       await invalidateChanges(
         queryClient,
-        new ChangeNotice({
+        ChangeNotice.make({
           revision: 1,
           reset: false,
           changes: [{ kind: "project", id: "board-test-repo" }],
@@ -333,19 +333,18 @@ it("says No runs yet when no task has a run", async () => {
   const overview = boardOverview();
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({
+    ReadyOverview.make({
       ...overview,
-      projects: overview.projects.map(
-        (project) =>
-          new ProjectView({
-            ...project,
-            board: new BoardView({
-              failures: [],
-              lanes: project.board.lanes.filter(({ items }) =>
-                items.every(({ runCount }) => runCount === 0),
-              ),
-            }),
+      projects: overview.projects.map((project) =>
+        ProjectView.make({
+          ...project,
+          board: BoardView.make({
+            failures: [],
+            lanes: project.board.lanes.filter(({ items }) =>
+              items.every(({ runCount }) => runCount === 0),
+            ),
           }),
+        }),
       ),
     }),
   );
@@ -460,14 +459,13 @@ it("updates the running count beside Overview without counting waiting or queued
   const overview = boardOverview();
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({
+    ReadyOverview.make({
       ...overview,
-      projects: overview.projects.map(
-        (project) =>
-          new ProjectView({
-            ...project,
-            runs: project.board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
-          }),
+      projects: overview.projects.map((project) =>
+        ProjectView.make({
+          ...project,
+          runs: project.board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
+        }),
       ),
     }),
   );
@@ -475,14 +473,13 @@ it("updates the running count beside Overview without counting waiting or queued
   await expect.element(page.getByTitle("Running", { exact: true })).toHaveTextContent("1 running");
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({
+    ReadyOverview.make({
       ...overview,
-      projects: overview.projects.map(
-        (project) =>
-          new ProjectView({
-            ...project,
-            runs: project.runs.filter(({ state }) => state !== "Running"),
-          }),
+      projects: overview.projects.map((project) =>
+        ProjectView.make({
+          ...project,
+          runs: project.runs.filter(({ state }) => state !== "Running"),
+        }),
       ),
     }),
   );

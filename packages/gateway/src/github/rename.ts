@@ -112,9 +112,8 @@ export const confirmRename = Effect.fn("GitHubRename.confirm")(function* (
           })),
         ),
         Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
-        Effect.mapError(
-          (error) =>
-            new RenameUnconfirmed({ reason: "github-unreachable", detail: error.reason._tag }),
+        Effect.mapError((error) =>
+          RenameUnconfirmed.make({ reason: "github-unreachable", detail: error.reason._tag }),
         ),
       );
   const former = yield* get(`${origins.api}/repos/${attachment.repository}`);
@@ -124,19 +123,19 @@ export const confirmRename = Effect.fn("GitHubRename.confirm")(function* (
     ),
   ).pipe(Option.filter((path) => REPOSITORY_BY_ID_PATH.test(path)));
   if (!PERMANENT_REDIRECTS.has(former.status) || Option.isNone(byId))
-    return yield* new RenameUnconfirmed({
+    return yield* RenameUnconfirmed.make({
       reason: "former-name-not-redirected",
       detail: `/repos/${attachment.repository} answered ${String(former.status)}`,
     });
   const current = yield* get(`${origins.api}${byId.value}`);
   const name = current.status === 200 ? decodeCurrentName(current.body) : Option.none();
   if (Option.isNone(name))
-    return yield* new RenameUnconfirmed({
+    return yield* RenameUnconfirmed.make({
       reason: "repository-unreadable",
       detail: `${byId.value} answered ${String(current.status)}`,
     });
   if (canonicalRepositoryName(name.value.full_name) !== canonicalRepositoryName(newName))
-    return yield* new RenameUnconfirmed({
+    return yield* RenameUnconfirmed.make({
       reason: "other-current-name",
       detail: `${byId.value} is ${name.value.full_name}`,
     });

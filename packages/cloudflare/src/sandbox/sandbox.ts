@@ -46,7 +46,7 @@ const INACTIVITY_TIMEOUT = Duration.minutes(10);
 const decoder = new TextDecoder();
 
 const unavailable = (name: SandboxName) => (failure: ContainerFailure) =>
-  new ContainerUnavailable({ name, message: `${failure.operation}: ${failure.message}` });
+  ContainerUnavailable.make({ name, message: `${failure.operation}: ${failure.message}` });
 
 /** Returns the bytes of `stream`, or none if it's `null`. */
 const readAll = async (stream: ReadableStream<Uint8Array> | null): Promise<Uint8Array> =>
@@ -57,7 +57,7 @@ export const collectBytes = (process: ContainerProcess) =>
   Effect.tryPromise({
     try: () => Promise.all([readAll(process.stdout), readAll(process.stderr), process.exitCode]),
     catch: (cause) =>
-      new ContainerFailure({
+      ContainerFailure.make({
         operation: "exec",
         message: cause instanceof Error ? cause.message : String(cause),
       }),
@@ -104,7 +104,7 @@ const summarize = Effect.fn("Sandbox.summarize")(function* (sandbox: StoredSandb
 const stored = Effect.fn("Sandbox.stored")(function* (name: SandboxName) {
   const storage = yield* SandboxStorage;
   const found = yield* storage.load;
-  if (Option.isNone(found)) return yield* new SandboxNotFound({ name });
+  if (Option.isNone(found)) return yield* SandboxNotFound.make({ name });
   return found.value;
 });
 
@@ -113,7 +113,7 @@ export const runningSandboxFor = Effect.fn("Sandbox.running")(function* (name: S
   const sandbox = yield* stored(name);
   const container = yield* SandboxContainer;
   if (!(yield* container.running))
-    return yield* new ContainerUnavailable({
+    return yield* ContainerUnavailable.make({
       name,
       message: "The container isn't running, so its disk is gone",
     });
@@ -148,7 +148,7 @@ const refuseStale = Effect.fn("Sandbox.refuseStale")(function* (
     issuedAt: DateTime.formatIso(credentials.issuedAt),
     current: DateTime.formatIso(current),
   });
-  return yield* new StaleCredentials({
+  return yield* StaleCredentials.make({
     name: sandbox.name,
     issuedAt: credentials.issuedAt,
     current,
@@ -168,7 +168,7 @@ const updateStored = Effect.fn("Sandbox.updateStored")(function* (
     const changed = Option.map(stored, change);
     return [changed, changed] as const;
   });
-  if (Option.isNone(updated)) return yield* new SandboxNotFound({ name });
+  if (Option.isNone(updated)) return yield* SandboxNotFound.make({ name });
   return updated.value;
 });
 
@@ -178,9 +178,8 @@ const updateStored = Effect.fn("Sandbox.updateStored")(function* (
  */
 export const extendLease = Effect.fn("Sandbox.extendLease")(function* (name: SandboxName) {
   const now = yield* DateTime.now;
-  return yield* updateStored(
-    name,
-    (sandbox) => new StoredSandbox({ ...sandbox, leaseUntil: DateTime.addDuration(now, LEASE) }),
+  return yield* updateStored(name, (sandbox) =>
+    StoredSandbox.make({ ...sandbox, leaseUntil: DateTime.addDuration(now, LEASE) }),
   );
 });
 
@@ -206,7 +205,7 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
       existingOwner: existing.value.owner,
       existingAttempt: existing.value.attempt,
     });
-    return yield* new SandboxConflict({
+    return yield* SandboxConflict.make({
       name,
       owner: existing.value.owner,
       attempt: existing.value.attempt,
@@ -220,7 +219,7 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
       ...fields,
       images: Object.keys(images).join(","),
     });
-    return yield* new ImageNotFound({ image: request.image, images: Object.keys(images) });
+    return yield* ImageNotFound.make({ image: request.image, images: Object.keys(images) });
   }
   const now = yield* DateTime.now;
   const wasRunning = yield* container.running;
@@ -230,7 +229,7 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
   yield* intercept(name, request.credentials).pipe(Effect.mapError(unavailable(name)));
   // Reads the stored sandbox again: a hold may have arrived while the container started.
   const sandbox = yield* storage.modify((current) => {
-    const created = new StoredSandbox({
+    const created = StoredSandbox.make({
       name,
       owner: request.owner,
       attempt: request.attempt,
@@ -272,14 +271,12 @@ const credentials = Effect.fn("Sandbox.credentials")(function* (
   yield* refuseStale(sandbox, renewed);
   yield* intercept(name, renewed).pipe(Effect.mapError(unavailable(name)));
   const now = yield* DateTime.now;
-  const extended = yield* updateStored(
-    name,
-    (current) =>
-      new StoredSandbox({
-        ...current,
-        leaseUntil: DateTime.addDuration(now, LEASE),
-        credentials: renewed,
-      }),
+  const extended = yield* updateStored(name, (current) =>
+    StoredSandbox.make({
+      ...current,
+      leaseUntil: DateTime.addDuration(now, LEASE),
+      credentials: renewed,
+    }),
   );
   yield* Effect.logInfo("Renewed the sandbox's credentials", {
     sandbox: name,
@@ -302,9 +299,8 @@ const hold = Effect.fn("Sandbox.hold")(function* (name: SandboxName) {
   const sandbox = yield* runningSandboxFor(name);
   const storage = yield* SandboxStorage;
   const now = yield* DateTime.now;
-  const held = yield* updateStored(
-    name,
-    (current) => new StoredSandbox({ ...current, held: true }),
+  const held = yield* updateStored(name, (current) =>
+    StoredSandbox.make({ ...current, held: true }),
   );
   yield* storage.alarmAt(DateTime.addDuration(now, KEEPALIVE_INTERVAL));
   yield* Effect.logInfo(
@@ -324,7 +320,7 @@ const stop = Effect.fn("Sandbox.stop")(function* (name: SandboxName) {
     yield* Effect.logInfo("The sandbox's container isn't running; no command to stop", {
       sandbox: name,
     });
-    return new Stopped({ stopped: 0 });
+    return Stopped.make({ stopped: 0 });
   }
   const process = yield* container
     .exec(stopCommand, "closed")
@@ -338,14 +334,14 @@ const stop = Effect.fn("Sandbox.stop")(function* (name: SandboxName) {
       attempt: sandbox.attempt,
       message,
     });
-    return yield* new ContainerUnavailable({ name, message });
+    return yield* ContainerUnavailable.make({ name, message });
   }
   yield* Effect.logInfo("Stopped the sandbox's commands", {
     sandbox: name,
     attempt: sandbox.attempt,
     stopped: count.value,
   });
-  return new Stopped({ stopped: count.value });
+  return Stopped.make({ stopped: count.value });
 });
 
 const destroy = Effect.fn("Sandbox.destroy")(function* (name: SandboxName) {
@@ -364,7 +360,7 @@ const destroy = Effect.fn("Sandbox.destroy")(function* (name: SandboxName) {
       attempt: Option.getOrUndefined(Option.map(existing, ({ attempt }) => attempt)),
     },
   );
-  return new Destroyed({ destroyed: Option.isSome(existing) });
+  return Destroyed.make({ destroyed: Option.isSome(existing) });
 });
 
 const processStatus = Effect.fn("Sandbox.process")(function* (
@@ -376,25 +372,28 @@ const processStatus = Effect.fn("Sandbox.process")(function* (
   const container = yield* SandboxContainer;
   const files = processFiles(process);
   const read = (path: string) =>
-    container
-      .read(path)
-      .pipe(
-        Effect.mapError(unavailable(name)),
-        Effect.map(Option.map((bytes) => decoder.decode(bytes))),
-      );
+    container.read(path).pipe(
+      Effect.mapBoth({
+        onFailure: unavailable(name),
+        onSuccess: Option.map((bytes) => decoder.decode(bytes)),
+      }),
+    );
   const pid = Option.flatMap(yield* read(files.pid), pidOf);
-  if (Option.isNone(pid)) return yield* new ProcessNotFound({ name, process });
+  if (Option.isNone(pid)) return yield* ProcessNotFound.make({ name, process });
   const exitCode = Option.flatMap(yield* read(files.exit), exitCodeOf);
   const size = (path: string) =>
-    container
-      .size(path)
-      .pipe(Effect.mapError(unavailable(name)), Effect.map(Option.getOrElse(() => 0)));
-  return new ProcessStatus({
+    container.size(path).pipe(
+      Effect.mapBoth({
+        onFailure: unavailable(name),
+        onSuccess: Option.getOrElse(() => 0),
+      }),
+    );
+  return ProcessStatus.make({
     process,
     pid: pid.value,
     state: Option.match(exitCode, {
-      onNone: () => new ProcessRunning(),
-      onSome: (code) => new ProcessExited({ exitCode: code }),
+      onNone: () => ProcessRunning.make(),
+      onSome: (code) => ProcessExited.make({ exitCode: code }),
     }),
     stdoutBytes: yield* size(files.stdout),
     stderrBytes: yield* size(files.stderr),
@@ -406,7 +405,7 @@ const isImageName = Schema.is(CloudflareImageName);
 const health = Effect.fn("Sandbox.health")(function* () {
   const container = yield* SandboxContainer;
   const images = Object.keys(yield* container.images).filter(isImageName);
-  return new HealthReport({ protocol: SANDBOX_PROTOCOL, images });
+  return HealthReport.make({ protocol: SANDBOX_PROTOCOL, images });
 });
 
 /**

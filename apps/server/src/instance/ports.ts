@@ -16,9 +16,7 @@ export class ListeningPortsError extends Schema.TaggedError<ListeningPortsError>
 /** Returns the port after the last colon of a socket address, in base `radix`. */
 const addressPort = (address: string, radix: 10 | 16) =>
   Option.toArray(
-    Schema.decodeUnknownOption(Port)(
-      Number.parseInt(address.slice(address.lastIndexOf(":") + 1), radix),
-    ),
+    Schema.decodeOption(Port)(Number.parseInt(address.slice(address.lastIndexOf(":") + 1), radix)),
   );
 
 /** Returns the inode and port of each listening socket in a `/proc/<pid>/net/tcp` table. */
@@ -41,7 +39,7 @@ export const procListeningPorts = Effect.fn("Instance.procListeningPorts")(funct
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const failure = (error: PlatformError.PlatformError) =>
-    new ListeningPortsError({ pid, reason: error.message });
+    ListeningPortsError.make({ pid, reason: error.message });
   const descriptors = yield* fileSystem
     .readDirectory(`/proc/${pid}/fd`)
     .pipe(Effect.mapError(failure));
@@ -89,10 +87,10 @@ export const lsofListeningPorts = Effect.fn("Instance.lsofListeningPorts")(funct
       Effect.timeoutOrElse({
         duration: LSOF_TIMEOUT,
         orElse: () =>
-          Effect.fail(new ListeningPortsError({ pid, reason: `lsof took over ${LSOF_TIMEOUT}` })),
+          Effect.fail(ListeningPortsError.make({ pid, reason: `lsof took over ${LSOF_TIMEOUT}` })),
       }),
       Effect.catchTag("PlatformError", (error) =>
-        Effect.fail(new ListeningPortsError({ pid, reason: error.message })),
+        Effect.fail(ListeningPortsError.make({ pid, reason: error.message })),
       ),
     );
   // With -Fn, lsof names each socket on a line like `n127.0.0.1:7331`.

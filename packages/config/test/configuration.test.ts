@@ -93,7 +93,7 @@ selector:
 Implement #{{ item.number }}.
 `,
   );
-  return new LoadedInstance({
+  return LoadedInstance.make({
     config,
     agents: [agent],
     loops: [loop],
@@ -116,8 +116,8 @@ describe("configuration domain without layers", () => {
   it.effect("omits unchanged entities when adding or removing an entity before them", () =>
     Effect.gen(function* () {
       const original = configurationEntities(yield* fixture);
-      const added = new ConfigurationEntity({
-        key: new ConfigurationEntityKey({
+      const added = ConfigurationEntity.make({
+        key: ConfigurationEntityKey.make({
           kind: "label",
           identifier: ConfigurationEntityId.make("preferred"),
         }),
@@ -125,14 +125,14 @@ describe("configuration domain without layers", () => {
       });
       const candidate = [added, ...original];
       expect(configurationDiff(original, candidate)).toEqual([
-        new ConfigurationChange({
+        ConfigurationChange.make({
           key: added.key,
           before: Option.none(),
           after: Option.some(added.value),
         }),
       ]);
       expect(configurationDiff(candidate, original)).toEqual([
-        new ConfigurationChange({
+        ConfigurationChange.make({
           key: added.key,
           before: Option.some(added.value),
           after: Option.none(),
@@ -166,13 +166,12 @@ describe("configuration domain without layers", () => {
       expect(stale._tag).toBe("StaleRevision");
       const invalid = changes
         .filter(({ key }) => key.kind === "agent" || key.kind === "worker")
-        .map(
-          (change) =>
-            new ConfigurationChange({
-              ...change,
-              before: change.after,
-              after: Option.some({ invalid: true }),
-            }),
+        .map((change) =>
+          ConfigurationChange.make({
+            ...change,
+            before: change.after,
+            after: Option.some({ invalid: true }),
+          }),
         );
       const failure = yield* commit(
         parser,
@@ -192,7 +191,7 @@ describe("configuration domain without layers", () => {
         first.configuration,
         first.configuration.number,
         [
-          new ConfigurationChange({
+          ConfigurationChange.make({
             key: worker.key,
             before: worker.after,
             after: Option.some({ name: "local", kind: "local" }),
@@ -227,7 +226,7 @@ for (const [name, layer] of adapters)
         const canonical = configurationEntities(yield* fixture);
         const changes = (yield* initialChanges).map((change) =>
           change.key.kind === "loop"
-            ? new ConfigurationChange({
+            ? ConfigurationChange.make({
                 ...change,
                 after: Option.map(change.after, (value) => {
                   const {
@@ -265,9 +264,12 @@ for (const [name, layer] of adapters)
         }
       }).pipe(
         Effect.scoped,
-        Effect.provide(layer),
-        Effect.provide(ConfigurationFolder.layer.pipe(Layer.provide(parserLayer))),
-        Effect.provide(NodeServices.layer),
+        Effect.provide(
+          layer.pipe(
+            Layer.provideMerge(ConfigurationFolder.layer.pipe(Layer.provide(parserLayer))),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
       ),
     );
 
@@ -281,8 +283,8 @@ for (const [name, layer] of adapters)
         const [settings, ...rest] = other;
         if (settings === undefined) return yield* Effect.die("fixture has no settings");
         const reordered = [settings, ...[...workers].reverse(), ...rest];
-        const added = new ConfigurationEntity({
-          key: new ConfigurationEntityKey({
+        const added = ConfigurationEntity.make({
+          key: ConfigurationEntityKey.make({
             kind: "worker",
             identifier: ConfigurationEntityId.make("new-preferred"),
           }),
@@ -294,7 +296,7 @@ for (const [name, layer] of adapters)
           reordered,
           original.map((entity) =>
             entity.key.kind === "worker"
-              ? new ConfigurationEntity({
+              ? ConfigurationEntity.make({
                   ...entity,
                   value: {
                     ...Schema.decodeUnknownSync(Schema.JsonObject)(entity.value),
@@ -346,8 +348,8 @@ for (const [name, layer] of adapters)
         const original = configurationEntities(yield* fixture);
         const workers = original.filter(({ key }) => key.kind === "worker");
         const other = original.filter(({ key }) => key.kind !== "worker");
-        const added = new ConfigurationEntity({
-          key: new ConfigurationEntityKey({
+        const added = ConfigurationEntity.make({
+          key: ConfigurationEntityKey.make({
             kind: "worker",
             identifier: ConfigurationEntityId.make("inserted"),
           }),
@@ -367,7 +369,7 @@ for (const [name, layer] of adapters)
               target,
             );
             expect(changes).toEqual([
-              new ConfigurationChange(
+              ConfigurationChange.make(
                 target === candidate
                   ? {
                       key: added.key,
@@ -416,36 +418,34 @@ for (const [name, layer] of adapters)
         const entities = configurationEntities(yield* fixture);
         const workers = entities.filter(({ key }) => key.kind === "worker");
         for (const changes of [
-          workers.map(
-            ({ key, value }) =>
-              new ConfigurationChange({
-                key,
-                before: Option.some(value),
-                after: Option.some(value),
-                position: 1,
-              }),
+          workers.map(({ key, value }) =>
+            ConfigurationChange.make({
+              key,
+              before: Option.some(value),
+              after: Option.some(value),
+              position: 1,
+            }),
           ),
           ...workers.map(({ key, value }) => [
-            new ConfigurationChange({
+            ConfigurationChange.make({
               key,
               before: Option.some(value),
               after: Option.some(value),
               position: workers.length,
             }),
           ]),
-          workers.map(
-            ({ key, value }) =>
-              new ConfigurationChange({
-                key,
-                before: Option.some(value),
-                after: Option.none(),
-                position: 1,
-              }),
+          workers.map(({ key, value }) =>
+            ConfigurationChange.make({
+              key,
+              before: Option.some(value),
+              after: Option.none(),
+              position: 1,
+            }),
           ),
           ...entities
             .filter(({ key }) => key.kind !== "worker")
             .map(({ key, value }) => [
-              new ConfigurationChange({
+              ConfigurationChange.make({
                 key,
                 before: Option.some(value),
                 after: Option.some(value),
@@ -472,14 +472,14 @@ for (const [name, layer] of adapters)
           const first = yield* initialize;
           const state = yield* store.read;
           expect(state.number).toBe(1);
-          const key = new ConfigurationEntityKey({
+          const key = ConfigurationEntityKey.make({
             kind: "agent",
             identifier: ConfigurationEntityId.make("developer"),
           });
           const agent = first.changes.find(({ key: candidate }) => candidate.key === key.key);
           expect(agent).toBeDefined();
           if (agent === undefined) return;
-          const change = new ConfigurationChange({
+          const change = ConfigurationChange.make({
             key,
             before: agent.after,
             after: Option.map(agent.after, (value) => {
@@ -513,7 +513,7 @@ for (const [name, layer] of adapters)
           const first = yield* initialize;
           const loop = first.changes.find(({ key }) => key.kind === "loop");
           if (loop === undefined) return yield* Effect.die("fixture has no loop");
-          const invalid = new ConfigurationChange({
+          const invalid = ConfigurationChange.make({
             ...loop,
             before: loop.after,
             after: Option.map(loop.after, (value) => ({
@@ -525,7 +525,7 @@ for (const [name, layer] of adapters)
             .commit({ expected: first.number, changes: [invalid], ...metadata })
             .pipe(Effect.flip);
           expect(failure._tag).toBe("ConfigurationInvalid");
-          const invalidCel = new ConfigurationChange({
+          const invalidCel = ConfigurationChange.make({
             ...loop,
             before: loop.after,
             after: Option.map(loop.after, (value) => ({
@@ -539,12 +539,12 @@ for (const [name, layer] of adapters)
               .pipe(Effect.flip))._tag,
           ).toBe("ConfigurationInvalid");
           expect((yield* store.list(Option.none())).length).toBe(1);
-          const results = yield* Effect.all(
-            [1, 2].map(() =>
+          const results = yield* Effect.forEach(
+            [1, 2],
+            () =>
               store
                 .commit({ expected: first.number, changes: [], ...metadata })
                 .pipe(Effect.result),
-            ),
             { concurrency: 2 },
           );
           expect(results.filter(Result.isSuccess)).toHaveLength(1);
@@ -567,7 +567,7 @@ it.effect(
       yield* folder.export(root, original);
       const imported = yield* folder.load(root);
       expect(Equal.equals(imported, original)).toBe(true);
-      const withoutLoops = new LoadedInstance({ ...original, loops: [] });
+      const withoutLoops = LoadedInstance.make({ ...original, loops: [] });
       yield* folder.export(root, withoutLoops);
       yield* fs.remove(`${root}/projects`, { recursive: true });
       expect(Equal.equals(yield* folder.load(root), withoutLoops)).toBe(true);
@@ -584,8 +584,12 @@ it.effect(
       expect(failure.problems.map(({ file }) => file)).toContain("agents/developer.md");
     }).pipe(
       Effect.scoped,
-      Effect.provide(ConfigurationFolder.layer.pipe(Layer.provide(parserLayer))),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(
+        ConfigurationFolder.layer.pipe(
+          Layer.provide(parserLayer),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
     ),
 );
 

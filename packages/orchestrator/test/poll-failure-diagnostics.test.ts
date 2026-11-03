@@ -6,7 +6,7 @@ import { repositoryFailureLogFields } from "../src/polling/cycle.ts";
 it("bounds GitHub decode details in logs and operator messages", () => {
   const detail = `Missing field: ${"x".repeat(600)}`;
   const fields = repositoryFailureLogFields(
-    new InvalidGitHubResponseError({
+    InvalidGitHubResponseError.make({
       operation: "fetch-issue-snapshot",
       message: "GitHub returned a response in an unexpected format",
       detail,
@@ -21,7 +21,7 @@ it("bounds GitHub decode details in logs and operator messages", () => {
 it("identifies GitHub API failures that have no decode detail", () => {
   assert.deepStrictEqual(
     repositoryFailureLogFields(
-      new GitHubApiError({
+      GitHubApiError.make({
         operation: "poll-repository-changes",
         status: Option.some(502),
         message: "GitHub returned HTTP status 502",

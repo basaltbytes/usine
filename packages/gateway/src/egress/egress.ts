@@ -112,15 +112,16 @@ export class EgressAllowlist extends Schema.Class<EgressAllowlist>(
   decide(host: string, port: number): EgressDecision {
     const normalized = host.toLowerCase().replace(/\.$/u, "");
     if (IPV4_LITERAL.test(normalized) || normalized.includes(":"))
-      return new EgressRefused({ host, port, reason: "address-literal" });
+      return EgressRefused.make({ host, port, reason: "address-literal" });
     if (!isHostName(normalized) || !isPort(port))
-      return new EgressRefused({ host, port, reason: "host-not-allowed" });
+      return EgressRefused.make({ host, port, reason: "host-not-allowed" });
     const covering = this.rules.filter((rule) => rule.covers(normalized));
-    if (covering.length === 0) return new EgressRefused({ host, port, reason: "host-not-allowed" });
+    if (covering.length === 0)
+      return EgressRefused.make({ host, port, reason: "host-not-allowed" });
     const rule = covering.find((candidate) => candidate.ports.includes(port));
     return rule === undefined
-      ? new EgressRefused({ host, port, reason: "port-not-allowed" })
-      : new EgressPermitted({ host: normalized, port, rule });
+      ? EgressRefused.make({ host, port, reason: "port-not-allowed" })
+      : EgressPermitted.make({ host: normalized, port, rule });
   }
 }
 
@@ -129,7 +130,7 @@ const parseLine = (text: string, line: number): Result.Result<EgressRule, Egress
   const host = match?.[2]?.toLowerCase();
   if (match === null || host === undefined || !isHostName(host) || IPV4_LITERAL.test(host))
     return Result.fail(
-      new EgressAllowlistError({
+      EgressAllowlistError.make({
         line,
         message: `Expected a host name, or *. and a domain, optionally followed by :port, got "${text}"`,
       }),
@@ -137,10 +138,10 @@ const parseLine = (text: string, line: number): Result.Result<EgressRule, Egress
   const port = Option.fromNullishOr(match[3]).pipe(Option.map(Number));
   if (Option.isSome(port) && !isPort(port.value))
     return Result.fail(
-      new EgressAllowlistError({ line, message: `Port ${port.value} is not between 1 and 65535` }),
+      EgressAllowlistError.make({ line, message: `Port ${port.value} is not between 1 and 65535` }),
     );
   return Result.succeed(
-    new EgressRule({
+    EgressRule.make({
       host,
       match: match[1] === undefined ? "exact" : "subdomains",
       ports: Option.match(port, {
@@ -168,5 +169,5 @@ export const parseEgressAllowlist = (
     if (Result.isFailure(parsed)) return Result.fail(parsed.failure);
     rules.push(parsed.success);
   }
-  return Result.succeed(new EgressAllowlist({ rules }));
+  return Result.succeed(EgressAllowlist.make({ rules }));
 };

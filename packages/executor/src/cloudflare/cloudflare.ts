@@ -124,7 +124,7 @@ const isExecutorError = Schema.is(ExecutorError);
 const operationError =
   (operation: ExecutorOperation) =>
   (error: SandboxRequestError): ExecutorOperationError =>
-    new ExecutorOperationError({ operation, message: error.message, cause: error });
+    ExecutorOperationError.make({ operation, message: error.message, cause: error });
 
 /** Returns why `address` can't run `brain`, or `None` if it can. */
 const brainGap = (
@@ -134,7 +134,7 @@ const brainGap = (
   Option.match(HARNESS_PROVIDERS[brain.harness], {
     onNone: () =>
       Option.some(
-        new WorkerCapabilityError({
+        WorkerCapabilityError.make({
           worker: address.name,
           capability: "toolchain",
           message: `Cloudflare worker "${address.name}" can't run Pi children, which run only on local workers`,
@@ -145,7 +145,7 @@ const brainGap = (
       address.providers.some((key) => key.provider === provider)
         ? Option.none()
         : Option.some(
-            new WorkerCapabilityError({
+            WorkerCapabilityError.make({
               worker: address.name,
               capability: "harness-login",
               message: `${PROVIDER_LABELS[provider]} on cloudflare worker "${address.name}", which holds no harness login. Add ${provider} to the worker's llm_providers with its api_key_env.`,
@@ -160,12 +160,11 @@ const credentialsFor = (
   github: Redacted.Redacted<string>,
   issuedAt: DateTime.Utc,
 ) =>
-  new SandboxCredentials({
+  SandboxCredentials.make({
     issuedAt,
     github: Option.some(github),
-    providers: address.providers.map(
-      ({ provider, apiKey }) =>
-        new ProviderGrant({ provider, credential: new ApiKeyCredential({ key: apiKey }) }),
+    providers: address.providers.map(({ provider, apiKey }) =>
+      ProviderGrant.make({ provider, credential: ApiKeyCredential.make({ key: apiKey }) }),
     ),
   });
 
@@ -174,7 +173,7 @@ const credentialsFor = (
  * keeps. Its outbound handlers refuse GitHub and every provider.
  */
 const noCredentials = (issuedAt: DateTime.Utc) =>
-  new SandboxCredentials({ issuedAt, github: Option.none(), providers: [] });
+  SandboxCredentials.make({ issuedAt, github: Option.none(), providers: [] });
 
 /** The message of the `InfraFailure` of an Attempt whose sandbox the platform stops. */
 const DRAIN_MESSAGE =
@@ -193,7 +192,7 @@ const versionProbe =
       const args = command === "codex" ? [...codexConfigArgs, "--version"] : ["--version"];
       const result = yield* commands.inspect(operation, shell, command, args);
       if (result.exitCode === SHELL_FAILURE)
-        return yield* new ExecutorOperationError({
+        return yield* ExecutorOperationError.make({
           operation,
           message: `Can't reach sandbox ${shell.destination} to run ${command}`,
           cause: new Error(
@@ -202,7 +201,7 @@ const versionProbe =
         });
       const version = result.stdout.trim();
       if (result.exitCode !== 0)
-        return new HarnessUnavailableError({
+        return HarnessUnavailableError.make({
           harness: brain.harness,
           capability: "binary",
           message: `${command} --version failed in the sandbox image`,
@@ -211,7 +210,7 @@ const versionProbe =
         brain.harness === "codex" &&
         !supportedCodexVersions.some((supported) => version === `codex-cli ${supported}`)
       )
-        return new HarnessUnavailableError({
+        return HarnessUnavailableError.make({
           harness: "codex",
           capability: "version",
           message: `The sandbox image has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Rebuild it with a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
@@ -221,7 +220,7 @@ const versionProbe =
         harness: brain.harness,
         version,
       });
-      return new HarnessReady({ harness: brain.harness });
+      return HarnessReady.make({ harness: brain.harness });
     });
 
 const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
@@ -386,7 +385,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       ]);
       if (inspected.exitCode === 0) return true;
       if (inspected.exitCode === 1) return false;
-      return yield* new ExecutorOperationError({
+      return yield* ExecutorOperationError.make({
         operation,
         message: `Can't inspect sandbox ${name}`,
         cause: new Error(
@@ -416,7 +415,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       yield* worker.client
         .create(
           name,
-          new CreateSandbox({
+          CreateSandbox.make({
             owner: worker.owner,
             attempt,
             image: worker.address.image,
@@ -761,7 +760,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       const health = yield* worker.client.health.pipe(
         Effect.mapError((error) =>
           error.refused
-            ? new WorkerCapabilityError({
+            ? WorkerCapabilityError.make({
                 worker: workerName,
                 capability: "credentials",
                 message: `The Cloudflare Worker at ${address.workerUrl.origin} refused the Access service token of cloudflare worker "${workerName}". Check the variables that access_client_id_env and access_client_secret_env name, and the Worker's ACCESS_CLIENT_ID and ACCESS_CLIENT_SECRET secrets.`,
@@ -771,7 +770,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         ),
       );
       if (!health.images.includes(address.image))
-        return yield* new WorkerCapabilityError({
+        return yield* WorkerCapabilityError.make({
           worker: workerName,
           capability: "toolchain",
           message: `The Cloudflare Worker at ${address.workerUrl.origin} has no image "${address.image}", which cloudflare worker "${workerName}" names; it has ${health.images.join(", ") || "none"}.`,
@@ -862,7 +861,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
                 .get(name)
                 .pipe(Effect.mapError(operationError("prepare")));
               if (!Option.exists(summary, ({ running }) => running))
-                return yield* new ExecutorOperationError({
+                return yield* ExecutorOperationError.make({
                   operation: "prepare",
                   message:
                     "The reattached attempt's sandbox no longer runs, so its checkout is gone",
@@ -870,13 +869,13 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
                 });
               const { cwd, spec } = yield* session.storedRequest(request.attemptId);
               if (cwd !== layout.worktree)
-                return yield* new ExecutorOperationError({
+                return yield* ExecutorOperationError.make({
                   operation: "prepare",
                   message: "The reattached attempt's checkout isn't in its cloudflare sandbox",
                   cause: new Error(cwd),
                 });
               if (!(yield* exists("prepare", worker, name, layout.worktree)))
-                return yield* new ExecutorOperationError({
+                return yield* ExecutorOperationError.make({
                   operation: "prepare",
                   message: "The reattached attempt's checkout no longer exists",
                   cause: new Error(layout.worktree),
@@ -1058,7 +1057,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         Effect.mapError((cause) =>
           isExecutorError(cause)
             ? cause
-            : new ExecutorOperationError({
+            : ExecutorOperationError.make({
                 operation: "prepare",
                 message: "Can't prepare the cloudflare attempt sandbox",
                 cause,
@@ -1092,12 +1091,11 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               harvestCommand("launch", worker, name, prepared.worktree, access),
               windows,
             ).pipe(
-              Effect.mapError(
-                (error) =>
-                  new InfraFailure({
-                    message: `Can't harvest the attempt's checkout: ${error.message}`,
-                    cause: error,
-                  }),
+              Effect.mapError((error) =>
+                InfraFailure.make({
+                  message: `Can't harvest the attempt's checkout: ${error.message}`,
+                  cause: error,
+                }),
               ),
             ),
           harvestComments: (windows) =>

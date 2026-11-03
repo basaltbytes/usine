@@ -14,15 +14,15 @@ import {
 import { RepositoryLabelColor, RepositoryLabelName } from "../src/polling/labels.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const token = new InstallationToken({
+const token = InstallationToken.make({
   value: Redacted.make("label-writer-token"),
   expiresAt: DateTime.makeUnsafe("2026-09-01T22:00:00Z"),
-  scope: new InstallationWide(),
+  scope: InstallationWide.make(),
 });
 const appLayer = Layer.succeed(GitHubApp)({
   installation: () =>
     Effect.succeed(
-      new Installation({
+      Installation.make({
         id: InstallationId.make(77),
         accountLogin: "basaltbytes",
         appSlug: AppSlug.make("usine-basaltbytes"),
@@ -72,7 +72,7 @@ describe("GitHubLabelWriter", () => {
       const writer = yield* GitHubLabelWriter;
       const created = yield* writer.create(
         repository,
-        new NewRepositoryLabel({
+        NewRepositoryLabel.make({
           name: RepositoryLabelName.make("ready-for-agent"),
           color: Option.some(RepositoryLabelColor.make("A2EEEF")),
           description: Option.some("Ready for an agent to claim"),

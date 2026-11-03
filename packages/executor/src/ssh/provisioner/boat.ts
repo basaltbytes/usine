@@ -149,7 +149,7 @@ const endpointOf = (
       return yield* new ProviderUnanswered({
         detail: "Boat reported no SSH address for the sandbox",
       });
-    const destination = yield* Schema.decodeUnknownEffect(SshDestination)(
+    const destination = yield* Schema.decodeEffect(SshDestination)(
       `${answer.sshUser ?? "user"}@${target.value.host}`,
     ).pipe(
       Effect.mapError(
@@ -180,7 +180,7 @@ export const boatDriverFor = (
     const api = yield* providerApiFor("boat", base, settings.token);
 
     const apiError = (operation: string) => (failure: ProviderFailure) =>
-      new ProviderApiError({
+      ProviderApiError.make({
         provider: "boat",
         operation,
         status: failure._tag === "ProviderRefused" ? Option.some(failure.status) : Option.none(),
@@ -188,10 +188,10 @@ export const boatDriverFor = (
       });
 
     const providerGap = (message: string, cause: unknown) =>
-      new WorkerCapabilityError({ worker, capability: "provider", message, cause });
+      WorkerCapabilityError.make({ worker, capability: "provider", message, cause });
 
     const unavailable = (reason: MachineUnavailableReason, message: string) =>
-      new MachineUnavailableError({ worker, provider: "boat", reason, message });
+      MachineUnavailableError.make({ worker, provider: "boat", reason, message });
 
     const verify = Effect.fn("BoatDriver.verify")(
       function* (_worker: WorkerName, maxConcurrentAttempts: number) {

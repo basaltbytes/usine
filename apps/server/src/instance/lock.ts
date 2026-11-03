@@ -46,7 +46,7 @@ const takeLock = (file: string) => {
 export const lockHeld = Effect.fn("Instance.lockHeld")(function* (files: InstanceFiles) {
   const fileSystem = yield* FileSystem.FileSystem;
   const lockError = (cause: unknown) =>
-    new InstanceLockError({ directory: files.folder, reason: reasonOf(cause) });
+    InstanceLockError.make({ directory: files.folder, reason: reasonOf(cause) });
   if (!(yield* fileSystem.exists(files.lock).pipe(Effect.mapError(lockError)))) return false;
   return yield* Effect.try({
     try: () => {
@@ -125,7 +125,7 @@ export const holdInstance = Effect.fn("Server.holdInstance")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const files = instanceFiles(directory);
   const lockError = (cause: unknown) =>
-    new InstanceLockError({ directory, reason: reasonOf(cause) });
+    InstanceLockError.make({ directory, reason: reasonOf(cause) });
   const refuse = Effect.fn("Server.refuseInstance")(function* (cause: unknown) {
     if (!Schema.is(SqliteBusy)(cause)) return yield* lockError(cause);
     const holder = yield* readPid(files);
@@ -133,7 +133,7 @@ export const holdInstance = Effect.fn("Server.holdInstance")(function* (
       instanceDirectory: directory,
       holder: Option.getOrUndefined(holder),
     });
-    return yield* new InstanceInUseError({ directory, holder });
+    return yield* InstanceInUseError.make({ directory, holder });
   });
   yield* fileSystem
     .makeDirectory(files.folder, { recursive: true })

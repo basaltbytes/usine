@@ -41,12 +41,12 @@ const unreachableCloudflare = {
   image: "usine",
 } as const;
 
-const startupFailure = (workers: (typeof UsineConfig.Encoded)["workers"]) =>
+const startupFailure = (workers: NonNullable<(typeof UsineConfig.Encoded)["workers"]>) =>
   Effect.gen(function* () {
     const directory = InstanceDirectory.make(
       yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({ prefix: "usine-engine-" }),
     );
-    const config = Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos: [], workers });
+    const config = Schema.decodeSync(UsineConfig)({ version: 1, repos: [], workers });
     return yield* Layer.build(
       workerEngineLayer(
         directory,
@@ -210,7 +210,7 @@ esac
 `,
       );
       yield* fs.chmod(`${directory}/ssh`, 0o755);
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [],
         workers: [
@@ -251,7 +251,7 @@ it.effect(
         ACCESS_ID: "id",
         HEALTHY_SECRET: "healthy-secret",
       };
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [],
         workers: [

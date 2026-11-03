@@ -6,7 +6,7 @@ import { ClaudeChildBackend, ClaudeLoginLock } from "../../src/runtime.ts";
 import { claudeChildBackendLayer, claudeSdkLive } from "../../src/pi/claude/claude.ts";
 import { interruptionContract, localHost, shimHost, steeringContract } from "./contract.ts";
 
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "claude",
   model: Schema.decodeUnknownSync(ModelId)(process.env.USINE_CLAUDE_INTEGRATION_MODEL),
   effort: "low",
@@ -19,10 +19,13 @@ const live = <A, E>(
   effect: Effect.Effect<A, E, ClaudeChildBackend | FileSystem.FileSystem | Path.Path>,
 ) =>
   effect.pipe(
-    Effect.provide(claudeChildBackendLayer),
-    Effect.provide(claudeSdkLive),
-    Effect.provide(noLoginLock),
-    Effect.provide(NodeServices.layer),
+    Effect.provide(
+      claudeChildBackendLayer.pipe(
+        Layer.provideMerge(claudeSdkLive),
+        Layer.provideMerge(noLoginLock),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
   );
 
 describe("Claude child live contract", () => {

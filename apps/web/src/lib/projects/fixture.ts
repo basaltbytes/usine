@@ -56,7 +56,7 @@ const link = (
   title: string,
   state: BoardItemLink["state"] = kind === "pr" ? "pr-open" : "issue-open",
 ) =>
-  new BoardItemLink({
+  BoardItemLink.make({
     itemKey: ItemKey.make(`${boardRepository}:${number}`),
     kind,
     number: ItemNumber.make(number),
@@ -71,24 +71,24 @@ const attempt = (
   failure: string | null | "running" | "canceled",
   endedAt: string | null = null,
 ) =>
-  new AttemptView({
+  AttemptView.make({
     task: AttemptTask.make("Implement the issue"),
     agent: AgentName.make("developer"),
     operatorIntervened: false,
     id: AttemptId.make(`attempt-${number}-${startedAt}`),
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),
-    workerAccess: new LocalWorkerAccess(),
-    brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5.6-sol"), effort: "high" }),
+    workerAccess: LocalWorkerAccess.make(),
+    brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5.6-sol"), effort: "high" }),
     startedAt,
     outcome:
       failure === "running"
         ? null
         : failure === "canceled"
-          ? new CanceledAttemptView()
+          ? CanceledAttemptView.make()
           : failure === null
-            ? new SucceededAttemptView()
-            : new FailedAttemptView({ failure: new AgentFailureView({ message: failure }) }),
+            ? SucceededAttemptView.make()
+            : FailedAttemptView.make({ failure: AgentFailureView.make({ message: failure }) }),
     endedAt,
     salvage: null,
   });
@@ -105,8 +105,8 @@ const run = (
   minutes: number,
   attempts: ReadonlyArray<AttemptView>,
 ) =>
-  new RunView({
-    agentBrain: new BrainSpec({
+  RunView.make({
+    agentBrain: BrainSpec.make({
       harness: "codex",
       model: ModelId.make("test-model"),
       effort: "high",
@@ -140,13 +140,13 @@ const pool = (
   usd: number | null = null,
   unpriced = false,
 ): TaskPoolUsageView =>
-  new TaskPoolUsageView({
+  TaskPoolUsageView.make({
     pool: name,
     tokens: TokenCount.make(tokens),
     cost:
       usd === null
         ? null
-        : new UsageCostView({ usd: UsdAmount.make(usd), estimate: name !== "apiKeys" }),
+        : UsageCostView.make({ usd: UsdAmount.make(usd), estimate: name !== "apiKeys" }),
     unpriced,
   });
 
@@ -157,7 +157,7 @@ export const taskUsageOf = (
 ): TaskUsageView => {
   const attempts = runs.flatMap((candidate) => candidate.attempts);
   const priced = pools.flatMap(({ cost }) => (cost === null ? [] : [cost]));
-  return new TaskUsageView({
+  return TaskUsageView.make({
     durationMillis: attempts.reduce(
       (sum, { startedAt, endedAt, outcome }) =>
         outcome === null || endedAt === null
@@ -175,7 +175,7 @@ export const taskUsageOf = (
     cost:
       priced.length === 0
         ? null
-        : new UsageCostView({
+        : UsageCostView.make({
             usd: UsdAmount.make(priced.reduce((sum, { usd }) => sum + usd, 0)),
             estimate: priced.some(({ estimate }) => estimate),
           }),
@@ -202,7 +202,7 @@ const task = (
     (run.canResolveFailure &&
       !members.some(({ itemKey, state }) => itemKey === run.itemKey && isSettledItemState(state)));
   const preferred = [...runs].reverse().find(needsYou) ?? runs.at(-1);
-  return new BoardTaskView({
+  return BoardTaskView.make({
     repository: boardRepository,
     ...current,
     title: members[0].title,
@@ -212,7 +212,7 @@ const task = (
     // If the Task has a pull request, the current Item is the newest one.
     pullRequest:
       current.kind === "pr" && (state === "pr-open" || state === "pr-merged")
-        ? new BoardPullRequestView({ number: current.number, url: current.url, state })
+        ? BoardPullRequestView.make({ number: current.number, url: current.url, state })
         : null,
     ...boardRunSummary(runs, preferred ?? null, members),
     run: preferred ?? null,
@@ -224,10 +224,10 @@ const task = (
 };
 
 const writable = (name: string, label: string, items: ReadonlyArray<BoardTaskView>) =>
-  new WritableBoardLaneView({
+  WritableBoardLaneView.make({
     id: BoardLaneId.make(`authored:${label}`),
     name: LaneName.make(name),
-    sources: [new LabelLaneSource({ label: GitHubLabelName.make(label) })],
+    sources: [LabelLaneSource.make({ label: GitHubLabelName.make(label) })],
     labels: [GitHubLabelName.make(label)],
     origin: "authored",
     items,
@@ -278,36 +278,40 @@ const pinnedRun = run("run-pinned", pinned, "review", "Failed", 95, [
  * and Unmapped with an issue.
  */
 const boardProject = () =>
-  new ProjectView({
+  ProjectView.make({
     repository: boardRepository,
     status: "needs-you",
     runs: [],
     labels: [
-      new LabelView({ name: GitHubLabelName.make("bug"), color: "d73a4a", description: null }),
-      new LabelView({ name: GitHubLabelName.make("priority"), color: "fbca04", description: null }),
-      new LabelView({ name: GitHubLabelName.make("ui"), color: "a2eeef", description: null }),
-      new LabelView({ name: GitHubLabelName.make("ci"), color: "0e8a16", description: null }),
-      new LabelView({ name: GitHubLabelName.make("docs"), color: "0075ca", description: null }),
-      new LabelView({ name: GitHubLabelName.make("backlog"), color: "c5def5", description: null }),
-      new LabelView({
+      LabelView.make({ name: GitHubLabelName.make("bug"), color: "d73a4a", description: null }),
+      LabelView.make({
+        name: GitHubLabelName.make("priority"),
+        color: "fbca04",
+        description: null,
+      }),
+      LabelView.make({ name: GitHubLabelName.make("ui"), color: "a2eeef", description: null }),
+      LabelView.make({ name: GitHubLabelName.make("ci"), color: "0e8a16", description: null }),
+      LabelView.make({ name: GitHubLabelName.make("docs"), color: "0075ca", description: null }),
+      LabelView.make({ name: GitHubLabelName.make("backlog"), color: "c5def5", description: null }),
+      LabelView.make({
         name: GitHubLabelName.make("ready-for-agent"),
         color: "1d76db",
         description: "An agent may start work",
       }),
-      new LabelView({
+      LabelView.make({
         name: GitHubLabelName.make("in-progress"),
         color: "5319e7",
         description: null,
       }),
-      new LabelView({ name: GitHubLabelName.make("review"), color: "d93f0b", description: null }),
-      new LabelView({
+      LabelView.make({ name: GitHubLabelName.make("review"), color: "d93f0b", description: null }),
+      LabelView.make({
         name: GitHubLabelName.make("ready-to-merge"),
         color: "0e8a16",
         description: null,
       }),
     ],
     preflightFindings: [],
-    board: new BoardView({
+    board: BoardView.make({
       failures: [],
       lanes: [
         writable("Backlog", "backlog", [
@@ -332,9 +336,9 @@ const boardProject = () =>
             // The plan Run is priced; the implement Run is on the ChatGPT plan.
             {
               pools: [
-                pool("apiKeys", 1_500, 0.75),
-                pool("claudePlan", 20_000, 1.25),
-                pool("chatgptPlan", 5_800, 0.4),
+                pool("apiKeys", 1500, 0.75),
+                pool("claudePlan", 20000, 1.25),
+                pool("chatgptPlan", 5800, 0.4),
               ],
             },
           ),
@@ -343,26 +347,26 @@ const boardProject = () =>
           task([pinned], ["review"], [pinnedRun], {
             conflicting: true,
             loops: ["review"],
-            pools: [pool("apiKeys", 12_000, 0.4)],
+            pools: [pool("apiKeys", 12000, 0.4)],
           }),
         ]),
         writable("Merge", "ready-to-merge", []),
-        new ReadOnlyBoardLaneView({
+        ReadOnlyBoardLaneView.make({
           id: BoardLaneId.make("authored:pull-requests"),
           name: LaneName.make("Pull requests"),
-          sources: [new StateLaneSource({ state: "pr-open" })],
+          sources: [StateLaneSource.make({ state: "pr-open" })],
           origin: "authored",
           items: [
             task([bump], []),
             task([node], [], [run("run-node", node, "rebase", "Queued", 2, [])]),
           ],
         }),
-        new ReadOnlyBoardLaneView({
+        ReadOnlyBoardLaneView.make({
           id: BoardLaneId.make("authored:done"),
           name: LaneName.make("Done"),
           sources: [
-            new StateLaneSource({ state: "issue-closed" }),
-            new StateLaneSource({ state: "pr-merged" }),
+            StateLaneSource.make({ state: "issue-closed" }),
+            StateLaneSource.make({ state: "pr-merged" }),
           ],
           origin: "authored",
           items: [
@@ -374,11 +378,11 @@ const boardProject = () =>
                   attempt(1, minutesAgo(2 * 1440), null, minutesAgo(2 * 1440 - 30)),
                 ]),
               ],
-              { state: "pr-merged", pools: [pool("claudePlan", 48_000, 3.1)] },
+              { state: "pr-merged", pools: [pool("claudePlan", 48000, 3.1)] },
             ),
           ],
         }),
-        new ReadOnlyBoardLaneView({
+        ReadOnlyBoardLaneView.make({
           id: BoardLaneId.make("fallback:unmapped"),
           name: LaneName.make("Unmapped"),
           sources: [],
@@ -390,7 +394,7 @@ const boardProject = () =>
   });
 
 const loop = (name: string, paused: boolean) =>
-  new LoopView({
+  LoopView.make({
     name: LoopName.make(name),
     trigger: name === "implement" ? "issue" : "pr",
     agent: AgentName.make(name === "review" ? "reviewer" : "developer"),
@@ -398,7 +402,7 @@ const loop = (name: string, paused: boolean) =>
   });
 
 export const boardOverview = () =>
-  new ReadyOverview({
+  ReadyOverview.make({
     projects: [boardProject()],
     loops: [loop("implement", false), loop("review", true), loop("rebase", false)],
     needsYou: [],
@@ -409,21 +413,20 @@ export const changeTasks = (
   overview: ReadyOverview,
   change: (task: BoardTaskView) => BoardTaskView,
 ): ReadyOverview =>
-  new ReadyOverview({
+  ReadyOverview.make({
     ...overview,
-    projects: overview.projects.map(
-      (project) =>
-        new ProjectView({
-          ...project,
-          board: new BoardView({
-            ...project.board,
-            lanes: project.board.lanes.map((lane) =>
-              lane._tag === "WritableBoardLane"
-                ? new WritableBoardLaneView({ ...lane, items: lane.items.map(change) })
-                : new ReadOnlyBoardLaneView({ ...lane, items: lane.items.map(change) }),
-            ),
-          }),
+    projects: overview.projects.map((project) =>
+      ProjectView.make({
+        ...project,
+        board: BoardView.make({
+          ...project.board,
+          lanes: project.board.lanes.map((lane) =>
+            lane._tag === "WritableBoardLane"
+              ? WritableBoardLaneView.make({ ...lane, items: lane.items.map(change) })
+              : ReadOnlyBoardLaneView.make({ ...lane, items: lane.items.map(change) }),
+          ),
         }),
+      }),
     ),
   });
 
@@ -432,10 +435,10 @@ export const changeTasks = (
 export const boardOverviewResolved = () =>
   changeTasks(boardOverview(), (task) => {
     if (task.itemKey !== pinned.itemKey) return task;
-    const runs = boardTaskRuns(task).map(
-      (run) => new RunSummaryView({ ...run, canResolveFailure: false }),
+    const runs = boardTaskRuns(task).map((run) =>
+      RunSummaryView.make({ ...run, canResolveFailure: false }),
     );
-    return new BoardTaskView({
+    return BoardTaskView.make({
       ...task,
       ...boardRunSummary(runs, null, task.items),
       run: null,
@@ -455,9 +458,9 @@ export const boardOverviewUnpriced = () =>
       [],
       [pool("apiKeys", 1_500, 0.75), pool("claudePlan", 26_000, 9.2, true)],
     );
-    return new BoardTaskView({
+    return BoardTaskView.make({
       ...task,
-      usage: new TaskUsageView({
+      usage: TaskUsageView.make({
         ...task.usage,
         tokens: usage.tokens,
         pools: usage.pools,
@@ -474,7 +477,7 @@ export const boardOverviewUntimed = () =>
     const untimed = run("run-dropped", dropped, "implement", "Canceled", 1440, [
       attempt(1, minutesAgo(1440), "canceled"),
     ]);
-    return new BoardTaskView({
+    return BoardTaskView.make({
       ...task,
       ...boardRunSummary([untimed], untimed, task.items),
       run: untimed,
@@ -504,18 +507,18 @@ export const boardOverviewDocumented = () =>
     const name = origin === undefined ? undefined : documentedPackages.get(origin.number);
     if (origin === undefined || name === undefined) return task;
     const title = `Document the public API of @usine/${name} in TSDoc`;
-    const items = [new BoardItemLink({ ...origin, title }), ...others];
-    if (task.itemKey !== shippedPr.itemKey) return new BoardTaskView({ ...task, title, items });
+    const items = [BoardItemLink.make({ ...origin, title }), ...others];
+    if (task.itemKey !== shippedPr.itemKey) return BoardTaskView.make({ ...task, title, items });
     const finished = run("run-shipped", shipped, "implement", "Succeeded", 109, [
       attempt(1, minutesAgo(109), null, minutesAgo(28)),
     ]);
-    return new BoardTaskView({
+    return BoardTaskView.make({
       ...task,
       title,
       items,
       ...boardRunSummary([finished], finished, items),
       run: finished,
-      usage: taskUsageOf([finished], [pool("claudePlan", 1_284_000, 12.62, true)]),
+      usage: taskUsageOf([finished], [pool("claudePlan", 1284000, 12.62, true)]),
     });
   });
 
@@ -528,10 +531,10 @@ export const boardOverviewDocumentedLongLoop = () =>
     if (task.itemKey !== redesignPr.itemKey) return task;
     const runs = boardTaskRuns(task).map((run) =>
       run.state === "Running"
-        ? new RunSummaryView({ ...run, loop: LoopName.make("dependency_updates") })
+        ? RunSummaryView.make({ ...run, loop: LoopName.make("dependency_updates") })
         : run,
     );
-    return new BoardTaskView({
+    return BoardTaskView.make({
       ...task,
       ...boardRunSummary(runs, runs.find(({ id }) => id === task.run?.id) ?? null, task.items),
       run: runs.find(({ id }) => id === task.run?.id) ?? null,
@@ -548,7 +551,7 @@ const starting = link(47, "issue", "Move a running card to the lane of its curre
  * server places #47 in the In progress lane.
  */
 export const boardOverviewReviewing = () => {
-  const running = new RunSummaryView({
+  const running = RunSummaryView.make({
     ...run("run-reviewing", reviewing, "review", "Running", 2, [
       attempt(1, minutesAgo(2), "running"),
     ]),
@@ -569,28 +572,27 @@ export const boardOverviewReviewing = () => {
     ["In progress", started],
   ]);
   const overview = boardOverview();
-  return new ReadyOverview({
+  return ReadyOverview.make({
     ...overview,
-    projects: overview.projects.map(
-      (project) =>
-        new ProjectView({
-          ...project,
-          board: new BoardView({
-            ...project.board,
-            lanes: project.board.lanes.map((lane) => {
-              const card = added.get(lane.name);
-              return lane._tag === "WritableBoardLane" && card !== undefined
-                ? new WritableBoardLaneView({ ...lane, items: [card, ...lane.items] })
-                : lane;
-            }),
+    projects: overview.projects.map((project) =>
+      ProjectView.make({
+        ...project,
+        board: BoardView.make({
+          ...project.board,
+          lanes: project.board.lanes.map((lane) => {
+            const card = added.get(lane.name);
+            return lane._tag === "WritableBoardLane" && card !== undefined
+              ? WritableBoardLaneView.make({ ...lane, items: [card, ...lane.items] })
+              : lane;
           }),
         }),
+      }),
     ),
   });
 };
 
 const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
-  new StalledItemView({
+  StalledItemView.make({
     repository: boardRepository,
     loop: LoopName.make(loopName),
     item,
@@ -599,7 +601,7 @@ const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView[
 
 /** Returns the desk's stalled Items for the Board's Items, in desk order. */
 export const boardStalled = () => [
-  stalled("implement", salvage, new AwaitingApprovalView({ run: salvageRun })),
-  stalled("review", pinned, new RunFailedView({ run: pinnedRun })),
-  stalled("implement", dropped, new ClosedUnchangedView({ run: droppedRun })),
+  stalled("implement", salvage, AwaitingApprovalView.make({ run: salvageRun })),
+  stalled("review", pinned, RunFailedView.make({ run: pinnedRun })),
+  stalled("implement", dropped, ClosedUnchangedView.make({ run: droppedRun })),
 ];

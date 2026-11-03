@@ -62,13 +62,13 @@ const messageFromCause = (cause: unknown, fallback: string): string =>
 
 const checkFailure = (source: Source, error: VendorCheckError | undefined): ExpressionCheckError =>
   error === undefined
-    ? new ExpressionCheckError({
+    ? ExpressionCheckError.make({
         source,
         code: "check_failed",
         message: "The CEL check failed and returned no error details",
         position: Option.none(),
       })
-    : new ExpressionCheckError({
+    : ExpressionCheckError.make({
         source,
         code: error instanceof CelParseError ? "parse_error" : "type_error",
         message: error.message,
@@ -237,7 +237,7 @@ const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals"
     catch: (cause) =>
       cause instanceof CelParseError
         ? checkFailure(source, cause)
-        : new ExpressionCheckError({
+        : ExpressionCheckError.make({
             source,
             code: "check_failed",
             message: messageFromCause(cause, "CEL analysis failed"),
@@ -482,7 +482,7 @@ const checkExpected = (
     const result = yield* Effect.try({
       try: () => runtimes.check(environment, source),
       catch: (cause) =>
-        new ExpressionCheckError({
+        ExpressionCheckError.make({
           source,
           code: "check_failed",
           message: messageFromCause(cause, "CEL check failed"),
@@ -492,7 +492,7 @@ const checkExpected = (
     if (!result.valid) return yield* checkFailure(source, result.error);
     const resultType = result.type;
     if (resultType === undefined || !accepts(resultType)) {
-      return yield* new ExpressionCheckError({
+      return yield* ExpressionCheckError.make({
         source,
         code: "unexpected_result_type",
         message: `Expected ${expected}, got ${resultType ?? "an unknown type"}`,
@@ -510,14 +510,14 @@ const evaluated = (
   Result.try({
     try: () => runtimes.evaluate(environment, source, context),
     catch: (cause) =>
-      new ExpressionEvaluationError({
+      ExpressionEvaluationError.make({
         source,
         message: messageFromCause(cause, "CEL evaluation failed"),
       }),
   });
 
 const unexpectedResult = (source: Source, expected: string) => () =>
-  new ExpressionEvaluationError({
+  ExpressionEvaluationError.make({
     source,
     message: `CEL evaluation returned a value that is not ${expected}`,
   });

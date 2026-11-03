@@ -25,13 +25,13 @@ class InterventionRefused extends Schema.TaggedError<InterventionRefused>(
   "@usine/durable/InterventionRefused",
 )("InterventionRefused", { message: Schema.NonEmptyString }) {}
 
-const refuse = (message: string) => new InterventionRefused({ message });
+const refuse = (message: string) => InterventionRefused.make({ message });
 
 const infra = (error: DurableHarnessError) =>
-  new InfraFailure({ message: error.message, cause: error });
+  InfraFailure.make({ message: error.message, cause: error });
 
 const storageFailed = (failure: DurableStorageFailed) =>
-  new InfraFailure({
+  InfraFailure.make({
     message: `Durable storage failed during the attempt: ${failure.message}`,
     cause: failure,
   });
@@ -285,15 +285,16 @@ const makeAttemptRuntime = Effect.gen(function* () {
           _tag: "Delivery",
           inputSequence,
           intervention,
-          delivered: Option.map(
-            delivered,
-            (state) => new AttemptChannel.InterventionState({ ...state, forwardedTo }),
+          delivered: Option.map(delivered, (state) =>
+            AttemptChannel.InterventionState.make({ ...state, forwardedTo }),
           ),
         }),
       )
       .pipe(
-        Effect.mapError((error) => refuse(error.message)),
-        Effect.map((state) => new AttemptChannel.InterventionState({ ...state, forwardedTo })),
+        Effect.mapBoth({
+          onFailure: (error) => refuse(error.message),
+          onSuccess: (state) => AttemptChannel.InterventionState.make({ ...state, forwardedTo }),
+        }),
       );
     if (action._tag === "OperatorMessage" || action._tag === "Release") {
       yield* hold(hub, (held) =>
@@ -361,7 +362,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     const parentId = parentSessionId(hub.attemptId);
     const action = intervention.action;
     const stateOf = (document: Hold, queued: boolean) =>
-      new AttemptChannel.InterventionState({
+      AttemptChannel.InterventionState.make({
         held: document.held.includes(parentId),
         paused: document.paused,
         queued,
@@ -373,7 +374,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
       if (hub.children.size === 1 && child !== undefined) {
         const forwarded = yield* routeChild(
           hub,
-          new AttemptChannel.ChildTarget({ sessionId: child.session.id }),
+          AttemptChannel.ChildTarget.make({ sessionId: child.session.id }),
           intervention,
           inputSequence,
         ).pipe(Effect.result);
@@ -505,7 +506,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
       return routed.value.state;
     }
     yield* Effect.logInfo("The Pi parent read the operator input at once", { holds });
-    return new AttemptChannel.InterventionState({ ...routed.value.state, queued: false });
+    return AttemptChannel.InterventionState.make({ ...routed.value.state, queued: false });
   });
 
   const intervene = Effect.fn("AttemptRuntime.intervene")(
@@ -520,7 +521,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
         yield* Effect.logWarning("Operator input addressed an Attempt with no live channel", {
           action: intervention.action._tag,
         });
-        return yield* new AgentFailure({ message: "This attempt no longer has a live channel" });
+        return yield* AgentFailure.make({ message: "This attempt no longer has a live channel" });
       }
       const hub = found.value;
       yield* hub.routing.withPermits(1)(
@@ -549,7 +550,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
             yield* emitPayload(
               durable,
               hub,
-              new AttemptChannel.InterventionRejected({
+              AttemptChannel.InterventionRejected.make({
                 inputSequence,
                 intervention,
                 message: applied.failure.message,
@@ -560,7 +561,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
           yield* emitPayload(
             durable,
             hub,
-            new AttemptChannel.InterventionApplied({
+            AttemptChannel.InterventionApplied.make({
               inputSequence,
               intervention,
               state: applied.success,
@@ -611,8 +612,8 @@ const makeAttemptRuntime = Effect.gen(function* () {
           durable,
           hub.value,
           "engine",
-          new AttemptChannel.ParentTarget(),
-          new AttemptChannel.Cancel(),
+          AttemptChannel.ParentTarget.make(),
+          AttemptChannel.Cancel.make(),
         ).pipe(
           Effect.tapError((error) =>
             Effect.logWarning("Could not record the cancellation in the transcript", {

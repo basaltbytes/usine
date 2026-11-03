@@ -68,9 +68,9 @@ for (const permission of ["none", "operate", "maintain"] as const) {
     permission === "none"
       ? []
       : [
-          new PermissionGrant({
+          PermissionGrant.make({
             permission,
-            scope: new ProjectScope({ project: ProjectId.make("test") }),
+            scope: ProjectScope.make({ project: ProjectId.make("test") }),
           }),
         ];
   for (const initial of ["/", "/tokens", "revoked"]) {
@@ -82,7 +82,7 @@ for (const permission of ["none", "operate", "maintain"] as const) {
         client.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
         client.setQueryData(
           overviewQuery().queryKey,
-          new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
+          ReadyOverview.make({ projects: [], loops: [], needsYou: [] }),
         );
       }
       const requests: string[] = [];

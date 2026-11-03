@@ -91,7 +91,7 @@ const failRunningAttempt = (
   attempt: Attempt,
   failure: AttemptFailure,
 ): RetryAttempt | RunFailed => {
-  const outcome = new AttemptFailed({ failure });
+  const outcome = AttemptFailed.make({ failure });
   if (
     shouldAutoRetry({
       failure,
@@ -140,11 +140,11 @@ export const finishAttempt = (
     onNone: () => handoff.success,
     onSome: (ci) =>
       Option.match(handoff.success, {
-        onSome: (recorded) => Option.some(new CiHandoff({ ...recorded, ...ci })),
+        onSome: (recorded) => Option.some(CiHandoff.make({ ...recorded, ...ci })),
         onNone: () =>
           pullRequest?._tag === "PullRequest" && Option.isSome(pullRequest.head)
             ? Option.some(
-                new CiHandoff({
+                CiHandoff.make({
                   ...ci,
                   pullRequest: ItemNumber.make(pullRequest.number),
                   head: pullRequest.head.value,
@@ -158,12 +158,12 @@ export const finishAttempt = (
     return failRunningAttempt(
       current.run.state,
       attempt.value,
-      new AgentFailure({
+      AgentFailure.make({
         message: "This loop requires CI, but the successful report has no pushed pull request head",
       }),
     );
   if (Option.isSome(required)) {
-    const request = new CiHandoff({
+    const request = CiHandoff.make({
       ...required.value,
       onGreen: [...inheritedOnGreen, ...required.value.onGreen],
     });
@@ -178,7 +178,7 @@ export const finishAttempt = (
       return failRunningAttempt(
         current.run.state,
         attempt.value,
-        new AgentFailure({
+        AgentFailure.make({
           message: "The CI handoff has no harvested pull request for the checkout's pushed head",
         }),
       );
@@ -186,15 +186,15 @@ export const finishAttempt = (
     return {
       _tag: "RunAwaitingCi",
       attempt: attempt.value,
-      outcome: new AttemptAwaitingCi(),
-      state: new RunState.AwaitingCi({ handoff: request }),
+      outcome: AttemptAwaitingCi.make(),
+      state: RunState.AwaitingCi.make({ handoff: request }),
       result: completed.success,
     };
   }
   return {
     _tag: "RunSucceeded",
     attempt: attempt.value,
-    outcome: new AttemptSucceeded(),
+    outcome: AttemptSucceeded.make(),
     state: RunState.succeed(current.run.state),
     result: completed.success,
   };
@@ -222,7 +222,7 @@ type StartDecision =
 const pushedPart = (salvage: AttemptSalvage): Option.Option<SalvagePushed> =>
   Match.valueTags(salvage, {
     Pushed: (pushed) => Option.some(pushed),
-    PartlyPushed: ({ ref, commit }) => Option.some(new SalvagePushed({ ref, commit })),
+    PartlyPushed: ({ ref, commit }) => Option.some(SalvagePushed.make({ ref, commit })),
     Retained: () => Option.none(),
     Rejected: () => Option.none(),
   });
@@ -266,12 +266,12 @@ export const beginAttempt = (
     interrupted = Option.some(recovery);
   }
   const start: AttemptStart = Option.isSome(interrupted)
-    ? new StartedAfterRestart()
+    ? StartedAfterRestart.make()
     : Option.getOrElse(requested, (): AttemptStart => {
-        if (current.attempts.length === 0) return new StartedByEvent();
+        if (current.attempts.length === 0) return StartedByEvent.make();
         return Option.isSome(pendingProviderRetry(state, current.attempts))
-          ? new StartedByProviderRetry()
-          : new StartedByInfraRetry();
+          ? StartedByProviderRetry.make()
+          : StartedByInfraRetry.make();
       });
   return {
     _tag: "StartAttempt",
@@ -311,7 +311,7 @@ export const cancelRun = (
         ? Option.map(openAttempt(current), (attempt) => ({
             id: attempt.id,
             worker: attempt.worker,
-            outcome: new AttemptCanceled(),
+            outcome: AttemptCanceled.make(),
           }))
         : Option.none(),
   };

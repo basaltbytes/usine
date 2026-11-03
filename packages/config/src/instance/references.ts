@@ -46,7 +46,7 @@ export const loopReferenceFailure = (
     problems.length === 0
       ? Option.none()
       : Option.some(
-          new ConfigFileError({
+          ConfigFileError.make({
             file,
             stage: "reference",
             expression: Option.none(),

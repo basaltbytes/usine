@@ -10,14 +10,14 @@ import {
   intersectPermissions,
 } from "../src/access.ts";
 import { ProjectId } from "../src/project.ts";
-const alpha = new ProjectScope({ project: ProjectId.make("alpha") });
-const beta = new ProjectScope({ project: ProjectId.make("beta") });
+const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+const beta = ProjectScope.make({ project: ProjectId.make("beta") });
 const binding = (role: "viewer" | "operator" | "maintainer") =>
-  new RoleBinding({ name: role, member: GitHubUserId.make(1), role, scope: alpha });
+  RoleBinding.make({ name: role, member: GitHubUserId.make(1), role, scope: alpha });
 it("rejects mismatched role scopes at construction", () => {
   for (const value of [
     { name: "bad", member: 1, role: "admin", scope: alpha },
-    { name: "bad", member: 1, role: "viewer", scope: new InstanceScope() },
+    { name: "bad", member: 1, role: "viewer", scope: InstanceScope.make() },
   ])
     assert.isTrue(Option.isNone(Schema.decodeUnknownOption(RoleBinding)(value)));
 });
@@ -35,11 +35,11 @@ it("grants project actions cumulatively without granting another project or inst
       [...expected],
     );
     assert.isFalse(permits(grants, "read", beta));
-    assert.isFalse(permits(grants, "admin", new InstanceScope()));
+    assert.isFalse(permits(grants, "admin", InstanceScope.make()));
   }
 });
 it("intersects token ceilings with current membership, including narrowed instance read scopes", () => {
-  const ceiling = [new PermissionGrant({ permission: "read", scope: new InstanceScope() })];
+  const ceiling = [PermissionGrant.make({ permission: "read", scope: InstanceScope.make() })];
   const effective = intersectPermissions(binding("maintainer").permissions, ceiling);
   assert.isTrue(permits(effective, "read", alpha));
   assert.isFalse(permits(effective, "read", beta));

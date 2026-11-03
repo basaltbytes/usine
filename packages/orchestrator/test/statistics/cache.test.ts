@@ -24,8 +24,8 @@ import { alwaysHoldsLayer } from "../support/polling.ts";
 import { cacheStatistics } from "../../src/operator/statistics/cache.ts";
 import { submission } from "../local-worker/support.ts";
 
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [],
     workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
@@ -36,7 +36,7 @@ const instance = new LoadedInstance({
   quarantinedLoops: [],
   warnings: [],
 });
-const revision = () => Effect.succeed(Option.some(ProjectionRevision.make(0)));
+const revision = () => Effect.succeedSome(ProjectionRevision.make(0));
 
 describe("Statistics cache", () => {
   it.effect(
@@ -80,7 +80,7 @@ describe("Statistics cache", () => {
         () => Effect.sync(() => ++reads),
       );
       assert.strictEqual(yield* cached(instance, "7d"), 1);
-      const reloaded = new LoadedInstance({ ...instance });
+      const reloaded = LoadedInstance.make({ ...instance });
       assert.strictEqual(yield* cached(reloaded, "7d"), 2);
       current = Option.none();
       assert.strictEqual(yield* cached(reloaded, "7d"), 3);
@@ -93,7 +93,7 @@ describe("Statistics cache", () => {
 
   it.effect("retries a failed computation instead of caching the error", () =>
     Effect.gen(function* () {
-      const failure = new EnginePersistenceError({
+      const failure = EnginePersistenceError.make({
         operation: "read statistics",
         cause: "unavailable",
       });
@@ -164,7 +164,7 @@ describe("Statistics cache", () => {
         yield* sql`INSERT INTO usine_trigger_events (event_id, item_key, loop_name, step_name, approval, repository, revision, task, agent_json)
           VALUES (${input.event.id}, ${input.itemKey}, ${input.loop}, ${input.step}, 'none', ${input.repository}, ${input.revision}, ${input.task}, ${agent})`;
         const pending = JSON.stringify(
-          Schema.encodeSync(RunState.RunState)(new RunState.Pending()),
+          Schema.encodeSync(RunState.RunState)(RunState.Pending.make()),
         );
         yield* sql`INSERT INTO usine_runs (run_id, event_id, loop_name, state_json, opened_at, repository, revision, task, agent_json)
           VALUES ('cached-run', ${input.event.id}, ${input.loop}, ${pending}, '2026-10-25T00:00:00.000Z', ${input.repository}, ${input.revision}, ${input.task}, ${agent})`;
@@ -178,7 +178,7 @@ describe("Statistics cache", () => {
           assert.isEmpty(yield* cached(instance, window));
         }
         assert.strictEqual(reads, 3);
-        const failed = JSON.stringify(Schema.encodeSync(RunState.RunState)(new RunState.Failed()));
+        const failed = JSON.stringify(Schema.encodeSync(RunState.RunState)(RunState.Failed.make()));
         yield* sql`UPDATE usine_runs SET state_json = ${failed}, closed_at = '2026-10-25T01:00:00.000Z' WHERE run_id = 'cached-run'`;
         for (const window of ["7d", "30d", "all"] as const) {
           assert.lengthOf(yield* cached(instance, window), 1);
@@ -220,7 +220,7 @@ describe("Statistics cache", () => {
       const executor = Layer.succeed(StepExecutor)({
         workers: Effect.succeed([worker]),
         isLive: () => Effect.succeed(false),
-        outcome: () => Effect.succeed(Option.none()),
+        outcome: () => Effect.succeedNone,
         recover: () => Effect.void,
         intervene: () => Effect.void,
         interrupt: () => Effect.void,
@@ -228,7 +228,7 @@ describe("Statistics cache", () => {
         sweep: Effect.void,
         discard: () => Effect.void,
         reserve: () => Effect.succeed({ worker, release: Effect.void }),
-        execute: () => Effect.fail(new AgentFailure({ message: "Needs operator input" })),
+        execute: () => Effect.fail(AgentFailure.make({ message: "Needs operator input" })),
       });
       const engineLayer = localEngineLayer(directory).pipe(
         Layer.provide(executor),

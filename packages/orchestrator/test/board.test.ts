@@ -53,7 +53,7 @@ const review = GitHubLabelName.make("ready-for-review");
 const bug = GitHubLabelName.make("bug");
 const reviewLane = LaneName.make("ready-for-review");
 const itemWithLabels = (labels: ReadonlyArray<GitHubLabelName>) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey,
     repository,
     source: ItemProjectionSource.make("issue"),
@@ -83,7 +83,7 @@ const itemWithLabels = (labels: ReadonlyArray<GitHubLabelName>) =>
   });
 
 const item = itemWithLabels([ready, bug]);
-const closedItem = new ItemProjection({
+const closedItem = ItemProjection.make({
   ...itemWithLabels([ready]),
   contentHash: ItemContentHash.make("issue-33:closed"),
   payload: {
@@ -95,7 +95,7 @@ const closedItem = new ItemProjection({
 });
 
 const passed = GitHubLabelName.make("review-passed");
-const mergedPullRequest = new ItemProjection({
+const mergedPullRequest = ItemProjection.make({
   itemKey: ItemKey.make("github:basaltbytes/usine:98"),
   repository,
   source: ItemProjectionSource.make("pr"),
@@ -133,8 +133,8 @@ const mergedPullRequest = new ItemProjection({
 });
 
 const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succeeded") =>
-  new RunView({
-    agentBrain: new BrainSpec({
+  RunView.make({
+    agentBrain: BrainSpec.make({
       harness: "codex",
       model: ModelId.make("test-model"),
       effort: "high",
@@ -164,7 +164,7 @@ const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succ
 describe("Board projection", () => {
   it.effect("gives label lanes precedence over state lanes", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [
           {
@@ -187,7 +187,7 @@ describe("Board projection", () => {
 
   it.effect("matches lane labels ignoring case, as GitHub does", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [
           { name: repository, lanes: [{ name: "Ready", sources: [{ label: "Ready-For-Agent" }] }] },
@@ -202,7 +202,7 @@ describe("Board projection", () => {
 
   it.effect("groups a merged pull request by state even when it still carries a lane label", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [
           {
@@ -227,13 +227,13 @@ describe("Board projection", () => {
     "leaves a closed issue, or an open one GitHub no longer has, unmapped instead of placing it by a leftover label",
     () =>
       Effect.gen(function* () {
-        const config = Schema.decodeUnknownSync(UsineConfig)({
+        const config = Schema.decodeSync(UsineConfig)({
           version: 1,
           repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
         });
         const managed = config.repos[0];
         assert(managed !== undefined);
-        const gone = new ItemProjection({
+        const gone = ItemProjection.make({
           ...itemWithLabels([ready]),
           goneAt: Option.some(DateTime.makeUnsafe("2026-09-04T08:00:00Z")),
         });
@@ -249,7 +249,7 @@ describe("Board projection", () => {
 
   it.effect("moves an open pull request GitHub no longer has to its closed lane", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [
           {
@@ -264,7 +264,7 @@ describe("Board projection", () => {
       });
       const managed = config.repos[0];
       assert(managed !== undefined);
-      const open = new ItemProjection({
+      const open = ItemProjection.make({
         ...mergedPullRequest,
         contentHash: ItemContentHash.make("pr-98:open"),
         payload: {
@@ -275,7 +275,7 @@ describe("Board projection", () => {
           labels: { totalCount: 1, nodes: [{ name: review }] },
         },
       });
-      const gone = new ItemProjection({
+      const gone = ItemProjection.make({
         ...open,
         goneAt: Option.some(DateTime.makeUnsafe("2026-09-04T08:00:00Z")),
       });
@@ -294,7 +294,7 @@ describe("Board projection", () => {
 
   it.effect("proposes lanes from unused repository labels when there are no Items", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
       });
@@ -310,13 +310,13 @@ describe("Board projection", () => {
 
   it.effect("quarantines one malformed Item projection and keeps its sibling", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
       });
       const managed = config.repos[0];
       assert(managed !== undefined);
-      const malformed = new ItemProjection({
+      const malformed = ItemProjection.make({
         itemKey: ItemKey.make("github:basaltbytes/usine:34"),
         repository,
         source: ItemProjectionSource.make("issue"),
@@ -333,7 +333,7 @@ describe("Board projection", () => {
 
   it.effect("keeps every actionable Run while preferring it over a settled Run", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
       });
@@ -355,7 +355,7 @@ describe("Board projection", () => {
 
   it.effect("retains a Waiting and Failed Run when another Run is active", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
       });
@@ -377,13 +377,13 @@ describe("Board projection", () => {
 
   it.effect("prefers the active Run over a failed Run on a closed issue, which needs no one", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository, lanes: [{ name: "Review", sources: [{ label: review }] }] }],
       });
       const managed = config.repos[0];
       assert(managed !== undefined);
-      const pr = new ItemProjection({
+      const pr = ItemProjection.make({
         ...mergedPullRequest,
         payload: {
           ...mergedPullRequest.payload,
@@ -393,11 +393,11 @@ describe("Board projection", () => {
           labels: { totalCount: 1, nodes: [{ name: review }] },
         },
       });
-      const failed = new RunView({
+      const failed = RunView.make({
         ...runForBoard("failed-run", "Failed"),
         pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
       });
-      const reviewRun = new RunView({
+      const reviewRun = RunView.make({
         ...runForBoard("review-run", "Running"),
         itemKey: pr.itemKey,
         openedAt: "2026-09-01T11:00:00.000Z",
@@ -413,13 +413,13 @@ describe("Board projection", () => {
     "keeps issue development and PR review in one Task after the issue loses its label",
     () =>
       Effect.gen(function* () {
-        const config = Schema.decodeUnknownSync(UsineConfig)({
+        const config = Schema.decodeSync(UsineConfig)({
           version: 1,
           repos: [{ name: repository, lanes: [{ name: "Review", sources: [{ label: review }] }] }],
         });
         const managed = config.repos[0];
         assert(managed !== undefined);
-        const pr = new ItemProjection({
+        const pr = ItemProjection.make({
           ...mergedPullRequest,
           payload: {
             ...mergedPullRequest.payload,
@@ -431,11 +431,11 @@ describe("Board projection", () => {
             labels: { totalCount: 1, nodes: [{ name: review }] },
           },
         });
-        const development = new RunView({
+        const development = RunView.make({
           ...runForBoard("development", "Succeeded"),
           pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
         });
-        const reviewRun = new RunView({
+        const reviewRun = RunView.make({
           ...runForBoard("review", "Running"),
           itemKey: pr.itemKey,
           openedAt: "2026-09-02T12:00:00.000Z",
@@ -461,7 +461,7 @@ describe("Board projection", () => {
         assert.strictEqual(card.itemKey, pr.itemKey);
         assert.deepStrictEqual(
           card.pullRequest,
-          new BoardPullRequestView({
+          BoardPullRequestView.make({
             number: ItemNumber.make(98),
             url: "https://github.com/basaltbytes/usine/pull/98",
             state: "pr-open",
@@ -492,7 +492,7 @@ describe("Board projection", () => {
 
   it.effect("joins only canonical same-repository closing links without Runs", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
       });
@@ -504,7 +504,7 @@ describe("Board projection", () => {
         ["https://github.com/basaltbytes/usine/pull/0x62", 2],
         ["https://github.com/basaltbytes/usine/pull/9.8e1", 2],
       ] as const) {
-        const linked = new ItemProjection({
+        const linked = ItemProjection.make({
           ...closedItem,
           payload: {
             ...closedItem.payload,
@@ -523,13 +523,13 @@ describe("Board projection", () => {
 
   it.effect("groups several issues sharing a PR once, independently of snapshot order", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
       });
       const managed = config.repos[0];
       assert(managed !== undefined);
-      const issue34 = new ItemProjection({
+      const issue34 = ItemProjection.make({
         ...item,
         itemKey: ItemKey.make("github:basaltbytes/usine:34"),
         number: ItemNumber.make(34),
@@ -540,16 +540,16 @@ describe("Board projection", () => {
           url: "https://github.com/basaltbytes/usine/issues/34",
         },
       });
-      const development = new RunView({
+      const development = RunView.make({
         ...runForBoard("dev-33", "Succeeded"),
         pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
       });
-      const companion = new RunView({
+      const companion = RunView.make({
         ...development,
         id: RunId.make("dev-34"),
         itemKey: issue34.itemKey,
       });
-      const reviewRun = new RunView({
+      const reviewRun = RunView.make({
         ...runForBoard("review-98", "Running"),
         itemKey: mergedPullRequest.itemKey,
       });
@@ -580,7 +580,7 @@ describe("Board projection", () => {
   );
 
   it("derives an authored lane mutation without trusting truncated card labels", () => {
-    const card = new BoardTaskView({
+    const card = BoardTaskView.make({
       repository,
       itemKey,
       kind: "issue",
@@ -589,7 +589,7 @@ describe("Board projection", () => {
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",
       items: [
-        new BoardItemLink({
+        BoardItemLink.make({
           itemKey,
           kind: "issue",
           number: ItemNumber.make(33),
@@ -607,28 +607,28 @@ describe("Board projection", () => {
       loops: [],
       usage: taskUsage([], new Map()),
     });
-    const source = new WritableBoardLaneView({
+    const source = WritableBoardLaneView.make({
       id: BoardLaneId.make("authored:Ready"),
       name: LaneName.make("Ready"),
-      sources: [new LabelLaneSource({ label: ready })],
+      sources: [LabelLaneSource.make({ label: ready })],
       labels: [ready],
       origin: "authored",
       items: [card],
     });
-    const target = new WritableBoardLaneView({
+    const target = WritableBoardLaneView.make({
       id: BoardLaneId.make("authored:Review"),
       name: LaneName.make("Review"),
-      sources: [new LabelLaneSource({ label: review })],
+      sources: [LabelLaneSource.make({ label: review })],
       labels: [review],
       origin: "authored",
       items: [],
     });
-    const board = new BoardView({
+    const board = BoardView.make({
       failures: [],
       lanes: [
         source,
         target,
-        new ReadOnlyBoardLaneView({
+        ReadOnlyBoardLaneView.make({
           id: BoardLaneId.make("fallback:unmapped"),
           name: LaneName.make("Unmapped"),
           sources: [],
@@ -644,7 +644,7 @@ describe("Board projection", () => {
 
   it.effect("keeps proposed label lanes read-only and preserves descriptive labels", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
       });
@@ -672,7 +672,7 @@ describe("Task usage", () => {
   const ended = (startedAt: string, endedAt: string | null) => ({
     startedAt,
     endedAt,
-    outcome: new SucceededAttemptView(),
+    outcome: SucceededAttemptView.make(),
   });
   const harnesses = { apiKeys: "pi", claudePlan: "claude", chatgptPlan: "codex" } as const;
   /** Returns one session of `attempt` using `tokens` from `pool`, priced at `usd` or unpriced. */
@@ -682,12 +682,12 @@ describe("Task usage", () => {
     tokens: number,
     usd: number | null,
   ): SessionUsageView =>
-    new SessionUsageView({
+    SessionUsageView.make({
       attemptId: AttemptId.make(attempt),
-      session: new ParentSession({
+      session: ParentSession.make({
         id: AgentSessionId.make(`${attempt}-${pool}`),
         agent: AgentName.make("developer"),
-        brain: new BrainSpec({
+        brain: BrainSpec.make({
           harness: harnesses[pool],
           model: ModelId.make("model"),
           effort: "high",
@@ -698,25 +698,25 @@ describe("Task usage", () => {
       cost:
         usd === null
           ? null
-          : new UsageCostView({ usd: UsdAmount.make(usd), estimate: pool !== "apiKeys" }),
+          : UsageCostView.make({ usd: UsdAmount.make(usd), estimate: pool !== "apiKeys" }),
     });
   /**
    * Returns a Run's usage as `RunUsageReader` reads it: a pool has no price while a session has
    * none.
    */
   const runUsage = (sessions: ReadonlyArray<SessionUsageView>) =>
-    new RunUsageView({
+    RunUsageView.make({
       tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
       pools: [...new Set(sessions.map(({ pool }) => pool))].map((pool) => {
         const members = sessions.filter((member) => member.pool === pool);
         const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost]));
-        return new PoolUsageView({
+        return PoolUsageView.make({
           pool,
           tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
           cost:
             costs.length < members.length
               ? null
-              : new UsageCostView({
+              : UsageCostView.make({
                   usd: UsdAmount.make(costs.reduce((sum, { usd }) => sum + usd, 0)),
                   estimate: pool !== "apiKeys",
                 }),
@@ -837,7 +837,7 @@ describe("Task usage", () => {
 
 it.effect("matches a project's label lane by name in both repositories", () =>
   Effect.gen(function* () {
-    const config = Schema.decodeUnknownSync(UsineConfig)({
+    const config = Schema.decodeSync(UsineConfig)({
       version: 2,
       repos: [{ name: repository }, { name: "basaltbytes/second" }],
       projects: [
@@ -851,7 +851,7 @@ it.effect("matches a project's label lane by name in both repositories", () =>
     });
     const views: Array<ProjectView> = [];
     for (const managed of boardRepositories(config)) {
-      const projection = new ItemProjection({
+      const projection = ItemProjection.make({
         ...item,
         repository: managed.name,
         itemKey: ItemKey.make(JSON.stringify(["github", managed.name, item.number])),
@@ -860,7 +860,7 @@ it.effect("matches a project's label lane by name in both repositories", () =>
       assert.strictEqual(board.lanes[0]?.name, "Ready");
       assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, projection.itemKey);
       views.push(
-        new ProjectView({
+        ProjectView.make({
           repository: managed.name,
           status: "clear",
           runs: [],

@@ -38,7 +38,7 @@ export const workerAttentionFor = (
           worker: attempt.worker,
         });
         const entries = yield* reader.transcript(
-          new TranscriptWorkerQuery({ attemptId: attempt.id }),
+          TranscriptWorkerQuery.make({ attemptId: attempt.id }),
         );
         const notice = entries.at(-1)?.envelope.payload;
         return notice?._tag === "WorkerUnresponsive" &&
@@ -54,7 +54,7 @@ export const workerAttentionFor = (
       const lastAnsweredAt = DateTime.formatIso(notice.lastAnsweredAt);
       workers.set(
         notice.worker,
-        new UnresponsiveWorkerNeed({
+        UnresponsiveWorkerNeed.make({
           id: `unresponsive-worker:${notice.worker}`,
           worker: notice.worker,
           lastAnsweredAt:
@@ -81,12 +81,12 @@ export const workerAttentionFor = (
     const needs: Array<NeedView> = [...workers.values()];
     for (const { worker, message } of yield* status.unavailable) {
       if (!declared.includes(worker)) continue;
-      needs.push(new WorkerPreflightNeed({ id: `worker-preflight:${worker}`, worker, message }));
+      needs.push(WorkerPreflightNeed.make({ id: `worker-preflight:${worker}`, worker, message }));
     }
     for (const { worker, quota } of yield* status.provisioning) {
       if (declared.includes(worker) && Option.isSome(quota))
         needs.push(
-          new WorkerQuotaNeed({ id: `worker-quota:${worker}`, worker, message: quota.value }),
+          WorkerQuotaNeed.make({ id: `worker-quota:${worker}`, worker, message: quota.value }),
         );
     }
     if (needs.length === 0) return overview;
@@ -99,7 +99,7 @@ export const workerAttentionFor = (
       quotaRefusals: needs.filter((need) => need._tag === "WorkerQuotaNeed").length,
       preflightFailures: needs.filter((need) => need._tag === "WorkerPreflightNeed").length,
     });
-    return new ReadyOverview({
+    return ReadyOverview.make({
       ...overview,
       projects: projectAttention(overview.projects, visible),
       needsYou: visible,

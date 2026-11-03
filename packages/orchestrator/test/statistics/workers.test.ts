@@ -15,7 +15,7 @@ import { configurationLayer } from "../support/configuration.ts";
 const HOUR = 3_600_000;
 const at = (hour: number) => DateTime.makeUnsafe(hour * HOUR);
 const instance = (slots: number) =>
-  new LoadedInstance({
+  LoadedInstance.make({
     config: Schema.decodeUnknownSync(UsineConfig)({
       version: 2,
       repos: [],

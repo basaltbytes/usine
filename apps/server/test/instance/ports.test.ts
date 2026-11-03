@@ -48,7 +48,7 @@ const listeningChild = () =>
     child.stdout.once("data", (data) =>
       resolve({
         pid: Schema.decodeUnknownSync(ProcessId)(child.pid),
-        port: Schema.decodeUnknownSync(Port)(Number(String(data).trim())),
+        port: Schema.decodeSync(Port)(Number(String(data).trim())),
       }),
     );
   });

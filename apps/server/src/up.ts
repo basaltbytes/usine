@@ -154,7 +154,7 @@ const refuseVolatileInstance = Effect.fn("Server.refuseVolatileInstance")(functi
   );
   if (Option.isNone(root)) return;
   if (!allowVolatileInstance) {
-    return yield* new VolatileInstanceDirectoryError({ directory, root: root.value });
+    return yield* VolatileInstanceDirectoryError.make({ directory, root: root.value });
   }
   yield* Effect.logWarning(
     "Instance folder sits under a volatile path; its runtime store is the only copy of run history",
@@ -326,7 +326,7 @@ export const up = (command: UpCommand) =>
       yield* refuseVolatileInstance(directory, command.allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );
-      const record = new InstanceRecord({
+      const record = InstanceRecord.make({
         pid: ProcessId.make(process.pid),
         version: yield* packageVersion().pipe(Effect.provide(NodeServices.layer)),
         startedAt: yield* DateTime.now,
@@ -383,8 +383,9 @@ export const up = (command: UpCommand) =>
         ),
       );
       yield* seedOperator(config.operator).pipe(
-        Effect.provide(authDependencies),
-        Effect.provide(Layer.succeedContext(accessContext)),
+        Effect.provide(
+          authDependencies.pipe(Layer.provideMerge(Layer.succeedContext(accessContext))),
+        ),
       );
       const localToken = yield* writeAdminToken(directory).pipe(Effect.provide(NodeServices.layer));
       const authContext = yield* Layer.build(

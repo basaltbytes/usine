@@ -5,8 +5,8 @@ import { authRequest } from "~/lib/auth";
 const Token = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  createdAt: Schema.Number,
-  lastUsedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  lastUsedAt: Schema.Finite,
   kind: Schema.String,
   scopes: Schema.Array(PermissionGrant).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 });

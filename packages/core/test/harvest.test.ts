@@ -25,9 +25,9 @@ const spec: HarvestSpec = {
   payload: { tick: { scheduledAt: "2026-10-19T12:00:00Z" } },
   preparedAt: Option.some(DateTime.makeUnsafe("2026-10-19T12:00:00.250Z")),
   botLogin: Option.some(BotLogin.make("usine-test[bot]")),
-  agent: new Agent({
+  agent: Agent.make({
     name: AgentName.make("developer"),
-    brain: new BrainSpec({
+    brain: BrainSpec.make({
       harness: "claude",
       model: ModelId.make("claude-sonnet-4-6"),
       effort: "high",
@@ -42,14 +42,14 @@ class CommandFailed extends Data.TaggedError("CommandFailed")<{ readonly message
 
 /** Returns an Attempt window that is open if `endedAt` is `null`. */
 const window = (attemptId: AttemptId, startedAt: string, endedAt: string | null = null) =>
-  new AttemptWindow({
+  AttemptWindow.make({
     attemptId,
     startedAt: DateTime.makeUnsafe(startedAt),
     endedAt: Option.fromNullOr(endedAt).pipe(Option.map(DateTime.makeUnsafe)),
   });
 
 /** The windows of `spec`'s Attempt, open since 12:00:00.100, with no overlapping Attempt. */
-const ALONE = new AttemptWindows({
+const ALONE = AttemptWindows.make({
   own: Option.some(window(spec.attemptId, "2026-10-19T12:00:00.100Z")),
   overlapping: [],
 });
@@ -439,7 +439,7 @@ describe("harvesting an Attempt's facts", () => {
           listed(SINCE),
           { ...itemRun("pull/71"), attemptId: fix },
           Effect.succeed(
-            new AttemptWindows({ own: Option.some(fixWindow), overlapping: [docsWindow] }),
+            AttemptWindows.make({ own: Option.some(fixWindow), overlapping: [docsWindow] }),
           ),
         );
         const documented = yield* harvest(
@@ -452,7 +452,7 @@ describe("harvesting an Attempt's facts", () => {
             preparedAt: Option.some(DateTime.makeUnsafe("2026-10-19T12:05:01.250Z")),
           },
           Effect.succeed(
-            new AttemptWindows({
+            AttemptWindows.make({
               own: Option.some(docsWindow),
               overlapping: [window(fix, "2026-10-19T12:00:00.100Z", "2026-10-19T12:10:00.000Z")],
             }),
@@ -520,7 +520,7 @@ describe("harvesting an Attempt's facts", () => {
             ],
           ],
           itemRun("pull/71"),
-          Effect.sync(() => new AttemptWindows({ own: ALONE.own, overlapping: [...open] })),
+          Effect.sync(() => AttemptWindows.make({ own: ALONE.own, overlapping: [...open] })),
         );
         assert.deepStrictEqual(comments(facts), []);
         assert.deepInclude(infos, [
@@ -581,7 +581,7 @@ describe("harvesting an Attempt's facts", () => {
           itemRun("pull/71"),
           (command, args) =>
             answers.get([command, ...args].join(" ")) ?? Effect.die("unexpected command"),
-          Effect.succeed(new AttemptWindows({ own: Option.some(canceled), overlapping: [] })),
+          Effect.succeed(AttemptWindows.make({ own: Option.some(canceled), overlapping: [] })),
         ).pipe(
           Effect.provide(
             Logger.layer([

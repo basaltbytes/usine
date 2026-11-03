@@ -30,7 +30,7 @@ export const attemptConnectionsFor = <A extends { readonly name: WorkerName }>(
         const saved = store === undefined ? Option.none<A>() : yield* store.read(attemptId);
         const address = Option.isSome(saved) ? saved.value : yield* current;
         if (address.name !== worker)
-          return yield* new ExecutorOperationError({
+          return yield* ExecutorOperationError.make({
             operation: "prepare",
             message: "The recorded attempt connection belongs to another worker",
             cause: new Error(`Attempt ${attemptId} belongs to ${address.name}, not ${worker}`),

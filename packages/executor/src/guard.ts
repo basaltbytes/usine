@@ -180,7 +180,7 @@ const tokenWatcher = (
         consumed,
         maxAttemptTokens: tokens.limit,
       });
-      return yield* new RunawayFailure({ ceiling: "tokens" });
+      return yield* RunawayFailure.make({ ceiling: "tokens" });
     }
     if (!warned && consumed >= tokens.warnAt) {
       warned = true;
@@ -327,7 +327,7 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
       attemptId,
       maxAttemptMinutes: wallClock.limit / 60_000,
     });
-    return yield* new RunawayFailure({ ceiling: "wall-clock" });
+    return yield* RunawayFailure.make({ ceiling: "wall-clock" });
   }).pipe(
     Effect.raceFirst(
       Effect.forever(Effect.sleep(RECORD_INTERVAL).pipe(Effect.andThen(recordCounted()))),

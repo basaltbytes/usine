@@ -110,7 +110,7 @@ const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(functio
     return {
       ...unchanged,
       failures: [
-        new RepositoryPollFailure({
+        RepositoryPollFailure.make({
           repository,
           errorTag: error._tag,
           message: repositoryFailureLogFields(error).message,
@@ -135,11 +135,10 @@ const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(functio
     });
     return { ...unchanged, confirmedLabels: Option.some(projection.value.labels) };
   }
-  const labels = detection.labels.map(
-    ({ name, color, description }) =>
-      new RepositoryLabel({ name, color: Option.some(color), description }),
+  const labels = detection.labels.map(({ name, color, description }) =>
+    RepositoryLabel.make({ name, color: Option.some(color), description }),
   );
-  yield* repositoryLabelWriter.replace(new RepositoryLabelProjection({ repository, labels }));
+  yield* repositoryLabelWriter.replace(RepositoryLabelProjection.make({ repository, labels }));
   return {
     ...unchanged,
     labelEntityTag: detection.entityTag,
@@ -178,7 +177,7 @@ export const synchronizeLabels = Effect.fn("PollingTriggers.synchronizeLabels")(
   };
   if (reconciliation.catalogChanged) {
     yield* repositoryLabelWriter
-      .replace(new RepositoryLabelProjection({ repository, labels: reconciliation.labels }))
+      .replace(RepositoryLabelProjection.make({ repository, labels: reconciliation.labels }))
       .pipe(
         // Provisioning may have reported failures before projection storage fails. Keep those
         // findings, as for a later Item failure.
@@ -215,7 +214,7 @@ export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
   const itemKey = gitHubItemKey(repository, changed.number);
   const cycleGeneration = yield* budgets.generation(itemKey);
   const snapshot = yield* github.snapshot(repository, changed);
-  const projection = new ItemProjection({
+  const projection = ItemProjection.make({
     itemKey,
     repository,
     source: ItemProjectionSource.make(changed._tag === "ChangedIssue" ? "issue" : "pr"),

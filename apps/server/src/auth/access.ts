@@ -44,14 +44,14 @@ const grantAdministrators = Effect.fn("MemberAccess.grantAdministrators")(functi
     )
     .map((member) => {
       const name = `member-${member.id}-admin`;
-      const binding = new RoleBinding({
+      const binding = RoleBinding.make({
         name,
         member: member.id,
         role: "admin",
-        scope: new InstanceScope(),
+        scope: InstanceScope.make(),
       });
-      return new ConfigurationChange({
-        key: new ConfigurationEntityKey({
+      return ConfigurationChange.make({
+        key: ConfigurationEntityKey.make({
           kind: "binding",
           identifier: ConfigurationEntityId.make(name),
         }),
@@ -117,7 +117,7 @@ export const memberAccessLayer = Layer.effect(
                 .filter((binding) => binding.member === member.id)
                 .flatMap((binding) => binding.permissions),
               "admin",
-              new InstanceScope(),
+              InstanceScope.make(),
             ),
           );
           if (admins.length === 1 && admins[0]?.id === id)
@@ -127,16 +127,15 @@ export const memberAccessLayer = Layer.effect(
             );
           const changes = bindings
             .filter((binding) => binding.member === id)
-            .map(
-              (binding) =>
-                new ConfigurationChange({
-                  key: new ConfigurationEntityKey({
-                    kind: "binding",
-                    identifier: ConfigurationEntityId.make(binding.name),
-                  }),
-                  before: Option.some(Schema.encodeSync(RoleBinding)(binding)),
-                  after: Option.none(),
+            .map((binding) =>
+              ConfigurationChange.make({
+                key: ConfigurationEntityKey.make({
+                  kind: "binding",
+                  identifier: ConfigurationEntityId.make(binding.name),
                 }),
+                before: Option.some(Schema.encodeSync(RoleBinding)(binding)),
+                after: Option.none(),
+              }),
             );
           yield* store.remove(id);
           if (changes.length > 0)

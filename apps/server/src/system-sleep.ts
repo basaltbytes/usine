@@ -14,7 +14,7 @@ interface SystemSleep {
 /** Matches a line such as ` sleep  1 (sleep prevented by caffeinate, powerd)`. */
 const SLEEP_LINE = /^\s*sleep\s+(\d+)(?:\s+\(sleep prevented by ([^)]*)\))?/mu;
 
-const Minutes = Schema.NumberFromString.pipe(Schema.decodeTo(Schema.Int));
+const Minutes = Schema.FiniteFromString.pipe(Schema.decodeTo(Schema.Int));
 
 /** Returns the `sleep` setting in `pmset -g` output, or `None` if it has no `sleep` line. */
 const systemSleepOf = (output: string): Option.Option<SystemSleep> => {

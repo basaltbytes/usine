@@ -144,10 +144,10 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const files = instanceFiles(directory);
   const fileError = (path: string) => (error: { readonly message: string }) =>
-    new UpgradeFileError({ path, reason: error.message });
+    UpgradeFileError.make({ path, reason: error.message });
   const state = yield* probeInstance(directory);
   if (state._tag === "Unrecorded") {
-    return yield* new UnrecordedInstanceError({ command: "upgrade", directory, pid: state.pid });
+    return yield* UnrecordedInstanceError.make({ command: "upgrade", directory, pid: state.pid });
   }
   const running: Option.Option<InstanceRecord> =
     state._tag === "Running" ? Option.some(state.record) : Option.none();
@@ -166,7 +166,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
         return yield* requestSystemUpgrade(directory, running.value, command);
       }
       if (!command.check) {
-        return yield* new EngineOutsideInstanceError({
+        return yield* EngineOutsideInstanceError.make({
           script,
           version: running.value.version,
           packaged: script.includes(`${sep}node_modules${sep}`),
@@ -183,11 +183,11 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   const manifestPath = join(directory, "package.json");
   const manifest = yield* readManifest(directory);
   if (Option.isNone(manifest)) {
-    return yield* new EnginePinError({ path: manifestPath, missing: true, linked: Option.none() });
+    return yield* EnginePinError.make({ path: manifestPath, missing: true, linked: Option.none() });
   }
   const pin = serverPin(manifest.value);
   if (Option.isNone(pin)) {
-    return yield* new EnginePinError({
+    return yield* EnginePinError.make({
       path: manifestPath,
       missing: false,
       linked: manifest.value.linkedServer,
@@ -225,8 +225,10 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   const lockfiles = yield* Effect.forEach(manifest.value.lockfiles, (file) => {
     const path = join(directory, file);
     return fileSystem.readFileString(path).pipe(
-      Effect.map((text) => [path, text] as const),
-      Effect.mapError(fileError(path)),
+      Effect.mapBoth({
+        onSuccess: (text) => [path, text] as const,
+        onFailure: fileError(path),
+      }),
     );
   });
   const restore = Effect.forEach(
@@ -300,7 +302,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     commit: Option.Option<string>,
     tail: string,
   ) =>
-    new UpgradeFailedError({
+    UpgradeFailedError.make({
       stage,
       reason,
       previous,
@@ -330,7 +332,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     ...Option.match(installed, { onNone: () => [], onSome: ({ lockfiles: present }) => present }),
   ];
   const commit = yield* commitPin(directory, paths, `Pin ${SERVER_PACKAGE} to ${target}`).pipe(
-    Effect.map(Option.some),
+    Effect.asSome,
     Effect.catchTag("CommandError", (error) =>
       Console.log(
         `Could not commit the pin change (${error.command} ${error.reason}). Commit ${paths.join(", ")} yourself.`,

@@ -32,8 +32,8 @@ import { TestClock } from "effect/testing";
 import { runView } from "../src/operator/projection.ts";
 
 const capacityMessage = "Selected model is at capacity. Please try a different model.";
-const brain = new BrainSpec({ harness: "codex", model: ModelId.make("gpt-test"), effort: "high" });
-const agent = new Agent({
+const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-test"), effort: "high" });
+const agent = Agent.make({
   name: AgentName.make("developer"),
   brain,
   persona: AgentPersona.make("Finish the task"),
@@ -41,12 +41,12 @@ const agent = new Agent({
   parentEffort: Option.none(),
 });
 const worker = WorkerName.make("local");
-const salvage = new SalvagePushed({
+const salvage = SalvagePushed.make({
   ref: SalvageRef.make("usine/salvage/capacity/1"),
   commit: CommitSha.make("a".repeat(40)),
 });
-const submission = new Submission({
-  event: new Event({
+const submission = Submission.make({
+  event: Event.make({
     id: EventId.make("capacity"),
     dedupKey: DedupKey.make("capacity"),
     payload: {},
@@ -135,7 +135,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
           return {
             workers: Effect.succeed([worker]),
             isLive: () => Effect.succeed(false),
-            outcome: () => Effect.succeed(Option.none()),
+            outcome: () => Effect.succeedNone,
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
@@ -159,8 +159,8 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
                   if (execution.attempt.number > 1)
                     assert.deepStrictEqual(execution.resume, Option.some(salvage));
                   const child = yield* codex.launch(
-                    new ChildRequest({
-                      session: new ChildSession({
+                    ChildRequest.make({
+                      session: ChildSession.make({
                         id: AgentSessionId.make(`child-${execution.attempt.number}`),
                         parentId: AgentSessionId.make("parent"),
                         agent: agent.name,
@@ -169,13 +169,13 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
                       cwd: WorkingDirectory.make(directory),
                       prompt: execution.task,
                       environment: {},
-                      host: new LocalProcess(),
+                      host: LocalProcess.make(),
                       worker,
                       machine: Option.none(),
                     }),
                   );
                   const result = yield* child.result;
-                  return new StepResult({ message: result.message, facts: [] });
+                  return StepResult.make({ message: result.message, facts: [] });
                 }),
               ).pipe(
                 Effect.mapError(toAttemptFailure),
@@ -248,7 +248,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
             assert.isNull(runView(exhausted, new Set(), new Map()).providerRetry);
             yield* engine.retry(
               accepted.runId,
-              new RetryRequest({ requestedBy: Option.none(), amendment: Option.none() }),
+              RetryRequest.make({ requestedBy: Option.none(), amendment: Option.none() }),
             );
             const retried = yield* inspectUntil(
               engine,

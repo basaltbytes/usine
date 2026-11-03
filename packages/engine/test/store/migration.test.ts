@@ -137,7 +137,7 @@ describe("Attempt migrations", () => {
         assert(attempt !== undefined);
         assert.deepStrictEqual(attempt.failureResolution, Option.none());
         const transcript = yield* store.transcript(
-          new TranscriptAllQuery({ attemptId: attempt.id }),
+          TranscriptAllQuery.make({ attemptId: attempt.id }),
         );
         assert.deepStrictEqual(
           transcript.map(({ envelope }) => [envelope.version, envelope.payload._tag]),
@@ -154,7 +154,7 @@ describe("Attempt migrations", () => {
         const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
         assert(Schema.is(Schema.Int)(before));
         assert.strictEqual(after, before + 1);
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -211,7 +211,7 @@ describe("Run driver migration", () => {
         assert.deepStrictEqual(remaining, []);
         const store = yield* RunStore;
         assert.strictEqual((yield* store.snapshot(runId)).run.state._tag, "Pending");
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -276,7 +276,9 @@ describe("Event reopening migration", () => {
           );
           const sql = yield* SqlClient.SqlClient;
           assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
-        }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+        }).pipe(
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+        );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -355,7 +357,9 @@ describe("Attempt salvage check migration", () => {
           const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
           assert(Schema.is(Schema.Int)(before));
           assert.strictEqual(after, before + 1);
-        }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+        }).pipe(
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+        );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -417,7 +421,9 @@ describe("Attempt start migration", () => {
             [Option.some("Event"), Option.none()],
           );
           assert(attempts.every(({ reattachedAt }) => Option.isNone(reattachedAt)));
-        }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+        }).pipe(
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+        );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -521,11 +527,11 @@ describe("Run approval source migration", () => {
             assert.deepStrictEqual(
               snapshot.approval,
               Option.some(
-                new RunApproval({
+                RunApproval.make({
                   approvedAt: DateTime.makeUnsafe("2026-10-01T00:05:00.000Z"),
                   source: recorded
                     ? Option.some(
-                        new ApprovalSource({
+                        ApprovalSource.make({
                           channel: "ui",
                           approver: Option.some(OperatorLogin.make("alice")),
                         }),
@@ -542,7 +548,9 @@ describe("Run approval source migration", () => {
                 Effect.flip,
               );
             assert.include(String(rejected.reason.cause), "CHECK constraint failed");
-          }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+          }).pipe(
+            Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+          );
         }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
 });
@@ -600,7 +608,7 @@ describe("Run close time migration", () => {
           (yield* store.snapshot(runId)).closedAt,
           Option.some(DateTime.makeUnsafe("2026-10-19T01:00:00.000Z")),
         );
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -653,68 +661,67 @@ describe("Transcript read model migration", () => {
               const attemptId = AttemptId.make(`transcript-upgrade-${attempt}`);
               yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, task, agent, started_at, outcome_json)
             VALUES (${attemptId}, ${runId}, ${lifecycleSubmission.step}, 'local', ${attempt}, ${brain}, ${lifecycleSubmission.task}, ${testAgent.name}, '2026-11-01T00:00:00.000Z', '{"_tag":"Succeeded"}')`;
-              const parent = new ParentSession({
+              const parent = ParentSession.make({
                 id: AgentSessionId.make("shared-parent"),
                 agent: testAgent.name,
                 brain: testAgent.brain,
               });
-              const child = new ChildSession({
+              const child = ChildSession.make({
                 id: AgentSessionId.make("shared-child"),
                 parentId: parent.id,
                 agent: testAgent.name,
                 brain: testAgent.brain,
               });
               const events = [
-                new SessionTokensUpdated({
+                SessionTokensUpdated.make({
                   session: parent,
                   totalTokens: TokenCount.make(100 * attempt),
                 }),
-                new SessionTokensUpdated({
+                SessionTokensUpdated.make({
                   session: child,
                   totalTokens: TokenCount.make(40 * attempt),
                 }),
-                new SessionTokensUpdated({
+                SessionTokensUpdated.make({
                   session: parent,
                   totalTokens: TokenCount.make(250 * attempt),
                 }),
-                new SessionTokensUpdated({
+                SessionTokensUpdated.make({
                   session: child,
                   totalTokens: TokenCount.make(90 * attempt),
                   costUsd: Option.some(UsdAmount.make(1)),
                 }),
-                new SessionTokensUpdated({
+                SessionTokensUpdated.make({
                   session: parent,
                   totalTokens: TokenCount.make(200 * attempt),
                 }),
-                new SessionTokensUpdated({
+                SessionTokensUpdated.make({
                   session: child,
                   totalTokens: TokenCount.make(90 * attempt),
                   costUsd: Option.some(UsdAmount.make(2)),
                 }),
-                ...(["chatgptPlan", "claudePlan"] as const).map(
-                  (pool) =>
-                    new PoolRateLimitsUpdated({
-                      session: parent,
-                      pool,
-                      login: Option.some(PoolLogin.make(`login-${attempt}`)),
-                      rateLimits: new RateLimitsSnapshot({
-                        limitId: Option.none(),
-                        limitName: Option.none(),
-                        primary: Option.none(),
-                        secondary: Option.none(),
-                      }),
+                ...(["chatgptPlan", "claudePlan"] as const).map((pool) =>
+                  PoolRateLimitsUpdated.make({
+                    session: parent,
+                    pool,
+                    login: Option.some(PoolLogin.make(`login-${attempt}`)),
+                    rateLimits: RateLimitsSnapshot.make({
+                      limitId: Option.none(),
+                      limitName: Option.none(),
+                      primary: Option.none(),
+                      secondary: Option.none(),
                     }),
+                  }),
                 ),
               ];
               for (const [i, event] of events.entries()) {
                 const envelope = JSON.stringify(
                   Schema.encodeSync(AttemptChannel.Envelope)(
-                    new AttemptChannel.OutboundEnvelope({
+                    AttemptChannel.OutboundEnvelope.make({
                       version: AttemptChannel.PROTOCOL_VERSION,
                       attemptId,
                       sequence: AttemptChannel.Sequence.make(i + 1),
                       sentAt: at,
-                      payload: new AttemptChannel.SessionEvent({ event }),
+                      payload: AttemptChannel.SessionEvent.make({ event }),
                     }),
                   ),
                 );

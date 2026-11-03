@@ -95,7 +95,7 @@ export class Configuration extends Schema.Class<Configuration>("@usine/config/Co
   }
 
   /** The uninitialized snapshot at revision zero, before the first successful commit. */
-  static readonly empty = new Configuration({
+  static readonly empty = Configuration.make({
     number: ConfigurationRevisionNumber.make(0),
     instance: Option.none(),
   });

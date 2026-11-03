@@ -66,7 +66,7 @@ describe("assemblePrompt", () => {
       persona: AgentPersona.make("Persona."),
       task: AttemptTask.make("Finish the work"),
       resume: Option.some(
-        new SalvagePushed({ ref: SalvageRef.make("usine/salvage/run-1/1"), commit }),
+        SalvagePushed.make({ ref: SalvageRef.make("usine/salvage/run-1/1"), commit }),
       ),
       conflictingSalvage: Option.none(),
     });
@@ -95,7 +95,7 @@ describe("assemblePrompt", () => {
       task: AttemptTask.make("Finish the work"),
       resume: Option.none(),
       conflictingSalvage: Option.some(
-        new SalvagePushed({ ref: SalvageRef.make("usine/salvage/run-1/2"), commit }),
+        SalvagePushed.make({ ref: SalvageRef.make("usine/salvage/run-1/2"), commit }),
       ),
     });
     assert(

@@ -29,7 +29,7 @@ export const readAdminToken = Effect.fn("Authentication.readAdminToken")(functio
   const raw = yield* fs
     .readFileString(path)
     .pipe(Effect.mapError(() => failure("Could not read the local admin token")));
-  const token = yield* Schema.decodeUnknownEffect(Secret)(raw.trim()).pipe(
+  const token = yield* Schema.decodeEffect(Secret)(raw.trim()).pipe(
     Effect.mapError(() => failure("Invalid local admin token; restart usine up")),
   );
   return Redacted.make(token);

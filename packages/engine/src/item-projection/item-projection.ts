@@ -27,7 +27,7 @@ const encodeGoneAt = Schema.encodeSync(ItemProjectionRow.fields.goneAt);
 const persistence =
   (operation: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EnginePersistenceError, R> =>
-    Effect.mapError(effect, (cause) => new EnginePersistenceError({ operation, cause }));
+    Effect.mapError(effect, (cause) => EnginePersistenceError.make({ operation, cause }));
 
 /** The options for listing Item projections, newest first. */
 export interface ItemProjectionListOptions {
@@ -56,7 +56,7 @@ const makeReader = Effect.gen(function* () {
         .where(eq(itemProjections.itemKey, itemKey))
         .execute();
       const [row] = yield* decodeRows(rows, { onExcessProperty: "error" });
-      return Option.map(Option.fromNullishOr(row), (stored) => new ItemProjection(stored));
+      return Option.map(Option.fromNullishOr(row), (stored) => ItemProjection.make(stored));
     }, persistence("read item projection")),
     list: Effect.fn("ItemProjectionReader.list")(function* (
       repository: RepositoryName,
@@ -70,8 +70,8 @@ const makeReader = Effect.gen(function* () {
         .orderBy(desc(itemProjections.itemNumber))
         .limit(options.limit)
         .execute();
-      return (yield* decodeRows(rows, { onExcessProperty: "error" })).map(
-        (row) => new ItemProjection(row),
+      return (yield* decodeRows(rows, { onExcessProperty: "error" })).map((row) =>
+        ItemProjection.make(row),
       );
     }, persistence("list item projections")),
     openIssues: Effect.fn("ItemProjectionReader.openIssues")(function* (

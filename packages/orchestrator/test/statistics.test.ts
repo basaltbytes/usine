@@ -76,14 +76,14 @@ const at = (instant: string) => DateTime.makeUnsafe(`2026-10-${instant}:00.000Z`
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const repository = RepositoryName.make("basaltbytes/usine");
-const opus = new BrainSpec({
+const opus = BrainSpec.make({
   harness: "claude",
   model: ModelId.make("claude-opus"),
   effort: "high",
 });
-const gpt = new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
+const gpt = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
 const agentOf = (name: string, brain: BrainSpec) =>
-  new Agent({
+  Agent.make({
     name: AgentName.make(name),
     brain,
     parentModel: Option.none(),
@@ -105,28 +105,27 @@ interface AttemptPlan {
 }
 
 const attempts = (runId: string, agent: Agent, plans: ReadonlyArray<AttemptPlan>) =>
-  plans.map(
-    (plan, index) =>
-      new Attempt({
-        id: AttemptId.make(`${runId}/${index + 1}`),
-        runId: RunId.make(runId),
-        stepName: StepName.make("run"),
-        worker: WorkerName.make(plan.worker),
-        number: AttemptNumber.make(index + 1),
-        brain: agent.brain,
-        task: AttemptTask.make("Work on it."),
-        agent: agent.name,
-        operatorIntervened: false,
-        parentModel: Option.none(),
-        startedAt: at(plan.startedAt),
-        outcome: Option.fromUndefinedOr(plan.outcome),
-        endedAt: Option.map(Option.fromUndefinedOr(plan.endedAt), at),
-        salvage: Option.none(),
-        start: Option.some(
-          plan.start ??
-            (index === 0 ? new StartedByEvent() : new StartedByRetry({ operator: Option.none() })),
-        ),
-      }),
+  plans.map((plan, index) =>
+    Attempt.make({
+      id: AttemptId.make(`${runId}/${index + 1}`),
+      runId: RunId.make(runId),
+      stepName: StepName.make("run"),
+      worker: WorkerName.make(plan.worker),
+      number: AttemptNumber.make(index + 1),
+      brain: agent.brain,
+      task: AttemptTask.make("Work on it."),
+      agent: agent.name,
+      operatorIntervened: false,
+      parentModel: Option.none(),
+      startedAt: at(plan.startedAt),
+      outcome: Option.fromUndefinedOr(plan.outcome),
+      endedAt: Option.map(Option.fromUndefinedOr(plan.endedAt), at),
+      salvage: Option.none(),
+      start: Option.some(
+        plan.start ??
+          (index === 0 ? StartedByEvent.make() : StartedByRetry.make({ operator: Option.none() })),
+      ),
+    }),
   );
 
 interface RunPlan {
@@ -142,9 +141,9 @@ interface RunPlan {
 }
 
 const summary = (plan: RunPlan) =>
-  new RunSummary({
+  RunSummary.make({
     itemKey: gitHubItemKey(repository, plan.item),
-    run: new Run({
+    run: Run.make({
       id: RunId.make(plan.id),
       eventId: EventId.make(`event-${plan.id}`),
       loop: plan.loop,
@@ -155,26 +154,24 @@ const summary = (plan: RunPlan) =>
     attempts: attempts(plan.id, plan.agent, plan.attempts ?? []),
     resolvedFailureAttemptId: Option.none(),
     closedAt: Option.map(Option.fromUndefinedOr(plan.closedAt), at),
-    approval: Option.map(
-      Option.fromUndefinedOr(plan.approvedAt),
-      (approvedAt) => new RunApproval({ approvedAt: at(approvedAt), source: Option.none() }),
+    approval: Option.map(Option.fromUndefinedOr(plan.approvedAt), (approvedAt) =>
+      RunApproval.make({ approvedAt: at(approvedAt), source: Option.none() }),
     ),
     runAgain: Option.none(),
     repository,
-
     agent: plan.agent,
   });
 
-const succeeded = new AttemptSucceeded();
-const failed = (message: string) => new AttemptFailed({ failure: new AgentFailure({ message }) });
-const operatorCanceled = new RunState.Canceled({ reason: new RunState.OperatorCanceled() });
+const succeeded = AttemptSucceeded.make();
+const failed = (message: string) => AttemptFailed.make({ failure: AgentFailure.make({ message }) });
+const operatorCanceled = RunState.Canceled.make({ reason: RunState.OperatorCanceled.make() });
 
 const implemented = summary({
   id: "implemented",
   item: 1,
   loop: startDev,
   agent: developer,
-  state: new RunState.Succeeded(),
+  state: RunState.Succeeded.make(),
   openedAt: "20T08:00",
   approvedAt: "20T08:10",
   closedAt: "20T09:15",
@@ -185,7 +182,7 @@ const firstReview = summary({
   item: 2,
   loop: reviewPr,
   agent: reviewer,
-  state: new RunState.Succeeded(),
+  state: RunState.Succeeded.make(),
   openedAt: "21T10:00",
   closedAt: "21T10:20",
   attempts: [{ worker: "w1", startedAt: "21T10:01", outcome: succeeded, endedAt: "21T10:20" }],
@@ -196,15 +193,15 @@ const fixed = summary({
   item: 2,
   loop: actOnFindings,
   agent: developer,
-  state: new RunState.Succeeded(),
+  state: RunState.Succeeded.make(),
   openedAt: "21T11:00",
   closedAt: "21T13:00",
   attempts: [
     {
       worker: "w2",
       startedAt: "21T11:01",
-      outcome: new AttemptFailed({
-        failure: new InfraFailure({ message: "Worker lost", cause: null }),
+      outcome: AttemptFailed.make({
+        failure: InfraFailure.make({ message: "Worker lost", cause: null }),
       }),
       endedAt: "21T11:05",
     },
@@ -213,7 +210,7 @@ const fixed = summary({
       startedAt: "21T11:06",
       outcome: failed("Tests fail"),
       endedAt: "21T11:30",
-      start: new StartedByInfraRetry(),
+      start: StartedByInfraRetry.make(),
     },
     { worker: "w2", startedAt: "21T12:30", outcome: succeeded, endedAt: "21T13:00" },
   ],
@@ -223,7 +220,7 @@ const secondReview = summary({
   item: 2,
   loop: reviewPr,
   agent: reviewer,
-  state: new RunState.Succeeded(),
+  state: RunState.Succeeded.make(),
   openedAt: "21T13:05",
   closedAt: "21T13:16",
   attempts: [{ worker: "w1", startedAt: "21T13:06", outcome: succeeded, endedAt: "21T13:16" }],
@@ -237,7 +234,7 @@ const canceled = summary({
   openedAt: "22T09:00",
   closedAt: "22T09:10",
   attempts: [
-    { worker: "w1", startedAt: "22T09:01", outcome: new AttemptCanceled(), endedAt: "22T09:10" },
+    { worker: "w1", startedAt: "22T09:01", outcome: AttemptCanceled.make(), endedAt: "22T09:10" },
   ],
 });
 const superseded = summary({
@@ -245,8 +242,8 @@ const superseded = summary({
   item: 4,
   loop: reviewPr,
   agent: reviewer,
-  state: new RunState.Canceled({
-    reason: new RunState.Superseded({ by: EventId.make("event-newer") }),
+  state: RunState.Canceled.make({
+    reason: RunState.Superseded.make({ by: EventId.make("event-newer") }),
   }),
   openedAt: "22T10:00",
   closedAt: "22T10:01",
@@ -256,7 +253,7 @@ const abandoned = summary({
   item: 7,
   loop: startDev,
   agent: developer,
-  state: new RunState.Failed(),
+  state: RunState.Failed.make(),
   openedAt: "23T14:00",
   closedAt: "23T15:00",
   attempts: [
@@ -268,7 +265,7 @@ const running = summary({
   item: 5,
   loop: startDev,
   agent: developer,
-  state: new RunState.Running(),
+  state: RunState.Running.make(),
   openedAt: "25T11:00",
   approvedAt: "25T11:30",
   attempts: [{ worker: "w1", startedAt: "25T11:31" }],
@@ -278,7 +275,7 @@ const waiting = summary({
   item: 6,
   loop: startDev,
   agent: developer,
-  state: new RunState.Waiting(),
+  state: RunState.Waiting.make(),
   openedAt: "25T10:00",
 });
 
@@ -289,9 +286,9 @@ const session = (
   usd: number | null,
   brain: BrainSpec = opus,
 ) =>
-  new SessionUsageView({
+  SessionUsageView.make({
     attemptId: AttemptId.make(attempt),
-    session: new ParentSession({
+    session: ParentSession.make({
       id: AgentSessionId.make(`${attempt}/parent`),
       agent: AgentName.make("developer"),
       brain,
@@ -301,10 +298,10 @@ const session = (
     cost:
       usd === null
         ? null
-        : new UsageCostView({ usd: UsdAmount.make(usd), estimate: pool !== "apiKeys" }),
+        : UsageCostView.make({ usd: UsdAmount.make(usd), estimate: pool !== "apiKeys" }),
   });
 const usageOf = (sessions: ReadonlyArray<SessionUsageView>) =>
-  new RunUsageView({
+  RunUsageView.make({
     tokens: TokenCount.make(sessions.reduce((total, { tokens }) => total + tokens, 0)),
     pools: [],
     sessions,
@@ -339,7 +336,7 @@ const earlierImplementation = summary({
   item: 8,
   loop: startDev,
   agent: developer,
-  state: new RunState.Succeeded(),
+  state: RunState.Succeeded.make(),
   openedAt: "15T08:00",
   closedAt: "15T09:00",
   attempts: [{ worker: "w1", startedAt: "15T08:01", outcome: succeeded, endedAt: "15T09:00" }],
@@ -349,7 +346,7 @@ const onlyReview = summary({
   item: 9,
   loop: reviewPr,
   agent: reviewer,
-  state: new RunState.Succeeded(),
+  state: RunState.Succeeded.make(),
   openedAt: "23T08:00",
   closedAt: "23T08:30",
   attempts: [{ worker: "w1", startedAt: "23T08:01", outcome: succeeded, endedAt: "23T08:30" }],
@@ -360,7 +357,7 @@ const unrecordedEnd = summary({
   item: 12,
   loop: startDev,
   agent: developer,
-  state: new RunState.Succeeded(),
+  state: RunState.Succeeded.make(),
   openedAt: "19T09:00",
   closedAt: "19T10:00",
   attempts: [{ worker: "w1", startedAt: "19T09:01", outcome: succeeded }],
@@ -492,7 +489,7 @@ describe("Task statistics", () => {
       item: 20,
       loop: startDev,
       agent: developer,
-      state: new RunState.Succeeded(),
+      state: RunState.Succeeded.make(),
       openedAt: "25T08:00",
       closedAt: "25T10:00",
       attempts: [{ worker: "w1", startedAt: "25T08:00", outcome: succeeded, endedAt: "25T10:00" }],
@@ -502,7 +499,7 @@ describe("Task statistics", () => {
       item: 21,
       loop: reviewPr,
       agent: reviewer,
-      state: new RunState.Succeeded(),
+      state: RunState.Succeeded.make(),
       openedAt: "25T09:00",
       closedAt: "25T11:00",
       attempts: [{ worker: "w1", startedAt: "25T09:00", outcome: succeeded, endedAt: "25T11:00" }],
@@ -553,7 +550,7 @@ describe("Run statistics", () => {
       item: 828,
       loop: startDev,
       agent: developer,
-      state: new RunState.HandedOff({
+      state: RunState.HandedOff.make({
         reason: "CI failed: ci.",
         head: CommitSha.make("a".repeat(40)),
         fixLoop: actOnFindings,
@@ -566,7 +563,7 @@ describe("Run statistics", () => {
           worker: "w1",
           startedAt: "25T08:01",
           endedAt: "25T09:00",
-          outcome: new AttemptHandedOff(),
+          outcome: AttemptHandedOff.make(),
         },
       ],
     });
@@ -743,21 +740,21 @@ describe("Run statistics", () => {
     const view = (runs: ReadonlyArray<RunSummary>) =>
       runStatisticsView({ window: "7d", now, runs, usage, workers }).needsAttention;
     const resolve = (run: RunSummary, number: number, resolvedAt: string) =>
-      new RunSummary({
+      RunSummary.make({
         ...run,
         attempts: run.attempts.map((attempt) =>
           attempt.number !== number
             ? attempt
-            : new AttemptSummary({
+            : AttemptSummary.make({
                 ...attempt,
                 failureResolution: Option.some(
-                  new FailureResolution({ resolvedAt: at(resolvedAt), operator: Option.none() }),
+                  FailureResolution.make({ resolvedAt: at(resolvedAt), operator: Option.none() }),
                 ),
               }),
         ),
       });
     assert.strictEqual(view([abandoned]).failureWait, null);
-    const legacy = new RunSummary({
+    const legacy = RunSummary.make({
       ...abandoned,
       resolvedFailureAttemptId: Option.some(AttemptId.make("abandoned/1")),
     });
@@ -782,7 +779,7 @@ describe("Run statistics", () => {
       item: 11,
       loop: startDev,
       agent: developer,
-      state: new RunState.Succeeded(),
+      state: RunState.Succeeded.make(),
       openedAt: "25T08:00",
       closedAt: "25T09:00",
       attempts: [{ worker: "w1", startedAt: "25T08:01", outcome: succeeded, endedAt: "25T09:00" }],
@@ -815,18 +812,18 @@ describe("Run statistics", () => {
 });
 
 const tokenReport = (attempt: string, tokens: number, usd: number) =>
-  new TranscriptEntry({
+  TranscriptEntry.make({
     sequence: TranscriptSequence.make(1),
     attemptId: AttemptId.make(attempt),
     direction: "outbound",
-    envelope: new AttemptChannel.OutboundEnvelope({
+    envelope: AttemptChannel.OutboundEnvelope.make({
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId: AttemptId.make(attempt),
       sequence: AttemptChannel.Sequence.make(1),
       sentAt: now,
-      payload: new AttemptChannel.SessionEvent({
-        event: new SessionTokensUpdated({
-          session: new ParentSession({
+      payload: AttemptChannel.SessionEvent.make({
+        event: SessionTokensUpdated.make({
+          session: ParentSession.make({
             id: AgentSessionId.make(`${attempt}/parent`),
             agent: developer.name,
             brain: opus,
@@ -839,8 +836,8 @@ const tokenReport = (attempt: string, tokens: number, usd: number) =>
     receivedAt: now,
   });
 
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: repository }],
     workers: [{ name: "w1", kind: "local", max_concurrent_attempts: 2 }],
@@ -880,7 +877,7 @@ describe("OperatorStatistics", () => {
               );
             }),
           events: () => Effect.die("unused"),
-          revision: () => Effect.succeed(Option.some(ProjectionRevision.make(0))),
+          revision: () => Effect.succeedSome(ProjectionRevision.make(0)),
           transcript: (query) =>
             Effect.succeed(
               query._tag === "TranscriptUsageQuery" && query.attemptId === "implemented/1"
@@ -901,7 +898,7 @@ describe("OperatorStatistics", () => {
                 mergedPullRequest(2, "2026-10-22T08:00:00Z"),
                 // Merged before the window.
                 mergedPullRequest(9, "2026-10-10T08:00:00Z"),
-                new ItemProjection({
+                ItemProjection.make({
                   itemKey: gitHubItemKey(repository, 12),
                   repository,
                   source: ItemProjectionSource.make("pr"),
@@ -944,13 +941,13 @@ describe("OperatorStatistics", () => {
                     return {
                       ...status,
                       machineStarts: Effect.succeed([
-                        new MachineStarts({
+                        MachineStarts.make({
                           worker: WorkerName.make("worker"),
                           provider: "boat",
                           day: DateTime.formatIso(now).slice(0, 10),
                           count: 3,
                         }),
-                        new MachineStarts({
+                        MachineStarts.make({
                           worker: WorkerName.make("worker"),
                           provider: "boat",
                           day: "2020-01-01",

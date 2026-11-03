@@ -114,7 +114,7 @@ export class Attachments extends Context.Service<
             return (
               next === current
                 ? Effect.void
-                : persistence.save([...next.values()].map((entry) => new LiveAttachment(entry)))
+                : persistence.save([...next.values()].map((entry) => LiveAttachment.make(entry)))
             ).pipe(Effect.as([result, next] as const));
           }).pipe(Effect.uninterruptible);
 
@@ -123,7 +123,7 @@ export class Attachments extends Context.Service<
           yield* Effect.annotateCurrentSpan({ attachment: id, worker, repository });
           const now = yield* DateTime.now;
           if (!attachment.isLiveAt(now))
-            return yield* new AttachmentAlreadyExpired({ worker, repository, expiresAt });
+            return yield* AttachmentAlreadyExpired.make({ worker, repository, expiresAt });
           const outcome = yield* modify((current) => {
             const previous = current.get(id);
             if (previous !== undefined && !samePair(previous.attachment, attachment))
@@ -134,7 +134,7 @@ export class Attachments extends Context.Service<
             ];
           });
           if (outcome === "conflict")
-            return yield* new AttachmentConflict({ id, worker, repository });
+            return yield* AttachmentConflict.make({ id, worker, repository });
           yield* Effect.logInfo(
             outcome === "attached" ? "Attached a GitHub credential" : "Renewed a GitHub credential",
             {
@@ -183,10 +183,10 @@ export class Attachments extends Context.Service<
         const find = Effect.fn("Attachments.find")(function* (id: AttachmentId) {
           const now = yield* DateTime.now;
           const entry = (yield* SynchronizedRef.get(entries)).get(id);
-          if (entry === undefined) return new MissingAttachment();
+          if (entry === undefined) return MissingAttachment.make();
           return entry.attachment.isLiveAt(now)
-            ? new LiveAttachment(entry)
-            : new ExpiredAttachment({ expiredAt: entry.attachment.expiresAt });
+            ? LiveAttachment.make(entry)
+            : ExpiredAttachment.make({ expiredAt: entry.attachment.expiresAt });
         });
 
         const learnNewName = Effect.fn("Attachments.learnNewName")(function* (
@@ -200,7 +200,7 @@ export class Attachments extends Context.Service<
               const entry = current.get(id);
               if (entry === undefined || !entry.attachment.isLiveAt(now))
                 return [Learning.Kept({ reason: "not-live" }), current];
-              if (new LiveAttachment(entry).serves(name))
+              if (LiveAttachment.make(entry).serves(name))
                 return [Learning.Kept({ reason: "already-served" }), current];
               return [
                 Learning.Learned({ attachment: entry.attachment }),

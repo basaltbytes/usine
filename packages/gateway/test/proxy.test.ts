@@ -139,7 +139,7 @@ const attachAs = (id: AttachmentId, credential: AttachmentCredential) =>
     const attachments = yield* Attachments;
     const callers = yield* CallerTokens;
     yield* attachments.attach(
-      new Attachment({
+      Attachment.make({
         id,
         worker: WORKER,
         repository: REPOSITORY,
@@ -149,14 +149,14 @@ const attachAs = (id: AttachmentId, credential: AttachmentCredential) =>
     );
     return Redacted.value(
       yield* callers.issue(
-        new CallerClaims({ attachment: id, worker: WORKER, repository: REPOSITORY }),
+        CallerClaims.make({ attachment: id, worker: WORKER, repository: REPOSITORY }),
       ),
     );
   });
 
 const attach = (credential: AttachmentCredential) => attachAs(ATTACHMENT, credential);
 
-const installation = new InstallationCredential({ token: secret(INSTALLATION_TOKEN) });
+const installation = InstallationCredential.make({ token: secret(INSTALLATION_TOKEN) });
 
 const send = (url: string, headers: Record<string, string>, init: RequestInit = {}) =>
   Effect.gen(function* () {
@@ -239,7 +239,7 @@ describe("GatewayProxy", () => {
 
   it.effect("an anonymous attachment forwards without any credential", () =>
     Effect.gen(function* () {
-      const caller = yield* attach(new AnonymousCredential());
+      const caller = yield* attach(AnonymousCredential.make());
       yield* send("http://git.gw.test/acme/demo.git/info/refs", {
         authorization: `Bearer ${caller}`,
       });
@@ -359,9 +359,9 @@ describe("GatewayProxy", () => {
         gateway({
           ...NO_PROVIDERS,
           anthropic: Option.some(
-            new AnthropicProvider({
+            AnthropicProvider.make({
               upstream: UpstreamBase.make("https://api.anthropic.com"),
-              credential: new AnthropicApiKey({ key: secret(ANTHROPIC_KEY) }),
+              credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
             }),
           ),
         }),
@@ -393,9 +393,9 @@ describe("GatewayProxy", () => {
           gateway({
             ...NO_PROVIDERS,
             anthropic: Option.some(
-              new AnthropicProvider({
+              AnthropicProvider.make({
                 upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: new AnthropicSubscriptionToken({ token: secret(SUBSCRIPTION_TOKEN) }),
+                credential: AnthropicSubscriptionToken.make({ token: secret(SUBSCRIPTION_TOKEN) }),
               }),
             ),
           }),
@@ -430,9 +430,9 @@ describe("GatewayProxy", () => {
           gateway({
             ...NO_PROVIDERS,
             openai: Option.some(
-              new OpenAiProvider({
+              OpenAiProvider.make({
                 upstream: UpstreamBase.make("https://api.openai.com"),
-                credential: new OpenAiApiKey({ key: secret(OPENAI_KEY) }),
+                credential: OpenAiApiKey.make({ key: secret(OPENAI_KEY) }),
               }),
             ),
           }),
@@ -511,15 +511,15 @@ describe("GatewayProxy", () => {
         Effect.provide(
           gateway({
             anthropic: Option.some(
-              new AnthropicProvider({
+              AnthropicProvider.make({
                 upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: new AnthropicApiKey({ key: secret(ANTHROPIC_KEY) }),
+                credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
               }),
             ),
             openai: Option.some(
-              new OpenAiProvider({
+              OpenAiProvider.make({
                 upstream: UpstreamBase.make("https://api.openai.com"),
-                credential: new OpenAiApiKey({ key: secret(OPENAI_KEY) }),
+                credential: OpenAiApiKey.make({ key: secret(OPENAI_KEY) }),
               }),
             ),
           }),
@@ -829,9 +829,9 @@ describe("GatewayProxy", () => {
           gateway({
             ...NO_PROVIDERS,
             anthropic: Option.some(
-              new AnthropicProvider({
+              AnthropicProvider.make({
                 upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: new AnthropicApiKey({ key: secret(ANTHROPIC_KEY) }),
+                credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
               }),
             ),
           }),

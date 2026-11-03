@@ -56,7 +56,7 @@ const swapText = (swap: WorkerSwap): string =>
   });
 
 const memoryError = (worker: WorkerName, message: string, cause: unknown) =>
-  new WorkerCapabilityError({ worker, capability: "memory", message, cause });
+  WorkerCapabilityError.make({ worker, capability: "memory", message, cause });
 
 /**
  * Checks that `worker`'s machine can run `maxConcurrentAttempts` concurrent Attempts. Fails

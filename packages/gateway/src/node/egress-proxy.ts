@@ -291,17 +291,17 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
   const resolve = Effect.fn("EgressProxy.resolve")(function* (permitted: EgressPermitted) {
     const addresses = yield* Effect.tryPromise({
       try: () => lookup(permitted.host, { all: true, verbatim: true }),
-      catch: () => new Unresolvable({ host: permitted.host }),
+      catch: () => Unresolvable.make({ host: permitted.host }),
     });
     const first = addresses[0];
-    if (first === undefined) return yield* new Unresolvable({ host: permitted.host });
+    if (first === undefined) return yield* Unresolvable.make({ host: permitted.host });
     if (
       addresses.some(({ address, family }) =>
         blocked.check(address, family === 6 ? "ipv6" : "ipv4"),
       )
     )
       return yield* Effect.fail(
-        new EgressRefused({
+        EgressRefused.make({
           host: permitted.host,
           port: permitted.port,
           reason: "private-address",
@@ -335,7 +335,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     Effect.callback<Socket, Unreachable>((resume) => {
       const socket = connect({ host: address, port });
       const onError = (error: Error) =>
-        resume(Effect.fail(new Unreachable({ host, port, message: error.message })));
+        resume(Effect.fail(Unreachable.make({ host, port, message: error.message })));
       socket.once("error", onError);
       socket.once("connect", () => {
         socket.off("error", onError);
@@ -421,7 +421,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       const refused =
         decision._tag === "EgressRefused"
           ? decision
-          : new EgressRefused({ host, port, reason: "port-not-allowed" });
+          : EgressRefused.make({ host, port, reason: "port-not-allowed" });
       client.end(
         statusLine(
           403,
@@ -544,7 +544,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
             response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
             response.end();
           }
-          settle(Effect.fail(new Unreachable({ host, port, message: error.message })));
+          settle(Effect.fail(Unreachable.make({ host, port, message: error.message })));
         };
         const outgoing = httpRequest(
           {
@@ -659,7 +659,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       server.once("error", (error) =>
         resume(
           Effect.fail(
-            new EgressProxyListenError({
+            EgressProxyListenError.make({
               host: listener.host,
               port: listener.port,
               message: error.message,

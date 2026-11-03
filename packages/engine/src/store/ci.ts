@@ -61,23 +61,24 @@ export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBu
         }
         const { handoff } = current.run.state;
         const state = Match.valueTags(resolution, {
-          CiPassed: () => new RunState.Succeeded(),
-          CiFailed: () => new RunState.Failed(),
+          CiPassed: () => RunState.Succeeded.make(),
+          CiFailed: () => RunState.Failed.make(),
           CiHandedOff: ({ reason, fixRunId }) =>
-            new RunState.HandedOff({
+            RunState.HandedOff.make({
               reason,
               fixRunId,
               head,
               fixLoop: handoff.fixLoop,
             }),
           CiSuperseded: ({ head }) =>
-            new RunState.Canceled({ reason: new RunState.HeadChanged({ head }) }),
+            RunState.Canceled.make({ reason: RunState.HeadChanged.make({ head }) }),
         });
         const outcome = Match.valueTags(resolution, {
-          CiPassed: () => new AttemptSucceeded(),
-          CiHandedOff: () => new AttemptHandedOff(),
-          CiFailed: ({ message }) => new AttemptFailed({ failure: new AgentFailure({ message }) }),
-          CiSuperseded: () => new AttemptCanceled(),
+          CiPassed: () => AttemptSucceeded.make(),
+          CiHandedOff: () => AttemptHandedOff.make(),
+          CiFailed: ({ message }) =>
+            AttemptFailed.make({ failure: AgentFailure.make({ message }) }),
+          CiSuperseded: () => AttemptCanceled.make(),
         });
         yield* queries.settleCiAttempt(runId, outcome);
         yield* queries.updateState(runId, state, yield* DateTime.now);

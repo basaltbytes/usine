@@ -96,7 +96,7 @@ const executorError = (
   operation: ExecutorOperation,
   message: string,
   cause: unknown,
-): ExecutorOperationError => new ExecutorOperationError({ operation, message, cause });
+): ExecutorOperationError => ExecutorOperationError.make({ operation, message, cause });
 
 const makeLocalExecutor = (options: LocalExecutorOptions) =>
   Effect.gen(function* () {
@@ -108,7 +108,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const logins = yield* ClaudeLoginLock;
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const harnessReadiness =
-      options.harnessReadiness ?? agentsHarnessProbe(spawner, new LocalProcess(), baseEnvironment);
+      options.harnessReadiness ?? agentsHarnessProbe(spawner, LocalProcess.make(), baseEnvironment);
     const repositoryUrl =
       options.repositoryUrl ??
       ((repository: RepositoryName): string => `https://github.com/${repository}.git`);
@@ -388,7 +388,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* Effect.annotateCurrentSpan({ worker, host: "local", maxConcurrentAttempts });
       const gitVersion = (yield* executeCommand("preflight", "git", ["--version"])).trim();
       if (!gitVersion.startsWith("git version ")) {
-        return yield* new WorkerCapabilityError({
+        return yield* WorkerCapabilityError.make({
           worker,
           capability: "toolchain",
           message: `Worker "${worker}" returned an unrecognized Git version`,
@@ -400,7 +400,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         ? verifyWorkerMemory(
             worker,
             maxConcurrentAttempts,
-            new WorkerMemory({ totalBytes: totalmem(), swap: SwapOnDemand.make({}) }),
+            WorkerMemory.make({ totalBytes: totalmem(), swap: SwapOnDemand.make({}) }),
           )
         : verifyLinuxMemory(
             worker,
@@ -439,12 +439,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         harvestCommand("launch", workspace.worktree, credential, environment),
         windows,
       ).pipe(
-        Effect.mapError(
-          (error) =>
-            new InfraFailure({
-              message: `Can't harvest the attempt's checkout: ${error.message}`,
-              cause: error,
-            }),
+        Effect.mapError((error) =>
+          InfraFailure.make({
+            message: `Can't harvest the attempt's checkout: ${error.message}`,
+            cause: error,
+          }),
         ),
       );
 
@@ -564,7 +563,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         workspace: prepared.workspace,
         launch: (io: AttemptChannel.Sink) =>
           session.launch(prepared.workspace, io, {
-            host: new LocalProcess(),
+            host: LocalProcess.make(),
             machine: Option.none(),
             environment,
             // Local Workers have no Gateway; every harness uses its own login.

@@ -60,11 +60,11 @@ export const harvestedResult = (
 ): Result.Result<StepResult, AgentFailure> =>
   report.answeredOperator && facts.length === 0
     ? Result.fail(
-        new AgentFailure({
+        AgentFailure.make({
           message: `The parent ended with an answer to the operator, and the attempt produced no commit, pull request, or comment. Answer: ${report.message}`,
         }),
       )
-    : Result.succeed(new StepResult({ message: report.message, facts }));
+    : Result.succeed(StepResult.make({ message: report.message, facts }));
 
 /** A successful parent report with no stored harvested result. */
 export class ParentReported extends Schema.TaggedClass<ParentReported>(

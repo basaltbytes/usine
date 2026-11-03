@@ -50,7 +50,7 @@ export const boardRepositories = (config: UsineConfig): ReadonlyArray<ManagedRep
         project.repositories.flatMap((name) =>
           config.repos
             .filter((repo) => canonicalRepositoryName(repo.name) === canonicalRepositoryName(name))
-            .map((repo) => new ManagedRepo({ ...repo, lanes: project.lanes })),
+            .map((repo) => ManagedRepo.make({ ...repo, lanes: project.lanes })),
         ),
       );
 
@@ -65,21 +65,20 @@ export const migrateProjects = (
   if (instance.config.version === 2) return Result.succeed(instance);
   const problems = instance.loops
     .filter((loop) => !instance.config.repos.some((repo) => matchesSelector(loop.selector, repo)))
-    .map(
-      (loop) =>
-        new ConfigFileError({
-          file: InstancePath.make(`loops/${loop.name}.md`),
-          stage: "reference",
-          expression: Option.none(),
-          message: `Cannot migrate loop ${loop.name}: selector ${JSON.stringify(
-            Option.match(loop.selector, {
-              onNone: () => null,
-              onSome: Schema.encodeSync(Selector),
-            }),
-          )} matches no registered repository. Register a matching repository or remove the loop before migrating.`,
-        }),
+    .map((loop) =>
+      ConfigFileError.make({
+        file: InstancePath.make(`loops/${loop.name}.md`),
+        stage: "reference",
+        expression: Option.none(),
+        message: `Cannot migrate loop ${loop.name}: selector ${JSON.stringify(
+          Option.match(loop.selector, {
+            onNone: () => null,
+            onSome: Schema.encodeSync(Selector),
+          }),
+        )} matches no registered repository. Register a matching repository or remove the loop before migrating.`,
+      }),
     );
-  if (Arr.isArrayNonEmpty(problems)) return Result.fail(new ConfigurationInvalid({ problems }));
+  if (Arr.isArrayNonEmpty(problems)) return Result.fail(ConfigurationInvalid.make({ problems }));
   const used = new Set<string>();
   const projects = instance.config.repos.map((repository) => {
     const base =
@@ -90,7 +89,7 @@ export const migrateProjects = (
     let slug = base;
     for (let suffix = 2; used.has(slug); suffix += 1) slug = `${base}-${suffix}`;
     used.add(slug);
-    return new Project({
+    return Project.make({
       id: ProjectId.make(slug),
       name: repository.name,
       repositories: [repository.name],
@@ -103,19 +102,19 @@ export const migrateProjects = (
       .flatMap((repository) =>
         instance.loops
           .filter((loop) => matchesSelector(loop.selector, repository))
-          .map(
-            (loop) => new LoopFile({ ...loop, name: LoopName.make(`${project.id}/${loop.name}`) }),
+          .map((loop) =>
+            LoopFile.make({ ...loop, name: LoopName.make(`${project.id}/${loop.name}`) }),
           ),
       ),
   );
   return Result.succeed(
-    new LoadedInstance({
+    LoadedInstance.make({
       ...instance,
-      config: new UsineConfig({
+      config: UsineConfig.make({
         ...instance.config,
         version: 2,
         projects,
-        repos: instance.config.repos.map((repo) => new ManagedRepo({ ...repo, lanes: [] })),
+        repos: instance.config.repos.map((repo) => ManagedRepo.make({ ...repo, lanes: [] })),
       }),
       loops,
       warnings: [],
@@ -137,7 +136,7 @@ export const labelsForRepository = (
       if ("label" in source && !labels.has(canonicalLabelName(source.label)))
         labels.set(
           canonicalLabelName(source.label),
-          new DeclaredLabel({
+          DeclaredLabel.make({
             name: source.label,
             color: Option.none(),
             description: Option.none(),

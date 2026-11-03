@@ -28,7 +28,7 @@ import { Changes } from "../src/changes/changes.ts";
 const unused = () => Effect.die("unexpected backend read");
 const project = ProjectId.make("visible");
 const repository = RepositoryName.make("owner/visible");
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 2,
   projects: [
     { id: project, name: "Visible", repositories: [repository] },
@@ -39,7 +39,7 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
     { name: RepositoryName.make("owner/hidden"), tags: [] },
   ],
 });
-const instance = new LoadedInstance({
+const instance = LoadedInstance.make({
   config,
   agents: [],
   loops: [],
@@ -109,9 +109,7 @@ it.effect("keeps a connected stream idle for 30 seconds without reading projecti
     assert.deepStrictEqual(frames.slice(1), [": heartbeat\n\n", ": heartbeat\n\n"]);
     assert.deepStrictEqual(reads, { overview: 0, desk: 0, configuration: 0 });
   }).pipe(
-    Effect.provide(live),
-    Effect.provide(backend),
-    Effect.provide(changeBusLayer),
+    Effect.provide(live.pipe(Layer.provideMerge(backend), Layer.provideMerge(changeBusLayer))),
     Effect.scoped,
   );
 });
@@ -131,22 +129,22 @@ it.effect(
           { _tag: "Loop", loop: LoopName.make("visible/developer") },
           { kind: "run", id: "run" },
         ],
-        [new ProjectScope({ project }), { kind: "attempt", id: "attempt" }],
-        [new ProjectScope({ project }), { kind: "attention", id: "instance" }],
-        [new ProjectScope({ project }), { kind: "activity", id: "instance" }],
+        [ProjectScope.make({ project }), { kind: "attempt", id: "attempt" }],
+        [ProjectScope.make({ project }), { kind: "attention", id: "instance" }],
+        [ProjectScope.make({ project }), { kind: "activity", id: "instance" }],
       ];
       for (const [audience, target] of cases) {
         yield* bus.publish([
           {
-            audience: new ProjectScope({ project: ProjectId.make("hidden") }),
+            audience: ProjectScope.make({ project: ProjectId.make("hidden") }),
             target: { ...target, id: "secret" },
           },
-          { audience: new InstanceScope(), target: { kind: "worker", id: "secret-worker" } },
+          { audience: InstanceScope.make(), target: { kind: "worker", id: "secret-worker" } },
           { audience, target },
         ]);
       }
       const grants = [
-        new PermissionGrant({ permission: "read", scope: new ProjectScope({ project }) }),
+        PermissionGrant.make({ permission: "read", scope: ProjectScope.make({ project }) }),
       ];
       const frames = yield* (yield* open(initial.revision, grants)).pipe(
         Stream.take(1),
@@ -158,7 +156,7 @@ it.effect(
       assert.notInclude(replay, '"reset":true');
       const admin = yield* (yield* open(initial.revision)).pipe(Stream.take(1), Stream.runCollect);
       assert.include(admin.join(""), "secret-worker");
-    }).pipe(Effect.provide(live), Effect.provide(changeBusLayer), Effect.scoped),
+    }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );
 
 it.effect("resets expired and future cursors and slow subscribers after a bounded replay gap", () =>
@@ -167,14 +165,14 @@ it.effect("resets expired and future cursors and slow subscribers after a bounde
     const initial = yield* bus.open;
     for (let index = 0; index < 257; index++)
       yield* bus.publish([
-        { audience: new InstanceScope(), target: { kind: "worker", id: String(index) } },
+        { audience: InstanceScope.make(), target: { kind: "worker", id: String(index) } },
       ]);
     for (const cursor of [initial.revision, Number.MAX_SAFE_INTEGER, "invalid"]) {
       const frames = yield* (yield* open(cursor)).pipe(Stream.take(1), Stream.runCollect);
       assert.include(frames.join(""), '"reset":true');
     }
     assert.strictEqual((yield* bus.open).history.length, 256);
-  }).pipe(Effect.provide(live), Effect.provide(changeBusLayer), Effect.scoped),
+  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );
 
 it.effect("revalidates credentials before a write can reveal an identifier", () =>
@@ -183,7 +181,7 @@ it.effect("revalidates credentials before a write can reveal an identifier", () 
     const verify = Effect.suspend(() =>
       permitted
         ? Effect.void
-        : Effect.fail(new AuthError({ status: 401, message: "credentials revoked" })),
+        : Effect.fail(AuthError.make({ status: 401, message: "credentials revoked" })),
     );
     const stream = yield* open().pipe(Effect.provideService(ChangeAccess, verify));
     const frames: string[] = [];
@@ -198,12 +196,12 @@ it.effect("revalidates credentials before a write can reveal an identifier", () 
     yield* Effect.yieldNow;
     permitted = false;
     yield* (yield* ChangeBus).publish([
-      { audience: new InstanceScope(), target: { kind: "worker", id: "hidden-after-revocation" } },
+      { audience: InstanceScope.make(), target: { kind: "worker", id: "hidden-after-revocation" } },
     ]);
     const exit = yield* Fiber.await(reader);
     assert.strictEqual(exit._tag, "Failure");
     assert.notInclude(frames.join(""), "hidden-after-revocation");
-  }).pipe(Effect.provide(live), Effect.provide(changeBusLayer), Effect.scoped),
+  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );
 
 it.effect("resets a live subscriber whose queue drops committed writes", () =>
@@ -225,12 +223,12 @@ it.effect("resets a live subscriber whose queue drops committed writes", () =>
     yield* Deferred.await(entered);
     for (let index = 0; index < 257; index++)
       yield* bus.publish([
-        { audience: new InstanceScope(), target: { kind: "worker", id: String(index) } },
+        { audience: InstanceScope.make(), target: { kind: "worker", id: String(index) } },
       ]);
     yield* Deferred.succeed(release, undefined);
     const frames = yield* Fiber.join(reader);
     assert.include(frames[1] ?? "", '"reset":true');
-  }).pipe(Effect.provide(live), Effect.provide(changeBusLayer), Effect.scoped),
+  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );
 
 it.effect(
@@ -240,7 +238,7 @@ it.effect(
       const bus = yield* ChangeBus;
       const ready = yield* Deferred.make<void>();
       const grants = [
-        new PermissionGrant({ permission: "read", scope: new ProjectScope({ project }) }),
+        PermissionGrant.make({ permission: "read", scope: ProjectScope.make({ project }) }),
       ];
       let first = true;
       const reader = yield* (yield* open(undefined, grants)).pipe(
@@ -259,7 +257,7 @@ it.effect(
           audience: { _tag: "Repository", repository: RepositoryName.make("owner/hidden") },
           target: { kind: "item", id: "secret-live" },
         },
-        { audience: new InstanceScope(), target: { kind: "worker", id: "secret-worker" } },
+        { audience: InstanceScope.make(), target: { kind: "worker", id: "secret-worker" } },
       ]);
       yield* bus.publish([
         {
@@ -273,5 +271,5 @@ it.effect(
       assert.include(liveFrame, '{"kind":"run","id":"preparing-run"}');
       assert.include(liveFrame, '{"kind":"project","id":"visible"}');
       assert.notInclude(liveFrame, '"reset":true');
-    }).pipe(Effect.provide(live), Effect.provide(changeBusLayer), Effect.scoped),
+    }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );

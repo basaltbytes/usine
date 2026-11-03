@@ -47,30 +47,28 @@ const overview = () => {
   if (project === undefined || ready === undefined || template === undefined)
     throw new Error("Missing board fixture");
   const itemKey = ItemKey.make(`${second}:${template.number}`);
-  const items = template.items.map(
-    (item) =>
-      new BoardItemLink({
-        ...item,
-        itemKey,
-        title: "API task",
-        url: `https://github.com/${second}/issues/${item.number}`,
-      }),
+  const items = template.items.map((item) =>
+    BoardItemLink.make({
+      ...item,
+      itemKey,
+      title: "API task",
+      url: `https://github.com/${second}/issues/${item.number}`,
+    }),
   );
-  const card = new BoardTaskView({
+  const card = BoardTaskView.make({
     ...template,
     repository: second,
     itemKey,
     title: "API task",
     items,
     ...boardRunSummary(
-      boardTaskRuns(template).map(
-        (run) =>
-          new RunSummaryView({
-            ...run,
-            repository: second,
-            id: RunId.make(`api-${run.id}`),
-            itemKey,
-          }),
+      boardTaskRuns(template).map((run) =>
+        RunSummaryView.make({
+          ...run,
+          repository: second,
+          id: RunId.make(`api-${run.id}`),
+          itemKey,
+        }),
       ),
       null,
       items,
@@ -78,21 +76,21 @@ const overview = () => {
     run: null,
     loops: [],
   });
-  const combined = new ProjectView({
+  const combined = ProjectView.make({
     ...project,
     id: ProjectId.make("product"),
     name: "Product",
     repositories: [project.repository, RepositoryName.make("Board-Test/API")],
-    board: new BoardView({
+    board: BoardView.make({
       failures: [],
       lanes: project.board.lanes.map((lane) =>
         lane.id === ready.id && lane._tag === "WritableBoardLane"
-          ? new WritableBoardLaneView({ ...lane, items: [template, card] })
+          ? WritableBoardLaneView.make({ ...lane, items: [template, card] })
           : lane,
       ),
     }),
   });
-  return new ReadyOverview({ projects: [combined], loops: [], needsYou: [] });
+  return ReadyOverview.make({ projects: [combined], loops: [], needsYou: [] });
 };
 beforeEach(() => {
   document.documentElement.classList.add("dark");
@@ -103,7 +101,7 @@ beforeEach(() => {
   client.setQueryData(overviewQuery().queryKey, overview());
   client.setQueryData(
     deskQuery().queryKey,
-    new DeskView({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
+    DeskView.make({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
   );
 });
 afterEach(() => {
@@ -232,14 +230,13 @@ it("clears a repository filter whose URL casing differs from project membership"
 it("redirects a legacy repository named tasks instead of treating its owner as a project", async () => {
   client.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({
+    ReadyOverview.make({
       ...overview(),
-      projects: overview().projects.map(
-        (project) =>
-          new ProjectView({
-            ...project,
-            repositories: [...project.repositories, RepositoryName.make("board-test/tasks")],
-          }),
+      projects: overview().projects.map((project) =>
+        ProjectView.make({
+          ...project,
+          repositories: [...project.repositories, RepositoryName.make("board-test/tasks")],
+        }),
       ),
     }),
   );
@@ -253,14 +250,13 @@ it.each(["tasks", "runs"])(
     const repository = RepositoryName.make(`board-test/${name}`);
     client.setQueryData(
       overviewQuery().queryKey,
-      new ReadyOverview({
+      ReadyOverview.make({
         ...overview(),
-        projects: overview().projects.map(
-          (project) =>
-            new ProjectView({
-              ...project,
-              repositories: [...project.repositories, repository],
-            }),
+        projects: overview().projects.map((project) =>
+          ProjectView.make({
+            ...project,
+            repositories: [...project.repositories, repository],
+          }),
         ),
       }),
     );

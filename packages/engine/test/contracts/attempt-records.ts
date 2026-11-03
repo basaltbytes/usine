@@ -37,7 +37,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             assert(Option.isNone(first.execution.resume));
             // Cancellation closes the Attempt before the executor finishes salvaging.
             yield* store.cancel(runId);
-            const pushed = new SalvagePushed({
+            const pushed = SalvagePushed.make({
               ref: SalvageRef.make("usine/salvage/salvaged/1"),
               commit: CommitSha.make("b".repeat(40)),
             });
@@ -45,7 +45,10 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const canceled = yield* store.snapshot(runId);
             assert.deepStrictEqual(canceled.attempts[0]?.salvage, Option.some(pushed));
             assert.strictEqual(
-              canceled.attempts[0]?.outcome.pipe(Option.map((o) => o._tag)).pipe(Option.getOrNull),
+              canceled.attempts[0]?.outcome.pipe(
+                Option.map((o) => o._tag),
+                Option.getOrNull,
+              ),
               "Canceled",
             );
             assert.deepStrictEqual(
@@ -60,9 +63,9 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             // A retry of a failed Run picks up the pushed salvage.
             const retriedRun = RunId.make("salvaged-retry");
             yield* store.recordAndClaim(
-              new Submission({
+              Submission.make({
                 ...lifecycleSubmission,
-                event: new Event({
+                event: Event.make({
                   ...lifecycleSubmission.event,
                   id: EventId.make("salvaged-retry"),
                   dedupKey: DedupKey.make("salvaged/retry"),
@@ -79,7 +82,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             assert(started._tag === "AttemptStarted");
             yield* store.finishAttempt(
               started.execution.attempt,
-              Result.fail(new AgentFailure({ message: "Guard tripped" })),
+              Result.fail(AgentFailure.make({ message: "Guard tripped" })),
             );
             yield* store.recordSalvage(started.execution.attempt.id, pushed);
             yield* store.retry(retriedRun);
@@ -96,11 +99,11 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             // retry resumes from the newest pushed salvage instead.
             yield* store.finishAttempt(
               resumed.execution.attempt,
-              Result.fail(new AgentFailure({ message: "Guard tripped again" })),
+              Result.fail(AgentFailure.make({ message: "Guard tripped again" })),
             );
             yield* store.recordSalvage(
               resumed.execution.attempt.id,
-              new SalvageRetained({
+              SalvageRetained.make({
                 path: "/workers/local/attempts/salvaged-retry",
                 commit: Option.some(CommitSha.make("c".repeat(40))),
                 message: "remote rejected",
@@ -115,9 +118,10 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             assert(fresh._tag === "AttemptStarted");
             assert.deepStrictEqual(fresh.execution.resume, Option.some(pushed));
             assert.strictEqual(
-              (yield* store.snapshot(retriedRun)).attempts[1]?.salvage
-                .pipe(Option.map((s) => s._tag))
-                .pipe(Option.getOrNull),
+              (yield* store.snapshot(retriedRun)).attempts[1]?.salvage.pipe(
+                Option.map((s) => s._tag),
+                Option.getOrNull,
+              ),
               "Retained",
             );
 
@@ -125,9 +129,9 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             // checkout of that file, and the retry resumes from the pushed part.
             yield* store.finishAttempt(
               fresh.execution.attempt,
-              Result.fail(new AgentFailure({ message: "Guard tripped a third time" })),
+              Result.fail(AgentFailure.make({ message: "Guard tripped a third time" })),
             );
-            const partlyPushed = new SalvagePartlyPushed({
+            const partlyPushed = SalvagePartlyPushed.make({
               ref: SalvageRef.make("usine/salvage/salvaged-retry/3"),
               commit: CommitSha.make("d".repeat(40)),
               path: "/workers/local/attempts/salvaged-retry-3",
@@ -145,7 +149,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             assert.deepStrictEqual(
               afterPartial.execution.resume,
               Option.some(
-                new SalvagePushed({ ref: partlyPushed.ref, commit: partlyPushed.commit }),
+                SalvagePushed.make({ ref: partlyPushed.ref, commit: partlyPushed.commit }),
               ),
             );
             assert.deepStrictEqual(
@@ -157,11 +161,11 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             // not release at the time is removed at the next reconcile, not salvaged.
             yield* store.finishAttempt(
               afterPartial.execution.attempt,
-              Result.succeed(new StepResult({ message: "delivered", facts: [] })),
+              Result.succeed(StepResult.make({ message: "delivered", facts: [] })),
             );
             // A recovery whose push GitHub refused records the rejection, and the next startup's
             // recovery gets it, so it doesn't push the same commit again.
-            const rejected = new SalvageRejected({
+            const rejected = SalvageRejected.make({
               path: "/workers/local/attempts/salvaged-retry",
               commit: CommitSha.make("c".repeat(40)),
               message: "remote: error: GH001: Large files detected.",
@@ -199,7 +203,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
           yield* store.recordAndClaim(lifecycleSubmission, runId);
           const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert(started._tag === "AttemptStarted");
-          const review = new Comment({
+          const review = Comment.make({
             url: new URL("https://github.com/basaltbytes/usine/pull/71#pullrequestreview-9"),
             kind: "review",
             at: Option.some(DateTime.makeUnsafe("2026-10-20T10:00:00.000Z")),
@@ -207,7 +211,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
           yield* store.recordComments(started.execution.attempt.id, [review]);
           yield* store.finishAttempt(
             started.execution.attempt,
-            Result.fail(new AgentFailure({ message: "Checks failed" })),
+            Result.fail(AgentFailure.make({ message: "Checks failed" })),
           );
           yield* store.retry(runId);
           const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
@@ -240,7 +244,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const killed = (container: string, kills: number, memoryMib: number) =>
               store.recordOutOfMemory(
                 attemptId,
-                new ContainerOutOfMemoryKills({
+                ContainerOutOfMemoryKills.make({
                   container: ContainerId.make(container.repeat(64)),
                   kills,
                   memoryMib: ContainerMemoryMib.make(memoryMib),
@@ -259,7 +263,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             yield* killed("b", 1, 7168);
             yield* store.finishAttempt(
               reattached.execution.attempt,
-              Result.fail(new AgentFailure({ message: "The test gate was killed" })),
+              Result.fail(AgentFailure.make({ message: "The test gate was killed" })),
             );
             yield* store.retry(runId);
             const retried = yield* store.beginAttempt(
@@ -273,7 +277,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             assert.deepStrictEqual(
               attempts[0]?.outOfMemory,
               Option.some(
-                new OutOfMemoryKills({ kills: 3, memoryMib: ContainerMemoryMib.make(7168) }),
+                OutOfMemoryKills.make({ kills: 3, memoryMib: ContainerMemoryMib.make(7168) }),
               ),
             );
             assert.deepStrictEqual(attempts[1]?.outOfMemory, Option.none());

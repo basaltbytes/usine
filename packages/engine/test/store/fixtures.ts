@@ -10,9 +10,9 @@ import { DateTime, Option } from "effect";
 
 import { Submission } from "../../src/engine/submission.ts";
 
-export const testAgent = new Agent({
+export const testAgent = Agent.make({
   name: AgentName.make("developer"),
-  brain: new BrainSpec({
+  brain: BrainSpec.make({
     harness: "claude",
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
@@ -22,8 +22,8 @@ export const testAgent = new Agent({
   persona: AgentPersona.make("Implement the task."),
 });
 
-export const lifecycleSubmission = new Submission({
-  event: new Event({
+export const lifecycleSubmission = Submission.make({
+  event: Event.make({
     id: EventId.make("lifecycle-event"),
     dedupKey: DedupKey.make("lifecycle/event/revision"),
     payload: {},

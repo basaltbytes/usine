@@ -4,7 +4,6 @@
   },
   "src/scaffold.ts": {
     "globalJsonInEffect": 1,
-    "newSchemaClass": 4,
     "schemaClassMissingBrand": 1
   },
   "test/scaffold.test.ts": {
@@ -14,7 +13,6 @@
     "newPromise": 2,
     "nodeBuiltinImport": 4,
     "processEnv": 2,
-    "schemaNumber": 2,
     "schemaSync": 2
   }
 }

@@ -34,7 +34,7 @@ export const memoryAuthLayer = Layer.sync(AuthStore, () => {
         )
       )
         return yield* authFailure("This GitHub login belongs to another member.", 409);
-      const renamed = new Member({ ...member, login: identity.login });
+      const renamed = Member.make({ ...member, login: identity.login });
       members.set(identity.id, renamed);
       yield* Effect.logInfo("Member login updated", {
         memberId: identity.id,
@@ -84,7 +84,7 @@ export const memoryAuthLayer = Layer.sync(AuthStore, () => {
       const token = tokens.get(id);
       if (token === undefined || token.memberId !== member)
         return yield* authFailure("Token not found.", 403);
-      tokens.set(id, new InstanceToken({ ...token, scopes }));
+      tokens.set(id, InstanceToken.make({ ...token, scopes }));
       yield* Effect.logInfo("Token scopes changed", { memberId: member, tokenId: id });
     }),
     revoke: Effect.fn("AuthStore.revoke")(function* (member, id) {

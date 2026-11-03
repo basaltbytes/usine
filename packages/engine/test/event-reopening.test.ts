@@ -135,7 +135,7 @@ describe("Events of canceled Runs", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.fail(new AgentFailure({ message: "Needs the operator" })),
+          Effect.fail(AgentFailure.make({ message: "Needs the operator" })),
         ]);
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;

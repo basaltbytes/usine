@@ -22,7 +22,7 @@ it.effect(
     const written: Array<AttemptId> = [];
     const executor = executorLayer(machine, mintingProvider(), ADDRESS, undefined, undefined, {
       attemptConnections: {
-        read: () => Effect.succeed(Option.none()),
+        read: () => Effect.succeedNone,
         write: (id) => Effect.sync(() => void written.push(id)),
         remove: () => Effect.void,
       },
@@ -93,7 +93,7 @@ it.effect(
       Effect.provide(
         executorLayer(machine, mintingProvider(), ADDRESS, undefined, undefined, {
           attemptConnections: {
-            read: () => Effect.succeed(Option.some(ADDRESS)),
+            read: () => Effect.succeedSome(ADDRESS),
             write: () => Effect.die("saved connections need no write"),
             remove: (id) => Effect.sync(() => void removed.push(id)),
           },

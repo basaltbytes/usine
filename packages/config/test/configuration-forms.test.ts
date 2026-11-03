@@ -7,7 +7,7 @@ it.effect(
   "preserves agent parent overrides through the form codec and rejects unknown fields",
   () =>
     Effect.gen(function* () {
-      const key = new ConfigurationEntityKey({
+      const key = ConfigurationEntityKey.make({
         kind: "agent",
         identifier: ConfigurationEntityId.make("developer"),
       });
@@ -34,7 +34,7 @@ it.effect(
   "uses worker cross-field rules and rejects secret values instead of environment variable names",
   () =>
     Effect.gen(function* () {
-      const key = new ConfigurationEntityKey({
+      const key = ConfigurationEntityKey.make({
         kind: "worker",
         identifier: ConfigurationEntityId.make("remote"),
       });
@@ -64,7 +64,7 @@ it.effect(
 
 it.effect("rejects duplicate lane sources and settings typos with field paths", () =>
   Effect.gen(function* () {
-    const repository = new ConfigurationEntityKey({
+    const repository = ConfigurationEntityKey.make({
       kind: "repository",
       identifier: ConfigurationEntityId.make("acme/repo"),
     });
@@ -78,7 +78,7 @@ it.effect("rejects duplicate lane sources and settings typos with field paths", 
     expect(duplicate.details).toEqual(
       expect.arrayContaining([expect.objectContaining({ path: ["lanes"] })]),
     );
-    const settings = new ConfigurationEntityKey({
+    const settings = ConfigurationEntityKey.make({
       kind: "settings",
       identifier: ConfigurationEntityId.make("instance"),
     });
@@ -96,7 +96,7 @@ it.effect(
   "accepts an empty project draft but requires repositories when saving and rejects unknown keys",
   () =>
     Effect.gen(function* () {
-      const key = new ConfigurationEntityKey({
+      const key = ConfigurationEntityKey.make({
         kind: "project",
         identifier: ConfigurationEntityId.make("product"),
       });
@@ -122,7 +122,7 @@ it.effect(
 
 it.effect("keeps repository tag edits from writing project lanes", () =>
   Effect.gen(function* () {
-    const key = new ConfigurationEntityKey({
+    const key = ConfigurationEntityKey.make({
       kind: "repository",
       identifier: ConfigurationEntityId.make("acme/api"),
     });

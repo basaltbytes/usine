@@ -57,7 +57,7 @@ export class AttachmentSummary extends Schema.Class<AttachmentSummary>(
 }) {
   /** Copies the metadata from `attachment`, replacing its credential with the credential kind. */
   static fromAttachment(attachment: Attachment): AttachmentSummary {
-    return new AttachmentSummary({
+    return AttachmentSummary.make({
       id: attachment.id,
       worker: attachment.worker,
       repository: attachment.repository,
@@ -114,12 +114,11 @@ export class LlmProviderList extends Schema.Class<LlmProviderList>(
   static fromProviders({ anthropic, openai }: LlmProviders): LlmProviderList {
     const listed = (provider: LlmProviderName, configured: Option.Option<LlmProvider>) =>
       Option.toArray(
-        Option.map(
-          configured,
-          (held) => new LlmProviderSummary({ provider, credential: credentialKind(held) }),
+        Option.map(configured, (held) =>
+          LlmProviderSummary.make({ provider, credential: credentialKind(held) }),
         ),
       );
-    return new LlmProviderList({
+    return LlmProviderList.make({
       providers: [...listed("anthropic", anthropic), ...listed("openai", openai)],
     });
   }

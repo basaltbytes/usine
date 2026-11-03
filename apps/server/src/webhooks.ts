@@ -66,12 +66,11 @@ const makeWebhookHandler: (
       return Effect.succeed(HttpServerResponse.empty({ status: 404 }));
     }
     const secret = yield* Config.schema(Secret, "USINE_GITHUB_WEBHOOK_SECRET").pipe(
-      Effect.mapError(
-        () =>
-          new WebhookConfigurationError({
-            message:
-              "Endpoint mode requires USINE_GITHUB_WEBHOOK_SECRET in the instance .env or environment. Set it to the GitHub App webhook secret and restart usine up.",
-          }),
+      Effect.mapError(() =>
+        WebhookConfigurationError.make({
+          message:
+            "Endpoint mode requires USINE_GITHUB_WEBHOOK_SECRET in the instance .env or environment. Set it to the GitHub App webhook secret and restart usine up.",
+        }),
       ),
     );
     yield* app.configureWebhook(webhooks.publicUrl).pipe(
@@ -95,7 +94,7 @@ const makeWebhookHandler: (
       const request = yield* HttpServerRequest.HttpServerRequest;
       const signature = request.headers["x-hub-signature-256"];
       if (signature === undefined || !/^sha256=[a-f0-9]{64}$/u.test(signature)) {
-        return yield* new WebhookRequestError({
+        return yield* WebhookRequestError.make({
           status: 401,
           message: "Invalid webhook signature",
         });
@@ -106,18 +105,17 @@ const makeWebhookHandler: (
           ByteSize.fromInputUnsafe(MAX_BODY_BYTES),
         ),
         Effect.timeout("10 seconds"),
-        Effect.mapError(
-          () =>
-            new WebhookRequestError({
-              status: 400,
-              message: "Could not read webhook body within its size or time limit",
-            }),
+        Effect.mapError(() =>
+          WebhookRequestError.make({
+            status: 400,
+            message: "Could not read webhook body within its size or time limit",
+          }),
         ),
       );
       const body = Buffer.from(bytes);
       const expected = createHmac("sha256", Redacted.value(secret)).update(body).digest();
       if (!timingSafeEqual(expected, Buffer.from(signature.slice(7), "hex"))) {
-        return yield* new WebhookRequestError({
+        return yield* WebhookRequestError.make({
           status: 401,
           message: "Invalid webhook signature",
         });
@@ -125,14 +123,14 @@ const makeWebhookHandler: (
       const event = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(
         request.headers["x-github-event"],
       ).pipe(
-        Effect.mapError(
-          () => new WebhookRequestError({ status: 400, message: "Missing GitHub event header" }),
+        Effect.mapError(() =>
+          WebhookRequestError.make({ status: 400, message: "Missing GitHub event header" }),
         ),
       );
       yield* Effect.annotateCurrentSpan({ event });
-      const payload = yield* Schema.decodeUnknownEffect(Payload)(body.toString("utf8")).pipe(
-        Effect.mapError(
-          () => new WebhookRequestError({ status: 400, message: "Invalid webhook payload" }),
+      const payload = yield* Schema.decodeEffect(Payload)(body.toString("utf8")).pipe(
+        Effect.mapError(() =>
+          WebhookRequestError.make({ status: 400, message: "Invalid webhook payload" }),
         ),
       );
       yield* health.received;

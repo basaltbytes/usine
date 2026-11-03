@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Option, Redacted, Schema } from "effect";
+import { Effect, Option, Redacted, Schema, Layer } from "effect";
 import { Base64, Base64Url } from "effect/encoding";
 import { Headers } from "effect/http";
 import {
@@ -21,9 +21,13 @@ import {
 } from "./fixtures.ts";
 
 const tokens = <A, E>(effect: Effect.Effect<A, E, CallerTokens>) =>
-  effect.pipe(Effect.provide(CallerTokens.layer), Effect.provide(settingsLayer(NO_PROVIDERS)));
+  effect.pipe(Effect.provide(CallerTokens.layer.pipe(Layer.provide(settingsLayer(NO_PROVIDERS)))));
 
-const claims = new CallerClaims({ attachment: ATTACHMENT, worker: WORKER, repository: REPOSITORY });
+const claims = CallerClaims.make({
+  attachment: ATTACHMENT,
+  worker: WORKER,
+  repository: REPOSITORY,
+});
 
 describe("CallerTokens", () => {
   it.effect("a token issued for an attachment verifies to the same Worker and repository", () =>
@@ -49,17 +53,17 @@ describe("CallerTokens", () => {
           const callers = yield* CallerTokens;
           const mac = Redacted.value(yield* callers.issue(claims)).split(".")[2];
           for (const forged of [
-            new CallerClaims({
+            CallerClaims.make({
               attachment: OTHER_ATTACHMENT,
               worker: WORKER,
               repository: REPOSITORY,
             }),
-            new CallerClaims({
+            CallerClaims.make({
               attachment: ATTACHMENT,
               worker: OTHER_WORKER,
               repository: REPOSITORY,
             }),
-            new CallerClaims({
+            CallerClaims.make({
               attachment: ATTACHMENT,
               worker: WORKER,
               repository: OTHER_REPOSITORY,
@@ -80,8 +84,11 @@ describe("CallerTokens", () => {
   it.effect("a token signed with another gateway's key is rejected", () =>
     Effect.gen(function* () {
       const foreign = yield* Effect.flatMap(CallerTokens, (callers) => callers.issue(claims)).pipe(
-        Effect.provide(CallerTokens.layer),
-        Effect.provide(settingsLayer(NO_PROVIDERS, "another-gateway-key-0123456789abcdef")),
+        Effect.provide(
+          CallerTokens.layer.pipe(
+            Layer.provide(settingsLayer(NO_PROVIDERS, "another-gateway-key-0123456789abcdef")),
+          ),
+        ),
       );
       const error = yield* tokens(
         Effect.flatMap(CallerTokens, (callers) => Effect.flip(callers.verify(foreign))),

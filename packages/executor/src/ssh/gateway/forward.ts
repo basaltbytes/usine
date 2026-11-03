@@ -241,7 +241,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
               Ref.set(state, {
                 _tag: "Closed",
                 generation,
-                closed: new GatewayForwardClosed({
+                closed: GatewayForwardClosed.make({
                   gateway,
                   generation: generation.number,
                   since,
@@ -292,7 +292,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
         const since = end._tag === "Exited" ? now : Option.getOrElse(closedSince, () => now);
         closedSince = Option.some(since);
         const pause = pauseAfter(failures);
-        const closed = new GatewayForwardClosed({
+        const closed = GatewayForwardClosed.make({
           gateway,
           generation: generation.number,
           since,
@@ -339,14 +339,13 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
 
   const notOpenedWithin = (generation: number) =>
     DateTime.now.pipe(
-      Effect.flatMap(
-        (since) =>
-          new GatewayForwardClosed({
-            gateway,
-            generation,
-            since,
-            reason: `the forward didn't open within ${OPEN_WAIT}`,
-          }),
+      Effect.flatMap((since) =>
+        GatewayForwardClosed.make({
+          gateway,
+          generation,
+          since,
+          reason: `the forward didn't open within ${OPEN_WAIT}`,
+        }),
       ),
     );
 

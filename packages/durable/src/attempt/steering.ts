@@ -25,9 +25,9 @@ export const queueParentSteer = Effect.fn("AttemptSteering.queueParent")(functio
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: hub.attemptId, inputSequence });
   const requestId = `intervention:${hub.attemptId}:${inputSequence}`;
-  const intervention = new AttemptChannel.Intervention({
+  const intervention = AttemptChannel.Intervention.make({
     operator,
-    target: new AttemptChannel.ParentTarget(),
+    target: AttemptChannel.ParentTarget.make(),
     action: steer,
   });
   const state = yield* durable.use("queue a parent turn for the steer", (harness, context) =>
@@ -56,7 +56,7 @@ export const queueParentSteer = Effect.fn("AttemptSteering.queueParent")(functio
         { inputSequence, requestId, intervention: encodeIntervention(intervention) },
       ];
       return Option.some(
-        new AttemptChannel.InterventionState({
+        AttemptChannel.InterventionState.make({
           held: hold.held.includes(parentSessionId(hub.attemptId)),
           paused: false,
           queued: true,

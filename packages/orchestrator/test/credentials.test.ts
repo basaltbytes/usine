@@ -19,7 +19,7 @@ import { gitHubCredentialLayer } from "../src/credentials.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
 
 const repository = RepositoryName.make("acme/demo");
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [{ name: repository }],
   workers: [{ name: "local", kind: "local" }],
@@ -28,7 +28,7 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
 describe("GitHub credential provider", () => {
   it.effect("mints each Attempt's token at its Loop's permission level", () => {
     const requested: Array<LoopPermissions> = [];
-    const project = new CoveredProject({
+    const project = CoveredProject.make({
       installationId: InstallationId.make(77),
       repository,
       repositoryId: RepositoryId.make(99),
@@ -45,10 +45,10 @@ describe("GitHub credential provider", () => {
       workerToken: (_project, permissions) =>
         Effect.sync(() => {
           requested.push(permissions);
-          return new InstallationToken({
+          return InstallationToken.make({
             value: Redacted.make(`ghs_${permissions}`),
-            expiresAt: DateTime.makeUnsafe(3_600_000),
-            scope: new SingleRepository({
+            expiresAt: DateTime.makeUnsafe(3600000),
+            scope: SingleRepository.make({
               repository,
               repositoryId: project.repositoryId,
               permissions,
@@ -72,7 +72,7 @@ describe("GitHub credential provider", () => {
 });
 
 describe("GitHub credential provider failures", () => {
-  const project = new CoveredProject({
+  const project = CoveredProject.make({
     installationId: InstallationId.make(77),
     repository,
     repositoryId: RepositoryId.make(99),
@@ -110,7 +110,7 @@ describe("GitHub credential provider failures", () => {
       Effect.provide(
         provider(
           [project],
-          new GitHubApiError({
+          GitHubApiError.make({
             operation: "mint-worker-token",
             status: Option.some(422),
             message:
@@ -133,7 +133,7 @@ describe("GitHub credential provider failures", () => {
       Effect.provide(
         provider(
           [],
-          new GitHubApiError({
+          GitHubApiError.make({
             operation: "mint-worker-token",
             status: Option.none(),
             message: "unused",
@@ -155,7 +155,7 @@ describe("GitHub credential provider failures", () => {
       Effect.provide(
         provider(
           [project],
-          new GitHubApiError({
+          GitHubApiError.make({
             operation: "mint-worker-token",
             status: Option.none(),
             message: "Could not send the request to GitHub",

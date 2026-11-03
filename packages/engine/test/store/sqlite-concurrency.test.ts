@@ -50,14 +50,14 @@ for (const method of ["standalone", "list", "board"] as const) {
           yield* store.recordAndClaim(lifecycleSubmission, runId);
           const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert(started._tag === "AttemptStarted");
-          const envelope = new AttemptChannel.OutboundEnvelope({
+          const envelope = AttemptChannel.OutboundEnvelope.make({
             version: AttemptChannel.PROTOCOL_VERSION,
             attemptId: started.execution.attempt.id,
             sequence: AttemptChannel.Sequence.make(1),
             sentAt: DateTime.makeUnsafe("2026-11-03T00:00:00Z"),
-            payload: new AttemptChannel.SessionEvent({
-              event: new TextOutput({
-                session: new ParentSession({
+            payload: AttemptChannel.SessionEvent.make({
+              event: TextOutput.make({
+                session: ParentSession.make({
                   id: AgentSessionId.make("concurrent-session"),
                   agent: testAgent.name,
                   brain: testAgent.brain,
@@ -77,7 +77,7 @@ for (const method of ["standalone", "list", "board"] as const) {
             (server) =>
               Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
           );
-          const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Number }))(
+          const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(
             server.address(),
           );
           yield* Effect.promise(async () =>
@@ -98,8 +98,7 @@ for (const method of ["standalone", "list", "board"] as const) {
               }).pipe(Effect.orDie),
           });
           const database = yield* SQLiteDrizzle.make().pipe(
-            Effect.provide(logger),
-            Effect.provide(SQLiteDrizzle.DefaultServices),
+            Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
           );
           const read =
             method === "standalone"
@@ -115,8 +114,9 @@ for (const method of ["standalone", "list", "board"] as const) {
                     );
                   }
                 }).pipe(
-                  Effect.provide(RunReader.layer),
-                  Effect.provide(RunDatabase.layer(database)),
+                  Effect.provide(
+                    RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database))),
+                  ),
                 );
           const readStarted = performance.now();
           const slow = yield* read.pipe(Effect.forkScoped);
@@ -126,7 +126,7 @@ for (const method of ["standalone", "list", "board"] as const) {
             yield* Effect.sleep("20 millis");
             yield* store.appendTranscript(
               "outbound",
-              new AttemptChannel.OutboundEnvelope({
+              AttemptChannel.OutboundEnvelope.make({
                 ...envelope,
                 sequence: AttemptChannel.Sequence.make(sequence),
               }),
@@ -150,7 +150,9 @@ for (const method of ["standalone", "list", "board"] as const) {
             yield* sql`SELECT count(*) AS count FROM usine_attempt_transcripts WHERE attempt_id = ${started.execution.attempt.id}`,
             [{ count: 3 }],
           );
-        }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+        }).pipe(
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+        );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 }
@@ -339,7 +341,10 @@ it.live(
         Effect.timeout("3 seconds"),
       );
       assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
+    ),
 );
 
 it.live(
@@ -391,7 +396,10 @@ it.live(
         { value: 3 },
       ]);
       assert.strictEqual(yield* reader.state, "worker");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
+    ),
 );
 
 it.effect(
@@ -422,5 +430,5 @@ it.effect(
       const closedStarts = starts;
       yield* TestClock.adjust("10 minutes");
       assert.strictEqual(starts, closedStarts);
-    }).pipe(Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
+    }).pipe(Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer)))),
 );

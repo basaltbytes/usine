@@ -51,12 +51,12 @@ import {
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const updatedAt = DateTime.makeUnsafe("2026-10-17T10:00:00Z");
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [{ name: repository }],
   settings: { poll_interval: 60 },
 });
-const agent = new AgentFile({
+const agent = AgentFile.make({
   name: AgentName.make("developer"),
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
@@ -67,12 +67,12 @@ const agent = new AgentFile({
 });
 
 const loop = (name: string, condition: string, body: string, on: "issue" | "pr" = "issue") =>
-  new LoopFile({
+  LoopFile.make({
     name: LoopName.make(name),
     trigger:
       on === "issue"
-        ? new IssueTrigger({ on, if: Source.make(condition) })
-        : new PullRequestTrigger({ on, if: Source.make(condition) }),
+        ? IssueTrigger.make({ on, if: Source.make(condition) })
+        : PullRequestTrigger.make({ on, if: Source.make(condition) }),
     selector: Option.none(),
     approval: "none",
     step: StepName.make("run"),
@@ -81,7 +81,7 @@ const loop = (name: string, condition: string, body: string, on: "issue" | "pr" 
   });
 
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
-  new LoadedInstance({
+  LoadedInstance.make({
     config,
     agents: [agent],
     invalidAgents: [],
@@ -111,7 +111,7 @@ const issuePayload = (number: number, milestone: string | null): IssuePayload =>
 });
 
 const pullRequestPayload = (number: number) =>
-  Schema.decodeUnknownSync(PullRequestPayload)({
+  Schema.decodeSync(PullRequestPayload)({
     ...issuePayload(number, null),
     isDraft: false,
     merged: false,
@@ -132,7 +132,7 @@ const pullRequestPayload = (number: number) =>
     closingIssuesReferences: { totalCount: 0, nodes: [] },
   });
 
-const advanced = new PollCursor({
+const advanced = PollCursor.make({
   entityTag: Option.some(EntityTag.make('W/"advanced"')),
   watermark: Option.some(updatedAt),
 });
@@ -143,13 +143,13 @@ const changesOnce =
   (_repository, cursor) =>
     Effect.succeed(
       Option.isNone(cursor.entityTag)
-        ? new RepositoryChanges({
+        ? RepositoryChanges.make({
             cursor: advanced,
             items,
             backlog: false,
             nextPollAt: Option.none(),
           })
-        : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
+        : RepositoryNotModified.make({ cursor, nextPollAt: Option.none() }),
     );
 
 const submissions: Array<string> = [];
@@ -167,14 +167,14 @@ const claimingRuns = Layer.succeed(RunEngine)({
   drain: () => Effect.void,
   waitForUpgrade: () => Effect.void,
   cancelUpgrade: Effect.void,
-  upgradeDrain: Effect.succeed(Option.none()),
+  upgradeDrain: Effect.succeedNone,
   retry: () => Effect.die("unused"),
   runAgain: () => Effect.die("unused"),
   revoke: () => Effect.succeed([]),
   submit: (submission) =>
     Effect.sync(() => {
       submissions.push(submission.loop);
-      return new Claimed({
+      return Claimed.make({
         eventId: submission.event.id,
         runId: RunId.make(`run-${submissions.length}`),
       });
@@ -184,27 +184,26 @@ const claimingRuns = Layer.succeed(RunEngine)({
 
 /** A new PollingTriggers, as one `usine up` process builds it, over a shared cursor store. */
 const processLayer = (github: GitHubPolling["Service"], cursors: CursorStore["Service"]) =>
-  PollingTriggers.layer
-    .pipe(Layer.provide(idleCiMonitor))
-    .pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          noCycleBudgets,
-          Layer.succeed(CursorStore)(cursors),
-          itemProjectionWriterLayer,
-          itemProjectionReaderLayer,
-          repositoryLabelProjectionReaderLayer,
-          repositoryLabelProjectionWriterLayer,
-          inertGitHubLabelWriterLayer,
-          inertLabelReconcilerLayer,
-          claimingRuns,
-          MarcbachmannCelLayer,
-          ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
-          Layer.succeed(GitHubPolling, github),
-          loopControlLayer(),
-        ),
+  PollingTriggers.layer.pipe(
+    Layer.provide(idleCiMonitor),
+    Layer.provide(
+      Layer.mergeAll(
+        noCycleBudgets,
+        Layer.succeed(CursorStore)(cursors),
+        itemProjectionWriterLayer,
+        itemProjectionReaderLayer,
+        repositoryLabelProjectionReaderLayer,
+        repositoryLabelProjectionWriterLayer,
+        inertGitHubLabelWriterLayer,
+        inertLabelReconcilerLayer,
+        claimingRuns,
+        MarcbachmannCelLayer,
+        ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
+        Layer.succeed(GitHubPolling, github),
+        loopControlLayer(),
       ),
-    );
+    ),
+  );
 
 const capturedLogs = () => {
   const lines: Array<{ readonly level: string; readonly text: string }> = [];
@@ -222,12 +221,12 @@ const FAILED = /Loop evaluation failed on an Item/u;
 
 const storedUnfetchedItems = (cursors: ReturnType<typeof memoryCursorStore>) =>
   Schema.decodeUnknownSync(
-    Schema.Struct({ unfetchedItems: Schema.Array(Schema.Struct({ number: Schema.Number })) }),
+    Schema.Struct({ unfetchedItems: Schema.Array(Schema.Struct({ number: Schema.Finite })) }),
   )(cursors.stored.get(`github-poll:${repository}`)).unfetchedItems.map(({ number }) => number);
 
 const storedFailingItems = (cursors: ReturnType<typeof memoryCursorStore>) =>
   Schema.decodeUnknownSync(
-    Schema.Struct({ failingItems: Schema.Array(Schema.Struct({ number: Schema.Number })) }),
+    Schema.Struct({ failingItems: Schema.Array(Schema.Struct({ number: Schema.Finite })) }),
   )(cursors.stored.get(`github-poll:${repository}`)).failingItems.map(({ number }) => number);
 
 describe("Loop evaluation failures", () => {
@@ -243,15 +242,15 @@ describe("Loop evaluation failures", () => {
           baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           labels: () =>
-            Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+            Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
           changes: changesOnce([
-            new ChangedIssue({ number: 28, updatedAt }),
-            new ChangedIssue({ number: 29, updatedAt }),
+            ChangedIssue.make({ number: 28, updatedAt }),
+            ChangedIssue.make({ number: 29, updatedAt }),
           ]),
           snapshot: (_repository, item) =>
             Effect.sync(() => {
               fetched.push(item.number);
-              return new IssueSnapshot({
+              return IssueSnapshot.make({
                 payload: issuePayload(item.number, item.number === 28 ? null : "v1"),
                 contentHash: ContentHash.make(String(item.number).repeat(32)),
               });
@@ -283,8 +282,11 @@ describe("Loop evaluation failures", () => {
           assert.deepStrictEqual(fetched.sort(), [28, 29]);
           assert.strictEqual(logs.errors(FAILED), 1);
         }).pipe(
-          Effect.provide(processLayer(github, cursors.store)),
-          Effect.provide(Logger.layer([logs.logger])),
+          Effect.provide(
+            processLayer(github, cursors.store).pipe(
+              Layer.provideMerge(Logger.layer([logs.logger])),
+            ),
+          ),
         );
       }),
   );
@@ -301,12 +303,12 @@ describe("Loop evaluation failures", () => {
         baseRefHead: base.baseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
-        changes: changesOnce([new ChangedPullRequest({ number: 12, updatedAt })]),
+          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
+        changes: changesOnce([ChangedPullRequest.make({ number: 12, updatedAt })]),
         snapshot: () =>
           Effect.sync(() => {
             fetches += 1;
-            return new PullRequestSnapshot({
+            return PullRequestSnapshot.make({
               payload: pullRequestPayload(12),
               contentHash: ContentHash.make(contentHash.repeat(64)),
             });
@@ -337,8 +339,9 @@ describe("Loop evaluation failures", () => {
         assert.strictEqual(logs.errors(FAILED), 2);
         assert.deepStrictEqual(submissions, []);
       }).pipe(
-        Effect.provide(processLayer(github, cursors.store)),
-        Effect.provide(Logger.layer([logs.logger])),
+        Effect.provide(
+          processLayer(github, cursors.store).pipe(Layer.provideMerge(Logger.layer([logs.logger]))),
+        ),
       );
     }),
   );
@@ -352,12 +355,12 @@ describe("Loop evaluation failures", () => {
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
-        changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),
+          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
+        changes: changesOnce([ChangedIssue.make({ number: 28, updatedAt })]),
         snapshot: (_repository, item) =>
           Effect.sync(() => {
             fetched.push(item.number);
-            return new IssueSnapshot({
+            return IssueSnapshot.make({
               payload: issuePayload(item.number, null),
               contentHash: ContentHash.make("c".repeat(64)),
             });
@@ -404,12 +407,12 @@ describe("Loop evaluation failures", () => {
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
-        changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),
+          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
+        changes: changesOnce([ChangedIssue.make({ number: 28, updatedAt })]),
         snapshot: (_repository, item) =>
           Effect.sync(() => {
             fetched.push(item.number);
-            return new IssueSnapshot({
+            return IssueSnapshot.make({
               payload: issuePayload(item.number, null),
               contentHash: ContentHash.make("c".repeat(64)),
             });
@@ -450,19 +453,19 @@ describe("Loop evaluation failures", () => {
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
-        changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),
+          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
+        changes: changesOnce([ChangedIssue.make({ number: 28, updatedAt })]),
         snapshot: (_repository, item) =>
           deleted
             ? Effect.fail(
-                new GitHubItemNotFoundError({
+                GitHubItemNotFoundError.make({
                   operation: "fetch-issue-snapshot",
                   item: item.number,
                   message: `GitHub has no issue ${item.number}`,
                 }),
               )
             : Effect.succeed(
-                new IssueSnapshot({
+                IssueSnapshot.make({
                   payload: issuePayload(item.number, null),
                   contentHash: ContentHash.make("d".repeat(64)),
                 }),
@@ -497,19 +500,19 @@ describe("Loop evaluation failures", () => {
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
-        changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),
+          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
+        changes: changesOnce([ChangedIssue.make({ number: 28, updatedAt })]),
         snapshot: (_repository, item) =>
           deleted
             ? Effect.fail(
-                new GitHubItemNotFoundError({
+                GitHubItemNotFoundError.make({
                   operation: "fetch-issue-snapshot",
                   item: item.number,
                   message: `GitHub has no issue ${item.number}`,
                 }),
               )
             : Effect.succeed(
-                new IssueSnapshot({
+                IssueSnapshot.make({
                   payload: issuePayload(item.number, null),
                   contentHash: ContentHash.make("d".repeat(64)),
                 }),
@@ -544,23 +547,22 @@ describe("Loop evaluation failures", () => {
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
         changes: changesOnce(
-          Array.from(
-            { length: 10 },
-            (_, index) => new ChangedIssue({ number: index + 1, updatedAt }),
+          Array.from({ length: 10 }, (_, index) =>
+            ChangedIssue.make({ number: index + 1, updatedAt }),
           ),
         ),
         snapshot: (_repository, item) =>
           Effect.gen(function* () {
             fetched.push(item.number);
             if (unavailable.has(item.number))
-              return yield* new GitHubApiError({
+              return yield* GitHubApiError.make({
                 operation: "fetch-issue-snapshot",
                 status: Option.some(504),
                 message: "GitHub returned HTTP status 504",
               });
-            return new IssueSnapshot({
+            return IssueSnapshot.make({
               payload: issuePayload(item.number, null),
               contentHash: ContentHash.make("e".repeat(64)),
             });
@@ -617,22 +619,22 @@ describe("Loop evaluation failures", () => {
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
         changes: changesOnce([
-          new ChangedIssue({ number: 28, updatedAt }),
-          new ChangedIssue({ number: 29, updatedAt }),
+          ChangedIssue.make({ number: 28, updatedAt }),
+          ChangedIssue.make({ number: 29, updatedAt }),
         ]),
         snapshot: (_repository, item) =>
           item.number === 29
             ? Effect.fail(
-                new GitHubApiError({
+                GitHubApiError.make({
                   operation: "fetch-issue-snapshot",
                   status: Option.some(401),
                   message: "GitHub returned HTTP status 401",
                 }),
               )
             : Effect.succeed(
-                new IssueSnapshot({
+                IssueSnapshot.make({
                   payload: issuePayload(item.number, null),
                   contentHash: ContentHash.make("f".repeat(64)),
                 }),

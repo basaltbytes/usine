@@ -21,7 +21,7 @@ import { engineLayer, stepResult, submission, waitFor, withInstance } from "./su
 
 /** Two Loops' Runs of the developer Agent on pull request 71 (#429). */
 const onPullRequest = (number: number, loop: string) =>
-  new Submission({ ...submission({ number, item: "pull-71" }), loop: LoopName.make(loop) });
+  Submission.make({ ...submission({ number, item: "pull-71" }), loop: LoopName.make(loop) });
 
 const executorWith = (
   execute: StepExecutor["Service"]["execute"],
@@ -31,7 +31,7 @@ const executorWith = (
   Layer.succeed(StepExecutor)({
     workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
-    outcome: () => Effect.succeed(Option.none()),
+    outcome: () => Effect.succeedNone,
     recover,
     intervene: () => Effect.void,
     interrupt,

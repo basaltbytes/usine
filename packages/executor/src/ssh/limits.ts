@@ -57,7 +57,7 @@ const SMALLEST = { cpus: 0.01, memoryMib: 256, pids: 64 } as const;
  * down to a hundredth of a CPU, a MiB, and a task, with Docker's minimum limits as a floor.
  */
 const deriveLimits = (machine: MachineResources, slots: number): ContainerLimits =>
-  new ContainerLimits({
+  ContainerLimits.make({
     cpus: ContainerCpus.make(
       Math.max(SMALLEST.cpus, Math.floor((machine.cpus / slots) * 100) / 100),
     ),
@@ -89,7 +89,7 @@ export type ResolvedLimits =
 export const configuredLimits = (container: SshWorkerContainer): Option.Option<ResolvedLimits> =>
   Option.map(
     Option.all({ cpus: container.cpus, memoryMib: container.memoryMib, pids: container.pids }),
-    (limits) => ({ _tag: "Configured", limits: new ContainerLimits(limits) }),
+    (limits) => ({ _tag: "Configured", limits: ContainerLimits.make(limits) }),
   );
 
 /**
@@ -109,7 +109,7 @@ export const resolveLimits = (
   } satisfies Record<ContainerLimit, boolean>;
   return {
     _tag: "Derived",
-    limits: new ContainerLimits({
+    limits: ContainerLimits.make({
       cpus: Option.getOrElse(container.cpus, () => derived.cpus),
       memoryMib: Option.getOrElse(container.memoryMib, () => derived.memoryMib),
       pids: Option.getOrElse(container.pids, () => derived.pids),

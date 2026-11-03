@@ -36,15 +36,15 @@ const instanceFolder = () => {
 };
 
 const recordFor = (pid: number) =>
-  new InstanceRecord({
+  InstanceRecord.make({
     pid: ProcessId.make(pid),
     version: "1.2.3",
     startedAt: DateTime.makeUnsafe("2026-10-25T16:00:00.000Z"),
-    launch: new InstanceLaunch({
+    launch: InstanceLaunch.make({
       node: process.execPath,
       nodeOptions: [],
       script: "/opt/usine/dist/main.js",
-      port: Port.make(8_112),
+      port: Port.make(8112),
       logLevel: "Info",
       allowVolatileInstance: false,
     }),
@@ -93,7 +93,7 @@ const pid1OwnedByThisUser = () => {
 describe("instance state", () => {
   it("reports a folder that never ran usine as stopped", async () => {
     const state = await probe(instanceFolder());
-    assert.deepStrictEqual(state, new Stopped({ stale: Option.none() }));
+    assert.deepStrictEqual(state, Stopped.make({ stale: Option.none() }));
   });
 
   it("reports a record without a lock holder as stale, even if its pid is live", async () => {
@@ -158,7 +158,7 @@ describe("instance state", () => {
         );
         writeFileSync(files.pid, `${exitedPid()}\n`);
         const starting = yield* probeInstance(directory);
-        assert.deepStrictEqual(starting, new Unrecorded({ pid: Option.none() }));
+        assert.deepStrictEqual(starting, Unrecorded.make({ pid: Option.none() }));
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
   });

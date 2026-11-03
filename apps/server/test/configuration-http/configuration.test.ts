@@ -405,7 +405,7 @@ it.each(["stale", "storage"] as const)(
             : Ref.set(
                 failNextCommit,
                 Option.some(
-                  new ConfigurationStoreError({
+                  ConfigurationStoreError.make({
                     operation: "commit",
                     cause: "storage unavailable",
                   }),
@@ -543,13 +543,13 @@ it("serves installation repositories, live labels and supported harnesses, and r
         labels: (name) =>
           name === repository
             ? Effect.succeed(
-                Schema.decodeUnknownSync(RepositoryLabelCatalog)({
+                Schema.decodeSync(RepositoryLabelCatalog)({
                   entityTag: null,
                   labels: [{ name: "ready", color: "00ff00", description: "Ready" }],
                 }),
               )
             : Effect.fail(
-                new InvalidGitHubResponseError({
+                InvalidGitHubResponseError.make({
                   operation: "list-repository-labels",
                   message: "Unavailable",
                   detail: "Test response failure",
@@ -582,7 +582,7 @@ it("serves installation repositories, live labels and supported harnesses, and r
   ));
 
 const previewItem = (number: number) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey: ItemKey.make(`github:acme/project#${number}`),
     repository: RepositoryName.make("acme/project"),
     source: ItemProjectionSource.make("issue"),

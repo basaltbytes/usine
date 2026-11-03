@@ -15,8 +15,8 @@ export const AgentJson = Schema.toCodecJson(AgentFile);
 export const LoopJson = Schema.toCodecJson(LoopFile);
 
 const entity = (kind: ConfigurationEntityKind, identifier: string, value: Schema.Json) =>
-  new ConfigurationEntity({
-    key: new ConfigurationEntityKey({ kind, identifier: ConfigurationEntityId.make(identifier) }),
+  ConfigurationEntity.make({
+    key: ConfigurationEntityKey.make({ kind, identifier: ConfigurationEntityId.make(identifier) }),
     value,
   });
 
@@ -75,9 +75,8 @@ export const configurationDiff = (
   );
   const removed = before
     .filter(({ key }) => !next.has(key.key))
-    .map(
-      ({ key, value }) =>
-        new ConfigurationChange({ key, before: Option.some(value), after: Option.none() }),
+    .map(({ key, value }) =>
+      ConfigurationChange.make({ key, before: Option.some(value), after: Option.none() }),
     );
   let workerPosition = 0;
   const changed = after.flatMap((entry) => {
@@ -92,7 +91,7 @@ export const configurationDiff = (
       before: Option.fromUndefinedOr(old?.value),
       after: Option.some(entry.value),
     };
-    return [new ConfigurationChange(moved ? { ...change, position } : change)];
+    return [ConfigurationChange.make(moved ? { ...change, position } : change)];
   });
   return [...removed, ...changed];
 };
@@ -119,7 +118,7 @@ export const resolveConfigurationEntityKey = (
   const project = projects[0];
   if (projects.length === 1 && project !== undefined)
     return Option.some(
-      new ConfigurationEntityKey({
+      ConfigurationEntityKey.make({
         kind: "loop",
         identifier: ConfigurationEntityId.make(`${project.key.identifier}/${key.identifier}`),
       }),

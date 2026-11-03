@@ -224,29 +224,28 @@ const withRunUsage = (
   history: ReadonlyArray<ItemRunHistory>,
 ): ReadyOverview => {
   const byItem = new Map(history.map((item) => [item.itemKey, item]));
-  return new ReadyOverview({
+  return ReadyOverview.make({
     ...overview,
-    projects: overview.projects.map(
-      (project) =>
-        new ProjectView({
-          ...project,
-          board: new BoardView({
-            ...project.board,
-            lanes: project.board.lanes.map((lane) => {
-              const items = lane.items.map((task) => {
-                const items = task.items.flatMap(({ itemKey }) => byItem.get(itemKey) ?? []);
-                return items.some(({ usageSources }) =>
-                  usageSources.some(({ run }) => changed.has(run.id)),
-                )
-                  ? new BoardTaskView({ ...task, usage: taskHistoryUsage(items, usage) })
-                  : task;
-              });
-              return lane._tag === "WritableBoardLane"
-                ? new WritableBoardLaneView({ ...lane, items })
-                : new ReadOnlyBoardLaneView({ ...lane, items });
-            }),
+    projects: overview.projects.map((project) =>
+      ProjectView.make({
+        ...project,
+        board: BoardView.make({
+          ...project.board,
+          lanes: project.board.lanes.map((lane) => {
+            const items = lane.items.map((task) => {
+              const items = task.items.flatMap(({ itemKey }) => byItem.get(itemKey) ?? []);
+              return items.some(({ usageSources }) =>
+                usageSources.some(({ run }) => changed.has(run.id)),
+              )
+                ? BoardTaskView.make({ ...task, usage: taskHistoryUsage(items, usage) })
+                : task;
+            });
+            return lane._tag === "WritableBoardLane"
+              ? WritableBoardLaneView.make({ ...lane, items })
+              : ReadOnlyBoardLaneView.make({ ...lane, items });
           }),
         }),
+      }),
     ),
   });
 };
@@ -436,43 +435,41 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     const projects = groupProjectViews(
       instance.config,
-      projected.map(({ name, projectFindings, overviewRuns, board, catalog }) => {
-        return new ProjectView({
+      projected.map(({ name, projectFindings, overviewRuns, board, catalog }) =>
+        ProjectView.make({
           repository: name,
           status: "clear",
           runs: overviewRuns,
           board,
-          labels: catalog.map(
-            ({ name: label, color, description }) =>
-              new LabelView({
-                name: GitHubLabelName.make(label),
-                color: Option.getOrNull(color),
-                description: Option.getOrNull(description),
-              }),
+          labels: catalog.map(({ name: label, color, description }) =>
+            LabelView.make({
+              name: GitHubLabelName.make(label),
+              color: Option.getOrNull(color),
+              description: Option.getOrNull(description),
+            }),
           ),
           preflightFindings: projectFindings,
-        });
-      }),
+        }),
+      ),
     );
     const usage: BoardUsage = {
       runs: new Map(projected.flatMap(({ runUsage }) => [...runUsage])),
       working: projected.flatMap(({ working }) => working),
       history: projected.flatMap(({ history }) => history),
     };
-    const loops = instance.loops.map(
-      (loop) =>
-        new LoopView({
-          name: loop.name,
-          trigger: loop.trigger.on,
-          agent: loop.agent,
-          paused: paused.has(loop.name),
-        }),
+    const loops = instance.loops.map((loop) =>
+      LoopView.make({
+        name: loop.name,
+        trigger: loop.trigger.on,
+        agent: loop.agent,
+        paused: paused.has(loop.name),
+      }),
     );
     const needsYou: Array<NeedView> = [];
     for (const ask of cycleAsks) {
-      const item = Schema.decodeUnknownOption(GitHubItemKey)(ask.itemKey);
+      const item = Schema.decodeOption(GitHubItemKey)(ask.itemKey);
       needsYou.push(
-        new CycleBudgetNeed({
+        CycleBudgetNeed.make({
           id: `cycle-budget:${ask.id}`,
           ask,
           itemLabel: Option.match(item, {
@@ -499,7 +496,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     for (const run of managedRuns) {
       if (run.state === "Waiting") {
         needsYou.push(
-          new ApprovalNeed({
+          ApprovalNeed.make({
             id: `approval:${run.id}`,
             repository: run.repository,
             runId: run.id,
@@ -527,7 +524,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           continue;
         }
         needsYou.push(
-          new RunFailureNeed({
+          RunFailureNeed.make({
             id: `run-failure:${run.id}:${attempt.id}`,
             repository: run.repository,
             runId: run.id,
@@ -540,7 +537,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     for (const project of projects) {
       for (const failure of project.board.failures) {
         needsYou.push(
-          new BoardProjectionNeed({
+          BoardProjectionNeed.make({
             id: `board-projection:${failure.repository}:${failure.itemKey}`,
             failure,
           }),
@@ -549,7 +546,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     }
     pollFailures.forEach((failure) => {
       needsYou.push(
-        new PollFailureNeed({
+        PollFailureNeed.make({
           id: `poll-failure:${JSON.stringify([failure.repository, failure.errorTag, failure.message])}`,
           failure,
         }),
@@ -557,7 +554,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     });
     preflightFindings.forEach((finding) => {
       needsYou.push(
-        new PreflightFindingNeed({
+        PreflightFindingNeed.make({
           id: `preflight:${finding.repository}:${finding.label}`,
           finding,
         }),
@@ -565,7 +562,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     });
     scheduleFailures.forEach((failure) => {
       needsYou.push(
-        new ScheduleFailureNeed({
+        ScheduleFailureNeed.make({
           id: `schedule-failure:${JSON.stringify([
             failure.loop,
             failure._tag,
@@ -576,16 +573,16 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
     });
     for (const { file, error } of instance.invalidAgents) {
-      needsYou.push(new ConfigFileNeed({ id: `config-file:${file}`, kind: "agent", error }));
+      needsYou.push(ConfigFileNeed.make({ id: `config-file:${file}`, kind: "agent", error }));
     }
     for (const { file, error } of instance.quarantinedLoops) {
-      needsYou.push(new ConfigFileNeed({ id: `config-file:${file}`, kind: "loop", error }));
+      needsYou.push(ConfigFileNeed.make({ id: `config-file:${file}`, kind: "loop", error }));
     }
     const configuredWorkers = new Set(instance.config.workers.map(({ name }) => name));
     for (const { worker, attempts, running } of workerAttempts) {
       if (configuredWorkers.has(worker)) continue;
       needsYou.push(
-        new UnconfiguredWorkerNeed({
+        UnconfiguredWorkerNeed.make({
           id: `unconfigured-worker:${worker}`,
           worker,
           attempts,
@@ -609,7 +606,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         continue;
       }
       needsYou.push(
-        new UnconfirmedStopNeed({
+        UnconfirmedStopNeed.make({
           id: `unconfirmed-stop:${attemptId}`,
           repository: run.repository,
           runId,
@@ -621,7 +618,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     }
     const saved = yield* acknowledgements.list();
     const { needsYou: visible, dismissedNeeds } = partitionNeeds(needsYou, saved);
-    const overview = new ReadyOverview({
+    const overview = ReadyOverview.make({
       projects: projectAttention(projects, visible),
       loops,
       needsYou: visible,
@@ -818,7 +815,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
       return null;
     }
-    return new UnconfirmedStopView({
+    return UnconfirmedStopView.make({
       runId: stop.runId,
       attemptNumber: attempt.number,
       worker: stop.worker,
@@ -828,7 +825,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const detail = Effect.fn("Operator.detail")(function* (
     instance: LoadedInstance,
     runId: RunId,
-    request: TranscriptRequest = new ColdTranscriptRequest(),
+    request: TranscriptRequest = ColdTranscriptRequest.make(),
   ) {
     yield* Effect.annotateCurrentSpan({ runId });
     const [snapshot, states, unconfirmedStops, inFlight, provisioning] = yield* Effect.all(
@@ -859,7 +856,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           readTranscript(reader, snapshot, request),
           Effect.forEach(
             snapshot.attempts.filter((attempt) => Option.isNone(attempt.outcome)),
-            (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
+            (attempt) => reader.transcript(TranscriptSessionsQuery.make({ attemptId: attempt.id })),
             { concurrency: "unbounded" },
           ),
           usageReader.read(runUsageSource(snapshot)),
@@ -872,7 +869,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         { concurrency: "unbounded" },
       );
     const currentAgent = instance.agents.find(({ name }) => name === snapshot.agent.name);
-    return new RunDetailView({
+    return RunDetailView.make({
       run: runView(
         snapshot,
         paused,
@@ -911,7 +908,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       [tasks.read(instance, repository, item), overview(instance)],
       { concurrency: "unbounded" },
     );
-    return new TaskView({ ...view, needsYou: taskNeedsAttention(view, current.needsYou) });
+    return TaskView.make({ ...view, needsYou: taskNeedsAttention(view, current.needsYou) });
   });
   return {
     detail,
@@ -1018,10 +1015,10 @@ const makeOperator = Effect.gen(function* () {
     instance: LoadedInstance,
     key: AttentionKey,
   ) {
-    yield* requirePermission("admin", new InstanceScope());
+    yield* requirePermission("admin", InstanceScope.make());
     yield* Effect.annotateCurrentSpan({ needId: key.id });
     yield* acknowledgements.dismiss(
-      new AttentionAcknowledgement({
+      AttentionAcknowledgement.make({
         ...key,
         dismissedBy: yield* requestActor(instance.config.operator),
         dismissedAt: yield* DateTime.now,
@@ -1030,7 +1027,7 @@ const makeOperator = Effect.gen(function* () {
     );
   });
   const undoDismissNeed = Effect.fn("Operator.undoDismissNeed")(function* (key: AttentionKey) {
-    yield* requirePermission("admin", new InstanceScope());
+    yield* requirePermission("admin", InstanceScope.make());
     yield* Effect.annotateCurrentSpan({ needId: key.id });
     yield* acknowledgements.undo(key, attentionAudiences(key));
   });
@@ -1053,7 +1050,7 @@ const makeOperator = Effect.gen(function* () {
         runId,
         state: current.run.state._tag,
       });
-      return yield* new RunOperationRejectedError({
+      return yield* RunOperationRejectedError.make({
         runId,
         operation: "approve",
         state: current.run.state._tag,
@@ -1063,13 +1060,13 @@ const makeOperator = Effect.gen(function* () {
     const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", runId]));
     yield* runs.approve(
       runId,
-      new Event({
+      Event.make({
         id: EventId.make(dedupKey),
         dedupKey,
         payload: { runId, decision: "approved" },
         receivedAt,
       }),
-      new ApprovalSource({
+      ApprovalSource.make({
         channel: "ui",
         approver: yield* requestActor(instance.config.operator),
       }),
@@ -1092,7 +1089,7 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.retry(
       runId,
-      new RetryRequest({
+      RetryRequest.make({
         requestedBy: yield* requestActor(instance.config.operator),
         amendment: Option.none(),
       }),
@@ -1109,17 +1106,17 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId, agent: edit.agent });
     const file = instance.agents.find(({ name }) => name === edit.agent);
     if (file === undefined)
-      return yield* new RosterAgentNotFoundError({
+      return yield* RosterAgentNotFoundError.make({
         agent: edit.agent,
         message: `Agent "${edit.agent}" is not in the roster`,
       });
     const agent = file.agent;
     yield* runs.retry(
       runId,
-      new RetryRequest({
+      RetryRequest.make({
         requestedBy: yield* requestActor(instance.config.operator),
         amendment: Option.some(
-          new AttemptContext({
+          AttemptContext.make({
             task: edit.task,
             agent,
             parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
@@ -1144,7 +1141,7 @@ const makeOperator = Effect.gen(function* () {
         runId,
         loop: current.run.loop,
       });
-      return yield* new LoopNotFoundError({
+      return yield* LoopNotFoundError.make({
         loop: current.run.loop,
         message: `Run ${runId} cannot run again: loop "${current.run.loop}" is not loaded.`,
       });
@@ -1155,7 +1152,7 @@ const makeOperator = Effect.gen(function* () {
         runId,
         agent: edit.agent,
       });
-      return yield* new RosterAgentNotFoundError({
+      return yield* RosterAgentNotFoundError.make({
         agent: edit.agent,
         message: `Agent "${edit.agent}" is not in the roster`,
       });
@@ -1163,7 +1160,7 @@ const makeOperator = Effect.gen(function* () {
     const agent = file.agent;
     const result = yield* runs.runAgain(
       runId,
-      new RunAgainRequest({
+      RunAgainRequest.make({
         step: loop.step,
         ...(yield* approvalFor(
           expressions,
@@ -1174,7 +1171,7 @@ const makeOperator = Effect.gen(function* () {
         cycleLimit: cycleLimitOf(loop),
         permissions: loop.permissions,
         ciPolicy: loop.ci,
-        context: new AttemptContext({
+        context: AttemptContext.make({
           task: edit.task,
           agent,
           parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
@@ -1206,7 +1203,7 @@ const makeOperator = Effect.gen(function* () {
     yield* runs.intervene(
       runId,
       input.attemptId,
-      new Intervention({
+      Intervention.make({
         operator: Option.getOrElse(
           yield* requestActor(instance.config.operator),
           () => "local operator",
@@ -1247,7 +1244,7 @@ const makeOperator = Effect.gen(function* () {
         ({ name }) => canonicalRepositoryName(name) === canonicalRepositoryName(move.repository),
       );
       if (repository === undefined) {
-        return yield* new BoardProjectNotFound({ repository: move.repository });
+        return yield* BoardProjectNotFound.make({ repository: move.repository });
       }
       const [storedItems, labelProjection] = yield* Effect.all(
         [
@@ -1281,20 +1278,20 @@ const makeOperator = Effect.gen(function* () {
       );
       const movedItem = storedItems.find(({ number }) => number === move.item);
       if (source === undefined || movedItem === undefined) {
-        return yield* new BoardItemNotFound({ repository: move.repository, item: move.item });
+        return yield* BoardItemNotFound.make({ repository: move.repository, item: move.item });
       }
       const target = board.lanes.find(({ id }) => id === move.toLane);
       if (target === undefined) {
-        return yield* new BoardLaneNotFound({ repository: move.repository, lane: move.toLane });
+        return yield* BoardLaneNotFound.make({ repository: move.repository, lane: move.toLane });
       }
       if (target._tag === "ReadOnlyBoardLane") {
-        return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
+        return yield* BoardLaneReadOnly.make({ repository: move.repository, lane: move.toLane });
       }
       const mutation = labelMutationForBoardMove(board, target);
       const movedAt = yield* DateTime.now;
       // Recorded before the write, so the Run reader never attributes the swap to an Agent.
       yield* boardMoves.record(
-        new BoardMoveRecord({
+        BoardMoveRecord.make({
           repository: move.repository,
           itemKey: movedItem.itemKey,
           at: movedAt,
@@ -1306,7 +1303,7 @@ const makeOperator = Effect.gen(function* () {
       );
       const changed = { number: move.item, updatedAt: movedAt };
       const item =
-        movedItem.source === "pr" ? new ChangedPullRequest(changed) : new ChangedIssue(changed);
+        movedItem.source === "pr" ? ChangedPullRequest.make(changed) : ChangedIssue.make(changed);
       const applied = yield* github.updateLabels(move.repository, move.item, mutation).pipe(
         // A failed or interrupted request may have applied part of the label
         // swap. Reconcile it without replacing the writer's original outcome.
@@ -1345,13 +1342,13 @@ const makeOperator = Effect.gen(function* () {
     const ask = (yield* budgets.asks()).find((ask) => ask.id === askId);
     yield* requirePermission(
       "operate",
-      ask === undefined ? new InstanceScope() : repositoryScope(instance, ask.repository),
+      ask === undefined ? InstanceScope.make() : repositoryScope(instance, ask.repository),
     );
     yield* Effect.annotateCurrentSpan({ askId });
     const key = `cycle-budget-reset:${askId}`;
     yield* budgets.reset(
       askId,
-      new Event({
+      Event.make({
         id: EventId.make(key),
         dedupKey: DedupKey.make(key),
         payload: { action: "reset-cycle-budget", askId },
@@ -1365,11 +1362,12 @@ const makeOperator = Effect.gen(function* () {
     approve,
     cancel,
     runWorkerPreflight: (worker: WorkerName) =>
-      requirePermission("admin", new InstanceScope())
-        .pipe(Effect.andThen(workerStatus.runPreflight(worker)))
-        .pipe(Effect.map(workerPreflightView)),
+      requirePermission("admin", InstanceScope.make()).pipe(
+        Effect.andThen(workerStatus.runPreflight(worker)),
+        Effect.map(workerPreflightView),
+      ),
     discardLeftovers: (worker: WorkerName) =>
-      requirePermission("admin", new InstanceScope()).pipe(
+      requirePermission("admin", InstanceScope.make()).pipe(
         Effect.andThen(runs.discardLeftovers(worker)),
         Effect.asVoid,
       ),

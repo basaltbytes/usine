@@ -85,7 +85,7 @@ import { Schema } from "effect";
 
 const deskRepository = RepositoryName.make("basaltbytes/usine");
 
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "claude",
   model: ModelId.make("claude-opus-4-7"),
   effort: "high",
@@ -94,7 +94,7 @@ const brain = new BrainSpec({
 const links = new Map<string, BoardItemLink>();
 
 const link = (number: number, title: string) => {
-  const item = new BoardItemLink({
+  const item = BoardItemLink.make({
     itemKey: Schema.encodeSync(GitHubItemKey)(["github", deskRepository, ItemNumber.make(number)]),
     kind: "issue",
     number: ItemNumber.make(number),
@@ -121,11 +121,11 @@ export const deskFixture = (now: number) => {
     worker = "local",
     ended: number | null = null,
   ) =>
-    new AttemptView({
+    AttemptView.make({
       id: AttemptId.make(`${id}-1`),
       number: AttemptNumber.make(1),
       worker: WorkerName.make(worker),
-      workerAccess: new LocalWorkerAccess(),
+      workerAccess: LocalWorkerAccess.make(),
       brain,
       task: AttemptTask.make("Implement the issue."),
       agent: AgentName.make("developer"),
@@ -144,7 +144,7 @@ export const deskFixture = (now: number) => {
     attempts: ReadonlyArray<AttemptView>,
     pullRequest: number | null = null,
   ) =>
-    new RunView({
+    RunView.make({
       agentBrain: brain,
       id: RunId.make(id),
       itemKey: item.itemKey,
@@ -201,8 +201,8 @@ export const deskFixture = (now: number) => {
     attempt(
       "run-question-367",
       178,
-      new FailedAttemptView({
-        failure: new QuestionFailureView({
+      FailedAttemptView.make({
+        failure: QuestionFailureView.make({
           question: "Should Done and Unmapped stay lanes or become filters?",
         }),
       }),
@@ -214,8 +214,8 @@ export const deskFixture = (now: number) => {
     attempt(
       "run-failed-349",
       238,
-      new FailedAttemptView({
-        failure: new AgentFailureView({ message: "Claude Code is not logged in on Worker local" }),
+      FailedAttemptView.make({
+        failure: AgentFailureView.make({ message: "Claude Code is not logged in on Worker local" }),
       }),
       "local",
       231,
@@ -226,7 +226,7 @@ export const deskFixture = (now: number) => {
       attempt(
         `run-canceled-${item.number}`,
         598 + index * 20,
-        new CanceledAttemptView(),
+        CanceledAttemptView.make(),
         "local",
         590 + index * 20,
       ),
@@ -237,21 +237,21 @@ export const deskFixture = (now: number) => {
     attempt(
       "run-retrying-415",
       19,
-      new FailedAttemptView({
-        failure: new InfraFailureView({ message: "Lost the parent task" }),
+      FailedAttemptView.make({
+        failure: InfraFailureView.make({ message: "Lost the parent task" }),
       }),
       "local",
       10,
     ),
   ]);
-  const ask = new CycleBudgetAsk({
+  const ask = CycleBudgetAsk.make({
     id: CycleBudgetAskId.make("event-budget-355"),
     itemKey: budget.itemKey,
     repository: deskRepository,
     loop: LoopName.make("start-dev"),
     limit: CycleLimit.make(3),
     counts: [
-      new LoopCycleCount({
+      LoopCycleCount.make({
         loop: LoopName.make("start-dev"),
         admitted: CycleCount.make(3),
         completed: CycleCount.make(3),
@@ -259,7 +259,7 @@ export const deskFixture = (now: number) => {
     ],
   });
   const stalled = (loop: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
-    new StalledItemView({ repository: deskRepository, loop: LoopName.make(loop), item, reason });
+    StalledItemView.make({ repository: deskRepository, loop: LoopName.make(loop), item, reason });
 
   const outcomes = [
     run(
@@ -268,7 +268,7 @@ export const deskFixture = (now: number) => {
       "start-dev",
       "Succeeded",
       95,
-      [attempt("run-done-399", 94, new SucceededAttemptView(), "hz-worker-1", 52)],
+      [attempt("run-done-399", 94, SucceededAttemptView.make(), "hz-worker-1", 52)],
       402,
     ),
     run(
@@ -277,7 +277,7 @@ export const deskFixture = (now: number) => {
       "review-fix",
       "Succeeded",
       160,
-      [attempt("run-review-396", 159, new SucceededAttemptView(), "local", 120)],
+      [attempt("run-review-396", 159, SucceededAttemptView.make(), "local", 120)],
       397,
     ),
     run(
@@ -290,8 +290,8 @@ export const deskFixture = (now: number) => {
         attempt(
           "run-blocked-393",
           299,
-          new FailedAttemptView({
-            failure: new BlockedFailureView({ message: "Main fails its gate before any change." }),
+          FailedAttemptView.make({
+            failure: BlockedFailureView.make({ message: "Main fails its gate before any change." }),
           }),
           "local",
           262,
@@ -300,23 +300,23 @@ export const deskFixture = (now: number) => {
     ),
   ];
 
-  const desk = new DeskView({
+  const desk = DeskView.make({
     running: [
-      new RunningAttemptView({
+      RunningAttemptView.make({
         run: runningDesk,
         attempt: runningDesk.attempts[0] ?? attempt("missing", 0, null),
         item: desk403,
         lastActivityAt: ago(1),
         warnings: [],
       }),
-      new RunningAttemptView({
+      RunningAttemptView.make({
         run: runningBoard,
         attempt: runningBoard.attempts[0] ?? attempt("missing", 0, null),
         item: board388,
         lastActivityAt: ago(14),
         warnings: [
-          new WorkerSilentView({ worker: WorkerName.make("local"), lastAnsweredAt: ago(13) }),
-          new ProviderRetryingView({
+          WorkerSilentView.make({ worker: WorkerName.make("local"), lastAnsweredAt: ago(13) }),
+          ProviderRetryingView.make({
             agent: AgentName.make("researcher"),
             message:
               "Reconnecting... waiting for network (Connection failed: error sending request)",
@@ -327,79 +327,78 @@ export const deskFixture = (now: number) => {
       }),
     ],
     notMoving: [
-      stalled("start-dev", approval, new AwaitingApprovalView({ run: waitingRun })),
-      stalled("start-dev", question, new SuppressedForOperatorView({ run: questionRun })),
-      stalled("start-dev", budget, new CycleBudgetUsedUpView({ ask })),
-      stalled("start-dev", failed, new RunFailedView({ run: failedRun })),
+      stalled("start-dev", approval, AwaitingApprovalView.make({ run: waitingRun })),
+      stalled("start-dev", question, SuppressedForOperatorView.make({ run: questionRun })),
+      stalled("start-dev", budget, CycleBudgetUsedUpView.make({ ask })),
+      stalled("start-dev", failed, RunFailedView.make({ run: failedRun })),
       ...canceledRuns.map((canceledRun, index) =>
         stalled(
           "start-dev",
           canceled[index] ?? approval,
-          new ClosedUnchangedView({ run: canceledRun }),
+          ClosedUnchangedView.make({ run: canceledRun }),
         ),
       ),
-      stalled("review-fix", paused, new LoopPausedView()),
+      stalled("review-fix", paused, LoopPausedView.make()),
       stalled(
         "start-dev",
         unstopped,
-        new WaitingForStopView({
+        WaitingForStopView.make({
           run: retryingRun,
-          stop: new UnconfirmedStopView({
+          stop: UnconfirmedStopView.make({
             runId: retryingRun.id,
             attemptNumber: AttemptNumber.make(1),
             worker: WorkerName.make("local"),
           }),
         }),
       ),
-      stalled("start-dev", queued, new QueuedForWorkerView({ run: queuedRun, ahead: 2 })),
-      stalled("start-dev", fresh, new AwaitingPollView()),
+      stalled("start-dev", queued, QueuedForWorkerView.make({ run: queuedRun, ahead: 2 })),
+      stalled("start-dev", fresh, AwaitingPollView.make()),
     ],
-    lastOutcomes: [...outcomes, ...canceledRuns].map(
-      (closed) =>
-        new ClosedRunView({
-          run: closed,
-          item: links.get(closed.itemKey) ?? null,
-          closedAt: closed.attempts.at(-1)?.endedAt ?? closed.openedAt,
-        }),
+    lastOutcomes: [...outcomes, ...canceledRuns].map((closed) =>
+      ClosedRunView.make({
+        run: closed,
+        item: links.get(closed.itemKey) ?? null,
+        closedAt: closed.attempts.at(-1)?.endedAt ?? closed.openedAt,
+      }),
     ),
     workers: [
-      new WorkerView({
+      WorkerView.make({
         name: WorkerName.make("local"),
-        slots: new WorkerSlotsView({ capacity: 2, leased: 1 }),
-        preflight: new PassedCheckView({ checkedAt: ago(420) }),
+        slots: WorkerSlotsView.make({ capacity: 2, leased: 1 }),
+        preflight: PassedCheckView.make({ checkedAt: ago(420) }),
       }),
-      new WorkerView({
+      WorkerView.make({
         name: WorkerName.make("hz-worker-1"),
-        slots: new WorkerSlotsView({ capacity: 1, leased: 1 }),
-        preflight: new FailedCheckView({
+        slots: WorkerSlotsView.make({ capacity: 1, leased: 1 }),
+        preflight: FailedCheckView.make({
           checkedAt: ago(400),
           capability: "harness-login",
           message: "Codex is not logged in on Worker hz-worker-1",
         }),
       }),
     ],
-    polls: [new RepositoryPollView({ repository: deskRepository, polledAt: ago(2) })],
+    polls: [RepositoryPollView.make({ repository: deskRepository, polledAt: ago(2) })],
   });
 
-  const overview = new ReadyOverview({
+  const overview = ReadyOverview.make({
     projects: [
-      new ProjectView({
+      ProjectView.make({
         repository: deskRepository,
         status: "needs-you",
         runs: [runningDesk, runningBoard, waitingRun, questionRun, failedRun, ...canceledRuns],
-        board: new BoardView({ lanes: [], failures: [] }),
+        board: BoardView.make({ lanes: [], failures: [] }),
         labels: [],
         preflightFindings: [],
       }),
     ],
     loops: [
-      new LoopView({
+      LoopView.make({
         name: LoopName.make("start-dev"),
         trigger: "issue",
         agent: AgentName.make("developer"),
         paused: false,
       }),
-      new LoopView({
+      LoopView.make({
         name: LoopName.make("review-fix"),
         trigger: "pr",
         agent: AgentName.make("reviewer"),
@@ -407,23 +406,23 @@ export const deskFixture = (now: number) => {
       }),
     ],
     needsYou: [
-      new ApprovalNeed({
+      ApprovalNeed.make({
         id: "approval:run-approval-410",
         repository: deskRepository,
         runId: waitingRun.id,
         loop: waitingRun.loop,
         item: approval,
       }),
-      new RunFailureNeed({
+      RunFailureNeed.make({
         id: "run-failure:run-question-367",
         repository: deskRepository,
         runId: questionRun.id,
         loop: questionRun.loop,
-        failure: new QuestionFailureView({
+        failure: QuestionFailureView.make({
           question: "Should Done and Unmapped stay lanes or become filters?",
         }),
       }),
-      new CycleBudgetNeed({
+      CycleBudgetNeed.make({
         id: `cycle-budget:${ask.id}`,
         ask,
         itemLabel: `${deskRepository}#355`,
@@ -432,16 +431,15 @@ export const deskFixture = (now: number) => {
     ],
   });
 
-  const empty = new DeskView({
+  const empty = DeskView.make({
     running: [],
     notMoving: [],
     lastOutcomes: [],
-    workers: desk.workers.map(
-      (worker) =>
-        new WorkerView({
-          ...worker,
-          slots: new WorkerSlotsView({ capacity: worker.slots.capacity, leased: 0 }),
-        }),
+    workers: desk.workers.map((worker) =>
+      WorkerView.make({
+        ...worker,
+        slots: WorkerSlotsView.make({ capacity: worker.slots.capacity, leased: 0 }),
+      }),
     ),
     polls: desk.polls,
   });
@@ -462,14 +460,13 @@ const tasksDone = (
   from: number,
   merges: ReadonlyArray<readonly [day: number, hours: number]>,
 ): ReadonlyArray<TaskDoneView> =>
-  merges.map(
-    ([day, hours], index) =>
-      new TaskDoneView({
-        repository: deskRepository,
-        number: ItemNumber.make(500 + index),
-        mergedAt: new Date(from + day * DAY + 12 * HOUR).toISOString(),
-        durationMillis: Math.round(hours * HOUR),
-      }),
+  merges.map(([day, hours], index) =>
+    TaskDoneView.make({
+      repository: deskRepository,
+      number: ItemNumber.make(500 + index),
+      mergedAt: new Date(from + day * DAY + 12 * HOUR).toISOString(),
+      durationMillis: Math.round(hours * HOUR),
+    }),
   );
 
 /** Returns one period per day from `from` to `now`, each counting the tasks merged that day. */
@@ -477,7 +474,7 @@ const dailyPeriods = (from: number, days: number, tasks: ReadonlyArray<TaskDoneV
   Array.from({ length: days }, (_, index) => {
     const start = utcDay(from + index * DAY);
     const members = tasks.filter(({ mergedAt }) => mergedAt.startsWith(start));
-    return new TaskPeriodView({
+    return TaskPeriodView.make({
       start,
       tasks: members.length,
       medianMillis: members[0]?.durationMillis ?? null,
@@ -489,7 +486,7 @@ const dailyPeriods = (from: number, days: number, tasks: ReadonlyArray<TaskDoneV
 /** Returns the tasks done of `window` with nothing merged; periods end on the UTC day of `now`. */
 export const emptyStatisticsFixture = (now: number, window: StatisticsWindow) => {
   const today = now - (now % DAY);
-  return new StatisticsView({
+  return StatisticsView.make({
     window,
     from: new Date(today).toISOString(),
     to: new Date(now).toISOString(),
@@ -538,7 +535,7 @@ export const statisticsFixture = (now: number, window: "7d" | "30d") => {
           [29, 0.4],
         ],
   );
-  return new StatisticsView({
+  return StatisticsView.make({
     window,
     from: new Date(from).toISOString(),
     to: new Date(now).toISOString(),
@@ -549,36 +546,36 @@ export const statisticsFixture = (now: number, window: "7d" | "30d") => {
     periods: dailyPeriods(from, days, tasks),
     firstTimeRight: (tasks.length * 3) / 4,
     operatorActions: (tasks.length * 3) / 2,
-    time: new TaskTimeView({
+    time: TaskTimeView.make({
       tasks: window === "7d" ? 4 : 9,
       loops: [
-        new LoopShareView({ loop: startDev, share: 0.32 }),
-        new LoopShareView({ loop: reviewFix, share: 0.08 }),
+        LoopShareView.make({ loop: startDev, share: 0.32 }),
+        LoopShareView.make({ loop: reviewFix, share: 0.08 }),
       ],
       waiting: 0.6,
       runs: [
-        new LoopRunTimeView({ loop: startDev, runs: 9, medianMillis: 39 * MINUTE }),
-        new LoopRunTimeView({ loop: reviewFix, runs: 14, medianMillis: 4.2 * MINUTE }),
+        LoopRunTimeView.make({ loop: startDev, runs: 9, medianMillis: 39 * MINUTE }),
+        LoopRunTimeView.make({ loop: reviewFix, runs: 14, medianMillis: 4.2 * MINUTE }),
       ],
     }),
-    tokens: new TaskTokensView({
+    tokens: TaskTokensView.make({
       tasks: tasks.length,
-      medianTokens: TokenCount.make(620_000),
+      medianTokens: TokenCount.make(620000),
       loops: [
-        new LoopShareView({ loop: startDev, share: 0.7 }),
-        new LoopShareView({ loop: reviewFix, share: 0.3 }),
+        LoopShareView.make({ loop: startDev, share: 0.7 }),
+        LoopShareView.make({ loop: reviewFix, share: 0.3 }),
       ],
       cost:
         window === "7d"
           ? null
-          : new TaskCostView({
+          : TaskCostView.make({
               tasks: tasks.length - 2,
               medianUsd: UsdAmount.make(3.1),
               estimate: true,
             }),
     }),
     untimed:
-      window === "7d" ? null : new UntimedTasksView({ tasks: 3, before: utcDay(from + 12 * DAY) }),
+      window === "7d" ? null : UntimedTasksView.make({ tasks: 3, before: utcDay(from + 12 * DAY) }),
     unmetered: 0,
   });
 };
@@ -592,7 +589,7 @@ export const weeklyStatisticsFixture = (now: number) => {
     from,
     Array.from({ length: 40 }, (_, index) => [index * 3.4, 1 + (index % 6) * 3] as const),
   );
-  return new StatisticsView({
+  return StatisticsView.make({
     window: "all",
     from: new Date(from).toISOString(),
     to: new Date(now).toISOString(),
@@ -600,16 +597,14 @@ export const weeklyStatisticsFixture = (now: number) => {
     loops: [startDev],
     tasks,
     medianMillis: 7 * HOUR,
-    periods: Array.from(
-      { length: 20 },
-      (_, index) =>
-        new TaskPeriodView({
-          start: utcDay(from + index * 7 * DAY),
-          tasks: 2,
-          medianMillis: (2 + (index % 4)) * HOUR,
-          firstTimeRight: 1,
-          operatorActions: 3,
-        }),
+    periods: Array.from({ length: 20 }, (_, index) =>
+      TaskPeriodView.make({
+        start: utcDay(from + index * 7 * DAY),
+        tasks: 2,
+        medianMillis: (2 + (index % 4)) * HOUR,
+        firstTimeRight: 1,
+        operatorActions: 3,
+      }),
     ),
     firstTimeRight: 20,
     operatorActions: 60,
@@ -621,24 +616,24 @@ export const weeklyStatisticsFixture = (now: number) => {
 };
 
 const durations = (count: number, median: number) =>
-  new DurationSummaryView({ count, medianMillis: Math.round(median * MINUTE) });
+  DurationSummaryView.make({ count, medianMillis: Math.round(median * MINUTE) });
 
 const outcomes = (succeeded: number, failed: number, canceled: number) =>
-  new OutcomeCountsView({ succeeded, failed, canceled });
+  OutcomeCountsView.make({ succeeded, failed, canceled });
 
 const usage = (measured: number, claudePlan: number, chatgptPlan: number, priced: number) =>
-  new UsageSummaryView({
+  UsageSummaryView.make({
     measured,
     tokens: TokenCount.make(claudePlan + chatgptPlan),
     meanTokens: TokenCount.make(Math.round((claudePlan + chatgptPlan) / measured)),
     pools: [
-      new PoolTokensView({ pool: "claudePlan", tokens: TokenCount.make(claudePlan) }),
-      new PoolTokensView({ pool: "chatgptPlan", tokens: TokenCount.make(chatgptPlan) }),
+      PoolTokensView.make({ pool: "claudePlan", tokens: TokenCount.make(claudePlan) }),
+      PoolTokensView.make({ pool: "chatgptPlan", tokens: TokenCount.make(chatgptPlan) }),
     ],
     cost:
       priced === 0
         ? null
-        : new CostSummaryView({
+        : CostSummaryView.make({
             usd: UsdAmount.make(priced * 3.1),
             meanUsd: UsdAmount.make(3.1),
             estimate: true,
@@ -666,7 +661,7 @@ export const runStatisticsFixture = (now: number, window: "7d" | "30d") => {
     time: durations(3 * scale, 5),
     usage: usage(3 * scale, 600_000 * scale, 600_000 * scale, 2 * scale),
   };
-  return new RunStatisticsView({
+  return RunStatisticsView.make({
     window,
     from: new Date(from).toISOString(),
     to: new Date(now).toISOString(),
@@ -675,66 +670,64 @@ export const runStatisticsFixture = (now: number, window: "7d" | "30d") => {
     runTime: durations(12 * scale, 18),
     attemptTime: durations(14 * scale, 14),
     unmeasuredAttempts: 0,
-    throughput: periods.map(
-      (start, index) =>
-        new ThroughputPeriodView({
-          start,
-          ...(index === busiest
-            ? outcomes(5 * scale, 2 * scale, 0)
-            : index > busiest
-              ? outcomes(2 * scale, 0, index === days - 1 ? scale : 0)
-              : outcomes(0, 0, 0)),
-        }),
+    throughput: periods.map((start, index) =>
+      ThroughputPeriodView.make({
+        start,
+        ...(index === busiest
+          ? outcomes(5 * scale, 2 * scale, 0)
+          : index > busiest
+            ? outcomes(2 * scale, 0, index === days - 1 ? scale : 0)
+            : outcomes(0, 0, 0)),
+      }),
     ),
     loops: [
-      new LoopStatisticsView({ loop: startDev, ...developer }),
-      new LoopStatisticsView({ loop: reviewFix, ...reviewer }),
+      LoopStatisticsView.make({ loop: startDev, ...developer }),
+      LoopStatisticsView.make({ loop: reviewFix, ...reviewer }),
     ],
     agents: [
-      new AgentStatisticsView({ agent: AgentName.make("developer"), ...developer }),
-      new AgentStatisticsView({ agent: AgentName.make("reviewer"), ...reviewer }),
+      AgentStatisticsView.make({ agent: AgentName.make("developer"), ...developer }),
+      AgentStatisticsView.make({ agent: AgentName.make("reviewer"), ...reviewer }),
     ],
     brains: [
-      new BrainStatisticsView({
+      BrainStatisticsView.make({
         brain,
         outcomes: outcomes(9 * scale, 4 * scale, scale),
         time: durations(14 * scale, 14),
-        usage: usage(14 * scale, 3_600_000 * scale, 600_000 * scale, 8 * scale),
+        usage: usage(14 * scale, 3600000 * scale, 600000 * scale, 8 * scale),
       }),
     ],
     queueWait: [
-      new WorkerQueueWaitView({ worker: WorkerName.make("hz-worker-1"), wait: durations(4, 2) }),
-      new WorkerQueueWaitView({ worker: WorkerName.make("local"), wait: durations(10, 0.1) }),
+      WorkerQueueWaitView.make({ worker: WorkerName.make("hz-worker-1"), wait: durations(4, 2) }),
+      WorkerQueueWaitView.make({ worker: WorkerName.make("local"), wait: durations(10, 0.1) }),
     ],
     attemptsPerRun: [
-      new AttemptCountView({ attempts: 1, runs: 10 * scale }),
-      new AttemptCountView({ attempts: 2, runs: scale }),
-      new AttemptCountView({ attempts: 3, runs: scale }),
+      AttemptCountView.make({ attempts: 1, runs: 10 * scale }),
+      AttemptCountView.make({ attempts: 2, runs: scale }),
+      AttemptCountView.make({ attempts: 3, runs: scale }),
     ],
     utilization: [
-      new WorkerUtilizationView({
+      WorkerUtilizationView.make({
         worker: WorkerName.make("local"),
         slots: 2,
         occupiedMillis: 900 * MINUTE,
         share: 0.38,
       }),
-      new WorkerUtilizationView({
+      WorkerUtilizationView.make({
         worker: WorkerName.make("hz-worker-1"),
         slots: 1,
         occupiedMillis: 180 * MINUTE,
         share: 0.12,
       }),
     ],
-    needsAttention: new NeedsAttentionView({
+    needsAttention: NeedsAttentionView.make({
       approvals: 3 * scale,
       failures: 2 * scale,
-      periods: periods.map(
-        (start, index) =>
-          new NeedsAttentionPeriodView({
-            start,
-            approvals: index === busiest ? 3 * scale : 0,
-            failures: index === days - 1 ? 2 * scale : 0,
-          }),
+      periods: periods.map((start, index) =>
+        NeedsAttentionPeriodView.make({
+          start,
+          approvals: index === busiest ? 3 * scale : 0,
+          failures: index === days - 1 ? 2 * scale : 0,
+        }),
       ),
       approvalWait: durations(3 * scale, 14),
       retryWait: durations(scale, 45),
@@ -747,7 +740,7 @@ export const runStatisticsFixture = (now: number, window: "7d" | "30d") => {
 /** Returns the run statistics of `window` with no closed Run. */
 export const emptyRunStatisticsFixture = (now: number, window: StatisticsWindow) => {
   const today = now - (now % DAY);
-  return new RunStatisticsView({
+  return RunStatisticsView.make({
     window,
     from: new Date(today).toISOString(),
     to: new Date(now).toISOString(),
@@ -756,21 +749,21 @@ export const emptyRunStatisticsFixture = (now: number, window: StatisticsWindow)
     runTime: null,
     attemptTime: null,
     unmeasuredAttempts: 0,
-    throughput: [new ThroughputPeriodView({ start: utcDay(today), ...outcomes(0, 0, 0) })],
+    throughput: [ThroughputPeriodView.make({ start: utcDay(today), ...outcomes(0, 0, 0) })],
     loops: [],
     agents: [],
     brains: [],
     queueWait: [],
     attemptsPerRun: [],
     utilization: [
-      new WorkerUtilizationView({
+      WorkerUtilizationView.make({
         worker: WorkerName.make("local"),
         slots: 2,
         occupiedMillis: 0,
         share: 0,
       }),
     ],
-    needsAttention: new NeedsAttentionView({
+    needsAttention: NeedsAttentionView.make({
       approvals: 0,
       failures: 0,
       periods: [],

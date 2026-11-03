@@ -15,13 +15,13 @@ import {
   RepositoryLabelCatalog,
   RepositoryNotModified,
 } from "@usine/github/polling";
-import { DateTime, Effect, Logger, Option, Schema } from "effect";
+import { DateTime, Effect, Logger, Option, Schema, Layer } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { baseBranches, memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
   agents: [],
   invalidAgents: [],
   loops: [],
@@ -46,7 +46,7 @@ const payload = (
     statusCheckRollup = null,
   }: RemotePullRequest,
 ) =>
-  Schema.decodeUnknownSync(PullRequestPayload)({
+  Schema.decodeSync(PullRequestPayload)({
     number,
     title: "Track base branch heads",
     body: "",
@@ -91,19 +91,19 @@ const fakeRepository = (
   const github: GitHubPolling["Service"] = {
     missingIssues: () => Effect.succeed([]),
     labels: () =>
-      Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+      Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
     changes: (_repository, cursor) =>
       Effect.sync(() => {
         changes += 1;
-        if (detected) return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+        if (detected) return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
         detected = true;
-        return new RepositoryChanges({
-          cursor: new PollCursor({
+        return RepositoryChanges.make({
+          cursor: PollCursor.make({
             entityTag: Option.some(EntityTag.make('W/"changes"')),
             watermark: Option.some(updatedAt),
           }),
-          items: [...pullRequests.keys()].map(
-            (number) => new ChangedPullRequest({ number, updatedAt }),
+          items: [...pullRequests.keys()].map((number) =>
+            ChangedPullRequest.make({ number, updatedAt }),
           ),
           backlog: false,
           nextPollAt: Option.none(),
@@ -117,7 +117,7 @@ const fakeRepository = (
     snapshot: (_repository, item) =>
       Effect.sync(() => {
         snapshots.push(item.number);
-        return new PullRequestSnapshot({
+        return PullRequestSnapshot.make({
           contentHash: ContentHash.make("a".repeat(64)),
           payload: payload(
             item.number,
@@ -283,7 +283,7 @@ describe("open pull request refresh", () => {
       const key = `github-poll:${repository}`;
       const LegacyOpenPullRequests = Schema.Array(
         Schema.Struct({
-          number: Schema.Number,
+          number: Schema.Finite,
           updatedAt: Schema.String,
           baseRefName: Schema.String,
           mergeable: Schema.String,
@@ -326,7 +326,7 @@ describe("open pull request refresh", () => {
     const key = `github-poll:${repository}`;
     // Decoding drops the fields that cursors written before base heads were recorded don't have.
     const LegacyOpenPullRequests = Schema.Array(
-      Schema.Struct({ number: Schema.Number, updatedAt: Schema.String }),
+      Schema.Struct({ number: Schema.Finite, updatedAt: Schema.String }),
     );
     return Effect.gen(function* () {
       yield* poll;
@@ -371,7 +371,7 @@ describe("open pull request refresh", () => {
         (repository, baseRefName, known) =>
           baseRefName === "main"
             ? Effect.fail(
-                new GitHubApiError({
+                GitHubApiError.make({
                   operation: "fetch-base-ref-head",
                   status: Option.some(502),
                   message: "GitHub returned HTTP status 502",
@@ -390,7 +390,9 @@ describe("open pull request refresh", () => {
         });
         assert.strictEqual(warnings.length, 1);
         assert.match(warnings[0] ?? "", /Could not read the base branch head/u);
-      }).pipe(Effect.provide(testLayer(github, cursors)), Effect.provide(Logger.layer([logger])));
+      }).pipe(
+        Effect.provide(testLayer(github, cursors).pipe(Layer.provideMerge(Logger.layer([logger])))),
+      );
     },
   );
 });

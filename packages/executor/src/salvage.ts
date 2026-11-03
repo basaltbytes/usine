@@ -138,8 +138,8 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
         { ...fields, ref: options.ref, commit: rejected.value.commit, message },
       ).pipe(Effect.as(Option.some<AttemptSalvage>(rejected.value)));
     const commit = Option.orElse(current, () => options.baseCommit);
-    return Effect.succeed(
-      Option.some<AttemptSalvage>(new SalvageRetained({ path: options.worktree, commit, message })),
+    return Effect.succeedSome<AttemptSalvage>(
+      SalvageRetained.make({ path: options.worktree, commit, message }),
     );
   };
 
@@ -226,7 +226,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       { ...fields, commit, message },
     );
     return Option.some<AttemptSalvage>(
-      new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
+      SalvageRetained.make({ path: options.worktree, commit: Option.some(commit), message }),
     );
   }
   const rejected = Option.filter(options.rejected, (salvage) => salvage.commit === commit);
@@ -258,7 +258,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     const message = pushFailure.value;
     if (/\bThe requested URL returned error: 403\b/u.test(message)) {
       const ref = `refs/heads/${options.ref}`;
-      const failure = new GitHubPushFailure({
+      const failure = GitHubPushFailure.make({
         repository: options.repository,
         ref,
         message: `GitHub refused the push to ${options.repository} at ${ref} (HTTP 403). The token is a single-repository installation token. GitHub's message: ${message}`,
@@ -270,7 +270,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
         message: failure.message,
       });
       return Option.some<AttemptSalvage>(
-        new SalvageRetained({
+        SalvageRetained.make({
           path: options.worktree,
           commit: Option.some(commit),
           message: failure.message,
@@ -284,7 +284,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
         { ...fields, ref: options.ref, commit, message },
       );
       return Option.some<AttemptSalvage>(
-        new SalvageRejected({ path: options.worktree, commit, message }),
+        SalvageRejected.make({ path: options.worktree, commit, message }),
       );
     }
     yield* Effect.logError("Salvage push failed; retaining the Attempt worktree", {
@@ -294,7 +294,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       message,
     });
     return Option.some<AttemptSalvage>(
-      new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
+      SalvageRetained.make({ path: options.worktree, commit: Option.some(commit), message }),
     );
   }
   if (leftOut.length > 0) {
@@ -304,9 +304,9 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       { ...fields, ref: options.ref, commit, message },
     );
     return Option.some<AttemptSalvage>(
-      new SalvagePartlyPushed({ ref: options.ref, commit, path: options.worktree, message }),
+      SalvagePartlyPushed.make({ ref: options.ref, commit, path: options.worktree, message }),
     );
   }
   yield* Effect.logInfo("Salvaged the Attempt's work", { ...fields, ref: options.ref, commit });
-  return Option.some<AttemptSalvage>(new SalvagePushed({ ref: options.ref, commit }));
+  return Option.some<AttemptSalvage>(SalvagePushed.make({ ref: options.ref, commit }));
 });

@@ -10,10 +10,10 @@ import { InstallationToken, InstallationWide } from "../src/installation.ts";
 import { PollCursor } from "../src/polling/detection.ts";
 import { GitHubPolling } from "../src/polling/polling.ts";
 
-const token = new InstallationToken({
+const token = InstallationToken.make({
   value: Redacted.make("test-token"),
   expiresAt: DateTime.makeUnsafe("2026-11-03T22:00:00Z"),
-  scope: new InstallationWide(),
+  scope: InstallationWide.make(),
 });
 const unused = () => Effect.die("unused GitHub App operation");
 const app = Layer.succeed(GitHubApp)({
@@ -78,7 +78,7 @@ for (const mode of ["rest", "graphql"] as const) {
           });
           assert.isAtLeast(finished - started, 800);
           assert.isAtMost(finished - started, 1200);
-        }).pipe(Effect.provide(polling), Effect.provide(Logger.layer([logger])));
+        }).pipe(Effect.provide(polling.pipe(Layer.provideMerge(Logger.layer([logger])))));
       });
     }
   });

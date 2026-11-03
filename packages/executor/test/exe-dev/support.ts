@@ -31,9 +31,13 @@ export const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
  */
 export const aloneOnItem = (attemptId: AttemptId = ATTEMPT_ID) =>
   Effect.succeed(
-    new AttemptWindows({
+    AttemptWindows.make({
       own: Option.some(
-        new AttemptWindow({ attemptId, startedAt: DateTime.makeUnsafe(0), endedAt: Option.none() }),
+        AttemptWindow.make({
+          attemptId,
+          startedAt: DateTime.makeUnsafe(0),
+          endedAt: Option.none(),
+        }),
       ),
       overlapping: [],
     }),
@@ -64,9 +68,9 @@ const COMMIT = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 export const SALVAGE_COMMIT = CommitSha.make("fedcba9876543210fedcba9876543210fedcba98");
 const TASK = AttemptTask.make("Complete the remote task");
 export const WORKTREE = "/home/exedev/.usine/workers/remote-one/attempts/remote-run_execute_1";
-export const TEST_AGENT = new Agent({
+export const TEST_AGENT = Agent.make({
   name: AgentName.make("developer"),
-  brain: new BrainSpec({
+  brain: BrainSpec.make({
     harness: "claude",
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
@@ -317,10 +321,10 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
   };
 };
 
-const integration = new GitHubIntegration({ repository: REPOSITORY, name: INTEGRATION });
+const integration = GitHubIntegration.make({ repository: REPOSITORY, name: INTEGRATION });
 
 /** The bot account that commits in the fixture Attempts. */
-export const COMMIT_AUTHOR = new BotAccount({
+export const COMMIT_AUTHOR = BotAccount.make({
   login: BotLogin.make("usine-test[bot]"),
   id: BotUserId.make(4242),
 });
@@ -329,7 +333,7 @@ export const COMMIT_AUTHOR = new BotAccount({
 export const BOT_COMMITS =
   "GIT_AUTHOR_NAME='usine-test[bot]' GIT_AUTHOR_EMAIL='4242+usine-test[bot]@users.noreply.github.com' GIT_COMMITTER_NAME='usine-test[bot]' GIT_COMMITTER_EMAIL='4242+usine-test[bot]@users.noreply.github.com'";
 
-export const request = new CheckoutRequest({
+export const request = CheckoutRequest.make({
   attemptId: ATTEMPT_ID,
   worker: WORKER,
   repository: REPOSITORY,
@@ -342,7 +346,7 @@ export const request = new CheckoutRequest({
   parentModel: Option.none(),
   maxChildren: ChildSessionBudget.make(4),
   maxAttemptMinutes: Option.some(60),
-  maxAttemptTokens: Option.some(10_000_000),
+  maxAttemptTokens: Option.some(10000000),
   parentEffort: "high",
   salvageRef: SalvageRef.make("usine/salvage/remote-run/1"),
   resume: Option.none(),
@@ -351,7 +355,7 @@ export const request = new CheckoutRequest({
 
 /** A parent that fails the Attempt like a crash. */
 export const fails: StubParent = () =>
-  Effect.fail(new InfraFailure({ message: "The parent stopped", cause: new Error("crash") }));
+  Effect.fail(InfraFailure.make({ message: "The parent stopped", cause: new Error("crash") }));
 
 /**
  * Returns the exe.dev executor over the fake SSH client, with each parent scripted by `parent`

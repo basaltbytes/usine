@@ -11,7 +11,7 @@ export const ReadingAnchor = Schema.Struct({
   key: identity,
   surface: Schema.Literals(["row", "group", "result"]),
   sequence: TranscriptSequence,
-  offset: Schema.Number.check(Schema.isBetween({ minimum: -1_000_000, maximum: 1_000_000 })),
+  offset: Schema.Finite.check(Schema.isBetween({ minimum: -1_000_000, maximum: 1_000_000 })),
 });
 export type ReadingAnchor = typeof ReadingAnchor.Type;
 

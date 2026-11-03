@@ -37,7 +37,7 @@ export const mergeEarlierTranscript = (
   page: RunDetailView,
   cursor: TranscriptPageCursor,
 ): RunDetailView =>
-  new RunDetailView({
+  RunDetailView.make({
     ...previous,
     transcript: mergeTranscript(previous.transcript, page.transcript),
     earlierTranscript: replaceEarlierCursor(

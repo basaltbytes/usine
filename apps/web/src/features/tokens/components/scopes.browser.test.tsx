@@ -13,9 +13,9 @@ import "~/index.css";
 
 it("offers only granted scopes and displays the new secret once", async () => {
   const grants = [
-    new PermissionGrant({
+    PermissionGrant.make({
       permission: "read",
-      scope: new ProjectScope({ project: ProjectId.make("alpha") }),
+      scope: ProjectScope.make({ project: ProjectId.make("alpha") }),
     }),
   ];
   const client = new QueryClient({

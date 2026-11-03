@@ -41,7 +41,7 @@ export interface Held {
 }
 
 export const machineStatusOf = (entry: Held): MachineStatus =>
-  new MachineStatus({
+  MachineStatus.make({
     worker: entry.worker,
     provider: entry.provider,
     state: entry.state === "located" || entry.state === "unlocated" ? "ready" : entry.state,

@@ -25,14 +25,14 @@ import { emptyCycleBudgets } from "../support/polling.ts";
 const repository = RepositoryName.make("acme/visible");
 const id = RunId.make("visible-run");
 const time = DateTime.makeUnsafe("2026-11-01T00:00:00Z");
-const summary = new RunSummary({
+const summary = RunSummary.make({
   itemKey: ItemKey.make("visible-item"),
   repository,
-  run: new Run({
+  run: Run.make({
     id,
     eventId: EventId.make("event"),
     loop: LoopName.make("alpha/work"),
-    state: new RunState.Succeeded(),
+    state: RunState.Succeeded.make(),
     openedAt: time,
   }),
   pullRequestUrl: null,
@@ -41,8 +41,7 @@ const summary = new RunSummary({
   closedAt: Option.some(time),
   approval: Option.none(),
   runAgain: Option.none(),
-
-  agent: Schema.decodeUnknownSync(Agent)({
+  agent: Schema.decodeSync(Agent)({
     name: "developer",
     brain: { harness: "codex", model: "test", effort: "high" },
     parentModel: null,
@@ -53,13 +52,13 @@ const summary = new RunSummary({
 it.effect("isolates project statistics from cached admin results and hides worker capacity", () =>
   Effect.gen(function* () {
     const hidden = RepositoryName.make("acme/hidden");
-    const loaded = new LoadedInstance({
+    const loaded = LoadedInstance.make({
       agents: [],
       loops: [],
       invalidAgents: [],
       quarantinedLoops: [],
       warnings: [],
-      config: Schema.decodeUnknownSync(UsineConfig)({
+      config: Schema.decodeSync(UsineConfig)({
         version: 2,
         repos: [{ name: repository }, { name: hidden }],
         projects: [
@@ -76,24 +75,24 @@ it.effect("isolates project statistics from cached admin results and hides worke
         ],
       }),
     });
-    const grants = new RoleBinding({
+    const grants = RoleBinding.make({
       name: "viewer",
       member: GitHubUserId.make(1),
       role: "viewer",
-      scope: new ProjectScope({ project: ProjectId.make("alpha") }),
+      scope: ProjectScope.make({ project: ProjectId.make("alpha") }),
     }).permissions;
     const reader = Layer.mock(RunReader)({
       closedSince: () =>
         Effect.succeed([
           summary,
-          new RunSummary({
+          RunSummary.make({
             ...summary,
             repository: hidden,
-            run: new Run({ ...summary.run, id: RunId.make("hidden-run") }),
+            run: Run.make({ ...summary.run, id: RunId.make("hidden-run") }),
           }),
         ]),
       list: () => Effect.succeed([]),
-      revision: () => Effect.succeed(Option.some(ProjectionRevision.make(1))),
+      revision: () => Effect.succeedSome(ProjectionRevision.make(1)),
       transcript: () => Effect.succeed([]),
     });
     yield* OperatorStatistics.use(({ runStatistics }) =>
@@ -120,7 +119,7 @@ it.effect("isolates project statistics from cached admin results and hides worke
           Layer.provide(
             Layer.mock(WorkerStatus)({
               machineStarts: Effect.succeed([
-                new MachineStarts({
+                MachineStarts.make({
                   worker: WorkerName.make("worker"),
                   provider: "boat",
                   day: DateTime.formatIso(yield* DateTime.now).slice(0, 10),

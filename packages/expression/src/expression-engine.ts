@@ -69,7 +69,7 @@ export type ExpressionError = typeof ExpressionError.Type;
  */
 export const Scalar = Schema.Union([
   Schema.String,
-  Schema.Number,
+  Schema.Finite,
   Schema.BigInt,
   Schema.Boolean,
   Schema.Null,

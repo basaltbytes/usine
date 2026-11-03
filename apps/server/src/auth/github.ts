@@ -31,9 +31,7 @@ export class GitHubSignIn extends Context.Service<
 >()("@usine/server/GitHubSignIn") {}
 
 export const githubSignInLayer = (
-  file: Effect.Effect<Option.Option<GitHubAppSecrets>, LocalSecretsError> = Effect.succeed(
-    Option.none(),
-  ),
+  file: Effect.Effect<Option.Option<GitHubAppSecrets>, LocalSecretsError> = Effect.succeedNone,
 ) =>
   Layer.effect(
     GitHubSignIn,

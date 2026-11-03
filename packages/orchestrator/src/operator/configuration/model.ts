@@ -118,7 +118,7 @@ export class ConfigurationRevisionView extends Schema.Class<ConfigurationRevisio
    * listing affected entities.
    */
   static fromRevision(revision: ConfigurationRevision): ConfigurationRevisionView {
-    return new ConfigurationRevisionView({
+    return ConfigurationRevisionView.make({
       ...revision,
       actor: Option.getOrNull(revision.actor),
       message: Option.getOrNull(revision.message),

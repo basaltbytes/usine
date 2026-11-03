@@ -75,7 +75,7 @@ export const signIn = Effect.fn("Cli.signIn")(function* (
       id: Schema.String,
       userCode: Schema.String,
       verificationUri: Schema.String,
-      interval: Schema.Number,
+      interval: Schema.Finite,
     }),
   );
   yield* Console.log(`Open ${started.verificationUri} and enter ${started.userCode}.`);

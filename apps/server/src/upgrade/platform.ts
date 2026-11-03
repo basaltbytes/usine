@@ -12,7 +12,7 @@ import { dependenciesOf, resolveVersion } from "../registry.ts";
 import { UpgradeError, type UpgradePlatform } from "./control.ts";
 
 const failure = (error: { readonly message: string }) =>
-  new UpgradeError({ message: error.message });
+  UpgradeError.make({ message: error.message });
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(function* (
@@ -30,7 +30,7 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   const prefix = script.slice(0, -suffix.length);
   const service = unit.value;
   const helperUnit = SystemdUnit.make(`${service.slice(0, -".service".length)}-upgrade.service`);
-  const previous = yield* Schema.decodeUnknownEffect(ReleaseVersion)(record.version).pipe(
+  const previous = yield* Schema.decodeEffect(ReleaseVersion)(record.version).pipe(
     Effect.mapError(failure),
   );
   const fs = yield* FileSystem.FileSystem;
@@ -64,7 +64,7 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
         reason: error.reason,
       }).pipe(
         Effect.andThen(
-          new UpgradeError({
+          UpgradeError.make({
             message: `Waiting for ${error.name}@${error.spec} on the registry: ${error.reason}`,
           }),
         ),
@@ -74,7 +74,7 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   const readOutcome = Effect.gen(function* () {
     if (!(yield* fs.exists(resultPath))) return Option.none<UpgradeRecord>();
     return Option.some(
-      yield* Schema.decodeUnknownEffect(Schema.fromJsonString(UpgradeRecord))(
+      yield* Schema.decodeEffect(Schema.fromJsonString(UpgradeRecord))(
         yield* fs.readFileString(resultPath),
         { onExcessProperty: "error" },
       ),
@@ -103,7 +103,7 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
       Effect.mapError(failure),
     );
     if (loaded.trim() !== "loaded") {
-      return yield* new UpgradeError({
+      return yield* UpgradeError.make({
         message: `Install ${helperUnit} and its polkit rule before upgrading. See the server setup guide.`,
       });
     }
@@ -115,7 +115,7 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
       ],
       directory,
       "10 seconds",
-    ).pipe(Effect.mapError(({ reason }) => new UpgradeError({ message: reason })));
+    ).pipe(Effect.mapError(({ reason }) => UpgradeError.make({ message: reason })));
   });
   const launch = Effect.fn("Server.launchUpgradeHelper")(function* (target: ReleaseVersion) {
     yield* Effect.annotateCurrentSpan({ previous, target, unit: service, prefix });

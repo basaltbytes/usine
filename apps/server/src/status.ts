@@ -49,7 +49,7 @@ const serviceLine = (record: InstanceRecord) =>
   supervisingUnit(record.pid, record.systemdUnit).pipe(
     Effect.map(Option.map((unit) => field("service", `${unit}, managed with systemctl`))),
     Effect.catchTag("SystemctlError", (error) =>
-      Effect.succeed(Option.some(field("service", `${error.unit}, unknown: ${error.reason}`))),
+      Effect.succeedSome(field("service", `${error.unit}, unknown: ${error.reason}`)),
     ),
   );
 

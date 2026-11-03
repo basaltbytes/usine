@@ -62,7 +62,7 @@ export class ConfigurationFolder extends Context.Service<
       const path = yield* Path.Path;
       const parser = yield* ConfigParser;
       const fileError = (file: string, message: string) =>
-        new ConfigFileError({
+        ConfigFileError.make({
           file: InstancePath.make(file),
           stage: "read",
           expression: Option.none(),
@@ -81,8 +81,10 @@ export class ConfigurationFolder extends Context.Service<
                 Effect.as([]),
               ),
           ),
-          Effect.map((names) => names.filter((name) => name.endsWith(".md")).sort()),
-          Effect.mapError((error) => fileError(directory, error.message)),
+          Effect.mapBoth({
+            onSuccess: (names) => names.filter((name) => name.endsWith(".md")).sort(),
+            onFailure: (error) => fileError(directory, error.message),
+          }),
         );
       return ConfigurationFolder.of({
         load: Effect.fn("ConfigurationFolder.load")(
@@ -139,12 +141,13 @@ export class ConfigurationFolder extends Context.Service<
                 if (Option.isSome(failure)) problems.push(failure.value);
               }
             }
-            if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
+            if (Arr.isArrayNonEmpty(problems))
+              return yield* ConfigurationInvalid.make({ problems });
             if (Result.isFailure(config))
-              return yield* new ConfigurationInvalid({ problems: [config.failure] });
+              return yield* ConfigurationInvalid.make({ problems: [config.failure] });
             return yield* Effect.fromResult(
               migrateProjects(
-                new LoadedInstance({
+                LoadedInstance.make({
                   config: config.success,
                   agents,
                   loops,
@@ -220,9 +223,8 @@ export class ConfigurationFolder extends Context.Service<
             }
             yield* Effect.logInfo("Configuration exported", { directory: root });
           },
-          Effect.mapError(
-            (cause) =>
-              new ConfigurationStoreError({ operation: "export configuration folder", cause }),
+          Effect.mapError((cause) =>
+            ConfigurationStoreError.make({ operation: "export configuration folder", cause }),
           ),
         ),
       });

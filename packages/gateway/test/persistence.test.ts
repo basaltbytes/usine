@@ -20,11 +20,11 @@ import {
 const START = DateTime.makeUnsafe("2026-10-28T20:00:00Z");
 const TOKEN = "ghs_persistence-regression-secret";
 const attachment = (id = ATTACHMENT, minutes = 60, token = TOKEN) =>
-  new Attachment({
+  Attachment.make({
     id,
     worker: WORKER,
     repository: REPOSITORY,
-    credential: new InstallationCredential({ token: Redacted.make(token) }),
+    credential: InstallationCredential.make({ token: Redacted.make(token) }),
     expiresAt: DateTime.add(START, { minutes }),
   });
 

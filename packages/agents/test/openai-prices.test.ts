@@ -5,7 +5,7 @@ import { openAiPrice } from "../src/openai-prices.ts";
 import { supportedCodexVersions } from "../src/preflight/preflight.ts";
 
 const tokens = (fields: Partial<ConstructorParameters<typeof TokenBreakdown>[0]>) =>
-  new TokenBreakdown({ input: 0, cachedInput: 0, cacheWrite: 0, output: 0, ...fields });
+  TokenBreakdown.make({ input: 0, cachedInput: 0, cacheWrite: 0, output: 0, ...fields });
 
 // The models with `visibility: "list"` in `codex-rs/models-manager/models.json` at each
 // `rust-v<version>` tag of openai/codex. Hidden models have no price on OpenAI's pricing page.

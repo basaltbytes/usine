@@ -244,7 +244,7 @@ export class PoolLimitNeed extends Schema.TaggedClass<PoolLimitNeed>(
   /** The provider usage window approaching or at its limit. */
   window: Schema.Literals(["primary", "secondary"]),
   /** The used share of the window allowance, as a percentage. */
-  usedPercent: Schema.Number.check(Schema.isGreaterThanOrEqualTo(POOL_LIMIT_WARNING_PERCENT)),
+  usedPercent: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(POOL_LIMIT_WARNING_PERCENT)),
   /** The UTC time when the provider usage window resets. */
   resetsAt: Schema.DateTimeUtcFromString,
 }) {}

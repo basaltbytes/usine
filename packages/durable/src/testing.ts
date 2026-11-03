@@ -148,7 +148,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   const queued: Array<OnDelivery> = [];
 
   const stateNow = (isQueued: boolean) =>
-    new AttemptChannel.InterventionState({ held, paused, queued: isQueued });
+    AttemptChannel.InterventionState.make({ held, paused, queued: isQueued });
   const readQueued = Effect.suspend(() =>
     Effect.forEach(queued.splice(0), (onDelivery) => onDelivery(Option.some(stateNow(false))), {
       discard: true,
@@ -165,10 +165,10 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   const emit = (event: AgentSessionEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
   const finish = (message: string) =>
     Effect.gen(function* () {
-      yield* emit(new TextOutput({ session, text: message }));
-      yield* emit(new SessionFinished({ session }));
+      yield* emit(TextOutput.make({ session, text: message }));
+      yield* emit(SessionFinished.make({ session }));
       yield* Queue.end(events);
-      yield* Deferred.succeed(result, new SessionResult({ message }));
+      yield* Deferred.succeed(result, SessionResult.make({ message }));
     });
   const reply = (message: string) =>
     readQueued.pipe(
@@ -176,25 +176,25 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
         Effect.suspend(() => {
           if (!held) return finish(message);
           pending = Option.some(message);
-          return emit(new SessionIdle({ session }));
+          return emit(SessionIdle.make({ session }));
         }),
       ),
     );
   const report = (error: AgentReport) =>
     Effect.gen(function* () {
       yield* readQueued;
-      yield* emit(new TextOutput({ session, text: reportText(error) }));
+      yield* emit(TextOutput.make({ session, text: reportText(error) }));
       yield* Queue.fail(events, error);
       yield* Deferred.fail(result, error);
     });
   const block = (message: string) =>
-    report(new AgentBlockedError({ sessionId: Option.some(session.id), message }));
+    report(AgentBlockedError.make({ sessionId: Option.some(session.id), message }));
   const ask = (question: string) =>
-    report(new AgentQuestionError({ sessionId: Option.some(session.id), message: question }));
+    report(AgentQuestionError.make({ sessionId: Option.some(session.id), message: question }));
   const fail = (message: string) => report(harnessFailure(Option.some(session.id), message));
   const crash = (message: string) =>
     Effect.gen(function* () {
-      const error = new SessionOperationError({
+      const error = SessionOperationError.make({
         operation: "stream",
         sessionId: Option.some(session.id),
         message,
@@ -216,7 +216,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
           return stateNow(true);
         }
         pending = Option.none();
-        yield* emit(new SessionResumed({ session }));
+        yield* emit(SessionResumed.make({ session }));
       } else if (action._tag === "Release") {
         held = false;
         if (Option.isSome(pending)) yield* finish(pending.value);
@@ -226,7 +226,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
       return stateNow(false);
     });
 
-  yield* emit(new SessionStarted({ session }));
+  yield* emit(SessionStarted.make({ session }));
   const running: RunningSession = {
     session,
     events: Stream.fromQueue(events),
@@ -369,16 +369,14 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
         return kept;
       };
       const envelope = (task: StubTask, payload: AttemptChannel.OutboundPayload) =>
-        Effect.map(
-          DateTime.now,
-          (sentAt) =>
-            new AttemptChannel.OutboundEnvelope({
-              version: AttemptChannel.PROTOCOL_VERSION,
-              attemptId: task.request.spec.attemptId,
-              sequence: AttemptChannel.Sequence.make(++task.outbound),
-              sentAt,
-              payload,
-            }),
+        Effect.map(DateTime.now, (sentAt) =>
+          AttemptChannel.OutboundEnvelope.make({
+            version: AttemptChannel.PROTOCOL_VERSION,
+            attemptId: task.request.spec.attemptId,
+            sequence: AttemptChannel.Sequence.make(++task.outbound),
+            sentAt,
+            payload,
+          }),
         );
 
       const execute = (request: AttemptRequest, io: AttemptChannel.Sink) =>
@@ -387,7 +385,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           const stored = storage.tasks.get(attemptId);
           if (stored?.state._tag === "finished") return stored.state.report;
           if (stored?.state._tag === "canceled")
-            return yield* new InfraFailure({
+            return yield* InfraFailure.make({
               message: `Attempt ${attemptId} has no live task`,
               cause: new Error(stored.state._tag),
             });
@@ -403,7 +401,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           const active = { io, canceled, started: false };
           attached.set(attemptId, active);
           Deferred.doneUnsafe(relayedFor(attemptId), Effect.void);
-          const session = new ParentSession({
+          const session = ParentSession.make({
             id: AgentSessionId.make(`parent:${attemptId}`),
             agent: request.spec.agent.name,
             brain: request.spec.agent.brain,
@@ -411,19 +409,19 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           const emit = (payload: AttemptChannel.OutboundPayload) =>
             Effect.flatMap(envelope(task, payload), (sent) => io.append("outbound", sent));
           const event = (event: AttemptChannel.SessionEvent["event"]) =>
-            emit(new AttemptChannel.SessionEvent({ event }));
+            emit(AttemptChannel.SessionEvent.make({ event }));
           if (stored === undefined) {
             yield* emit(
-              new AttemptChannel.Started({
+              AttemptChannel.Started.make({
                 parentModel: Option.getOrElse(request.spec.parentModel, () =>
                   ModelId.make("stub/parent"),
                 ),
               }),
             );
-            yield* event(new SessionStarted({ session }));
-            yield* event(new TextOutput({ session, text: `Working on ${request.spec.task}` }));
+            yield* event(SessionStarted.make({ session }));
+            yield* event(TextOutput.make({ session, text: `Working on ${request.spec.task}` }));
           } else {
-            yield* event(new TextOutput({ session, text: "Resumed after a restart" }));
+            yield* event(TextOutput.make({ session, text: "Resumed after a restart" }));
           }
           // Notices sent while the buffered ones are recorded are buffered too, so loop until none
           // is left.
@@ -441,17 +439,19 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             Effect.raceFirst(
               Deferred.await(canceled).pipe(
                 Effect.andThen(
-                  Effect.fail(new AgentFailure({ message: "The parent task was canceled" })),
+                  Effect.fail(AgentFailure.make({ message: "The parent task was canceled" })),
                 ),
               ),
             ),
           );
           const report =
-            finished instanceof AttemptReport ? finished : new AttemptReport({ message: finished });
-          yield* event(new SessionFinished({ session }));
+            finished instanceof AttemptReport
+              ? finished
+              : AttemptReport.make({ message: finished });
+          yield* event(SessionFinished.make({ session }));
           yield* emit(
-            new AttemptChannel.Final({
-              result: new StepResult({ message: report.message, facts: [] }),
+            AttemptChannel.Final.make({
+              result: StepResult.make({ message: report.message, facts: [] }),
             }),
           );
           task.state = { _tag: "finished", report, result: Option.none() };
@@ -487,8 +487,8 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             if (state?._tag !== "finished") return Option.none<FinishedAttempt>();
             return Option.some(
               Option.match(state.result, {
-                onNone: (): FinishedAttempt => new ParentReported({ report: state.report }),
-                onSome: (result) => new ResultRecorded({ result }),
+                onNone: (): FinishedAttempt => ParentReported.make({ report: state.report }),
+                onSome: (result) => ResultRecorded.make({ result }),
               }),
             );
           }),
@@ -506,10 +506,8 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           Effect.sync(() => Option.fromNullishOr(storage.unsupervised.get(attemptId))),
         request: (attemptId) =>
           Effect.sync(() =>
-            Option.map(
-              Option.fromNullishOr(storage.tasks.get(attemptId)),
-              ({ request }) =>
-                new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
+            Option.map(Option.fromNullishOr(storage.tasks.get(attemptId)), ({ request }) =>
+              StoredRequest.make({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
             ),
           ),
         cancel: (attemptId) =>
@@ -536,11 +534,11 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             const task = storage.tasks.get(attemptId);
             const active = attached.get(attemptId);
             if (task === undefined || active === undefined)
-              return yield* new AgentFailure({ message: "This attempt has no live parent" });
+              return yield* AgentFailure.make({ message: "This attempt has no live parent" });
             const inputSequence = AttemptChannel.Sequence.make(++task.inbound);
             yield* active.io.append(
               "inbound",
-              new AttemptChannel.InboundEnvelope({
+              AttemptChannel.InboundEnvelope.make({
                 version: AttemptChannel.PROTOCOL_VERSION,
                 attemptId,
                 sequence: inputSequence,
@@ -554,10 +552,10 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
               "outbound",
               yield* envelope(
                 task,
-                new AttemptChannel.InterventionApplied({
+                AttemptChannel.InterventionApplied.make({
                   inputSequence,
                   intervention,
-                  state: new AttemptChannel.InterventionState({ held: false, paused: false }),
+                  state: AttemptChannel.InterventionState.make({ held: false, paused: false }),
                 }),
               ),
             );

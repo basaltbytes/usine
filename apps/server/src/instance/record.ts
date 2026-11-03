@@ -33,17 +33,16 @@ export class InstanceLaunch extends Schema.Class<InstanceLaunch>("@usine/server/
  */
 export const currentLaunch = ({ port, origin, logLevel, allowVolatileInstance }: UpCommand) =>
   Schema.decodeUnknownEffect(Schema.NonEmptyString)(process.argv[1]).pipe(
-    Effect.map(
-      (script) =>
-        new InstanceLaunch({
-          node: process.execPath,
-          nodeOptions: process.execArgv,
-          script,
-          port,
-          origin,
-          logLevel,
-          allowVolatileInstance,
-        }),
+    Effect.map((script) =>
+      InstanceLaunch.make({
+        node: process.execPath,
+        nodeOptions: process.execArgv,
+        script,
+        port,
+        origin,
+        logLevel,
+        allowVolatileInstance,
+      }),
     ),
     Effect.orDie,
   );
@@ -124,7 +123,7 @@ export const writeRecord = Effect.fn("Instance.writeRecord")(function* (
 /** Records `stoppingSince` synchronously, for use in a signal listener. Throws on failure. */
 export const markStoppingSync = (files: InstanceFiles, record: InstanceRecord): void => {
   const staging = `${files.record}.${record.pid}`;
-  const stopping = new InstanceRecord({
+  const stopping = InstanceRecord.make({
     pid: record.pid,
     version: record.version,
     startedAt: record.startedAt,
@@ -139,7 +138,7 @@ export const markStoppingSync = (files: InstanceFiles, record: InstanceRecord): 
 /** Reads `.usine/instance.json`, or returns `None` if it doesn't exist. */
 export const readRecord = Effect.fn("Instance.readRecord")(function* (files: InstanceFiles) {
   const fileSystem = yield* FileSystem.FileSystem;
-  const failure = (reason: string) => new InstanceRecordError({ path: files.record, reason });
+  const failure = (reason: string) => InstanceRecordError.make({ path: files.record, reason });
   if (!(yield* fileSystem.exists(files.record).pipe(Effect.mapError((e) => failure(e.message))))) {
     return Option.none<InstanceRecord>();
   }
@@ -147,14 +146,14 @@ export const readRecord = Effect.fn("Instance.readRecord")(function* (files: Ins
     .readFileString(files.record)
     .pipe(Effect.mapError((error) => failure(error.message)));
   return Option.some(
-    yield* Schema.decodeUnknownEffect(RecordFromJson)(text).pipe(
+    yield* Schema.decodeEffect(RecordFromJson)(text).pipe(
       Effect.mapError((error) => failure(error.message)),
     ),
   );
 });
 
 const PidFromText = Schema.Trim.pipe(
-  Schema.decodeTo(Schema.NumberFromString),
+  Schema.decodeTo(Schema.FiniteFromString),
   Schema.decodeTo(ProcessId),
 );
 

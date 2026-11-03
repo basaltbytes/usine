@@ -32,10 +32,7 @@ const RequestAccess = Context.Reference<Option.Option<Access>>("@usine/server/Re
   defaultValue: Option.none,
 });
 const accessEffect = Effect.flatMap(RequestAccess, (access) =>
-  Option.match(access, {
-    onNone: () => Effect.fail(authFailure("Sign in to continue.")),
-    onSome: Effect.succeed,
-  }),
+  Effect.fromOption(access, () => authFailure("Sign in to continue.")),
 );
 const COOKIE = "usine_session";
 const STATE_COOKIE = "usine_sign_in_state";
@@ -72,11 +69,9 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     );
   const member = Effect.flatMap(accessEffect, (access) =>
-    Option.match(access.member, {
-      onNone: () =>
-        Effect.fail(authFailure("Complete GitHub sign-in to add the first member.", 409)),
-      onSome: Effect.succeed,
-    }),
+    Effect.fromOption(access.member, () =>
+      authFailure("Complete GitHub sign-in to add the first member.", 409),
+    ),
   );
   const endpoints = [
     HttpRouter.route(
@@ -218,7 +213,7 @@ export const authenticatedRoutes = (services: AuthServices) => {
         const { login } = yield* body(AddMember);
         const identity = yield* github.lookup(login);
         yield* store.add(
-          new Member({
+          Member.make({
             ...identity,
             addedAt: yield* Clock.currentTimeMillis,
             addedBy: actor,
@@ -234,7 +229,7 @@ export const authenticatedRoutes = (services: AuthServices) => {
       Effect.gen(function* () {
         const { id } = yield* HttpRouter.params;
         const parsed = yield* Schema.decodeUnknownEffect(
-          Schema.NumberFromString.pipe(Schema.decodeTo(GitHubUserId)),
+          Schema.FiniteFromString.pipe(Schema.decodeTo(GitHubUserId)),
         )(id).pipe(Effect.mapError(() => authFailure("Invalid member ID.", 400)));
         yield* auth.removeMember(parsed);
         return json({ ok: true });
@@ -319,12 +314,12 @@ export const authenticatedRoutes = (services: AuthServices) => {
           : authPermissions[authEndpoint.identifier];
       if (requirement === "local" && access.credential !== "local")
         return yield* authFailure("Run usine sign-in-link on the instance machine.", 403);
-      if (requirement === "admin" && !permits(access.permissions, "admin", new InstanceScope()))
+      if (requirement === "admin" && !permits(access.permissions, "admin", InstanceScope.make()))
         return yield* authFailure("Instance admin access is required.", 403);
       if (
         requirement === "setup" &&
         access.credential !== "bootstrap" &&
-        !permits(access.permissions, "admin", new InstanceScope())
+        !permits(access.permissions, "admin", InstanceScope.make())
       )
         return yield* authFailure("Instance admin access is required.", 403);
       if (
@@ -338,7 +333,7 @@ export const authenticatedRoutes = (services: AuthServices) => {
         requirement === "tokens" &&
         Option.isSome(access.token) &&
         access.token.value.kind === "device" &&
-        !permits(access.permissions, "admin", new InstanceScope())
+        !permits(access.permissions, "admin", InstanceScope.make())
       )
         return yield* authFailure("Sign in with a browser session to manage tokens.", 403);
       const bearer = request.headers.authorization?.startsWith("Bearer ") === true;

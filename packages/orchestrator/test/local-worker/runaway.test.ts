@@ -37,8 +37,8 @@ import { claudeLoginLockLayer } from "@usine/executor";
 /** Returns a new Attempt of a Run, as the engine passes it to the StepExecutor. */
 const freshExecution = (runId: RunId, attemptId: AttemptId) => {
   const selected = submission(5);
-  return new StepExecution({
-    attempt: new Attempt({
+  return StepExecution.make({
+    attempt: Attempt.make({
       task: selected.task,
       agent: selected.agent.name,
       operatorIntervened: false,
@@ -55,14 +55,14 @@ const freshExecution = (runId: RunId, attemptId: AttemptId) => {
       salvage: Option.none(),
     }),
     event: selected.event,
-    run: new Run({
+    run: Run.make({
       id: runId,
       eventId: selected.event.id,
       loop: selected.loop,
-      state: RunState.start(new RunState.Pending()),
+      state: RunState.start(RunState.Pending.make()),
       openedAt: selected.event.receivedAt,
     }),
-    step: new Step({ runId, name: selected.step, result: Option.none() }),
+    step: Step.make({ runId, name: selected.step, result: Option.none() }),
     repository: selected.repository,
     revision: selected.revision,
     task: selected.task,
@@ -80,13 +80,13 @@ describe("local worker runaway guard", () => {
       const storage = new StubStorage();
       const spender: StubParent = ({ emit, session }) =>
         emit(
-          new AttemptChannel.SessionEvent({
-            event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(150) }),
+          AttemptChannel.SessionEvent.make({
+            event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(150) }),
           }),
         ).pipe(Effect.andThen(Effect.never));
-      const ceiling = new UsineConfig({
+      const ceiling = UsineConfig.make({
         ...config,
-        settings: new Settings({ ...config.settings, maxAttemptTokens: Option.some(100) }),
+        settings: Settings.make({ ...config.settings, maxAttemptTokens: Option.some(100) }),
       });
       return Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -143,9 +143,9 @@ describe("local worker runaway guard", () => {
           Layer.provide(stubAttemptRuntime(storage, idle)),
           Layer.provide(claudeLoginLockLayer),
         );
-        const ceiling = new UsineConfig({
+        const ceiling = UsineConfig.make({
           ...config,
-          settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
+          settings: Settings.make({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
         });
         yield* Effect.gen(function* () {
           const scheduler = yield* StepExecutor;

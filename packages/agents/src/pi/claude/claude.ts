@@ -94,7 +94,7 @@ const operationError = (
   message: string,
   cause: unknown,
 ): SessionOperationError =>
-  new SessionOperationError({
+  SessionOperationError.make({
     operation,
     sessionId: Option.some(request.session.id),
     message,
@@ -387,7 +387,7 @@ const makeClaudeChild = Effect.gen(function* () {
       });
       if (!modelExists(models, request.session.brain.model)) {
         yield* Effect.logError("Claude child rejected an unknown model");
-        return yield* new UnknownModelError({
+        return yield* UnknownModelError.make({
           harness: "claude",
           model: request.session.brain.model,
           message: `Claude has no model "${request.session.brain.model}"`,
@@ -569,7 +569,7 @@ const makeClaudeChild = Effect.gen(function* () {
           error: retry.error,
         });
         yield* channel.emit(
-          new ProviderRetrying({
+          ProviderRetrying.make({
             session: request.session,
             message,
             retries: ProviderRetries.make(retries),
@@ -584,7 +584,7 @@ const makeClaudeChild = Effect.gen(function* () {
           retries,
         });
         yield* channel.emit(
-          new ProviderRecovered({
+          ProviderRecovered.make({
             session: request.session,
             retries: ProviderRetries.make(retries),
           }),
@@ -646,12 +646,12 @@ const makeClaudeChild = Effect.gen(function* () {
           const init = decodeClaudeInit(message);
           if (Option.isSome(init)) harnessSessionId = Option.some(init.value.session_id);
           if (Option.isSome(init) && !(yield* Ref.getAndSet(launched, true))) {
-            const harnessSession = new HarnessSession({
+            const harnessSession = HarnessSession.make({
               id: init.value.session_id,
               cwd: request.cwd,
             });
             yield* channel.emit(
-              new SessionStarted({
+              SessionStarted.make({
                 session: request.session,
                 harnessSession: Option.some(harnessSession),
               }),
@@ -666,7 +666,7 @@ const makeClaudeChild = Effect.gen(function* () {
           const used = usage.read(message);
           if (Option.isSome(used))
             yield* channel.emit(
-              new SessionTokensUpdated({ session: request.session, ...used.value }),
+              SessionTokensUpdated.make({ session: request.session, ...used.value }),
             );
           for (const event of sessionEventsFrom(message, request.session, tools)) {
             yield* channel.emit(event);
@@ -780,7 +780,7 @@ const makeClaudeChild = Effect.gen(function* () {
         completedTurn = Option.none();
         for (const [callId, tool] of tools)
           yield* channel.emit(
-            new ToolFinished({
+            ToolFinished.make({
               session: request.session,
               callId,
               tool,
@@ -820,7 +820,7 @@ const makeClaudeChild = Effect.gen(function* () {
                 scope,
               ),
             ),
-            Effect.map(Option.some),
+            Effect.asSome,
             Effect.catchTag("SessionOperationError", (failure) =>
               Effect.logWarning("Could not resume the Claude child yet", {
                 ...fields,

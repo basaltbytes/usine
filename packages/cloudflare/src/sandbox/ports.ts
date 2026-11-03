@@ -84,7 +84,7 @@ export class StoredSandbox extends Schema.Class<StoredSandbox>("@usine/cloudflar
   credentials: SandboxCredentials,
 }) {
   summary(running: boolean, draining: boolean): SandboxSummary {
-    return new SandboxSummary({
+    return SandboxSummary.make({
       name: this.name,
       owner: this.owner,
       attempt: this.attempt,

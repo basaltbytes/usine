@@ -48,13 +48,12 @@ export const ciHandoff = (
 ): Result.Result<Option.Option<CiHandoff>, AgentFailure> => {
   const answer = message.trim();
   if (!answer.startsWith(AWAITING_CI_MARKER)) return Result.succeed(Option.none());
-  return Schema.decodeUnknownResult(HandoffFromJson)(
-    answer.slice(AWAITING_CI_MARKER.length).trim(),
-    { onExcessProperty: "error" },
-  ).pipe(
+  return Schema.decodeResult(HandoffFromJson)(answer.slice(AWAITING_CI_MARKER.length).trim(), {
+    onExcessProperty: "error",
+  }).pipe(
     Result.map(Option.some),
-    Result.mapError(
-      (error) => new AgentFailure({ message: `Invalid CI handoff: ${error.message}` }),
+    Result.mapError((error) =>
+      AgentFailure.make({ message: `Invalid CI handoff: ${error.message}` }),
     ),
   );
 };

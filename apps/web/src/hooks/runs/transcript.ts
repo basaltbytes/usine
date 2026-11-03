@@ -15,7 +15,7 @@ export const useEarlierTranscript = (runId: RunId) => {
   return useMutation({
     mutationFn: (cursor: TranscriptPageCursor) =>
       api((client) =>
-        client.detail({ params: { runId }, query: new EarlierTranscriptRequest(cursor) }),
+        client.detail({ params: { runId }, query: EarlierTranscriptRequest.make(cursor) }),
       ),
     onSuccess: (page, cursor) => {
       queryClient.setQueryData<RunDetailView>(runDetailKey(runId), (previous) =>

@@ -21,7 +21,7 @@ export const readWorkerCapacity = Effect.fn("Operator.statistics.workerCapacity"
   worker: Worker,
 ) {
   yield* Effect.annotateCurrentSpan({ worker: worker.name });
-  const key = new ConfigurationEntityKey({
+  const key = ConfigurationEntityKey.make({
     kind: "worker",
     identifier: ConfigurationEntityId.make(worker.name),
   });
@@ -37,11 +37,11 @@ export const readWorkerCapacity = Effect.fn("Operator.statistics.workerCapacity"
         onNone: () => Effect.succeed(0),
         onSome: (value) =>
           Schema.decodeUnknownEffect(WorkerFromYaml)(value).pipe(
-            Effect.map(({ maxConcurrentAttempts }) => maxConcurrentAttempts),
-            Effect.mapError(
-              (cause) =>
-                new ConfigurationStoreError({ operation: "decode worker slot history", cause }),
-            ),
+            Effect.mapBoth({
+              onSuccess: ({ maxConcurrentAttempts }) => maxConcurrentAttempts,
+              onFailure: (cause) =>
+                ConfigurationStoreError.make({ operation: "decode worker slot history", cause }),
+            }),
           ),
       }).pipe(Effect.map((slots) => ({ at: revision.time, slots, revision: revision.number }))),
   );

@@ -33,7 +33,7 @@ export const revertConfiguration = (
     );
     const conflicts = target.changes.filter(({ key }) => later.has(key.key)).map(({ key }) => key);
     if (Arr.isArrayNonEmpty(conflicts))
-      return yield* new ConfigurationRevertBlocked({ entities: conflicts });
+      return yield* ConfigurationRevertBlocked.make({ entities: conflicts });
 
     let previous = Configuration.empty;
     for (const entry of history
@@ -72,6 +72,8 @@ export const revertConfiguration = (
     return target.changes.map((change) => {
       const position = positions.get(change.key.key);
       const reversed = { key: change.key, before: change.after, after: change.before };
-      return new ConfigurationChange(position === undefined ? reversed : { ...reversed, position });
+      return ConfigurationChange.make(
+        position === undefined ? reversed : { ...reversed, position },
+      );
     });
   });

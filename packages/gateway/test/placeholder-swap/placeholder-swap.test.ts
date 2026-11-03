@@ -161,10 +161,10 @@ const swap = (providers: LlmProviders) =>
       transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
     });
     const attached = yield* client.attachments.attach({
-      payload: new AttachRequest({
+      payload: AttachRequest.make({
         worker: WORKER,
         repository: REPOSITORY,
-        credential: new AnonymousCredential(),
+        credential: AnonymousCredential.make(),
         expiresAt: DateTime.add(yield* DateTime.now, { minutes: 10 }),
       }),
     });
@@ -198,9 +198,9 @@ const swap = (providers: LlmProviders) =>
 const subscription = (upstream: string, token: string): LlmProviders => ({
   ...NO_PROVIDERS,
   anthropic: Option.some(
-    new AnthropicProvider({
+    AnthropicProvider.make({
       upstream: UpstreamBase.make(upstream),
-      credential: new AnthropicSubscriptionToken({ token: secret(token) }),
+      credential: AnthropicSubscriptionToken.make({ token: secret(token) }),
     }),
   ),
 });

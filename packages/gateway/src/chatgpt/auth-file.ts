@@ -51,7 +51,7 @@ const decodeAuthFileFields = Schema.decodeUnknownOption(AuthFileFields);
 
 const JwtClaims = Schema.fromJsonString(
   Schema.Struct({
-    exp: Schema.optionalKey(Schema.Number),
+    exp: Schema.optionalKey(Schema.Finite),
     "https://api.openai.com/auth": Schema.optionalKey(
       Schema.Struct({ chatgpt_account_id: Schema.optionalKey(Schema.String) }),
     ),
@@ -93,7 +93,7 @@ const tokensFromAuthFile = (
   const fields = decodeAuthFileObject(text).pipe(Option.flatMap(decodeAuthFileFields));
   if (Option.isNone(fields))
     return Result.fail(
-      new ChatGptAuthFileError({
+      ChatGptAuthFileError.make({
         path,
         operation: "read",
         message: `${path} isn't a Codex ChatGPT login: it needs tokens.access_token and tokens.refresh_token, as codex login writes them.`,
@@ -101,7 +101,7 @@ const tokensFromAuthFile = (
     );
   const { tokens, last_refresh } = fields.value;
   return Result.succeed(
-    new ChatGptTokens({
+    ChatGptTokens.make({
       accessToken: Redacted.make(tokens.access_token),
       refreshToken: Redacted.make(tokens.refresh_token),
       accountId: nonEmpty(tokens.account_id).pipe(
@@ -120,8 +120,8 @@ export const readAuthFile = Effect.fn("ChatGptAuthFile.read")(function* (path: s
   const text = yield* fs
     .readFileString(path)
     .pipe(
-      Effect.mapError(
-        (error) => new ChatGptAuthFileError({ path, operation: "read", message: error.message }),
+      Effect.mapError((error) =>
+        ChatGptAuthFileError.make({ path, operation: "read", message: error.message }),
       ),
     );
   return yield* Effect.fromResult(tokensFromAuthFile(path, text));
@@ -146,7 +146,7 @@ export const writeAuthFile = Effect.fn("ChatGptAuthFile.write")(function* (
   yield* Effect.annotateCurrentSpan({ authFile: path });
   const fs = yield* FileSystem.FileSystem;
   const failed = (message: string) =>
-    new ChatGptAuthFileError({ path, operation: "write", message });
+    ChatGptAuthFileError.make({ path, operation: "write", message });
   const text = yield* fs
     .readFileString(path)
     .pipe(Effect.mapError((error) => failed(error.message)));
@@ -195,13 +195,12 @@ export const checkAuthFileWritable = Effect.fn("ChatGptAuthFile.checkWritable")(
   const probe = besides(path, "check");
   yield* fs.writeFileString(probe, "", { mode: 0o600 }).pipe(
     Effect.andThen(fs.remove(probe)),
-    Effect.mapError(
-      (error) =>
-        new ChatGptAuthFileError({
-          path,
-          operation: "write",
-          message: `The gateway can't write next to ${path}, so it couldn't save a refreshed login: ${error.message}`,
-        }),
+    Effect.mapError((error) =>
+      ChatGptAuthFileError.make({
+        path,
+        operation: "write",
+        message: `The gateway can't write next to ${path}, so it couldn't save a refreshed login: ${error.message}`,
+      }),
     ),
   );
 });

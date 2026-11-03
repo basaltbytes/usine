@@ -29,7 +29,7 @@ describe("Agent brain specs", () => {
     const override = ModelId.make("anthropic/agent-parent");
     const base = {
       name: AgentName.make("developer"),
-      brain: new BrainSpec({
+      brain: BrainSpec.make({
         harness: "claude",
         model: ModelId.make("claude-sonnet-4-6"),
         effort: "high",
@@ -37,12 +37,12 @@ describe("Agent brain specs", () => {
       persona: AgentPersona.make("Implement the issue."),
     } as const;
 
-    const defaulted = new Agent({
+    const defaulted = Agent.make({
       ...base,
       parentModel: Option.none(),
       parentEffort: Option.none(),
     });
-    const overridden = new Agent({
+    const overridden = Agent.make({
       ...base,
       parentModel: Option.some(override),
       parentEffort: Option.none(),
@@ -55,7 +55,7 @@ describe("Agent brain specs", () => {
   it("resolves the parent effort from the roster, then the instance, then the child brain", () => {
     const base = {
       name: AgentName.make("developer"),
-      brain: new BrainSpec({
+      brain: BrainSpec.make({
         harness: "codex",
         model: ModelId.make("gpt-5.6-sol"),
         effort: "xhigh",
@@ -63,8 +63,8 @@ describe("Agent brain specs", () => {
       parentModel: Option.none(),
       persona: AgentPersona.make("Implement the issue."),
     } as const;
-    const inherited = new Agent({ ...base, parentEffort: Option.none() });
-    const overridden = new Agent({ ...base, parentEffort: Option.some("low") });
+    const inherited = Agent.make({ ...base, parentEffort: Option.none() });
+    const overridden = Agent.make({ ...base, parentEffort: Option.some("low") });
 
     expect(resolveParentEffort(inherited, Option.none())).toBe("xhigh");
     expect(resolveParentEffort(inherited, Option.some("medium"))).toBe("medium");
@@ -72,7 +72,7 @@ describe("Agent brain specs", () => {
   });
 
   it("decodes a stored Agent without a parent effort as inheriting", () => {
-    const stored = Schema.decodeUnknownSync(Agent)({
+    const stored = Schema.decodeSync(Agent)({
       name: "developer",
       brain: { harness: "codex", model: "gpt-5.6-sol", effort: "xhigh" },
       parentModel: null,

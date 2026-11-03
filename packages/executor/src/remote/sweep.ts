@@ -33,16 +33,15 @@ export const directChildren = (
   parent: string,
   output: string,
 ): Effect.Effect<ReadonlyArray<string>, ExecutorOperationError> =>
-  Schema.decodeUnknownEffect(Schema.Array(directChildSchema(parent)))(
+  Schema.decodeEffect(Schema.Array(directChildSchema(parent)))(
     output.split("\0").filter((value) => value.length > 0),
   ).pipe(
-    Effect.mapError(
-      (cause) =>
-        new ExecutorOperationError({
-          operation,
-          message: `Worker returned an invalid path while listing ${parent}`,
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      ExecutorOperationError.make({
+        operation,
+        message: `Worker returned an invalid path while listing ${parent}`,
+        cause,
+      }),
     ),
   );
 

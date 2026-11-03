@@ -82,8 +82,8 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     const own = reportedOutcome(Option.some(session.id), message);
     if (Option.isSome(own)) return yield* fail(own.value);
     if (yield* Ref.getAndSet(terminal, true)) return;
-    yield* Queue.offer(events, new SessionFinished({ session }));
-    yield* Deferred.succeed(result, new SessionResult({ message }));
+    yield* Queue.offer(events, SessionFinished.make({ session }));
+    yield* Deferred.succeed(result, SessionResult.make({ message }));
     yield* Queue.end(events);
     yield* runCleanups;
     yield* Effect.logInfo(`${options.label} finished`, {
@@ -176,10 +176,10 @@ const sessionEventFrom = (
 ): AgentSessionEvent | undefined => {
   if (event.type === "message_end") {
     const text = messageText(event.message);
-    return text === undefined ? undefined : new TextOutput({ session, text });
+    return text === undefined ? undefined : TextOutput.make({ session, text });
   }
   if (event.type === "tool_execution_start") {
-    return new ToolStarted({
+    return ToolStarted.make({
       session,
       callId: event.toolCallId,
       tool: event.toolName,
@@ -187,7 +187,7 @@ const sessionEventFrom = (
     });
   }
   if (event.type === "tool_execution_end") {
-    return new ToolFinished({
+    return ToolFinished.make({
       session,
       callId: event.toolCallId,
       tool: event.toolName,
@@ -230,7 +230,7 @@ export const subscribePiSession = (
         const usage = piMessageUsage(event.message);
         if (Option.isSome(usage)) {
           total = addUsage(total, usage.value);
-          offer(new SessionTokensUpdated({ session, ...total }));
+          offer(SessionTokensUpdated.make({ session, ...total }));
         }
       }
       if (event.type === "auto_retry_start") {
@@ -247,7 +247,7 @@ export const subscribePiSession = (
             sessionId: session.id,
           }),
         );
-        offer(new ProviderRetrying({ session, message, retries: ProviderRetries.make(retries) }));
+        offer(ProviderRetrying.make({ session, message, retries: ProviderRetries.make(retries) }));
         return;
       }
       if (event.type === "auto_retry_end") {
@@ -259,7 +259,7 @@ export const subscribePiSession = (
               sessionId: session.id,
             }),
           );
-          offer(new ProviderRecovered({ session, retries: ProviderRetries.make(retries) }));
+          offer(ProviderRecovered.make({ session, retries: ProviderRetries.make(retries) }));
           return;
         }
         log(

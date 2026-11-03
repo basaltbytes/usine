@@ -173,8 +173,7 @@ describe("SSH Worker with Docker", () => {
         assert.include(logs.lines.join("\n"), "Ran the attempt image user probe");
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider())),
-        Effect.provide(logs.layer),
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
       );
     },
   );
@@ -202,8 +201,7 @@ describe("SSH Worker with Docker", () => {
         for (const line of unreadable) assert.strictEqual(JSON.parse(line)[1].stdout, stdout);
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider())),
-        Effect.provide(logs.layer),
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
         Effect.provideService(References.MinimumLogLevel, "Debug"),
       );
     },
@@ -328,8 +326,9 @@ describe("SSH Worker with Docker", () => {
         );
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider(), parent)),
-        Effect.provide(logs.layer),
+        Effect.provide(
+          runtime(machine, mintingProvider(), parent).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -370,9 +369,11 @@ describe("SSH Worker with Docker", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          executorLayer(machine, mintingProvider(), address).pipe(Layer.provide(noGateway)),
+          executorLayer(machine, mintingProvider(), address).pipe(
+            Layer.provide(noGateway),
+            Layer.provideMerge(logs.layer),
+          ),
         ),
-        Effect.provide(logs.layer),
       );
     },
   );
@@ -451,9 +452,11 @@ describe("SSH Worker with Docker", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          executorLayer(machine, mintingProvider(), address).pipe(Layer.provide(noGateway)),
+          executorLayer(machine, mintingProvider(), address).pipe(
+            Layer.provide(noGateway),
+            Layer.provideMerge(logs.layer),
+          ),
         ),
-        Effect.provide(logs.layer),
       );
     },
   );
@@ -465,20 +468,20 @@ describe("SSH Worker with Docker", () => {
       const gateway = fakeGateway(machine, {
         anthropic: Option.none(),
         openai: Option.some(
-          new OpenAiProvider({
+          OpenAiProvider.make({
             upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
-            credential: new ChatGptLogin({
+            credential: ChatGptLogin.make({
               authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),
               tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
             }),
           }),
         ),
       });
-      const codexRequest = new CheckoutRequest({
+      const codexRequest = CheckoutRequest.make({
         ...request,
-        agent: new Agent({
+        agent: Agent.make({
           ...TEST_AGENT,
-          brain: new BrainSpec({
+          brain: BrainSpec.make({
             harness: "codex",
             model: ModelId.make("gpt-5.6-sol"),
             effort: "low",
@@ -591,8 +594,9 @@ describe("SSH Worker with Docker", () => {
         assert(!linesOf(machine).some((line) => line.startsWith("exec 'docker' 'run' ")));
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider(), parent)),
-        Effect.provide(logs.layer),
+        Effect.provide(
+          runtime(machine, mintingProvider(), parent).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -715,7 +719,7 @@ describe("SSH Worker with Docker", () => {
         leftover(WORKER, INSTANCE, "5d0c9a1e-2f4b-4e8a-b7c6-3a9d1e0f2b8c"),
       );
       const second = WorkerName.make("eu-two");
-      const secondRequest = new CheckoutRequest({
+      const secondRequest = CheckoutRequest.make({
         ...request,
         attemptId: AttemptId.make("remote-run/execute/2"),
         worker: second,
@@ -748,7 +752,7 @@ describe("SSH Worker with Docker", () => {
           machine: { _tag: "Fixed", destination: SshDestination.make("other@203.0.113.7") },
         });
         yield* Effect.scoped(
-          executor.prepare(new CheckoutRequest({ ...secondRequest, worker: WORKER })),
+          executor.prepare(CheckoutRequest.make({ ...secondRequest, worker: WORKER })),
         );
         assert(
           machine.state.containers.has(CONTAINER),
@@ -821,7 +825,7 @@ describe("SSH Worker with Docker", () => {
           const executor = yield* Executor;
           const before = machine.state.calls.length;
           const prepared = yield* executor.prepare(
-            new CheckoutRequest({ ...request, reattach: true }),
+            CheckoutRequest.make({ ...request, reattach: true }),
           );
           yield* prepared.launch(sink);
           const calls = machine.state.calls.slice(before);
@@ -875,7 +879,7 @@ describe("SSH Worker with Docker", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const prepared = yield* executor.prepare(
-            new CheckoutRequest({ ...request, reattach: true }),
+            CheckoutRequest.make({ ...request, reattach: true }),
           );
           yield* prepared.launch(recording);
         }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, reattached, storage)));
@@ -977,9 +981,11 @@ describe("SSH Worker with Docker", () => {
         }).pipe(
           Effect.scoped,
           Effect.provide(
-            executorLayer(machine, credentials, address).pipe(Layer.provide(noGateway)),
+            executorLayer(machine, credentials, address).pipe(
+              Layer.provide(noGateway),
+              Layer.provideMerge(logs.layer),
+            ),
           ),
-          Effect.provide(logs.layer),
         );
         assert.lengthOf(
           linesOf(machine)
@@ -1091,8 +1097,11 @@ describe("SSH Worker with Docker", () => {
         );
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider(), stopsItsContainer)),
-        Effect.provide(logs.layer),
+        Effect.provide(
+          runtime(machine, mintingProvider(), stopsItsContainer).pipe(
+            Layer.provideMerge(logs.layer),
+          ),
+        ),
       );
     },
   );
@@ -1112,7 +1121,7 @@ describe("SSH Worker with Docker", () => {
           const before = machine.state.calls.length;
           const failure = yield* Effect.gen(function* () {
             const executor = yield* Executor;
-            return yield* executor.prepare(new CheckoutRequest({ ...request, reattach: true }));
+            return yield* executor.prepare(CheckoutRequest.make({ ...request, reattach: true }));
           }).pipe(
             Effect.flip,
             Effect.scoped,

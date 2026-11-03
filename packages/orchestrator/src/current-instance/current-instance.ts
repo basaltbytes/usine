@@ -62,7 +62,7 @@ export class RestartRequiredError extends Schema.TaggedError<RestartRequiredErro
 export const restartRequired = (
   changes: EffectArray.NonEmptyReadonlyArray<RestartChange>,
 ): RestartRequiredError =>
-  new RestartRequiredError({
+  RestartRequiredError.make({
     blocks: EffectArray.dedupe(EffectArray.map(changes, ({ block }) => block)),
     fields: EffectArray.map(changes, ({ field }) => field),
     message: `These usine.yaml changes require a restart: ${changes.map(({ reason }) => reason).join("; ")}. The running configuration is unchanged. Restart usine up to apply them.`,
@@ -118,7 +118,7 @@ export const reloadPreflightFailed = (
       ? `Worker "${cause.worker}": ${cause.message}`
       : cause.message;
   const sentence = `${detail.charAt(0).toUpperCase()}${detail.slice(1)}`.replace(/\.$/u, "");
-  return new ReloadPreflightError({
+  return ReloadPreflightError.make({
     agents,
     workers,
     message: `Worker preflight failed for ${subjects.join(" and ")}. ${sentence}. The running configuration is unchanged. Fix the worker, usine.yaml, or the agent file, then reload again.`,
@@ -207,7 +207,7 @@ export class CurrentInstance extends Context.Service<
         const store = yield* ConfigurationStore;
         const parser = yield* ConfigParser;
         const observed = yield* Ref.make(
-          new Configuration({ number: after, instance: Option.some(initial) }),
+          Configuration.make({ number: after, instance: Option.some(initial) }),
         );
         const current = yield* SubscriptionRef.make(initial);
         const registered = yield* Ref.make(Option.none<WorkerReload>());
@@ -232,7 +232,7 @@ export class CurrentInstance extends Context.Service<
             Effect.gen(function* () {
               const running = yield* SubscriptionRef.get(current);
               if (Option.isNone(snapshot.instance))
-                return yield* new FactoryConfigError({
+                return yield* FactoryConfigError.make({
                   file: InstancePath.make(".usine/runtime.sqlite"),
                   stage: "read",
                   message: "The configuration store has not been initialized",
@@ -345,13 +345,12 @@ export class CurrentInstance extends Context.Service<
               cause: error.cause,
             }),
           ),
-          Effect.mapError(
-            () =>
-              new FactoryConfigError({
-                file: InstancePath.make(".usine/runtime.sqlite"),
-                stage: "read",
-                message: "Could not read the configuration store",
-              }),
+          Effect.mapError(() =>
+            FactoryConfigError.make({
+              file: InstancePath.make(".usine/runtime.sqlite"),
+              stage: "read",
+              message: "Could not read the configuration store",
+            }),
           ),
           Effect.flatMap(install),
           reloading.withPermits(1),

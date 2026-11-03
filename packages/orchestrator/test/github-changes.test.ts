@@ -34,12 +34,12 @@ import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 
 const appActor = BotLogin.make("usine-test[bot]");
 const exeActor = BotLogin.make("exe-dev-github-integration[bot]");
-const localWorker = new LocalWorker({
+const localWorker = LocalWorker.make({
   name: WorkerName.make("usine-worker-1"),
   kind: "local",
   maxConcurrentAttempts: 1,
 });
-const exeWorker = new ExeDevWorker({
+const exeWorker = ExeDevWorker.make({
   name: WorkerName.make("exe-one"),
   kind: "exe.dev",
   maxConcurrentAttempts: 1,
@@ -49,12 +49,12 @@ const workers = [localWorker, exeWorker];
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = gitHubItemKey(repository, 247);
 const runId = RunId.make("d4ca1525f463fad8df76328db85a7611");
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-6-astra"),
   effort: "medium",
 });
-const agent = new Agent({
+const agent = Agent.make({
   name: AgentName.make("developer"),
   brain,
   parentModel: Option.none(),
@@ -63,7 +63,7 @@ const agent = new Agent({
 });
 const time = (iso: string) => DateTime.makeUnsafe(iso);
 const failed = Option.some(
-  new AttemptFailed({ failure: new AgentFailure({ message: "Baseline gate blocked." }) }),
+  AttemptFailed.make({ failure: AgentFailure.make({ message: "Baseline gate blocked." }) }),
 );
 const attempt = (
   owner: RunId,
@@ -71,7 +71,7 @@ const attempt = (
   startedAt: string,
   end: { readonly endedAt: string | null; readonly live?: boolean },
 ) =>
-  new Attempt({
+  Attempt.make({
     id: AttemptId.make(`${owner}/implement/${number}`),
     runId: owner,
     stepName: StepName.make("implement"),
@@ -100,18 +100,18 @@ const review = attempt(reviewRunId, 1, "2026-10-16T13:04:00.000Z", {
 });
 
 const step = (owner: RunId) =>
-  new Step({ runId: owner, name: StepName.make("implement"), result: Option.none() });
+  Step.make({ runId: owner, name: StepName.make("implement"), result: Option.none() });
 const run = (owner: RunId, loop: string) =>
-  new Run({
+  Run.make({
     id: owner,
     eventId: EventId.make(`event-${owner}`),
     loop: LoopName.make(loop),
-    state: new RunState.Running(),
+    state: RunState.Running.make(),
     openedAt: time("2026-10-15T19:30:21.965Z"),
   });
 const snapshot = (attempts: ReadonlyArray<Attempt>) =>
-  new RunSnapshot({
-    event: new Event({
+  RunSnapshot.make({
+    event: Event.make({
       id: EventId.make(`event-${runId}`),
       dedupKey: DedupKey.make(`event-${runId}`),
       payload: { number: 247 },
@@ -132,7 +132,7 @@ const snapshot = (attempts: ReadonlyArray<Attempt>) =>
     parentModel: Option.none(),
     permissions: "write",
   });
-const reviewRun = new RunSummary({
+const reviewRun = RunSummary.make({
   itemKey,
   run: run(reviewRunId, "review-issue"),
   pullRequestUrl: null,
@@ -142,65 +142,73 @@ const reviewRun = new RunSummary({
   approval: Option.none(),
   runAgain: Option.none(),
   repository,
-
   agent,
 });
 
-const parent = new ParentSession({
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: agent.name,
   brain,
 });
-const lastRow = new TranscriptEntry({
+const lastRow = TranscriptEntry.make({
   sequence: TranscriptSequence.make(19171),
   attemptId: first.id,
   direction: "outbound",
-  envelope: new AttemptChannel.OutboundEnvelope({
+  envelope: AttemptChannel.OutboundEnvelope.make({
     version: AttemptChannel.PROTOCOL_VERSION,
     attemptId: first.id,
     sequence: AttemptChannel.Sequence.make(1),
     sentAt: time("2026-10-15T19:55:19.808Z"),
-    payload: new AttemptChannel.SessionEvent({
-      event: new TextOutput({ session: parent, text: "Recorded the blocker on #247." }),
+    payload: AttemptChannel.SessionEvent.make({
+      event: TextOutput.make({ session: parent, text: "Recorded the blocker on #247." }),
     }),
   }),
   receivedAt: time("2026-10-15T19:55:19.808Z"),
 });
 
 const label = (name: string, color: string) =>
-  new RepositoryLabel({
+  RepositoryLabel.make({
     name: RepositoryLabelName.make(name),
     color: RepositoryLabelColor.make(color),
     description: Option.none(),
   });
 const comment = (at: string, id: number) =>
-  new Commented({
+  Commented.make({
     at: time(at),
     url: `https://github.com/basaltbytes/usine/issues/247#issuecomment-${id}`,
   });
 const appChanges: ReadonlyArray<ItemChange> = [
   // The operator's swap, before the first Attempt started.
-  new LabelAdded({ at: time("2026-10-15T19:28:13Z"), label: label("ready-for-agent", "1f883d") }),
+  LabelAdded.make({ at: time("2026-10-15T19:28:13Z"), label: label("ready-for-agent", "1f883d") }),
   // GitHub records seconds, so this is the second the first Attempt started.
-  new LabelRemoved({ at: time("2026-10-15T19:30:39Z"), label: label("ready-for-agent", "1f883d") }),
-  new LabelAdded({ at: time("2026-10-15T19:31:31Z"), label: label("agent-in-progress", "fbca04") }),
+  LabelRemoved.make({
+    at: time("2026-10-15T19:30:39Z"),
+    label: label("ready-for-agent", "1f883d"),
+  }),
+  LabelAdded.make({
+    at: time("2026-10-15T19:31:31Z"),
+    label: label("agent-in-progress", "fbca04"),
+  }),
   comment("2026-10-15T19:55:08Z", 6201011438),
-  new LabelRemoved({
+  LabelRemoved.make({
     at: time("2026-10-15T19:55:11Z"),
     label: label("agent-in-progress", "fbca04"),
   }),
   // Between Attempts: no Attempt was running.
   comment("2026-10-16T09:00:00Z", 1),
-  new LabelAdded({ at: time("2026-10-16T09:46:55Z"), label: label("agent-in-progress", "fbca04") }),
+  LabelAdded.make({
+    at: time("2026-10-16T09:46:55Z"),
+    label: label("agent-in-progress", "fbca04"),
+  }),
   // The Agent removes a label seconds before the Board move below also removes it.
-  new LabelRemoved({
+  LabelRemoved.make({
     at: time("2026-10-16T09:47:05Z"),
     label: label("agent-in-progress", "fbca04"),
   }),
   // The Board move's label, recorded at the second the move was.
-  new LabelAdded({ at: time("2026-10-16T09:47:10Z"), label: label("ready-for-review", "0e8a16") }),
+  LabelAdded.make({ at: time("2026-10-16T09:47:10Z"), label: label("ready-for-review", "0e8a16") }),
   // The Agent's label, inside the move's span but not one the move sent.
-  new LabelAdded({ at: time("2026-10-16T09:47:11Z"), label: label("needs-operator", "d93f0b") }),
+  LabelAdded.make({ at: time("2026-10-16T09:47:11Z"), label: label("needs-operator", "d93f0b") }),
   comment("2026-10-16T09:48:00Z", 6212798620),
   comment("2026-10-16T13:03:00Z", 2),
   // While the review Run's Attempt also worked on the Item.
@@ -208,7 +216,7 @@ const appChanges: ReadonlyArray<ItemChange> = [
 ];
 
 // The operator moved the card while the second Attempt worked on the Item.
-const boardMove = new BoardMoveRecord({
+const boardMove = BoardMoveRecord.make({
   repository,
   itemKey,
   at: time("2026-10-16T09:47:10.250Z"),
@@ -236,7 +244,7 @@ const testLayer = (
     forItems: () =>
       Ref.get(current).pipe(
         Effect.map((saved) => [
-          new RunSummary({
+          RunSummary.make({
             itemKey,
             run: saved.run,
             pullRequestUrl: null,
@@ -295,7 +303,7 @@ const summary = (view: RunGitHubChangesView) =>
 describe("RunGitHubChanges", () => {
   it.effect("recomputes settled attribution when an overlapping worker's identity changes", () =>
     Effect.gen(function* () {
-      const settled = new Attempt({
+      const settled = Attempt.make({
         ...third,
         worker: exeWorker.name,
         outcome: failed,
@@ -321,7 +329,7 @@ describe("RunGitHubChanges", () => {
         assert.deepStrictEqual(
           summary(
             yield* changes.read(
-              [exeWorker, new ExeDevWorker({ ...localWorker, kind: "exe.dev" })],
+              [exeWorker, ExeDevWorker.make({ ...localWorker, kind: "exe.dev" })],
               runId,
             ),
           ),
@@ -344,22 +352,22 @@ describe("RunGitHubChanges", () => {
     "matches exe.dev writes, separates App board moves, and invalidates cached identities",
     () =>
       Effect.gen(function* () {
-        const exeSecond = new Attempt({ ...second, worker: exeWorker.name });
-        const exeThird = new Attempt({ ...third, worker: exeWorker.name });
+        const exeSecond = Attempt.make({ ...second, worker: exeWorker.name });
+        const exeThird = Attempt.make({ ...third, worker: exeWorker.name });
         const current = yield* Ref.make(snapshot([first, exeSecond, exeThird]));
         const requests = yield* Ref.make<ReadonlyArray<string>>([]);
         const exeChanges = [
-          new LabelAdded({
+          LabelAdded.make({
             at: time("2026-10-16T09:47:10Z"),
             label: label("ready-for-review", "0e8a16"),
           }),
-          new LabelRemoved({
+          LabelRemoved.make({
             at: time("2026-10-16T09:47:12Z"),
             label: label("agent-in-progress", "fbca04"),
           }),
           comment("2026-10-16T09:48:00Z", 50),
           comment("2026-10-16T13:05:08Z", 51),
-          new Reviewed({
+          Reviewed.make({
             at: time("2026-10-16T13:05:10Z"),
             url: "https://github.com/basaltbytes/usine/pull/247#pullrequestreview-52",
             state: "COMMENTED",
@@ -388,7 +396,7 @@ describe("RunGitHubChanges", () => {
             [],
           ]);
           const replaced = yield* changes.read(
-            [localWorker, new LocalWorker({ ...exeWorker, kind: "local" })],
+            [localWorker, LocalWorker.make({ ...exeWorker, kind: "local" })],
             runId,
           );
           assert.deepStrictEqual(summary(replaced)[2], [

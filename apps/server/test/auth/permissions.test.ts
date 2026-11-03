@@ -12,14 +12,14 @@ it("applies the credential and role matrix to every auth and setup endpoint", as
   Effect.runPromise(
     Effect.gen(function* () {
       for (const role of ["viewer", "operator", "maintainer", "admin"] as const) {
-        const grants = new RoleBinding({
+        const grants = RoleBinding.make({
           name: role,
           member: alice.id,
           role,
           scope:
             role === "admin"
-              ? new InstanceScope()
-              : new ProjectScope({ project: ProjectId.make("alpha") }),
+              ? InstanceScope.make()
+              : ProjectScope.make({ project: ProjectId.make("alpha") }),
         }).permissions;
         const services = yield* authFixture([alice], alice, () => grants);
         const link = new URL(yield* services.authentication.link);

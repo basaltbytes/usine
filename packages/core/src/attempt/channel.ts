@@ -195,7 +195,7 @@ export class InterventionState extends Schema.Class<InterventionState>(
   ),
   /** The child that accepted a steer addressed to the parent, or `None`. */
   forwardedTo: Schema.OptionFromOptionalKey(AgentSessionId).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
 }) {}
 

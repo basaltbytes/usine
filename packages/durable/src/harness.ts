@@ -123,7 +123,7 @@ const messageOf = (cause: unknown): string =>
  * message of the storage error that failed the harness.
  */
 export const durableError = (operation: string, cause: unknown) =>
-  new DurableHarnessError({
+  DurableHarnessError.make({
     operation,
     message: messageOf(cause instanceof SessionFailed ? cause.cause : cause),
     cause,
@@ -310,7 +310,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
     const next = yield* open(number).pipe(Effect.result);
     if (Result.isFailure(next)) {
       return yield* stop(
-        new DurableStorageFailed({
+        DurableStorageFailed.make({
           generation: number,
           message: next.failure.message,
           cause: next.failure,
@@ -336,7 +336,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
     const end = yield* Effect.promise(() => opened.harness.closed);
     flushReports(opened.generation);
     const cause = end.reason === "failed" ? end.error : new Error("pi-durable closed the harness");
-    const failure = new DurableStorageFailed({
+    const failure = DurableStorageFailed.make({
       generation: number,
       message: messageOf(cause),
       cause,
@@ -381,15 +381,14 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
         onNone: () => Effect.succeed(current),
         onSome: (ready) =>
           Deferred.await(ready).pipe(
-            Effect.mapError(
-              (failure) =>
-                new DurableHarnessError({
-                  operation,
-                  message: stopped
-                    ? `The durable harness stopped after repeated storage errors: ${failure.message}. Restart the orchestrator.`
-                    : failure.message,
-                  cause: failure,
-                }),
+            Effect.mapError((failure) =>
+              DurableHarnessError.make({
+                operation,
+                message: stopped
+                  ? `The durable harness stopped after repeated storage errors: ${failure.message}. Restart the orchestrator.`
+                  : failure.message,
+                cause: failure,
+              }),
             ),
           ),
       }),

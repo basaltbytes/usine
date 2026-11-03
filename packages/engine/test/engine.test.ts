@@ -76,13 +76,13 @@ describe("durable run engine", () => {
             readonly agent: Agent;
             readonly parentModel: Option.Option<ModelId>;
           }> = [];
-          const amended = new AttemptContext({
+          const amended = AttemptContext.make({
             task: AttemptTask.make("Fix the reviewed edge case"),
-            agent: new Agent({
+            agent: Agent.make({
               ...testAgent,
               name: AgentName.make("reviewer"),
               persona: AgentPersona.make("Review the amended task"),
-              brain: new BrainSpec({
+              brain: BrainSpec.make({
                 harness: "codex",
                 model: ModelId.make("gpt-5.6-terra"),
                 effort: "medium",
@@ -93,7 +93,7 @@ describe("durable run engine", () => {
           const executor = Layer.succeed(StepExecutor)({
             workers: Effect.succeed([WorkerName.make("local")]),
             isLive: () => Effect.succeed(false),
-            outcome: () => Effect.succeed(Option.none()),
+            outcome: () => Effect.succeedNone,
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
@@ -110,9 +110,9 @@ describe("durable run engine", () => {
                   parentModel: execution.parentModel,
                 });
                 if (executed.length === 1)
-                  return yield* new AgentFailure({ message: "Needs a correction" });
+                  return yield* AgentFailure.make({ message: "Needs a correction" });
                 if (executed.length === 2)
-                  return yield* new InfraFailure({
+                  return yield* InfraFailure.make({
                     message: "Link lost",
                     cause: new Error("offline"),
                   });
@@ -129,7 +129,7 @@ describe("durable run engine", () => {
             yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Failed");
             yield* engine.retry(
               accepted.runId,
-              new RetryRequest({
+              RetryRequest.make({
                 requestedBy: Option.some(OperatorLogin.make("PhilDL")),
                 amendment: Option.some(amended),
               }),
@@ -143,13 +143,13 @@ describe("durable run engine", () => {
             assert.deepStrictEqual(
               finished.attempts.map(({ start }) => start),
               [
-                Option.some(new StartedByEvent()),
+                Option.some(StartedByEvent.make()),
                 Option.some(
-                  new StartedByEditAndRetry({
+                  StartedByEditAndRetry.make({
                     operator: Option.some(OperatorLogin.make("PhilDL")),
                   }),
                 ),
-                Option.some(new StartedByInfraRetry()),
+                Option.some(StartedByInfraRetry.make()),
               ],
             );
             assert.deepStrictEqual(
@@ -182,7 +182,7 @@ describe("durable run engine", () => {
         const executor = Layer.succeed(StepExecutor)({
           workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
-          outcome: () => Effect.succeed(Option.none()),
+          outcome: () => Effect.succeedNone,
           recover: () => Effect.void,
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           sweep: Effect.void,
@@ -203,10 +203,10 @@ describe("durable run engine", () => {
           const current = yield* engine.inspect(accepted.runId);
           const attempt = current.attempts[0];
           assert(attempt !== undefined);
-          const input = new Intervention({
+          const input = Intervention.make({
             operator: "Philippe",
-            target: new ParentTarget(),
-            action: new OperatorMessage({ message: "Continue" }),
+            target: ParentTarget.make(),
+            action: OperatorMessage.make({ message: "Continue" }),
           });
           const stale = yield* Effect.flip(
             engine.intervene(accepted.runId, AttemptId.make("old-attempt"), input),
@@ -396,7 +396,7 @@ describe("durable run engine", () => {
             assert(Option.isNone(waiting.approval));
 
             const approval = approvalEvent(2);
-            const askAnswer = new ApprovalSource({
+            const askAnswer = ApprovalSource.make({
               channel: "ui",
               approver: Option.some(OperatorLogin.make("Philippe")),
             });
@@ -408,7 +408,7 @@ describe("durable run engine", () => {
             );
             assert.strictEqual(finished.attempts.length, 1);
             const recorded = Option.some(
-              new RunApproval({ approvedAt: approval.receivedAt, source: Option.some(askAnswer) }),
+              RunApproval.make({ approvedAt: approval.receivedAt, source: Option.some(askAnswer) }),
             );
             assert.deepStrictEqual(finished.approval, recorded);
 
@@ -426,7 +426,7 @@ describe("durable run engine", () => {
   it.live("auto-retries only typed infrastructure failures", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const infrastructureFailure = new InfraFailure({
+        const infrastructureFailure = InfraFailure.make({
           message: "worker unreachable",
           cause: new Error("ECONNREFUSED"),
         });
@@ -434,7 +434,7 @@ describe("durable run engine", () => {
           infrastructureFailure,
           Effect.succeed(stepResult("retried")),
         ]);
-        const salvage = new SalvagePushed({
+        const salvage = SalvagePushed.make({
           ref: SalvageRef.make("usine/salvage/lost-machine/1"),
           commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
         });
@@ -537,7 +537,7 @@ describe("durable run engine", () => {
   it.live("stops automatic infrastructure retry at three Attempts", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const failure = new InfraFailure({
+        const failure = InfraFailure.make({
           message: "worker unavailable",
           cause: new Error("offline"),
         });
@@ -574,7 +574,7 @@ describe("durable run engine", () => {
           );
           assert.deepStrictEqual(
             finished.attempts[3]?.start,
-            Option.some(new StartedByRetry({ operator: Option.none() })),
+            Option.some(StartedByRetry.make({ operator: Option.none() })),
           );
         }).pipe(Effect.provide(runtime));
       }),
@@ -585,7 +585,7 @@ describe("durable run engine", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          new AgentFailure({ message: "agent could not finish" }),
+          AgentFailure.make({ message: "agent could not finish" }),
           Effect.succeed(stepResult("operator-guided result")),
         ]);
         const runtime = engineLayer(directory, executorLayer(plans));
@@ -634,7 +634,7 @@ describe("durable run engine", () => {
         const answer = yield* Deferred.make<TriggerRecheck>();
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Deferred.await(finish).pipe(
-            Effect.andThen(new AgentFailure({ message: "needs the operator" })),
+            Effect.andThen(AgentFailure.make({ message: "needs the operator" })),
           ),
           Effect.succeed(stepResult("retried")),
         ]);
@@ -815,7 +815,7 @@ describe("durable run engine", () => {
           const local = WorkerName.make("local");
           assert.deepStrictEqual(
             yield* Effect.flip(engine.discardLeftovers(local)),
-            new LeftoversDiscardRejectedError({ worker: local, running: 1 }),
+            LeftoversDiscardRejectedError.make({ worker: local, running: 1 }),
           );
           assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
@@ -830,7 +830,9 @@ describe("durable run engine", () => {
         const checks = yield* Ref.make(0);
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Deferred.await(stopped).pipe(
-            Effect.andThen(new InfraFailure({ message: "stopped by the operator", cause: "test" })),
+            Effect.andThen(
+              InfraFailure.make({ message: "stopped by the operator", cause: "test" }),
+            ),
           ),
           Effect.succeed(stepResult("queued Event")),
         ]);
@@ -882,7 +884,7 @@ describe("durable run engine", () => {
           const executor = Layer.succeed(StepExecutor)({
             workers: Effect.succeed([local]),
             isLive: () => Effect.succeed(false),
-            outcome: () => Effect.succeed(Option.none()),
+            outcome: () => Effect.succeedNone,
             recover: () => Effect.void,
             intervene: () => Effect.void,
             // Like the durable session, a stop ends the execution within the interrupt grace even
@@ -893,7 +895,7 @@ describe("durable run engine", () => {
                 yield* Deferred.succeed(stopRequested, undefined);
                 yield* Effect.sleep("20 millis");
                 if (yield* Ref.get(refusing))
-                  return yield* new InfraFailure({
+                  return yield* InfraFailure.make({
                     message: "Could not cancel the parent task",
                     cause: "storage unavailable",
                   });
@@ -915,7 +917,7 @@ describe("durable run engine", () => {
                 yield* io.checkoutAcquired;
                 if (execution.task !== unstoppable.task) return stepResult("ran in the freed slot");
                 yield* Deferred.await(stopRequested);
-                return yield* new InfraFailure({
+                return yield* InfraFailure.make({
                   message: "The Attempt's execution stopped",
                   cause: "canceled",
                 });
@@ -993,7 +995,7 @@ describe("durable run engine", () => {
         Effect.gen(function* () {
           const worker = yield* slottedExecutor(
             [
-              Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" })),
+              Effect.fail(InfraFailure.make({ message: "Lost the parent task", cause: "offline" })),
               Effect.succeed(stepResult("ran after the stop")),
             ],
             slots,
@@ -1025,7 +1027,7 @@ describe("durable run engine", () => {
             assert.deepStrictEqual(new Set(stops.map(([, reason]) => reason)), new Set(["failed"]));
             assert.strictEqual(yield* TxRef.get(worker.leased), 1);
             assert.deepStrictEqual(yield* unconfirmed.list, [
-              new UnconfirmedStop({
+              UnconfirmedStop.make({
                 attemptId: failed.id,
                 runId: accepted.runId,
                 loop: failing.loop,
@@ -1090,7 +1092,7 @@ describe("durable run engine", () => {
             const refusal = yield* Effect.flip(engine.cancel(running.runId));
             assert.strictEqual(refusal._tag, "AttemptCancellationError");
             assert.deepStrictEqual(yield* unconfirmed.list, [
-              new UnconfirmedStop({
+              UnconfirmedStop.make({
                 attemptId: attempt.id,
                 runId: running.runId,
                 loop: canceled.loop,
@@ -1101,7 +1103,7 @@ describe("durable run engine", () => {
             ]);
 
             const otherLoop = yield* engine.submit(
-              new Submission({
+              Submission.make({
                 ...submission({ number: 49, item: "unstoppable-cancel" }),
                 loop: LoopName.make("another-loop"),
               }),
@@ -1149,7 +1151,7 @@ describe("durable run engine", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const worker = yield* slottedExecutor([
-          Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" })),
+          Effect.fail(InfraFailure.make({ message: "Lost the parent task", cause: "offline" })),
           Effect.succeed(stepResult("ran in the freed slot")),
         ]);
         // With the default reconcile interval, no reconcile runs during the test, so only the
@@ -1187,7 +1189,7 @@ describe("durable run engine", () => {
         const executor = Layer.succeed(StepExecutor)({
           workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
-          outcome: () => Effect.succeed(Option.none()),
+          outcome: () => Effect.succeedNone,
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
@@ -1233,9 +1235,9 @@ describe("durable run engine", () => {
           assert.strictEqual(first.runId, "c33a338a9aaafa7490fa315fbf02a437");
           assert.strictEqual(yield* runIdFor(original), first.runId);
           const resubmitted = yield* engine.submit(
-            new Submission({
+            Submission.make({
               ...original,
-              event: new Event({ ...original.event, id: EventId.make("event-1-seen-again") }),
+              event: Event.make({ ...original.event, id: EventId.make("event-1-seen-again") }),
             }),
           );
           assert(resubmitted._tag === "Claimed");

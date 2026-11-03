@@ -13,7 +13,7 @@ export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(
   /** The canceling operator's login, or `None` if none was recorded. */
   by: Schema.OptionFromNullOr(OperatorActor).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
 }) {}
 
@@ -167,35 +167,35 @@ export const STATE_TAGS = tagsOf<RunState>()(
 export const UNSTARTED_STATE_TAGS = tagsOf<Unstarted>()("Pending", "Waiting", "Queued");
 
 /** Returns the waiting state for a pending run whose loop requires approval. */
-export const awaitApproval = (_state: Pending): Waiting => new Waiting();
+export const awaitApproval = (_state: Pending): Waiting => Waiting.make();
 
 /** Returns the queued state for a waiting run after approval, ready for a worker slot. */
-export const approve = (_state: Waiting): Queued => new Queued();
+export const approve = (_state: Waiting): Queued => Queued.make();
 
 /** Returns the running state for a pending or queued run when its attempt starts. */
-export const start = (_state: Startable): Running => new Running();
+export const start = (_state: Startable): Running => Running.make();
 
 /** Returns the succeeded state for a running run after its step result is stored. */
-export const succeed = (_state: Running): Succeeded => new Succeeded();
+export const succeed = (_state: Running): Succeeded => Succeeded.make();
 
 /** Returns `Failed`. Callers use it only if `shouldAutoRetry` returns `false`. */
-export const fail = (_state: Running): Failed => new Failed();
+export const fail = (_state: Running): Failed => Failed.make();
 
 /** Returns the running state for a failed run when an operator starts another attempt. */
-export const retry = (_state: Failed): Running => new Running();
+export const retry = (_state: Failed): Running => Running.make();
 
 /** Returns a canceled state for an open run, recording `by` when an operator login is available. Does not stop the running attempt itself. */
 export const cancelByOperator = (
   _state: Open,
   by: Option.Option<OperatorActor> = Option.none(),
-): Canceled => new Canceled({ reason: new OperatorCanceled({ by }) });
+): Canceled => Canceled.make({ reason: OperatorCanceled.make({ by }) });
 
 /**
  * Returns `Canceled` for a Run replaced by the newer Event `by`. A running Run isn't
  * superseded; the engine evaluates the newer Event after its Attempt ends (ADR 0007).
  */
 export const supersede = (_state: Unstarted, by: EventId): Canceled =>
-  new Canceled({ reason: new Superseded({ by }) });
+  Canceled.make({ reason: Superseded.make({ by }) });
 
 /** Returns a canceled state for an unstarted run whose item no longer matches its loop's trigger (ADR 0007). */
-export const revoke = (_state: Unstarted): Canceled => new Canceled({ reason: new Revoked() });
+export const revoke = (_state: Unstarted): Canceled => Canceled.make({ reason: Revoked.make() });

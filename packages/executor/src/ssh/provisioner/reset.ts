@@ -28,19 +28,18 @@ export const machineResetFor = (raw: RemoteCommands, instance: string, instanceI
     const host = machine.shell.destination;
     yield* Effect.annotateCurrentSpan({ worker, host });
     if (failures.has(machine.shell))
-      return yield* new ExecutorOperationError({
+      return yield* ExecutorOperationError.make({
         operation: "cleanup",
         message: "The previous attempt's cleanup failed; the machine must be retired",
         cause: new Error("incomplete attempt cleanup"),
       });
     const runtime = yield* detectRuntime(commands, machine).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ExecutorOperationError({ operation: "cleanup", message: cause.message, cause }),
+      Effect.mapError((cause) =>
+        ExecutorOperationError.make({ operation: "cleanup", message: cause.message, cause }),
       ),
     );
     if (Option.isNone(runtime))
-      return yield* new ExecutorOperationError({
+      return yield* ExecutorOperationError.make({
         operation: "cleanup",
         message: "The machine has no container runtime; it must be retired",
         cause: new Error("missing container runtime during reset"),
@@ -54,7 +53,7 @@ export const machineResetFor = (raw: RemoteCommands, instance: string, instanceI
       runtime.value,
     );
     if (removed.length > 0)
-      return yield* new ExecutorOperationError({
+      return yield* ExecutorOperationError.make({
         operation: "cleanup",
         message: "The previous attempt left containers; the machine must be retired",
         cause: new Error("leftover attempt containers"),

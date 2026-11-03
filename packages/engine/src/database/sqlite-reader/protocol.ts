@@ -3,7 +3,7 @@ import { Schema } from "effect";
 export const Params = Schema.Array(
   Schema.Union([
     Schema.String,
-    Schema.Number,
+    Schema.Finite,
     Schema.BigInt,
     Schema.Null,
     Schema.declare((input): input is NodeJS.ArrayBufferView => ArrayBuffer.isView(input)),
@@ -38,7 +38,7 @@ export const Response = Schema.Union([
   Schema.Struct({
     id: Schema.Int,
     ok: Schema.Literal(false),
-    cause: Schema.Struct({ message: Schema.String, errno: Schema.optionalKey(Schema.Number) }),
+    cause: Schema.Struct({ message: Schema.String, errno: Schema.optionalKey(Schema.Finite) }),
   }),
 ]);
 export type Response = typeof Response.Type;

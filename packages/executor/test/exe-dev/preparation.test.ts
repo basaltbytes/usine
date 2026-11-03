@@ -9,7 +9,7 @@ import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
 import { TestClock } from "effect/testing";
-import { Cause, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Logger, Option, Scope, Layer } from "effect";
 
 import {
   aloneOnItem,
@@ -74,7 +74,7 @@ describe("exe.dev preparation", () => {
         if (salvage === "dirty") {
           assert(removal > push, "the worktree was removed before the salvage push");
           assert.deepStrictEqual(recorded, [
-            new SalvagePushed({ ref: request.salvageRef, commit: SALVAGE_COMMIT }),
+            SalvagePushed.make({ ref: request.salvageRef, commit: SALVAGE_COMMIT }),
           ]);
         } else {
           assert.strictEqual(removal, -1, "a worktree whose push failed must stay on disk");
@@ -95,7 +95,7 @@ describe("exe.dev preparation", () => {
         const executor = yield* Executor;
         const failure = yield* executor
           .prepare(
-            new CheckoutRequest({
+            CheckoutRequest.make({
               ...request,
               loop: LoopName.make("review-pr"),
               permissions: "read",
@@ -118,7 +118,7 @@ describe("exe.dev preparation", () => {
   it.effect("retains pushed work when durable salvage recording fails", () => {
     const ssh = fakeSsh();
     ssh.state.salvage = "dirty";
-    const recordFailure = new InfraFailure({ message: "database unavailable", cause: "outage" });
+    const recordFailure = InfraFailure.make({ message: "database unavailable", cause: "outage" });
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const prepared = yield* executor.prepare(request);
@@ -154,10 +154,10 @@ describe("exe.dev preparation", () => {
         const executor = yield* Executor;
         const error = yield* executor
           .prepare(
-            new CheckoutRequest({
+            CheckoutRequest.make({
               ...request,
               resume: Option.some(
-                new SalvagePushed({
+                SalvagePushed.make({
                   ref: SalvageRef.make("usine/salvage/r/1"),
                   commit: SALVAGE_COMMIT,
                 }),
@@ -477,7 +477,7 @@ describe("exe.dev preparation", () => {
       const prepared = yield* executor.prepare(request).pipe(Scope.provide(firstScope));
       yield* executor
         .prepare(
-          new CheckoutRequest({
+          CheckoutRequest.make({
             ...request,
             attemptId: AttemptId.make("remote-run/execute/2"),
           }),
@@ -508,8 +508,7 @@ describe("exe.dev preparation", () => {
       assert.strictEqual(detaches(), 1);
     }).pipe(
       Effect.scoped,
-      Effect.provide(runtime(ssh.layer)),
-      Effect.provide(Logger.layer([logger])),
+      Effect.provide(runtime(ssh.layer).pipe(Layer.provideMerge(Logger.layer([logger])))),
     );
   });
 
@@ -552,8 +551,7 @@ describe("exe.dev preparation", () => {
         assert.strictEqual(ssh.state.commands.length, completed);
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(ssh.layer)),
-        Effect.provide(Logger.layer([logger])),
+        Effect.provide(runtime(ssh.layer).pipe(Layer.provideMerge(Logger.layer([logger])))),
       );
     },
   );
@@ -670,7 +668,7 @@ describe("exe.dev preparation", () => {
       }
       const waiting = yield* executor
         .prepare(
-          new CheckoutRequest({
+          CheckoutRequest.make({
             ...request,
             attemptId: AttemptId.make("remote-run/execute/2"),
           }),
@@ -695,7 +693,7 @@ describe("exe.dev preparation", () => {
 
   it.effect("refreshes a shared grant for each Attempt and detaches after the last cleanup", () => {
     const ssh = fakeSsh();
-    const secondRequest = new CheckoutRequest({
+    const secondRequest = CheckoutRequest.make({
       ...request,
       attemptId: AttemptId.make("remote-run/execute/2"),
     });
@@ -728,7 +726,7 @@ describe("exe.dev preparation", () => {
       ssh.state.failAttach = true;
       const error = yield* executor
         .prepare(
-          new CheckoutRequest({
+          CheckoutRequest.make({
             ...request,
             attemptId: AttemptId.make("remote-run/execute/2"),
           }),

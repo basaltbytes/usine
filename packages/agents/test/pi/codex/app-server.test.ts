@@ -27,16 +27,16 @@ import {
   codexAppServerLive,
 } from "../../../src/pi/codex/app-server.ts";
 
-const request = new ChildRequest({
+const request = ChildRequest.make({
   worker: WorkerName.make("worker-1"),
   machine: Option.none(),
   environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
-  host: new LocalProcess(),
-  session: new ChildSession({
+  host: LocalProcess.make(),
+  session: ChildSession.make({
     id: AgentSessionId.make("parent:attempt-1:child:2"),
     parentId: AgentSessionId.make("parent:attempt-1"),
     agent: AgentName.make("developer"),
-    brain: new BrainSpec({
+    brain: BrainSpec.make({
       harness: "codex",
       model: ModelId.make("gpt-5.6-terra"),
       effort: "medium",
@@ -156,8 +156,9 @@ describe("Codex app-server transport", () => {
           yield* connection.close;
         }).pipe(Effect.ensuring(Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(0)))),
       ).pipe(
-        Effect.provide(codexAppServerLive),
-        Effect.provide(spawnerFor(process, { exitOnEof: false })),
+        Effect.provide(
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { exitOnEof: false }))),
+        ),
       );
     }),
   );
@@ -177,8 +178,9 @@ describe("Codex app-server transport", () => {
           return yield* Effect.flip(connection.close);
         }),
       ).pipe(
-        Effect.provide(codexAppServerLive),
-        Effect.provide(spawnerFor(process, { exitOnEof: false })),
+        Effect.provide(
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { exitOnEof: false }))),
+        ),
         Effect.forkChild,
       );
       yield* Deferred.await(process.stdinClosed);
@@ -218,7 +220,7 @@ describe("Codex app-server transport", () => {
           assert(outcome.failure instanceof SessionOperationError);
           assert.strictEqual(outcome.failure.operation, "steer");
         }),
-      ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process)));
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 
@@ -242,8 +244,9 @@ describe("Codex app-server transport", () => {
           assert(outcome.failure instanceof SessionOperationError);
         }),
       ).pipe(
-        Effect.provide(codexAppServerLive),
-        Effect.provide(spawnerFor(process, { exitOnEof: false })),
+        Effect.provide(
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { exitOnEof: false }))),
+        ),
       );
     }),
   );
@@ -285,7 +288,11 @@ describe("Codex app-server transport", () => {
           assert(outcome.failure instanceof SessionOperationError);
           assert.strictEqual(outcome.failure.operation, "interrupt");
         }).pipe(Effect.ensuring(Deferred.succeed(readOutput, undefined))),
-      ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process, { stdout })));
+      ).pipe(
+        Effect.provide(
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { stdout }))),
+        ),
+      );
     }),
   );
 
@@ -298,7 +305,7 @@ describe("Codex app-server transport", () => {
 
   for (const sessionId of [Option.some(request.session.id), Option.none<AgentSessionId>()]) {
     it(`disables repository trust, recursive agents, and background traffic for ${Option.isSome(sessionId) ? "children" : "preflight"}`, () => {
-      const command = codexAppServerCommand({ ...client(new LocalProcess()), sessionId });
+      const command = codexAppServerCommand({ ...client(LocalProcess.make()), sessionId });
       assert.strictEqual(command._tag, "StandardCommand");
       if (command._tag !== "StandardCommand") return;
       assert.notStrictEqual(command.options.cwd, "/workspace/repo");
@@ -328,7 +335,7 @@ describe("Codex app-server transport", () => {
   }
 
   it("runs the app server on a remote host as one SSH command with its pid recorded", () => {
-    const host = new RemoteShell({
+    const host = RemoteShell.make({
       ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
       sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
       destination: "worker.exe.xyz",
@@ -373,7 +380,7 @@ describe("Codex app-server transport", () => {
           const result = yield* Fiber.join(pending);
           assert.deepStrictEqual(result, { userAgent: "codex" });
         }),
-      ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process)));
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 
@@ -401,7 +408,7 @@ describe("Codex app-server transport", () => {
           const first = yield* Fiber.join(notifications);
           assert.deepStrictEqual(first, Option.some({ method: "turn/started", params: {} }));
         }),
-      ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process)));
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 
@@ -432,7 +439,7 @@ describe("Codex app-server transport", () => {
           const afterFailure = yield* Effect.flip(connection.request("steer", "turn/steer", {}));
           assert.strictEqual(afterFailure, error, "later requests preserve the recorded failure");
         }),
-      ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process)));
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 
@@ -455,7 +462,7 @@ describe("Codex app-server transport", () => {
           assert(error instanceof SessionOperationError);
           assert.match(error.message, /didn't respond to initialize/u);
         }),
-      ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process)));
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 });

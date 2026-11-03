@@ -41,16 +41,15 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
   const [secret, setSecret] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
-  const choices = permits(permissions, "admin", new InstanceScope())
+  const choices = permits(permissions, "admin", InstanceScope.make())
     ? [
         ...administratorPermissions,
         ...(configuration.data?.projects ?? []).flatMap((project) => {
           const id = project.id;
           return id === undefined
             ? []
-            : (["read", "operate", "maintain"] as const).map(
-                (permission) =>
-                  new PermissionGrant({ permission, scope: new ProjectScope({ project: id }) }),
+            : (["read", "operate", "maintain"] as const).map((permission) =>
+                PermissionGrant.make({ permission, scope: ProjectScope.make({ project: id }) }),
               );
         }),
       ]

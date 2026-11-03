@@ -52,7 +52,7 @@ for (const [method, phase, selection, transition] of [
         if (transition === "retry") {
           yield* store.finishAttempt(
             started.execution.attempt,
-            Result.fail(new AgentFailure({ message: "Retry during summary read" })),
+            Result.fail(AgentFailure.make({ message: "Retry during summary read" })),
           );
         }
         // The worker snapshot lets the other connection commit between SELECTs.
@@ -69,7 +69,7 @@ for (const [method, phase, selection, transition] of [
                 yield* store.finishAttempt(
                   started.execution.attempt,
                   Result.succeed(
-                    new StepResult({ message: "Completed during summary read", facts: [] }),
+                    StepResult.make({ message: "Completed during summary read", facts: [] }),
                   ),
                 );
               } else {
@@ -85,8 +85,7 @@ for (const [method, phase, selection, transition] of [
             }).pipe(Effect.orDie),
         });
         const database = yield* SQLiteDrizzle.make().pipe(
-          Effect.provide(logger),
-          Effect.provide(SQLiteDrizzle.DefaultServices),
+          Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
           Effect.provideService(SqliteClient.SqliteClient, routed.client),
         );
         yield* Effect.gen(function* () {
@@ -161,14 +160,16 @@ for (const [method, phase, selection, transition] of [
           );
           assert(Option.isSome(finishedAttempt.endedAt));
         }).pipe(
-          Effect.provide(RunReader.layer),
-          Effect.provide(RunDatabase.layer(database)),
+          Effect.provide(RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database)))),
           Effect.provideService(ReadSnapshot, {
             run: (_database, effect) => routed.readSnapshot(effect),
           }),
         );
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
+    ),
   );
 }
 
@@ -187,16 +188,16 @@ it.effect(
         const store = yield* RunStore;
         const task = AttemptTask.make("Saved prompt. ".repeat(10_000));
         const message = "Saved result. ".repeat(10_000);
-        const comment = new Comment({
+        const comment = Comment.make({
           url: new URL("https://github.com/basaltbytes/usine/issues/1#issuecomment-1"),
           kind: "issue-comment",
           at: Option.none(),
         });
-        const pullRequest = new PullRequest({
+        const pullRequest = PullRequest.make({
           number: 2,
           url: new URL("https://github.com/basaltbytes/usine/pull/2"),
         });
-        const laterPullRequest = new PullRequest({
+        const laterPullRequest = PullRequest.make({
           number: 3,
           url: new URL("https://github.com/basaltbytes/usine/pull/3"),
         });
@@ -204,12 +205,12 @@ it.effect(
         for (let index = 0; index < 5; index++) {
           const runId = RunId.make(`summary-${index}`);
           ids.push(runId);
-          const submission = new Submission({
+          const submission = Submission.make({
             ...lifecycleSubmission,
             task,
             loop: LoopName.make(index === 0 ? "plan" : "implement"),
             cycleLimit: Option.some(CycleLimit.make(10)),
-            event: new Event({
+            event: Event.make({
               ...lifecycleSubmission.event,
               id: EventId.make(runId),
               dedupKey: DedupKey.make(runId),
@@ -225,9 +226,9 @@ it.effect(
             yield* store.finishAttempt(
               started.execution.attempt,
               index === 1 || index === 2
-                ? Result.fail(new AgentFailure({ message: "Unresolved earlier failure" }))
+                ? Result.fail(AgentFailure.make({ message: "Unresolved earlier failure" }))
                 : Result.succeed(
-                    new StepResult({
+                    StepResult.make({
                       message,
                       facts: index === 0 ? [pullRequest, laterPullRequest, comment] : [],
                     }),
@@ -246,8 +247,7 @@ it.effect(
             }),
         });
         const database = yield* SQLiteDrizzle.make().pipe(
-          Effect.provide(logger),
-          Effect.provide(SQLiteDrizzle.DefaultServices),
+          Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
         );
         yield* Effect.gen(function* () {
           const reader = yield* RunReader;
@@ -320,7 +320,9 @@ it.effect(
           assert.deepStrictEqual(detail.attempts[0]?.comments, [comment]);
           assert.strictEqual(Option.getOrNull(detail.step.result)?.message, message);
           assert(statements.some((query) => /"task"/u.test(query)));
-        }).pipe(Effect.provide(RunReader.layer), Effect.provide(RunDatabase.layer(database)));
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+        }).pipe(
+          Effect.provide(RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database)))),
+        );
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.provide(NodeServices.layer)),
 );

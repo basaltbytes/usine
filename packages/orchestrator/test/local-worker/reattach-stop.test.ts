@@ -38,7 +38,7 @@ it.live(
         RunEngine,
       );
       const accepted = yield* first.submit(
-        new Submission({ ...submission(1), permissions: "read" }),
+        Submission.make({ ...submission(1), permissions: "read" }),
       );
       assert(accepted._tag === "Claimed");
       const [attempt] = (yield* waitFor(first, accepted.runId, "Running")).attempts;
@@ -65,7 +65,7 @@ it.live(
                   "the checkout must exist until the parent stops",
                 );
                 if (yield* Ref.get(refusing))
-                  return yield* new InfraFailure({ message: "Stop refused", cause: "offline" });
+                  return yield* InfraFailure.make({ message: "Stop refused", cause: "offline" });
                 yield* original.cancel(id);
               }),
           });

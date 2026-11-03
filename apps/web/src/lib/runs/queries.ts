@@ -22,13 +22,13 @@ export const runDetailQuery = (queryClient: QueryClient, runId: RunId) => {
       const cursor = previous?.transcript.at(-1)?.sequence;
       const next = await fetchRunDetail(
         cursor === undefined
-          ? new ColdTranscriptRequest()
-          : new TailTranscriptRequest({ after: cursor }),
+          ? ColdTranscriptRequest.make()
+          : TailTranscriptRequest.make({ after: cursor }),
         (query) => api((client) => client.detail({ params: { runId }, query })),
       );
       const current = queryClient.getQueryData<RunDetailView>(key);
       if (cursor === undefined || current === undefined) return next;
-      return new RunDetailView({
+      return RunDetailView.make({
         ...next,
         transcript: mergeTranscript(current.transcript, next.transcript),
         earlierTranscript: current.earlierTranscript,

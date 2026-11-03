@@ -73,7 +73,7 @@ type ContainerCheck =
   | { readonly _tag: "SharedUser"; readonly degraded: string };
 
 const containerGap = (worker: WorkerName, message: string, cause: unknown) =>
-  new WorkerCapabilityError({ worker, capability: "container", message, cause });
+  WorkerCapabilityError.make({ worker, capability: "container", message, cause });
 
 /**
  * Returns the container operations of the SSH executor: the preflight checks of a Worker's

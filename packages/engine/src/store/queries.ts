@@ -202,7 +202,7 @@ const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS
 // The Json round-trip gives `queriesFor` a portable named type; without it tsc
 // cannot emit the declaration (TS2883).
 const storedAgent = (agent: Agent): Schema.Json =>
-  Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
+  Schema.decodeSync(Schema.Json)(encodeAgent(agent));
 
 export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) => {
   const changedRun = (runId: RunId) =>
@@ -360,9 +360,9 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     const storedRun = storedRuns[0];
     const route = routes[0];
     if (storedRun === undefined || route === undefined) {
-      return yield* new RunNotFoundError({ runId });
+      return yield* RunNotFoundError.make({ runId });
     }
-    return new RunSnapshot({
+    return RunSnapshot.make({
       event: eventFromRow(route),
       itemKey: route.itemKey,
       run: runFromRow(storedRun),
@@ -411,7 +411,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       .execute()
       .pipe(Effect.flatMap(decodeRunSummaryRows));
     const [summary] = yield* summariesWithAttempts(rows);
-    if (summary === undefined) return yield* new RunNotFoundError({ runId });
+    if (summary === undefined) return yield* RunNotFoundError.make({ runId });
     return summary;
   });
 
@@ -498,7 +498,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       items: items.length,
       runs: summaries.length,
     });
-    return new BoardRunHistory({ items, runs: summaries });
+    return BoardRunHistory.make({ items, runs: summaries });
   });
 
   // Every open Run plus the newest `closedLimit` closed ones, so an old waiting Run stays listed.
@@ -606,7 +606,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       .returning({ runId: runs.runId })
       .execute();
     if (updated.length === 0) {
-      return yield* new RunNotFoundError({ runId });
+      return yield* RunNotFoundError.make({ runId });
     }
     yield* changedRun(runId);
   });
@@ -705,7 +705,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       yield* database
         .update(attempts)
         .set({
-          outcomeJson: encodeOutcome(new AttemptFailed({ failure: salvage.pushFailure.value })),
+          outcomeJson: encodeOutcome(AttemptFailed.make({ failure: salvage.pushFailure.value })),
         })
         .where(
           and(
@@ -916,7 +916,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
         runId,
         eventId,
         loopName: submission.loop,
-        stateJson: encodeRunState(new RunState.Pending()),
+        stateJson: encodeRunState(RunState.Pending.make()),
         openedAt: encodeDateTime(submission.event.receivedAt),
         repository: submission.repository,
         revision: submission.revision,
@@ -1154,7 +1154,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
         ),
       )
       .execute();
-    const decoded = yield* Schema.decodeUnknownEffect(
+    const decoded = yield* Schema.decodeEffect(
       Schema.Array(Schema.Struct({ loop: LoopName, itemKey: ItemKey })),
     )(items);
     const closed = yield* Effect.forEach(decoded, ({ loop, itemKey }) =>

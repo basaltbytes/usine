@@ -19,7 +19,7 @@ import {
 } from "./model.ts";
 
 const problem = (file: string, message: string) =>
-  new ConfigFileError({
+  ConfigFileError.make({
     file: InstancePath.make(file),
     stage: "schema",
     expression: Option.none(),
@@ -32,18 +32,17 @@ export const configurationWarnings = (
   loops: ReadonlyArray<LoopFile>,
 ) =>
   parser.configWarnings(config, loops).pipe(
-    Effect.mapError(
-      (error) =>
-        new ConfigurationInvalid({
-          problems: [
-            new ConfigFileError({
-              file: InstancePath.make("usine.yaml"),
-              stage: "expression",
-              expression: Option.some(error.source),
-              message: error.message,
-            }),
-          ],
-        }),
+    Effect.mapError((error) =>
+      ConfigurationInvalid.make({
+        problems: [
+          ConfigFileError.make({
+            file: InstancePath.make("usine.yaml"),
+            stage: "expression",
+            expression: Option.some(error.source),
+            message: error.message,
+          }),
+        ],
+      }),
     ),
   );
 
@@ -105,7 +104,7 @@ export const validateConfiguration = (
                   .filter(({ key }) => key.kind === kind)
                   .find((_, position) => position === index);
           problems.push(
-            new ConfigFileError({
+            ConfigFileError.make({
               ...error,
               file: InstancePath.make(entity?.key.key ?? "settings:instance"),
               message: detail.message,
@@ -134,7 +133,7 @@ export const validateConfiguration = (
       }
       if (kind !== "agent") continue;
       const file = InstancePath.make(`agents/${identifier}.md`);
-      const parsed = yield* Schema.decodeUnknownEffect(AgentJson)(entry.value, {
+      const parsed = yield* Schema.decodeEffect(AgentJson)(entry.value, {
         errors: "all",
         onExcessProperty: "error",
       }).pipe(
@@ -162,9 +161,9 @@ export const validateConfiguration = (
         if (Option.isSome(checked.success.loop)) loops.push(checked.success.loop.value);
       }
     }
-    if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
+    if (Arr.isArrayNonEmpty(problems)) return yield* ConfigurationInvalid.make({ problems });
     if (Result.isFailure(config))
-      return yield* new ConfigurationInvalid({ problems: [config.failure] });
+      return yield* ConfigurationInvalid.make({ problems: [config.failure] });
     if (config.success.version === 2) {
       for (const loop of loops) {
         if (!config.success.projects.some(({ id }) => loop.name.startsWith(`${id}/`)))
@@ -176,8 +175,8 @@ export const validateConfiguration = (
           );
       }
     }
-    if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
-    return new LoadedInstance({
+    if (Arr.isArrayNonEmpty(problems)) return yield* ConfigurationInvalid.make({ problems });
+    return LoadedInstance.make({
       config: config.success,
       agents,
       loops,
@@ -214,7 +213,7 @@ export const commit = (
 > =>
   Effect.gen(function* () {
     if (current.number !== expected)
-      return yield* new StaleRevision({ expected, actual: current.number });
+      return yield* StaleRevision.make({ expected, actual: current.number });
     const before = Option.match(current.instance, {
       onNone: () => [],
       onSome: configurationEntities,
@@ -237,10 +236,10 @@ export const commit = (
       else
         entities.set(
           change.key.key,
-          new ConfigurationEntity({ key: change.key, value: change.after.value }),
+          ConfigurationEntity.make({ key: change.key, value: change.after.value }),
         );
     }
-    if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
+    if (Arr.isArrayNonEmpty(problems)) return yield* ConfigurationInvalid.make({ problems });
     const moves = changes.flatMap(({ key, position }) =>
       position === undefined ? [] : [{ key, position }],
     );
@@ -264,7 +263,7 @@ export const commit = (
       positions.add(position);
       ordered.splice(position, 0, entity);
     }
-    if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
+    if (Arr.isArrayNonEmpty(problems)) return yield* ConfigurationInvalid.make({ problems });
     const instance = yield* validateConfiguration(parser, [
       ...[...entities.values()].filter(({ key }) => key.kind !== "worker"),
       ...ordered,
@@ -274,7 +273,7 @@ export const commit = (
       current.instance.value.config.version === 2 &&
       instance.config.version === 1
     )
-      return yield* new ConfigurationInvalid({
+      return yield* ConfigurationInvalid.make({
         problems: [
           problem(
             "settings:instance",
@@ -284,8 +283,8 @@ export const commit = (
       });
     const number = ConfigurationRevisionNumber.make(current.number + 1);
     return {
-      configuration: new Configuration({ number, instance: Option.some(instance) }),
-      revision: new ConfigurationRevision({
+      configuration: Configuration.make({ number, instance: Option.some(instance) }),
+      revision: ConfigurationRevision.make({
         ...metadata,
         number,
         changes: configurationDiff(before, configurationEntities(instance)),

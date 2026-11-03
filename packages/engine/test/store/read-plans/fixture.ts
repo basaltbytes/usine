@@ -32,11 +32,11 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
   const at = "2026-11-01T00:00:00.000Z";
   const agent = JSON.stringify(Schema.encodeSync(Agent)(testAgent));
   const brain = JSON.stringify(Schema.encodeSync(Agent.fields.brain)(testAgent.brain));
-  const running = JSON.stringify(Schema.encodeSync(RunState.RunState)(new RunState.Running()));
+  const running = JSON.stringify(Schema.encodeSync(RunState.RunState)(RunState.Running.make()));
   const awaitingCi = JSON.stringify(
     Schema.encodeSync(RunState.RunState)(
-      new RunState.AwaitingCi({
-        handoff: new CiHandoff({
+      RunState.AwaitingCi.make({
+        handoff: CiHandoff.make({
           pullRequest: ItemNumber.make(1),
           head: CommitSha.make("a".repeat(40)),
           fixLoop: lifecycleSubmission.loop,
@@ -48,7 +48,7 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
   );
   const handedOff = JSON.stringify(
     Schema.encodeSync(RunState.RunState)(
-      new RunState.HandedOff({
+      RunState.HandedOff.make({
         reason: "CI fix admitted",
         head: CommitSha.make("a".repeat(40)),
         fixLoop: lifecycleSubmission.loop,
@@ -56,15 +56,15 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
       }),
     ),
   );
-  const succeeded = JSON.stringify(Schema.encodeSync(RunState.RunState)(new RunState.Succeeded()));
+  const succeeded = JSON.stringify(Schema.encodeSync(RunState.RunState)(RunState.Succeeded.make()));
   const succeededOutcome = JSON.stringify(
-    Schema.encodeSync(AttemptOutcome)(new AttemptSucceeded()),
+    Schema.encodeSync(AttemptOutcome)(AttemptSucceeded.make()),
   );
   const handedOffOutcome = JSON.stringify(
-    Schema.encodeSync(AttemptOutcome)(new AttemptHandedOff()),
+    Schema.encodeSync(AttemptOutcome)(AttemptHandedOff.make()),
   );
   const awaitingCiOutcome = JSON.stringify(
-    Schema.encodeSync(AttemptOutcome)(new AttemptAwaitingCi()),
+    Schema.encodeSync(AttemptOutcome)(AttemptAwaitingCi.make()),
   );
   yield* sql`CREATE TEMP TABLE fixture_numbers AS WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i + 1 FROM n WHERE i < 999) SELECT i FROM n`;
   yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
@@ -81,7 +81,7 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
     SELECT 'attempt-' || i, 'run-' || i, ${lifecycleSubmission.step}, 'local', 1, ${brain}, ${lifecycleSubmission.task}, ${testAgent.name}, ${at},
     case when i = 888 then ${handedOffOutcome} when i = 989 then ${awaitingCiOutcome} when i < 989 then ${succeededOutcome} end,
     case when i < 990 then strftime('%Y-%m-%dT%H:%M:%fZ', ${at}, '+' || (i + 1) || ' seconds') end FROM fixture_numbers`;
-  const session = new ParentSession({
+  const session = ParentSession.make({
     id: AgentSessionId.make("fixture-session"),
     agent: testAgent.name,
     brain: testAgent.brain,
@@ -89,7 +89,7 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
   const envelope = (payload: AttemptChannel.OutboundPayload) =>
     JSON.stringify(
       Schema.encodeSync(AttemptChannel.OutboundEnvelope)(
-        new AttemptChannel.OutboundEnvelope({
+        AttemptChannel.OutboundEnvelope.make({
           version: AttemptChannel.PROTOCOL_VERSION,
           attemptId: AttemptId.make("fixture-attempt"),
           sequence: AttemptChannel.Sequence.make(1),
@@ -99,16 +99,16 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
       ),
     );
   const started = envelope(
-    new AttemptChannel.SessionEvent({ event: new SessionStarted({ session }) }),
+    AttemptChannel.SessionEvent.make({ event: SessionStarted.make({ session }) }),
   );
   const tokens = envelope(
-    new AttemptChannel.SessionEvent({
-      event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(100) }),
+    AttemptChannel.SessionEvent.make({
+      event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(100) }),
     }),
   );
   const output = envelope(
-    new AttemptChannel.SessionEvent({
-      event: new TextOutput({ session, text: "x".repeat(padding) }),
+    AttemptChannel.SessionEvent.make({
+      event: TextOutput.make({ session, text: "x".repeat(padding) }),
     }),
   );
   yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at)
@@ -123,12 +123,12 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
     FROM usine_attempt_transcripts WHERE payload_tag = 'SessionEvent' AND event_tag = 'SessionTokensUpdated'
     GROUP BY attempt_id, session_id`;
   const pool = envelope(
-    new AttemptChannel.SessionEvent({
-      event: new PoolRateLimitsUpdated({
+    AttemptChannel.SessionEvent.make({
+      event: PoolRateLimitsUpdated.make({
         session,
         pool: "chatgptPlan",
         login: Option.none(),
-        rateLimits: new RateLimitsSnapshot({
+        rateLimits: RateLimitsSnapshot.make({
           limitId: Option.none(),
           limitName: Option.none(),
           primary: Option.none(),

@@ -92,7 +92,7 @@ export class ContainerOutOfMemoryKills extends Schema.Class<ContainerOutOfMemory
 export const totalOutOfMemoryKills = (
   containers: EffectArray.NonEmptyReadonlyArray<ContainerOutOfMemoryKills>,
 ): OutOfMemoryKills =>
-  new OutOfMemoryKills({
+  OutOfMemoryKills.make({
     kills: containers.reduce((total, { kills }) => total + kills, 0),
     memoryMib: EffectArray.lastNonEmpty(containers).memoryMib,
   });
@@ -149,7 +149,7 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   ),
   /** The most recent restart reattachment time, or `None` if never reattached. */
   reattachedAt: Schema.Option(Schema.DateTimeUtc).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** Comments and reviews from an unsuccessful attempt; successful attempts record them in the step result. */
   comments: Schema.Array(Comment).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
@@ -179,7 +179,7 @@ export const windowOf = (
   Option.isSome(attempt.outcome) && Option.isNone(attempt.endedAt)
     ? Option.none()
     : Option.some(
-        new AttemptWindow({
+        AttemptWindow.make({
           attemptId: attempt.id,
           startedAt: attempt.startedAt,
           endedAt: attempt.endedAt,
@@ -266,7 +266,7 @@ export const pendingProviderRetry = (
   if (outcome._tag !== "Failed" || outcome.failure._tag !== "ProviderCapacityFailure")
     return Option.none();
   return Option.some(
-    new ProviderRetry({
+    ProviderRetry.make({
       nextAttempt: AttemptNumber.make(last.number + 1),
       retryAt: DateTime.add(last.endedAt.value, {
         minutes: last.number === 1 ? 2 : 5,

@@ -29,7 +29,7 @@ export const parseYamlDocument = (
           uniqueKeys: true,
         }),
       catch: (cause) =>
-        new ConfigFileError({
+        ConfigFileError.make({
           file,
           stage: "yaml",
           expression: Option.none(),
@@ -38,7 +38,7 @@ export const parseYamlDocument = (
     });
     const syntaxIssue = document.errors[0] ?? document.warnings[0];
     if (syntaxIssue !== undefined) {
-      return yield* new ConfigFileError({
+      return yield* ConfigFileError.make({
         file,
         stage: "yaml",
         expression: Option.none(),

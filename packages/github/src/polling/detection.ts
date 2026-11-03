@@ -27,7 +27,7 @@ export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCurs
   watermark: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {
   /** Starts an unconditional poll with no saved update watermark. */
-  static readonly empty = new PollCursor({
+  static readonly empty = PollCursor.make({
     entityTag: Option.none(),
     watermark: Option.none(),
   });
@@ -68,7 +68,7 @@ export class RepositoryNotModified extends Schema.TaggedClass<RepositoryNotModif
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
   /** The backoff from rate pressure or `Retry-After`, not including the normal polling interval. */
   backoffUntil: Schema.Option(Schema.DateTimeUtc).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
 }) {}
 
@@ -86,7 +86,7 @@ export class RepositoryChanges extends Schema.TaggedClass<RepositoryChanges>(
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
   /** The backoff from rate pressure or `Retry-After`, not including the normal polling interval. */
   backoffUntil: Schema.Option(Schema.DateTimeUtc).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
 }) {}
 

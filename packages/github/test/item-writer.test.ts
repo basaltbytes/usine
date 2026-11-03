@@ -14,16 +14,16 @@ import {
 } from "../src/installation.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const token = new InstallationToken({
+const token = InstallationToken.make({
   value: Redacted.make("item-writer-token"),
   expiresAt: DateTime.makeUnsafe("2026-09-01T22:00:00Z"),
-  scope: new InstallationWide(),
+  scope: InstallationWide.make(),
 });
 
 const appLayer = Layer.succeed(GitHubApp)({
   installation: () =>
     Effect.succeed(
-      new Installation({
+      Installation.make({
         id: InstallationId.make(77),
         accountLogin: "basaltbytes",
         appSlug: AppSlug.make("usine-basaltbytes"),
@@ -89,7 +89,7 @@ describe("GitHubItemWriter", () => {
       const applied = yield* writer.updateLabels(
         repository,
         ItemNumber.make(33),
-        new ItemLabelMutation({
+        ItemLabelMutation.make({
           add: ["ready-for-review"],
           remove: ["ready", "stale-lane-label"],
         }),
@@ -148,7 +148,7 @@ it.effect("removes labels without sending an empty additions request", () => {
     yield* (yield* GitHubItemWriter).updateLabels(
       repository,
       ItemNumber.make(815),
-      new ItemLabelMutation({ add: [], remove: ["agent-in-progress"] }),
+      ItemLabelMutation.make({ add: [], remove: ["agent-in-progress"] }),
     );
     assert.deepStrictEqual(methods, ["DELETE"]);
   }).pipe(Effect.provide(layer));

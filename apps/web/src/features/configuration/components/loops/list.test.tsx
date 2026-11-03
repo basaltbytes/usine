@@ -395,16 +395,14 @@ describe("Settings page", () => {
       const page = text(
         await render(() => (
           <SettingsPage
-            configuration={
-              new ConfigurationView({
-                ...configuration,
-                settings: new SettingsView({
-                  ...configuration.settings,
-                  webhooks: mode,
-                  lastHintAt: at,
-                }),
-              })
-            }
+            configuration={ConfigurationView.make({
+              ...configuration,
+              settings: SettingsView.make({
+                ...configuration.settings,
+                webhooks: mode,
+                lastHintAt: at,
+              }),
+            })}
           />
         )),
       );

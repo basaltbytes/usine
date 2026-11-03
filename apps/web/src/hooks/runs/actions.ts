@@ -38,8 +38,8 @@ const runActionKey = ["run-action"] as const;
 const withoutRunNeeds = (overview: FactoryOverview, runId: RunId): FactoryOverview => {
   const needsYou = overview.needsYou.filter((need) => !("runId" in need) || need.runId !== runId);
   return overview._tag === "Ready"
-    ? new ReadyOverview({ ...overview, needsYou })
-    : new NeedsSetupOverview({ ...overview, needsYou });
+    ? ReadyOverview.make({ ...overview, needsYou })
+    : NeedsSetupOverview.make({ ...overview, needsYou });
 };
 
 /**
@@ -108,7 +108,7 @@ export const usePendingRunAction = (runId: RunId): RunActionRequest["action"] | 
 
 export const unchangedRunAgain = (run: RunView) => ({
   runId: run.id,
-  amendment: new EditAndRetry({ task: AttemptTask.make(run.task), agent: run.agent }),
+  amendment: EditAndRetry.make({ task: AttemptTask.make(run.task), agent: run.agent }),
 });
 
 /**
@@ -142,7 +142,7 @@ export const useRunAgain = ({
               ? unchangedRunAgain(
                   (yield* client.detail({
                     params: { runId },
-                    query: new ColdTranscriptRequest(),
+                    query: ColdTranscriptRequest.make(),
                   })).run,
                 ).amendment
               : amendment;

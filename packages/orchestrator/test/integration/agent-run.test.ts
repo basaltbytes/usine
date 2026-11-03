@@ -51,7 +51,7 @@ const PositiveIntFromString = Schema.FiniteFromString.pipe(
 );
 
 const GitHubComment = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   body: Schema.NullOr(Schema.String),
   user: Schema.Struct({ login: Schema.String }),
 });
@@ -124,13 +124,13 @@ const makeInstance = (options: {
   readonly parentModel: ModelId;
   readonly repository: RepositoryName;
 }): LoadedInstance => {
-  const config = Schema.decodeUnknownSync(UsineConfig)({
+  const config = Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: options.repository, tags: ["integration"] }],
     settings: { parent_model: options.parentModel, poll_interval: 15 },
     workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
   });
-  const agent = new AgentFile({
+  const agent = AgentFile.make({
     name: AgentName.make("live-contract-agent"),
     harness: "claude",
     model: options.childModel,
@@ -141,16 +141,16 @@ const makeInstance = (options: {
       "Act conservatively. Perform only the requested GitHub operation and report its result.",
     ),
   });
-  const loop = new LoopFile({
+  const loop = LoopFile.make({
     name: LoopName.make("live-agent-contract"),
-    trigger: new IssueTrigger({
+    trigger: IssueTrigger.make({
       on: "issue",
       if: Source.make(
         `item.number == ${String(options.issueNumber)} && item.comments.nodes.exists(comment, comment.body == ${JSON.stringify(options.kick)})`,
       ),
     }),
     selector: Option.some(
-      new Selector({ repos: Option.some([options.repository]), tags: Option.none() }),
+      Selector.make({ repos: Option.some([options.repository]), tags: Option.none() }),
     ),
     approval: "none",
     step: StepName.make("comment"),
@@ -166,7 +166,7 @@ const makeInstance = (options: {
       ].join("\n"),
     ),
   });
-  return new LoadedInstance({
+  return LoadedInstance.make({
     config,
     agents: [agent],
     invalidAgents: [],
@@ -201,7 +201,7 @@ const runtimeLayer = (
   const engine = localWorkerLayer(
     runtimeDirectory,
     instance.config,
-    instance.agents.map(({ harness, model, effort }) => new BrainSpec({ harness, model, effort })),
+    instance.agents.map(({ harness, model, effort }) => BrainSpec.make({ harness, model, effort })),
     {
       interruptGrace: "10 seconds",
     },
@@ -234,7 +234,7 @@ const runtimeLayer = (
   );
   return Layer.merge(
     dependencies,
-    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
+    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor), Layer.provide(dependencies)),
   );
 };
 
@@ -343,7 +343,7 @@ describe("live agent loop", () => {
         });
 
         yield* Effect.acquireUseRelease(
-          Effect.succeed(undefined),
+          Effect.undefined,
           () =>
             Effect.gen(function* () {
               yield* polling.poll(instance);
@@ -397,7 +397,7 @@ describe("live agent loop", () => {
               assert.match(comment.body ?? "", /— usine agent: live-contract-agent/u);
 
               const transcript = yield* engine.transcript(
-                new TranscriptAllQuery({ attemptId: attempt.id }),
+                TranscriptAllQuery.make({ attemptId: attempt.id }),
               );
               assert(
                 transcript.some(

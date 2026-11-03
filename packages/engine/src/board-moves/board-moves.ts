@@ -24,7 +24,7 @@ const encodeRemoved = Schema.encodeSync(BoardMoveRecord.fields.removed);
 const persistence =
   (operation: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EnginePersistenceError, R> =>
-    Effect.mapError(effect, (cause) => new EnginePersistenceError({ operation, cause }));
+    Effect.mapError(effect, (cause) => EnginePersistenceError.make({ operation, cause }));
 
 const makeBoardMoves = Effect.gen(function* () {
   const database = yield* RunDatabase;
@@ -67,8 +67,8 @@ const makeBoardMoves = Effect.gen(function* () {
         .where(and(eq(boardMoves.itemKey, itemKey), gte(boardMoves.movedAt, encodeDateTime(since))))
         .orderBy(asc(boardMoves.movedAt), asc(boardMoves.moveId))
         .execute();
-      return (yield* decodeRows(rows, { onExcessProperty: "error" })).map(
-        (row) => new BoardMoveRecord(row),
+      return (yield* decodeRows(rows, { onExcessProperty: "error" })).map((row) =>
+        BoardMoveRecord.make(row),
       );
     }, persistence("read board moves")),
   } as const;

@@ -283,8 +283,8 @@ export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
                   attemptId={composer.attemptId}
                   target={
                     composer.session._tag === "ParentSession"
-                      ? new ParentTarget()
-                      : new ChildTarget({ sessionId: composer.session.id })
+                      ? ParentTarget.make()
+                      : ChildTarget.make({ sessionId: composer.session.id })
                   }
                   paused={composer.paused}
                   held={composer.held}

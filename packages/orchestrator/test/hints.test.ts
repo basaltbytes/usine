@@ -20,8 +20,8 @@ import { fixedInstance } from "./support/current-instance.ts";
 import { pollingTestLayer, unmovedBaseRefHead } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: repository }],
     settings: { poll_interval: 60 },
@@ -32,11 +32,11 @@ const instance = new LoadedInstance({
   quarantinedLoops: [],
   warnings: [],
 });
-const changed = new ChangedIssue({
+const changed = ChangedIssue.make({
   number: 74,
   updatedAt: DateTime.makeUnsafe("2026-09-06T12:00:00Z"),
 });
-const snapshot = new IssueSnapshot({
+const snapshot = IssueSnapshot.make({
   contentHash: ContentHash.make("a".repeat(64)),
   payload: {
     number: 74,
@@ -59,7 +59,7 @@ const snapshot = new IssueSnapshot({
   },
 });
 const labels = () =>
-  Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] }));
+  Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] }));
 
 describe("Polling self-write Hints", () => {
   it.effect("coalesces repository hints without moving the 60-second backstop", () => {
@@ -71,7 +71,7 @@ describe("Polling self-write Hints", () => {
       changes: (_repository, cursor) =>
         Effect.sync(() => {
           requests += 1;
-          return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+          return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
         }),
       snapshot: () => Effect.die("no item changed"),
     };
@@ -99,7 +99,7 @@ describe("Polling self-write Hints", () => {
       missingIssues: () => Effect.succeed([]),
       labels,
       changes: (_repository, cursor) =>
-        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
       snapshot: () =>
         Effect.sync(() => {
           snapshots += 1;
@@ -135,11 +135,9 @@ describe("Polling self-write Hints", () => {
       changes: (_repository, cursor) =>
         Effect.gen(function* () {
           requests += 1;
-          return new RepositoryNotModified({
+          return RepositoryNotModified.make({
             cursor,
-            nextPollAt: Option.some(
-              DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 120_000),
-            ),
+            nextPollAt: Option.some(DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 120000)),
           });
         }),
       snapshot: () =>
@@ -182,14 +180,14 @@ describe("Polling self-write Hints", () => {
             requests += 1;
             return backoff === "error"
               ? Effect.fail(
-                  new GitHubRateLimitError({
+                  GitHubRateLimitError.make({
                     operation: "poll-repository-changes",
                     retryAt: until,
                     message: "Wait before retrying",
                   }),
                 )
               : Effect.succeed(
-                  new RepositoryNotModified({
+                  RepositoryNotModified.make({
                     cursor,
                     nextPollAt: Option.some(until),
                     backoffUntil: Option.some(until),
@@ -233,8 +231,8 @@ describe("Polling self-write Hints", () => {
             Effect.sync(() => {
               requests += 1;
               return requests === 1
-                ? new RepositoryNotModified({ cursor, nextPollAt: Option.none() })
-                : new RepositoryChanges({
+                ? RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })
+                : RepositoryChanges.make({
                     cursor: PollCursor.empty,
                     items: [changed],
                     backlog: false,
@@ -247,7 +245,7 @@ describe("Polling self-write Hints", () => {
               if (snapshots === 1) {
                 yield* Deferred.succeed(snapshotStarted, undefined);
                 yield* Deferred.await(releaseSnapshot);
-                return yield* new GitHubApiError({
+                return yield* GitHubApiError.make({
                   operation: "fetch-issue-snapshot",
                   status: Option.some(503),
                   message: "Temporary snapshot failure",

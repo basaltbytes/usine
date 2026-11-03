@@ -55,7 +55,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     Effect.suspend(() => {
       const read = queued.splice(0, Math.max(0, count));
       if (read.length === 0) return Effect.void;
-      const state = new InterventionState({ held, paused });
+      const state = InterventionState.make({ held, paused });
       return Effect.logInfo("The session read queued operator messages", {
         sessionId: session.id,
         read: read.length,
@@ -93,7 +93,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     if (!paused) yield* deliver(queued.length);
     if (held || paused) {
       idle = Option.some(message);
-      yield* channel.emit(new SessionIdle({ session }));
+      yield* channel.emit(SessionIdle.make({ session }));
       yield* Effect.logInfo("Session is idle under operator supervision", {
         sessionId: session.id,
         held,
@@ -112,7 +112,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id, action: action._tag });
     if (yield* channel.isTerminal) {
-      return yield* new SessionOperationError({
+      return yield* SessionOperationError.make({
         operation: "steer",
         sessionId: Option.some(session.id),
         message: "This session has already returned",
@@ -146,7 +146,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       yield* Deferred.succeed(resume, undefined);
       resume = yield* Deferred.make<void>();
       if (taken === "queued") queued.push({ message: action.message, onDelivery });
-      if (stopped) yield* channel.emit(new SessionResumed({ session }));
+      if (stopped) yield* channel.emit(SessionResumed.make({ session }));
     }
     yield* Effect.logInfo("Session intervention applied", {
       sessionId: session.id,
@@ -155,7 +155,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       paused,
       queued: taken === "queued",
     });
-    return new InterventionState({ held, paused, queued: taken === "queued" });
+    return InterventionState.make({ held, paused, queued: taken === "queued" });
   }, mutex.withPermits(1));
 
   return {

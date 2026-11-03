@@ -73,7 +73,7 @@ export const durationSummary = (durations: ReadonlyArray<number>): DurationSumma
   Option.match(median(durations), {
     onNone: () => null,
     onSome: (middle) =>
-      new DurationSummaryView({ count: durations.length, medianMillis: Math.round(middle) }),
+      DurationSummaryView.make({ count: durations.length, medianMillis: Math.round(middle) }),
   });
 
 type Outcome = "succeeded" | "failed" | "canceled";
@@ -105,7 +105,7 @@ const attemptOutcome = (attempt: AttemptSummary): Outcome | null =>
   });
 
 const outcomeCounts = (outcomes: ReadonlyArray<Outcome | null>): OutcomeCountsView =>
-  new OutcomeCountsView({
+  OutcomeCountsView.make({
     succeeded: outcomes.filter((outcome) => outcome === "succeeded").length,
     failed: outcomes.filter((outcome) => outcome === "failed").length,
     canceled: outcomes.filter((outcome) => outcome === "canceled").length,
@@ -133,7 +133,7 @@ const usageSummary = (units: ReadonlyArray<ReadonlyArray<SessionUsageView>>): Us
   const usd = sum(
     priced.flatMap((unit) => unit.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]))),
   );
-  return new UsageSummaryView({
+  return UsageSummaryView.make({
     measured: units.length,
     tokens: TokenCount.make(tokens),
     meanTokens: units.length === 0 ? null : TokenCount.make(Math.round(tokens / units.length)),
@@ -142,7 +142,7 @@ const usageSummary = (units: ReadonlyArray<ReadonlyArray<SessionUsageView>>): Us
       return members.length === 0
         ? []
         : [
-            new PoolTokensView({
+            PoolTokensView.make({
               pool,
               tokens: TokenCount.make(sum(members.map((session) => session.tokens))),
             }),
@@ -151,7 +151,7 @@ const usageSummary = (units: ReadonlyArray<ReadonlyArray<SessionUsageView>>): Us
     cost:
       priced.length === 0
         ? null
-        : new CostSummaryView({
+        : CostSummaryView.make({
             usd: UsdAmount.make(usd),
             meanUsd: UsdAmount.make(usd / priced.length),
             estimate: priced.some((unit) => unit.some(({ cost }) => cost?.estimate === true)),
@@ -203,16 +203,15 @@ const brainGroups = (
     JSON.stringify([brain.harness, brain.model, brain.effort]),
   );
   return Object.values(groups)
-    .map(
-      (members) =>
-        new BrainStatisticsView({
-          brain: members[0].attempt.brain,
-          outcomes: outcomeCounts(members.map(({ attempt }) => attemptOutcome(attempt))),
-          time: durationSummary(
-            members.flatMap(({ attempt }) => Option.toArray(attemptMillis(attempt))),
-          ),
-          usage: usageSummary(members.map(({ sessions }) => sessions)),
-        }),
+    .map((members) =>
+      BrainStatisticsView.make({
+        brain: members[0].attempt.brain,
+        outcomes: outcomeCounts(members.map(({ attempt }) => attemptOutcome(attempt))),
+        time: durationSummary(
+          members.flatMap(({ attempt }) => Option.toArray(attemptMillis(attempt))),
+        ),
+        usage: usageSummary(members.map(({ sessions }) => sessions)),
+      }),
     )
     .sort(
       (left, right) =>
@@ -306,16 +305,15 @@ const needsAttention = (
   }
   const approvalCounts = perPeriod(bucket, starts, approvals);
   const failureCounts = perPeriod(bucket, starts, failures);
-  return new NeedsAttentionView({
+  return NeedsAttentionView.make({
     approvals: approvals.length,
     failures: failures.length,
-    periods: starts.map(
-      (start) =>
-        new NeedsAttentionPeriodView({
-          start: utcDay(start),
-          approvals: approvalCounts.get(start) ?? 0,
-          failures: failureCounts.get(start) ?? 0,
-        }),
+    periods: starts.map((start) =>
+      NeedsAttentionPeriodView.make({
+        start: utcDay(start),
+        approvals: approvalCounts.get(start) ?? 0,
+        failures: failureCounts.get(start) ?? 0,
+      }),
     ),
     approvalWait: durationSummary(approvalWaits),
     retryWait: durationSummary(retryWaits),
@@ -408,7 +406,7 @@ export const runStatisticsView = ({
       ),
     );
 
-  return new RunStatisticsView({
+  return RunStatisticsView.make({
     window,
     from: new Date(from).toISOString(),
     to: DateTime.formatIso(now),
@@ -419,33 +417,30 @@ export const runStatisticsView = ({
       ended.flatMap((attempt) => Option.toArray(attemptMillis(attempt))),
     ),
     unmeasuredAttempts: ended.filter(({ endedAt }) => Option.isNone(endedAt)).length,
-    throughput: starts.map(
-      (start) =>
-        new ThroughputPeriodView({
-          start: utcDay(start),
-          ...(throughputCounts.get(start) ?? { succeeded: 0, failed: 0, canceled: 0 }),
-        }),
+    throughput: starts.map((start) =>
+      ThroughputPeriodView.make({
+        start: utcDay(start),
+        ...(throughputCounts.get(start) ?? { succeeded: 0, failed: 0, canceled: 0 }),
+      }),
     ),
-    loops: groupRuns(closed, ({ run }) => run.loop).map(
-      ([loop, members]) => new LoopStatisticsView({ loop, ...runGroup(members, usage) }),
+    loops: groupRuns(closed, ({ run }) => run.loop).map(([loop, members]) =>
+      LoopStatisticsView.make({ loop, ...runGroup(members, usage) }),
     ),
-    agents: groupRuns(closed, ({ agent }) => agent.name).map(
-      ([agent, members]) => new AgentStatisticsView({ agent, ...runGroup(members, usage) }),
+    agents: groupRuns(closed, ({ agent }) => agent.name).map(([agent, members]) =>
+      AgentStatisticsView.make({ agent, ...runGroup(members, usage) }),
     ),
     brains: brainGroups(closed, usage),
     queueWait: [...waits.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .flatMap(([worker, durations]) => {
         const wait = durationSummary(durations);
-        return wait === null ? [] : [new WorkerQueueWaitView({ worker, wait })];
+        return wait === null ? [] : [WorkerQueueWaitView.make({ worker, wait })];
       }),
-    attemptsPerRun: Array.from(
-      { length: mostAttempts },
-      (_, index) =>
-        new AttemptCountView({
-          attempts: index + 1,
-          runs: attemptCounts.filter((count) => count === index + 1).length,
-        }),
+    attemptsPerRun: Array.from({ length: mostAttempts }, (_, index) =>
+      AttemptCountView.make({
+        attempts: index + 1,
+        runs: attemptCounts.filter((count) => count === index + 1).length,
+      }),
     ),
     utilization: workers.flatMap((worker) => {
       const { name, slots } = worker;
@@ -453,7 +448,7 @@ export const runStatisticsView = ({
       if (slots < 1) return [];
       const held = occupied(name);
       return [
-        new WorkerUtilizationView({
+        WorkerUtilizationView.make({
           worker: name,
           slots,
           occupiedMillis: Math.round(held),

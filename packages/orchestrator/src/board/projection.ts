@@ -45,9 +45,9 @@ const proposedLanes = (repositoryLabels: ReadonlyArray<string>): ReadonlyArray<L
     .sort((left, right) => left.localeCompare(right))
     .map((label) => GitHubLabelName.make(label));
   return labels.map((label) => ({
-    lane: new Lane({
+    lane: Lane.make({
       name: LaneName.make(label),
-      sources: [new LabelLaneSource({ label })],
+      sources: [LabelLaneSource.make({ label })],
     }),
     origin: "proposed",
   }));
@@ -126,7 +126,7 @@ const runningLaneFor = Effect.fn("Board.runningLane")(function* (
     return undefined;
   }
   const labels = yield* payloadLabels(view.kind, event.payload).pipe(
-    Effect.map(Option.some),
+    Effect.asSome,
     Effect.catch((error) =>
       Effect.logWarning(
         "The running Run's Event has no labels to read; placing its card by its Item's state",
@@ -216,7 +216,7 @@ export const projectBoard = Effect.fn("Board.project")(
       }
       const sortItems = (values: Array<BoardTaskView>) =>
         values.sort((left, right) => right.number - left.number);
-      return new BoardView({
+      return BoardView.make({
         failures,
         lanes: [
           ...lanes.map((definition) => {
@@ -229,10 +229,10 @@ export const projectBoard = Effect.fn("Board.project")(
               items: sortItems(grouped.get(laneId(definition)) ?? []),
             } as const;
             return definition.origin === "authored" && labels.length > 0
-              ? new WritableBoardLaneView({ ...fields, origin: definition.origin, labels })
-              : new ReadOnlyBoardLaneView(fields);
+              ? WritableBoardLaneView.make({ ...fields, origin: definition.origin, labels })
+              : ReadOnlyBoardLaneView.make(fields);
           }),
-          new ReadOnlyBoardLaneView({
+          ReadOnlyBoardLaneView.make({
             id: BoardLaneId.make("fallback:unmapped"),
             name: LaneName.make("Unmapped"),
             sources: [],
@@ -258,7 +258,7 @@ export const labelMutationForBoardMove = (
       .flatMap(({ sources }) => labelSources(sources)),
   );
   const targetLabels = new Set(target.labels);
-  return new ItemLabelMutation({
+  return ItemLabelMutation.make({
     add: [...targetLabels].sort((left, right) => left.localeCompare(right)),
     remove: [...laneOwned]
       .filter((label) => !targetLabels.has(label))

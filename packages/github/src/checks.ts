@@ -154,7 +154,7 @@ export class GitHubChecks extends Context.Service<
               "The pull request awaiting CI is unavailable",
             );
           const state = pr.statusCheckRollup?.state;
-          return new CheckSnapshot({
+          return CheckSnapshot.make({
             head: pr.headRefOid,
             state:
               state === "SUCCESS"
@@ -218,7 +218,7 @@ export class GitHubChecks extends Context.Service<
             const failures = statuses.statuses.filter(
               ({ state }) => state === "failure" || state === "error",
             );
-            return new CheckFailureEvidence({
+            return CheckFailureEvidence.make({
               jobs: failures.map(({ context }) => context),
               excerpt: failures
                 .slice(0, 4)
@@ -232,7 +232,7 @@ export class GitHubChecks extends Context.Service<
             head,
             jobs: failed.map(({ name }) => name),
           });
-          return new CheckFailureEvidence({
+          return CheckFailureEvidence.make({
             jobs: failed.map(({ name }) => name),
             excerpt: excerpts.join("\n\n").slice(-12000),
           });

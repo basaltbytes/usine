@@ -82,14 +82,13 @@ export const machineReuseFor = (options: ReuseOptions) => {
                   attempts: candidate.uses,
                 })
                 .pipe(
-                  Effect.mapError(
-                    (error) =>
-                      new MachineUnavailableError({
-                        worker,
-                        provider: driver.provider,
-                        reason: "provider",
-                        message: error.message,
-                      }),
+                  Effect.mapError((error) =>
+                    MachineUnavailableError.make({
+                      worker,
+                      provider: driver.provider,
+                      reason: "provider",
+                      message: error.message,
+                    }),
                   ),
                 );
               yield* holds.update(candidate.hold, (current) => ({
@@ -114,7 +113,7 @@ export const machineReuseFor = (options: ReuseOptions) => {
             attempts: candidate.uses,
           });
           return Option.some(
-            new MachineGrant({
+            MachineGrant.make({
               hold: candidate.hold,
               id,
               worker,
@@ -156,7 +155,7 @@ export const machineReuseFor = (options: ReuseOptions) => {
           ),
           orElse: () =>
             Effect.fail(
-              new ExecutorOperationError({
+              ExecutorOperationError.make({
                 operation: "cleanup",
                 message: "Machine reset timed out",
                 cause: new Error("machine reset timeout"),

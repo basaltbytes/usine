@@ -24,7 +24,7 @@ export const hetznerSettings = (
   sshUser: SshUser.make("usine"),
   labels: { team: "platform" },
   apiKeys: { anthropic: Option.none(), openai: Option.none() },
-  timings: new ProvisionerTimings({}),
+  timings: ProvisionerTimings.make({}),
   reuse: Option.none(),
   ...overrides,
 });
@@ -37,7 +37,7 @@ export const boatSettings = (overrides: Partial<BoatProvisioner> = {}): BoatProv
   snapshot: Option.none(),
   tailnet: Option.none(),
   apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
-  timings: new ProvisionerTimings({}),
+  timings: ProvisionerTimings.make({}),
   reuse: Option.none(),
   ...overrides,
 });

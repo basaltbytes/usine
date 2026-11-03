@@ -152,7 +152,7 @@ const keptProviders = (error: string) =>
 
 /** The new LLM providers, or `None` if they're invalid. */
 const nextProviders = llmProviders.pipe(
-  Effect.map(Option.some),
+  Effect.asSome,
   Effect.catchTags({
     ConfigError: ({ message }) => keptProviders(message),
     ConflictingProviderCredentials: ({ message }) => keptProviders(message),

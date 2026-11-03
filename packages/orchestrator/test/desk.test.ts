@@ -72,12 +72,12 @@ import { CycleBudgets } from "@usine/engine/cycle-budget";
 
 const time = (clock: string) => DateTime.makeUnsafe(`2026-10-20T${clock}.000Z`);
 const repository = RepositoryName.make("basaltbytes/usine");
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "claude",
   model: ModelId.make("claude-opus"),
   effort: "high",
 });
-const developer = new AgentFile({
+const developer = AgentFile.make({
   name: AgentName.make("developer"),
   harness: brain.harness,
   model: brain.model,
@@ -87,9 +87,9 @@ const developer = new AgentFile({
   persona: AgentPersona.make("Implement the issue."),
 });
 const labelled = (name: string, label: string) =>
-  new LoopFile({
+  LoopFile.make({
     name: LoopName.make(name),
-    trigger: new IssueTrigger({
+    trigger: IssueTrigger.make({
       on: "issue",
       if: Source.make(`item.labels.nodes.exists(label, label.name == "${label}")`),
     }),
@@ -101,8 +101,8 @@ const labelled = (name: string, label: string) =>
   });
 const startDev = labelled("start-dev", "ready");
 const review = labelled("review", "review");
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: repository }],
     workers: [
@@ -120,7 +120,7 @@ const instance = new LoadedInstance({
 
 const itemKey = (number: number) => gitHubItemKey(repository, number);
 const issue = (number: number, labels: ReadonlyArray<string>, gone = false) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey: itemKey(number),
     repository,
     source: ItemProjectionSource.make("issue"),
@@ -147,7 +147,7 @@ const issue = (number: number, labels: ReadonlyArray<string>, gone = false) =>
     goneAt: gone ? Option.some(time("09:00:00")) : Option.none(),
   });
 
-const agent = new Agent({
+const agent = Agent.make({
   name: developer.name,
   brain,
   parentModel: Option.none(),
@@ -161,7 +161,7 @@ const attempt = (
   outcome: Option.Option<AttemptOutcome>,
   endedAt: Option.Option<string> = Option.none(),
 ) =>
-  new Attempt({
+  Attempt.make({
     id: AttemptId.make(`${run}-attempt`),
     runId: RunId.make(run),
     stepName: StepName.make("run"),
@@ -186,9 +186,9 @@ const summary = (
   attempts: ReadonlyArray<Attempt> = [],
   loop: LoopFile = startDev,
 ) =>
-  new RunSummary({
+  RunSummary.make({
     itemKey: itemKey(item),
-    run: new Run({
+    run: Run.make({
       id: RunId.make(id),
       eventId: EventId.make(`event-${id}`),
       loop: loop.name,
@@ -202,7 +202,6 @@ const summary = (
     approval: Option.none(),
     runAgain: Option.none(),
     repository,
-
     agent,
   });
 
@@ -212,7 +211,7 @@ const sighting = (
   suppressedBy: string | null = null,
   loop: LoopFile = startDev,
 ) =>
-  new LoopSighting({
+  LoopSighting.make({
     loop: loop.name,
     itemKey: itemKey(item),
     event: Option.some(EventId.make(`event-${run ?? item}`)),
@@ -220,7 +219,7 @@ const sighting = (
     suppressedBy: Option.map(Option.fromNullishOr(suppressedBy), RunId.make),
   });
 
-const canceledByOperator = new RunState.Canceled({ reason: new RunState.OperatorCanceled() });
+const canceledByOperator = RunState.Canceled.make({ reason: RunState.OperatorCanceled.make() });
 const items = [
   issue(1, ["ready"]),
   issue(2, ["ready"]),
@@ -237,44 +236,48 @@ const items = [
 ];
 const runs = [
   summary("canceled-1", 1, canceledByOperator, "08:00:00", [
-    attempt("canceled-1", "08:01:00", Option.some(new AttemptCanceled()), Option.some("08:20:00")),
+    attempt("canceled-1", "08:01:00", Option.some(AttemptCanceled.make()), Option.some("08:20:00")),
   ]),
-  summary("blocked-2", 2, new RunState.Failed(), "08:30:00", [
+  summary("blocked-2", 2, RunState.Failed.make(), "08:30:00", [
     attempt(
       "blocked-2",
       "08:31:00",
-      Option.some(new AttemptFailed({ failure: new BlockedFailure({ message: "Main is red." }) })),
+      Option.some(
+        AttemptFailed.make({ failure: BlockedFailure.make({ message: "Main is red." }) }),
+      ),
       Option.some("08:50:00"),
     ),
   ]),
-  summary("waiting-3", 3, new RunState.Waiting(), "09:00:00"),
-  summary("queued-4", 4, new RunState.Queued(), "09:10:00"),
-  summary("failed-6", 6, new RunState.Failed(), "09:20:00", [
+  summary("waiting-3", 3, RunState.Waiting.make(), "09:00:00"),
+  summary("queued-4", 4, RunState.Queued.make(), "09:10:00"),
+  summary("failed-6", 6, RunState.Failed.make(), "09:20:00", [
     attempt(
       "failed-6",
       "09:21:00",
-      Option.some(new AttemptFailed({ failure: new AgentFailure({ message: "No login." }) })),
+      Option.some(AttemptFailed.make({ failure: AgentFailure.make({ message: "No login." }) })),
       Option.some("09:40:00"),
     ),
   ]),
-  summary("running-8", 8, new RunState.Running(), "11:00:00", [
+  summary("running-8", 8, RunState.Running.make(), "11:00:00", [
     attempt("running-8", "11:01:00", Option.none()),
   ]),
   summary("canceled-9", 9, canceledByOperator, "07:00:00", [
-    attempt("canceled-9", "07:01:00", Option.some(new AttemptCanceled()), Option.some("07:30:00")),
+    attempt("canceled-9", "07:01:00", Option.some(AttemptCanceled.make()), Option.some("07:30:00")),
   ]),
-  summary("succeeded-11", 11, new RunState.Succeeded(), "10:00:00", [
+  summary("succeeded-11", 11, RunState.Succeeded.make(), "10:00:00", [
     attempt(
       "succeeded-11",
       "10:01:00",
-      Option.some(new AttemptSucceeded()),
+      Option.some(AttemptSucceeded.make()),
       Option.some("10:45:00"),
     ),
   ]),
   summary(
     "superseded-11",
     11,
-    new RunState.Canceled({ reason: new RunState.Superseded({ by: EventId.make("event-later") }) }),
+    RunState.Canceled.make({
+      reason: RunState.Superseded.make({ by: EventId.make("event-later") }),
+    }),
     "10:50:00",
   ),
 ];
@@ -288,14 +291,14 @@ const sightings = [
   sighting(8, "running-8"),
   sighting(9, "canceled-9"),
 ];
-const ask = new CycleBudgetAsk({
+const ask = CycleBudgetAsk.make({
   id: CycleBudgetAskId.make("event-budget-5"),
   itemKey: itemKey(5),
   repository,
   loop: startDev.name,
   limit: CycleLimit.make(3),
   counts: [
-    new LoopCycleCount({
+    LoopCycleCount.make({
       loop: startDev.name,
       admitted: CycleCount.make(3),
       completed: CycleCount.make(3),
@@ -303,23 +306,23 @@ const ask = new CycleBudgetAsk({
   ],
 });
 
-const parent = new ParentSession({
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: developer.name,
   brain,
 });
-const child = new ChildSession({
+const child = ChildSession.make({
   id: AgentSessionId.make("child"),
   parentId: parent.id,
   agent: AgentName.make("researcher"),
   brain,
 });
 const outbound = (sequence: number, at: string, payload: AttemptChannel.OutboundPayload) =>
-  new TranscriptEntry({
+  TranscriptEntry.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId: AttemptId.make("running-8-attempt"),
     direction: "outbound",
-    envelope: new AttemptChannel.OutboundEnvelope({
+    envelope: AttemptChannel.OutboundEnvelope.make({
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId: AttemptId.make("running-8-attempt"),
       sequence: AttemptChannel.Sequence.make(sequence),
@@ -329,8 +332,8 @@ const outbound = (sequence: number, at: string, payload: AttemptChannel.Outbound
     receivedAt: time(at),
   });
 const retrying = (retries: number) =>
-  new AttemptChannel.SessionEvent({
-    event: new ProviderRetrying({
+  AttemptChannel.SessionEvent.make({
+    event: ProviderRetrying.make({
       session: child,
       message: "Reconnecting... waiting for network",
       retries: ProviderRetries.make(retries),
@@ -340,12 +343,14 @@ const transcript = [
   outbound(
     1,
     "11:50:00",
-    new AttemptChannel.SessionEvent({ event: new TextOutput({ session: parent, text: "Tests" }) }),
+    AttemptChannel.SessionEvent.make({
+      event: TextOutput.make({ session: parent, text: "Tests" }),
+    }),
   ),
   outbound(
     2,
     "11:55:00",
-    new AttemptChannel.WorkerUnresponsive({
+    AttemptChannel.WorkerUnresponsive.make({
       worker: WorkerName.make("local"),
       lastAnsweredAt: time("11:54:00"),
       reason: "No answer within 45 seconds",
@@ -399,7 +404,7 @@ const deskLayer = (
     sightings: (keys) => Effect.succeed(sightings.filter(({ itemKey }) => keys.includes(itemKey))),
   });
   const polling = Layer.succeed(PollingTriggers)({
-    lastHint: Effect.succeed(Option.none()),
+    lastHint: Effect.succeedNone,
     hint: () => Effect.void,
     poll: () => Effect.die("unused"),
     run: () => Effect.never,
@@ -407,7 +412,7 @@ const deskLayer = (
       polls.length === 0
         ? Option.none()
         : Option.some(
-            new PollCycle({
+            PollCycle.make({
               repositoryPolls: polls,
               repositories: 1,
               changedItems: 0,
@@ -423,7 +428,7 @@ const deskLayer = (
   const schedules = Layer.succeed(ScheduleTriggers)({
     tick: () => Effect.die("unused"),
     run: () => Effect.never,
-    latest: Effect.succeed(Option.none()),
+    latest: Effect.succeedNone,
   });
   const passed = (clock: string) => ({ _tag: "Passed" as const, checkedAt: time(clock) });
   const queued = (runId: string, number: number, ahead: number): QueuedRun => ({
@@ -498,7 +503,7 @@ const deskLayer = (
           list: () => Effect.succeed(items),
           openIssues: () => Effect.die("the desk does not check open issues"),
         }),
-        loopControlLayer([new LoopRuntimeState({ loop: review.name, paused: true })]),
+        loopControlLayer([LoopRuntimeState.make({ loop: review.name, paused: true })]),
         repositoryLabelProjectionReaderLayer,
         MarcbachmannCelLayer,
         Layer.succeed(UnconfirmedStops)({ list: Effect.succeed(stopped.unconfirmed) }),
@@ -507,7 +512,7 @@ const deskLayer = (
   );
 };
 
-const polled = [new RepositoryPoll({ repository, completedAt: time("11:59:00") })];
+const polled = [RepositoryPoll.make({ repository, completedAt: time("11:59:00") })];
 
 describe("Operator desk", () => {
   it.effect("says why each Item a Loop matches has no Attempt running on it", () =>
@@ -553,7 +558,7 @@ describe("Operator desk", () => {
         assert.strictEqual(reason.run.id, RunId.make("queued-4"));
         assert.deepStrictEqual(
           reason.stop,
-          new UnconfirmedStopView({
+          UnconfirmedStopView.make({
             runId: RunId.make("canceled-4"),
             attemptNumber: AttemptNumber.make(1),
             worker: WorkerName.make("local"),
@@ -574,13 +579,13 @@ describe("Operator desk", () => {
                 attempt(
                   "canceled-4",
                   "08:41:00",
-                  Option.some(new AttemptCanceled()),
+                  Option.some(AttemptCanceled.make()),
                   Option.some("08:45:00"),
                 ),
               ]),
             ],
             unconfirmed: [
-              new UnconfirmedStop({
+              UnconfirmedStop.make({
                 attemptId: AttemptId.make("canceled-4-attempt"),
                 runId: RunId.make("canceled-4"),
                 loop: LoopName.make("another-loop"),
@@ -641,10 +646,10 @@ describe("Operator desk", () => {
   it.effect("keeps the ten newest authorized outcomes beyond a full page of hidden runs", () => {
     const hidden = RepositoryName.make("acme/hidden");
     const second = RepositoryName.make("acme/second");
-    const loaded = new LoadedInstance({
+    const loaded = LoadedInstance.make({
       ...instance,
       loops: [],
-      config: Schema.decodeUnknownSync(UsineConfig)({
+      config: Schema.decodeSync(UsineConfig)({
         version: 2,
         repos: [{ name: repository }, { name: second }, { name: hidden }],
         projects: [
@@ -655,8 +660,8 @@ describe("Operator desk", () => {
     });
     const closed = Array.from({ length: 122 }, (_, index) => {
       const repo = index < 110 ? hidden : index % 2 === 0 ? repository : second;
-      return new RunSummary({
-        ...summary(`recent-${index}`, index + 100, new RunState.Succeeded(), "12:00:00"),
+      return RunSummary.make({
+        ...summary(`recent-${index}`, index + 100, RunState.Succeeded.make(), "12:00:00"),
         repository: repo,
         itemKey: gitHubItemKey(repo, index + 100),
         closedAt: Option.some(DateTime.add(time("13:00:00"), { seconds: -index })),
@@ -665,11 +670,11 @@ describe("Operator desk", () => {
     return Effect.gen(function* () {
       const observation = yield* OperatorObservation;
       for (const role of ["viewer", "operator", "maintainer"] as const) {
-        const grants = new RoleBinding({
+        const grants = RoleBinding.make({
           name: role,
           member: GitHubUserId.make(1),
           role,
-          scope: new ProjectScope({ project: ProjectId.make("visible") }),
+          scope: ProjectScope.make({ project: ProjectId.make("visible") }),
         }).permissions;
         const desk = yield* observation
           .desk(loaded)

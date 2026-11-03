@@ -201,7 +201,7 @@ const separateBoardMoves = (
 };
 
 const labelView = (label: RepositoryLabel) =>
-  new LabelView({
+  LabelView.make({
     name: GitHubLabelName.make(label.name),
     color: label.color,
     description: Option.getOrNull(label.description),
@@ -210,15 +210,15 @@ const labelView = (label: RepositoryLabel) =>
 const changeView = (change: ItemChange): GitHubChangeView =>
   Match.valueTags(change, {
     LabelAdded: ({ at, label }) =>
-      new LabelAddedView({ at: DateTime.formatIso(at), label: labelView(label) }),
+      LabelAddedView.make({ at: DateTime.formatIso(at), label: labelView(label) }),
     LabelRemoved: ({ at, label }) =>
-      new LabelRemovedView({ at: DateTime.formatIso(at), label: labelView(label) }),
-    Commented: ({ at, url }) => new CommentedView({ at: DateTime.formatIso(at), url }),
-    Reviewed: ({ at, url, state }) => new ReviewedView({ at: DateTime.formatIso(at), url, state }),
+      LabelRemovedView.make({ at: DateTime.formatIso(at), label: labelView(label) }),
+    Commented: ({ at, url }) => CommentedView.make({ at: DateTime.formatIso(at), url }),
+    Reviewed: ({ at, url, state }) => ReviewedView.make({ at: DateTime.formatIso(at), url, state }),
   });
 
 const moveView = (move: BoardMoveRecord) =>
-  new BoardMovedView({
+  BoardMovedView.make({
     at: DateTime.formatIso(move.at),
     fromLane: LaneName.make(move.fromLane),
     toLane: LaneName.make(move.toLane),
@@ -237,7 +237,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     const recorded = windowOf(attempt);
     if (Option.isSome(recorded)) return recorded;
     const [last] = yield* reader.transcript(
-      new TranscriptPageQuery({ attemptId: attempt.id, before: Option.none(), limit: 1 }),
+      TranscriptPageQuery.make({ attemptId: attempt.id, before: Option.none(), limit: 1 }),
     );
     if (last === undefined) {
       yield* Effect.logInfo(
@@ -247,7 +247,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
       return Option.none<AttemptWindow>();
     }
     return Option.some(
-      new AttemptWindow({
+      AttemptWindow.make({
         attemptId: attempt.id,
         startedAt: attempt.startedAt,
         endedAt: Option.some(last.receivedAt),
@@ -264,16 +264,15 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     const item = Schema.decodeOption(GitHubItemKey)(snapshot.itemKey);
     if (Option.isNone(item)) {
       yield* Effect.logDebug("The Run has no GitHub Item, so it has no GitHub changes", { runId });
-      return new RunGitHubChangesView({ attempts: [] });
+      return RunGitHubChangesView.make({ attempts: [] });
     }
     const [, , number] = item.value;
     const repository = snapshot.repository;
     yield* Effect.annotateCurrentSpan({ repository, item: number });
     const view = (changes: ReadonlyMap<AttemptId, ReadonlyArray<GitHubChangeView>>) =>
-      new RunGitHubChangesView({
-        attempts: snapshot.attempts.map(
-          ({ id }) =>
-            new AttemptGitHubChangesView({ attemptId: id, changes: changes.get(id) ?? [] }),
+      RunGitHubChangesView.make({
+        attempts: snapshot.attempts.map(({ id }) =>
+          AttemptGitHubChangesView.make({ attemptId: id, changes: changes.get(id) ?? [] }),
         ),
       });
     if (snapshot.attempts.length === 0) return view(new Map());

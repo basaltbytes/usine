@@ -128,7 +128,7 @@ const makeCodexChild = Effect.gen(function* () {
       );
       if (catalogModel === undefined) {
         yield* Effect.logError("Codex child rejected an unknown model", { model: requestedModel });
-        return yield* new UnknownModelError({
+        return yield* UnknownModelError.make({
           harness: "codex",
           model: requestedModel,
           message: `Codex has no model "${requestedModel}"`,
@@ -146,7 +146,7 @@ const makeCodexChild = Effect.gen(function* () {
           model: requestedModel,
           supported: supportedEfforts.map((option) => option.reasoningEffort),
         });
-        return yield* new UnsupportedEffortError({
+        return yield* UnsupportedEffortError.make({
           harness: "codex",
           model: requestedModel,
           effort: request.session.brain.effort,
@@ -176,11 +176,11 @@ const makeCodexChild = Effect.gen(function* () {
         model: thread.model,
         sessionId: request.session.id,
       });
-      const session = new ChildSession({
+      const session = ChildSession.make({
         id: request.session.id,
         parentId: request.session.parentId,
         agent: request.session.agent,
-        brain: new BrainSpec({
+        brain: BrainSpec.make({
           harness: "codex",
           model: ModelId.make(thread.model),
           effort: request.session.brain.effort,
@@ -191,7 +191,7 @@ const makeCodexChild = Effect.gen(function* () {
         label: "Codex child session",
         sessionId: session.id,
       });
-      const harnessSession = new HarnessSession({
+      const harnessSession = HarnessSession.make({
         id: thread.thread.id,
         cwd: request.cwd,
         // Codex saves its sessions under CODEX_HOME, which `codex resume` needs to find them.
@@ -200,7 +200,7 @@ const makeCodexChild = Effect.gen(function* () {
         ),
       });
       yield* channel.emit(
-        new SessionStarted({ session, harnessSession: Option.some(harnessSession) }),
+        SessionStarted.make({ session, harnessSession: Option.some(harnessSession) }),
       );
       yield* Effect.logInfo("Codex child session saved", {
         sessionId: session.id,
@@ -274,7 +274,7 @@ const makeCodexChild = Effect.gen(function* () {
           message,
         });
         yield* channel.emit(
-          new ProviderRetrying({ session, message, retries: ProviderRetries.make(retries) }),
+          ProviderRetrying.make({ session, message, retries: ProviderRetries.make(retries) }),
         );
       });
       const reportRecovery = Effect.fn("CodexChildBackend.reportRecovery")(function* () {
@@ -286,7 +286,7 @@ const makeCodexChild = Effect.gen(function* () {
           retries,
         });
         yield* channel.emit(
-          new ProviderRecovered({ session, retries: ProviderRetries.make(retries) }),
+          ProviderRecovered.make({ session, retries: ProviderRetries.make(retries) }),
         );
       });
       const interruptTurn = Effect.fn("CodexChildBackend.interruptTurn")(function* () {
@@ -457,7 +457,7 @@ const makeCodexChild = Effect.gen(function* () {
               if (Option.isSome(usage) && usage.value.threadId === thread.thread.id) {
                 const total = usage.value.tokenUsage.total;
                 yield* channel.emit(
-                  new SessionTokensUpdated({
+                  SessionTokensUpdated.make({
                     session,
                     totalTokens: codexThreadTokens(total),
                     breakdown: Option.some(codexTokenBreakdown(total)),
@@ -499,7 +499,7 @@ const makeCodexChild = Effect.gen(function* () {
               if (!Schema.is(ToolItem)(notification.value.item)) return;
               toolsInFlight.add(notification.value.item.id);
               return yield* channel.emit(
-                new ToolStarted({
+                ToolStarted.make({
                   session,
                   callId: notification.value.item.id,
                   tool: toolName(notification.value.item),
@@ -527,12 +527,12 @@ const makeCodexChild = Effect.gen(function* () {
                 if (text.length === 0) return;
                 lastText = text;
                 if (item.phase === "final_answer") finalText = text;
-                return yield* channel.emit(new TextOutput({ session, text }));
+                return yield* channel.emit(TextOutput.make({ session, text }));
               }
               if (!Schema.is(ToolItem)(item)) return;
               toolsInFlight.delete(item.id);
               yield* channel.emit(
-                new ToolFinished({
+                ToolFinished.make({
                   session,
                   callId: item.id,
                   tool: toolName(item),
@@ -577,11 +577,11 @@ const makeCodexChild = Effect.gen(function* () {
               if (Option.isNone(notification)) return;
               const snapshot = notification.value.rateLimits;
               return yield* channel.emit(
-                new PoolRateLimitsUpdated({
+                PoolRateLimitsUpdated.make({
                   session,
                   pool: billing.pool,
                   login: billing.login,
-                  rateLimits: new RateLimitsSnapshot({
+                  rateLimits: RateLimitsSnapshot.make({
                     limitId: Option.fromNullishOr(snapshot.limitId),
                     limitName: Option.fromNullishOr(snapshot.limitName),
                     primary: Option.fromNullishOr(snapshot.primary).pipe(

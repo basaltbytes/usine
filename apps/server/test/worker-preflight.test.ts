@@ -55,8 +55,8 @@ import { apiRoutes } from "../src/http.ts";
 
 const failedWorker = WorkerName.make("failed");
 const healthyWorker = WorkerName.make("healthy");
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [],
     workers: [
@@ -70,8 +70,8 @@ const instance = new LoadedInstance({
   quarantinedLoops: [],
   warnings: [],
 });
-const submission = new Submission({
-  event: new Event({
+const submission = Submission.make({
+  event: Event.make({
     id: EventId.make("preflight-event"),
     dedupKey: DedupKey.make("preflight-event"),
     payload: {},
@@ -84,9 +84,9 @@ const submission = new Submission({
   repository: RepositoryName.make("basaltbytes/usine"),
   revision: RepositoryRevision.make("main"),
   task: AttemptTask.make("Implement the issue"),
-  agent: new Agent({
+  agent: Agent.make({
     name: AgentName.make("developer"),
-    brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-6-sol"), effort: "high" }),
+    brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-6-sol"), effort: "high" }),
     parentModel: Option.none(),
     parentEffort: Option.none(),
     persona: AgentPersona.make("Implement the issue"),
@@ -121,7 +121,7 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
             }
           }
           if (worker === failedWorker && broken)
-            return yield* new ExecutorOperationError({
+            return yield* ExecutorOperationError.make({
               operation: "preflight",
               message:
                 "SSH destination is unreachable. Correct the worker destination or restore connectivity.",
@@ -143,7 +143,7 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
     const app = Layer.mock(GitHubApp)({
       botAccount: () =>
         Effect.succeed(
-          new BotAccount({
+          BotAccount.make({
             login: BotLogin.make("usine-test[bot]"),
             id: BotUserId.make(4242),
           }),
@@ -242,7 +242,7 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         yield* Deferred.succeed(finishCheck, undefined);
         const response = yield* Fiber.join(requested);
         assert.strictEqual(response.status, 200);
-        const fresh = Schema.decodeUnknownSync(Schema.fromJsonString(WorkerPreflightView))(
+        const fresh = Schema.decodeSync(Schema.fromJsonString(WorkerPreflightView))(
           yield* response.text,
         );
         assert.strictEqual(fresh.prerequisites?._tag, "Passed");
@@ -269,6 +269,9 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         assert.strictEqual(failedChecks, 3, "a passing manual check cancels automatic retries");
       }).pipe(Effect.provide(server));
     }).pipe(Effect.provide(observation));
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(TestClock.layer()));
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(TestClock.layer()))),
+  );
   await Effect.runPromise(program);
 }, 30_000);

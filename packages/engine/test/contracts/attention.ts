@@ -18,23 +18,21 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
       () =>
         Effect.gen(function* () {
           const fixture = yield* adapter.fixture;
-          const previous = new AttentionAcknowledgement({
+          const previous = AttentionAcknowledgement.make({
             id: "unconfigured-worker:local",
             revision: AttentionRevision.make('{"attempts":1,"running":0}'),
             dismissedBy: Option.some(OperatorLogin.make("operator")),
             dismissedAt: DateTime.makeUnsafe("2026-10-28T12:00:00Z"),
           });
-          const current = new AttentionAcknowledgement({
+          const current = AttentionAcknowledgement.make({
             ...previous,
             revision: AttentionRevision.make('{"attempts":2,"running":0}'),
           });
-          const recovered = new AttentionAcknowledgement({ ...current, id: "recovered" });
+          const recovered = AttentionAcknowledgement.make({ ...current, id: "recovered" });
           const keys = [
-            new AttentionKey(current),
-            ...Array.from(
-              { length: 1_200 },
-              (_, index) =>
-                new AttentionKey({ id: `visible:${index}`, revision: previous.revision }),
+            AttentionKey.make(current),
+            ...Array.from({ length: 1_200 }, (_, index) =>
+              AttentionKey.make({ id: `visible:${index}`, revision: previous.revision }),
             ),
           ];
           const open = fixture.open;
@@ -72,13 +70,13 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
       () =>
         Effect.gen(function* () {
           const fixture = yield* adapter.fixture;
-          const acknowledgement = new AttentionAcknowledgement({
+          const acknowledgement = AttentionAcknowledgement.make({
             id: "preflight:project:label",
             revision: AttentionRevision.make("first finding"),
             dismissedBy: Option.some(OperatorLogin.make("operator")),
             dismissedAt: DateTime.makeUnsafe("2026-10-28T12:00:00Z"),
           });
-          const next = new AttentionAcknowledgement({
+          const next = AttentionAcknowledgement.make({
             ...acknowledgement,
             revision: AttentionRevision.make("changed finding"),
             dismissedBy: Option.none(),
@@ -92,7 +90,7 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
             const after = yield* reader.revision();
             assert.notDeepEqual(before, after);
             yield* store.dismiss(
-              new AttentionAcknowledgement({ ...acknowledgement, dismissedBy: Option.none() }),
+              AttentionAcknowledgement.make({ ...acknowledgement, dismissedBy: Option.none() }),
             );
             assert.deepStrictEqual(yield* reader.revision(), after);
             assert.deepStrictEqual(yield* store.list(), [acknowledgement]);
@@ -103,10 +101,10 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
             const reader = yield* RunReader;
             assert.sameDeepMembers([...(yield* store.list())], [acknowledgement, next]);
             const before = yield* reader.revision();
-            yield* store.undo(new AttentionKey(acknowledgement));
+            yield* store.undo(AttentionKey.make(acknowledgement));
             assert.notDeepEqual(yield* reader.revision(), before);
             assert.deepStrictEqual(yield* store.list(), [next]);
-            yield* store.undo(new AttentionKey(acknowledgement));
+            yield* store.undo(AttentionKey.make(acknowledgement));
             assert.deepStrictEqual(yield* store.list(), [next]);
           }).pipe(Effect.provide(open()));
         }).pipe(Effect.scoped),

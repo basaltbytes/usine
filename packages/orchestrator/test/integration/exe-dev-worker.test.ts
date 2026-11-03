@@ -77,9 +77,9 @@ describe("live exe.dev Worker", () => {
       const worker = WorkerName.make(settings.worker);
       const repository = RepositoryName.make(settings.repository);
       const revision = RepositoryRevision.make(settings.revision);
-      const agent = new Agent({
+      const agent = Agent.make({
         name: AgentName.make("developer"),
-        brain: new BrainSpec({
+        brain: BrainSpec.make({
           harness: "codex",
           model: ModelId.make("gpt-5.6-sol"),
           effort: "high",
@@ -88,7 +88,7 @@ describe("live exe.dev Worker", () => {
         parentEffort: Option.none(),
         persona: AgentPersona.make("Verify the remote Worker transport."),
       });
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
         workers: [{ name: worker, kind: "exe.dev", max_concurrent_attempts: 1 }],
@@ -99,7 +99,7 @@ describe("live exe.dev Worker", () => {
       );
       const runtime = exeDevLayer(instanceDirectory, config, [agent.brain], {
         githubIntegrations: [
-          new GitHubIntegration({
+          GitHubIntegration.make({
             repository,
             name: IntegrationName.make(settings.integration),
           }),
@@ -116,8 +116,8 @@ describe("live exe.dev Worker", () => {
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
         const accepted = yield* engine.submit(
-          new Submission({
-            event: new Event({
+          Submission.make({
+            event: Event.make({
               id: EventId.make(`exe-dev-${globalThis.crypto.randomUUID()}`),
               dedupKey: DedupKey.make(`exe-dev/${repository}/${globalThis.crypto.randomUUID()}`),
               payload: { integration: "exe.dev" },
@@ -143,7 +143,7 @@ describe("live exe.dev Worker", () => {
         assert(Option.isSome(finished.step.result));
 
         const transcript = yield* engine.transcript(
-          new TranscriptAllQuery({ attemptId: attempt.id }),
+          TranscriptAllQuery.make({ attemptId: attempt.id }),
         );
         const tags = transcript.map(({ direction, envelope }) => [
           direction,

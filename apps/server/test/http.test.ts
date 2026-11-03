@@ -125,11 +125,11 @@ const runId = RunId.make("run-1");
 const loopName = LoopName.make("review-issue");
 const agentName = AgentName.make("developer");
 const repositoryName = RepositoryName.make("basaltbytes/usine");
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [{ name: "basaltbytes/usine" }],
 });
-const instance = new LoadedInstance({
+const instance = LoadedInstance.make({
   config,
   agents: [],
   invalidAgents: [],
@@ -137,8 +137,8 @@ const instance = new LoadedInstance({
   quarantinedLoops: [],
   warnings: [],
 });
-const run = new RunView({
-  agentBrain: new BrainSpec({
+const run = RunView.make({
+  agentBrain: BrainSpec.make({
     harness: "codex",
     model: ModelId.make("test-model"),
     effort: "high",
@@ -164,21 +164,21 @@ const run = new RunView({
   canCancel: false,
   canRunAgain: false,
 });
-const detail = new RunDetailView({
+const detail = RunDetailView.make({
   agentDefinitionChanged: false,
   sessionState: [],
   // An approved Run that the operator ran again, so the detail round trip includes both records.
-  run: new RunView({
+  run: RunView.make({
     ...run,
     state: "Queued",
     canApprove: false,
-    runAgain: new RunAgain({
+    runAgain: RunAgain.make({
       from: RunId.make("run-0"),
       requestedBy: Option.some(OperatorLogin.make("Philippe")),
     }),
-    approval: new ApprovalView({
+    approval: ApprovalView.make({
       approvedAt: "2026-09-01T12:05:00.000Z",
-      source: new ApprovalSource({
+      source: ApprovalSource.make({
         channel: "ui",
         approver: Option.some(OperatorLogin.make("Philippe")),
       }),
@@ -187,40 +187,40 @@ const detail = new RunDetailView({
   eventDedupKey: "issue:31",
   eventPayload: { number: 31 },
   transcript: [
-    new TranscriptEventView({
+    TranscriptEventView.make({
       attemptId: AttemptId.make("attempt/1"),
       sequence: TranscriptSequence.make(7),
       receivedAt: "2026-09-01T12:00:00.000Z",
       direction: "outbound",
-      payload: new FailedTranscriptView({
-        failure: new InfraFailureView({ message: "Worker disconnected" }),
+      payload: FailedTranscriptView.make({
+        failure: InfraFailureView.make({ message: "Worker disconnected" }),
       }),
     }),
   ],
   earlierTranscript: [
-    new TranscriptPageCursor({
+    TranscriptPageCursor.make({
       attemptId: AttemptId.make("attempt/1"),
       before: TranscriptSequence.make(7),
     }),
   ],
 });
-const overview = new ReadyOverview({
+const overview = ReadyOverview.make({
   projects: [
-    new ProjectView({
+    ProjectView.make({
       id: ProjectId.make("workspace"),
       name: "Workspace",
       repositories: [repositoryName],
       repository: repositoryName,
       status: "needs-you",
       runs: [run],
-      board: new BoardView({ failures: [], lanes: [] }),
+      board: BoardView.make({ failures: [], lanes: [] }),
       labels: [],
       preflightFindings: [],
     }),
   ],
-  loops: [new LoopView({ name: loopName, trigger: "issue", agent: agentName, paused: true })],
+  loops: [LoopView.make({ name: loopName, trigger: "issue", agent: agentName, paused: true })],
   needsYou: [
-    new ApprovalNeed({
+    ApprovalNeed.make({
       id: `approval:${runId}`,
       repository: repositoryName,
       runId,
@@ -229,20 +229,20 @@ const overview = new ReadyOverview({
     }),
   ],
 });
-const githubChanges = new RunGitHubChangesView({
+const githubChanges = RunGitHubChangesView.make({
   attempts: [
-    new AttemptGitHubChangesView({
+    AttemptGitHubChangesView.make({
       attemptId: AttemptId.make("attempt/1"),
       changes: [
-        new LabelRemovedView({
+        LabelRemovedView.make({
           at: "2026-10-15T19:55:11.000Z",
-          label: new LabelView({
+          label: LabelView.make({
             name: GitHubLabelName.make("agent-in-progress"),
             color: "fbca04",
             description: "An usine development run is working this issue",
           }),
         }),
-        new CommentedView({
+        CommentedView.make({
           at: "2026-10-15T19:55:08.000Z",
           url: "https://github.com/basaltbytes/usine/issues/247#issuecomment-6201011438",
         }),
@@ -250,18 +250,18 @@ const githubChanges = new RunGitHubChangesView({
     }),
   ],
 });
-const task = new TaskView({
+const task = TaskView.make({
   repository: repositoryName,
   number: ItemNumber.make(31),
   title: "Review issue 31",
   current: run.itemKey,
-  lane: new TaskLaneView({
+  lane: TaskLaneView.make({
     id: BoardLaneId.make("authored:Review"),
     name: LaneName.make("Review"),
   }),
   needsYou: true,
   items: [
-    new TaskItemView({
+    TaskItemView.make({
       itemKey: run.itemKey,
       kind: "issue",
       number: ItemNumber.make(31),
@@ -274,7 +274,7 @@ const task = new TaskView({
   ],
   runs: [run],
   comments: [
-    new TaskCommentView({
+    TaskCommentView.make({
       runId,
       kind: "issue-comment",
       url: "https://github.com/basaltbytes/usine/issues/31#issuecomment-1",
@@ -283,15 +283,15 @@ const task = new TaskView({
     }),
   ],
 });
-const desk = new DeskView({
+const desk = DeskView.make({
   running: [],
   notMoving: [],
   lastOutcomes: [],
   workers: [],
-  polls: [new RepositoryPollView({ repository: repositoryName, polledAt: null })],
+  polls: [RepositoryPollView.make({ repository: repositoryName, polledAt: null })],
 });
 const statisticsOf = (window: StatisticsWindow) =>
-  new StatisticsView({
+  StatisticsView.make({
     window,
     from: "2026-09-01T00:00:00.000Z",
     to: "2026-09-01T12:00:00.000Z",
@@ -308,12 +308,12 @@ const statisticsOf = (window: StatisticsWindow) =>
     unmetered: 0,
   });
 const runStatisticsOf = (window: StatisticsWindow) =>
-  new RunStatisticsView({
+  RunStatisticsView.make({
     window,
     from: "2026-09-01T00:00:00.000Z",
     to: "2026-09-01T12:00:00.000Z",
     bucket: "day",
-    runs: new OutcomeCountsView({ succeeded: 0, failed: 0, canceled: 0 }),
+    runs: OutcomeCountsView.make({ succeeded: 0, failed: 0, canceled: 0 }),
     runTime: null,
     attemptTime: null,
     unmeasuredAttempts: 0,
@@ -324,7 +324,7 @@ const runStatisticsOf = (window: StatisticsWindow) =>
     queueWait: [],
     attemptsPerRun: [],
     utilization: [],
-    needsAttention: new NeedsAttentionView({
+    needsAttention: NeedsAttentionView.make({
       approvals: 0,
       failures: 0,
       periods: [],
@@ -342,9 +342,9 @@ const observation: OperatorObservation["Service"] = {
   detail: () => Effect.succeed(detail),
   task: () => Effect.succeed(task),
 };
-const configurationView = new ConfigurationView({
+const configurationView = ConfigurationView.make({
   projects: [
-    new Project({
+    Project.make({
       id: ProjectId.make("workspace"),
       name: "Workspace",
       repositories: [repositoryName],
@@ -356,7 +356,7 @@ const configurationView = new ConfigurationView({
   agents: [],
   invalidAgents: [],
   workers: [
-    new WorkerConfigurationView({
+    WorkerConfigurationView.make({
       name: WorkerName.make("local"),
       kind: "local",
       maxConcurrentAttempts: 1,
@@ -373,7 +373,7 @@ const configurationView = new ConfigurationView({
   ],
   removedWorkers: [],
   repositories: [],
-  settings: new SettingsView({
+  settings: SettingsView.make({
     pollInterval: 60,
     maxChildren: 4,
     maxAttemptMinutes: null,
@@ -641,7 +641,7 @@ describe("operator HTTP API", () => {
       }),
       polling: Effect.never,
       status: Effect.succeed(
-        new UpgradeView({
+        UpgradeView.make({
           running: "1.0.0",
           channel: "next",
           mode: "propose",
@@ -858,10 +858,14 @@ describe("operator HTTP API", () => {
       runAgain: (id) =>
         id === runId
           ? Effect.fail(
-              new RunOperationRejectedError({ runId: id, operation: "runAgain", state: "Running" }),
+              RunOperationRejectedError.make({
+                runId: id,
+                operation: "runAgain",
+                state: "Running",
+              }),
             )
           : Effect.fail(
-              new LoopNotFoundError({
+              LoopNotFoundError.make({
                 loop: loopName,
                 message: `Run ${id} cannot run again: loop "${loopName}" is not loaded.`,
               }),
@@ -871,12 +875,12 @@ describe("operator HTTP API", () => {
       detail: (id, request) =>
         request._tag === "EarlierTranscriptRequest"
           ? Effect.fail(
-              new TranscriptAttemptNotFoundError({ runId: id, attemptId: request.attemptId }),
+              TranscriptAttemptNotFoundError.make({ runId: id, attemptId: request.attemptId }),
             )
-          : Effect.fail(new RunNotFoundError({ runId: id })),
+          : Effect.fail(RunNotFoundError.make({ runId: id })),
       githubChanges: () =>
         Effect.fail(
-          new GitHubItemNotFoundError({
+          GitHubItemNotFoundError.make({
             operation: "fetch-item-timeline",
             item: 247,
             message:
@@ -885,14 +889,14 @@ describe("operator HTTP API", () => {
         ),
       approve: (id: RunId) =>
         Effect.fail(
-          new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
+          RunOperationRejectedError.make({ runId: id, operation: "approve", state: "Running" }),
         ),
       dismissNeed: () => Effect.void,
       undoDismissNeed: () => Effect.void,
       resetCycleBudget: () => Effect.void,
       retry: (id: RunId) =>
         Effect.fail(
-          new RunRetryBlockedError({
+          RunRetryBlockedError.make({
             runId: id,
             openRunId: RunId.make("run-open"),
             message: `Cannot retry run ${id}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
@@ -900,23 +904,23 @@ describe("operator HTTP API", () => {
         ),
       cancel: (id) =>
         Effect.fail(
-          new RunOperationRejectedError({ runId: id, operation: "cancel", state: "Failed" }),
+          RunOperationRejectedError.make({ runId: id, operation: "cancel", state: "Failed" }),
         ),
       discardLeftovers: () => Effect.void,
       moveBoardItem: (move) => {
         if (move.toLane === "Ready")
           return Effect.fail(
-            new BoardLaneNotFoundError({ repository: move.repository, lane: move.toLane }),
+            BoardLaneNotFoundError.make({ repository: move.repository, lane: move.toLane }),
           );
         if (move.toLane === "proposed:ready")
           return Effect.fail(
-            new BoardLaneReadOnlyError({ repository: move.repository, lane: move.toLane }),
+            BoardLaneReadOnlyError.make({ repository: move.repository, lane: move.toLane }),
           );
         return Effect.sync(() => void (moved = move));
       },
       pause: () => Effect.void,
       unpause: () => Effect.void,
-      task: (repository, item) => Effect.fail(new BoardItemNotFoundError({ repository, item })),
+      task: (repository, item) => Effect.fail(BoardItemNotFoundError.make({ repository, item })),
       configuration: Effect.succeed(configurationView),
       desk: Effect.succeed(desk),
       statistics: (window) => Effect.succeed(statisticsOf(window)),
@@ -1075,7 +1079,7 @@ describe("operator HTTP API", () => {
     const record = (operation: string) => Effect.sync(() => void interventions.push(operation));
     const edits: Array<EditAndRetry> = [];
     const againEdits: Array<EditAndRetry> = [];
-    const opened = new Claimed({
+    const opened = Claimed.make({
       eventId: EventId.make("run-again-event"),
       runId: RunId.make("run-2"),
     });
@@ -1086,7 +1090,7 @@ describe("operator HTTP API", () => {
         attemptId === "attempt/1"
           ? record(`resolve:${id}:${attemptId}`)
           : Effect.fail(
-              new RunOperationRejectedError({
+              RunOperationRejectedError.make({
                 runId: id,
                 operation: "resolveFailure",
                 state: "Failed",
@@ -1108,10 +1112,10 @@ describe("operator HTTP API", () => {
         }),
       overview: Effect.succeed(overview),
       detail: (id, request) => {
-        if (id !== runId) return Effect.fail(new RunNotFoundError({ runId: id }));
+        if (id !== runId) return Effect.fail(RunNotFoundError.make({ runId: id }));
         if (request._tag === "EarlierTranscriptRequest" && request.attemptId !== "attempt/1") {
           return Effect.fail(
-            new TranscriptAttemptNotFoundError({ runId: id, attemptId: request.attemptId }),
+            TranscriptAttemptNotFoundError.make({ runId: id, attemptId: request.attemptId }),
           );
         }
         return Effect.sync(() => {
@@ -1124,28 +1128,28 @@ describe("operator HTTP API", () => {
         id === runId
           ? record(`approve:${id}`)
           : Effect.fail(
-              new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
+              RunOperationRejectedError.make({ runId: id, operation: "approve", state: "Running" }),
             ),
       dismissNeed: (key) => record(`dismiss:${key.id}:${key.revision}`),
       undoDismissNeed: (key) => record(`undo:${key.id}:${key.revision}`),
       resetCycleBudget: (id) =>
         id === "current-ask"
           ? record(`reset:${id}`)
-          : Effect.fail(new CycleBudgetResetRejectedError({ askId: id })),
+          : Effect.fail(CycleBudgetResetRejectedError.make({ askId: id })),
       retry: (id) => record(`retry:${id}`),
       cancel: (id) => record(`cancel:${id}`),
       discardLeftovers: (worker) =>
-        Effect.fail(new LeftoversDiscardRejectedError({ worker, running: 2 })),
+        Effect.fail(LeftoversDiscardRejectedError.make({ worker, running: 2 })),
       pause: (loop) =>
         loop === loopName
           ? record(`pause:${loop}`)
-          : Effect.fail(new BackendUnavailableError({ message: "Setup is required." })),
+          : Effect.fail(BackendUnavailableError.make({ message: "Setup is required." })),
       unpause: (loop) => record(`unpause:${loop}`),
       moveBoardItem: (move) => record(`move:${move.repository}#${move.item}:${move.toLane}`),
       task: (repository, item) =>
         repository === repositoryName && item === 31
           ? Effect.succeed(task)
-          : Effect.fail(new BoardItemNotFoundError({ repository, item })),
+          : Effect.fail(BoardItemNotFoundError.make({ repository, item })),
       configuration: Effect.succeed(configurationView),
       desk: Effect.succeed(desk),
       statistics: (window) => Effect.succeed(statisticsOf(window)),
@@ -1160,7 +1164,7 @@ describe("operator HTTP API", () => {
         assert.deepStrictEqual(yield* client.overview(), overview);
         assert.deepStrictEqual(yield* client.agents(), [agentName]);
         assert.deepStrictEqual(yield* client.configuration(), configurationView);
-        const edit = new EditAndRetry({
+        const edit = EditAndRetry.make({
           task: AttemptTask.make("Fix the reviewed behavior"),
           agent: agentName,
         });
@@ -1170,18 +1174,18 @@ describe("operator HTTP API", () => {
           opened,
         );
         assert.deepStrictEqual(againEdits, [edit]);
-        const input = new SessionIntervention({
+        const input = SessionIntervention.make({
           attemptId: AttemptId.make("attempt/1"),
-          target: new ParentTarget(),
-          action: new OperatorMessage({ message: "Continue carefully" }),
+          target: ParentTarget.make(),
+          action: OperatorMessage.make({ message: "Continue carefully" }),
         });
         yield* client.intervene({ params: { runId }, payload: input });
         assert.deepStrictEqual(edits, [edit]);
         assert.deepStrictEqual(inputs, [input]);
         const requests = [
-          new ColdTranscriptRequest(),
-          new TailTranscriptRequest({ after: TranscriptSequence.make(7) }),
-          new EarlierTranscriptRequest({
+          ColdTranscriptRequest.make(),
+          TailTranscriptRequest.make({ after: TranscriptSequence.make(7) }),
+          EarlierTranscriptRequest.make({
             attemptId: AttemptId.make("attempt/1"),
             before: TranscriptSequence.make(4),
           }),
@@ -1219,7 +1223,7 @@ describe("operator HTTP API", () => {
         for (const action of ["dismissNeed", "undoDismissNeed"] as const) {
           assert.deepStrictEqual(
             yield* client[action]({
-              payload: new AttentionKey({
+              payload: AttentionKey.make({
                 id: "finding",
                 revision: AttentionRevision.make("revision"),
               }),
@@ -1293,7 +1297,7 @@ describe("operator HTTP API", () => {
         assert.strictEqual(staleReset.status, 409);
         assert.strictEqual(staleReset.error, "CycleBudgetResetRejectedError");
         const missing = yield* Effect.flip(
-          client.detail({ params: { runId: missingId }, query: new ColdTranscriptRequest() }),
+          client.detail({ params: { runId: missingId }, query: ColdTranscriptRequest.make() }),
         );
         assert.instanceOf(missing, OperatorHttpError);
         assert.strictEqual(missing.error, "RunNotFoundError");
@@ -1302,7 +1306,7 @@ describe("operator HTTP API", () => {
         const wrongAttempt = yield* Effect.flip(
           client.detail({
             params: { runId },
-            query: new EarlierTranscriptRequest({
+            query: EarlierTranscriptRequest.make({
               attemptId: AttemptId.make("other-attempt"),
               before: TranscriptSequence.make(4),
             }),
@@ -1429,7 +1433,7 @@ it("returns a typed server error when statistics cannot read worker configuratio
         Layer.mock(FactoryBackend)({
           runStatistics: () =>
             Effect.fail(
-              new ConfigurationStoreError({
+              ConfigurationStoreError.make({
                 operation: "read revisions",
                 cause: "private database details",
               }),
@@ -1454,14 +1458,14 @@ it("returns a typed server error when statistics cannot read worker configuratio
 it("checks the declared permission for every operator route and each role", async () => {
   const roles = ["viewer", "operator", "maintainer", "admin"] as const;
   for (const role of roles) {
-    const binding = new RoleBinding({
+    const binding = RoleBinding.make({
       name: role,
       member: GitHubUserId.make(1),
       role,
       scope:
         role === "admin"
-          ? new InstanceScope()
-          : new ProjectScope({ project: ProjectId.make("alpha") }),
+          ? InstanceScope.make()
+          : ProjectScope.make({ project: ProjectId.make("alpha") }),
     });
     const secured = HttpRouter.toWebHandler(
       apiRoutes().pipe(
@@ -1517,15 +1521,15 @@ it("retains all linked card membership when the board read omits settled cards",
   const item = task.items[0];
   const original = overview.projects[0];
   assert(item !== undefined && original !== undefined);
-  const member = new BoardItemLink(item);
-  const current = new BoardItemLink({
+  const member = BoardItemLink.make(item);
+  const current = BoardItemLink.make({
     ...member,
     itemKey: ItemKey.make("github:basaltbytes/usine:42"),
     kind: "pr",
     number: ItemNumber.make(42),
     state: "pr-merged",
   });
-  const card = new BoardTaskView({
+  const card = BoardTaskView.make({
     ...current,
     repository: repositoryName,
     items: [member, current],
@@ -1534,7 +1538,7 @@ it("retains all linked card membership when the board read omits settled cards",
     pullRequest: null,
     needsYou: false,
     loops: [],
-    usage: new TaskUsageView({
+    usage: TaskUsageView.make({
       durationMillis: 0,
       runningSince: [],
       unmeasured: 0,
@@ -1543,16 +1547,16 @@ it("retains all linked card membership when the board read omits settled cards",
       cost: null,
     }),
   });
-  const project = new ProjectView({
+  const project = ProjectView.make({
     ...original,
-    board: new BoardView({
+    board: BoardView.make({
       failures: [],
       lanes: [
-        new ReadOnlyBoardLaneView({
+        ReadOnlyBoardLaneView.make({
           id: BoardLaneId.make("Done"),
           name: LaneName.make("Done"),
           origin: "authored",
-          sources: [new StateLaneSource({ state: "pr-merged" })],
+          sources: [StateLaneSource.make({ state: "pr-merged" })],
           items: [card],
         }),
       ],
@@ -1562,7 +1566,7 @@ it("retains all linked card membership when the board read omits settled cards",
     FactoryBackend,
     Effect.map(FactoryBackend, (service) => ({
       ...service,
-      overview: Effect.succeed(new ReadyOverview({ ...overview, projects: [project] })),
+      overview: Effect.succeed(ReadyOverview.make({ ...overview, projects: [project] })),
     })),
   ).pipe(Layer.provide(backend));
   const boardApp = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(read)), {
@@ -1592,6 +1596,8 @@ it("streams small changes and replays missed revisions without payloads", async 
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
+        const effectContext = yield* Effect.context<never>();
+
         const context = yield* Layer.build(changeBusLayer);
         const bus = Context.get(context, ChangeBus);
         yield* Effect.promise(async () => {
@@ -1619,9 +1625,9 @@ it("streams small changes and replays missed revisions without payloads", async 
             assert.include(first, ": heartbeat");
             const cursor = /id: (\d+)/u.exec(first)?.[1];
             assert(cursor !== undefined);
-            await Effect.runPromise(
+            await Effect.runPromiseWith(effectContext)(
               bus.publish([
-                { audience: new InstanceScope(), target: { kind: "project", id: "workspace" } },
+                { audience: InstanceScope.make(), target: { kind: "project", id: "workspace" } },
               ]),
             );
             const changed = new TextDecoder().decode((await reader.read()).value);

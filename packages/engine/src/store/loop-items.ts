@@ -214,7 +214,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     );
     return rows.map(({ loop, itemKey, observedEventId, suppressedByRunId }) => {
       const event = Option.map(Option.fromNullishOr(observedEventId), current);
-      return new LoopSighting({
+      return LoopSighting.make({
         loop,
         itemKey,
         event,

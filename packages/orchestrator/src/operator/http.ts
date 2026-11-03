@@ -251,9 +251,9 @@ export type ReloadRefusal = RestartRequiredRefusal | ReloadPreflightRefusal | Fa
 export const reloadRefusal = (error: InstanceReloadError, message: string): ReloadRefusal =>
   Match.valueTags(error, {
     RestartRequiredError: ({ _tag, blocks, fields }) =>
-      new RestartRequiredRefusal({ error: _tag, message, blocks, fields }),
+      RestartRequiredRefusal.make({ error: _tag, message, blocks, fields }),
     ReloadPreflightError: ({ _tag, agents, workers, cause }) =>
-      new ReloadPreflightRefusal({
+      ReloadPreflightRefusal.make({
         error: _tag,
         message,
         agents,
@@ -278,7 +278,7 @@ export const reloadRefusal = (error: InstanceReloadError, message: string): Relo
         }),
       }),
     FactoryConfigError: ({ _tag, file, stage }) =>
-      new FactoryConfigRefusal({ error: _tag, message, file, stage }),
+      FactoryConfigRefusal.make({ error: _tag, message, file, stage }),
   });
 
 /** An HTTP 409 response when a configuration write uses an outdated revision. */
@@ -372,7 +372,7 @@ const transcriptQuery = Schema.Union([
     Schema.decodeTo(
       Schema.toType(ColdTranscriptRequest),
       SchemaTransformation.transform({
-        decode: () => new ColdTranscriptRequest(),
+        decode: () => ColdTranscriptRequest.make(),
         encode: () => ({}),
       }),
     ),
@@ -381,7 +381,7 @@ const transcriptQuery = Schema.Union([
     Schema.decodeTo(
       Schema.toType(TailTranscriptRequest),
       SchemaTransformation.transform({
-        decode: ({ after }) => new TailTranscriptRequest({ after }),
+        decode: ({ after }) => TailTranscriptRequest.make({ after }),
         encode: ({ after }) => ({ after }),
       }),
     ),
@@ -395,7 +395,7 @@ const transcriptQuery = Schema.Union([
       Schema.toType(EarlierTranscriptRequest),
       SchemaTransformation.transform({
         decode: ({ before, attempt }) =>
-          new EarlierTranscriptRequest({ before, attemptId: attempt }),
+          EarlierTranscriptRequest.make({ before, attemptId: attempt }),
         encode: ({ before, attemptId }) => ({ before, attempt: attemptId }),
       }),
     ),

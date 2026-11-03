@@ -38,8 +38,8 @@ export const useCan = (permission: Permission, project?: string) => {
     grants,
     permission,
     Option.match(parsed, {
-      onNone: () => new InstanceScope(),
-      onSome: (project) => new ProjectScope({ project }),
+      onNone: () => InstanceScope.make(),
+      onSome: (project) => ProjectScope.make({ project }),
     }),
   );
 };
@@ -50,7 +50,7 @@ export const useCanOperateRepository = (repository: RepositoryName) => {
   const permissions = usePermissions();
   const { data } = useQuery({
     ...overviewQuery(),
-    enabled: canReadOverview(permissions) && !permits(permissions, "admin", new InstanceScope()),
+    enabled: canReadOverview(permissions) && !permits(permissions, "admin", InstanceScope.make()),
   });
   return useCan("operate", projectForRepository(data?.projects ?? [], repository)?.id);
 };

@@ -30,7 +30,7 @@ const childError = (
   message: string,
   cause: unknown,
 ) =>
-  new SessionOperationError({
+  SessionOperationError.make({
     operation,
     sessionId: Option.some(request.session.id),
     message,
@@ -45,7 +45,7 @@ const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
     model: started.model,
     supported: started.supported,
   });
-  return yield* new UnsupportedEffortError({
+  return yield* UnsupportedEffortError.make({
     harness: "pi",
     model: started.model,
     effort: started.effort,
@@ -70,7 +70,7 @@ const makePiChild = Effect.gen(function* () {
         yield* Effect.logError("Pi child refused a remote host", {
           destination: request.host.destination,
         });
-        return yield* new AgentResultError({
+        return yield* AgentResultError.make({
           sessionId: Option.some(request.session.id),
           message:
             "Pi children run only on local workers: their tools run in the orchestrator process, not on the worker",
@@ -96,7 +96,7 @@ const makePiChild = Effect.gen(function* () {
               yield* Effect.logError("Pi child rejected an unknown model", {
                 model: request.session.brain.model,
               });
-              return yield* new UnknownModelError({
+              return yield* UnknownModelError.make({
                 harness: "pi",
                 model: request.session.brain.model,
                 message: `Pi has no model "${request.session.brain.model}"`,
@@ -110,7 +110,7 @@ const makePiChild = Effect.gen(function* () {
                 model: started.model,
                 requiredPool: "apiKeys",
               });
-              return yield* new PoolUnavailableError({
+              return yield* PoolUnavailableError.make({
                 harness: "pi",
                 model: started.model,
                 pool: "apiKeys",
@@ -123,7 +123,7 @@ const makePiChild = Effect.gen(function* () {
                 requiredPool: "apiKeys",
                 subscription: started.authentication.subscription,
               });
-              return yield* new PoolUnavailableError({
+              return yield* PoolUnavailableError.make({
                 harness: "pi",
                 model: started.model,
                 pool: "apiKeys",
@@ -136,7 +136,7 @@ const makePiChild = Effect.gen(function* () {
                 requiredPool: "apiKeys",
                 resolvedPool: started.pool,
               });
-              return yield* new PoolUnavailableError({
+              return yield* PoolUnavailableError.make({
                 harness: "pi",
                 model: started.model,
                 pool: "apiKeys",
@@ -148,11 +148,11 @@ const makePiChild = Effect.gen(function* () {
               pool: started.pool,
               tools: started.tools,
             });
-            const session = new ChildSession({
+            const session = ChildSession.make({
               id: request.session.id,
               parentId: request.session.parentId,
               agent: request.session.agent,
-              brain: new BrainSpec({
+              brain: BrainSpec.make({
                 harness: "pi",
                 model: started.model,
                 effort: request.session.brain.effort,
@@ -163,7 +163,7 @@ const makePiChild = Effect.gen(function* () {
               label: "Pi child session",
               sessionId: session.id,
             });
-            yield* channel.emit(new SessionStarted({ session }));
+            yield* channel.emit(SessionStarted.make({ session }));
             const subscription = yield* subscribePiSession(started.session, session, channel);
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(

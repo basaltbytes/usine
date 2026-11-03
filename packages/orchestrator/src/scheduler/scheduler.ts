@@ -181,13 +181,13 @@ const releasedFrom = (pool: SlotPool, worker: WorkerName): [SlotRelease, SlotPoo
 // Only errors that a retry can avoid become the `InfraFailure` that the engine retries.
 const asAttemptFailure = (error: ExecutorError): AgentFailure | InfraFailure =>
   Match.valueTags(error, {
-    WorkerCapabilityError: ({ message }) => new AgentFailure({ message }),
+    WorkerCapabilityError: ({ message }) => AgentFailure.make({ message }),
     CredentialUnavailableError: ({ reason, message }) =>
       reason === "refused"
-        ? new AgentFailure({ message })
-        : new InfraFailure({ message, cause: error }),
+        ? AgentFailure.make({ message })
+        : InfraFailure.make({ message, cause: error }),
     ExecutorOperationError: ({ operation, message }) =>
-      new InfraFailure({ message: `Executor ${operation} failed: ${message}`, cause: error }),
+      InfraFailure.make({ message: `Executor ${operation} failed: ${message}`, cause: error }),
   });
 
 const validateWorkers = (
@@ -197,7 +197,7 @@ const validateWorkers = (
   const unsupported = workers.find((worker) => worker.kind !== kind);
   return unsupported === undefined
     ? Effect.succeed(workers)
-    : new UnsupportedWorkerError({ worker: unsupported.name, kind: unsupported.kind });
+    : UnsupportedWorkerError.make({ worker: unsupported.name, kind: unsupported.kind });
 };
 
 const brainLabel = ({ harness, model, effort }: BrainSpec) => `${harness}/${model}/${effort}`;
@@ -206,8 +206,8 @@ const brainLabel = ({ harness, model, effort }: BrainSpec) => `${harness}/${mode
 const botAccountFailure = (error: GitHubAppError) => {
   const message = `Can't read the GitHub App's bot account, which authors the attempt's commits: ${error.message}`;
   return isRefusal(error)
-    ? new AgentFailure({ message })
-    : new InfraFailure({ message, cause: error });
+    ? AgentFailure.make({ message })
+    : InfraFailure.make({ message, cause: error });
 };
 
 /**
@@ -901,7 +901,7 @@ export const stepExecutorLayer = (
           yield* machineForAttempt(execution);
           const prepared = yield* executor
             .prepare(
-              new CheckoutRequest({
+              CheckoutRequest.make({
                 attemptId: execution.attempt.id,
                 worker: execution.attempt.worker,
                 repository: execution.repository,

@@ -60,8 +60,8 @@ describe("exe.dev ceilings across a restart", () => {
     () => {
       const ssh = fakeSsh();
       const storage = new StubStorage();
-      const minute = new CheckoutRequest({ ...request, maxAttemptMinutes: Option.some(1) });
-      const reattach = new CheckoutRequest({ ...minute, reattach: true });
+      const minute = CheckoutRequest.make({ ...request, maxAttemptMinutes: Option.some(1) });
+      const reattach = CheckoutRequest.make({ ...minute, reattach: true });
       const { transcript, sink } = recording();
       return Effect.gen(function* () {
         // The parent is silent for 30 of its 60 seconds, then the process stops.
@@ -111,8 +111,8 @@ describe("exe.dev ceilings across a restart", () => {
       after: { maxAttemptTokens: Option.some(100) },
       first: ({ emit, session }: StubParentContext) =>
         emit(
-          new AttemptChannel.SessionEvent({
-            event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(120) }),
+          AttemptChannel.SessionEvent.make({
+            event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(120) }),
           }),
         ),
     },
@@ -126,13 +126,13 @@ describe("exe.dev ceilings across a restart", () => {
         const storage = new StubStorage();
         const { sink } = recording();
         return Effect.gen(function* () {
-          const earlier = new CheckoutRequest({ ...request, ...before });
+          const earlier = CheckoutRequest.make({ ...request, ...before });
           yield* stopAfter(ssh, storage, earlier, sink, "70 seconds", first);
           yield* Effect.gen(function* () {
             const executor = yield* Executor;
             yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
             const prepared = yield* executor.prepare(
-              new CheckoutRequest({ ...request, ...after, reattach: true }),
+              CheckoutRequest.make({ ...request, ...after, reattach: true }),
             );
             const failure = yield* prepared.launch(sink).pipe(Effect.flip);
             assert(failure._tag === "RunawayFailure");
@@ -173,8 +173,8 @@ describe("exe.dev ceilings across a restart", () => {
       after: { maxAttemptTokens: Option.some(140) },
       first: ({ emit, session }: StubParentContext) =>
         emit(
-          new AttemptChannel.SessionEvent({
-            event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(120) }),
+          AttemptChannel.SessionEvent.make({
+            event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(120) }),
           }),
         ),
       warning: "120 of 140 tokens used by this Attempt; commit and push your work now.",
@@ -202,7 +202,7 @@ describe("exe.dev ceilings across a restart", () => {
               : [],
           );
         return Effect.gen(function* () {
-          const earlier = new CheckoutRequest({ ...request, ...before });
+          const earlier = CheckoutRequest.make({ ...request, ...before });
           yield* stopAfter(ssh, storage, earlier, sink, "50 seconds", first);
           assert.deepStrictEqual(steers(), [], "the earlier run passed no warning point");
           const executing = yield* Deferred.make<void>();
@@ -211,7 +211,7 @@ describe("exe.dev ceilings across a restart", () => {
             const executor = yield* Executor;
             yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
             const prepared = yield* executor.prepare(
-              new CheckoutRequest({ ...request, ...after, reattach: true }),
+              CheckoutRequest.make({ ...request, ...after, reattach: true }),
             );
             const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
             // The launch registers the Attempt and starts its guard before `execute` finishes reading
@@ -244,7 +244,7 @@ describe("exe.dev ceilings across a restart", () => {
         AttemptRuntime.of({
           ...runtime,
           unsupervised: () =>
-            new InfraFailure({ message: "Read failed", cause: "storage unavailable" }),
+            InfraFailure.make({ message: "Read failed", cause: "storage unavailable" }),
         }),
       ),
     ).pipe(Layer.provide(stub));
@@ -257,8 +257,8 @@ describe("exe.dev ceilings across a restart", () => {
       // A finished child's 80 tokens and the resulting warning are only in the transcript.
       first: ({ emit, session }: StubParentContext) =>
         emit(
-          new AttemptChannel.SessionEvent({
-            event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(80) }),
+          AttemptChannel.SessionEvent.make({
+            event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(80) }),
           }),
         ),
       transcriptFails: true,
@@ -281,7 +281,7 @@ describe("exe.dev ceilings across a restart", () => {
         ssh.state.salvage = "dirty";
         const storage = new StubStorage();
         const { transcript, sink } = recording();
-        const checkout = new CheckoutRequest({ ...request, ...ceilings });
+        const checkout = CheckoutRequest.make({ ...request, ...ceilings });
         return Effect.gen(function* () {
           yield* stopAfter(ssh, storage, checkout, sink, "40 seconds", first);
           const steers = () =>
@@ -296,13 +296,13 @@ describe("exe.dev ceilings across a restart", () => {
             const executor = yield* Executor;
             yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
             const prepared = yield* executor.prepare(
-              new CheckoutRequest({ ...checkout, reattach: true }),
+              CheckoutRequest.make({ ...checkout, reattach: true }),
             );
             const failure = yield* prepared
               .launch({
                 ...sink,
                 transcript: transcriptFails
-                  ? new InfraFailure({ message: "Read failed", cause: "storage unavailable" })
+                  ? InfraFailure.make({ message: "Read failed", cause: "storage unavailable" })
                   : sink.transcript,
                 salvage: (salvage) =>
                   Effect.sync(() => {
@@ -338,7 +338,7 @@ describe("exe.dev ceilings across a restart", () => {
     const ssh = fakeSsh();
     const storage = new StubStorage();
     const { sink } = recording();
-    const tokens = new CheckoutRequest({
+    const tokens = CheckoutRequest.make({
       ...request,
       maxAttemptMinutes: Option.none(),
       maxAttemptTokens: Option.some(100),
@@ -349,7 +349,7 @@ describe("exe.dev ceilings across a restart", () => {
         const executor = yield* Executor;
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const prepared = yield* executor.prepare(
-          new CheckoutRequest({ ...tokens, reattach: true }),
+          CheckoutRequest.make({ ...tokens, reattach: true }),
         );
         const result = yield* prepared.launch(sink);
         assert.strictEqual(result.message, `Completed: ${request.task}`);

@@ -23,13 +23,13 @@ export const loopScope = (loop: string) => {
     ? Schema.decodeUnknownOption(ProjectId)(loop.split("/")[0])
     : Option.none();
   return Option.match(project, {
-    onNone: () => new InstanceScope(),
-    onSome: (project) => new ProjectScope({ project }),
+    onNone: () => InstanceScope.make(),
+    onSome: (project) => ProjectScope.make({ project }),
   });
 };
 export const repositoryScope = (instance: LoadedInstance, repository: RepositoryName) => {
   const project = instance.config.projects.find((project) => project.includes(repository));
-  return project === undefined ? new InstanceScope() : new ProjectScope({ project: project.id });
+  return project === undefined ? InstanceScope.make() : ProjectScope.make({ project: project.id });
 };
 export const visibleRepository = (
   instance: LoadedInstance,
@@ -43,7 +43,7 @@ const visibleNeed = (
   grants: ReadonlyArray<PermissionGrant>,
   need: NeedView,
 ) => {
-  if (permits(grants, "admin", new InstanceScope())) return true;
+  if (permits(grants, "admin", InstanceScope.make())) return true;
   const repositories = needRepositories(need);
   return (
     repositories.length > 0 &&
@@ -52,7 +52,7 @@ const visibleNeed = (
 };
 export const filterOverview = (instance: LoadedInstance, view: ReadyOverview) =>
   Effect.map(RequestPermissions, (grants) => {
-    if (permits(grants, "admin", new InstanceScope())) return view;
+    if (permits(grants, "admin", InstanceScope.make())) return view;
     const fields = {
       projects: view.projects.filter((project) =>
         visibleRepository(instance, grants, project.repository),
@@ -61,18 +61,18 @@ export const filterOverview = (instance: LoadedInstance, view: ReadyOverview) =>
       needsYou: view.needsYou.filter((need) => visibleNeed(instance, grants, need)),
       dismissedNeeds: view.dismissedNeeds.filter((need) => visibleNeed(instance, grants, need)),
     };
-    return new ReadyOverview(fields);
+    return ReadyOverview.make(fields);
   });
 export const visibleInstance = (instance: LoadedInstance) =>
   Effect.map(RequestPermissions, (grants) => {
-    if (permits(grants, "admin", new InstanceScope())) return instance;
-    return new LoadedInstance({
+    if (permits(grants, "admin", InstanceScope.make())) return instance;
+    return LoadedInstance.make({
       ...instance,
-      config: new UsineConfig({
+      config: UsineConfig.make({
         ...instance.config,
         bindings: [],
         projects: instance.config.projects.filter(({ id }) =>
-          permits(grants, "read", new ProjectScope({ project: id })),
+          permits(grants, "read", ProjectScope.make({ project: id })),
         ),
         repos: instance.config.repos.filter(({ name }) =>
           visibleRepository(instance, grants, name),
@@ -86,9 +86,9 @@ export const visibleInstance = (instance: LoadedInstance) =>
 export const entityPermission = (key: ConfigurationEntityKey, permission: "read" | "maintain") => {
   if (key.kind === "loop") return requirePermission(permission, loopScope(key.identifier));
   if (key.kind === "project")
-    return Schema.decodeUnknownEffect(ProjectId)(key.identifier).pipe(
-      Effect.mapError(() => new AccessDenied({ permission })),
-      Effect.flatMap((project) => requirePermission(permission, new ProjectScope({ project }))),
+    return Schema.decodeEffect(ProjectId)(key.identifier).pipe(
+      Effect.mapError(() => AccessDenied.make({ permission })),
+      Effect.flatMap((project) => requirePermission(permission, ProjectScope.make({ project }))),
     );
-  return requirePermission("admin", new InstanceScope());
+  return requirePermission("admin", InstanceScope.make());
 };

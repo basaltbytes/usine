@@ -158,7 +158,7 @@ const authFile = (accessExpiresIn: Duration.Input, refresh = "refresh-first") =>
     return {
       directory,
       path,
-      login: new ChatGptLogin({
+      login: ChatGptLogin.make({
         authFile: HostFilePath.make(path),
         tokenUrl: UpstreamBase.make(TOKEN_URL),
       }),
@@ -422,7 +422,7 @@ describe("ChatGptLogins", () => {
         assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
         const moved = join(directory, "moved.json");
         yield* replaceAuthFile(moved, "refresh-first", "60 minutes");
-        const elsewhere = new ChatGptLogin({ ...login, authFile: HostFilePath.make(moved) });
+        const elsewhere = ChatGptLogin.make({ ...login, authFile: HostFilePath.make(moved) });
         yield* (yield* ChatGptLogins).reload(elsewhere);
         assert.strictEqual(nonceOf(yield* accessToken(elsewhere)), "second");
         assert.lengthOf(yield* tokenRequests, 1);
@@ -509,7 +509,7 @@ describe("ChatGptLogins", () => {
 const chatGptProviders = (login: ChatGptLogin): LlmProviders => ({
   ...NO_PROVIDERS,
   openai: Option.some(
-    new OpenAiProvider({ upstream: UpstreamBase.make(BACKEND), credential: login }),
+    OpenAiProvider.make({ upstream: UpstreamBase.make(BACKEND), credential: login }),
   ),
 });
 
@@ -527,17 +527,17 @@ const attach = Effect.gen(function* () {
   const attachments = yield* Attachments;
   const callers = yield* CallerTokens;
   yield* attachments.attach(
-    new Attachment({
+    Attachment.make({
       id: ATTACHMENT,
       worker: WORKER,
       repository: REPOSITORY,
-      credential: new AnonymousCredential(),
+      credential: AnonymousCredential.make(),
       expiresAt: DateTime.add(yield* DateTime.now, { hours: 2 }),
     }),
   );
   return Redacted.value(
     yield* callers.issue(
-      new CallerClaims({ attachment: ATTACHMENT, worker: WORKER, repository: REPOSITORY }),
+      CallerClaims.make({ attachment: ATTACHMENT, worker: WORKER, repository: REPOSITORY }),
     ),
   );
 });
@@ -727,7 +727,7 @@ describe("the Node gateway with a ChatGPT login", () => {
       const providers: LlmProviders = {
         ...NO_PROVIDERS,
         openai: Option.some(
-          new OpenAiProvider({
+          OpenAiProvider.make({
             upstream: UpstreamBase.make(`${backend.origin}/backend-api/codex`),
             credential: login,
           }),

@@ -46,8 +46,8 @@ export const DismissNeed = ({ need, action }: DismissNeedProps) => {
             projects: projectAttention(overview.projects, needsYou),
           };
           return overview._tag === "Ready"
-            ? new ReadyOverview({ ...overview, ...fields })
-            : new NeedsSetupOverview({ ...overview, ...fields });
+            ? ReadyOverview.make({ ...overview, ...fields })
+            : NeedsSetupOverview.make({ ...overview, ...fields });
         },
       );
       await queries.invalidateQueries({ queryKey: overviewQuery().queryKey });

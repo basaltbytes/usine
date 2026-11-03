@@ -62,7 +62,7 @@ const OPENAI: CloudflareProviderKey = {
   apiKey: Redacted.make("sk-openai-test-key"),
 };
 
-const request = new CheckoutRequest({ ...sshRequest, worker: WORKER });
+const request = CheckoutRequest.make({ ...sshRequest, worker: WORKER });
 
 /** A credential provider that can't reach GitHub, so it issues no token. */
 const unreachableGitHub: ReturnType<typeof mintingProvider> = {
@@ -71,7 +71,7 @@ const unreachableGitHub: ReturnType<typeof mintingProvider> = {
   layer: Layer.succeed(CredentialProvider)({
     issue: (repository) =>
       Effect.fail(
-        new CredentialUnavailableError({
+        CredentialUnavailableError.make({
           repository,
           reason: "unreachable",
           message: "GitHub didn't answer the installation token request",
@@ -91,9 +91,9 @@ const sink = {
 };
 
 const brain = (harness: "claude" | "codex" | "pi") =>
-  new Agent({
+  Agent.make({
     ...request.agent,
-    brain: new BrainSpec({ harness, model: ModelId.make("model"), effort: "high" }),
+    brain: BrainSpec.make({ harness, model: ModelId.make("model"), effort: "high" }),
   });
 
 const executor = (
@@ -308,7 +308,7 @@ describe("cloudflare Worker", () => {
           const cloudflare = yield* Executor;
           assert.isTrue(yield* cloudflare.isLive(request.attemptId));
           const prepared = yield* cloudflare.prepare(
-            new CheckoutRequest({ ...request, reattach: true }),
+            CheckoutRequest.make({ ...request, reattach: true }),
           );
           yield* prepared.launch(sink);
         }).pipe(Effect.scoped, Effect.provide(executor(worker, credentials, completes, storage)));
@@ -347,7 +347,7 @@ describe("cloudflare Worker", () => {
           const worker = yield* fakeWorker;
           const storage = new StubStorage();
           const credentials = mintingProvider();
-          const checkout = new CheckoutRequest({ ...request, permissions });
+          const checkout = CheckoutRequest.make({ ...request, permissions });
           const working = yield* Deferred.make<void>();
           const blocks: StubParent = () =>
             Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
@@ -369,7 +369,10 @@ describe("cloudflare Worker", () => {
                 cancel: (id) =>
                   Effect.gen(function* () {
                     if (yield* Ref.get(refusing))
-                      return yield* new InfraFailure({ message: "Stop refused", cause: "offline" });
+                      return yield* InfraFailure.make({
+                        message: "Stop refused",
+                        cause: "offline",
+                      });
                     yield* original.cancel(id);
                   }),
               });
@@ -386,7 +389,7 @@ describe("cloudflare Worker", () => {
           );
           yield* Executor.pipe(
             Effect.flatMap((cloudflare) =>
-              cloudflare.prepare(new CheckoutRequest({ ...checkout, reattach: true })),
+              cloudflare.prepare(CheckoutRequest.make({ ...checkout, reattach: true })),
             ),
             Effect.scoped,
             Effect.provide(restarted),
@@ -447,7 +450,7 @@ describe("cloudflare Worker", () => {
         // After the restart, GitHub doesn't answer when the reattachment asks for a token.
         const refused = yield* Executor.pipe(
           Effect.flatMap((cloudflare) =>
-            cloudflare.prepare(new CheckoutRequest({ ...request, reattach: true })),
+            cloudflare.prepare(CheckoutRequest.make({ ...request, reattach: true })),
           ),
           Effect.flip,
           Effect.scoped,
@@ -563,7 +566,7 @@ describe("cloudflare Worker", () => {
       yield* Effect.gen(function* () {
         const cloudflare = yield* Executor;
         const codex = yield* cloudflare
-          .prepare(new CheckoutRequest({ ...request, agent: brain("codex") }))
+          .prepare(CheckoutRequest.make({ ...request, agent: brain("codex") }))
           .pipe(Effect.flip);
         const pi = yield* cloudflare.preflight(WORKER, [brain("pi").brain], 1).pipe(Effect.flip);
         assert(codex instanceof WorkerCapabilityError && pi instanceof WorkerCapabilityError);
@@ -580,7 +583,7 @@ describe("cloudflare Worker", () => {
     Effect.gen(function* () {
       const worker = yield* fakeWorker;
       const credentials = mintingProvider();
-      const codex = new CheckoutRequest({ ...request, agent: brain("codex") });
+      const codex = CheckoutRequest.make({ ...request, agent: brain("codex") });
       const probes: Array<{ sandbox: string; words: ReadonlyArray<string> }> = [];
       worker.state.respond = (sandbox, words) => {
         if (words[0] === "codex") probes.push({ sandbox: sandbox.name, words });

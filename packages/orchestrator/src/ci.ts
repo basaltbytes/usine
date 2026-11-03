@@ -91,7 +91,7 @@ export class CiMonitor extends Context.Service<
           return yield* engine.settleCi(
             runId,
             head,
-            new CiHandedOff({
+            CiHandedOff.make({
               reason: "CI could not complete; a fix run was admitted.",
               fixRunId: admitted.value,
             }),
@@ -103,7 +103,7 @@ export class CiMonitor extends Context.Service<
             head,
             newHead: observed.head,
           });
-          return yield* engine.settleCi(runId, head, new CiSuperseded({ head: observed.head }));
+          return yield* engine.settleCi(runId, head, CiSuperseded.make({ head: observed.head }));
         }
         const now = yield* DateTime.now;
         const timedOut =
@@ -119,7 +119,7 @@ export class CiMonitor extends Context.Service<
             return yield* engine.settleCi(
               runId,
               head,
-              new CiFailed({
+              CiFailed.make({
                 message: `CI did not settle within ${handoff.timeoutSeconds} seconds. Check https://github.com/${wait.repository}/pull/${pullRequest}/checks`,
               }),
             );
@@ -139,11 +139,11 @@ export class CiMonitor extends Context.Service<
             yield* writer.updateLabels(
               wait.repository,
               mutation.item,
-              new ItemLabelMutation(mutation),
+              ItemLabelMutation.make(mutation),
             );
           }
           yield* Effect.logInfo("CI passed; recorded completion actions applied", { runId, head });
-          return yield* engine.settleCi(runId, head, new CiPassed());
+          return yield* engine.settleCi(runId, head, CiPassed.make());
         }
         const failureReason =
           observed.state === "conflict"
@@ -176,7 +176,7 @@ export class CiMonitor extends Context.Service<
           return yield* engine.settleCi(
             runId,
             head,
-            new CiFailed({
+            CiFailed.make({
               message: `${failureReason} Fix loop ${handoff.fixLoop} is missing, paused, or does not select this pull request's repository.`,
             }),
           );
@@ -196,12 +196,12 @@ export class CiMonitor extends Context.Service<
               );
         const observation = yield* observeItem(
           wait.repository,
-          new ChangedPullRequest({ number: pullRequest, updatedAt: now }),
+          ChangedPullRequest.make({ number: pullRequest, updatedAt: now }),
         ).pipe(Effect.provide(observationServices));
         if (observation.projection.payload.headRefOid !== head) {
           const newer = yield* checks.snapshot(wait.repository, pullRequest);
           if (newer.head !== head)
-            return yield* engine.settleCi(runId, head, new CiSuperseded({ head: newer.head }));
+            return yield* engine.settleCi(runId, head, CiSuperseded.make({ head: newer.head }));
           return;
         }
         if (observation.projection.payload.state !== "OPEN") {
@@ -209,7 +209,7 @@ export class CiMonitor extends Context.Service<
           return yield* engine.settleCi(
             runId,
             head,
-            new CiFailed({
+            CiFailed.make({
               message: `${failureReason} The pull request closed; no fix was started.`,
             }),
           );
@@ -232,7 +232,7 @@ export class CiMonitor extends Context.Service<
           ),
         });
         const result = yield* engine.submit(
-          new Submission({
+          Submission.make({
             ...submission,
             ciFailureHead: Option.some(head),
             ciOnGreen: handoff.onGreen,
@@ -265,7 +265,7 @@ export class CiMonitor extends Context.Service<
           return yield* engine.settleCi(
             runId,
             head,
-            new CiFailed({
+            CiFailed.make({
               message: `${failure.reason} Fix loop ${fix.loop.name} did not admit its queued event within ${handoff.timeoutSeconds} seconds.`,
             }),
           );
@@ -274,11 +274,11 @@ export class CiMonitor extends Context.Service<
           runId,
           head,
           result._tag === "Claimed"
-            ? new CiHandedOff({
+            ? CiHandedOff.make({
                 reason: failure.reason,
                 fixRunId: result.runId,
               })
-            : new CiFailed({
+            : CiFailed.make({
                 message: `${failure.reason} Fix loop ${fix.loop.name}: ${result._tag}.`,
               }),
         );
@@ -318,7 +318,7 @@ export class CiMonitor extends Context.Service<
               ...repositoryFailureLogFields(error),
             });
             failures.push(
-              new RepositoryPollFailure({
+              RepositoryPollFailure.make({
                 repository: wait.repository,
                 errorTag: error._tag,
                 message: repositoryFailureLogFields(error).message,

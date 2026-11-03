@@ -17,7 +17,7 @@ it.effect.each(["issue", "pr"] as const)(
   "pins each %s Event to its worker revision, including a later push",
   (source) =>
     Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [{ name: "acme/demo" }],
       });
@@ -27,7 +27,7 @@ it.effect.each(["issue", "pr"] as const)(
         InstancePath.make("loops/review.md"),
         `---\ntrigger:\n  on: ${source}\n  if: 'true'\nagent: reviewer\n---\nInspect item {{ item.number }}.`,
       );
-      const agent = Schema.decodeUnknownSync(AgentFile)({
+      const agent = Schema.decodeSync(AgentFile)({
         name: "reviewer",
         harness: "codex",
         model: "gpt-5.6-sol",
@@ -36,7 +36,7 @@ it.effect.each(["issue", "pr"] as const)(
         parentEffort: Option.none(),
         persona: "Review the code.",
       });
-      const instance = new LoadedInstance({
+      const instance = LoadedInstance.make({
         config,
         agents: [agent],
         invalidAgents: [],
@@ -59,7 +59,7 @@ it.effect.each(["issue", "pr"] as const)(
         drain: () => Effect.void,
         waitForUpgrade: () => Effect.void,
         cancelUpgrade: Effect.void,
-        upgradeDrain: Effect.succeed(Option.none()),
+        upgradeDrain: Effect.succeedNone,
         retry: () => Effect.die("unused"),
         runAgain: () => Effect.die("unused"),
         revoke: () => Effect.succeed([]),
@@ -67,7 +67,7 @@ it.effect.each(["issue", "pr"] as const)(
         submit: (submission) =>
           Effect.sync(() => {
             submissions.push(submission);
-            return new Claimed({
+            return Claimed.make({
               eventId: submission.event.id,
               runId: RunId.make(submission.event.id),
             });
@@ -75,7 +75,7 @@ it.effect.each(["issue", "pr"] as const)(
       });
       for (const digit of ["a", "b"]) {
         const sha = digit.repeat(40);
-        const projection = Schema.decodeUnknownSync(ItemProjection)({
+        const projection = Schema.decodeSync(ItemProjection)({
           repository: repository.name,
           source,
           number: 63,
@@ -92,7 +92,7 @@ it.effect.each(["issue", "pr"] as const)(
       assert.strictEqual(submissions.length, 2);
       assert.notStrictEqual(submissions[0]?.event.id, submissions[1]?.event.id);
       if (source === "pr") {
-        const invalid = Schema.decodeUnknownSync(ItemProjection)({
+        const invalid = Schema.decodeSync(ItemProjection)({
           repository: repository.name,
           source,
           number: 63,

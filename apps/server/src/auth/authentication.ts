@@ -132,7 +132,7 @@ export const authenticationLayer = (options: {
         yield* Effect.annotateCurrentSpan({ memberId: member.id, kind });
         const secret = randomSecret();
         const now = yield* Clock.currentTimeMillis;
-        const token = new InstanceToken({
+        const token = InstanceToken.make({
           id: TokenId.make(crypto.randomUUID()),
           memberId: member.id,
           hash: secretHash(Redacted.value(secret)),
@@ -166,7 +166,7 @@ export const authenticationLayer = (options: {
         const member = members.find((entry) => entry.id === identity.id);
         if (member !== undefined) return yield* store.rename(identity);
         if (bootstrap && members.length === 0) {
-          const first = new Member({
+          const first = Member.make({
             ...identity,
             addedAt: yield* Clock.currentTimeMillis,
             addedBy: identity.login,
@@ -438,7 +438,7 @@ export const seedOperator = Effect.fn("Authentication.seedOperator")(function* (
   yield* Effect.annotateCurrentSpan({ login: login.value });
   const github = yield* GitHubSignIn;
   const identity = yield* github.lookup(login.value).pipe(
-    Effect.map(Option.some),
+    Effect.asSome,
     Effect.catchTag("AuthError", (error) =>
       Effect.logWarning("Operator enrollment deferred until the next start", {
         login: login.value,
@@ -448,7 +448,7 @@ export const seedOperator = Effect.fn("Authentication.seedOperator")(function* (
   );
   if (Option.isNone(identity)) return;
   yield* (yield* MemberAccess).enroll(
-    new Member({
+    Member.make({
       ...identity.value,
       addedBy: identity.value.login,
       addedAt: yield* Clock.currentTimeMillis,

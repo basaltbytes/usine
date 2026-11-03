@@ -25,7 +25,7 @@ const problemEntity = (file: string) => {
   const identifier = markdown
     ? file.slice(separator + 1).replace(/\.md$/u, "")
     : file.slice(separator + 1);
-  return new ConfigurationEntityKey({
+  return ConfigurationEntityKey.make({
     kind: Option.getOrElse(
       Schema.decodeUnknownOption(ConfigurationEntityKind)(kind),
       () => "settings" as const,
@@ -37,12 +37,12 @@ const problemEntity = (file: string) => {
 const refusal = (error: ConfigurationEditorError) => {
   switch (error._tag) {
     case "AccessDenied":
-      return new OperatorHttpError({
+      return OperatorHttpError.make({
         error: "AccessDenied",
         message: "You do not have permission for this configuration entity.",
       });
     case "StaleRevision":
-      return new StaleRevisionRefusal({
+      return StaleRevisionRefusal.make({
         error: error._tag,
         message: "The configuration changed. Read it again before saving.",
         expected: error.expected,
@@ -56,7 +56,7 @@ const refusal = (error: ConfigurationEditorError) => {
           ...detail,
         }));
       });
-      return new ConfigurationInvalidRefusal({
+      return ConfigurationInvalidRefusal.make({
         error: error._tag,
         message: "The configuration is invalid.",
         problems: Arr.isArrayNonEmpty(problems)
@@ -71,15 +71,18 @@ const refusal = (error: ConfigurationEditorError) => {
       });
     }
     case "ConfigurationRevertBlocked":
-      return new ConfigurationRevertRefusal({
+      return ConfigurationRevertRefusal.make({
         error: error._tag,
         message: "Later revisions changed these entities.",
         entities: error.entities,
       });
     case "ConfigurationNotFound":
-      return new OperatorHttpError({ error: error._tag, message: error.message });
+      return OperatorHttpError.make({ error: error._tag, message: error.message });
     case "ConfigurationStoreError":
-      return new OperatorHttpError({ error: error._tag, message: `Could not ${error.operation}.` });
+      return OperatorHttpError.make({
+        error: error._tag,
+        message: `Could not ${error.operation}.`,
+      });
     default:
       return reloadRefusal(error, error.message);
   }
@@ -91,7 +94,7 @@ export const fromConfiguration = <A>(
   Effect.gen(function* () {
     const editor = yield* Effect.serviceOption(ConfigurationEditor);
     if (Option.isNone(editor))
-      return yield* new OperatorHttpError({
+      return yield* OperatorHttpError.make({
         error: "BackendUnavailableError",
         message: "Configuration editing is unavailable.",
       });

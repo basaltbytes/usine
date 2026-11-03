@@ -35,11 +35,11 @@ it.each([
     });
     client.setQueryData(
       configurationQuery().queryKey,
-      new ConfigurationView({ ...configurationFixture(), repositories: [] }),
+      ConfigurationView.make({ ...configurationFixture(), repositories: [] }),
     );
     client.setQueryData(
       overviewQuery().queryKey,
-      new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
+      ReadyOverview.make({ projects: [], loops: [], needsYou: [] }),
     );
     client.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
     const router = createRouter({

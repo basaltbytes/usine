@@ -34,20 +34,20 @@ import {
 } from "~/lib/runs/transcript/navigation/model";
 
 const attemptId = AttemptId.make("attempt");
-const brain = new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
-const parent = new ParentSession({
+const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
   brain,
 });
-const child = new ChildSession({
+const child = ChildSession.make({
   id: AgentSessionId.make("child"),
   parentId: parent.id,
   agent: AgentName.make("reviewer"),
   brain,
 });
 const record = (sequence: number, payload: TranscriptEventView["payload"]) =>
-  new TranscriptEventView({
+  TranscriptEventView.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId,
     receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
@@ -55,26 +55,26 @@ const record = (sequence: number, payload: TranscriptEventView["payload"]) =>
     payload,
   });
 const event = (sequence: number, event: AgentSessionEvent) =>
-  record(sequence, new SessionEvent({ event }));
+  record(sequence, SessionEvent.make({ event }));
 const message = (sequence: number, session: AgentSession = parent) =>
-  event(sequence, new TextOutput({ session, text: `Activity ${sequence}` }));
+  event(sequence, TextOutput.make({ session, text: `Activity ${sequence}` }));
 const started = (sequence: number, session: AgentSession = parent) =>
   event(
     sequence,
-    new ToolStarted({ session, callId: "call", tool: "read", input: { path: "README.md" } }),
+    ToolStarted.make({ session, callId: "call", tool: "read", input: { path: "README.md" } }),
   );
 const finished = (sequence: number, session: AgentSession = parent, isError = false) =>
   event(
     sequence,
-    new ToolFinished({ session, callId: "call", tool: "read", output: "Result", isError }),
+    ToolFinished.make({ session, callId: "call", tool: "read", output: "Result", isError }),
   );
 const meter = (sequence: number) =>
   event(
     sequence,
-    new PoolRateLimitsUpdated({
+    PoolRateLimitsUpdated.make({
       session: parent,
       pool: "chatgptPlan",
-      rateLimits: new RateLimitsSnapshot({
+      rateLimits: RateLimitsSnapshot.make({
         limitId: Option.none(),
         limitName: Option.none(),
         primary: Option.none(),
@@ -136,7 +136,10 @@ describe("conversation update index", () => {
       started(1),
       started(2, child),
       finished(3, child, true),
-      record(4, new FailedTranscriptView({ failure: new AgentFailureView({ message: "Failed" }) })),
+      record(
+        4,
+        FailedTranscriptView.make({ failure: AgentFailureView.make({ message: "Failed" }) }),
+      ),
     ]);
     const errors = rows.filter((row) => row.isError);
     assert.deepEqual(

@@ -98,7 +98,7 @@ const changesBy = <A, N>(
 
 /** Compares a newly loaded instance folder with the running instance. */
 export const instanceReload = (running: LoadedInstance, loaded: LoadedInstance): InstanceReload =>
-  new InstanceReload({
+  InstanceReload.make({
     loops: changesBy(
       running.loops,
       loaded.loops,

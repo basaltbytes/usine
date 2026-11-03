@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { CommitSha } from "../repository.ts";
 
 /** A commit between the workspace base and the final HEAD. */
@@ -19,7 +19,7 @@ export class PullRequest extends Schema.TaggedClass<PullRequest>("StepResult/Pul
     url: Schema.URLFromString,
     /** The pushed head, or `None` for facts recorded before CI handoffs. */
     head: Schema.OptionFromOptionalKey(CommitSha).pipe(
-      Schema.withConstructorDefault(Effect.succeed(Option.none())),
+      Schema.withConstructorDefault(Effect.succeedNone),
     ),
   },
 ) {}

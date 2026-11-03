@@ -72,7 +72,9 @@ export const readSettingsSource = Effect.fn("GatewayNode.readSettingsSource")(fu
   const contents = yield* Effect.forEach(files, (path) =>
     fs
       .readFileString(path)
-      .pipe(Effect.mapError((error) => new EnvironmentFileError({ path, message: error.message }))),
+      .pipe(
+        Effect.mapError((error) => EnvironmentFileError.make({ path, message: error.message })),
+      ),
   );
   const provider = contents.reduce(
     (below, text) => ConfigProvider.fromDotEnvContents(text).pipe(ConfigProvider.orElse(below)),
@@ -89,7 +91,7 @@ const onlyOne = <A, B>(
 ): Effect.Effect<Option.Option<A | B>, ConflictingProviderCredentials> =>
   Option.isSome(first) && Option.isSome(second)
     ? Effect.fail(
-        new ConflictingProviderCredentials({
+        ConflictingProviderCredentials.make({
           provider,
           message: `${firstName} and ${secondName} are both set, and the gateway sends only one ${provider} credential. Unset one of them.`,
         }),
@@ -121,21 +123,19 @@ export const llmProviders = Effect.gen(function* () {
   );
   const anthropicCredential = yield* onlyOne(
     "anthropic",
-    ["ANTHROPIC_API_KEY", Option.map(anthropicKey, (key) => new AnthropicApiKey({ key }))],
+    ["ANTHROPIC_API_KEY", Option.map(anthropicKey, (key) => AnthropicApiKey.make({ key }))],
     [
       "USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN",
-      Option.map(subscription, (token) => new AnthropicSubscriptionToken({ token })),
+      Option.map(subscription, (token) => AnthropicSubscriptionToken.make({ token })),
     ],
   );
   const openAiCredential = yield* onlyOne(
     "openai",
-    ["OPENAI_API_KEY", Option.map(openAiKey, (key) => new OpenAiApiKey({ key }))],
+    ["OPENAI_API_KEY", Option.map(openAiKey, (key) => OpenAiApiKey.make({ key }))],
     [
       "USINE_GATEWAY_CHATGPT_AUTH_FILE",
-      Option.map(
-        chatGptAuthFile,
-        (authFile) =>
-          new ChatGptLogin({ authFile, tokenUrl: UpstreamBase.make(CHATGPT_TOKEN_URL) }),
+      Option.map(chatGptAuthFile, (authFile) =>
+        ChatGptLogin.make({ authFile, tokenUrl: UpstreamBase.make(CHATGPT_TOKEN_URL) }),
       ),
     ],
   );
@@ -144,17 +144,14 @@ export const llmProviders = Effect.gen(function* () {
     yield* checkAuthFileWritable(openAiCredential.value.authFile);
   }
   return {
-    anthropic: Option.map(
-      anthropicCredential,
-      (credential) => new AnthropicProvider({ upstream: anthropicUpstream, credential }),
+    anthropic: Option.map(anthropicCredential, (credential) =>
+      AnthropicProvider.make({ upstream: anthropicUpstream, credential }),
     ),
-    openai: Option.map(
-      openAiCredential,
-      (credential) =>
-        new OpenAiProvider({
-          upstream: credential._tag === "ChatGptLogin" ? chatGptUpstream : openAiUpstream,
-          credential,
-        }),
+    openai: Option.map(openAiCredential, (credential) =>
+      OpenAiProvider.make({
+        upstream: credential._tag === "ChatGptLogin" ? chatGptUpstream : openAiUpstream,
+        credential,
+      }),
     ),
   } satisfies LlmProviders;
 });

@@ -41,45 +41,45 @@ it.each([1440, 390])(
     await page.viewport(width, width === 390 ? 844 : 900);
     await commands.reducedMotion(true);
     const bindings = [
-      new RoleBinding({
+      RoleBinding.make({
         name: "instance-admin",
         member: GitHubUserId.make(1),
         role: "admin",
-        scope: new InstanceScope(),
+        scope: InstanceScope.make(),
       }),
-      new RoleBinding({
+      RoleBinding.make({
         name: "project-operator",
         member: GitHubUserId.make(2),
         role: "operator",
-        scope: new ProjectScope({ project: ProjectId.make("usine") }),
+        scope: ProjectScope.make({ project: ProjectId.make("usine") }),
       }),
-      new RoleBinding({
+      RoleBinding.make({
         name: "project-viewer",
         member: GitHubUserId.make(3),
         role: "viewer",
-        scope: new ProjectScope({ project: ProjectId.make("usine") }),
+        scope: ProjectScope.make({ project: ProjectId.make("usine") }),
       }),
     ];
-    const configuration = new ConfigurationView({ ...configurationFixture(), bindings });
+    const configuration = ConfigurationView.make({ ...configurationFixture(), bindings });
     const configurationJson = JSON.stringify(Schema.encodeSync(ConfigurationView)(configuration));
     await commands.configurationEditorResponses([], configurationJson);
     await commands.accessResponses(configurationJson, JSON.stringify(administratorPermissions));
     const template = fullTask().runs[0];
     if (template === undefined) throw new Error("Missing waiting run fixture");
-    const run = new RunView({
+    const run = RunView.make({
       ...template,
       id: RunId.make("approval-run"),
       loop: LoopName.make("usine/fix-ci"),
     });
-    const overview = new ReadyOverview({
+    const overview = ReadyOverview.make({
       ...taskOverview(),
-      projects: taskOverview().projects.map(
-        (project) => new ProjectView({ ...project, id: ProjectId.make("usine"), runs: [run] }),
+      projects: taskOverview().projects.map((project) =>
+        ProjectView.make({ ...project, id: ProjectId.make("usine"), runs: [run] }),
       ),
       needsYou: [],
     });
     const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
-    const detail = new RunDetailView({
+    const detail = RunDetailView.make({
       run,
       agentDefinitionChanged: false,
       eventDedupKey: "roles-capture",

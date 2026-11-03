@@ -143,7 +143,7 @@ const isoOrNull = Option.match({ onNone: () => null, onSome: DateTime.formatIso 
  */
 const harvestedComments = (summary: RunSnapshot): ReadonlyArray<TaskCommentView> => {
   const view = (comment: Comment, endedAt: Option.Option<DateTime.Utc>) =>
-    new TaskCommentView({
+    TaskCommentView.make({
       runId: summary.run.id,
       kind: comment.kind,
       url: comment.url.toString(),
@@ -190,7 +190,7 @@ const makeTaskReader = Effect.gen(function* () {
         repository,
         item: number,
       });
-      return yield* new BoardProjectNotFoundError({ repository });
+      return yield* BoardProjectNotFoundError.make({ repository });
     }
     const [stored, labelProjection, states, asks, provisioning] = yield* Effect.all(
       [
@@ -231,7 +231,7 @@ const makeTaskReader = Effect.gen(function* () {
         item: number,
         selectedItems: stored.length,
       });
-      return yield* new BoardItemNotFoundError({ repository: managed.name, item: number });
+      return yield* BoardItemNotFoundError.make({ repository: managed.name, item: number });
     }
     const { lane, task } = placed;
     const memberKeys = new Set(task.items.map(({ itemKey }) => itemKey));
@@ -261,7 +261,7 @@ const makeTaskReader = Effect.gen(function* () {
       } = result.success;
       details.set(
         itemKey,
-        new TaskItemView({
+        TaskItemView.make({
           itemKey,
           kind,
           number: itemNumber,
@@ -278,7 +278,7 @@ const makeTaskReader = Effect.gen(function* () {
       return detail === undefined ? [] : [detail];
     });
     if (first === undefined) {
-      return yield* new BoardItemNotFoundError({ repository: managed.name, item: number });
+      return yield* BoardItemNotFoundError.make({ repository: managed.name, item: number });
     }
     const detailRuns = yield* Effect.forEach(
       summaries.filter(({ itemKey }) => memberKeys.has(itemKey)),
@@ -292,12 +292,12 @@ const makeTaskReader = Effect.gen(function* () {
           b.run.id.localeCompare(a.run.id),
       )
       .flatMap(harvestedComments);
-    const view = new TaskView({
+    const view = TaskView.make({
       repository: managed.name,
       number: first.number,
       title: task.title,
       current: task.itemKey,
-      lane: new TaskLaneView({ id: lane.id, name: lane.name }),
+      lane: TaskLaneView.make({ id: lane.id, name: lane.name }),
       needsYou: task.needsYou,
       items: [first, ...rest],
       runs: detailRuns

@@ -15,8 +15,8 @@ import { audienceScope, authorize, expandTarget } from "../../src/changes/policy
 
 const project = ProjectId.make("visible");
 const repository = RepositoryName.make("owner/visible");
-const scope = new ProjectScope({ project });
-const projects = [new Project({ id: project, name: "Visible", repositories: [repository] })];
+const scope = ProjectScope.make({ project });
+const projects = [Project.make({ id: project, name: "Visible", repositories: [repository] })];
 
 it("resolves repository and loop audiences without granting project readers orphaned notices", () => {
   const projectAudiences: ReadonlyArray<ChangeAudience> = [
@@ -27,29 +27,31 @@ it("resolves repository and loop audiences without granting project readers orph
   for (const audience of projectAudiences) expect(audienceScope(audience, projects)).toEqual(scope);
   expect(audienceScope({ _tag: "Readers" }, projects)).toEqual({ _tag: "Readers" });
   for (const audience of [
-    new InstanceScope(),
+    InstanceScope.make(),
     { _tag: "Repository", repository: RepositoryName.make("owner/removed") },
     { _tag: "Loop", loop: LoopName.make("invalid.project/developer") },
   ] as const) {
     const resolved = audienceScope(audience, projects);
-    expect(resolved).toEqual(new InstanceScope());
-    expect(authorize([new PermissionGrant({ permission: "read", scope })], resolved)).toBe(false);
+    expect(resolved).toEqual(InstanceScope.make());
+    expect(authorize([PermissionGrant.make({ permission: "read", scope })], resolved)).toBe(false);
   }
 });
 
 it("requires read access at the resolved scope and allows shared notices for any reader", () => {
-  const other = new ProjectScope({ project: ProjectId.make("hidden") });
-  const reader = [new PermissionGrant({ permission: "read", scope })];
-  const instanceReader = [new PermissionGrant({ permission: "read", scope: new InstanceScope() })];
-  for (const target of [scope, other, new InstanceScope(), { _tag: "Readers" } as const]) {
+  const other = ProjectScope.make({ project: ProjectId.make("hidden") });
+  const reader = [PermissionGrant.make({ permission: "read", scope })];
+  const instanceReader = [
+    PermissionGrant.make({ permission: "read", scope: InstanceScope.make() }),
+  ];
+  for (const target of [scope, other, InstanceScope.make(), { _tag: "Readers" } as const]) {
     expect(authorize(administratorPermissions, target)).toBe(true);
     expect(authorize(instanceReader, target)).toBe(true);
     expect(authorize([], target)).toBe(false);
-    expect(authorize([new PermissionGrant({ permission: "operate", scope })], target)).toBe(false);
+    expect(authorize([PermissionGrant.make({ permission: "operate", scope })], target)).toBe(false);
   }
   expect(authorize(reader, scope)).toBe(true);
   expect(authorize(reader, other)).toBe(false);
-  expect(authorize(reader, new InstanceScope())).toBe(false);
+  expect(authorize(reader, InstanceScope.make())).toBe(false);
   expect(authorize(reader, { _tag: "Readers" })).toBe(true);
 });
 

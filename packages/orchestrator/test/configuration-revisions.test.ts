@@ -75,7 +75,7 @@ it.live("applies committed agent brains and webhook settings live", () =>
       actor: initial.config.operator,
       message: Option.none(),
       changes: [
-        new ConfigurationChange({
+        ConfigurationChange.make({
           ...agent,
           before: agent.after,
           after: Option.map(agent.after, (value) => ({
@@ -95,7 +95,7 @@ it.live("applies committed agent brains and webhook settings live", () =>
       actor: initial.config.operator,
       message: Option.none(),
       changes: [
-        new ConfigurationChange({
+        ConfigurationChange.make({
           ...settings,
           before: settings.after,
           after: Option.map(settings.after, (value) => ({

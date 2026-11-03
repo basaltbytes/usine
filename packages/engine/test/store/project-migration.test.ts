@@ -20,28 +20,27 @@ it.effect(
       Effect.gen(function* () {
         const store = yield* RunStore;
         const sql = yield* SqlClient.SqlClient;
-        const projects = ["one", "two"].map(
-          (name) =>
-            new RepositoryProject({
-              repository: RepositoryName.make(`acme/${name}`),
-              project: ProjectId.make(`acme-${name}`),
-              loops: [
-                LoopName.make(`acme-${name}/implement`),
-                ...(name === "one" ? [LoopName.make("acme-one/review")] : []),
-              ],
-            }),
+        const projects = ["one", "two"].map((name) =>
+          RepositoryProject.make({
+            repository: RepositoryName.make(`acme/${name}`),
+            project: ProjectId.make(`acme-${name}`),
+            loops: [
+              LoopName.make(`acme-${name}/implement`),
+              ...(name === "one" ? [LoopName.make("acme-one/review")] : []),
+            ],
+          }),
         );
         const submissions: Array<Submission> = [];
         for (const { repository } of projects) {
           const key = JSON.stringify(["implement", repository, 1, "hash"]);
-          const submission = new Submission({
+          const submission = Submission.make({
             ...lifecycleSubmission,
             repository,
             loop: LoopName.make("implement"),
             approval: "required",
             cycleLimit: Option.some(CycleLimit.make(1)),
             itemKey: ItemKey.make(JSON.stringify(["github", repository, 1])),
-            event: new Event({
+            event: Event.make({
               ...lifecycleSubmission.event,
               id: EventId.make(key),
               dedupKey: DedupKey.make(key),
@@ -90,10 +89,10 @@ it.effect(
           expect(asks).toEqual([{ loop: name, participant: name }]);
           const dedupKey = DedupKey.make(JSON.stringify([name, submission.repository, 1, "hash"]));
           const repeated = yield* store.recordAndClaim(
-            new Submission({
+            Submission.make({
               ...submission,
               loop: name,
-              event: new Event({ ...submission.event, id: EventId.make(dedupKey), dedupKey }),
+              event: Event.make({ ...submission.event, id: EventId.make(dedupKey), dedupKey }),
             }),
             RunId.make("must-not-open"),
           );

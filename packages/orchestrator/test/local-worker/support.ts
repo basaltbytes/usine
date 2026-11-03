@@ -33,9 +33,13 @@ import { alwaysHoldsLayer } from "../support/polling.ts";
  */
 export const aloneOnItem = (attemptId: AttemptId) =>
   Effect.succeed(
-    new AttemptWindows({
+    AttemptWindows.make({
       own: Option.some(
-        new AttemptWindow({ attemptId, startedAt: DateTime.makeUnsafe(0), endedAt: Option.none() }),
+        AttemptWindow.make({
+          attemptId,
+          startedAt: DateTime.makeUnsafe(0),
+          endedAt: Option.none(),
+        }),
       ),
       overlapping: [],
     }),
@@ -52,11 +56,11 @@ export const LIVE_TEST_TIMEOUT = 30_000;
 
 /** Reports every brain ready without probing the machine's harness CLIs. */
 export const harnessReady: HarnessProbe = (brain) =>
-  Effect.succeed(new HarnessReady({ harness: brain.harness }));
+  Effect.succeed(HarnessReady.make({ harness: brain.harness }));
 
-export const testAgent = new Agent({
+export const testAgent = Agent.make({
   name: AgentName.make("developer"),
-  brain: new BrainSpec({
+  brain: BrainSpec.make({
     harness: "claude",
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
@@ -66,16 +70,16 @@ export const testAgent = new Agent({
   persona: AgentPersona.make("Implement the task."),
 });
 
-export const config = Schema.decodeUnknownSync(UsineConfig)({
+export const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [{ name: "acme/demo" }],
   workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
 });
 
 export const workerCredential = (value: Redacted.Redacted<string>) =>
-  new WorkerCredential({
+  WorkerCredential.make({
     value,
-    expiresAt: DateTime.makeUnsafe(Date.now() + 3_600_000),
+    expiresAt: DateTime.makeUnsafe(Date.now() + 3600000),
   });
 
 export const credentialLayer = Layer.succeed(CredentialProvider)({
@@ -126,8 +130,8 @@ export const makeRemote = Effect.fn("test.makeRemote")(function* (root: string) 
 });
 
 export const submission = (number: number, receivedAt = `2026-08-30T12:00:0${number}Z`) =>
-  new Submission({
-    event: new Event({
+  Submission.make({
+    event: Event.make({
       id: EventId.make(`local-event-${number}`),
       dedupKey: DedupKey.make(`local/item-${number}/main`),
       payload: { number },
@@ -169,7 +173,7 @@ export const waitForStarted = Effect.fn("test.waitForStarted")(function* (
   attemptId: AttemptId,
 ) {
   for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
-    const transcript = yield* engine.transcript(new TranscriptAllQuery({ attemptId }));
+    const transcript = yield* engine.transcript(TranscriptAllQuery.make({ attemptId }));
     if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) return;
     yield* Effect.sleep("10 millis");
   }

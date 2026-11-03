@@ -45,7 +45,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
   const roster = new Map(instance.agents.map((agent) => [agent.name, agent]));
   const loaded = roster.get(loop.agent);
   if (loaded === undefined) {
-    return yield* new LoopAgentResolutionError({
+    return yield* LoopAgentResolutionError.make({
       loop: loop.name,
       agent: loop.agent,
       message: `Loop "${loop.name}" references agent "${loop.agent}", which is not in the roster`,
@@ -110,8 +110,8 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
     options.repository,
     options.payload,
   );
-  return new Submission({
-    event: new Event({
+  return Submission.make({
+    event: Event.make({
       id: EventId.make(options.dedupKey),
       dedupKey: options.dedupKey,
       payload: options.payload,

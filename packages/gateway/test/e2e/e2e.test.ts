@@ -72,10 +72,10 @@ const attachPublicRepository = Effect.gen(function* () {
     transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
   });
   const attached = yield* client.attachments.attach({
-    payload: new AttachRequest({
+    payload: AttachRequest.make({
       worker: WORKER,
       repository: PUBLIC_REPOSITORY,
-      credential: new AnonymousCredential(),
+      credential: AnonymousCredential.make(),
       expiresAt: DateTime.add(yield* DateTime.now, { minutes: 10 }),
     }),
   });
@@ -98,7 +98,8 @@ const socketForwarder = (path: string, proxy: Listener) =>
     Effect.callback<ReturnType<typeof createServer>>((resume) => {
       const server = createServer((client) => {
         const upstream = connect(proxy.port, proxy.host);
-        client.pipe(upstream).pipe(client);
+        client.pipe(upstream);
+        upstream.pipe(client);
         client.on("error", () => upstream.destroy());
         upstream.on("error", () => client.destroy());
       });

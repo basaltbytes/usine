@@ -290,7 +290,7 @@ describe("sandbox routes", () => {
     const { state, call } = served();
     await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
     const process = "0123456789abcdef0123456789abcdef";
-    const files = processFiles(Schema.decodeUnknownSync(ProcessStatus.fields.process)(process));
+    const files = processFiles(Schema.decodeSync(ProcessStatus.fields.process)(process));
     state.files.set(files.pid, text("4242"));
     state.files.set(files.stdout, text("hello\n"));
     const running = await call("GET", `/v1/sandboxes/${NAME}/processes/${process}`);

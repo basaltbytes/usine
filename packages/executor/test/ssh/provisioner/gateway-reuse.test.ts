@@ -29,7 +29,7 @@ describe("Provisioned machine reuse behind a gateway", () => {
             _tag: "Provisioned",
             provisioner: hetznerSettings({
               reuse: Option.some(
-                new ProvisionerReuse({
+                ProvisionerReuse.make({
                   attempts: MachineAttemptLimit.make(5),
                   maxAge: MachineMaxAge.make("2h"),
                 }),
@@ -57,7 +57,7 @@ describe("Provisioned machine reuse behind a gateway", () => {
           gateway.switches.refusedDetaches.clear();
           if (!detachFails) assert.lengthOf(yield* attachmentsInForce, 0);
           yield* machines.release(first.hold);
-          const nextRequest = new CheckoutRequest({
+          const nextRequest = CheckoutRequest.make({
             ...request,
             attemptId: AttemptId.make("remote-run/execute/2"),
           });

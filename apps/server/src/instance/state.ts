@@ -65,7 +65,7 @@ export const signalProcess = Effect.fn("Instance.signal")(function* (
       }
     },
     catch: (cause) =>
-      new SignalError({
+      SignalError.make({
         pid,
         signal,
         reason: cause instanceof Error ? cause.message : String(cause),
@@ -92,12 +92,12 @@ export const probeInstance = Effect.fn("Instance.probe")(function* (directory: I
   );
   if (!(yield* lockHeld(files))) {
     const stale = Option.isSome(record) ? Option.some(record.value.pid) : yield* readPid(files);
-    return new Stopped({ stale });
+    return Stopped.make({ stale });
   }
   if (Option.isSome(record) && (yield* processAlive(record.value.pid))) {
-    return new Running({ record: record.value });
+    return Running.make({ record: record.value });
   }
   const pid = yield* readPid(files);
   const live = Option.isSome(pid) && (yield* processAlive(pid.value)) ? pid : Option.none();
-  return new Unrecorded({ pid: live });
+  return Unrecorded.make({ pid: live });
 });

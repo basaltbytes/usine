@@ -102,14 +102,14 @@ const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
  * remains in the filename.
  */
 export const formatAgent = (agent: AgentFile): string =>
-  `---\n${writeYaml(Schema.encodeSync(AuthoredAgentFrontmatter)(new AgentFrontmatter(agent)))}---\n${agent.persona}`;
+  `---\n${writeYaml(Schema.encodeSync(AuthoredAgentFrontmatter)(AgentFrontmatter.make(agent)))}---\n${agent.persona}`;
 
 /**
  * Serializes `loop` as YAML frontmatter and a Markdown prompt, with snake_case keys. The name
  * remains in the filename.
  */
 export const formatLoop = (loop: LoopFile): string =>
-  `---\n${writeYaml(Schema.encodeSync(AuthoredLoopFrontmatter)(new LoopFrontmatter(loop)))}---\n${loop.body}`;
+  `---\n${writeYaml(Schema.encodeSync(AuthoredLoopFrontmatter)(LoopFrontmatter.make(loop)))}---\n${loop.body}`;
 
 interface Interpolation {
   readonly source: Source;
@@ -129,14 +129,13 @@ const parseYaml = (
   Effect.gen(function* () {
     const document = yield* parseYamlDocument(file, source);
     return yield* decodeJson(document.toJS()).pipe(
-      Effect.mapError(
-        (error) =>
-          new ConfigFileError({
-            file,
-            stage: "yaml",
-            expression: Option.none(),
-            message: formatIssue(error.issue),
-          }),
+      Effect.mapError((error) =>
+        ConfigFileError.make({
+          file,
+          stage: "yaml",
+          expression: Option.none(),
+          message: formatIssue(error.issue),
+        }),
       ),
     );
   });
@@ -155,7 +154,7 @@ const expressionError = (
     error._tag === "ExpressionCheckError" && Option.isSome(error.position)
       ? { ...detail, position: error.position.value }
       : detail;
-  return new ConfigFileError({
+  return ConfigFileError.make({
     file,
     stage: "expression",
     expression: Option.some(error.source),
@@ -167,7 +166,7 @@ const expressionError = (
 const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError> => {
   const basename = file.slice(file.lastIndexOf("/") + 1);
   if (!basename.endsWith(".md")) {
-    return new ConfigFileError({
+    return ConfigFileError.make({
       file,
       stage: "schema",
       expression: Option.none(),
@@ -180,7 +179,7 @@ const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError
 const loopName = (file: InstancePath): Effect.Effect<LoopName, ConfigFileError> =>
   markdownName(file).pipe(
     Effect.flatMap((name) =>
-      Schema.decodeUnknownEffect(LoopFile.fields.name)(
+      Schema.decodeEffect(LoopFile.fields.name)(
         file.startsWith("projects/")
           ? `${file.split("/")[1]}/${name}`
           : file.startsWith("loops/")
@@ -193,7 +192,7 @@ const loopName = (file: InstancePath): Effect.Effect<LoopName, ConfigFileError> 
 const agentName = (file: InstancePath): Effect.Effect<AgentName, ConfigFileError> =>
   markdownName(file).pipe(
     Effect.flatMap((name) =>
-      Schema.decodeUnknownEffect(AgentName)(name).pipe(
+      Schema.decodeEffect(AgentName)(name).pipe(
         Effect.mapError((error) => schemaError(file, error)),
       ),
     ),
@@ -210,7 +209,7 @@ const interpolations = (file: InstancePath, body: PromptTemplate) => {
     if (end < 0) {
       const message = `The prompt has an unclosed {{ at character ${start}. Close it with }}.`;
       problems.push(
-        new ConfigFileError({
+        ConfigFileError.make({
           file,
           stage: "expression",
           expression: Option.none(),
@@ -220,12 +219,12 @@ const interpolations = (file: InstancePath, body: PromptTemplate) => {
       );
       break;
     }
-    const parsed = Schema.decodeUnknownResult(Source)(body.slice(start + 2, end).trim());
+    const parsed = Schema.decodeResult(Source)(body.slice(start + 2, end).trim());
     if (Result.isSuccess(parsed)) expressions.push({ source: parsed.success, start, end: end + 2 });
     else {
       const message = `The prompt has an empty expression at character ${start}. Add an expression between {{ and }}.`;
       problems.push(
-        new ConfigFileError({
+        ConfigFileError.make({
           file,
           stage: "expression",
           expression: Option.none(),
@@ -240,7 +239,7 @@ const interpolations = (file: InstancePath, body: PromptTemplate) => {
 };
 
 const expressionFailures = (file: InstancePath, failures: Arr.NonEmptyArray<ConfigFileError>) =>
-  new ConfigFileError({
+  ConfigFileError.make({
     file,
     stage: "expression",
     expression: failures[0].expression,
@@ -262,8 +261,10 @@ const render = (
     if (Arr.isArrayNonEmpty(problems)) return yield* expressionFailures(file, problems);
     const rendered = yield* Effect.forEach(expressions, (expression) =>
       engine.evaluateScalar(expression.source, environment, context).pipe(
-        Effect.mapError((error) => expressionError(file, error, ["body"])),
-        Effect.map((value) => ({ expression, value })),
+        Effect.mapBoth({
+          onFailure: (error) => expressionError(file, error, ["body"]),
+          onSuccess: (value) => ({ expression, value }),
+        }),
       ),
     );
     let output = "";
@@ -302,10 +303,10 @@ export const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
         onExcessProperty: "error",
         errors: "all",
       }).pipe(Effect.mapError((error) => schemaError(file, error)));
-      const persona = yield* Schema.decodeUnknownEffect(AgentPersona)(markdown.body).pipe(
+      const persona = yield* Schema.decodeEffect(AgentPersona)(markdown.body).pipe(
         Effect.mapError((error) => schemaError(file, error)),
       );
-      return new AgentFile({
+      return AgentFile.make({
         name,
         harness: frontmatter.harness,
         model: frontmatter.model,
@@ -331,17 +332,17 @@ export const parseLoopDraft = (file: InstancePath, source: string) =>
       onExcessProperty: "error",
       errors: "all",
     }).pipe(Effect.mapError((error) => schemaError(file, error)));
-    const body = yield* Schema.decodeUnknownEffect(PromptTemplate)(markdown.body).pipe(
+    const body = yield* Schema.decodeEffect(PromptTemplate)(markdown.body).pipe(
       Effect.mapError((error) => {
         const failure = schemaError(file, error);
-        return new ConfigFileError({
+        return ConfigFileError.make({
           ...failure,
           message: failure.message,
           details: [{ path: ["body"], message: failure.message }],
         });
       }),
     );
-    return new LoopFile({ name, ...frontmatter, body });
+    return LoopFile.make({ name, ...frontmatter, body });
   });
 
 const checkExpressions = (
@@ -414,10 +415,10 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
             },
             { errors: "all", onExcessProperty: "error" },
           ).pipe(
-            Result.map(({ frontmatter, ...rest }) => new LoopFile({ ...frontmatter, ...rest })),
+            Result.map(({ frontmatter, ...rest }) => LoopFile.make({ ...frontmatter, ...rest })),
             Result.mapError((error) => {
               const failure = schemaError(file, error);
-              return new ConfigFileError({
+              return ConfigFileError.make({
                 ...failure,
                 message: failure.message,
                 details: (failure.details ?? []).map((detail) => ({
@@ -431,7 +432,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
         })
       : Effect.succeed({
           value: input.value,
-          parsed: Schema.decodeUnknownResult(LoopJson)(input.value, {
+          parsed: Schema.decodeResult(LoopJson)(input.value, {
             errors: "all",
             onExcessProperty: "error",
           }).pipe(Result.mapError((error) => schemaError(file, error))),
@@ -444,7 +445,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
       if (Option.isSome(named) && named.value.name !== (yield* loopName(file))) {
         const message = "Entity identifier does not match its name";
         problems.push(
-          new ConfigFileError({
+          ConfigFileError.make({
             file,
             stage: "schema",
             expression: Option.none(),
@@ -539,7 +540,7 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
         for (const source of lane.sources) {
           if ("label" in source && !declared.has(canonicalLabelName(source.label))) {
             warnings.push(
-              new UndeclaredLaneLabelWarning({
+              UndeclaredLaneLabelWarning.make({
                 repository: repository.name,
                 lane: lane.name,
                 label: source.label,
@@ -554,7 +555,9 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
       for (const literal of literals) {
         const label = decodeLabelName(literal);
         if (Option.isSome(label) && !declared.has(canonicalLabelName(label.value))) {
-          warnings.push(new UndeclaredTriggerLabelWarning({ loop: loop.name, label: label.value }));
+          warnings.push(
+            UndeclaredTriggerLabelWarning.make({ loop: loop.name, label: label.value }),
+          );
         }
       }
     }

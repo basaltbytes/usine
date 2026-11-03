@@ -73,7 +73,7 @@ const settings = Effect.all({
 });
 
 const configFor = (values: Effect.Success<typeof settings>) =>
-  Schema.decodeUnknownSync(UsineConfig)({
+  Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: values.repository }],
     workers: [
@@ -105,9 +105,9 @@ const sshFor = (values: Effect.Success<typeof settings>) => ({
 });
 
 const brain = (harness: Harness, model: string) =>
-  new BrainSpec({ harness, model: ModelId.make(model), effort: "low" });
+  BrainSpec.make({ harness, model: ModelId.make(model), effort: "low" });
 
-const agent = new Agent({
+const agent = Agent.make({
   name: AgentName.make("developer"),
   brain: brain("claude", "claude-sonnet-4-6"),
   parentModel: Option.none(),
@@ -265,7 +265,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           ssh: sshFor(values),
           // Logins are the operator's; this test needs none, the preflight test checks them.
           harnessReadiness: () => (brain) =>
-            Effect.succeed(new HarnessReady({ harness: brain.harness })),
+            Effect.succeed(HarnessReady.make({ harness: brain.harness })),
         }).pipe(
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
@@ -279,8 +279,8 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
           const accepted = yield* engine.submit(
-            new Submission({
-              event: new Event({
+            Submission.make({
+              event: Event.make({
                 id: EventId.make(`ssh-${globalThis.crypto.randomUUID()}`),
                 dedupKey: DedupKey.make(`ssh/${repository}/${globalThis.crypto.randomUUID()}`),
                 payload: { integration: "ssh" },
@@ -373,7 +373,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         const unused = Layer.succeed(CredentialProvider)({
           issue: (repository) =>
             Effect.fail(
-              new CredentialUnavailableError({
+              CredentialUnavailableError.make({
                 repository,
                 reason: "refused",
                 message: "Preflight issues no credential",
@@ -445,7 +445,7 @@ const gatewaySettings = Effect.all({
  * use their logins on the machine.
  */
 const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
-  Schema.decodeUnknownSync(UsineConfig)({
+  Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: values.repository }],
     workers: [
@@ -639,7 +639,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           ssh: gatewaySshFor(values),
           // The logins are the operator's; the Gateway's check of their hosts still runs.
           harnessReadiness: () => (brain) =>
-            Effect.succeed(new HarnessReady({ harness: brain.harness })),
+            Effect.succeed(HarnessReady.make({ harness: brain.harness })),
         }).pipe(
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
@@ -653,8 +653,8 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
           const accepted = yield* engine.submit(
-            new Submission({
-              event: new Event({
+            Submission.make({
+              event: Event.make({
                 id: EventId.make(`gateway-${globalThis.crypto.randomUUID()}`),
                 dedupKey: DedupKey.make(`gateway/${repository}/${globalThis.crypto.randomUUID()}`),
                 payload: { integration: "gateway" },
@@ -710,7 +710,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             [],
             "the Attempt's attachment is detached",
           );
-        }).pipe(Effect.provide(runtime), Effect.provide(FetchHttpClient.layer));
+        }).pipe(Effect.provide(runtime.pipe(Layer.provideMerge(FetchHttpClient.layer))));
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
     { timeout: 300_000 },
   );
@@ -724,7 +724,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         const unused = Layer.succeed(CredentialProvider)({
           issue: (repository) =>
             Effect.fail(
-              new CredentialUnavailableError({
+              CredentialUnavailableError.make({
                 repository,
                 reason: "refused",
                 message: "Preflight issues no credential",

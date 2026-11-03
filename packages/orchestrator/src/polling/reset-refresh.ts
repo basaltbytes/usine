@@ -31,9 +31,9 @@ const resetItem = Effect.fn("PollingTriggers.resetItem")(function* (reset: Cycle
   return Option.flatMap(projection, ({ source, number, payload }) =>
     Option.flatMap(decodeStoredItem(payload), ({ updatedAt }) =>
       source === "issue"
-        ? Option.some<ChangedItem>(new ChangedIssue({ number, updatedAt }))
+        ? Option.some<ChangedItem>(ChangedIssue.make({ number, updatedAt }))
         : source === "pr"
-          ? Option.some<ChangedItem>(new ChangedPullRequest({ number, updatedAt }))
+          ? Option.some<ChangedItem>(ChangedPullRequest.make({ number, updatedAt }))
           : Option.none(),
     ),
   );

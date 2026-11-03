@@ -14,8 +14,8 @@ export const spawnWorker = (filename: string) =>
   );
 
 export const connectionError = (cause: unknown) =>
-  new SqlError({
-    reason: new ConnectionError({
+  SqlError.make({
+    reason: ConnectionError.make({
       cause,
       message: "SQLite read worker stopped",
       operation: "read",
@@ -90,7 +90,7 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
       response.ok
         ? Effect.succeed(response.result)
         : Effect.fail(
-            new SqlError({
+            SqlError.make({
               reason: classifySqliteError(response.cause, {
                 message: response.cause.message,
                 operation: "execute",

@@ -44,12 +44,12 @@ export const deferItem = Effect.fn("PollingTriggers.deferItem")(function* (
   );
   return {
     _tag: "Unfetched",
-    failure: new RepositoryPollFailure({
+    failure: RepositoryPollFailure.make({
       repository,
       errorTag: error._tag,
       message: `${repositoryFailureLogFields(error).message} (item ${item.number})`,
     }),
-    unfetched: new UnfetchedItem({
+    unfetched: UnfetchedItem.make({
       stream: item._tag === "ChangedIssue" ? "issue" : "pr",
       number: ItemNumber.make(item.number),
       updatedAt: item.updatedAt,

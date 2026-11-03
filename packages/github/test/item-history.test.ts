@@ -14,10 +14,10 @@ const appLayer = Layer.succeed(GitHubApp)({
   repositories: () => Effect.die("unused installation repositories"),
   installationToken: () =>
     Effect.succeed(
-      new InstallationToken({
+      InstallationToken.make({
         value: Redacted.make("history-token"),
         expiresAt: DateTime.makeUnsafe("2026-10-16T22:00:00Z"),
-        scope: new InstallationWide(),
+        scope: InstallationWide.make(),
       }),
     ),
   botAccount: () => Effect.die("not used by history tests"),

@@ -140,7 +140,7 @@ export const hetznerDriverFor = (
     const api = yield* providerApiFor("hetzner", base, settings.token);
 
     const apiError = (operation: string) => (failure: ProviderFailure) =>
-      new ProviderApiError({
+      ProviderApiError.make({
         provider: "hetzner",
         operation,
         status: failure._tag === "ProviderRefused" ? Option.some(failure.status) : Option.none(),
@@ -148,7 +148,7 @@ export const hetznerDriverFor = (
       });
 
     const providerGap = (message: string, cause: unknown) =>
-      new WorkerCapabilityError({ worker, capability: "provider", message, cause });
+      WorkerCapabilityError.make({ worker, capability: "provider", message, cause });
 
     /** Returns every page of a listing at `path`. */
     const listAll = <S extends Schema.Constraint>(
@@ -314,7 +314,7 @@ export const hetznerDriverFor = (
         const image = yield* imageId().pipe(
           Effect.catchTag("WorkerCapabilityError", (gap) =>
             Effect.fail(
-              new MachineUnavailableError({
+              MachineUnavailableError.make({
                 worker,
                 provider: "hetzner",
                 reason: "refused",
@@ -363,7 +363,7 @@ export const hetznerDriverFor = (
           Effect.catchTags({
             ProviderUnanswered: (failure) =>
               Effect.fail(
-                new MachineUnavailableError({
+                MachineUnavailableError.make({
                   worker,
                   provider: "hetzner",
                   reason: "unreachable",
@@ -372,7 +372,7 @@ export const hetznerDriverFor = (
               ),
             ProviderRefused: (failure) =>
               Effect.fail(
-                new MachineUnavailableError({
+                MachineUnavailableError.make({
                   worker,
                   provider: "hetzner",
                   reason: creationReason(failure),
@@ -414,7 +414,7 @@ export const hetznerDriverFor = (
           Effect.catchTags({
             ProviderUnanswered: (failure) =>
               Effect.fail(
-                new MachineUnavailableError({
+                MachineUnavailableError.make({
                   worker,
                   provider: "hetzner",
                   reason: "unreachable",
@@ -423,7 +423,7 @@ export const hetznerDriverFor = (
               ),
             ProviderRefused: (failure) =>
               Effect.fail(
-                new MachineUnavailableError({
+                MachineUnavailableError.make({
                   worker,
                   provider: "hetzner",
                   reason: failure.status === 404 ? "capacity" : creationReason(failure),

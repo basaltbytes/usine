@@ -44,7 +44,7 @@ const authorization = Layer.effect(
               reason: "bad-admin-token",
               endpoint: endpoint.identifier,
             });
-            return yield* new HttpApiError.Unauthorized({});
+            return yield* HttpApiError.Unauthorized.make({});
           }
           return yield* httpEffect;
         }),
@@ -61,12 +61,12 @@ const store = Effect.fn("GatewayAdmin.store")(function* (id: AttachmentId, reque
   });
   const attachments = yield* Attachments;
   const callers = yield* CallerTokens;
-  const attachment = new Attachment({ id, ...request });
+  const attachment = Attachment.make({ id, ...request });
   yield* attachments.attach(attachment);
   const callerToken = yield* callers.issue(
-    new CallerClaims({ attachment: id, worker: request.worker, repository: request.repository }),
+    CallerClaims.make({ attachment: id, worker: request.worker, repository: request.repository }),
   );
-  return new Attached({ attachment: AttachmentSummary.fromAttachment(attachment), callerToken });
+  return Attached.make({ attachment: AttachmentSummary.fromAttachment(attachment), callerToken });
 });
 
 const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", (routes) =>
@@ -83,7 +83,7 @@ const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", 
       Effect.fn("GatewayAdmin.detach")(function* ({ params }) {
         yield* Effect.annotateCurrentSpan({ attachment: params.id });
         const attachments = yield* Attachments;
-        return new Detached({ detached: yield* attachments.detach(params.id) });
+        return Detached.make({ detached: yield* attachments.detach(params.id) });
       }),
     )
     .handle(
@@ -91,7 +91,7 @@ const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", 
       Effect.fn("GatewayAdmin.list")(function* () {
         const attachments = yield* Attachments;
         const current = yield* attachments.list();
-        return new AttachmentList({ attachments: current.map(AttachmentSummary.fromAttachment) });
+        return AttachmentList.make({ attachments: current.map(AttachmentSummary.fromAttachment) });
       }),
     ),
 );

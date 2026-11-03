@@ -45,32 +45,32 @@ const fixture = () => {
     previousRun === undefined
   )
     throw new Error("Missing ready board fixture");
-  const need = new WorkerQuotaNeed({
+  const need = WorkerQuotaNeed.make({
     id: "worker-quota:hetzner-pool",
     worker: WorkerName.make("hetzner-pool"),
     message:
       "Hetzner refused machine creation: status 403 resource_limit_exceeded: shared core limit exceeded.",
   });
-  const run = new RunSummaryView({
+  const run = RunSummaryView.make({
     ...previousRun,
     id: RunId.make("approval-run"),
     state: "Running",
     canApprove: false,
-    machineWait: new MachineQuotaWait({ worker: need.worker, message: need.message }),
+    machineWait: MachineQuotaWait.make({ worker: need.worker, message: need.message }),
   });
-  const card = new BoardTaskView({
+  const card = BoardTaskView.make({
     ...template,
     ...boardRunSummary([run], run, template.items),
     run,
     needsYou: false,
   });
-  const overview = new ReadyOverview({
+  const overview = ReadyOverview.make({
     projects: [
-      new ProjectView({
+      ProjectView.make({
         ...project,
         runs: [run],
-        board: new BoardView({
-          lanes: [new WritableBoardLaneView({ ...lane, items: [card] })],
+        board: BoardView.make({
+          lanes: [WritableBoardLaneView.make({ ...lane, items: [card] })],
           failures: [],
         }),
       }),
@@ -78,14 +78,13 @@ const fixture = () => {
     loops: [],
     needsYou: [need],
   });
-  const detail = new RunDetailView({
-    run: new RunView({
+  const detail = RunDetailView.make({
+    run: RunView.make({
       ...run,
       task: "Implement the issue.",
       resultMessage: null,
-      attempts: run.attempts.map(
-        (attempt) =>
-          new AttemptView({ ...attempt, task: AttemptTask.make("Implement the issue.") }),
+      attempts: run.attempts.map((attempt) =>
+        AttemptView.make({ ...attempt, task: AttemptTask.make("Implement the issue.") }),
       ),
     }),
     agentDefinitionChanged: false,

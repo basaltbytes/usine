@@ -35,7 +35,7 @@ it.each([
     expected: "AgentResultError",
   },
 ])("uses Codex's structured refusal code: $code", ({ code, message, expected }) => {
-  const { turn } = Schema.decodeUnknownSync(TurnCompleted)({
+  const { turn } = Schema.decodeSync(TurnCompleted)({
     turn: {
       id: "turn",
       status: "failed",
@@ -50,7 +50,9 @@ it("keeps Claude turn limits terminal after an earlier capacity retry", () => {
   const failure = resultFailure(
     sessionId,
     { type: "result", subtype: "error_max_turns", errors: ["Turn limit exceeded"] },
-    Option.some(new AgentCapacityError({ sessionId: Option.some(sessionId), message: "HTTP 529" })),
+    Option.some(
+      AgentCapacityError.make({ sessionId: Option.some(sessionId), message: "HTTP 529" }),
+    ),
   );
   assert.strictEqual(failure._tag, "AgentResultError");
   assert.strictEqual(failure.message, "Turn limit exceeded");

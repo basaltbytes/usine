@@ -22,7 +22,7 @@ let root: Root;
 let queryClient: QueryClient;
 
 const removedWorker = (running: number) =>
-  new UnconfiguredWorkerNeed({
+  UnconfiguredWorkerNeed.make({
     id: "unconfigured-worker:usine-worker-2",
     worker: WorkerName.make("usine-worker-2"),
     attempts: 3,

@@ -32,25 +32,25 @@ import { RunEvidenceFromJson } from "../src/export-run.ts";
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const now = DateTime.makeUnsafe("2026-09-06T00:00:00Z");
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("test-model"),
   effort: "high",
 });
-const agent = new Agent({
+const agent = Agent.make({
   name: AgentName.make("developer"),
   brain,
   parentModel: Option.none(),
   parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
-const parent = new ParentSession({ id: AgentSessionId.make("parent"), agent: agent.name, brain });
-const result = new StepResult({ message: "Evidence retained", facts: [] });
+const parent = ParentSession.make({ id: AgentSessionId.make("parent"), agent: agent.name, brain });
+const result = StepResult.make({ message: "Evidence retained", facts: [] });
 
 const executor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
-  outcome: () => Effect.succeed(Option.none()),
+  outcome: () => Effect.succeedNone,
   recover: () => Effect.void,
   intervene: () => Effect.void,
   occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
@@ -64,22 +64,22 @@ const executor = Layer.succeed(StepExecutor)({
       for (let sequence = 1; sequence <= rows; sequence += 1) {
         yield* io.append(
           "outbound",
-          new AttemptChannel.OutboundEnvelope({
+          AttemptChannel.OutboundEnvelope.make({
             version: AttemptChannel.PROTOCOL_VERSION,
             attemptId: execution.attempt.id,
             sequence: AttemptChannel.Sequence.make(sequence),
             sentAt: now,
             payload:
               sequence === 1
-                ? new AttemptChannel.Started({ parentModel: ModelId.make("selected-parent") })
-                : new AttemptChannel.SessionEvent({
-                    event: new TextOutput({ session: parent, text: `row ${sequence}` }),
+                ? AttemptChannel.Started.make({ parentModel: ModelId.make("selected-parent") })
+                : AttemptChannel.SessionEvent.make({
+                    event: TextOutput.make({ session: parent, text: `row ${sequence}` }),
                   }),
           }),
         );
       }
       if (execution.attempt.number === 1)
-        return yield* new AgentFailure({ message: "Retry explicitly" });
+        return yield* AgentFailure.make({ message: "Retry explicitly" });
       return result;
     }),
 });
@@ -98,8 +98,8 @@ const settle = (engine: RunEngine["Service"], runId: RunId) =>
 const seed = (directory: string) =>
   Effect.gen(function* () {
     const engine = yield* RunEngine;
-    const submission = new Submission({
-      event: new Event({
+    const submission = Submission.make({
+      event: Event.make({
         id: EventId.make("evidence"),
         dedupKey: DedupKey.make("evidence"),
         payload: { number: 74 },
@@ -124,12 +124,12 @@ const seed = (directory: string) =>
     assert.strictEqual(snapshot.run.state._tag, "Succeeded");
     const reader = yield* RunReader;
     const transcript = (yield* Effect.forEach(snapshot.attempts, ({ id }) =>
-      reader.transcript(new TranscriptAllQuery({ attemptId: id })),
+      reader.transcript(TranscriptAllQuery.make({ attemptId: id })),
     )).flat();
     const waiting = yield* engine.submit(
-      new Submission({
+      Submission.make({
         ...submission,
-        event: new Event({
+        event: Event.make({
           ...submission.event,
           id: EventId.make("waiting"),
           dedupKey: DedupKey.make("waiting"),
@@ -186,7 +186,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     const exported = runCli(directory, ["export-run", runId]);
     assert.strictEqual(exported.status, 0, exported.stderr);
     const output = join(directory, `run-${encodeURIComponent(runId)}.json`);
-    const evidence = Schema.decodeUnknownSync(RunEvidenceFromJson)(await readFile(output, "utf8"));
+    const evidence = Schema.decodeSync(RunEvidenceFromJson)(await readFile(output, "utf8"));
 
     assert.strictEqual(evidence.version, 1);
     assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
@@ -234,7 +234,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     }
     const exported = runCli(restored, ["export-run", saved.snapshot.run.id]);
     assert.strictEqual(exported.status, 0, exported.stderr);
-    const evidence = Schema.decodeUnknownSync(RunEvidenceFromJson)(
+    const evidence = Schema.decodeSync(RunEvidenceFromJson)(
       await readFile(
         join(restored, `run-${encodeURIComponent(saved.snapshot.run.id)}.json`),
         "utf8",
@@ -257,7 +257,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
       "waiting.json",
     ]);
     assert.strictEqual(exported.status, 0, exported.stderr);
-    const evidence = Schema.decodeUnknownSync(RunEvidenceFromJson)(await readFile(output, "utf8"));
+    const evidence = Schema.decodeSync(RunEvidenceFromJson)(await readFile(output, "utf8"));
 
     assert.deepStrictEqual(evidence.snapshot, saved.waitingSnapshot);
     assert.deepStrictEqual(evidence.snapshot.attempts, []);

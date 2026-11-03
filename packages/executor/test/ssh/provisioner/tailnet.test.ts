@@ -106,15 +106,15 @@ const fakeTailnet = () => {
 
 const providers = {
   anthropic: Option.some(
-    new AnthropicProvider({
+    AnthropicProvider.make({
       upstream: UpstreamBase.make("https://api.anthropic.com"),
-      credential: new AnthropicSubscriptionToken({ token: Redacted.make("sk-ant-oat01-test") }),
+      credential: AnthropicSubscriptionToken.make({ token: Redacted.make("sk-ant-oat01-test") }),
     }),
   ),
   openai: Option.some(
-    new OpenAiProvider({
+    OpenAiProvider.make({
       upstream: UpstreamBase.make("https://api.openai.com"),
-      credential: new ChatGptLogin({
+      credential: ChatGptLogin.make({
         authFile: HostFilePath.make("/gateway/auth.json"),
         tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
       }),
@@ -198,7 +198,7 @@ describe("Boat tailnet", () => {
       yield* (yield* WorkerMachines).sweep;
       assert.strictEqual(boat.boat.sandboxes.size, 0);
       assert.lengthOf(api.calls, 0);
-    }).pipe(Effect.scoped, Effect.provide(layer), Effect.provide(boat.layer));
+    }).pipe(Effect.scoped, Effect.provide(layer.pipe(Layer.provideMerge(boat.layer))));
   });
 
   it.effect("scrubs an auth key echoed by a failed SSH command before creating its error", () => {
@@ -236,7 +236,7 @@ describe("Boat tailnet", () => {
         );
         assert(creation !== undefined);
         assert.deepInclude(
-          Schema.decodeUnknownSync(Schema.fromJsonString(Schema.JsonObject))(creation.body),
+          Schema.decodeSync(Schema.fromJsonString(Schema.JsonObject))(creation.body),
           {
             capabilities: {
               devices: {
@@ -319,15 +319,15 @@ describe("Boat tailnet", () => {
         const boat = fakeProviders();
         const api = fakeTailnet();
         const gateway = fakeGateway(machine, providers);
-        const agent = new Agent({
+        const agent = Agent.make({
           ...TEST_AGENT,
-          brain: new BrainSpec({
+          brain: BrainSpec.make({
             harness,
             model: ModelId.make(harness === "codex" ? "gpt-5.6-sol" : "claude-sonnet-4-6"),
             effort: "high",
           }),
         });
-        const attempt = new CheckoutRequest({ ...request, agent });
+        const attempt = CheckoutRequest.make({ ...request, agent });
         let launched = false;
         const runtime = stubAttemptRuntime(new StubStorage(), (context) =>
           Effect.gen(function* () {

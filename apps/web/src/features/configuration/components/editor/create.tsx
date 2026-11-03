@@ -47,8 +47,8 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
             event.preventDefault();
             const identifier: Option.Option<ProjectId | ConfigurationEntityId> =
               kind === "project"
-                ? Schema.decodeUnknownOption(ProjectId)(name.trim())
-                : Schema.decodeUnknownOption(ConfigurationEntityId)(
+                ? Schema.decodeOption(ProjectId)(name.trim())
+                : Schema.decodeOption(ConfigurationEntityId)(
                     kind === "loop" ? `${project}/${name.trim()}` : name.trim(),
                   );
             if (Option.isNone(identifier)) {
@@ -83,7 +83,7 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
                 <option value="">{projectCopy.chooseProject}</option>
                 {configuration.data?.projects
                   .filter(({ id }) =>
-                    permits(grants, "maintain", new ProjectScope({ project: id })),
+                    permits(grants, "maintain", ProjectScope.make({ project: id })),
                   )
                   .map((project) => (
                     <option key={project.id} value={project.id}>

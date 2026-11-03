@@ -14,7 +14,7 @@ import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts"
 import packageJson from "../package.json" with { type: "json" };
 
 /** The Claude Code version that the installed Claude Agent SDK bundles. */
-const { claudeCodeVersion } = Schema.decodeUnknownSync(
+const { claudeCodeVersion } = Schema.decodeSync(
   Schema.fromJsonString(Schema.Struct({ claudeCodeVersion: Schema.String })),
 )(
   readFileSync(
@@ -25,10 +25,10 @@ const { claudeCodeVersion } = Schema.decodeUnknownSync(
 const claudeVersionOutput = `${claudeCodeVersion} (Claude Code)`;
 
 const brain = (harness: BrainSpec["harness"]) =>
-  new BrainSpec({ harness, model: ModelId.make("provider/model"), effort: "low" });
+  BrainSpec.make({ harness, model: ModelId.make("provider/model"), effort: "low" });
 const coder = brain("codex");
-const local = new LocalProcess();
-const remote = new RemoteShell({
+const local = LocalProcess.make();
+const remote = RemoteShell.make({
   ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
   sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
   destination: "worker.exe.xyz",
@@ -191,9 +191,12 @@ describe("worker harness readiness", () => {
           assert.strictEqual(server.opened(), 0);
           assert(!JSON.stringify(error).includes("credential-shaped"));
         }).pipe(
-          Effect.provide(commands({ [codexVersionCommand]: result })),
-          Effect.provide(server.layer),
-          Effect.provide(unusedPi),
+          Effect.provide(
+            commands({ [codexVersionCommand]: result }).pipe(
+              Layer.provideMerge(server.layer),
+              Layer.provideMerge(unusedPi),
+            ),
+          ),
         );
       },
     );
@@ -209,7 +212,7 @@ describe("worker harness readiness", () => {
             if (auth.type === "chatgpt") {
               assert.deepStrictEqual(
                 yield* verifyHarness(coder, local, workerEnvironment),
-                new HarnessReady({ harness: "codex" }),
+                HarnessReady.make({ harness: "codex" }),
               );
             } else {
               const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
@@ -222,10 +225,8 @@ describe("worker harness readiness", () => {
             Effect.provide(
               commands({
                 [codexVersionCommand]: { stdout: `codex-cli ${version}`, exitCode: 0 },
-              }),
+              }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
             ),
-            Effect.provide(server.layer),
-            Effect.provide(unusedPi),
           );
         },
       );
@@ -243,10 +244,8 @@ describe("worker harness readiness", () => {
         Effect.provide(
           commands({
             [codexVersionCommand]: { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
-          }),
+          }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
         ),
-        Effect.provide(server.layer),
-        Effect.provide(unusedPi),
         Effect.forkChild,
       );
       yield* Deferred.await(started);
@@ -283,7 +282,7 @@ describe("worker harness readiness", () => {
           if (status.auth.authMethod === "claude.ai") {
             assert.deepStrictEqual(
               yield* verifyHarness(brain("claude"), local, workerEnvironment),
-              new HarnessReady({ harness: "claude" }),
+              HarnessReady.make({ harness: "claude" }),
             );
           } else {
             const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
@@ -302,10 +301,8 @@ describe("worker harness readiness", () => {
                 stdout: JSON.stringify(status.auth),
                 exitCode: status.exitCode,
               },
-            }),
+            }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
           ),
-          Effect.provide(server.layer),
-          Effect.provide(unusedPi),
         );
       },
     );
@@ -334,10 +331,11 @@ describe("worker harness readiness", () => {
             commands({
               "claude --version": { stdout: claudeVersionOutput, exitCode: 0 },
               "claude auth status --json": status,
-            }),
+            }).pipe(
+              Layer.provideMerge(account(Effect.succeed(null)).layer),
+              Layer.provideMerge(unusedPi),
+            ),
           ),
-          Effect.provide(account(Effect.succeed(null)).layer),
-          Effect.provide(unusedPi),
         ),
     );
 
@@ -367,7 +365,7 @@ describe("worker harness readiness", () => {
         if (pool === "apiKeys") {
           assert.deepStrictEqual(
             yield* verifyHarness(brain("pi"), local, workerEnvironment),
-            new HarnessReady({ harness: "pi" }),
+            HarnessReady.make({ harness: "pi" }),
           );
         } else {
           const error = yield* verifyHarness(brain("pi"), local, workerEnvironment).pipe(
@@ -380,15 +378,18 @@ describe("worker harness readiness", () => {
         // The session's bash tool would run with the worker's environment, not this process's.
         assert.deepStrictEqual(options?.environment, Option.some(workerEnvironment));
       }).pipe(
-        Effect.provide(commands({})),
-        Effect.provide(account(Effect.succeed(null)).layer),
         Effect.provide(
-          Layer.succeed(PiSdk)({
-            start: async (received) => {
-              options = received;
-              return started;
-            },
-          }),
+          commands({}).pipe(
+            Layer.provideMerge(account(Effect.succeed(null)).layer),
+            Layer.provideMerge(
+              Layer.succeed(PiSdk)({
+                start: async (received) => {
+                  options = received;
+                  return started;
+                },
+              }),
+            ),
+          ),
         ),
       );
     });
@@ -401,10 +402,11 @@ describe("worker harness readiness", () => {
       assert.match(error.message, /node --version failed/u);
     }).pipe(
       Effect.provide(
-        commands({ [overSsh("exec 'node' '--version'")]: { stdout: "", exitCode: 127 } }),
+        commands({ [overSsh("exec 'node' '--version'")]: { stdout: "", exitCode: 127 } }).pipe(
+          Layer.provideMerge(account(Effect.succeed({})).layer),
+          Layer.provideMerge(unusedPi),
+        ),
       ),
-      Effect.provide(account(Effect.succeed({})).layer),
-      Effect.provide(unusedPi),
     ),
   );
 
@@ -412,7 +414,7 @@ describe("worker harness readiness", () => {
     Effect.gen(function* () {
       assert.deepStrictEqual(
         yield* verifyHarness(brain("claude"), remote, {}),
-        new HarnessReady({ harness: "claude" }),
+        HarnessReady.make({ harness: "claude" }),
       );
     }).pipe(
       Effect.provide(
@@ -426,10 +428,11 @@ describe("worker harness readiness", () => {
             }),
             exitCode: 0,
           },
-        }),
+        }).pipe(
+          Layer.provideMerge(account(Effect.succeed(null)).layer),
+          Layer.provideMerge(unusedPi),
+        ),
       ),
-      Effect.provide(account(Effect.succeed(null)).layer),
-      Effect.provide(unusedPi),
     ),
   );
 
@@ -441,10 +444,11 @@ describe("worker harness readiness", () => {
         assert.strictEqual(error._tag, "SessionOperationError");
       }).pipe(
         Effect.provide(
-          commands({ [overSsh("exec 'claude' '--version'")]: { stdout: "", exitCode: 255 } }),
+          commands({ [overSsh("exec 'claude' '--version'")]: { stdout: "", exitCode: 255 } }).pipe(
+            Layer.provideMerge(account(Effect.succeed(null)).layer),
+            Layer.provideMerge(unusedPi),
+          ),
         ),
-        Effect.provide(account(Effect.succeed(null)).layer),
-        Effect.provide(unusedPi),
       ),
   );
 
@@ -454,9 +458,12 @@ describe("worker harness readiness", () => {
       assert(error instanceof HarnessUnavailableError);
       assert.strictEqual(error.message, "Pi children run only on local workers");
     }).pipe(
-      Effect.provide(commands({})),
-      Effect.provide(account(Effect.succeed(null)).layer),
-      Effect.provide(unusedPi),
+      Effect.provide(
+        commands({}).pipe(
+          Layer.provideMerge(account(Effect.succeed(null)).layer),
+          Layer.provideMerge(unusedPi),
+        ),
+      ),
     ),
   );
 });

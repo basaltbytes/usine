@@ -56,15 +56,15 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           const attemptId = started.execution.attempt.id;
           yield* store.appendTranscript(
             "outbound",
-            new AttemptChannel.OutboundEnvelope({
+            AttemptChannel.OutboundEnvelope.make({
               version: AttemptChannel.PROTOCOL_VERSION,
               attemptId,
               sequence: AttemptChannel.Sequence.make(1),
               sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-              payload: new AttemptChannel.Started({ parentModel: effectiveParentModel }),
+              payload: AttemptChannel.Started.make({ parentModel: effectiveParentModel }),
             }),
           );
-          const parent = new ParentSession({
+          const parent = ParentSession.make({
             id: AgentSessionId.make("store-parent"),
             agent: testAgent.name,
             brain: testAgent.brain,
@@ -72,13 +72,13 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           for (const sequence of [2, 3] as const) {
             yield* store.appendTranscript(
               "outbound",
-              new AttemptChannel.OutboundEnvelope({
+              AttemptChannel.OutboundEnvelope.make({
                 version: AttemptChannel.PROTOCOL_VERSION,
                 attemptId,
                 sequence: AttemptChannel.Sequence.make(sequence),
                 sentAt: DateTime.makeUnsafe(`2026-08-25T00:00:0${sequence}Z`),
-                payload: new AttemptChannel.SessionEvent({
-                  event: new TextOutput({ session: parent, text: `update ${sequence}` }),
+                payload: AttemptChannel.SessionEvent.make({
+                  event: TextOutput.make({ session: parent, text: `update ${sequence}` }),
                 }),
               }),
             );
@@ -90,7 +90,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             snapshot.attempts[0]?.parentModel,
             Option.some(effectiveParentModel),
           );
-          const all = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+          const all = yield* store.transcript(TranscriptAllQuery.make({ attemptId }));
           const first = all[0];
           const last = all[2];
           assert(first !== undefined && last !== undefined);
@@ -100,13 +100,13 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           );
           assert.deepStrictEqual(
             (yield* store.transcript(
-              new TranscriptTailQuery({ attemptId, after: first.sequence, limit: 1 }),
+              TranscriptTailQuery.make({ attemptId, after: first.sequence, limit: 1 }),
             )).map(({ sequence }) => sequence),
             [2],
           );
           assert.deepStrictEqual(
             (yield* store.transcript(
-              new TranscriptTailQuery({
+              TranscriptTailQuery.make({
                 attemptId,
                 after: TranscriptSequence.make(2),
                 limit: 1,
@@ -116,7 +116,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           );
           assert.deepStrictEqual(
             (yield* store.transcript(
-              new TranscriptPageQuery({
+              TranscriptPageQuery.make({
                 attemptId,
                 before: Option.none(),
                 limit: 2,
@@ -126,7 +126,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           );
           assert.deepStrictEqual(
             (yield* store.transcript(
-              new TranscriptPageQuery({
+              TranscriptPageQuery.make({
                 attemptId,
                 before: Option.some(last.sequence),
                 limit: 2,
@@ -147,21 +147,21 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             const reader = yield* RunReader;
             assert.deepStrictEqual(yield* reader.latestPoolRateLimits(), []);
             const at = DateTime.makeUnsafe("2026-10-29T00:00:00Z");
-            const session = new ParentSession({
+            const session = ParentSession.make({
               id: AgentSessionId.make("pool-session"),
               agent: testAgent.name,
               brain: testAgent.brain,
             });
-            const high = new PoolRateLimitsUpdated({
+            const high = PoolRateLimitsUpdated.make({
               session,
               pool: "chatgptPlan",
               login: Option.some(PoolLogin.make("first@example.com")),
-              rateLimits: new RateLimitsSnapshot({
+              rateLimits: RateLimitsSnapshot.make({
                 limitId: Option.none(),
                 limitName: Option.none(),
                 secondary: Option.none(),
                 primary: Option.some(
-                  new RateLimitWindow({
+                  RateLimitWindow.make({
                     usedPercent: 85,
                     windowDurationMinutes: Option.some(300),
                     resetsAt: Option.some(DateTime.add(at, { hours: 1 })),
@@ -169,13 +169,13 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 ),
               }),
             });
-            const low = new PoolRateLimitsUpdated({
+            const low = PoolRateLimitsUpdated.make({
               ...high,
               login: Option.some(PoolLogin.make("second@example.com")),
-              rateLimits: new RateLimitsSnapshot({
+              rateLimits: RateLimitsSnapshot.make({
                 ...high.rateLimits,
                 primary: Option.some(
-                  new RateLimitWindow({
+                  RateLimitWindow.make({
                     usedPercent: 20,
                     windowDurationMinutes: Option.some(300),
                     resetsAt: Option.some(DateTime.add(at, { hours: 2 })),
@@ -188,14 +188,14 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
               logLevels.push(logLevel);
             });
             const logging = Logger.layer([logger]);
-            const other = new PoolRateLimitsUpdated({ ...high, pool: "claudePlan" });
+            const other = PoolRateLimitsUpdated.make({ ...high, pool: "claudePlan" });
             for (const [index, report] of [high, low].entries()) {
               const runId = RunId.make(`pool-run-${index}`);
               yield* store.recordAndClaim(
-                new Submission({
+                Submission.make({
                   ...lifecycleSubmission,
                   itemKey: ItemKey.make(`pool-item-${index}`),
-                  event: new Event({
+                  event: Event.make({
                     ...lifecycleSubmission.event,
                     id: EventId.make(`pool-event-${index}`),
                     dedupKey: DedupKey.make(`pool-dedup-${index}`),
@@ -215,7 +215,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 store
                   .appendTranscript(
                     "outbound",
-                    new AttemptChannel.OutboundEnvelope({
+                    AttemptChannel.OutboundEnvelope.make({
                       version: AttemptChannel.PROTOCOL_VERSION,
                       attemptId,
                       sequence: AttemptChannel.Sequence.make(++sequence),
@@ -227,22 +227,22 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                     Effect.provide(logging),
                     Effect.provideService(References.MinimumLogLevel, "Debug"),
                   );
-              yield* append(new AttemptChannel.SessionEvent({ event: report }));
-              if (index === 0) yield* append(new AttemptChannel.SessionEvent({ event: other }));
+              yield* append(AttemptChannel.SessionEvent.make({ event: report }));
+              if (index === 0) yield* append(AttemptChannel.SessionEvent.make({ event: other }));
               for (let i = 0; i < 205; i++)
                 yield* append(
-                  new AttemptChannel.SessionEvent({
-                    event: new TextOutput({ session, text: "More activity" }),
+                  AttemptChannel.SessionEvent.make({
+                    event: TextOutput.make({ session, text: "More activity" }),
                   }),
                 );
               yield* store.appendTranscript(
                 "outbound",
-                new AttemptChannel.OutboundEnvelope({
+                AttemptChannel.OutboundEnvelope.make({
                   version: AttemptChannel.PROTOCOL_VERSION,
                   attemptId,
                   sequence: AttemptChannel.Sequence.make(1),
                   sentAt: DateTime.add(at, { days: 1 }),
-                  payload: new AttemptChannel.SessionEvent({ event: index === 0 ? low : high }),
+                  payload: AttemptChannel.SessionEvent.make({ event: index === 0 ? low : high }),
                 }),
               );
               assert.deepStrictEqual(
@@ -275,7 +275,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             const append = (payload: AttemptChannel.OutboundPayload) =>
               store.appendTranscript(
                 "outbound",
-                new AttemptChannel.OutboundEnvelope({
+                AttemptChannel.OutboundEnvelope.make({
                   version: AttemptChannel.PROTOCOL_VERSION,
                   attemptId,
                   sequence: AttemptChannel.Sequence.make(++sequence),
@@ -283,9 +283,9 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                   payload,
                 }),
               );
-            const query = new TranscriptWorkerQuery({ attemptId });
+            const query = TranscriptWorkerQuery.make({ attemptId });
             assert.deepStrictEqual(yield* store.transcript(query), []);
-            const silent = new AttemptChannel.WorkerUnresponsive({
+            const silent = AttemptChannel.WorkerUnresponsive.make({
               worker: WorkerName.make("remote"),
               lastAnsweredAt: at,
               reason: "SSH timed out",
@@ -294,13 +294,13 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             yield* append(silent);
             for (let i = 0; i < 205; i++)
               yield* append(
-                new AttemptChannel.Started({ parentModel: ModelId.make("test-model") }),
+                AttemptChannel.Started.make({ parentModel: ModelId.make("test-model") }),
               );
             assert.deepStrictEqual(
               (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
               [silent],
             );
-            const recovered = new AttemptChannel.WorkerResponsive({
+            const recovered = AttemptChannel.WorkerResponsive.make({
               worker: silent.worker,
               lastAnsweredAt: at,
             });
@@ -327,47 +327,47 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert(started._tag === "AttemptStarted");
           const attemptId = started.execution.attempt.id;
-          const parent = new ParentSession({
+          const parent = ParentSession.make({
             id: AgentSessionId.make("usage-parent"),
             agent: testAgent.name,
             brain: testAgent.brain,
           });
-          const child = new ChildSession({
+          const child = ChildSession.make({
             id: AgentSessionId.make("usage-child"),
             parentId: parent.id,
             agent: testAgent.name,
             brain: testAgent.brain,
           });
           const events = [
-            new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(100) }),
-            new SessionTokensUpdated({
+            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(100) }),
+            SessionTokensUpdated.make({
               session: child,
               totalTokens: TokenCount.make(40),
               costUsd: Option.some(UsdAmount.make(0.4)),
             }),
-            new TextOutput({ session: parent, text: "Delegated the fix." }),
-            new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(250) }),
-            new SessionTokensUpdated({
+            TextOutput.make({ session: parent, text: "Delegated the fix." }),
+            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(250) }),
+            SessionTokensUpdated.make({
               session: child,
               totalTokens: TokenCount.make(90),
               costUsd: Option.some(UsdAmount.make(1.25)),
             }),
             // A lower report after a higher one never lowers the session's usage.
-            new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(200) }),
+            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(200) }),
           ];
           for (const [index, event] of events.entries()) {
             yield* store.appendTranscript(
               "outbound",
-              new AttemptChannel.OutboundEnvelope({
+              AttemptChannel.OutboundEnvelope.make({
                 version: AttemptChannel.PROTOCOL_VERSION,
                 attemptId,
                 sequence: AttemptChannel.Sequence.make(index + 1),
                 sentAt: DateTime.makeUnsafe("2026-10-20T00:00:00Z"),
-                payload: new AttemptChannel.SessionEvent({ event }),
+                payload: AttemptChannel.SessionEvent.make({ event }),
               }),
             );
           }
-          const usage = yield* store.transcript(new TranscriptUsageQuery({ attemptId }));
+          const usage = yield* store.transcript(TranscriptUsageQuery.make({ attemptId }));
           assert.deepStrictEqual(
             usage.map(({ envelope }): readonly [string, number, number | null] | null =>
               envelope.payload._tag === "SessionEvent" &&
@@ -403,12 +403,12 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             );
             assert(started._tag === "AttemptStarted");
             const attemptId = started.execution.attempt.id;
-            const parent = new ParentSession({
+            const parent = ParentSession.make({
               id: AgentSessionId.make("parent"),
               agent: testAgent.name,
               brain: testAgent.brain,
             });
-            const child = new ChildSession({
+            const child = ChildSession.make({
               id: AgentSessionId.make("held-child"),
               parentId: parent.id,
               agent: testAgent.name,
@@ -418,7 +418,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             const emit = (payload: AttemptChannel.OutboundPayload) =>
               store.appendTranscript(
                 "outbound",
-                new AttemptChannel.OutboundEnvelope({
+                AttemptChannel.OutboundEnvelope.make({
                   version: AttemptChannel.PROTOCOL_VERSION,
                   attemptId,
                   sequence: AttemptChannel.Sequence.make(++sequence),
@@ -427,14 +427,14 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 }),
               );
             yield* emit(
-              new AttemptChannel.SessionEvent({ event: new SessionStarted({ session: parent }) }),
+              AttemptChannel.SessionEvent.make({ event: SessionStarted.make({ session: parent }) }),
             );
             yield* emit(
-              new AttemptChannel.SessionEvent({
-                event: new SessionStarted({
+              AttemptChannel.SessionEvent.make({
+                event: SessionStarted.make({
                   session: child,
                   harnessSession: Option.some(
-                    new HarnessSession({
+                    HarnessSession.make({
                       id: HarnessSessionId.make("vendor-1"),
                       cwd: "/worker/repo",
                     }),
@@ -442,13 +442,13 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 }),
               }),
             );
-            const intervention = new AttemptChannel.Intervention({
+            const intervention = AttemptChannel.Intervention.make({
               operator: "Philippe",
-              target: new AttemptChannel.ChildTarget({ sessionId: child.id }),
-              action: new AttemptChannel.OperatorMessage({ message: "Review with me" }),
+              target: AttemptChannel.ChildTarget.make({ sessionId: child.id }),
+              action: AttemptChannel.OperatorMessage.make({ message: "Review with me" }),
             });
             yield* emit(
-              new AttemptChannel.InterventionRejected({
+              AttemptChannel.InterventionRejected.make({
                 inputSequence: AttemptChannel.Sequence.make(1),
                 intervention,
                 message: "Temporarily unavailable",
@@ -459,26 +459,26 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
               false,
             );
             yield* emit(
-              new AttemptChannel.InterventionApplied({
+              AttemptChannel.InterventionApplied.make({
                 inputSequence: AttemptChannel.Sequence.make(2),
                 intervention,
-                state: new AttemptChannel.InterventionState({ held: true, paused: false }),
+                state: AttemptChannel.InterventionState.make({ held: true, paused: false }),
               }),
             );
             yield* emit(
-              new AttemptChannel.SessionEvent({ event: new SessionIdle({ session: child }) }),
+              AttemptChannel.SessionEvent.make({ event: SessionIdle.make({ session: child }) }),
             );
-            const steer = new AttemptChannel.Intervention({
+            const steer = AttemptChannel.Intervention.make({
               operator: "Philippe",
-              target: new AttemptChannel.ParentTarget(),
-              action: new AttemptChannel.Steer({ message: "Fix the third finding" }),
+              target: AttemptChannel.ParentTarget.make(),
+              action: AttemptChannel.Steer.make({ message: "Fix the third finding" }),
             });
             for (const queued of [true, false])
               yield* emit(
-                new AttemptChannel.InterventionApplied({
+                AttemptChannel.InterventionApplied.make({
                   inputSequence: AttemptChannel.Sequence.make(3),
                   intervention: steer,
-                  state: new AttemptChannel.InterventionState({
+                  state: AttemptChannel.InterventionState.make({
                     held: true,
                     paused: false,
                     queued,
@@ -487,10 +487,10 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 }),
               );
             yield* emit(
-              new AttemptChannel.InterventionApplied({
+              AttemptChannel.InterventionApplied.make({
                 inputSequence: AttemptChannel.Sequence.make(4),
                 intervention: steer,
-                state: new AttemptChannel.InterventionState({
+                state: AttemptChannel.InterventionState.make({
                   held: true,
                   paused: false,
                   queued: true,
@@ -499,7 +499,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
               }),
             );
             yield* emit(
-              new AttemptChannel.InterventionRejected({
+              AttemptChannel.InterventionRejected.make({
                 inputSequence: AttemptChannel.Sequence.make(4),
                 intervention: steer,
                 message: "The steer was withdrawn by an interruption",
@@ -507,11 +507,11 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             );
             for (let index = 0; index < 5; index++)
               yield* emit(
-                new AttemptChannel.SessionEvent({
-                  event: new TextOutput({ session: parent, text: `Parent progress ${index}` }),
+                AttemptChannel.SessionEvent.make({
+                  event: TextOutput.make({ session: parent, text: `Parent progress ${index}` }),
                 }),
               );
-            const state = yield* store.transcript(new TranscriptSessionsQuery({ attemptId }));
+            const state = yield* store.transcript(TranscriptSessionsQuery.make({ attemptId }));
             assert.deepStrictEqual(
               state.map(({ envelope }) =>
                 envelope.payload._tag === "SessionEvent"
@@ -544,7 +544,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             assert(rejected?._tag === "InterventionRejected");
             assert.strictEqual(rejected.inputSequence, 4);
             const page = yield* store.transcript(
-              new TranscriptPageQuery({ attemptId, before: Option.none(), limit: 2 }),
+              TranscriptPageQuery.make({ attemptId, before: Option.none(), limit: 2 }),
             );
             assert(
               page.every(

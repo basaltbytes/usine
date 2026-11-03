@@ -33,7 +33,7 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
       (content) => content.length > 0,
     );
     if (Option.isSome(key)) return key.value;
-    return yield* new WorkerCapabilityError({
+    return yield* WorkerCapabilityError.make({
       worker,
       capability: "credentials",
       message: `Provisioned worker "${worker}" needs the public key of identity_file at ${file ?? "<identity_file>.pub"}, which it adds to each Boat sandbox`,
@@ -49,7 +49,7 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
         ? Option.some(entry.address.machine.provisioner)
         : Option.none();
     if (Option.isNone(provisioner))
-      return yield* new WorkerCapabilityError({
+      return yield* WorkerCapabilityError.make({
         worker,
         capability: "machine",
         message: `SSH worker "${worker}" has a machine of its own and creates none`,

@@ -22,19 +22,17 @@ import { DeskSection, EmptyLine } from "~/components/overview/section";
 import { Statistics } from "~/features/overview/components/statistics/statistics";
 import { WorkersLine } from "~/features/overview/components/workers-line";
 
-const NoProjects = () => {
-  return (
-    <section className="flex flex-col items-start gap-3">
-      <div className="flex max-w-prose flex-col gap-1">
-        <h2 className="text-md font-medium">{noProjectsCopy.title}</h2>
-        <p className="text-muted-foreground">{noProjectsCopy.description}</p>
-      </div>
-      <Button variant="outline" render={<Link to="/configuration/projects" />}>
-        {noProjectsCopy.action}
-      </Button>
-    </section>
-  );
-};
+const NoProjects = () => (
+  <section className="flex flex-col items-start gap-3">
+    <div className="flex max-w-prose flex-col gap-1">
+      <h2 className="text-md font-medium">{noProjectsCopy.title}</h2>
+      <p className="text-muted-foreground">{noProjectsCopy.description}</p>
+    </div>
+    <Button variant="outline" render={<Link to="/configuration/projects" />}>
+      {noProjectsCopy.action}
+    </Button>
+  </section>
+);
 
 type DeskNeedsYouProps = {
   readonly needs: ReadonlyArray<NeedView>;

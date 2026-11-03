@@ -73,7 +73,10 @@ export const EditAndRetry = ({ run, intent, close, openRun, className }: EditAnd
   const mutation = intent === "retry" ? retry : again;
   const valid = task.trim().length > 0 && roster.data?.some((name) => name === agent) === true;
   const submit = () => {
-    const amendment = new Amendment({ task: AttemptTask.make(task), agent: AgentName.make(agent) });
+    const amendment = Amendment.make({
+      task: AttemptTask.make(task),
+      agent: AgentName.make(agent),
+    });
     if (intent === "retry") retry.mutate(amendment);
     else
       again.mutate(

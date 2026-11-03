@@ -17,19 +17,19 @@ export const groupProjectViews = (
         lanes.set(
           lane.id,
           lane._tag === "WritableBoardLane"
-            ? new WritableBoardLaneView({ ...lane, items })
-            : new ReadOnlyBoardLaneView({ ...lane, items }),
+            ? WritableBoardLaneView.make({ ...lane, items })
+            : ReadOnlyBoardLaneView.make({ ...lane, items }),
         );
       }
     }
-    return new ProjectView({
+    return ProjectView.make({
       id: project.id,
       name: project.name,
       repositories: project.repositories,
       repository: project.repositories[0],
       status: "clear",
       runs: members.flatMap(({ runs }) => runs),
-      board: new BoardView({
+      board: BoardView.make({
         lanes: [...lanes.values()],
         failures: members.flatMap(({ board }) => board.failures),
       }),

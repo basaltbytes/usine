@@ -19,12 +19,12 @@ const platformAt = (folder: string) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     return yield* systemUpgradePlatform(
       InstanceDirectory.make(folder),
-      new InstanceRecord({
+      InstanceRecord.make({
         pid: ProcessId.make(4242),
         version: "1.0.0",
         startedAt: DateTime.nowUnsafe(),
         systemdUnit: Option.some(SystemdUnit.make("usine.service")),
-        launch: new InstanceLaunch({
+        launch: InstanceLaunch.make({
           node: process.execPath,
           nodeOptions: [],
           script: join(folder, "lib/node_modules/@usine/server/dist/main.js"),
@@ -72,7 +72,7 @@ it.each(["npm", "curl", "timeout", "flock"])(
           });
           const error = yield* upgrades
             .request(
-              new UpgradeRequest({
+              UpgradeRequest.make({
                 timing: "idle",
                 version: Option.some(ReleaseVersion.make("1.1.0")),
               }),
@@ -146,14 +146,14 @@ esac`,
         expect((yield* upgrades.status).available).toBe("1.1.0");
         rmSync(join(folder, "ready"));
         const refused = yield* upgrades
-          .request(new UpgradeRequest({ timing: "idle", version: Option.none() }))
+          .request(UpgradeRequest.make({ timing: "idle", version: Option.none() }))
           .pipe(Effect.flip);
         expect(refused.message).toContain("@usine/cloudflare@1.1.0");
         expect(yield* Ref.get(drained)).toBe(false);
         expect(yield* Ref.get(launched)).toBe(false);
         expect((yield* upgrades.status).phase).toBe("idle");
         writeFileSync(join(folder, "ready"), "");
-        yield* upgrades.request(new UpgradeRequest({ timing: "idle", version: Option.none() }));
+        yield* upgrades.request(UpgradeRequest.make({ timing: "idle", version: Option.none() }));
         yield* Effect.yieldNow;
         expect(yield* Ref.get(drained)).toBe(true);
         expect(yield* Ref.get(launched)).toBe(true);

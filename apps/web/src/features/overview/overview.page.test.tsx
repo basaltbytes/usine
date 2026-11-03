@@ -81,7 +81,7 @@ describe("Desk", () => {
   });
 
   it("shows the silent webhook endpoint and its recovery instructions", () => {
-    const need = new WebhookSilenceNeed({
+    const need = WebhookSilenceNeed.make({
       id: "webhook-silence",
       startedAt: "2026-10-29T12:00:00.000Z",
       publicUrl: "https://usine.example/webhooks/github",
@@ -95,7 +95,7 @@ describe("Desk", () => {
   });
 
   it("shows a failed worker's preflight message and links to that worker", () => {
-    const need = new WorkerPreflightNeed({
+    const need = WorkerPreflightNeed.make({
       id: "worker-preflight:boat-pool",
       worker: WorkerName.make("boat-pool"),
       message: "Gateway check failed",
@@ -196,10 +196,10 @@ describe("Desk", () => {
   });
 
   it("shows a Worker that runs attempts without containers as degraded, not failed", () => {
-    const degraded = new WorkerView({
+    const degraded = WorkerView.make({
       name: WorkerName.make("hz-worker-2"),
-      slots: new WorkerSlotsView({ capacity: 1, leased: 0 }),
-      preflight: new DegradedCheckView({
+      slots: WorkerSlotsView.make({ capacity: 1, leased: 0 }),
+      preflight: DegradedCheckView.make({
         checkedAt: "2026-10-20T04:00:00.000Z",
         message: "Docker isn't installed, so attempts run as the SSH user",
       }),
@@ -212,10 +212,10 @@ describe("Desk", () => {
 
   it("counts a provisioned Worker's machines and says when machine creation is paused", () => {
     const pause = pauseFixture();
-    const provisioned = new WorkerView({
+    const provisioned = WorkerView.make({
       name: WorkerName.make("hz-pool"),
-      slots: new WorkerSlotsView({ capacity: 3, leased: 2 }),
-      preflight: new PassedCheckView({ checkedAt: "2026-10-20T08:00:00.000Z" }),
+      slots: WorkerSlotsView.make({ capacity: 3, leased: 2 }),
+      preflight: PassedCheckView.make({ checkedAt: "2026-10-20T08:00:00.000Z" }),
       machines: [
         machineFixture({ state: "ready", id: "52341896", attemptId: "attempt-1", attempts: 3 }),
         machineFixture({ runId: "run-other" }),
@@ -228,7 +228,7 @@ describe("Desk", () => {
       `hz-pool 2 of 3 slots in use, 2 machines 52341896: 3 attempts, 2m old Creating: 1 attempt, 2m old Preflight passed 2h ago Machine creation failed: no capacity. ${nextCreationLine(pause, now)}`,
     );
     assert.include(html, "Hetzner Cloud has no cx33 servers in nbg1 right now");
-    const resumed = new WorkerView({
+    const resumed = WorkerView.make({
       ...provisioned,
       machines: [],
       provisioning: pauseFixture({ blocked: false }),
@@ -240,10 +240,10 @@ describe("Desk", () => {
   });
 
   it("shows harness checks deferred to a provisioned Worker's first machine", () => {
-    const deferred = new WorkerView({
+    const deferred = WorkerView.make({
       name: WorkerName.make("boat-pool"),
-      slots: new WorkerSlotsView({ capacity: 2, leased: 0 }),
-      preflight: Schema.decodeUnknownSync(PreflightCheckView)({
+      slots: WorkerSlotsView.make({ capacity: 2, leased: 0 }),
+      preflight: Schema.decodeSync(PreflightCheckView)({
         _tag: "Deferred",
         checkedAt: "2026-10-20T09:00:00.000Z",
         message: "Checked on the worker's first machine each day",
@@ -258,9 +258,9 @@ describe("Desk", () => {
   it("shows evaluated priority while waiting for a slot and machine progress during creation", () => {
     const queued = desk.notMoving.find(({ reason }) => reason._tag === "QueuedForWorker");
     if (queued?.reason._tag !== "QueuedForWorker") throw new Error("Expected a queued Run");
-    const waiting = new StalledItemView({
+    const waiting = StalledItemView.make({
       ...queued,
-      reason: new QueuedForWorkerView({
+      reason: QueuedForWorkerView.make({
         ...queued.reason,
         priority: PriorityValue.make(-1),
         ahead: 2,
@@ -270,9 +270,9 @@ describe("Desk", () => {
       text(render(<NotMoving stalled={[waiting]} now={now} readOnly={false} polled />)),
       "Waiting for a free worker slot, priority -1, behind 2 runs",
     );
-    const creating = new StalledItemView({
+    const creating = StalledItemView.make({
       ...queued,
-      reason: new QueuedForWorkerView({
+      reason: QueuedForWorkerView.make({
         run: queued.reason.run,
         ahead: 0,
         creating: machineFixture({ since: "2026-10-20T09:58:00.000Z" }),

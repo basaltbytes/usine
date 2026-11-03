@@ -11,7 +11,7 @@ const decodeRows = Schema.decodeUnknownEffect(Schema.Array(AttentionAcknowledgem
 const persistence =
   (operation: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.mapError((cause) => new EnginePersistenceError({ operation, cause })));
+    effect.pipe(Effect.mapError((cause) => EnginePersistenceError.make({ operation, cause })));
 
 /** Stores attention acknowledgements without changing runs or asks. */
 export class AttentionAcknowledgements extends Context.Service<

@@ -52,7 +52,7 @@ const getJson = <A, I>(
       .pipe(
         Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
         Effect.timeout(OPERATOR_API_TIMEOUT),
-        Effect.mapError((error) => new OperatorApiError({ url, reason: error.message })),
+        Effect.mapError((error) => OperatorApiError.make({ url, reason: error.message })),
       );
   });
 };

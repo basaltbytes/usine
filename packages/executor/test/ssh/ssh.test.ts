@@ -41,7 +41,7 @@ const allowlisted = new Set<string>(SSH_ENVIRONMENT_ALLOWLIST);
 
 /** Returns a request on the same Worker with its own Attempt and salvage ref. */
 const requestFor = (attempt: number) =>
-  new CheckoutRequest({
+  CheckoutRequest.make({
     ...request,
     attemptId: AttemptId.make(`remote-run/execute/${attempt}`),
     salvageRef: SalvageRef.make(`usine/salvage/remote-run/${attempt}`),
@@ -179,8 +179,7 @@ describe("SSH Worker", () => {
         assert.notInclude(logs.lines.join("\n"), TOKEN_PREFIX);
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(machine, credentials, parent)),
-        Effect.provide(logs.layer),
+        Effect.provide(runtime(machine, credentials, parent).pipe(Layer.provideMerge(logs.layer))),
       );
     },
   );
@@ -320,7 +319,7 @@ describe("SSH Worker", () => {
         const executor = yield* Executor;
         machine.state.salvage = "dirty";
         const prepared = yield* executor.prepare(
-          new CheckoutRequest({
+          CheckoutRequest.make({
             ...request,
             loop: LoopName.make("review-pr"),
             permissions: "read",
@@ -500,7 +499,7 @@ describe("SSH Worker", () => {
           assert.isTrue(yield* executor.isLive(request.attemptId));
           const before = machine.state.calls.length;
           const prepared = yield* executor.prepare(
-            new CheckoutRequest({ ...request, reattach: true }),
+            CheckoutRequest.make({ ...request, reattach: true }),
           );
           const lines = machine.state.calls.slice(before).map(({ line }) => line);
           const stale = lines.findIndex((line) => line.includes('for directory in "$root"/*'));
@@ -794,7 +793,7 @@ describe("SSH Worker", () => {
       assert.notInclude(reported, TOKEN_PREFIX);
       assert.notInclude(logs.lines.join("\n"), TOKEN_PREFIX);
       assert.strictEqual(machine.state.credentials.size, 0);
-    }).pipe(Effect.provide(runtime(machine, credentials)), Effect.provide(logs.layer));
+    }).pipe(Effect.provide(runtime(machine, credentials).pipe(Layer.provideMerge(logs.layer))));
   });
 
   it.effect("preflight reports an unreachable machine or root without changing either", () => {
@@ -868,7 +867,7 @@ describe("SSH Worker", () => {
         assert.include(withoutSwap.message, "has no swap, and max_concurrent_attempts is 2");
         const shortWithoutSwap = yield* executor.preflight(WORKER, [], 5).pipe(Effect.flip);
         assert.include(shortWithoutSwap.message, "Set max_concurrent_attempts to 1 or less");
-      }).pipe(Effect.provide(runtime(machine, credentials)), Effect.provide(logs.layer));
+      }).pipe(Effect.provide(runtime(machine, credentials).pipe(Layer.provideMerge(logs.layer))));
     },
   );
 });
@@ -926,7 +925,7 @@ for (const transition of ["live", "restart"] as const) {
             const before = machine.state.calls.length;
             if (operation === "reattach") {
               yield* Effect.scoped(
-                executor.prepare(new CheckoutRequest({ ...request, reattach: true })),
+                executor.prepare(CheckoutRequest.make({ ...request, reattach: true })),
               );
             } else {
               yield* executor.recover(

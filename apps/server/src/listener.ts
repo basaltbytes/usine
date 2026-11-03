@@ -30,10 +30,7 @@ export const startupListener = Effect.fnUntraced(function* (version: string) {
       );
     }),
   );
-  yield* server.serve(
-    Effect.flatMap(Ref.get(handler), (current) => current),
-    HttpMiddleware.logger,
-  );
+  yield* server.serve(Effect.flatten(Ref.get(handler)), HttpMiddleware.logger);
   yield* Effect.logInfo("HTTP listener ready; startup recovery can continue", { version });
   return { install: (next: HttpHandler) => Ref.set(handler, next) };
 });

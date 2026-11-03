@@ -16,18 +16,18 @@ import {
 } from "../src/lease-order.ts";
 
 const labelLane = (name: string, ...labels: ReadonlyArray<string>) =>
-  new Lane({
+  Lane.make({
     name: LaneName.make(name),
-    sources: labels.map((label) => new LabelLaneSource({ label: GitHubLabelName.make(label) })),
+    sources: labels.map((label) => LabelLaneSource.make({ label: GitHubLabelName.make(label) })),
   });
 
 const lanes = [
   labelLane("Ready", "ready-for-agent"),
   labelLane("In progress", "agent-in-progress"),
   labelLane("Review", "ready-for-review"),
-  new Lane({
+  Lane.make({
     name: LaneName.make("Pull requests"),
-    sources: [new StateLaneSource({ state: "pr-open" })],
+    sources: [StateLaneSource.make({ state: "pr-open" })],
   }),
   labelLane("Merge", "ready-to-merge"),
 ];
@@ -162,7 +162,7 @@ describe("Runs ahead", () => {
 
 it.effect("orders label-driven priorities before event time and rejects unsafe integers", () =>
   Effect.gen(function* () {
-    const loop = Schema.decodeUnknownSync(LoopFile)({
+    const loop = Schema.decodeSync(LoopFile)({
       name: "start-dev",
       trigger: { on: "issue", if: "true" },
       selector: Option.none(),
@@ -173,7 +173,7 @@ it.effect("orders label-driven priorities before event time and rejects unsafe i
       priority: Option.some('item.labels.nodes.exists(l, l.name == "low-priority") ? -1 : 0'),
     });
     const engine = makeExpressionEngine();
-    const outOfRange = new LoopFile({
+    const outOfRange = LoopFile.make({
       ...loop,
       priority: Option.some(Source.make("9007199254740992")),
     });

@@ -11,13 +11,13 @@ import { GitHubUserId, Member } from "../../src/auth/model.ts";
 import { AuthStore } from "../../src/auth/store.ts";
 
 export const localSecret = "l".repeat(43);
-export const alice = new Member({
+export const alice = Member.make({
   id: GitHubUserId.make(1),
   login: OperatorLogin.make("alice"),
   addedAt: 1,
   addedBy: OperatorLogin.make("alice"),
 });
-export const bob = new Member({
+export const bob = Member.make({
   id: GitHubUserId.make(2),
   login: OperatorLogin.make("bob"),
   addedAt: 2,

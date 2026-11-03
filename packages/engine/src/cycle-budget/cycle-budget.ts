@@ -30,7 +30,7 @@ const persistence = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.mapError((cause) =>
       cause instanceof CycleBudgetResetRejectedError
         ? cause
-        : new EnginePersistenceError({ operation: "update cycle budget", cause }),
+        : EnginePersistenceError.make({ operation: "update cycle budget", cause }),
     ),
   );
 
@@ -84,8 +84,8 @@ export class CycleBudgets extends Context.Service<
         const budget = yield* queries
           .get(itemKey)
           .pipe(
-            Effect.mapError(
-              (cause) => new EnginePersistenceError({ operation: "read cycle generation", cause }),
+            Effect.mapError((cause) =>
+              EnginePersistenceError.make({ operation: "read cycle generation", cause }),
             ),
           );
         return Option.match(budget, {
@@ -97,8 +97,8 @@ export class CycleBudgets extends Context.Service<
         queries
           .asks()
           .pipe(
-            Effect.mapError(
-              (cause) => new EnginePersistenceError({ operation: "read cycle asks", cause }),
+            Effect.mapError((cause) =>
+              EnginePersistenceError.make({ operation: "read cycle asks", cause }),
             ),
           ),
       );
@@ -122,7 +122,7 @@ export class CycleBudgets extends Context.Service<
               return;
             }
             const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);
-            if (ask === undefined) return yield* new CycleBudgetResetRejectedError({ askId });
+            if (ask === undefined) return yield* CycleBudgetResetRejectedError.make({ askId });
             const budget = yield* cycleQueries(transaction).get(ask.itemKey);
             if (Option.isNone(budget))
               return yield* Effect.die(new Error("Open cycle ask has no budget"));
@@ -238,18 +238,18 @@ export class CycleBudgets extends Context.Service<
             return true;
           }),
         ).pipe(
-          Effect.mapError(
-            (cause) => new EnginePersistenceError({ operation: "close cycle ask", cause }),
+          Effect.mapError((cause) =>
+            EnginePersistenceError.make({ operation: "close cycle ask", cause }),
           ),
         );
       });
       const pendingResets = Effect.fn("CycleBudgets.pendingResets")(() =>
         queries.pendingResets().pipe(
-          Effect.map((rows) => rows.map((row) => new CycleBudgetReset(row))),
-          Effect.mapError(
-            (cause) =>
-              new EnginePersistenceError({ operation: "read pending cycle resets", cause }),
-          ),
+          Effect.mapBoth({
+            onSuccess: (rows) => rows.map((row) => CycleBudgetReset.make(row)),
+            onFailure: (cause) =>
+              EnginePersistenceError.make({ operation: "read pending cycle resets", cause }),
+          }),
         ),
       );
       const acknowledgeReset = Effect.fn("CycleBudgets.acknowledgeReset")(function* (
@@ -267,9 +267,8 @@ export class CycleBudgets extends Context.Service<
           )
           .execute()
           .pipe(
-            Effect.mapError(
-              (cause) =>
-                new EnginePersistenceError({ operation: "acknowledge cycle reset", cause }),
+            Effect.mapError((cause) =>
+              EnginePersistenceError.make({ operation: "acknowledge cycle reset", cause }),
             ),
           );
         yield* Effect.logInfo("Cycle reset trigger refresh recorded", {

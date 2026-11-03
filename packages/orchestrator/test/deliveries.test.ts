@@ -41,19 +41,19 @@ import {
 import { memoryCursorStore, pollingTestLayer, unmovedBaseRefHead } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const installation = new Installation({
+const installation = Installation.make({
   id: InstallationId.make(77),
   accountLogin: "basaltbytes",
   appSlug: AppSlug.make("usine-test"),
 });
-const project = new CoveredProject({
+const project = CoveredProject.make({
   installationId: installation.id,
   repository,
   repositoryId: RepositoryId.make(99),
 });
 const instance = (mode: "off" | "deliveries") =>
-  new LoadedInstance({
-    config: Schema.decodeUnknownSync(UsineConfig)({
+  LoadedInstance.make({
+    config: Schema.decodeSync(UsineConfig)({
       version: 1,
       repos: [{ name: repository }],
       webhooks: { mode },
@@ -65,7 +65,7 @@ const instance = (mode: "off" | "deliveries") =>
     warnings: [],
   });
 const delivery = (id: string, event: string, repositoryId: number | null) =>
-  Schema.decodeUnknownSync(WebhookDelivery)({ id, event, repositoryId });
+  Schema.decodeSync(WebhookDelivery)({ id, event, repositoryId });
 
 const appLayer = (deliveries: GitHubApp["Service"]["deliveries"]) =>
   Layer.mock(GitHubApp)({
@@ -109,17 +109,22 @@ describe("Webhook delivery polling", () => {
         if (initialCursor === "legacy number") {
           yield* Effect.gen(function* () {
             yield* (yield* CursorStore).write(key, Schema.Int, 9);
-          }).pipe(Effect.provide(CursorStore.layer), Effect.provide(localSqliteLayer(directory)));
+          }).pipe(
+            Effect.provide(CursorStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+          );
         }
         const cycle = Effect.gen(function* () {
           yield* (yield* WebhookDeliveries).poll(instance("deliveries"));
           const stored = yield* (yield* CursorStore).read(key, Schema.String);
           assert.deepStrictEqual(stored, Option.some("3851199271760044123"));
         }).pipe(
-          Effect.provide(WebhookDeliveries.layer),
-          Effect.provide(app),
-          Effect.provide(polling),
-          Effect.provide(CursorStore.layer),
+          Effect.provide(
+            WebhookDeliveries.layer.pipe(
+              Layer.provideMerge(app),
+              Layer.provideMerge(polling),
+              Layer.provideMerge(CursorStore.layer),
+            ),
+          ),
         );
         yield* cycle.pipe(Effect.provide(localSqliteLayer(directory)));
         assert.deepStrictEqual(hints, [repository]);
@@ -141,11 +146,11 @@ describe("Webhook delivery polling", () => {
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+          Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
         changes: (_repository, cursor) =>
           Effect.sync(() => {
             requests += 1;
-            return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+            return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
           }),
         snapshot: () => Effect.die("no changed item"),
       };
@@ -208,10 +213,13 @@ describe("Webhook delivery polling", () => {
       assert.strictEqual(requests, 3);
       yield* Fiber.interrupt(enabled);
     }).pipe(
-      Effect.provide(WebhookDeliveries.layer),
-      Effect.provide(app),
-      Effect.provide(Layer.mock(PollingTriggers)({})),
-      Effect.provide(Layer.succeed(CursorStore)(memoryCursorStore().store)),
+      Effect.provide(
+        WebhookDeliveries.layer.pipe(
+          Layer.provideMerge(app),
+          Layer.provideMerge(Layer.mock(PollingTriggers)({})),
+          Layer.provideMerge(Layer.succeed(CursorStore)(memoryCursorStore().store)),
+        ),
+      ),
     );
   });
 
@@ -223,9 +231,9 @@ describe("Webhook delivery polling", () => {
         requests += 1;
         return requests === 1
           ? Effect.fail(
-              new GitHubRateLimitError({
+              GitHubRateLimitError.make({
                 operation: "poll-webhook-deliveries",
-                retryAt: DateTime.makeUnsafe(30_000),
+                retryAt: DateTime.makeUnsafe(30000),
                 message: "Wait",
               }),
             ).pipe(Effect.tapError(() => Deferred.succeed(started, undefined)))
@@ -244,10 +252,13 @@ describe("Webhook delivery polling", () => {
       assert.strictEqual(requests, 2);
       yield* Fiber.interrupt(fiber);
     }).pipe(
-      Effect.provide(WebhookDeliveries.layer),
-      Effect.provide(app),
-      Effect.provide(Layer.mock(PollingTriggers)({})),
-      Effect.provide(Layer.succeed(CursorStore)(cursors.store)),
+      Effect.provide(
+        WebhookDeliveries.layer.pipe(
+          Layer.provideMerge(app),
+          Layer.provideMerge(Layer.mock(PollingTriggers)({})),
+          Layer.provideMerge(Layer.succeed(CursorStore)(cursors.store)),
+        ),
+      ),
     );
   });
 });
@@ -296,17 +307,20 @@ it.effect(
         );
         yield* Fiber.interrupt(running);
       }).pipe(
-        Effect.provide(WebhookDeliveries.layer),
-        Effect.provide(app),
         Effect.provide(
-          Layer.mock(PollingTriggers)({
-            hint: (hinted) => {
-              assert.strictEqual(hinted, repository);
-              return Deferred.succeed(received, undefined).pipe(Effect.asVoid);
-            },
-          }),
+          WebhookDeliveries.layer.pipe(
+            Layer.provideMerge(app),
+            Layer.provideMerge(
+              Layer.mock(PollingTriggers)({
+                hint: (hinted) => {
+                  assert.strictEqual(hinted, repository);
+                  return Deferred.succeed(received, undefined).pipe(Effect.asVoid);
+                },
+              }),
+            ),
+            Layer.provideMerge(Layer.succeed(CursorStore, cursors.store)),
+          ),
         ),
-        Effect.provide(Layer.succeed(CursorStore, cursors.store)),
       );
     }),
 );

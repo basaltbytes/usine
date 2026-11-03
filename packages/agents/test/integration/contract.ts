@@ -59,13 +59,13 @@ const processEnvironment = (): Record<string, string> =>
 
 /** The local machine; the child's environment is exactly this process's environment. */
 export const localHost: ContractHost = {
-  host: new LocalProcess(),
+  host: LocalProcess.make(),
   environment: { ...processEnvironment(), USINE_CONTRACT_MARKER: MARKER },
 };
 
 /** A remote host whose SSH client is the test shim; the remote command runs locally on top of the shim's environment, as on a Worker VM. */
 export const shimHost: ContractHost = {
-  host: new RemoteShell({
+  host: RemoteShell.make({
     ssh: {
       command: fileURLToPath(new URL("../fixtures/ssh-shim.sh", import.meta.url)),
       args: ["-o", "BatchMode=yes"],
@@ -109,13 +109,13 @@ const controlledChild = <A, E, R>(
       const launch = yield* Scope.fork(yield* Effect.scope);
       const running = yield* backend
         .launch(
-          new ChildRequest({
+          ChildRequest.make({
             worker: WorkerName.make("worker-1"),
             machine: Option.none(),
             cwd: WorkingDirectory.make(cwd),
             environment: child.environment,
             host: child.host,
-            session: new ChildSession({
+            session: ChildSession.make({
               id: session,
               parentId: AgentSessionId.make(`parent:${brain.harness}-live`),
               agent: AgentName.make("contract-tester"),

@@ -99,12 +99,12 @@ import {
 } from "./support/polling.ts";
 
 const watchedRepository = RepositoryName.make("basaltbytes/usine");
-const emptyLabelCatalog = new RepositoryLabelCatalog({
+const emptyLabelCatalog = RepositoryLabelCatalog.make({
   entityTag: Option.none(),
   labels: [],
 });
 
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [
     { name: watchedRepository, tags: ["active"] },
@@ -113,7 +113,7 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
   settings: { poll_interval: 60, parent_model: "anthropic/instance-parent" },
 });
 
-const agent = new AgentFile({
+const agent = AgentFile.make({
   name: AgentName.make("developer"),
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
@@ -124,16 +124,16 @@ const agent = new AgentFile({
 });
 
 const issueLoop = (name: string) =>
-  new LoopFile({
+  LoopFile.make({
     name: LoopName.make(name),
-    trigger: new IssueTrigger({
+    trigger: IssueTrigger.make({
       on: "issue",
       if: Source.make(
         'item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready")',
       ),
     }),
     selector: Option.some(
-      new Selector({
+      Selector.make({
         repos: Option.some([config.repos[0]?.name ?? assert.fail("missing watched repo")]),
         tags: Option.none(),
       }),
@@ -145,7 +145,7 @@ const issueLoop = (name: string) =>
   });
 
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
-  new LoadedInstance({
+  LoadedInstance.make({
     config,
     agents: [agent],
     invalidAgents: [],
@@ -201,7 +201,7 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
 const gatedExecutor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
-  outcome: () => Effect.succeed(Option.none()),
+  outcome: () => Effect.succeedNone,
   recover: () => Effect.void,
   intervene: () => Effect.void,
   interrupt: () => Effect.void,
@@ -233,7 +233,7 @@ const runtimeLayer = (
   );
   return Layer.merge(
     dependencies,
-    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
+    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor), Layer.provide(dependencies)),
   );
 };
 
@@ -247,9 +247,9 @@ describe("PollingTriggers", () => {
           prefix: "usine-mergeability-",
         }),
       );
-      const loop = new LoopFile({
+      const loop = LoopFile.make({
         ...issueLoop("rebase-pr"),
-        trigger: new PullRequestTrigger({
+        trigger: PullRequestTrigger.make({
           on: "pr",
           if: Source.make('item.state == "OPEN" && item.mergeable == "CONFLICTING"'),
         }),
@@ -280,20 +280,19 @@ describe("PollingTriggers", () => {
             const numbers = detected;
             detected = [];
             if (numbers.length === 0) {
-              return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+              return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
             }
             detections += 1;
-            return new RepositoryChanges({
-              cursor: new PollCursor({
+            return RepositoryChanges.make({
+              cursor: PollCursor.make({
                 entityTag: Option.some(EntityTag.make(`W/"changes-${detections}"`)),
                 watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
               }),
-              items: numbers.map(
-                (number) =>
-                  new ChangedPullRequest({
-                    number,
-                    updatedAt: DateTime.makeUnsafe(`2026-08-30T20:00:0${detections}Z`),
-                  }),
+              items: numbers.map((number) =>
+                ChangedPullRequest.make({
+                  number,
+                  updatedAt: DateTime.makeUnsafe(`2026-08-30T20:00:0${detections}Z`),
+                }),
               ),
               backlog: false,
               nextPollAt: Option.none(),
@@ -303,13 +302,13 @@ describe("PollingTriggers", () => {
           Effect.sync(() => {
             fetched.push(item.number);
             const pullRequest = remote.get(item.number) ?? assert.fail("unknown pull request");
-            return new PullRequestSnapshot({
+            return PullRequestSnapshot.make({
               contentHash: ContentHash.make(
                 createHash("sha256")
                   .update(JSON.stringify([item.number, pullRequest]))
                   .digest("hex"),
               ),
-              payload: Schema.decodeUnknownSync(PullRequestPayload)({
+              payload: Schema.decodeSync(PullRequestPayload)({
                 ...issuePayload([], item.number),
                 ...pullRequest,
                 mergeStateStatus: "UNKNOWN",
@@ -407,9 +406,9 @@ describe("PollingTriggers", () => {
         }),
       );
       const instance = instanceWith([
-        new LoopFile({
+        LoopFile.make({
           ...issueLoop("review-pr"),
-          trigger: new PullRequestTrigger({ on: "pr", if: Source.make('item.state == "OPEN"') }),
+          trigger: PullRequestTrigger.make({ on: "pr", if: Source.make('item.state == "OPEN"') }),
         }),
       ]);
       let gone = false;
@@ -421,13 +420,13 @@ describe("PollingTriggers", () => {
         changes: (repository, cursor) =>
           Effect.succeed(
             repository === watchedRepository && Option.isNone(cursor.entityTag)
-              ? new RepositoryChanges({
-                  cursor: new PollCursor({
+              ? RepositoryChanges.make({
+                  cursor: PollCursor.make({
                     entityTag: Option.some(EntityTag.make('W/"unchanged"')),
                     watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
                   }),
                   items: [
-                    new ChangedPullRequest({
+                    ChangedPullRequest.make({
                       number: 28,
                       updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
                     }),
@@ -435,23 +434,23 @@ describe("PollingTriggers", () => {
                   backlog: false,
                   nextPollAt: Option.none(),
                 })
-              : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
+              : RepositoryNotModified.make({ cursor, nextPollAt: Option.none() }),
           ),
         snapshot: (repository, item) =>
           Effect.suspend(() => {
             fetches += 1;
             return gone
               ? Effect.fail(
-                  new GitHubItemNotFoundError({
+                  GitHubItemNotFoundError.make({
                     operation: "fetch-pull-request-snapshot",
                     item: item.number,
                     message: `GitHub has no pull request ${item.number} in ${repository}`,
                   }),
                 )
               : Effect.succeed(
-                  new PullRequestSnapshot({
+                  PullRequestSnapshot.make({
                     contentHash: ContentHash.make("a".repeat(64)),
-                    payload: Schema.decodeUnknownSync(PullRequestPayload)({
+                    payload: Schema.decodeSync(PullRequestPayload)({
                       ...issuePayload([]),
                       mergeable: "MERGEABLE",
                       mergeStateStatus: "CLEAN",
@@ -513,9 +512,9 @@ describe("PollingTriggers", () => {
           prefix: "usine-finisher-",
         }),
       );
-      const loop = new LoopFile({
+      const loop = LoopFile.make({
         ...issueLoop("finish-pr"),
-        trigger: new PullRequestTrigger({
+        trigger: PullRequestTrigger.make({
           on: "pr",
           if: Source.make(
             'item.state == "OPEN" && !item.labels.nodes.exists(label, label.name == "ready-to-merge") && item.labels.nodes.exists(label, label.name == "review-passed")',
@@ -535,10 +534,10 @@ describe("PollingTriggers", () => {
         changes: (repository, cursor) =>
           Effect.succeed(
             repository === watchedRepository
-              ? new RepositoryChanges({
+              ? RepositoryChanges.make({
                   cursor,
                   items: [
-                    new ChangedPullRequest({
+                    ChangedPullRequest.make({
                       number: 162,
                       updatedAt: DateTime.makeUnsafe("2026-09-18T04:08:10Z"),
                     }),
@@ -546,15 +545,15 @@ describe("PollingTriggers", () => {
                   backlog: false,
                   nextPollAt: Option.none(),
                 })
-              : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
+              : RepositoryNotModified.make({ cursor, nextPollAt: Option.none() }),
           ),
         snapshot: () =>
           Effect.sync(() => {
             snapshots += 1;
             const relabeled = remote.labels.includes("ready-to-merge");
-            return new PullRequestSnapshot({
+            return PullRequestSnapshot.make({
               contentHash: ContentHash.make(`${remote.head}${relabeled ? "f" : "0"}`.repeat(32)),
-              payload: Schema.decodeUnknownSync(PullRequestPayload)({
+              payload: Schema.decodeSync(PullRequestPayload)({
                 ...issuePayload(remote.labels, 162),
                 state: "OPEN",
                 mergeable: "MERGEABLE",
@@ -583,7 +582,7 @@ describe("PollingTriggers", () => {
       const executor = Layer.succeed(StepExecutor)({
         workers: Effect.succeed([WorkerName.make("local")]),
         isLive: () => Effect.succeed(false),
-        outcome: () => Effect.succeed(Option.none()),
+        outcome: () => Effect.succeedNone,
         recover: () => Effect.void,
         intervene: () => Effect.void,
         interrupt: () => Effect.void,
@@ -596,7 +595,7 @@ describe("PollingTriggers", () => {
             executions += 1;
             if (executions > 1) return yield* Effect.die("a second finish Run must not start");
             yield* Deferred.await(finishing);
-            return new StepResult({ message: "Finished", facts: [] });
+            return StepResult.make({ message: "Finished", facts: [] });
           }),
       });
       const condition = triggerConditionLayer.pipe(
@@ -656,9 +655,9 @@ describe("PollingTriggers", () => {
           Effect.gen(function* () {
             changeRequests += 1;
             const now = yield* Clock.currentTimeMillis;
-            return new RepositoryNotModified({
+            return RepositoryNotModified.make({
               cursor,
-              nextPollAt: Option.some(DateTime.makeUnsafe(now + 120_000)),
+              nextPollAt: Option.some(DateTime.makeUnsafe(now + 120000)),
             });
           }),
         labels: () => Effect.succeed(emptyLabelCatalog),
@@ -697,8 +696,7 @@ describe("PollingTriggers", () => {
         );
         yield* Fiber.interrupt(fiber);
       }).pipe(
-        Effect.provide(pollingTestLayer(github)),
-        Effect.provide(changeBusLayer),
+        Effect.provide(pollingTestLayer(github).pipe(Layer.provideMerge(changeBusLayer))),
         Effect.scoped,
       );
     },
@@ -713,9 +711,9 @@ describe("PollingTriggers", () => {
         Effect.suspend(() => {
           changeRequests += 1;
           return Effect.fail(
-            new GitHubRateLimitError({
+            GitHubRateLimitError.make({
               operation: "poll-repository-changes",
-              retryAt: DateTime.makeUnsafe(90_000),
+              retryAt: DateTime.makeUnsafe(90000),
               message: "Wait before retrying",
             }),
           );
@@ -755,14 +753,14 @@ describe("PollingTriggers", () => {
         changes: (repository, cursor) =>
           Effect.sync(() => {
             polled.push(repository);
-            return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+            return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
           }),
         labels: () => Effect.succeed(emptyLabelCatalog),
         snapshot: () => Effect.die("an unchanged repository has no snapshots"),
       };
-      const onlyWatched = new LoadedInstance({
+      const onlyWatched = LoadedInstance.make({
         ...instanceWith([]),
-        config: new UsineConfig({ ...config, repos: config.repos.slice(0, 1) }),
+        config: UsineConfig.make({ ...config, repos: config.repos.slice(0, 1) }),
       });
 
       return Effect.gen(function* () {
@@ -808,10 +806,10 @@ describe("PollingTriggers", () => {
           missingIssues: () => Effect.succeed([]),
           changes: (_repository, cursor) =>
             Effect.succeed(
-              new RepositoryChanges({
+              RepositoryChanges.make({
                 cursor,
                 items: [
-                  new ChangedIssue({
+                  ChangedIssue.make({
                     number: 28,
                     updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
                   }),
@@ -823,7 +821,7 @@ describe("PollingTriggers", () => {
           labels: () => Effect.succeed(emptyLabelCatalog),
           snapshot: () =>
             Effect.succeed(
-              new IssueSnapshot({
+              IssueSnapshot.make({
                 payload,
                 contentHash: ContentHash.make("a".repeat(64)),
               }),
@@ -857,13 +855,13 @@ describe("PollingTriggers", () => {
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       changes: (_repository, cursor) =>
-        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
       labels: () =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
-          return yield* new GitHubRateLimitError({
+          return yield* GitHubRateLimitError.make({
             operation: "list-repository-labels",
-            retryAt: DateTime.makeUnsafe(now + 90_000),
+            retryAt: DateTime.makeUnsafe(now + 90000),
             message: "secondary rate limit",
           });
         }),
@@ -896,7 +894,7 @@ describe("PollingTriggers", () => {
       const cursorsReturned = yield* Ref.make<ReadonlyArray<EntityTag>>([]);
       const labelEntityTagsSeen = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
       const catalogEntityTag = EntityTag.make('W/"labels"');
-      const changed = new ChangedIssue({
+      const changed = ChangedIssue.make({
         number: 28,
         updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
       });
@@ -916,8 +914,8 @@ describe("PollingTriggers", () => {
               `W/"${repository}-${String((yield* Ref.get(cursorsReturned)).length)}"`,
             );
             yield* recordFor(repository, cursorsReturned)(entityTag);
-            return new RepositoryChanges({
-              cursor: new PollCursor({
+            return RepositoryChanges.make({
+              cursor: PollCursor.make({
                 entityTag: Option.some(entityTag),
                 watermark: Option.some(changed.updatedAt),
               }),
@@ -930,16 +928,16 @@ describe("PollingTriggers", () => {
           Effect.gen(function* () {
             yield* recordFor(repository, labelEntityTagsSeen)(entityTag);
             if (yield* Ref.get(catalogFails)) {
-              return yield* new GitHubApiError({
+              return yield* GitHubApiError.make({
                 operation: "list-repository-labels",
                 status: Option.some(502),
                 message: "label catalog unavailable",
               });
             }
-            return new RepositoryLabelCatalog({
+            return RepositoryLabelCatalog.make({
               entityTag: Option.some(catalogEntityTag),
               labels: [
-                new RepositoryLabel({
+                RepositoryLabel.make({
                   name: RepositoryLabelName.make("ready"),
                   color: RepositoryLabelColor.make("0E8A16"),
                   description: Option.none(),
@@ -949,7 +947,7 @@ describe("PollingTriggers", () => {
           }),
         snapshot: () =>
           Effect.gen(function* () {
-            return new IssueSnapshot({
+            return IssueSnapshot.make({
               payload: issuePayload(["ready"]),
               contentHash: yield* Ref.get(hash),
             });
@@ -1028,7 +1026,7 @@ describe("PollingTriggers", () => {
         const seenLabelEntityTags = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
         const seenRepositories = yield* Ref.make<ReadonlyArray<string>>([]);
         const snapshotCalls = yield* Ref.make(0);
-        const changed = new ChangedIssue({
+        const changed = ChangedIssue.make({
           number: 28,
           updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
         });
@@ -1039,8 +1037,8 @@ describe("PollingTriggers", () => {
             Effect.gen(function* () {
               yield* Ref.update(seenCursors, (values) => [...values, cursor]);
               yield* Ref.update(seenRepositories, (values) => [...values, repository]);
-              return new RepositoryChanges({
-                cursor: new PollCursor({
+              return RepositoryChanges.make({
+                cursor: PollCursor.make({
                   entityTag: Option.some(EntityTag.make('W/"live"')),
                   watermark: Option.some(changed.updatedAt),
                 }),
@@ -1052,11 +1050,11 @@ describe("PollingTriggers", () => {
           labels: (_repository, entityTag) =>
             Effect.gen(function* () {
               yield* Ref.update(seenLabelEntityTags, (values) => [...values, entityTag]);
-              if (Option.isSome(entityTag)) return new RepositoryLabelsNotModified();
-              return new RepositoryLabelCatalog({
+              if (Option.isSome(entityTag)) return RepositoryLabelsNotModified.make();
+              return RepositoryLabelCatalog.make({
                 entityTag: Option.some(EntityTag.make('W/"labels"')),
                 labels: [
-                  new RepositoryLabel({
+                  RepositoryLabel.make({
                     name: RepositoryLabelName.make("unused-repository-label"),
                     color: RepositoryLabelColor.make("5319E7"),
                     description: Option.some("kept for the restart test"),
@@ -1068,7 +1066,7 @@ describe("PollingTriggers", () => {
             Effect.gen(function* () {
               yield* Ref.update(snapshotCalls, (count) => count + 1);
               const current = yield* Ref.get(state);
-              return new IssueSnapshot({
+              return IssueSnapshot.make({
                 payload: current.payload,
                 contentHash: current.hash,
               });
@@ -1206,21 +1204,21 @@ describe("PollingTriggers", () => {
   );
 
   it.effect("isolates one repository's failure from its siblings", () => {
-    const multiConfig = Schema.decodeUnknownSync(UsineConfig)({
+    const multiConfig = Schema.decodeSync(UsineConfig)({
       version: 1,
       repos: [{ name: "basaltbytes/failing" }, { name: "basaltbytes/healthy" }],
       settings: { poll_interval: 60 },
     });
-    const loop = new LoopFile({
+    const loop = LoopFile.make({
       name: LoopName.make("watch-open"),
-      trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
+      trigger: IssueTrigger.make({ on: "issue", if: Source.make('item.state == "OPEN"') }),
       selector: Option.none(),
       approval: "required",
       step: StepName.make("run"),
       agent: agent.name,
       body: PromptTemplate.make("Implement issue {{ item.number }}."),
     });
-    const instance = new LoadedInstance({
+    const instance = LoadedInstance.make({
       config: multiConfig,
       agents: [agent],
       invalidAgents: [],
@@ -1228,7 +1226,7 @@ describe("PollingTriggers", () => {
       quarantinedLoops: [],
       warnings: [],
     });
-    const changed = new ChangedIssue({
+    const changed = ChangedIssue.make({
       number: 7,
       updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
     });
@@ -1239,14 +1237,14 @@ describe("PollingTriggers", () => {
       changes: (repository, cursor) =>
         repository === "basaltbytes/failing" && failing
           ? Effect.fail(
-              new GitHubApiError({
+              GitHubApiError.make({
                 operation: "poll-repository-changes",
                 status: Option.some(500),
                 message: "GitHub returned HTTP status 500",
               }),
             )
           : Effect.succeed(
-              new RepositoryChanges({
+              RepositoryChanges.make({
                 cursor,
                 items: [changed],
                 backlog: false,
@@ -1256,14 +1254,14 @@ describe("PollingTriggers", () => {
       labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () =>
         Effect.succeed(
-          new IssueSnapshot({
+          IssueSnapshot.make({
             payload: issuePayload([], 7),
             contentHash: ContentHash.make("d".repeat(64)),
           }),
         ),
     };
     const cursors = Layer.succeed(CursorStore)({
-      read: () => Effect.succeed(Option.none()),
+      read: () => Effect.succeedNone,
       write: () => Effect.void,
     });
     const runs = Layer.succeed(RunEngine)({
@@ -1279,13 +1277,13 @@ describe("PollingTriggers", () => {
       drain: () => Effect.void,
       waitForUpgrade: () => Effect.void,
       cancelUpgrade: Effect.void,
-      upgradeDrain: Effect.succeed(Option.none()),
+      upgradeDrain: Effect.succeedNone,
       retry: () => Effect.die("unused"),
       runAgain: () => Effect.die("unused"),
       revoke: () => Effect.succeed([]),
       submit: (submission) =>
         Effect.succeed(
-          new Claimed({
+          Claimed.make({
             eventId: submission.event.id,
             runId: RunId.make(`run-${submission.event.id}`),
           }),
@@ -1293,27 +1291,26 @@ describe("PollingTriggers", () => {
       transcript: () => Effect.die("unused"),
     });
     const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-    const layer = PollingTriggers.layer
-      .pipe(Layer.provide(idleCiMonitor))
-      .pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            noCycleBudgets,
-            cursors,
-            itemProjectionWriterLayer,
-            itemProjectionReaderLayer,
-            repositoryLabelProjectionReaderLayer,
-            repositoryLabelProjectionWriterLayer,
-            inertGitHubLabelWriterLayer,
-            inertLabelReconcilerLayer,
-            runs,
-            MarcbachmannCelLayer,
-            parser,
-            Layer.succeed(GitHubPolling, github),
-            loopControlLayer(),
-          ),
+    const layer = PollingTriggers.layer.pipe(
+      Layer.provide(idleCiMonitor),
+      Layer.provide(
+        Layer.mergeAll(
+          noCycleBudgets,
+          cursors,
+          itemProjectionWriterLayer,
+          itemProjectionReaderLayer,
+          repositoryLabelProjectionReaderLayer,
+          repositoryLabelProjectionWriterLayer,
+          inertGitHubLabelWriterLayer,
+          inertLabelReconcilerLayer,
+          runs,
+          MarcbachmannCelLayer,
+          parser,
+          Layer.succeed(GitHubPolling, github),
+          loopControlLayer(),
         ),
-      );
+      ),
+    );
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
@@ -1358,11 +1355,11 @@ describe("PollingTriggers", () => {
       const cursors = memoryCursorStore();
       const projections = new Map<number, ItemProjection>();
       const observedCursors: Array<PollCursor> = [];
-      const baseline = new PollCursor({
+      const baseline = PollCursor.make({
         entityTag: Option.some(EntityTag.make('W/"baseline"')),
         watermark: Option.some(DateTime.makeUnsafe("2026-08-30T19:00:00Z")),
       });
-      const advanced = new PollCursor({
+      const advanced = PollCursor.make({
         entityTag: Option.some(EntityTag.make('W/"advanced"')),
         watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
       });
@@ -1379,20 +1376,19 @@ describe("PollingTriggers", () => {
         changes: (repository, cursor) =>
           Effect.sync(() => {
             if (repository !== watchedRepository) {
-              return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+              return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
             }
             observedCursors.push(cursor);
-            return new RepositoryChanges({
+            return RepositoryChanges.make({
               cursor: phase === "baseline" ? baseline : advanced,
               items:
                 phase === "baseline"
                   ? []
-                  : [28, 29].map(
-                      (number) =>
-                        new ChangedIssue({
-                          number,
-                          updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
-                        }),
+                  : [28, 29].map((number) =>
+                      ChangedIssue.make({
+                        number,
+                        updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+                      }),
                     ),
               backlog: false,
               nextPollAt: Option.none(),
@@ -1400,7 +1396,7 @@ describe("PollingTriggers", () => {
           }),
         snapshot: (_repository, item) =>
           Effect.succeed(
-            new IssueSnapshot({
+            IssueSnapshot.make({
               payload: issuePayload(item.number === 28 ? ["ready"] : [], item.number),
               contentHash: ContentHash.make("a".repeat(64)),
             }),
@@ -1419,7 +1415,7 @@ describe("PollingTriggers", () => {
         drain: () => Effect.void,
         waitForUpgrade: () => Effect.void,
         cancelUpgrade: Effect.void,
-        upgradeDrain: Effect.succeed(Option.none()),
+        upgradeDrain: Effect.succeedNone,
         retry: () => Effect.die("unused"),
         runAgain: () => Effect.die("unused"),
         transcript: () => Effect.die("unused"),
@@ -1430,7 +1426,7 @@ describe("PollingTriggers", () => {
               yield* Deferred.await(allowSubmit);
               yield* Deferred.succeed(submitFinished, undefined);
             }
-            return new Claimed({ eventId: submission.event.id, runId: RunId.make("submitted") });
+            return Claimed.make({ eventId: submission.event.id, runId: RunId.make("submitted") });
           }),
         revoke: () =>
           Effect.gen(function* () {
@@ -1442,7 +1438,8 @@ describe("PollingTriggers", () => {
           }),
       });
       const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-      const layer = PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(
+      const layer = PollingTriggers.layer.pipe(
+        Layer.provide(idleCiMonitor),
         Layer.provide(
           Layer.mergeAll(
             noCycleBudgets,
@@ -1489,7 +1486,7 @@ describe("PollingTriggers", () => {
         assert.deepStrictEqual(savedCursor(), baseline);
         yield* Deferred.fail(
           allowRevoke,
-          new EnginePersistenceError({
+          EnginePersistenceError.make({
             operation: "revoke run",
             cause: "storage unavailable",
           }),
@@ -1516,7 +1513,7 @@ describe("PollingTriggers", () => {
     const healthy = issueLoop("healthy-prompt");
     const cursorWrites: Array<CursorKey> = [];
     const cursors = Layer.succeed(CursorStore)({
-      read: () => Effect.succeed(Option.none()),
+      read: () => Effect.succeedNone,
       write: (key) =>
         Effect.sync(() => {
           cursorWrites.push(key);
@@ -1535,13 +1532,13 @@ describe("PollingTriggers", () => {
       drain: () => Effect.void,
       waitForUpgrade: () => Effect.void,
       cancelUpgrade: Effect.void,
-      upgradeDrain: Effect.succeed(Option.none()),
+      upgradeDrain: Effect.succeedNone,
       retry: () => Effect.die("unused"),
       runAgain: () => Effect.die("unused"),
       revoke: () => Effect.succeed([]),
       submit: (submission) =>
         Effect.succeed(
-          new Claimed({
+          Claimed.make({
             eventId: submission.event.id,
             runId: RunId.make(`run-${submission.loop}`),
           }),
@@ -1557,7 +1554,7 @@ describe("PollingTriggers", () => {
       renderPrompt: (loop) =>
         loop.name === broken.name
           ? Effect.fail(
-              new ConfigFileError({
+              ConfigFileError.make({
                 file: InstancePath.make(`loops/${loop.name}.md`),
                 stage: "expression",
                 expression: Option.some(Source.make("item.missing")),
@@ -1571,10 +1568,10 @@ describe("PollingTriggers", () => {
       missingIssues: () => Effect.succeed([]),
       changes: (_repository, cursor) =>
         Effect.succeed(
-          new RepositoryChanges({
+          RepositoryChanges.make({
             cursor,
             items: [
-              new ChangedIssue({
+              ChangedIssue.make({
                 number: 28,
                 updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
               }),
@@ -1586,33 +1583,32 @@ describe("PollingTriggers", () => {
       labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () =>
         Effect.succeed(
-          new IssueSnapshot({
+          IssueSnapshot.make({
             payload: issuePayload(["ready"]),
             contentHash: ContentHash.make("c".repeat(64)),
           }),
         ),
     };
-    const layer = PollingTriggers.layer
-      .pipe(Layer.provide(idleCiMonitor))
-      .pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            noCycleBudgets,
-            cursors,
-            itemProjectionWriterLayer,
-            itemProjectionReaderLayer,
-            repositoryLabelProjectionReaderLayer,
-            repositoryLabelProjectionWriterLayer,
-            inertGitHubLabelWriterLayer,
-            inertLabelReconcilerLayer,
-            runs,
-            MarcbachmannCelLayer,
-            parser,
-            Layer.succeed(GitHubPolling, github),
-            loopControlLayer(),
-          ),
+    const layer = PollingTriggers.layer.pipe(
+      Layer.provide(idleCiMonitor),
+      Layer.provide(
+        Layer.mergeAll(
+          noCycleBudgets,
+          cursors,
+          itemProjectionWriterLayer,
+          itemProjectionReaderLayer,
+          repositoryLabelProjectionReaderLayer,
+          repositoryLabelProjectionWriterLayer,
+          inertGitHubLabelWriterLayer,
+          inertLabelReconcilerLayer,
+          runs,
+          MarcbachmannCelLayer,
+          parser,
+          Layer.succeed(GitHubPolling, github),
+          loopControlLayer(),
         ),
-      );
+      ),
+    );
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
@@ -1635,7 +1631,7 @@ describe("PollingTriggers", () => {
           prefix: "usine-polling-multi-",
         }),
       );
-      const multiConfig = Schema.decodeUnknownSync(UsineConfig)({
+      const multiConfig = Schema.decodeSync(UsineConfig)({
         version: 2,
         projects: [
           {
@@ -1647,16 +1643,16 @@ describe("PollingTriggers", () => {
         repos: [{ name: "basaltbytes/one" }, { name: "basaltbytes/two" }],
         settings: { poll_interval: 60 },
       });
-      const loop = new LoopFile({
+      const loop = LoopFile.make({
         name: LoopName.make("workspace/watch-open"),
-        trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
+        trigger: IssueTrigger.make({ on: "issue", if: Source.make('item.state == "OPEN"') }),
         selector: Option.none(),
         approval: "required",
         step: StepName.make("run"),
         agent: agent.name,
         body: PromptTemplate.make("Implement issue {{ item.number }}."),
       });
-      const instance = new LoadedInstance({
+      const instance = LoadedInstance.make({
         config: multiConfig,
         agents: [agent],
         invalidAgents: [],
@@ -1664,9 +1660,8 @@ describe("PollingTriggers", () => {
         quarantinedLoops: [],
         warnings: [],
       });
-      const changedItems = [11, 12].map(
-        (number) =>
-          new ChangedIssue({ number, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+      const changedItems = [11, 12].map((number) =>
+        ChangedIssue.make({ number, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
       );
       const hashFor = (repository: string, number: number) =>
         ContentHash.make(
@@ -1677,7 +1672,7 @@ describe("PollingTriggers", () => {
         missingIssues: () => Effect.succeed([]),
         changes: (_repository, cursor) =>
           Effect.succeed(
-            new RepositoryChanges({
+            RepositoryChanges.make({
               cursor,
               items: changedItems,
               backlog: false,
@@ -1687,7 +1682,7 @@ describe("PollingTriggers", () => {
         labels: () => Effect.succeed(emptyLabelCatalog),
         snapshot: (repository, item) =>
           Effect.succeed(
-            new IssueSnapshot({
+            IssueSnapshot.make({
               payload: issuePayload([], item.number),
               contentHash: hashFor(repository, item.number),
             }),
@@ -1742,16 +1737,16 @@ describe("PollingTriggers", () => {
           labels: () => Effect.succeed(emptyLabelCatalog),
           changes: (_repository, cursor) =>
             Effect.succeed(
-              new RepositoryChanges({
+              RepositoryChanges.make({
                 cursor,
-                items: [...open].map((number) => new ChangedIssue({ number, updatedAt })),
+                items: [...open].map((number) => ChangedIssue.make({ number, updatedAt })),
                 backlog: false,
                 nextPollAt: Option.none(),
               }),
             ),
           snapshot: (_repository, item) =>
             Effect.succeed(
-              new IssueSnapshot({
+              IssueSnapshot.make({
                 payload: issuePayload(["ready"], item.number),
                 contentHash: ContentHash.make((item.number === 28 ? "a" : "b").repeat(64)),
               }),
@@ -1762,7 +1757,7 @@ describe("PollingTriggers", () => {
         const executor = Layer.succeed(StepExecutor)({
           workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
-          outcome: () => Effect.succeed(Option.none()),
+          outcome: () => Effect.succeedNone,
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
@@ -1774,7 +1769,7 @@ describe("PollingTriggers", () => {
             Effect.sync(() => {
               models.push(execution.agent.brain.model);
               permissions.push(execution.permissions);
-              return new StepResult({ message: "Implemented", facts: [] });
+              return StepResult.make({ message: "Implemented", facts: [] });
             }),
         });
 
@@ -1806,8 +1801,13 @@ describe("PollingTriggers", () => {
           const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", openRun]));
           yield* engine.approve(
             openRun,
-            new Event({ id: EventId.make(dedupKey), dedupKey, payload: {}, receivedAt: updatedAt }),
-            new ApprovalSource({ channel: "ui", approver: Option.none() }),
+            Event.make({
+              id: EventId.make(dedupKey),
+              dedupKey,
+              payload: {},
+              receivedAt: updatedAt,
+            }),
+            ApprovalSource.make({ channel: "ui", approver: Option.none() }),
           );
           yield* waitForState(engine, openRun, "Succeeded");
           assert.deepStrictEqual(models, ["gpt-5.6-sol"]);

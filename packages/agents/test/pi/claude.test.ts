@@ -113,18 +113,18 @@ const RECORD_SSH = fileURLToPath(new URL("../fixtures/record-ssh.mjs", import.me
 const request = (
   model = "claude-sonnet-4-6",
   options?: { readonly harness?: Harness; readonly effort?: Effort },
-  host: ChildHost = new LocalProcess(),
+  host: ChildHost = LocalProcess.make(),
 ) =>
-  new ChildRequest({
+  ChildRequest.make({
     worker: WorkerName.make("worker-1"),
     machine: Option.none(),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host,
-    session: new ChildSession({
+    session: ChildSession.make({
       id: AgentSessionId.make("parent:attempt-1:child:1"),
       parentId: AgentSessionId.make("parent:attempt-1"),
       agent: AgentName.make("developer"),
-      brain: new BrainSpec({
+      brain: BrainSpec.make({
         harness: "claude",
         model: ModelId.make(model),
         effort: "high",
@@ -231,7 +231,7 @@ const joinAdvancingClock = Effect.fn(function* <A, E>(fiber: Fiber.Fiber<A, E>) 
 
 /** A remote host whose SSH client exits with `code` at once: `SSH_FAILURE` for a broken connection. */
 const exitingHost = (code: number) =>
-  new RemoteShell({
+  RemoteShell.make({
     ssh: { command: process.execPath, args: ["-e", `process.exit(${code})`] },
     sshEnvironment: {},
     destination: "worker.exe.xyz",
@@ -341,9 +341,7 @@ describe("Claude child backend", () => {
         assert.lengthOf(retries, 1);
         assert.include(retries[0], '"delay":"15s"');
       }).pipe(
-        Effect.provide(claudeChild),
-        Effect.provide(sdk),
-        Effect.provide(logs.layer),
+        Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
         Effect.scoped,
       );
     }),
@@ -365,9 +363,7 @@ describe("Claude child backend", () => {
           ["15s", "30s", "1m"],
         );
       }).pipe(
-        Effect.provide(claudeChild),
-        Effect.provide(sdk),
-        Effect.provide(logs.layer),
+        Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
         Effect.scoped,
       );
     }),
@@ -382,7 +378,7 @@ describe("Claude child backend", () => {
         yield* Fiber.interrupt(launching);
         yield* TestClock.adjust("2 minutes");
         assert.lengthOf(launches, 1, "the canceled child starts no retry");
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk), Effect.scoped);
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
     }),
   );
 
@@ -433,7 +429,7 @@ describe("Claude child backend", () => {
           yield* TestClock.adjust("1 minute");
           yield* Fiber.join(waitingForSilence);
           yield* Fiber.join(silent);
-        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk), Effect.scoped);
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
       }),
   );
 
@@ -454,7 +450,7 @@ describe("Claude child backend", () => {
           assert(error instanceof SessionOperationError);
           assert.strictEqual(error.operation, "stream");
           assert.match(error.message, /invalid completion update/u);
-        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
   );
@@ -480,7 +476,7 @@ describe("Claude child backend", () => {
       Effect.gen(function* () {
         const session = yield* (yield* ChildBackend).launch(request());
         assert.strictEqual((yield* session.result).message, "Updated answer");
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -533,7 +529,7 @@ describe("Claude child backend", () => {
             events.map((event) => event._tag),
             ["SessionStarted", "TextOutput", "SessionFinished"],
           );
-        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
   );
@@ -567,7 +563,7 @@ describe("Claude child backend", () => {
           const error = yield* Effect.flip(session.result);
           assert(error instanceof SessionOperationError);
           assert.strictEqual(error.operation, "stream");
-        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
   );
@@ -593,7 +589,7 @@ describe("Claude child backend", () => {
         const running = yield* (yield* ChildBackend).launch(request());
         const reads: Array<Option.Option<InterventionState>> = [];
         const state = yield* running.intervene(
-          new OperatorMessage({ message: "Review with me" }),
+          OperatorMessage.make({ message: "Review with me" }),
           (delivered) =>
             Effect.sync(() => {
               reads.push(delivered);
@@ -620,7 +616,7 @@ describe("Claude child backend", () => {
         const [read] = reads;
         assert(read !== undefined && Option.isSome(read));
         assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk));
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
 
@@ -661,7 +657,7 @@ describe("Claude child backend", () => {
         assert(input !== undefined);
         const entered = input;
         yield* Effect.promise(() => entered.next());
-        yield* running.intervene(new OperatorMessage({ message: "Review with me" }), noDelivery);
+        yield* running.intervene(OperatorMessage.make({ message: "Review with me" }), noDelivery);
         assert.strictEqual(
           (yield* Effect.promise(() => entered.next())).value?.message.content,
           "Review with me",
@@ -687,7 +683,7 @@ describe("Claude child backend", () => {
         yield* Queue.take(idle);
         assert.strictEqual(result.pollUnsafe(), undefined);
         yield* running.intervene(
-          new OperatorMessage({ message: "One more adjustment" }),
+          OperatorMessage.make({ message: "One more adjustment" }),
           noDelivery,
         );
         assert.strictEqual(
@@ -711,14 +707,14 @@ describe("Claude child backend", () => {
           state: "idle",
         });
         yield* Queue.take(idle);
-        yield* running.intervene(new Release(), noDelivery);
+        yield* running.intervene(Release.make(), noDelivery);
         assert.strictEqual((yield* Fiber.join(result)).message, "Adjusted answer");
         assert.strictEqual((yield* Effect.promise(() => entered.next())).done, true);
         assert.deepStrictEqual(
           seen.filter((tag) => tag === "SessionStarted"),
           ["SessionStarted"],
         );
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk));
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
   it.effect("closes a paused tool hook with its child scope even without a vendor abort", () =>
@@ -746,8 +742,8 @@ describe("Claude child backend", () => {
       yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void));
       const running = yield* Effect.gen(function* () {
         return yield* (yield* ChildBackend).launch(request());
-      }).pipe(Scope.provide(owner), Effect.provide(claudeChild), Effect.provide(sdk));
-      yield* running.intervene(new Interrupt(), noDelivery);
+      }).pipe(Scope.provide(owner), Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))));
+      yield* running.intervene(Interrupt.make(), noDelivery);
       const hook = options?.hooks?.PreToolUse?.[0]?.hooks[0];
       assert(hook !== undefined);
       const settled = hook(
@@ -825,7 +821,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(options?.spawnClaudeCodeProcess, undefined);
         const first = yield* Effect.promise(() => input![Symbol.asyncIterator]().next());
         assert.strictEqual(first.value?.message.content, "Implement the focused task.");
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -887,9 +883,9 @@ describe("Claude child backend", () => {
         const retries = warnings.filter((line) => line.includes("cannot reach its provider"));
         assert.lengthOf(retries, 2, "one warning per API retry");
       }).pipe(
-        Effect.provide(claudeChild),
-        Effect.provide(sdk),
-        Effect.provide(Logger.layer([logger])),
+        Effect.provide(
+          claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(Logger.layer([logger]))),
+        ),
       ),
     );
   });
@@ -903,7 +899,7 @@ describe("Claude child backend", () => {
       },
     });
     const record = join(mkdtempSync(join(tmpdir(), "usine-claude-ssh-")), "ssh.json");
-    const host = new RemoteShell({
+    const host = RemoteShell.make({
       ssh: { command: process.execPath, args: [RECORD_SSH] },
       sshEnvironment: { RECORD_TO: record },
       destination: "worker.exe.xyz",
@@ -929,7 +925,7 @@ describe("Claude child backend", () => {
           child.once("exit", (code) => resume(Effect.succeed(code)));
         });
         assert.strictEqual(exitCode, 0);
-        const spawned = Schema.decodeUnknownSync(
+        const spawned = Schema.decodeSync(
           Schema.fromJsonString(
             Schema.Struct({
               argv: Schema.Array(Schema.String),
@@ -944,7 +940,7 @@ describe("Claude child backend", () => {
         ]);
         assert.strictEqual(spawned.env.RECORD_TO, record);
         assert.strictEqual(spawned.env.HOME, undefined, "the SSH client inherits nothing");
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -984,7 +980,10 @@ describe("Claude child backend", () => {
       assert(usage?._tag === "SessionTokensUpdated");
       assert.strictEqual(usage.totalTokens, 180, "usage carries over from the broken launch");
       assert.deepStrictEqual(usage.costUsd, Option.some(0.5));
-    }).pipe(Effect.provide(claudeChildWith(worker.layer)), Effect.provide(sdk), Effect.scoped);
+    }).pipe(
+      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
+      Effect.scoped,
+    );
   });
 
   it.effect("fails a remote child whose Claude process fails instead of resuming it", () => {
@@ -999,7 +998,10 @@ describe("Claude child backend", () => {
       assert.strictEqual(error.message, "Claude output stream failed");
       assert.deepStrictEqual(resumed, []);
       assert.deepStrictEqual(worker.commands, []);
-    }).pipe(Effect.provide(claudeChildWith(worker.layer)), Effect.provide(sdk), Effect.scoped);
+    }).pipe(
+      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
+      Effect.scoped,
+    );
   });
 
   it.effect("fails a remote child once its Worker stays unreachable through every resume", () => {
@@ -1014,7 +1016,10 @@ describe("Claude child backend", () => {
       assert.strictEqual(error.message, "Claude output stream failed");
       assert.lengthOf(worker.commands, 6, "one stop per resume try");
       assert.deepStrictEqual(resumed, [], "no Claude process starts before the old one stops");
-    }).pipe(Effect.provide(claudeChildWith(worker.layer)), Effect.provide(sdk), Effect.scoped);
+    }).pipe(
+      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
+      Effect.scoped,
+    );
   });
 
   it.effect("rejects an unknown model through the typed channel before sending the prompt", () => {
@@ -1035,7 +1040,7 @@ describe("Claude child backend", () => {
           const error = yield* Effect.flip(backend.launch(request("claude-never-existed")));
           assert(error instanceof UnknownModelError);
           assert.strictEqual(error.model, "claude-never-existed");
-        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
       assert.strictEqual(closed, true);
     });
@@ -1058,7 +1063,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(captured[0] !== undefined && "effort" in captured[0], false);
         assert.deepStrictEqual(captured[1]?.thinking, { type: "adaptive" });
         assert.strictEqual(captured[1]?.effort, "low");
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -1156,7 +1161,7 @@ describe("Claude child backend", () => {
           const error = yield* Effect.flip(session.result);
           assert.strictEqual(error instanceof AgentCapacityError, capacity);
           if (!capacity) assert(error instanceof AgentResultError);
-        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
   );
@@ -1173,7 +1178,7 @@ describe("Claude child backend", () => {
         assert(error instanceof SessionOperationError);
         assert.strictEqual(error.operation, "stream");
         assert.match(error.message, /closed without a result/u);
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 });

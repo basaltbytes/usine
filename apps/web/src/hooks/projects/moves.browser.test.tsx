@@ -47,29 +47,29 @@ const overview = (
   additionalLabels: ReadonlyArray<string> = [],
   projectRepository = repository,
 ) =>
-  new ReadyOverview({
+  ReadyOverview.make({
     loops: [],
     needsYou: [],
     projects: [
-      new ProjectView({
+      ProjectView.make({
         repository: projectRepository,
         status: "clear",
         runs: [],
         labels: [],
         preflightFindings: [],
-        board: new BoardView({
+        board: BoardView.make({
           failures: [],
           lanes: ["Backlog", "Ready", "In progress"].map((name) => {
             const label = GitHubLabelName.make(name);
-            return new WritableBoardLaneView({
+            return WritableBoardLaneView.make({
               id: BoardLaneId.make(name),
               name: LaneName.make(name),
-              sources: [new LabelLaneSource({ label })],
+              sources: [LabelLaneSource.make({ label })],
               labels: [label],
               origin: "authored",
               items: locations.flatMap((location, index) => {
                 if (location !== name) return [];
-                const link = new BoardItemLink({
+                const link = BoardItemLink.make({
                   itemKey: ItemKey.make(`${projectRepository}:${index + 1}`),
                   kind: "issue",
                   number: ItemNumber.make(index + 1),
@@ -78,7 +78,7 @@ const overview = (
                   state: "issue-open",
                 });
                 return [
-                  new BoardTaskView({
+                  BoardTaskView.make({
                     repository: projectRepository,
                     ...link,
                     state: "issue-open",
@@ -209,7 +209,7 @@ it("keeps separate saved moves while another card can move, and accepts work tha
   await respond(overview(["In progress", "Ready"]));
   await invalidateChanges(
     queryClient,
-    new ChangeNotice({
+    ChangeNotice.make({
       revision: 1,
       reset: false,
       changes: [{ kind: "navigation", id: "instance" }],
@@ -223,7 +223,7 @@ it("keeps separate saved moves while another card can move, and accepts work tha
 
 it("finishes an in-flight move in its original project after navigating to another project", async () => {
   const other = RepositoryName.make("board-test/other");
-  const data = new ReadyOverview({
+  const data = ReadyOverview.make({
     projects: [...overview().projects, ...overview(undefined, "", [], other).projects],
     loops: [],
     needsYou: [],
@@ -265,30 +265,29 @@ it("finishes an in-flight move in its original project after navigating to anoth
 
 it("shows move progress even when the destination has no labels or Run details to display yet", async () => {
   const data = overview();
-  const singleDestination = new ReadyOverview({
+  const singleDestination = ReadyOverview.make({
     ...data,
-    projects: data.projects.map(
-      (project) =>
-        new ProjectView({
-          ...project,
-          board: new BoardView({
-            failures: [],
-            lanes: project.board.lanes.flatMap((lane) => {
-              if (lane.name === "In progress") return [];
-              return lane.name === "Backlog"
-                ? [
-                    new ReadOnlyBoardLaneView({
-                      id: lane.id,
-                      name: lane.name,
-                      origin: "fallback",
-                      sources: [],
-                      items: lane.items.map((item) => new BoardTaskView({ ...item, labels: [] })),
-                    }),
-                  ]
-                : [lane];
-            }),
+    projects: data.projects.map((project) =>
+      ProjectView.make({
+        ...project,
+        board: BoardView.make({
+          failures: [],
+          lanes: project.board.lanes.flatMap((lane) => {
+            if (lane.name === "In progress") return [];
+            return lane.name === "Backlog"
+              ? [
+                  ReadOnlyBoardLaneView.make({
+                    id: lane.id,
+                    name: lane.name,
+                    origin: "fallback",
+                    sources: [],
+                    items: lane.items.map((item) => BoardTaskView.make({ ...item, labels: [] })),
+                  }),
+                ]
+              : [lane];
           }),
         }),
+      }),
     ),
   });
   await respond(singleDestination);
@@ -341,31 +340,30 @@ for (const method of ["menu", "keyboard"] as const) {
     const project = initial.projects[0];
     if (project === undefined) throw new Error("Missing project fixture");
     const cards = project.board.lanes.flatMap(({ items }) =>
-      items.map(
-        (item) =>
-          new BoardTaskView({
-            ...item,
-            state: "issue-closed",
-            items: item.items.map(
-              (member) => new BoardItemLink({ ...member, state: "issue-closed" }),
-            ),
-          }),
+      items.map((item) =>
+        BoardTaskView.make({
+          ...item,
+          state: "issue-closed",
+          items: item.items.map((member) =>
+            BoardItemLink.make({ ...member, state: "issue-closed" }),
+          ),
+        }),
       ),
     );
-    const paged = new ReadyOverview({
+    const paged = ReadyOverview.make({
       ...initial,
       projects: [
-        new ProjectView({
+        ProjectView.make({
           ...project,
-          board: new BoardView({
+          board: BoardView.make({
             ...project.board,
             lanes: [
               ...project.board.lanes.map((lane) => ({ ...lane, items: [] })),
-              new ReadOnlyBoardLaneView({
+              ReadOnlyBoardLaneView.make({
                 id: BoardLaneId.make("Done"),
                 name: LaneName.make("Done"),
                 origin: "authored",
-                sources: [new StateLaneSource({ state: "issue-closed" })],
+                sources: [StateLaneSource.make({ state: "issue-closed" })],
                 items: [],
                 totalItems: cards.length,
               }),
@@ -420,32 +418,30 @@ it("moves and links cards with matching numbers using each card's repository", a
   const second = overview(["Backlog"], "", [], RepositoryName.make("board-test/other"));
   const [other] = second.projects;
   if (other === undefined) throw new Error("Missing second project");
-  const data = new ReadyOverview({
+  const data = ReadyOverview.make({
     ...first,
-    projects: first.projects.map(
-      (project) =>
-        new ProjectView({
-          ...project,
-          repositories: [project.repository, other.repository],
-          board: new BoardView({
-            failures: [],
-            lanes: project.board.lanes.map(
-              (lane) =>
-                new WritableBoardLaneView({
-                  ...lane,
-                  _tag: "WritableBoardLane",
-                  origin: "authored",
-                  labels: [GitHubLabelName.make(lane.name)],
-                  items: [
-                    ...lane.items,
-                    ...other.board.lanes
-                      .filter(({ id }) => id === lane.id)
-                      .flatMap(({ items }) => items),
-                  ],
-                }),
-            ),
-          }),
+    projects: first.projects.map((project) =>
+      ProjectView.make({
+        ...project,
+        repositories: [project.repository, other.repository],
+        board: BoardView.make({
+          failures: [],
+          lanes: project.board.lanes.map((lane) =>
+            WritableBoardLaneView.make({
+              ...lane,
+              _tag: "WritableBoardLane",
+              origin: "authored",
+              labels: [GitHubLabelName.make(lane.name)],
+              items: [
+                ...lane.items,
+                ...other.board.lanes
+                  .filter(({ id }) => id === lane.id)
+                  .flatMap(({ items }) => items),
+              ],
+            }),
+          ),
         }),
+      }),
     ),
   });
   await respond(data);

@@ -241,7 +241,7 @@ it("says what is missing when the window has no task done", async () => {
 });
 
 it("keeps setup mode usable when statistics fail and recovers on refetch", async () => {
-  const state = new NeedsSetupOverview({
+  const state = NeedsSetupOverview.make({
     errorTag: "GitHubAppNotConfigured",
     projects: [],
     loops: [],

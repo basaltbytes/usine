@@ -21,10 +21,10 @@ export const instanceIdOf = Effect.fn("Instance.id")(function* (files: InstanceF
   const fileSystem = yield* FileSystem.FileSystem;
   const failure =
     (operation: InstanceIdError["operation"]) => (error: { readonly message: string }) =>
-      new InstanceIdError({ operation, path: files.id, reason: error.message });
+      InstanceIdError.make({ operation, path: files.id, reason: error.message });
   if (yield* fileSystem.exists(files.id).pipe(Effect.mapError(failure("read")))) {
     const text = yield* fileSystem.readFileString(files.id).pipe(Effect.mapError(failure("read")));
-    const instanceId = yield* Schema.decodeUnknownEffect(InstanceIdFromText)(text).pipe(
+    const instanceId = yield* Schema.decodeEffect(InstanceIdFromText)(text).pipe(
       Effect.mapError(failure("read")),
     );
     yield* Effect.annotateCurrentSpan({ instanceId });

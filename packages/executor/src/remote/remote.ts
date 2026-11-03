@@ -54,7 +54,7 @@ import { abandonedWorktreeSweepFor } from "./sweep.ts";
 const isExecutorError = Schema.is(ExecutorError);
 
 const executorError = (message: string, cause: unknown): ExecutorOperationError =>
-  new ExecutorOperationError({ operation: "prepare", message, cause });
+  ExecutorOperationError.make({ operation: "prepare", message, cause });
 
 /** A script that writes `$2` to the file `$1`, creating its directory, and makes it executable. */
 const WRITE_EXECUTABLE_SCRIPT = String.raw`
@@ -121,7 +121,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       ((name: WorkerName, _attemptId: AttemptId) => worker.machineFor(name));
     const leftoversOf = (attempt: AttemptRecovery) =>
       worker.leftovers === undefined
-        ? workerLeftovers(attempt.worker).pipe(Effect.map((found) => Option.some(found)))
+        ? workerLeftovers(attempt.worker).pipe(Effect.asSome)
         : worker.leftovers(attempt, workerLeftovers(attempt.worker));
     const recovered = worker.recovered ?? (() => Effect.void);
     const checkoutHeld = worker.checkoutHeld ?? (() => Effect.void);
@@ -196,7 +196,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         contained,
         message,
       });
-      return yield* new ExecutorOperationError({
+      return yield* ExecutorOperationError.make({
         operation,
         message,
         cause: new Error(contained ? "container marker without a runtime" : "no container marker"),
@@ -302,19 +302,16 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const harvestCommand =
       (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteShell) =>
       (command: "git" | "gh", args: ReadonlyArray<string>) =>
-        access.refresh
-          .pipe(
-            Effect.andThen(
-              commands.run(operation, shell, command, args, {
-                cwd: worktree,
-                environment: access.environment,
-                scrub: access.scrub,
-              }),
-            ),
-          )
-          .pipe(
-            Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
-          );
+        access.refresh.pipe(
+          Effect.andThen(
+            commands.run(operation, shell, command, args, {
+              cwd: worktree,
+              environment: access.environment,
+              scrub: access.scrub,
+            }),
+          ),
+          Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
+        );
 
     /** Returns whether the checkout at `worktree` exists on `machine`. */
     const checkoutExists = (machine: M, worktree: string) =>
@@ -541,12 +538,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         harvestCommand("launch", workspace.worktree, access, shell),
         windows,
       ).pipe(
-        Effect.mapError(
-          (error) =>
-            new InfraFailure({
-              message: `Can't harvest the attempt's checkout: ${error.message}`,
-              cause: error,
-            }),
+        Effect.mapError((error) =>
+          InfraFailure.make({
+            message: `Can't harvest the attempt's checkout: ${error.message}`,
+            cause: error,
+          }),
         ),
       );
 
@@ -753,7 +749,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           permissions: request.permissions,
           message,
         });
-        return yield* new WorkerCapabilityError({
+        return yield* WorkerCapabilityError.make({
           worker: request.worker,
           capability: "credentials",
           message,
@@ -957,12 +953,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               );
               yield* checkoutHost.recordOutOfMemory(io.outOfMemory);
               const shell = yield* checkoutHost.shell.pipe(
-                Effect.mapError(
-                  (error) =>
-                    new InfraFailure({
-                      message: `Can't start the attempt's container: ${error.message}`,
-                      cause: error,
-                    }),
+                Effect.mapError((error) =>
+                  InfraFailure.make({
+                    message: `Can't start the attempt's container: ${error.message}`,
+                    cause: error,
+                  }),
                 ),
               );
               yield* workerWatches.watch({

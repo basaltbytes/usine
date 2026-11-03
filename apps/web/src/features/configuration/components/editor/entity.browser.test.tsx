@@ -58,7 +58,7 @@ beforeEach(() => {
   client.setQueryData(configurationQuery().queryKey, configurationFixture());
   client.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
+    ReadyOverview.make({ projects: [], loops: [], needsYou: [] }),
   );
 });
 afterEach(() => {
@@ -329,7 +329,7 @@ it("keeps a loop draft when a refresh removes the loop", async () => {
   await source.fill("keep this loop draft");
   client.setQueryData(
     configurationQuery().queryKey,
-    new ConfigurationView({ ...configurationFixture(), loops: [] }),
+    ConfigurationView.make({ ...configurationFixture(), loops: [] }),
   );
   await expect
     .element(page.getByText("loops/start-dev.md", { exact: true }))
@@ -658,13 +658,13 @@ it("shows derived container limits and validates environment variable names in a
   await mount();
   client.setQueryData(
     configurationQuery().queryKey,
-    new ConfigurationView({
+    ConfigurationView.make({
       ...configurationFixture(),
       workers: configurationFixture().workers.map((worker) =>
         worker.name === "local"
           ? {
               ...worker,
-              containerLimits: Schema.decodeUnknownSync(ContainerLimits)({
+              containerLimits: Schema.decodeSync(ContainerLimits)({
                 cpus: 2,
                 memoryMib: 2048,
                 pids: 256,
@@ -808,10 +808,10 @@ it.each([
 it("checks CEL while typing, completes payload fields, previews, saves paused, and confirms resume", async () => {
   client.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({
+    ReadyOverview.make({
       ...taskOverview(),
-      projects: taskOverview().projects.map(
-        (project) => new ProjectView({ ...project, id: ProjectId.make("usine") }),
+      projects: taskOverview().projects.map((project) =>
+        ProjectView.make({ ...project, id: ProjectId.make("usine") }),
       ),
     }),
   );
@@ -927,7 +927,7 @@ it("matches and removes repository selections regardless of casing", async () =>
   await mount("/configuration/loops/usine%2Fstart-dev");
   client.setQueryData(
     configurationQuery().queryKey,
-    new ConfigurationView({
+    ConfigurationView.make({
       ...configurationFixture(),
       repositories: configurationFixture().repositories.map((repository) => ({
         ...repository,
@@ -1028,7 +1028,7 @@ it("creates a project with two ordered repositories and lanes without phone page
   await mount("/configuration/projects");
   client.setQueryData(
     configurationQuery().queryKey,
-    new ConfigurationView({ ...configurationFixture(), projects: [] }),
+    ConfigurationView.make({ ...configurationFixture(), projects: [] }),
   );
   await button("New").click();
   const identifier = page.getByRole("textbox", { name: "Project ID", exact: true });

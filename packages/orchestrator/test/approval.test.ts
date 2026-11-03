@@ -31,7 +31,7 @@ const label = (actor: Schema.Json) => ({
 const executor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
-  outcome: () => Effect.succeed(Option.none()),
+  outcome: () => Effect.succeedNone,
   recover: () => Effect.void,
   intervene: () => Effect.void,
   interrupt: () => Effect.void,
@@ -39,7 +39,7 @@ const executor = Layer.succeed(StepExecutor)({
   sweep: Effect.void,
   discard: () => Effect.void,
   reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
-  execute: () => Effect.succeed(new StepResult({ message: "Completed", facts: [] })),
+  execute: () => Effect.succeed(StepResult.make({ message: "Completed", facts: [] })),
 });
 const parser = ConfigParser.layer.pipe(Layer.provideMerge(MarcbachmannCelLayer));
 
@@ -127,8 +127,8 @@ for (const scenario of [
       const options = {
         loop,
         agent: agent.agent,
-        repository: Schema.decodeUnknownSync(ManagedRepo)({ name: "acme/project" }),
-        payload: Schema.decodeUnknownSync(Schema.Json)(scenario.payload),
+        repository: Schema.decodeSync(ManagedRepo)({ name: "acme/project" }),
+        payload: Schema.decodeSync(Schema.Json)(scenario.payload),
         dedupKey: DedupKey.make("approval-event"),
         cycleGeneration: CycleGeneration.make(0),
         itemKey: ItemKey.make("github:acme/project:1"),
@@ -171,7 +171,7 @@ for (const scenario of [
         // A repeated event keeps the original decision after a configuration edit.
         const changed = yield* triggerSubmission(expressions, {
           ...options,
-          loop: new LoopFile({ ...loop, approval: "required" }),
+          loop: LoopFile.make({ ...loop, approval: "required" }),
         });
         yield* engine.submit(changed);
         expect((yield* inspect).approvalReason).toEqual(submission.approvalReason);
@@ -188,9 +188,12 @@ for (const scenario of [
         );
       }).pipe(Effect.provide(observationLayer(directory)));
     }).pipe(
-      Effect.provide(parser),
-      Effect.provide(NodeServices.layer),
-      Effect.provide(Logger.layer([logger])),
+      Effect.provide(
+        parser.pipe(
+          Layer.provideMerge(NodeServices.layer),
+          Layer.provideMerge(Logger.layer([logger])),
+        ),
+      ),
     );
   });
 }

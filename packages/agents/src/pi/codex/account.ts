@@ -24,7 +24,7 @@ export const initializeCodex = Effect.fn("Codex.initialize")(function* (
 
 /** Returns the error for when Codex cannot confirm that it uses the ChatGPT pool. */
 export const codexPoolUnavailable = (model: ModelId) =>
-  new PoolUnavailableError({
+  PoolUnavailableError.make({
     harness: "codex",
     model,
     pool: "chatgptPlan",

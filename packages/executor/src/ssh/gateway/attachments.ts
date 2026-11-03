@@ -201,10 +201,10 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     );
 
     const requestFor = (credential: WorkerCredential) =>
-      new AttachRequest({
+      AttachRequest.make({
         worker,
         repository,
-        credential: new InstallationCredential({ token: credential.value }),
+        credential: InstallationCredential.make({ token: credential.value }),
         expiresAt: credential.expiresAt,
       });
 
@@ -216,14 +216,13 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
           onNone: () => admin.attach(requestFor(credential)),
           onSome: ({ id }) => admin.renew(id, requestFor(credential)),
         }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new CredentialUnavailableError({
-                repository,
-                reason: "unreachable",
-                message: cause.message,
-                cause,
-              }),
+          Effect.mapError((cause) =>
+            CredentialUnavailableError.make({
+              repository,
+              reason: "unreachable",
+              message: cause.message,
+              cause,
+            }),
           ),
         );
         active.add(answer.attachment.id);

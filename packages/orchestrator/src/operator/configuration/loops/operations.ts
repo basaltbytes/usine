@@ -33,7 +33,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
 
   const candidate = (input: LoopPreviewRequest) =>
     Effect.gen(function* () {
-      const requested = new ConfigurationEntityKey({
+      const requested = ConfigurationEntityKey.make({
         kind: "loop",
         identifier: ConfigurationEntityId.make(input.name),
       });
@@ -44,17 +44,17 @@ export const configurationLoopOperations = Effect.gen(function* () {
       });
       const resolved = resolveConfigurationEntityKey(entities, requested);
       if (Option.isNone(resolved))
-        return yield* new ConfigurationNotFound({
+        return yield* ConfigurationNotFound.make({
           message: "Loop is ambiguous. Use project/loop.",
         });
       const key = resolved.value;
       const instance = yield* validateConfiguration(parser, [
         ...entities.filter((entity) => entity.key.key !== key.key),
-        new ConfigurationEntity({ key, value: qualifyLoopValue(key, input.value) }),
+        ConfigurationEntity.make({ key, value: qualifyLoopValue(key, input.value) }),
       ]);
       const loop = instance.loops.find((loop) => loop.name === LoopName.make(key.identifier));
       if (loop === undefined)
-        return yield* new ConfigurationNotFound({
+        return yield* ConfigurationNotFound.make({
           message: "Loop was not found in the checked configuration.",
         });
       return { instance, loop };
@@ -65,13 +65,13 @@ export const configurationLoopOperations = Effect.gen(function* () {
     const snapshot = yield* store.read;
     const resolved = resolveConfigurationEntityKey(
       Option.match(snapshot.instance, { onNone: () => [], onSome: configurationEntities }),
-      new ConfigurationEntityKey({
+      ConfigurationEntityKey.make({
         kind: "loop",
         identifier: ConfigurationEntityId.make(input.name),
       }),
     );
     if (Option.isNone(resolved))
-      return yield* new ConfigurationNotFound({ message: "Loop is ambiguous. Use project/loop." });
+      return yield* ConfigurationNotFound.make({ message: "Loop is ambiguous. Use project/loop." });
     const key = resolved.value;
     const errors = yield* parser
       .checkLoopDraft(
@@ -94,7 +94,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
       loop: input.name,
       problems: problems.length,
     });
-    return new LoopCheck({ problems });
+    return LoopCheck.make({ problems });
   });
 
   const preview = Effect.fn("ConfigurationEditor.previewLoop")(
@@ -120,18 +120,17 @@ export const configurationLoopOperations = Effect.gen(function* () {
             repository,
             candidates.map(({ payload }) => payload),
           ).pipe(
-            Effect.mapError(
-              (error) =>
-                new ConfigurationInvalid({
-                  problems: [
-                    new ConfigFileError({
-                      file: InstancePath.make(`loops/${loop.name}.md`),
-                      stage: "expression",
-                      expression: Option.some(error.source),
-                      message: error.message,
-                    }),
-                  ],
-                }),
+            Effect.mapError((error) =>
+              ConfigurationInvalid.make({
+                problems: [
+                  ConfigFileError.make({
+                    file: InstancePath.make(`loops/${loop.name}.md`),
+                    stage: "expression",
+                    expression: Option.some(error.source),
+                    message: error.message,
+                  }),
+                ],
+              }),
             ),
           );
           for (const [item, result] of Arr.zip(candidates, evaluated)) {
@@ -156,7 +155,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
             const projected = yield* projectedItem(item).pipe(Effect.result);
             if (Result.isSuccess(projected) && matched.length < 20)
               matched.push(
-                new LoopPreviewItem({
+                LoopPreviewItem.make({
                   ...projected.success,
                   repository: repository.name,
                   priority,
@@ -180,7 +179,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
         selected === null &&
         !failures.some((failure) => failure.itemKey === input.itemKey)
       )
-        return yield* new ConfigurationNotFound({
+        return yield* ConfigurationNotFound.make({
           message: "The selected item no longer matches this loop.",
         });
       for (const failure of failures)
@@ -194,7 +193,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
         failures: failures.length,
         repositoriesWithoutItems: repositoriesWithoutItems.length,
       });
-      return new LoopPreview({
+      return LoopPreview.make({
         items: matched,
         total,
         prompt: selected,
@@ -205,7 +204,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
     },
     Effect.provideService(ExpressionEngine, expressions),
     Effect.catchTag("EnginePersistenceError", (cause) =>
-      Effect.fail(new ConfigurationStoreError({ operation: "preview loop", cause })),
+      Effect.fail(ConfigurationStoreError.make({ operation: "preview loop", cause })),
     ),
   );
   return { checkLoop: check, previewLoop: preview };

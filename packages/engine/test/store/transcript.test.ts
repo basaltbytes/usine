@@ -20,7 +20,7 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { eq, sql } from "drizzle-orm";
-import { DateTime, Effect, FileSystem, Logger, Option, References, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Logger, Option, References, Schema, Layer } from "effect";
 
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { RunDatabase } from "../../src/database/database.ts";
@@ -45,10 +45,10 @@ describe("Attempt transcripts", () => {
         const store = yield* RunStore;
         const database = yield* RunDatabase;
         for (const index of [0, 1]) {
-          const submission = new Submission({
+          const submission = Submission.make({
             ...lifecycleSubmission,
             itemKey: ItemKey.make(`usage-item-${index}`),
-            event: new Event({
+            event: Event.make({
               ...lifecycleSubmission.event,
               id: EventId.make(`usage-event-${index}`),
               dedupKey: DedupKey.make(`usage-dedup-${index}`),
@@ -59,12 +59,12 @@ describe("Attempt transcripts", () => {
           const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert(started._tag === "AttemptStarted");
           const attemptId = started.execution.attempt.id;
-          const parent = new ParentSession({
+          const parent = ParentSession.make({
             id: AgentSessionId.make("usage-parent"),
             agent: testAgent.name,
             brain: testAgent.brain,
           });
-          const child = new ChildSession({
+          const child = ChildSession.make({
             id: AgentSessionId.make("usage-child"),
             parentId: parent.id,
             agent: testAgent.name,
@@ -76,22 +76,22 @@ describe("Attempt transcripts", () => {
           });
           const logging = Logger.layer([logger]);
           const events = [
-            new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(100) }),
-            new SessionTokensUpdated({
+            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(100) }),
+            SessionTokensUpdated.make({
               session: child,
               totalTokens: TokenCount.make(40),
               costUsd: Option.some(UsdAmount.make(0.4)),
             }),
-            new TextOutput({ session: parent, text: "Delegated the fix." }),
-            new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(250) }),
-            new SessionTokensUpdated({
+            TextOutput.make({ session: parent, text: "Delegated the fix." }),
+            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(250) }),
+            SessionTokensUpdated.make({
               session: child,
               totalTokens: TokenCount.make(90),
               costUsd: Option.some(UsdAmount.make(1.25)),
             }),
             // A lower report after a higher one never lowers the session's usage.
-            new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(200) }),
-            new SessionTokensUpdated({
+            SessionTokensUpdated.make({ session: parent, totalTokens: TokenCount.make(200) }),
+            SessionTokensUpdated.make({
               session: child,
               totalTokens: TokenCount.make(90),
               costUsd: Option.some(UsdAmount.make(2)),
@@ -101,12 +101,12 @@ describe("Attempt transcripts", () => {
             yield* store
               .appendTranscript(
                 "outbound",
-                new AttemptChannel.OutboundEnvelope({
+                AttemptChannel.OutboundEnvelope.make({
                   version: AttemptChannel.PROTOCOL_VERSION,
                   attemptId,
                   sequence: AttemptChannel.Sequence.make(index + 1),
                   sentAt: DateTime.makeUnsafe("2026-10-20T00:00:00Z"),
-                  payload: new AttemptChannel.SessionEvent({ event }),
+                  payload: AttemptChannel.SessionEvent.make({ event }),
                 }),
               )
               .pipe(
@@ -117,20 +117,20 @@ describe("Attempt transcripts", () => {
           assert.deepStrictEqual(logLevels, ["Debug", "Debug", "Debug", "Debug", "Debug", "Debug"]);
           yield* store.appendTranscript(
             "outbound",
-            new AttemptChannel.OutboundEnvelope({
+            AttemptChannel.OutboundEnvelope.make({
               version: AttemptChannel.PROTOCOL_VERSION,
               attemptId,
               sequence: AttemptChannel.Sequence.make(1),
               sentAt: DateTime.makeUnsafe("2026-10-21T00:00:00Z"),
-              payload: new AttemptChannel.SessionEvent({
-                event: new SessionTokensUpdated({
+              payload: AttemptChannel.SessionEvent.make({
+                event: SessionTokensUpdated.make({
                   session: parent,
                   totalTokens: TokenCount.make(999),
                 }),
               }),
             }),
           );
-          const all = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+          const all = yield* store.transcript(TranscriptAllQuery.make({ attemptId }));
           const highest = new Map<
             AgentSessionId,
             { totalTokens: TokenCount; entry: (typeof all)[number] }
@@ -150,7 +150,7 @@ describe("Attempt transcripts", () => {
                 entry,
               });
           }
-          const usage = yield* store.transcript(new TranscriptUsageQuery({ attemptId }));
+          const usage = yield* store.transcript(TranscriptUsageQuery.make({ attemptId }));
           assert.deepStrictEqual(
             usage,
             [...highest.values()].map(({ entry }) => entry).sort((a, b) => a.sequence - b.sequence),
@@ -179,13 +179,13 @@ describe("Attempt transcripts", () => {
           const rejected = yield* store
             .appendTranscript(
               "outbound",
-              new AttemptChannel.OutboundEnvelope({
+              AttemptChannel.OutboundEnvelope.make({
                 version: AttemptChannel.PROTOCOL_VERSION,
                 attemptId,
                 sequence: AttemptChannel.Sequence.make(events.length + 1),
                 sentAt: DateTime.makeUnsafe("2026-10-22T00:00:00Z"),
-                payload: new AttemptChannel.SessionEvent({
-                  event: new SessionTokensUpdated({
+                payload: AttemptChannel.SessionEvent.make({
+                  event: SessionTokensUpdated.make({
                     session: child,
                     totalTokens: TokenCount.make(1000),
                   }),
@@ -195,16 +195,16 @@ describe("Attempt transcripts", () => {
             .pipe(Effect.flip);
           assert.strictEqual(rejected._tag, "EnginePersistenceError");
           assert.deepStrictEqual(
-            yield* store.transcript(new TranscriptAllQuery({ attemptId })),
+            yield* store.transcript(TranscriptAllQuery.make({ attemptId })),
             all,
           );
           assert.deepStrictEqual(
-            yield* store.transcript(new TranscriptUsageQuery({ attemptId })),
+            yield* store.transcript(TranscriptUsageQuery.make({ attemptId })),
             usage,
           );
           yield* database.run(sql`DROP TRIGGER reject_usage`).execute();
         }
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -217,8 +217,8 @@ describe("Attempt transcripts", () => {
           prefix: "usine-store-protocol-v3-",
         }),
       );
-      const submission = new Submission({
-        event: new Event({
+      const submission = Submission.make({
+        event: Event.make({
           id: EventId.make("protocol-v3-event"),
           dedupKey: DedupKey.make("protocol-v3/event/revision"),
           payload: {},
@@ -244,12 +244,12 @@ describe("Attempt transcripts", () => {
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;
-        const currentEnvelope = new AttemptChannel.OutboundEnvelope({
+        const currentEnvelope = AttemptChannel.OutboundEnvelope.make({
           version: AttemptChannel.PROTOCOL_VERSION,
           attemptId,
           sequence: AttemptChannel.Sequence.make(1),
           sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-          payload: new AttemptChannel.Interrupted(),
+          payload: AttemptChannel.Interrupted.make(),
         });
         yield* store.appendTranscript("outbound", currentEnvelope);
 
@@ -260,12 +260,12 @@ describe("Attempt transcripts", () => {
           .where(eq(attemptTranscripts.attemptId, attemptId))
           .execute();
 
-        const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+        const transcript = yield* store.transcript(TranscriptAllQuery.make({ attemptId }));
         const entry = transcript[0];
         assert(entry !== undefined);
         assert.strictEqual(entry.envelope.version, version);
         assert.strictEqual(entry.envelope.payload._tag, "Interrupted");
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -278,8 +278,8 @@ describe("Attempt transcripts", () => {
           prefix: "usine-store-protocol-v4-",
         }),
       );
-      const submission = new Submission({
-        event: new Event({
+      const submission = Submission.make({
+        event: Event.make({
           id: EventId.make("protocol-v4-event"),
           dedupKey: DedupKey.make("protocol-v4/event/revision"),
           payload: {},
@@ -305,14 +305,14 @@ describe("Attempt transcripts", () => {
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;
-        const currentEnvelope = new AttemptChannel.InboundEnvelope({
+        const currentEnvelope = AttemptChannel.InboundEnvelope.make({
           operator: "operator",
           version: AttemptChannel.PROTOCOL_VERSION,
           attemptId,
           sequence: AttemptChannel.Sequence.make(1),
           sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-          target: new AttemptChannel.ParentTarget(),
-          payload: new AttemptChannel.Steer({ message: "Keep going" }),
+          target: AttemptChannel.ParentTarget.make(),
+          payload: AttemptChannel.Steer.make({ message: "Keep going" }),
         });
         yield* store.appendTranscript("inbound", currentEnvelope);
 
@@ -336,7 +336,7 @@ describe("Attempt transcripts", () => {
           .where(eq(attemptTranscripts.attemptId, attemptId))
           .execute();
 
-        const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+        const transcript = yield* store.transcript(TranscriptAllQuery.make({ attemptId }));
         const entry = transcript[0];
         assert(entry !== undefined);
         assert.strictEqual(entry.envelope.version, version);
@@ -345,7 +345,7 @@ describe("Attempt transcripts", () => {
           assert.strictEqual(entry.envelope.target._tag, "Parent");
         }
         assert.strictEqual(entry.envelope.payload._tag, "Steer");
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

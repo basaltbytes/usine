@@ -332,7 +332,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   const workerFor = Effect.fn("SshExecutor.workerFor")(function* (worker: WorkerName) {
     const entry = (yield* SynchronizedRef.get(machines)).byWorker.get(worker);
     if (entry === undefined)
-      return yield* new WorkerCapabilityError({
+      return yield* WorkerCapabilityError.make({
         worker,
         capability: "machine",
         message: `No SSH worker named "${worker}" is configured`,
@@ -345,7 +345,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   const machineFor = Effect.fn("SshExecutor.machineFor")(function* (worker: WorkerName) {
     const entry = yield* workerFor(worker);
     if (Option.isNone(entry.machine))
-      return yield* new WorkerCapabilityError({
+      return yield* WorkerCapabilityError.make({
         worker,
         capability: "machine",
         message: `SSH worker "${worker}" creates a machine for each attempt, so it has no machine of its own`,

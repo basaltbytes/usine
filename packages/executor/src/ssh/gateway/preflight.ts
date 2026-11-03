@@ -27,11 +27,11 @@ done
 const REFUSED_WITHOUT_TOKEN = /^x-usine-gateway-refusal:\s*missing-caller-token\s*$/imu;
 
 const gatewayGap = (worker: WorkerName, message: string, cause: unknown) =>
-  new WorkerCapabilityError({ worker, capability: "gateway", message, cause });
+  WorkerCapabilityError.make({ worker, capability: "gateway", message, cause });
 
 /** Returns the error for an SSH transport failure, which isn't a capability gap. */
 const unreachable = (host: string, command: string, result: CommandResult) =>
-  new ExecutorOperationError({
+  ExecutorOperationError.make({
     operation: "preflight",
     message: `Can't reach ${host} to run ${command}`,
     cause: new Error(result.stderr.trim() || `ssh exited with code ${SSH_FAILURE}`),
@@ -286,7 +286,7 @@ export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(fu
     const runtime = yield* commands.inspect("preflight", shell, "node", ["--version"]);
     if (runtime.exitCode === SSH_FAILURE) return yield* unreachable(host, "node", runtime);
     if (runtime.exitCode !== 0)
-      return new HarnessUnavailableError({
+      return HarnessUnavailableError.make({
         harness,
         capability: "binary",
         message: "Remote Codex children require Node.js on the worker's command path.",
@@ -296,7 +296,7 @@ export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(fu
   const result = yield* commands.inspect("preflight", shell, harness, args);
   if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, harness, result);
   if (result.exitCode !== 0)
-    return new HarnessUnavailableError({
+    return HarnessUnavailableError.make({
       harness,
       capability: "binary",
       message: `${harness} --version failed. Check the ${label} installation on the worker.`,
@@ -309,7 +309,7 @@ export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(fu
     harness,
     version,
   });
-  return new HarnessReady({ harness });
+  return HarnessReady.make({ harness });
 });
 
 /**

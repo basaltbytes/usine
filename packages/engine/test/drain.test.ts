@@ -141,7 +141,7 @@ describe("engine drain", () => {
             Deferred.succeed(started, undefined).pipe(
               Effect.andThen(Deferred.await(finish)),
               Effect.andThen(
-                new InfraFailure({ message: "temporary worker failure", cause: "test" }),
+                InfraFailure.make({ message: "temporary worker failure", cause: "test" }),
               ),
             ),
             Effect.succeed(stepResult("retried after restart")),

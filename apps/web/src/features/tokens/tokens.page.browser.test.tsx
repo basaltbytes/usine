@@ -45,7 +45,7 @@ it("distinguishes tokens with the same name and confirms revocation through the 
             <WithRouter>
               <PageCommandsProvider>
                 <CommandPalette
-                  overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })}
+                  overview={ReadyOverview.make({ projects: [], loops: [], needsYou: [] })}
                 />
                 <TokensPage />
               </PageCommandsProvider>

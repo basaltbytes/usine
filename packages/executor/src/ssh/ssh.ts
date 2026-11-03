@@ -71,7 +71,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           Effect.mapError((cause) =>
             cause._tag === "WorkerCapabilityError"
               ? cause
-              : new WorkerCapabilityError({
+              : WorkerCapabilityError.make({
                   worker,
                   capability: "machine",
                   message: `Can't restore the connection of attempt ${attemptId}: ${cause.message}`,

@@ -19,15 +19,14 @@ const reference = Schema.decodeUnknownSync(TypeReference);
 type FieldDeclaration = readonly [name: string, type: string, nullability?: "nullable"];
 
 const objectType = (name: string, fields: ReadonlyArray<FieldDeclaration>): ObjectType =>
-  new ObjectType({
+  ObjectType.make({
     name,
-    fields: fields.map(
-      ([fieldName, fieldType, nullability]) =>
-        new ObjectField({
-          name: fieldName,
-          type: reference(fieldType),
-          nullable: nullability === "nullable",
-        }),
+    fields: fields.map(([fieldName, fieldType, nullability]) =>
+      ObjectField.make({
+        name: fieldName,
+        type: reference(fieldType),
+        nullable: nullability === "nullable",
+      }),
     ),
   });
 
@@ -192,11 +191,11 @@ const tick = objectType("Tick", [
 const schedule = objectType("SchedulePayload", [["tick", "Tick"]]);
 
 const environment = (types: ReadonlyArray<ObjectType>, itemType: string): Environment =>
-  new Environment({
+  Environment.make({
     types: [repo, ...types],
     variables: [
-      new Variable({ name: "repo", type: reference("RepoContext") }),
-      new Variable({ name: "item", type: reference(itemType) }),
+      Variable.make({ name: "repo", type: reference("RepoContext") }),
+      Variable.make({ name: "item", type: reference(itemType) }),
     ],
   });
 

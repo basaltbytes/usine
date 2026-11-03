@@ -33,7 +33,7 @@ const startCollector = async (status = 200) => {
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+  const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
     server.address(),
   );
   return {
@@ -43,9 +43,7 @@ const startCollector = async (status = 200) => {
   };
 };
 
-const currentTracer = Effect.gen(function* () {
-  return yield* Tracer.Tracer;
-});
+const currentTracer = Tracer.Tracer;
 
 const annotated = Effect.fn("Test.annotated")(function* () {
   yield* Effect.annotateCurrentSpan({ runId: "run-279" });
@@ -77,9 +75,10 @@ const spanExport = <A, E>(
   ).pipe(
     Effect.withLogger(Logger.make(({ message }) => options.logs?.push(JSON.stringify(message)))),
     Effect.provide(
-      ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.environment ?? {} })),
+      ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.environment ?? {} })).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
     ),
-    Effect.provide(NodeServices.layer),
   );
 
 describe("tracingLayer", () => {
@@ -88,7 +87,7 @@ describe("tracingLayer", () => {
     const secrets = ["unspent-code", "invalid-state", "exchanged-code", "signed-url-secret"];
     try {
       await withSpanExport(
-        new Tracing({ otlpUrl: collector.url, serviceName: "usine-test" }),
+        Tracing.make({ otlpUrl: collector.url, serviceName: "usine-test" }),
         Effect.gen(function* () {
           const services = yield* authFixture();
           const app = HttpRouter.toWebHandler(authenticatedRoutes(services).routes);
@@ -149,7 +148,7 @@ describe("tracingLayer", () => {
     const collector = await startCollector();
     try {
       await withSpanExport(
-        new Tracing({ otlpUrl: collector.url, serviceName: "usine-test" }),
+        Tracing.make({ otlpUrl: collector.url, serviceName: "usine-test" }),
         annotated(),
         {
           environment: {
@@ -185,7 +184,7 @@ describe("tracingLayer", () => {
       const error = await Effect.runPromise(
         Effect.flip(
           spanExport(
-            new Tracing({ otlpUrl: collector.url, serviceName: "usine-test" }),
+            Tracing.make({ otlpUrl: collector.url, serviceName: "usine-test" }),
             annotated(),
             {
               environment: { OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=eu,team=100%" },
@@ -216,7 +215,7 @@ describe("tracingLayer", () => {
         }
         url.search = "?token=secret";
         // usine.yaml rejects such a URL; the logs must not leak one that arrives another way.
-        return new Tracing({ otlpUrl: url, serviceName: "usine-test" }, { disableChecks: true });
+        return Tracing.make({ otlpUrl: url, serviceName: "usine-test" }, { disableChecks: true });
       };
 
       const startup: Array<string> = [];

@@ -51,7 +51,7 @@ export const ClaudeResultMessage = Schema.Struct({
   subtype: Schema.String,
   result: Schema.optionalKey(Schema.String),
   errors: Schema.optionalKey(Schema.Array(Schema.String)),
-  queued_turn_count: Schema.optionalKey(Schema.Number),
+  queued_turn_count: Schema.optionalKey(Schema.Finite),
 });
 const ClaudeBackgroundTasks = Schema.Struct({
   type: Schema.Literal("system"),
@@ -81,10 +81,10 @@ export const decodeCompletionUpdate = Schema.decodeUnknownEffect(
 export const ClaudeApiRetry = Schema.Struct({
   type: Schema.Literal("system"),
   subtype: Schema.Literal("api_retry"),
-  attempt: Schema.Number,
-  max_retries: Schema.Number,
-  retry_delay_ms: Schema.Number,
-  error_status: Schema.NullOr(Schema.Number),
+  attempt: Schema.Finite,
+  max_retries: Schema.Finite,
+  retry_delay_ms: Schema.Finite,
+  error_status: Schema.NullOr(Schema.Finite),
   error: Schema.String,
 });
 export const decodeApiRetry = Schema.decodeUnknownOption(ClaudeApiRetry);
@@ -156,11 +156,11 @@ export const sessionEventsFrom = (
   for (const block of message.message.content) {
     // Emits only text blocks of completed assistant messages; streaming deltas are not recorded.
     if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
-      events.push(new TextOutput({ session, text: block.text }));
+      events.push(TextOutput.make({ session, text: block.text }));
     } else if (Schema.is(ClaudeToolUseBlock)(block)) {
       tools.set(block.id, block.name);
       events.push(
-        new ToolStarted({
+        ToolStarted.make({
           session,
           callId: block.id,
           tool: block.name,
@@ -169,7 +169,7 @@ export const sessionEventsFrom = (
       );
     } else if (Schema.is(ClaudeToolResultBlock)(block)) {
       events.push(
-        new ToolFinished({
+        ToolFinished.make({
           session,
           callId: block.tool_use_id,
           tool: tools.get(block.tool_use_id) ?? "unknown",
@@ -189,7 +189,7 @@ export const apiRetryFailure = (sessionId: AgentSessionId, retry: typeof ClaudeA
   retry.error === "overloaded_error" ||
   (retry.error_status === 503 && retry.retry_delay_ms > 0)
     ? Option.some(
-        new AgentCapacityError({
+        AgentCapacityError.make({
           sessionId: Option.some(sessionId),
           message: apiRetryMessage(retry),
         }),
@@ -208,13 +208,13 @@ export const assistantFailure = (
       message:
         error.message.content.map(({ text }) => text).join("\n") || "Claude API request failed.",
     };
-    if (error.error === "overloaded") return new AgentCapacityError(fields);
+    if (error.error === "overloaded") return AgentCapacityError.make(fields);
     if (error.error === "server_error" || error.error === "unknown") {
       return Option.exists(previous, (failure) => failure instanceof AgentCapacityError)
-        ? new AgentCapacityError(fields)
+        ? AgentCapacityError.make(fields)
         : harnessFailure(fields.sessionId, fields.message);
     }
-    return new AgentResultError(fields);
+    return AgentResultError.make(fields);
   });
 
 /** Keeps task limits terminal even if the turn previously retried a provider request. */
@@ -226,5 +226,5 @@ export const resultFailure = (
   const message = result.errors?.join("; ") || "Claude returned an unsuccessful result";
   return result.subtype === "error_during_execution"
     ? Option.getOrElse(providerFailure, () => harnessFailure(Option.some(sessionId), message))
-    : new AgentResultError({ sessionId: Option.some(sessionId), message });
+    : AgentResultError.make({ sessionId: Option.some(sessionId), message });
 };

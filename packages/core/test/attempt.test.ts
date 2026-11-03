@@ -24,11 +24,14 @@ import { SalvageRetained } from "../src/attempt/salvage.ts";
 import { RepositoryName } from "../src/repository.ts";
 import { Event, DedupKey, EventId } from "../src/event.ts";
 
-const infra = new InfraFailure({ message: "worker unreachable", cause: new Error("ECONNREFUSED") });
-const defect = new DefectFailure({ message: "executor crashed", cause: new Error("bug") });
-const agent = new AgentFailure({ message: "agent reported failure" });
-const runaway = new RunawayFailure({ ceiling: "tokens" });
-const childBudget = new ChildSessionBudgetFailure({
+const infra = InfraFailure.make({
+  message: "worker unreachable",
+  cause: new Error("ECONNREFUSED"),
+});
+const defect = DefectFailure.make({ message: "executor crashed", cause: new Error("bug") });
+const agent = AgentFailure.make({ message: "agent reported failure" });
+const runaway = RunawayFailure.make({ ceiling: "tokens" });
+const childBudget = ChildSessionBudgetFailure.make({
   maxChildren: ChildSessionBudget.make(4),
   attemptedChildren: ChildSessionCount.make(5),
 });
@@ -39,7 +42,7 @@ const decodeChildSessionBudget = Schema.decodeUnknownSync(ChildSessionBudget);
 describe("auto-retry law (ADR 0002, ADR 0013)", () => {
   it("infrastructure and capacity failures permit automatic retries", () => {
     expect(isAutoRetryableFailure(infra)).toBe(true);
-    expect(isAutoRetryableFailure(new ProviderCapacityFailure({ message: "At capacity" }))).toBe(
+    expect(isAutoRetryableFailure(ProviderCapacityFailure.make({ message: "At capacity" }))).toBe(
       true,
     );
     expect(isAutoRetryableFailure(agent)).toBe(false);
@@ -48,7 +51,7 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
     expect(isAutoRetryableFailure(childBudget)).toBe(false);
   });
 
-  it.each([infra, new ProviderCapacityFailure({ message: "At capacity" })])(
+  it.each([infra, ProviderCapacityFailure.make({ message: "At capacity" })])(
     "automatic retries stop at the cap: $_tag",
     (failure) => {
       expect(shouldAutoRetry({ failure, number: n(1), maxAutoAttempts: n(3) })).toBe(true);
@@ -68,13 +71,12 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
 
 describe("construction is the only door", () => {
   it("rejects a provider retry that names the first attempt", () => {
-    expect(
-      () =>
-        new ProviderRetry({
-          nextAttempt: n(1),
-          retryAt: DateTime.makeUnsafe(0),
-          message: "At capacity",
-        }),
+    expect(() =>
+      ProviderRetry.make({
+        nextAttempt: n(1),
+        retryAt: DateTime.makeUnsafe(0),
+        message: "At capacity",
+      }),
     ).toThrow();
   });
   it("rejects a resolution with an invalid time, operator, or unknown field", () => {
@@ -100,7 +102,7 @@ describe("construction is the only door", () => {
   });
 
   it("empty ids are unconstructible", () => {
-    expect(() => Schema.decodeUnknownSync(EventId)("")).toThrow();
+    expect(() => Schema.decodeSync(EventId)("")).toThrow();
   });
 
   it("an Event rejects payloads that SQLite cannot preserve as JSON", () => {
@@ -118,7 +120,7 @@ describe("construction is the only door", () => {
 
 describe("Attempt windows", () => {
   const window = (id: string, startedAt: string, endedAt: string | null) =>
-    new AttemptWindow({
+    AttemptWindow.make({
       attemptId: AttemptId.make(id),
       startedAt: DateTime.makeUnsafe(startedAt),
       endedAt: endedAt === null ? Option.none() : Option.some(DateTime.makeUnsafe(endedAt)),
@@ -141,19 +143,19 @@ describe("retained push refusal", () => {
       commit: null,
       message: "push failed",
     } as const;
-    expect(Option.isNone(Schema.decodeUnknownSync(SalvageRetained)(legacy).pushFailure)).toBe(true);
-    const failure = new GitHubPushFailure({
+    expect(Option.isNone(Schema.decodeSync(SalvageRetained)(legacy).pushFailure)).toBe(true);
+    const failure = GitHubPushFailure.make({
       repository: RepositoryName.make("acme/demo"),
       ref: "refs/heads/usine/salvage/run/1",
       message: "GitHub refused the push (HTTP 403)",
     });
     expect(isAutoRetryableFailure(failure)).toBe(false);
-    const retained = new SalvageRetained({
+    const retained = SalvageRetained.make({
       ...legacy,
       commit: Option.none(),
       pushFailure: Option.some(failure),
     });
     const json = Schema.fromJsonString(SalvageRetained);
-    expect(Schema.decodeUnknownSync(json)(Schema.encodeSync(json)(retained))).toEqual(retained);
+    expect(Schema.decodeSync(json)(Schema.encodeSync(json)(retained))).toEqual(retained);
   });
 });

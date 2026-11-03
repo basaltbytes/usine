@@ -192,10 +192,10 @@ const makeRunStore = Effect.gen(function* () {
   ) {
     const blocked = yield* tx.cycles.admit(submission);
     if (Option.isSome(blocked))
-      return new CycleBlocked({ eventId: submission.event.id, ask: blocked.value });
+      return CycleBlocked.make({ eventId: submission.event.id, ask: blocked.value });
     yield* tx.createRun(submission, submission.event.id, runId);
     yield* tx.cycles.reserve(submission, runId);
-    return new Claimed({ eventId: submission.event.id, runId });
+    return Claimed.make({ eventId: submission.event.id, runId });
   });
 
   const openRun = Effect.fn("RunStore.openRun")(function* (
@@ -205,7 +205,7 @@ const makeRunStore = Effect.gen(function* () {
     supersededRun: Option.Option<RunId> = Option.none(),
   ) {
     const result = yield* admitRun(tx, submission, runId);
-    return new Claim({
+    return Claim.make({
       result,
       openedRun: result._tag === "Claimed" ? Option.some(runId) : Option.none(),
       supersededRun,
@@ -241,8 +241,8 @@ const makeRunStore = Effect.gen(function* () {
     runId: RunId,
   ) {
     if (!(yield* tx.cycles.isCurrentEvent(recorded))) {
-      return new Claim({
-        result: new Ignored({ eventId: recorded.event.id, reason: "superseded" }),
+      return Claim.make({
+        result: Ignored.make({ eventId: recorded.event.id, reason: "superseded" }),
       });
     }
     const suppression = yield* tx.loopItems.suppression(recorded.loop, recorded.itemKey);
@@ -261,16 +261,16 @@ const makeRunStore = Effect.gen(function* () {
             "First Item state after the Agent stopped for the operator; it waits for the operator",
             fields,
           );
-          return new Claim({
-            result: new Suppressed({ eventId: recorded.event.id, runId: suppression.value.runId }),
+          return Claim.make({
+            result: Suppressed.make({ eventId: recorded.event.id, runId: suppression.value.runId }),
           });
         case "Suppress":
           yield* Effect.logInfo(
             "Item unchanged since the Agent stopped for the operator; no Run opens",
             fields,
           );
-          return new Claim({
-            result: new Suppressed({ eventId: recorded.event.id, runId: suppression.value.runId }),
+          return Claim.make({
+            result: Suppressed.make({ eventId: recorded.event.id, runId: suppression.value.runId }),
           });
         case "Lift":
           yield* tx.loopItems.lift(recorded.loop, recorded.itemKey);
@@ -295,7 +295,7 @@ const makeRunStore = Effect.gen(function* () {
     });
     switch (decision._tag) {
       case "QueueEvent":
-        return new Claim({ result: new Queued({ eventId: recorded.event.id }) });
+        return Claim.make({ result: Queued.make({ eventId: recorded.event.id }) });
       case "SupersedeRun":
         yield* tx.updateState(decision.runId, decision.state);
         return yield* openRun(tx, recorded, runId, Option.some(decision.runId));
@@ -345,10 +345,10 @@ const makeRunStore = Effect.gen(function* () {
               runId: decision.run.id,
               state: decision.run.state._tag,
             });
-            return new Claim({ result: new Claimed({ eventId, runId: decision.run.id }) });
+            return Claim.make({ result: Claimed.make({ eventId, runId: decision.run.id }) });
           case "StayIgnored":
             yield* Effect.logInfo("Event remains ignored", { eventId, reason: decision.reason });
-            return new Claim({ result: new Ignored({ eventId, reason: decision.reason }) });
+            return Claim.make({ result: Ignored.make({ eventId, reason: decision.reason }) });
           case "ReopenEvent": {
             const reopening = current.reopening + 1;
             const reopened = yield* tx.recordTriggerEvent(
@@ -464,10 +464,10 @@ const makeRunStore = Effect.gen(function* () {
       readonly state: RunState.Running;
     },
   ) =>
-    new StepExecution({
+    StepExecution.make({
       attempt,
       event: current.event,
-      run: new Run({
+      run: Run.make({
         id: current.run.id,
         eventId: current.run.eventId,
         loop: current.run.loop,
@@ -495,7 +495,7 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(runId);
-        const interruption = new InfraFailure({
+        const interruption = InfraFailure.make({
           message: "The orchestrator stopped during the attempt",
           cause: new Error("attempt interrupted by orchestrator restart"),
         });
@@ -503,15 +503,15 @@ const makeRunStore = Effect.gen(function* () {
         const decision = decideBeginAttempt(current, interruption, live, requested);
         if (decision._tag === "RunClosed") {
           yield* Effect.logInfo("Attempt start skipped", { runId, state: decision.state._tag });
-          return new RunClosed();
+          return RunClosed.make();
         }
         if (decision._tag === "RunFailed") {
           yield* applyFinish(tx, runId, decision);
-          return new AttemptRecoveryFailed();
+          return AttemptRecoveryFailed.make();
         }
         if (decision._tag === "ReattachAttempt") {
           const reattachedAt = yield* DateTime.now;
-          const attempt = new Attempt({
+          const attempt = Attempt.make({
             ...decision.attempt,
             reattachedAt: Option.some(reattachedAt),
           });
@@ -536,7 +536,7 @@ const makeRunStore = Effect.gen(function* () {
               },
             );
           }
-          return new AttemptStarted({
+          return AttemptStarted.make({
             execution: executionOf(current, {
               attempt,
               state: decision.state,
@@ -553,7 +553,7 @@ const makeRunStore = Effect.gen(function* () {
         }
         const attemptId = AttemptId.make(`${runId}/${current.step.name}/${decision.number}`);
         const startedAt = yield* DateTime.now;
-        const attempt = new Attempt({
+        const attempt = Attempt.make({
           id: attemptId,
           runId,
           stepName: current.step.name,
@@ -581,7 +581,7 @@ const makeRunStore = Effect.gen(function* () {
           start: decision.start._tag,
           resumesFrom: Option.map(decision.resume, ({ ref }) => ref),
         });
-        return new AttemptStarted({
+        return AttemptStarted.make({
           execution: executionOf(current, {
             attempt,
             state: decision.state,
@@ -736,7 +736,7 @@ const makeRunStore = Effect.gen(function* () {
             state: current.run.state._tag,
             latestAttemptId: latest?.id,
           });
-          return yield* new RunOperationRejectedError({
+          return yield* RunOperationRejectedError.make({
             runId,
             operation: "resolveFailure",
             state: current.run.state._tag,
@@ -746,7 +746,7 @@ const makeRunStore = Effect.gen(function* () {
           yield* Effect.logInfo("Run failure already resolved", { runId, attemptId });
           return false;
         }
-        const resolution = new FailureResolution({ resolvedAt: yield* DateTime.now, operator });
+        const resolution = FailureResolution.make({ resolvedAt: yield* DateTime.now, operator });
         yield* tx.resolveFailure(runId, attemptId, resolution);
         const lifted = yield* tx.loopItems.liftRun(runId);
         yield* Effect.logInfo("Run failure resolved", {
@@ -773,7 +773,7 @@ const makeRunStore = Effect.gen(function* () {
         if (yield* tx.approvalExists(runId)) return false;
         const current = yield* tx.snapshot(runId);
         if (current.run.state._tag !== "Waiting") {
-          return yield* new RunOperationRejectedError({
+          return yield* RunOperationRejectedError.make({
             runId,
             operation: "approve",
             state: current.run.state._tag,
@@ -813,7 +813,7 @@ const makeRunStore = Effect.gen(function* () {
               loop: current.run.loop,
               itemKey: current.itemKey,
             });
-            return yield* new RunRetryBlockedError({
+            return yield* RunRetryBlockedError.make({
               runId,
               openRunId: blocking.runId,
               message: `Cannot retry run ${runId}: run ${blocking.runId} of loop "${current.run.loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
@@ -834,15 +834,15 @@ const makeRunStore = Effect.gen(function* () {
             runId,
             Option.some(
               Option.isSome(amendment)
-                ? new StartedByEditAndRetry({ operator: requestedBy })
-                : new StartedByRetry({ operator: requestedBy }),
+                ? StartedByEditAndRetry.make({ operator: requestedBy })
+                : StartedByRetry.make({ operator: requestedBy }),
             ),
           );
           yield* tx.updateState(runId, decision.state);
           return true;
         }
         if (decision._tag === "ResumePending" && Option.isNone(amendment)) return false;
-        return yield* new RunOperationRejectedError({
+        return yield* RunOperationRejectedError.make({
           runId,
           operation: "retry",
           state: current.run.state._tag,
@@ -868,7 +868,7 @@ const makeRunStore = Effect.gen(function* () {
             runId,
             state: current.run.state._tag,
           });
-          return yield* new RunOperationRejectedError({
+          return yield* RunOperationRejectedError.make({
             runId,
             operation: "runAgain",
             state: current.run.state._tag,
@@ -882,7 +882,7 @@ const makeRunStore = Effect.gen(function* () {
             loop,
             itemKey,
           });
-          return yield* new RunRetryBlockedError({
+          return yield* RunRetryBlockedError.make({
             runId,
             openRunId: blocking.runId,
             message: `Run ${runId} cannot run again: run ${blocking.runId} of loop "${loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
@@ -914,7 +914,7 @@ const makeRunStore = Effect.gen(function* () {
         );
         yield* tx.recordRunAgain(
           recorded.event.id,
-          new RunAgain({ from: runId, requestedBy: request.requestedBy }),
+          RunAgain.make({ from: runId, requestedBy: request.requestedBy }),
         );
         const result = yield* admitRun(tx, recorded, yield* runIdOf(recorded));
         yield* Effect.logInfo(
@@ -957,7 +957,7 @@ const makeRunStore = Effect.gen(function* () {
         });
         if (decision._tag === "AlreadyClosed") return decision;
         if (decision._tag === "CancelRejected")
-          return yield* new RunOperationRejectedError({
+          return yield* RunOperationRejectedError.make({
             runId,
             operation: "cancel",
             state: current.run.state._tag,
@@ -968,7 +968,7 @@ const makeRunStore = Effect.gen(function* () {
           yield* tx.closeAttempt(id, outcome, canceledAt);
         }
         if (current.run.state._tag === "AwaitingCi")
-          yield* tx.settleCiAttempt(runId, new AttemptCanceled());
+          yield* tx.settleCiAttempt(runId, AttemptCanceled.make());
         yield* tx.updateState(runId, decision.state, canceledAt);
         const canceled: CancelOutcome = {
           _tag: "Canceled",
@@ -1104,7 +1104,7 @@ const makeRunStore = Effect.gen(function* () {
       queries.eventRouteByRun(runId).pipe(
         Effect.flatMap((routes) =>
           routes[0] === undefined
-            ? Effect.fail(new RunNotFoundError({ runId }))
+            ? Effect.fail(RunNotFoundError.make({ runId }))
             : Effect.succeed(submissionFromRow(routes[0])),
         ),
         persistence("read run submission"),

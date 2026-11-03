@@ -19,15 +19,15 @@ export const repositoryLabelProjectionContract = (adapter: PersistenceAdapter) =
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
         const repository = RepositoryName.make("basaltbytes/usine");
-        const projection = new RepositoryLabelProjection({
+        const projection = RepositoryLabelProjection.make({
           repository,
           labels: [
-            new RepositoryLabel({
+            RepositoryLabel.make({
               name: "bug",
               color: Option.some("d73a4a"),
               description: Option.some("Something is broken"),
             }),
-            new RepositoryLabel({
+            RepositoryLabel.make({
               name: "unused-ready-label",
               color: Option.none(),
               description: Option.none(),

@@ -35,7 +35,7 @@ export const quotaWaits = (
         onNone: () => [],
         onSome: (message) =>
           pause.waitingRuns.map(
-            (runId) => [runId, new MachineQuotaWait({ worker: pause.worker, message })] as const,
+            (runId) => [runId, MachineQuotaWait.make({ worker: pause.worker, message })] as const,
           ),
       }),
     ),
@@ -137,7 +137,7 @@ export const ProvisionerView = Schema.Union([HetznerProvisionerView, BoatProvisi
 export type ProvisionerView = typeof ProvisionerView.Type;
 
 export const machineView = (machine: MachineStatus): MachineView =>
-  new MachineView({
+  MachineView.make({
     worker: machine.worker,
     provider: machine.provider,
     state: machine.state,
@@ -149,7 +149,7 @@ export const machineView = (machine: MachineStatus): MachineView =>
   });
 
 export const provisioningPauseView = (pause: ProvisioningPause): ProvisioningPauseView =>
-  new ProvisioningPauseView({
+  ProvisioningPauseView.make({
     reason: pause.reason,
     message: pause.message,
     failures: pause.failures,
@@ -164,7 +164,7 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
     onNone: () => null,
     onSome: (settings): ProvisionerView =>
       settings.provider === "hetzner"
-        ? new HetznerProvisionerView({
+        ? HetznerProvisionerView.make({
             tokenEnv: settings.tokenEnv,
             serverType: settings.serverType,
             location: settings.location,
@@ -177,7 +177,7 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
             anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
             openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
           })
-        : new BoatProvisionerView({
+        : BoatProvisionerView.make({
             tokenEnv: settings.tokenEnv,
             size: settings.size,
             anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),

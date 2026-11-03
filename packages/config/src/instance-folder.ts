@@ -15,7 +15,7 @@ interface ParsedFile<A> {
 }
 
 const factoryError = (error: ConfigFileError): FactoryConfigError =>
-  new FactoryConfigError({
+  FactoryConfigError.make({
     file: error.file,
     stage: error.stage,
     message: error.message,
@@ -46,14 +46,13 @@ export class InstanceFolder extends Context.Service<
       const readFile = Effect.fn("InstanceFolder.readFile")(
         (absolutePath: string, file: InstancePath): Effect.Effect<string, ConfigFileError> =>
           fileSystem.readFileString(absolutePath).pipe(
-            Effect.mapError(
-              (error) =>
-                new ConfigFileError({
-                  file,
-                  stage: "read",
-                  expression: Option.none(),
-                  message: error.message,
-                }),
+            Effect.mapError((error) =>
+              ConfigFileError.make({
+                file,
+                stage: "read",
+                expression: Option.none(),
+                message: error.message,
+              }),
             ),
           ),
       );
@@ -64,15 +63,15 @@ export class InstanceFolder extends Context.Service<
           directory: string,
         ): Effect.Effect<ReadonlyArray<string>, FactoryConfigError> =>
           fileSystem.readDirectory(path.join(root, directory)).pipe(
-            Effect.map((files) => files.filter((file) => file.endsWith(".md")).sort()),
-            Effect.mapError(
-              (error) =>
-                new FactoryConfigError({
+            Effect.mapBoth({
+              onSuccess: (files) => files.filter((file) => file.endsWith(".md")).sort(),
+              onFailure: (error) =>
+                FactoryConfigError.make({
                   file: InstancePath.make(directory),
                   stage: "read",
                   message: error.message,
                 }),
-            ),
+            }),
           ),
       );
 
@@ -131,7 +130,7 @@ export class InstanceFolder extends Context.Service<
                 if (Result.isSuccess(entry.result)) agents.push(entry.result.success);
                 else {
                   invalidAgents.push(
-                    new InvalidAgent({ file: entry.file, error: entry.result.failure }),
+                    InvalidAgent.make({ file: entry.file, error: entry.result.failure }),
                   );
                 }
               }
@@ -143,7 +142,7 @@ export class InstanceFolder extends Context.Service<
               for (const entry of parsed.loops) {
                 if (Result.isFailure(entry.result)) {
                   quarantinedLoops.push(
-                    new QuarantinedLoop({ file: entry.file, error: entry.result.failure }),
+                    QuarantinedLoop.make({ file: entry.file, error: entry.result.failure }),
                   );
                   continue;
                 }
@@ -154,7 +153,7 @@ export class InstanceFolder extends Context.Service<
                 );
                 if (Option.isSome(referenceFailure)) {
                   quarantinedLoops.push(
-                    new QuarantinedLoop({ file: entry.file, error: referenceFailure.value }),
+                    QuarantinedLoop.make({ file: entry.file, error: referenceFailure.value }),
                   );
                 } else loops.push(entry.result.success);
               }
@@ -212,7 +211,7 @@ export class InstanceFolder extends Context.Service<
                 { discard: true },
               );
 
-              return new LoadedInstance({
+              return LoadedInstance.make({
                 config,
                 agents,
                 invalidAgents,

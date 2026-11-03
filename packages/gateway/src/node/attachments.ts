@@ -29,7 +29,7 @@ export const fileAttachmentsLayer = (directory: string) =>
         .update(Redacted.value(callerKey))
         .digest();
       const failure = (operation: "read" | "write") =>
-        new AttachmentPersistenceError({
+        AttachmentPersistenceError.make({
           operation,
           message: `Could not ${operation} the encrypted attachment snapshot. Check the state directory and caller key.`,
         });
@@ -39,10 +39,10 @@ export const fileAttachmentsLayer = (directory: string) =>
 
       const load = Effect.fn("GatewayAttachments.load")(function* () {
         const stored = yield* fs.readFile(path).pipe(
-          Effect.map(Option.some),
+          Effect.asSome,
           Effect.catchIf(
             (error) => error.reason._tag === "NotFound",
-            () => Effect.succeed(Option.none()),
+            () => Effect.succeedNone,
           ),
           Effect.mapError(() => failure("read")),
         );

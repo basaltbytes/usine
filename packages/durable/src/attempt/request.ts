@@ -20,7 +20,9 @@ export const attemptIdOf = (input: JsonValue): Option.Option<AttemptId> =>
   Option.map(decodeStoredOption(input), ({ spec }) => spec.attemptId);
 
 export const taskInput = (request: AttemptRequest): AttemptTaskInput =>
-  encodeStored(new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }));
+  encodeStored(
+    StoredRequest.make({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
+  );
 
 /** Decodes a stored task input. Dies on a malformed input, since only this package writes it. */
 export const storedRequestOf = (input: AttemptTaskInput | JsonValue) =>

@@ -50,7 +50,7 @@ it("offers enabled member actions, preserves pending states, and confirms remova
             <WithRouter>
               <PageCommandsProvider>
                 <CommandPalette
-                  overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })}
+                  overview={ReadyOverview.make({ projects: [], loops: [], needsYou: [] })}
                 />
                 <MembersPage />
               </PageCommandsProvider>

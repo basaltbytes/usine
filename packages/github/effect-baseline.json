@@ -1,12 +1,10 @@
 {
   "src/access.ts": {
-    "newSchemaClass": 2,
     "schemaClassMissingBrand": 3
   },
   "src/checks.ts": {
     "catchConditionalRefailToCatchIf": 1,
     "deterministicKeys": 1,
-    "newSchemaClass": 3,
     "schemaClassMissingBrand": 2,
     "yieldInCallArgument": 2
   },
@@ -23,14 +21,9 @@
   "src/github-app.ts": {
     "deterministicKeys": 1,
     "lazyEffect": 5,
-    "newSchemaClass": 12,
     "yieldInCallArgument": 1
   },
-  "src/graphql.ts": {
-    "newSchemaClass": 2
-  },
   "src/http.ts": {
-    "newSchemaClass": 5,
     "preferBarrelImport": 1
   },
   "src/installation.ts": {
@@ -38,7 +31,6 @@
   },
   "src/item-history.ts": {
     "deterministicKeys": 1,
-    "newSchemaClass": 6,
     "schemaClassMissingBrand": 4
   },
   "src/item-writer.ts": {
@@ -48,28 +40,20 @@
   },
   "src/jwt.ts": {
     "asyncFunction": 1,
-    "globalJson": 1,
-    "newSchemaClass": 1
+    "globalJson": 1
   },
   "src/label-writer.ts": {
     "deterministicKeys": 1,
-    "newSchemaClass": 1,
     "schemaClassMissingBrand": 1,
     "yieldInCallArgument": 1
   },
   "src/local-secrets.ts": {
     "globalJsonInEffect": 1,
-    "newSchemaClass": 6,
     "schemaClassMissingBrand": 3,
     "yieldInCallArgument": 1
   },
   "src/polling/detection.ts": {
-    "newSchemaClass": 1,
-    "preferSucceedSomeOrNone": 2,
     "schemaClassMissingBrand": 6
-  },
-  "src/polling/label-events.ts": {
-    "newSchemaClass": 1
   },
   "src/polling/labels.ts": {
     "schemaClassMissingBrand": 3
@@ -81,7 +65,6 @@
     "deterministicKeys": 1,
     "globalDate": 1,
     "globalJsonInEffect": 1,
-    "newSchemaClass": 12,
     "yieldInCallArgument": 2
   },
   "src/retry.ts": {
@@ -89,7 +72,6 @@
   },
   "test/checks.test.ts": {
     "globalJson": 1,
-    "newSchemaClass": 3,
     "nodeBuiltinImport": 1
   },
   "test/github-app.test.ts": {
@@ -98,7 +80,6 @@
     "globalJson": 5,
     "globalJsonInEffect": 2,
     "instanceOfSchema": 1,
-    "newSchemaClass": 6,
     "nodeBuiltinImport": 1,
     "schemaSync": 5,
     "schemaSyncInEffect": 3,
@@ -112,26 +93,22 @@
   },
   "test/item-history.test.ts": {
     "globalJson": 2,
-    "newSchemaClass": 2,
     "schemaSync": 1
   },
   "test/item-writer.test.ts": {
     "globalJson": 2,
     "globalJsonInEffect": 1,
-    "newSchemaClass": 5,
     "schemaSync": 2,
     "schemaSyncInEffect": 1
   },
   "test/label-writer.test.ts": {
     "globalJson": 1,
     "globalJsonInEffect": 1,
-    "newSchemaClass": 4,
     "schemaSync": 1,
     "schemaSyncInEffect": 1
   },
   "test/local-secrets.test.ts": {
     "globalJsonInEffect": 7,
-    "preferTypedSchemaDecoder": 1,
     "yieldInCallArgument": 3
   },
   "test/polling.test.ts": {
@@ -140,15 +117,11 @@
     "globalJson": 2,
     "globalJsonInEffect": 1,
     "instanceOfSchema": 5,
-    "newSchemaClass": 16,
-    "preferTypedSchemaDecoder": 2,
     "schemaSync": 5,
     "schemaSyncInEffect": 3,
     "yieldInCallArgument": 3
   },
   "test/request-retry.test.ts": {
-    "globalJsonInEffect": 1,
-    "multipleEffectProvide": 1,
-    "newSchemaClass": 2
+    "globalJsonInEffect": 1
   }
 }

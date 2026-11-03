@@ -49,12 +49,12 @@ export const runCommand = Effect.fn("Cli.runCommand")(function* (
     }),
   ).pipe(
     Effect.timeout(timeout),
-    Effect.mapError((cause) => new CommandError({ command: line, reason: cause.message })),
+    Effect.mapError((cause) => CommandError.make({ command: line, reason: cause.message })),
   );
   if (result.exitCode !== 0) {
     const reason = `exited with status ${result.exitCode}: ${firstLine(result.stderr) || firstLine(result.stdout)}`;
     yield* Effect.logWarning("A command exited non-zero", { command: line, reason });
-    return yield* new CommandError({ command: line, reason });
+    return yield* CommandError.make({ command: line, reason });
   }
   return result;
 });
@@ -80,9 +80,9 @@ export const runInTerminal = Effect.fn("Cli.runInTerminal")(function* (
         stderr: "inherit",
       }),
     )
-    .pipe(Effect.mapError((cause) => new CommandError({ command: line, reason: cause.message })));
+    .pipe(Effect.mapError((cause) => CommandError.make({ command: line, reason: cause.message })));
   if (Number(exitCode) !== 0) {
-    return yield* new CommandError({
+    return yield* CommandError.make({
       command: line,
       reason: `exited with status ${Number(exitCode)}`,
     });

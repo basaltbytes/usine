@@ -90,7 +90,7 @@ export const revisionQuery = (number: ConfigurationRevisionNumber) =>
               ? ""
               : await Effect.runPromise(
                   formatConfigurationEntity(
-                    new ConfigurationEntity({ key: change.key, value: change.before }),
+                    ConfigurationEntity.make({ key: change.key, value: change.before }),
                   ),
                 ),
           afterText:
@@ -98,7 +98,7 @@ export const revisionQuery = (number: ConfigurationRevisionNumber) =>
               ? ""
               : await Effect.runPromise(
                   formatConfigurationEntity(
-                    new ConfigurationEntity({ key: change.key, value: change.after }),
+                    ConfigurationEntity.make({ key: change.key, value: change.after }),
                   ),
                 ),
         })),
@@ -137,14 +137,14 @@ export const useConfigurationWrite = () => {
           return api((client) =>
             client.deleteConfigurationEntity({
               params: request.key,
-              payload: new ConfigurationWrite(request.payload),
+              payload: ConfigurationWrite.make(request.payload),
             }),
           );
         case "revert":
           return api((client) =>
             client.revertConfigurationRevision({
               params: { number: request.number },
-              payload: new ConfigurationWrite(request.payload),
+              payload: ConfigurationWrite.make(request.payload),
             }),
           );
       }

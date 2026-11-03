@@ -111,7 +111,7 @@ const loopOf = Effect.fn("FactoryBackend.resolveLoop")(function* (
   const instance = yield* instances.get;
   const name = resolveLoopName(instance.loops, loop);
   if (Option.isNone(name))
-    return yield* new LoopNotFoundError({
+    return yield* LoopNotFoundError.make({
       loop,
       message: "Loop is missing or ambiguous. Use project/loop.",
     });
@@ -180,13 +180,12 @@ export const needsSetupBackendLayer = (
   configuration: OperatorConfiguration["Service"],
   acknowledgements: AttentionAcknowledgements["Service"],
 ): Layer.Layer<FactoryBackend> => {
-  const unavailable = new BackendUnavailableError({
+  const unavailable = BackendUnavailableError.make({
     message: "The GitHub App is not set up. Set it up to use operator actions.",
   });
   const overview = Effect.flatMap(instances.get, observation.overview).pipe(
-    Effect.map(
-      ({ projects, loops, needsYou, dismissedNeeds }) =>
-        new NeedsSetupOverview({ errorTag, projects, loops, needsYou, dismissedNeeds }),
+    Effect.map(({ projects, loops, needsYou, dismissedNeeds }) =>
+      NeedsSetupOverview.make({ errorTag, projects, loops, needsYou, dismissedNeeds }),
     ),
   );
   const fail = () => Effect.fail(unavailable);
@@ -201,7 +200,7 @@ export const needsSetupBackendLayer = (
       yield* Effect.annotateCurrentSpan({ needId: key.id });
       const instance = yield* instances.get;
       yield* acknowledgements.dismiss(
-        new AttentionAcknowledgement({
+        AttentionAcknowledgement.make({
           ...key,
           dismissedBy: yield* requestActor(instance.config.operator),
           dismissedAt: yield* DateTime.now,

@@ -11,7 +11,7 @@ const db = new DatabaseSync(filename, { readOnly: true });
 db.exec("PRAGMA busy_timeout = 5000");
 const Diagnostic = Schema.Struct({
   message: Schema.String,
-  errcode: Schema.optionalKey(Schema.Number),
+  errcode: Schema.optionalKey(Schema.Finite),
 });
 const session = Ref.makeUnsafe<number | null>(null);
 const statements = new Map<string, StatementSync>();

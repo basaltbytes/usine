@@ -6,7 +6,7 @@ import {
 import type { ConfigurationView } from "@usine/orchestrator/operator";
 
 export const entityKey = (kind: ConfigurationEntityKind, identifier: string) =>
-  new ConfigurationEntityKey({ kind, identifier: ConfigurationEntityId.make(identifier) });
+  ConfigurationEntityKey.make({ kind, identifier: ConfigurationEntityId.make(identifier) });
 
 export const entityHref = ({ kind, identifier }: ConfigurationEntityKey): string => {
   switch (kind) {

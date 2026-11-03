@@ -20,7 +20,7 @@ export const tailscaleClientFor = Effect.fn("Tailscale.clientFor")(function* (
   yield* Effect.annotateCurrentSpan({ worker });
   const http = yield* HttpClient.HttpClient;
   const gap = (operation: string, detail: string) =>
-    new WorkerCapabilityError({
+    WorkerCapabilityError.make({
       worker,
       capability: "gateway",
       message: `Tailscale couldn't ${operation} for worker "${worker}": ${detail}`,

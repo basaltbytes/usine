@@ -237,19 +237,19 @@ export class ChatGptLogins extends Context.Service<
       const unavailable = (login: ChatGptLogin, reason: ChatGptLoginUnavailable["reason"]) => {
         switch (reason) {
           case "unreadable":
-            return new ChatGptLoginUnavailable({
+            return ChatGptLoginUnavailable.make({
               authFile: login.authFile,
               reason,
               message: `The gateway can't read its ChatGPT login at ${login.authFile}. Its log has the reason.`,
             });
           case "refresh-failed":
-            return new ChatGptLoginUnavailable({
+            return ChatGptLoginUnavailable.make({
               authFile: login.authFile,
               reason,
               message: `The gateway could not refresh its ChatGPT login and tries again after ${FAILURE_BACKOFF}. Its log has the reason.`,
             });
           case "refresh-rejected":
-            return new ChatGptLoginUnavailable({
+            return ChatGptLoginUnavailable.make({
               authFile: login.authFile,
               reason,
               message: `The token endpoint rejected the refresh token of the gateway's ChatGPT login. Copy a new auth.json from codex login to ${login.authFile} and reload the gateway.`,
@@ -359,7 +359,7 @@ export class ChatGptLogins extends Context.Service<
         const refreshToken = present(body.value.refresh_token);
         const idToken = present(body.value.id_token);
         const now = yield* DateTime.now;
-        const tokens = new ChatGptTokens({
+        const tokens = ChatGptTokens.make({
           accessToken: Redacted.make(accessToken.value),
           refreshToken: Option.match(refreshToken, {
             onNone: () => state.tokens.refreshToken,

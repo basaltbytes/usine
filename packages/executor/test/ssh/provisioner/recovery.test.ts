@@ -115,7 +115,7 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
                 read: (attemptId) =>
                   unreadable
                     ? Effect.fail(
-                        new ExecutorOperationError({
+                        ExecutorOperationError.make({
                           operation: "prepare",
                           message: "Corrupt connection record",
                           cause: new Error("invalid JSON"),

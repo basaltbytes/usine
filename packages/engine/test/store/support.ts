@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
@@ -19,7 +19,6 @@ export const withRunStore = <A, E>(effect: Effect.Effect<A, E, RunStore | SqlCli
       }),
     );
     return yield* effect.pipe(
-      Effect.provide(RunStore.layer),
-      Effect.provide(localSqliteLayer(directory)),
+      Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
     );
   }).pipe(Effect.provide(NodeServices.layer));

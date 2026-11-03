@@ -1273,16 +1273,15 @@ describe("InstanceFolder", () => {
       const folder = yield* InstanceFolder;
       const loaded = yield* folder.load(acceptanceRoot);
 
-      expect(
-        () =>
-          new LoadedInstance({
-            config: loaded.config,
-            agents: [],
-            invalidAgents: loaded.invalidAgents,
-            loops: loaded.loops,
-            quarantinedLoops: loaded.quarantinedLoops,
-            warnings: loaded.warnings,
-          }),
+      expect(() =>
+        LoadedInstance.make({
+          config: loaded.config,
+          agents: [],
+          invalidAgents: loaded.invalidAgents,
+          loops: loaded.loops,
+          quarantinedLoops: loaded.quarantinedLoops,
+          warnings: loaded.warnings,
+        }),
       ).toThrow();
     }).pipe(Effect.provide(instanceFolderLayer)),
   );
@@ -1352,16 +1351,15 @@ describe("InstanceFolder", () => {
 
       const references = referenceIndex(loaded.config, loaded.agents);
       expect(Option.isNone(loopReferenceFailure(file, loop, references))).toBe(true);
-      expect(
-        () =>
-          new LoadedInstance({
-            config: loaded.config,
-            agents: loaded.agents,
-            invalidAgents: loaded.invalidAgents,
-            loops: [...loaded.loops, loop],
-            quarantinedLoops: loaded.quarantinedLoops,
-            warnings: loaded.warnings,
-          }),
+      expect(() =>
+        LoadedInstance.make({
+          config: loaded.config,
+          agents: loaded.agents,
+          invalidAgents: loaded.invalidAgents,
+          loops: [...loaded.loops, loop],
+          quarantinedLoops: loaded.quarantinedLoops,
+          warnings: loaded.warnings,
+        }),
       ).not.toThrow();
       const repo = Schema.decodeUnknownSync(ManagedRepo);
       expect(matchesSelector(loop.selector, repo({ name: "basaltbytes/usine" }))).toBe(true);
@@ -1384,7 +1382,7 @@ describe("YamlWriter", () => {
       const updated = yield* updateYaml(
         InstancePath.make("usine.yaml"),
         source,
-        new YamlEdit({ path: ["settings", "poll_interval"], value: 30 }),
+        YamlEdit.make({ path: ["settings", "poll_interval"], value: 30 }),
       );
 
       expect(updated).toContain("# keep this comment");
@@ -1407,7 +1405,7 @@ describe("YamlWriter", () => {
       const updated = yield* updateFrontmatter(
         InstancePath.make("agents/developer.md"),
         source,
-        new YamlEdit({ path: ["effort"], value: "high" }),
+        YamlEdit.make({ path: ["effort"], value: "high" }),
       );
 
       expect(updated).toContain("# authored note");
@@ -1421,14 +1419,14 @@ describe("YamlWriter", () => {
       const updatedYaml = yield* updateYaml(
         InstancePath.make("usine.yaml"),
         "version: 1\r\nrepos: []\r\n",
-        new YamlEdit({ path: ["version"], value: 1 }),
+        YamlEdit.make({ path: ["version"], value: 1 }),
       );
       expect(updatedYaml).toBe("version: 1\r\nrepos: []\r\n");
 
       const updatedMarkdown = yield* updateFrontmatter(
         InstancePath.make("agents/developer.md"),
         "---\r\nharness: codex\r\nmodel: gpt-5\r\neffort: medium\r\n---\r\nPersona body.",
-        new YamlEdit({ path: ["effort"], value: "high" }),
+        YamlEdit.make({ path: ["effort"], value: "high" }),
       );
       expect(updatedMarkdown).toBe(
         "---\r\nharness: codex\r\nmodel: gpt-5\r\neffort: high\r\n---\r\nPersona body.",
@@ -1449,7 +1447,7 @@ describe("YamlWriter", () => {
       const updated = yield* updateFrontmatter(
         InstancePath.make("agents/developer.md"),
         source,
-        new YamlEdit({ path: ["effort"], value: "high" }),
+        YamlEdit.make({ path: ["effort"], value: "high" }),
       );
 
       expect(updated).toContain('"---not-a-delimiter": true');

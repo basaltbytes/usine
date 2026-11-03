@@ -32,15 +32,11 @@ export const runConfigCommand = Effect.fn("Cli.config")(
     const resolveKey = (
       key: ConfigurationEntityKey,
     ): Effect.Effect<ConfigurationEntityKey, ConfigCommandError> =>
-      Option.match(resolveConfigurationEntityKey(configurationEntities(instance), key), {
-        onSome: Effect.succeed,
-        onNone: () =>
-          Effect.fail(
-            new ConfigCommandError({
-              message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
-            }),
-          ),
-      });
+      Effect.fromOption(resolveConfigurationEntityKey(configurationEntities(instance), key), () =>
+        ConfigCommandError.make({
+          message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
+        }),
+      );
     const actor = Option.some(localActor);
     const save = (
       expected: ConfigurationRevisionNumber,
@@ -83,8 +79,8 @@ export const runConfigCommand = Effect.fn("Cli.config")(
       case "ConfigLogCommand": {
         const revisions = yield* store.list(
           yield* Option.match(command.entity, {
-            onNone: () => Effect.succeed(Option.none()),
-            onSome: (key) => resolveKey(key).pipe(Effect.map(Option.some)),
+            onNone: () => Effect.succeedNone,
+            onSome: (key) => resolveKey(key).pipe(Effect.asSome),
           }),
         );
         return yield* Effect.forEach(
@@ -106,12 +102,12 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         const resolved = yield* resolveKey(command.entity);
         const entity = entities.find(({ key }) => key.key === resolved.key);
         if (entity === undefined)
-          return yield* new ConfigCommandError({
+          return yield* ConfigCommandError.make({
             message: `Unknown ${command.entity.kind} ${command.entity.identifier}.`,
           });
         const editor = yield* Config.option(Config.String("EDITOR")).pipe(Effect.orDie);
         if (Option.isNone(editor) || editor.value.trim() === "")
-          return yield* new ConfigCommandError({
+          return yield* ConfigCommandError.make({
             message: "Set EDITOR to the editor command to use.",
           });
         const fs = yield* FileSystem.FileSystem;
@@ -128,12 +124,12 @@ export const runConfigCommand = Effect.fn("Cli.config")(
           }),
         );
         if (Number(exit) !== 0)
-          return yield* new ConfigCommandError({
+          return yield* ConfigCommandError.make({
             message: `Editor exited with status ${exit}; no revision was written.`,
           });
         const latest = yield* store.read;
         if (latest.number !== number)
-          return yield* new StaleRevision({ expected: number, actual: latest.number });
+          return yield* StaleRevision.make({ expected: number, actual: latest.number });
         const edited = yield* parseConfigurationEntity(
           yield* ConfigParser,
           entity.key,
@@ -144,7 +140,7 @@ export const runConfigCommand = Effect.fn("Cli.config")(
     }
   },
   Effect.catchTag("PlatformError", (cause) =>
-    Effect.fail(new ConfigurationStoreError({ operation: "edit configuration", cause })),
+    Effect.fail(ConfigurationStoreError.make({ operation: "edit configuration", cause })),
   ),
 );
 

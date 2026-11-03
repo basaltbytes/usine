@@ -13,7 +13,7 @@ import {
   withInstance,
 } from "./support.ts";
 
-const blocker = new BlockedFailure({
+const blocker = BlockedFailure.make({
   message: "The baseline gate fails on main before any change. Fixing it needs a maintainer.",
 });
 
@@ -101,7 +101,7 @@ describe("Attempts that end with a blocker", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          new AgentFailure({ message: "Claude Code is not logged in on Worker local" }),
+          AgentFailure.make({ message: "Claude Code is not logged in on Worker local" }),
           Effect.succeed(stepResult("ran after the login")),
         ]);
         yield* Effect.gen(function* () {

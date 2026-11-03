@@ -141,7 +141,7 @@ describe("local worker restart", () => {
           ["Work before the restart"],
         );
         const transcript = yield* second.transcript(
-          new TranscriptAllQuery({ attemptId: attempt.id }),
+          TranscriptAllQuery.make({ attemptId: attempt.id }),
         );
         const outbound = transcript.filter(({ direction }) => direction === "outbound");
         assert.deepStrictEqual(
@@ -249,9 +249,9 @@ describe("local worker restart", () => {
                 yield* Deferred.succeed(harvesting, undefined);
                 return yield* Effect.never;
               }
-              return new WorkerCredential({
+              return WorkerCredential.make({
                 value: Redacted.make(TOKEN),
-                expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 60_000),
+                expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 60000),
               });
             }),
         });
@@ -280,7 +280,7 @@ describe("local worker restart", () => {
         yield* Ref.set(holdRenewals, true);
         yield* child.reply("Implemented the task.");
         yield* Deferred.await(harvesting);
-        const relayed = yield* first.transcript(new TranscriptAllQuery({ attemptId: attempt.id }));
+        const relayed = yield* first.transcript(TranscriptAllQuery.make({ attemptId: attempt.id }));
         assert.strictEqual(relayed.at(-1)?.envelope.payload._tag, "Final");
         yield* Scope.close(firstScope, Exit.void);
         assert(yield* fileSystem.exists(worktree), "the unharvested checkout survives the stop");
@@ -307,7 +307,7 @@ describe("local worker restart", () => {
           ["Work before the stop"],
         );
         const transcript = yield* second.transcript(
-          new TranscriptAllQuery({ attemptId: attempt.id }),
+          TranscriptAllQuery.make({ attemptId: attempt.id }),
         );
         assert.strictEqual(
           transcript.filter(({ envelope }) => envelope.payload._tag === "Final").length,

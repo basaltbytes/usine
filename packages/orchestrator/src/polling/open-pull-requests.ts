@@ -32,7 +32,7 @@ export const openPullRequest = (
 ): Option.Option<OpenPullRequest> =>
   snapshot._tag === "PullRequestSnapshot" && snapshot.payload.state === "OPEN"
     ? Option.some(
-        new OpenPullRequest({
+        OpenPullRequest.make({
           number: item.number,
           updatedAt: item.updatedAt,
           baseRefName: Option.some(snapshot.payload.baseRefName),

@@ -81,7 +81,7 @@ const recordingExecutor = (
   Layer.succeed(StepExecutor)({
     workers: Effect.succeed(workers.map((worker) => WorkerName.make(worker))),
     isLive: () => Effect.succeed(false),
-    outcome: () => Effect.succeed(Option.none()),
+    outcome: () => Effect.succeedNone,
     recover: (attempt) => Ref.update(recovered, (ids) => [...ids, attempt.attemptId]),
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
@@ -173,7 +173,7 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
     Effect.gen(function* () {
       if ((yield* Ref.get(state.unstoppable)).has(attemptId)) {
         yield* Ref.update(state.refused, (ids) => [...ids, attemptId]);
-        return yield* new InfraFailure({
+        return yield* InfraFailure.make({
           message: "Could not cancel the parent task",
           cause: "storage unavailable",
         });
@@ -191,7 +191,7 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
         ]);
         if (byRun) yield* Deferred.await(state.gate);
         if ((yield* Ref.get(state.unreadable)).has(attemptId))
-          return yield* new InfraFailure({
+          return yield* InfraFailure.make({
             message: "Could not read the parent task",
             cause: "storage unavailable",
           });
@@ -208,10 +208,14 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
         const stored = (yield* Ref.get(state.stored)).get(attempt.attemptId);
         if (attempt.open && stored !== undefined && Result.isFailure(stored))
           yield* record.comments([
-            new Comment({ url: new URL(POSTED_COMMENT), kind: "issue-comment", at: Option.none() }),
+            Comment.make({
+              url: new URL(POSTED_COMMENT),
+              kind: "issue-comment",
+              at: Option.none(),
+            }),
           ]);
         yield* record.salvage(
-          new SalvagePushed({ ref: attempt.ref, commit: CommitSha.make("a".repeat(40)) }),
+          SalvagePushed.make({ ref: attempt.ref, commit: CommitSha.make("a".repeat(40)) }),
         );
       }),
     intervene: () => Effect.void,
@@ -228,7 +232,7 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
         );
         if ((yield* Ref.get(state.stalled)).has(id)) return yield* Effect.never;
         if ((yield* Ref.get(state.unprepared)).has(id))
-          return yield* new InfraFailure({
+          return yield* InfraFailure.make({
             message: "The reattached Attempt's credential could not be issued",
             cause: "credential unavailable",
           });
@@ -383,7 +387,7 @@ describe("engine restart", () => {
         const executor = Layer.succeed(StepExecutor)({
           workers: Effect.succeed([WorkerName.make("local")]),
           isLive: (attemptId) => Ref.get(live).pipe(Effect.map((ids) => ids.has(attemptId))),
-          outcome: () => Effect.succeed(Option.none()),
+          outcome: () => Effect.succeedNone,
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
@@ -467,7 +471,7 @@ describe("engine restart", () => {
                   Layer.succeed(StepExecutor)({
                     workers: Effect.succeed([local, spare]),
                     isLive: () => Effect.succeed(false),
-                    outcome: () => Effect.succeed(Option.none()),
+                    outcome: () => Effect.succeedNone,
                     recover: () => Effect.void,
                     intervene: () => Effect.void,
                     interrupt: () => Effect.void,
@@ -553,7 +557,7 @@ describe("engine restart", () => {
                 Effect.flatMap((byRun) => (byRun ? Deferred.await(read) : Effect.void)),
                 Effect.as(liveIds.has(attemptId)),
               ),
-            outcome: () => Effect.succeed(Option.none()),
+            outcome: () => Effect.succeedNone,
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
@@ -661,7 +665,7 @@ describe("engine restart", () => {
                   const result = results.get(attempt.attemptId);
                   return attempt.open && result !== undefined && Result.isFailure(result)
                     ? record.comments([
-                        new Comment({
+                        Comment.make({
                           url: new URL(POSTED_COMMENT),
                           kind: "issue-comment",
                           at: Option.none(),
@@ -686,7 +690,7 @@ describe("engine restart", () => {
                       execution.attempt.id,
                       execution.task === succeeding.task
                         ? Result.succeed(stepResult("finished before the restart"))
-                        : Result.fail(new AgentFailure({ message: "blocked before the restart" })),
+                        : Result.fail(AgentFailure.make({ message: "blocked before the restart" })),
                     ),
                   ),
                 ),
@@ -781,7 +785,9 @@ describe("engine restart", () => {
           yield* Ref.set(worker.unstoppable, new Set([unread.id]));
           yield* Ref.set(
             worker.stored,
-            new Map([[failed.id, Result.fail(new AgentFailure({ message: "failed unattached" }))]]),
+            new Map([
+              [failed.id, Result.fail(AgentFailure.make({ message: "failed unattached" }))],
+            ]),
           );
           yield* Deferred.succeed(worker.gate, undefined);
 
@@ -1068,7 +1074,7 @@ describe("engine restart", () => {
           const [canceled] = yield* stopDuringAttempts(directory, [acquired]);
           assert(canceled !== undefined);
           const unconfirmed = (reason: StopReason) => [
-            new UnconfirmedStop({
+            UnconfirmedStop.make({
               attemptId: canceled.id,
               runId: canceled.runId,
               loop: acquired.loop,
@@ -1182,7 +1188,7 @@ describe("engine restart", () => {
           // The first Attempt fails, and its parent task can't be stopped, so the Run starts no
           // retry, even in a free slot of `local`.
           const first = yield* slottedExecutor(
-            [Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" }))],
+            [Effect.fail(InfraFailure.make({ message: "Lost the parent task", cause: "offline" }))],
             slots,
           );
           yield* Ref.set(first.unstoppable, true);
@@ -1202,7 +1208,7 @@ describe("engine restart", () => {
           const [failed] = attempts;
           assert(failed !== undefined);
           const unconfirmed = (reason: StopReason) => [
-            new UnconfirmedStop({
+            UnconfirmedStop.make({
               attemptId: failed.id,
               runId: accepted.runId,
               loop: failing.loop,
@@ -1316,7 +1322,7 @@ describe("engine restart", () => {
           // A configured Worker's Attempts stay reconciled at every start.
           assert.deepStrictEqual(
             yield* Effect.flip(engine.discardLeftovers(WorkerName.make("usine-worker-1"))),
-            new LeftoversDiscardRejectedError({
+            LeftoversDiscardRejectedError.make({
               worker: WorkerName.make("usine-worker-1"),
               running: 0,
             }),
@@ -1389,7 +1395,7 @@ describe("engine restart", () => {
             assert(started._tag === "AttemptStarted");
             yield* store.finishAttempt(
               started.execution.attempt,
-              Result.fail(new AgentFailure({ message: "needs the operator" })),
+              Result.fail(AgentFailure.make({ message: "needs the operator" })),
             );
             yield* store.retry(runId);
           }),
@@ -1437,7 +1443,7 @@ describe("engine restart", () => {
               assert(interrupted._tag === "AttemptStarted");
               const decision = yield* store.finishAttempt(
                 interrupted.execution.attempt,
-                Result.fail(new InfraFailure({ message: "worker lost", cause: "test" })),
+                Result.fail(InfraFailure.make({ message: "worker lost", cause: "test" })),
               );
               assert.strictEqual(decision._tag, "RetryAttempt");
               // This Run closed with an Event queued behind it, before its continuation ran.

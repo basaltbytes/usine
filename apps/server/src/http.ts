@@ -91,7 +91,7 @@ const operatorFailure = (error: BackendError) => {
         return `Attempt ${error.attemptId} could not be canceled.`;
     }
   })();
-  return new OperatorHttpError({ error: error._tag, message });
+  return OperatorHttpError.make({ error: error._tag, message });
 };
 
 const requireProjectRepository = (project: ProjectId, repository: RepositoryName) =>
@@ -101,7 +101,7 @@ const requireProjectRepository = (project: ProjectId, repository: RepositoryName
       return member?.includes(repository) === true
         ? Effect.void
         : Effect.fail(
-            new OperatorHttpError({
+            OperatorHttpError.make({
               error: "BoardProjectNotFoundError",
               message: `Repository ${repository} does not belong to project ${project}.`,
             }),
@@ -120,16 +120,16 @@ const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
       const project = Schema.decodeUnknownOption(ProjectId)(params.project);
       const allowed =
         requirement !== undefined &&
-        (permits(grants, "admin", new InstanceScope()) ||
+        (permits(grants, "admin", InstanceScope.make()) ||
           (Option.isSome(project)
-            ? permits(grants, requirement, new ProjectScope({ project: project.value }))
+            ? permits(grants, requirement, ProjectScope.make({ project: project.value }))
             : grants.some(({ permission }) => permission === requirement)));
       if (!allowed) {
         yield* Effect.logWarning("Operator route permission refused", {
           route: endpoint.identifier,
           permission: requirement,
         });
-        return yield* new OperatorHttpError({
+        return yield* OperatorHttpError.make({
           error: "AccessDenied",
           message: "You do not have permission for this operation.",
         });
@@ -152,7 +152,7 @@ const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
         if (!HttpApiError.HttpApiSchemaError.is(error)) return Effect.fail(error);
         const responseEncoding = error.kind === "Body" || error.kind === "ResponseHeaders";
         return Effect.fail(
-          new OperatorHttpError({
+          OperatorHttpError.make({
             error: responseEncoding
               ? "HttpBodyError"
               : error.kind === "Payload"
@@ -176,13 +176,12 @@ const fromBackend = <A>(
 ) => Effect.flatMap(FactoryBackend, use).pipe(Effect.mapError(operatorFailure));
 
 const projectRepository = (params: { readonly owner: string; readonly repository: string }) =>
-  Schema.decodeUnknownEffect(RepositoryName)(`${params.owner}/${params.repository}`).pipe(
-    Effect.mapError(
-      (error) =>
-        new OperatorHttpError({
-          error: "SchemaError",
-          message: `Invalid request: ${error.message}`,
-        }),
+  Schema.decodeEffect(RepositoryName)(`${params.owner}/${params.repository}`).pipe(
+    Effect.mapError((error) =>
+      OperatorHttpError.make({
+        error: "SchemaError",
+        message: `Invalid request: ${error.message}`,
+      }),
     ),
   );
 
@@ -192,13 +191,13 @@ const fromUpgrades = <A>(
   Effect.gen(function* () {
     const upgrades = yield* Effect.serviceOption(ServerUpgrades);
     if (Option.isNone(upgrades))
-      return yield* new OperatorHttpError({
+      return yield* OperatorHttpError.make({
         error: "UpgradeError",
         message: "Upgrades are unavailable until the factory is running.",
       });
     return yield* use(upgrades.value).pipe(
-      Effect.mapError(
-        (error) => new OperatorHttpError({ error: "UpgradeError", message: error.message }),
+      Effect.mapError((error) =>
+        OperatorHttpError.make({ error: "UpgradeError", message: error.message }),
       ),
     );
   });
@@ -248,15 +247,13 @@ const handlers = HttpApiBuilder.group(
             const project = overview.projects.find(({ id }) => id === params.project);
             return project === undefined
               ? Effect.fail(
-                  new OperatorHttpError({
+                  OperatorHttpError.make({
                     error: "BoardProjectNotFoundError",
                     message: `Project ${params.project} was not found.`,
                   }),
                 )
-              : Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
-                  Effect.succeed(
-                    request.headers["x-usine-view"] === "board" ? pagedBoard(project) : project,
-                  ),
+              : Effect.map(HttpServerRequest.HttpServerRequest, (request) =>
+                  request.headers["x-usine-view"] === "board" ? pagedBoard(project) : project,
                 );
           }),
         ),
@@ -269,7 +266,7 @@ const handlers = HttpApiBuilder.group(
               ?.board.lanes.find(({ id }) => id === params.lane);
             if (lane === undefined)
               return Effect.fail(
-                new OperatorHttpError({
+                OperatorHttpError.make({
                   error: "BoardLaneNotFoundError",
                   message: "The project lane was not found.",
                 }),
@@ -294,7 +291,7 @@ const handlers = HttpApiBuilder.group(
           Effect.andThen(
             fromBackend((backend) =>
               backend.moveBoardItem(
-                new BoardMove({
+                BoardMove.make({
                   repository: payload.repository,
                   item: params.item,
                   toLane: payload.toLane,
@@ -371,7 +368,7 @@ const handlers = HttpApiBuilder.group(
           });
           return yield* fromBackend((backend) =>
             backend.moveBoardItem(
-              new BoardMove({ repository, item: params.item, toLane: payload.toLane }),
+              BoardMove.make({ repository, item: params.item, toLane: payload.toLane }),
             ),
           ).pipe(acknowledge);
         }),
@@ -403,7 +400,7 @@ const handlers = HttpApiBuilder.group(
           const task = yield* fromBackend((backend) => backend.task(repository, params.item));
           const request = yield* HttpServerRequest.HttpServerRequest;
           return request.headers["x-usine-view"] === "task"
-            ? new TaskView({
+            ? TaskView.make({
                 ...task,
                 runsTotal: task.runs.length,
                 runs: task.runs.slice(0, 25),
@@ -433,7 +430,7 @@ const handlers = HttpApiBuilder.group(
       .handle("configurationLabels", ({ params }) =>
         Effect.gen(function* () {
           const grants = yield* RequestPermissions;
-          if (permits(grants, "admin", new InstanceScope()))
+          if (permits(grants, "admin", InstanceScope.make()))
             return yield* configurationLabels(params.repository);
           const view = yield* fromBackend((backend) => backend.configuration);
           if (
@@ -441,7 +438,7 @@ const handlers = HttpApiBuilder.group(
               ({ name }) => name.toLowerCase() === params.repository.toLowerCase(),
             )
           )
-            return yield* new OperatorHttpError({
+            return yield* OperatorHttpError.make({
               error: "AccessDenied",
               message: "You do not have access to this repository.",
             });

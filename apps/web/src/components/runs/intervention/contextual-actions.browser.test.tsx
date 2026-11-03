@@ -54,8 +54,8 @@ declare module "vitest/browser" {
 }
 const runId = RunId.make("intervention-test");
 const attemptId = AttemptId.make("attempt-2");
-const failedRun = new RunView({
-  agentBrain: new BrainSpec({
+const failedRun = RunView.make({
+  agentBrain: BrainSpec.make({
     harness: "codex",
     model: ModelId.make("test-model"),
     effort: "high",
@@ -81,7 +81,7 @@ const failedRun = new RunView({
   canCancel: false,
   canRunAgain: false,
 });
-const succeededRun = new RunView({
+const succeededRun = RunView.make({
   ...failedRun,
   state: "Succeeded",
   canRetry: false,
@@ -124,7 +124,7 @@ it("addresses parent and child messages independently and exposes an explicit re
         <SessionComposer
           runId={runId}
           attemptId={attemptId}
-          target={new ParentTarget()}
+          target={ParentTarget.make()}
           paused
           held
         />
@@ -133,7 +133,7 @@ it("addresses parent and child messages independently and exposes an explicit re
         <SessionComposer
           runId={runId}
           attemptId={attemptId}
-          target={new ChildTarget({ sessionId: AgentSessionId.make("child-2") })}
+          target={ChildTarget.make({ sessionId: AgentSessionId.make("child-2") })}
           paused={false}
           held={false}
         />
@@ -202,9 +202,9 @@ it("edits failed task text and selects the replacement roster agent", async () =
 });
 
 it("describes the saved retry brain and offers the current definition without changing the task or agent name", async () => {
-  const run = new RunView({
+  const run = RunView.make({
     ...failedRun,
-    agentBrain: new BrainSpec({
+    agentBrain: BrainSpec.make({
       harness: "claude",
       model: ModelId.make("claude-opus-4-7"),
       effort: "high",
@@ -257,7 +257,7 @@ it("runs a succeeded Run again as it ended or with an edited task and agent, and
   const opened: Array<RunId> = [];
   await commands.runAgainResponse(
     runAgainBody(
-      new Claimed({ eventId: EventId.make("run-again-event"), runId: RunId.make("opened-again") }),
+      Claimed.make({ eventId: EventId.make("run-again-event"), runId: RunId.make("opened-again") }),
     ),
   );
   mount(
@@ -309,16 +309,16 @@ it("says that running a Run again opened no Run once the Item's cycle budget is 
   const loop = LoopName.make("implement");
   await commands.runAgainResponse(
     runAgainBody(
-      new CycleBlocked({
+      CycleBlocked.make({
         eventId: EventId.make("run-again-event"),
-        ask: new CycleBudgetAsk({
+        ask: CycleBudgetAsk.make({
           id: CycleBudgetAskId.make("exhausted"),
           itemKey: succeededRun.itemKey,
           repository: succeededRun.repository,
           loop,
           limit: CycleLimit.make(1),
           counts: [
-            new LoopCycleCount({
+            LoopCycleCount.make({
               loop,
               admitted: CycleCount.make(1),
               completed: CycleCount.make(1),
@@ -346,7 +346,7 @@ it("retains unsent guidance and displays a delivery failure", async () => {
     <SessionComposer
       runId={runId}
       attemptId={attemptId}
-      target={new ParentTarget()}
+      target={ParentTarget.make()}
       paused={false}
       held={false}
     />,
@@ -362,7 +362,7 @@ it("retains unsent guidance and displays a delivery failure", async () => {
 });
 
 it("offers the run's overflow actions in the palette and retains cancellation confirmation", async () => {
-  const run = new RunView({
+  const run = RunView.make({
     ...failedRun,
     state: "Waiting",
     canApprove: true,
@@ -373,7 +373,7 @@ it("offers the run's overflow actions in the palette and retains cancellation co
   mount(
     <WithRouter>
       <PageCommandsProvider>
-        <CommandPalette overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })} />
+        <CommandPalette overview={ReadyOverview.make({ projects: [], loops: [], needsYou: [] })} />
         <ContextualActions
           detail={{ run, agentDefinitionChanged: false }}
           onEdit={() => {}}
@@ -419,18 +419,18 @@ it("hides run mutations from a member without operate permission", () => {
 });
 
 it("updates run actions when repository ownership changes without changing the historical loop", async () => {
-  const run = new RunView({ ...failedRun, loop: LoopName.make("alpha/implement") });
-  const grants = new RoleBinding({
+  const run = RunView.make({ ...failedRun, loop: LoopName.make("alpha/implement") });
+  const grants = RoleBinding.make({
     name: "alpha-operator",
     member: GitHubUserId.make(1),
     role: "operator",
-    scope: new ProjectScope({ project: ProjectId.make("alpha") }),
+    scope: ProjectScope.make({ project: ProjectId.make("alpha") }),
   }).permissions;
   const overview = (project: "alpha" | "beta") =>
-    new ReadyOverview({
+    ReadyOverview.make({
       ...taskOverview(),
-      projects: taskOverview().projects.map(
-        (value) => new ProjectView({ ...value, id: ProjectId.make(project) }),
+      projects: taskOverview().projects.map((value) =>
+        ProjectView.make({ ...value, id: ProjectId.make(project) }),
       ),
     });
   client.setQueryDefaults(overviewQuery().queryKey, { staleTime: Infinity });
@@ -450,20 +450,20 @@ it("updates run actions when repository ownership changes without changing the h
   client.setQueryData(overviewQuery().queryKey, overview("beta"));
   await expect.element(page.getByRole("group", { name: "Run actions" })).not.toBeInTheDocument();
   render(
-    new RoleBinding({
+    RoleBinding.make({
       name: "beta-operator",
       member: GitHubUserId.make(1),
       role: "operator",
-      scope: new ProjectScope({ project: ProjectId.make("beta") }),
+      scope: ProjectScope.make({ project: ProjectId.make("beta") }),
     }).permissions,
   );
   await expect.element(page.getByRole("group", { name: "Run actions" })).toBeVisible();
   render(
-    new RoleBinding({
+    RoleBinding.make({
       name: "beta-viewer",
       member: GitHubUserId.make(1),
       role: "viewer",
-      scope: new ProjectScope({ project: ProjectId.make("beta") }),
+      scope: ProjectScope.make({ project: ProjectId.make("beta") }),
     }).permissions,
   );
   await expect.element(page.getByRole("group", { name: "Run actions" })).not.toBeInTheDocument();

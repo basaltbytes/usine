@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Option, Redacted } from "effect";
+import { Effect, Option, Redacted, Layer } from "effect";
 import { WorkerMachines } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
@@ -56,8 +56,9 @@ for (const address of [hetznerAddress, boatAddress]) {
         assert.lengthOf(yield* machines.machines, 0);
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtimeOf(machine, providers, address)),
-        Effect.provide(providers.layer),
+        Effect.provide(
+          runtimeOf(machine, providers, address).pipe(Layer.provideMerge(providers.layer)),
+        ),
       );
     },
   );
@@ -89,9 +90,12 @@ for (const address of [hetznerAddress, boatAddress]) {
         assert.isFalse(logs.lines.some((line) => line.includes(Redacted.value(settings.token))));
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtimeOf(machine, providers, address)),
-        Effect.provide(providers.layer),
-        Effect.provide(logs.layer),
+        Effect.provide(
+          runtimeOf(machine, providers, address).pipe(
+            Layer.provideMerge(providers.layer),
+            Layer.provideMerge(logs.layer),
+          ),
+        ),
       );
     },
   );
@@ -125,8 +129,9 @@ it.live("reports a failed final deletion and still removes the worker configurat
     );
   }).pipe(
     Effect.scoped,
-    Effect.provide(runtimeOf(machine, providers, hetznerAddress)),
-    Effect.provide(logs.layer),
+    Effect.provide(
+      runtimeOf(machine, providers, hetznerAddress).pipe(Layer.provideMerge(logs.layer)),
+    ),
   );
 });
 

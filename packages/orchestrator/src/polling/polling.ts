@@ -212,7 +212,7 @@ export class PollingTriggers extends Context.Service<
       const openIssueChecks = yield* Ref.make<ReadonlyMap<CursorKey, number>>(new Map());
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
-        new StoredPollCursor({
+        StoredPollCursor.make({
           boardVersion: 5,
           openPullRequests: [],
           baseRefHeads: [],
@@ -328,7 +328,7 @@ export class PollingTriggers extends Context.Service<
             ...targeted.map((item) => [item.number, item] as const),
             ...refresh.refreshed.map(
               ({ number, updatedAt }) =>
-                [number, new ChangedPullRequest({ number, updatedAt })] as const,
+                [number, ChangedPullRequest.make({ number, updatedAt })] as const,
             ),
           ]);
           for (const item of detectedItems) items.set(item.number, item);
@@ -414,7 +414,7 @@ export class PollingTriggers extends Context.Service<
               Option.contains(pullRequest.baseRefName, baseRefName),
             ),
           );
-          const nextCursor = new StoredPollCursor({
+          const nextCursor = StoredPollCursor.make({
             boardVersion: 5,
             cursor: detected.cursor,
             labelEntityTag: preflight.labelEntityTag,
@@ -562,7 +562,7 @@ export class PollingTriggers extends Context.Service<
               yield* Ref.update(completedPolls, (current) =>
                 new Map(current).set(
                   canonicalRepositoryName(repository.repository.name),
-                  new RepositoryPoll({ repository: repository.repository.name, completedAt }),
+                  RepositoryPoll.make({ repository: repository.repository.name, completedAt }),
                 ),
               );
               continue;
@@ -601,7 +601,7 @@ export class PollingTriggers extends Context.Service<
               source: "Polling",
               repository: repository.repository.name,
               failures,
-              failure: new RepositoryPollFailure({
+              failure: RepositoryPollFailure.make({
                 repository: repository.repository.name,
                 errorTag: error._tag,
                 message: repositoryFailureLogFields(error).message,
@@ -622,7 +622,7 @@ export class PollingTriggers extends Context.Service<
             yield* Effect.logWithLevel(level)("Repository poll failure streak updated", fields);
           }
           const polls = yield* Ref.get(completedPolls);
-          const cycle = new PollCycle({
+          const cycle = PollCycle.make({
             repositoryPolls: watched.flatMap(({ repository }) =>
               Option.toArray(
                 Option.fromNullishOr(polls.get(canonicalRepositoryName(repository.name))),
