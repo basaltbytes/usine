@@ -124,7 +124,7 @@ import {
   TailTranscriptRequest,
 } from "../src/operator/transcript.ts";
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
-import { UnconfiguredWorkerNeed } from "../src/operator/need.ts";
+import { PoolLimitNeed, UnconfiguredWorkerNeed } from "../src/operator/need.ts";
 import { boardTaskRuns, Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
 import {
@@ -861,7 +861,7 @@ describe("Operator", () => {
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const reports: Array<TranscriptEntry> = [];
         const resetsAt = DateTime.add(now, { hours: 1 });
-        const append = (usedPercent: number) =>
+        const append = (usedPercent: number, resetTime = resetsAt) =>
           reports.push(
             new TranscriptEntry({
               sequence: TranscriptSequence.make(3000 + reports.length),
@@ -885,7 +885,7 @@ describe("Operator", () => {
                       primary: Option.some(
                         new RateLimitWindow({
                           usedPercent,
-                          resetsAt: Option.some(resetsAt),
+                          resetsAt: Option.some(resetTime),
                           windowDurationMinutes: Option.some(300),
                         }),
                       ),
@@ -901,12 +901,12 @@ describe("Operator", () => {
             view.needsYou.filter((need) => need._tag === "PoolLimitNeed"),
           );
           assert.deepStrictEqual(yield* needs, []);
-          append(85);
+          append(80);
           const [need] = yield* needs;
           assert(need !== undefined);
           assert.strictEqual(need.pool, "chatgptPlan");
           assert.strictEqual(Option.getOrNull(need.login), "operator@example.com");
-          assert.strictEqual(need.usedPercent, 85);
+          assert.strictEqual(need.usedPercent, 80);
           assert.deepStrictEqual(need.resetsAt, resetsAt);
           assert.strictEqual(
             yield* Ref.get(reads),
@@ -920,9 +920,33 @@ describe("Operator", () => {
               (entry) => entry.id === need.id,
             ),
           );
+          for (let usedPercent = 81; usedPercent < 90; usedPercent++) {
+            append(usedPercent);
+            const view = yield* operator.overview(instance);
+            assert.deepStrictEqual(
+              view.needsYou.filter((entry) => entry._tag === "PoolLimitNeed"),
+              [],
+            );
+            const dismissed = view.dismissedNeeds.find((entry) => entry.id === need.id);
+            assert(dismissed?._tag === "PoolLimitNeed");
+            assert.strictEqual(dismissed.usedPercent, usedPercent);
+          }
           yield* operator.undoDismissNeed(attentionKey(need));
-          assert.deepStrictEqual(yield* needs, [need]);
+          assert.deepStrictEqual(yield* needs, [new PoolLimitNeed({ ...need, usedPercent: 89 })]);
           yield* operator.dismissNeed(instance, attentionKey(need));
+          append(90);
+          const [higherBand] = yield* needs;
+          assert(higherBand !== undefined);
+          assert.strictEqual(higherBand.usedPercent, 90);
+          yield* operator.dismissNeed(instance, attentionKey(higherBand));
+          assert.deepStrictEqual(yield* needs, []);
+          const nextReset = DateTime.add(resetsAt, { hours: 1 });
+          append(90, nextReset);
+          const [nextWindow] = yield* needs;
+          assert(nextWindow !== undefined);
+          assert.deepStrictEqual(nextWindow.resetsAt, nextReset);
+          yield* operator.dismissNeed(instance, attentionKey(nextWindow));
+          assert.deepStrictEqual(yield* needs, []);
           append(20);
           assert.deepStrictEqual(yield* needs, []);
           assert(
@@ -930,7 +954,7 @@ describe("Operator", () => {
               (entry) => entry.id === need.id,
             ),
           );
-          append(85);
+          append(80);
           assert.deepStrictEqual(yield* needs, [need], "a cleared warning needs a new dismissal");
           yield* TestClock.adjust("1 hour");
           assert.deepStrictEqual(
