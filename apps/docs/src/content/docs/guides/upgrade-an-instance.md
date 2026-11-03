@@ -33,6 +33,8 @@ Access to the instance machine, a recoverable backup, and either a global instal
 
 Managed upgrades check that required packages resolve before draining. The helper backs up both stores before changing packages and requires free space on both the backup and instance filesystems equal to at least twice the combined database and WAL file sizes, so rollback can stage database copies locally even with external backups. If space is insufficient, it records a failed upgrade with the folder to clean and leaves the server and packages unchanged. Instance-local upgrades back up stores, change package pins, install dependencies, commit the pin change, and restart. A failed local installation restores manifests and lockfiles; follow the CLI’s recovery instructions if startup fails.
 
+Startup applies runtime database migrations before readiness. The transcript migration builds an index over stored envelope tags and backfills session usage and billing-pool limits. This requires a one-time pass over historical transcripts and adds disk space for the index and summary tables. It preserves conversations and reported usage. Allow startup to finish within the managed helper's readiness window.
+
 ## Managed upgrade backups
 
 The helper creates private `backup.XXXXXXXX` directories under `.usine/upgrade/` in the instance folder. After a successful upgrade, it keeps the newest three backups, always including the current upgrade backup, and removes older ones. Failed upgrades and rollbacks retain all backups. The helper journal reports backup paths and cleanup failures. After a backup or space-check failure, free the required space and restart the server service to resume attempt admission before retrying the upgrade.
