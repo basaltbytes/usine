@@ -38,6 +38,10 @@ export class CiMonitor extends Context.Service<
       repository: Option.Option<RepositoryName>,
     ) => Effect.Effect<
       {
+        /** Repositories with persisted CI waits, including waits skipped during backoff. */
+        readonly repositories: ReadonlyArray<RepositoryName>;
+        /** Repositories whose CI observations completed without rate limiting. */
+        readonly polledRepositories: ReadonlyArray<RepositoryName>;
         readonly failures: ReadonlyArray<RepositoryPollFailure>;
         readonly nextPollAt: Option.Option<DateTime.Utc>;
       },
@@ -295,8 +299,18 @@ export class CiMonitor extends Context.Service<
           );
           const failures: Array<RepositoryPollFailure> = [];
           const backoffs: Array<Option.Option<DateTime.Utc>> = [];
+          const polled = new Map<string, RepositoryName>();
+          const remaining = new Map<string, number>();
+          for (const wait of waits) {
+            const key = canonicalRepositoryName(wait.repository);
+            remaining.set(key, (remaining.get(key) ?? 0) + 1);
+          }
           for (const wait of waits) {
             const result = yield* reconcileOne(instance, wait).pipe(Effect.result);
+            const key = canonicalRepositoryName(wait.repository);
+            const pending = (remaining.get(key) ?? 0) - 1;
+            remaining.set(key, pending);
+            if (pending === 0) polled.set(key, wait.repository);
             if (Result.isSuccess(result)) continue;
             const error: RepositoryPollError = result.failure;
             yield* Effect.logError("CI observation failed; this wait will be retried", {
@@ -312,11 +326,17 @@ export class CiMonitor extends Context.Service<
               }),
             );
             if (error._tag === "GitHubRateLimitError") {
+              polled.delete(key);
               backoffs.push(Option.some(error.retryAt));
               break;
             }
           }
-          return { failures, nextPollAt: latestPollAt(backoffs) };
+          return {
+            repositories: waits.map((wait) => wait.repository),
+            polledRepositories: [...polled.values()],
+            failures,
+            nextPollAt: latestPollAt(backoffs),
+          };
         }),
       };
     }),

@@ -4,6 +4,7 @@ import type { GitHubServerError } from "@usine/github/github-app";
 import type { ChangedItem } from "@usine/github/polling";
 import { Effect, Schema } from "effect";
 import { changedItem, FailingItem } from "./evaluation-failures.ts";
+import { RepositoryPollFailure, repositoryFailureLogFields } from "./cycle.ts";
 
 /**
  * An Item that GitHub couldn't return in a cycle because of a server error. The poll cursor keeps
@@ -21,6 +22,7 @@ export class UnfetchedItem extends Schema.Class<UnfetchedItem>("@usine/orchestra
 interface Unfetched {
   readonly _tag: "Unfetched";
   readonly unfetched: UnfetchedItem;
+  readonly failure: RepositoryPollFailure;
 }
 
 /** Logs `error` and returns the cursor entry that fetches `item` again in the next cycle. */
@@ -42,6 +44,11 @@ export const deferItem = Effect.fn("PollingTriggers.deferItem")(function* (
   );
   return {
     _tag: "Unfetched",
+    failure: new RepositoryPollFailure({
+      repository,
+      errorTag: error._tag,
+      message: `${repositoryFailureLogFields(error).message} (item ${item.number})`,
+    }),
     unfetched: new UnfetchedItem({
       stream: item._tag === "ChangedIssue" ? "issue" : "pr",
       number: ItemNumber.make(item.number),

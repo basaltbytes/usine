@@ -30,6 +30,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { CheckFailureEvidence, CheckSnapshot, GitHubChecks } from "@usine/github/checks";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
+import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
   ContentHash,
   GitHubPolling,
@@ -52,9 +53,10 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
 import { CiMonitor } from "../src/ci.ts";
+import { PollingTriggers } from "../src/polling-triggers.ts";
 import { triggerSubmission } from "../src/trigger-submission.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
-import { unmovedBaseRefHead } from "./support/polling.ts";
+import { inertLabelReconcilerLayer, unmovedBaseRefHead } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const head = CommitSha.make("a".repeat(40));
@@ -125,6 +127,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory(), prefix: "usine-ci-" }),
   );
   const observed = yield* Ref.make(new CheckSnapshot({ head, state: "pending" }));
+  const observationFailure = yield* Ref.make(Option.none<GitHubApiError | GitHubRateLimitError>());
   const mergeable = yield* Ref.make<PullRequestPayload["mergeable"]>("CONFLICTING");
   const tasks = yield* Ref.make<ReadonlyArray<string>>([]);
   const mutations = yield* Ref.make<
@@ -151,7 +154,12 @@ const scenario = Effect.fn("test.ciScenario")(function* (
       ),
   });
   const checks = Layer.succeed(GitHubChecks)({
-    snapshot: () => Ref.get(observed),
+    snapshot: () =>
+      Effect.gen(function* () {
+        const failure = yield* Ref.get(observationFailure);
+        if (Option.isSome(failure)) return yield* failure.value;
+        return yield* Ref.get(observed);
+      }),
     failures: () =>
       Ref.get(observed).pipe(
         Effect.flatMap(({ state }) =>
@@ -206,7 +214,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     MarcbachmannCelLayer,
   );
   const runtime = CiMonitor.layer.pipe(Layer.provideMerge(dependencies));
-  return { observed, mergeable, tasks, mutations, runtime, timeoutSeconds };
+  return { observed, observationFailure, mergeable, tasks, mutations, runtime, timeoutSeconds };
 });
 
 const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number, sameLoop = false) {
@@ -239,6 +247,71 @@ const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number,
   );
   return accepted.runId;
 });
+
+it.live("reports CI observation failures after a repository is removed from configuration", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const setup = yield* scenario(3600);
+      const removed = new LoadedInstance({
+        ...instance,
+        config: UsineConfig.make({ ...instance.config, repos: [] }),
+      });
+      const failure = new GitHubApiError({
+        operation: "read-ci-checks",
+        status: Option.some(403),
+        message: "GitHub returned HTTP status 403",
+      });
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        const polling = yield* PollingTriggers;
+        yield* Ref.set(setup.observationFailure, Option.some(failure));
+        assert.deepStrictEqual((yield* polling.poll(removed)).failures, []);
+        assert.deepStrictEqual((yield* polling.poll(removed)).failures, []);
+        const third = yield* polling.poll(removed);
+        assert.strictEqual(third.failures.length, 1);
+        assert.strictEqual(third.failures[0]?.repository, repository);
+        assert.strictEqual(third.failures[0]?.errorTag, "GitHubApiError");
+        assert.include(third.failures[0]?.message ?? "", failure.operation);
+        assert.deepStrictEqual((yield* polling.poll(removed)).failures, third.failures);
+
+        yield* Ref.set(
+          setup.observationFailure,
+          Option.some(
+            new GitHubRateLimitError({
+              operation: failure.operation,
+              message: "secondary rate limit",
+              retryAt: yield* DateTime.now,
+            }),
+          ),
+        );
+        const paused = yield* polling.poll(removed);
+        assert.deepStrictEqual(
+          paused.failures.filter(({ errorTag }) => errorTag === "GitHubApiError"),
+          third.failures,
+        );
+        yield* Ref.set(setup.observationFailure, Option.none());
+        assert.deepStrictEqual((yield* polling.poll(removed)).failures, []);
+        assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "AwaitingCi");
+
+        yield* Ref.set(setup.observationFailure, Option.some(failure));
+        assert.deepStrictEqual((yield* polling.poll(removed)).failures, []);
+        assert.deepStrictEqual((yield* polling.poll(removed)).failures, []);
+        assert.strictEqual((yield* polling.poll(removed)).failures.length, 1);
+        yield* Ref.set(setup.observationFailure, Option.none());
+        yield* Ref.set(setup.observed, new CheckSnapshot({ head, state: "success" }));
+        assert.deepStrictEqual((yield* polling.poll(removed)).failures, []);
+        assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "Succeeded");
+        assert.deepStrictEqual((yield* polling.poll(removed)).failures, []);
+      }).pipe(
+        Effect.provide(
+          PollingTriggers.layer.pipe(
+            Layer.provideMerge(Layer.merge(setup.runtime, inertLabelReconcilerLayer)),
+          ),
+        ),
+      );
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it.effect("polling an open CI wait releases response bodies across six simulated hours", () =>
   Effect.gen(function* () {

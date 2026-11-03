@@ -447,6 +447,9 @@ export class PollingTriggers extends Context.Service<
             failures: [
               ...preflight.failures,
               ...openIssueCheck.failures,
+              ...evaluations.flatMap((evaluation) =>
+                evaluation._tag === "Unfetched" ? [evaluation.failure] : [],
+              ),
               ...failingItems.flatMap((failing) =>
                 failingItemPollFailures(watched.repository.name, failing),
               ),
@@ -529,7 +532,12 @@ export class PollingTriggers extends Context.Service<
           const backoffs: Array<Option.Option<DateTime.Utc>> = [ciCycle.nextPollAt];
           const preflightFindings: Array<LabelPreflightFinding> = [];
           const completedAt = yield* DateTime.now;
-          const polled: Array<RepositoryName> = [];
+          const configured = new Set(
+            watched.map(({ repository }) => canonicalRepositoryName(repository.name)),
+          );
+          const polled: Array<RepositoryName> = ciCycle.polledRepositories.filter(
+            (repository) => !configured.has(canonicalRepositoryName(repository)),
+          );
           for (const { repository, result } of settled) {
             if (Result.isSuccess(result)) {
               if (result.success.rateLimited) {
@@ -585,7 +593,7 @@ export class PollingTriggers extends Context.Service<
           const reported = sustainedPollFailures(
             [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
             previousStreaks,
-            watched.map(({ repository }) => repository.name),
+            [...watched.map(({ repository }) => repository.name), ...ciCycle.repositories],
             polled,
           );
           yield* Ref.set(failureStreaks, reported.streaks);
