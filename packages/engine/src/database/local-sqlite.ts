@@ -4,7 +4,6 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { fileURLToPath } from "node:url";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
-import { sql } from "drizzle-orm";
 import {
   Context,
   Effect,
@@ -34,6 +33,7 @@ import { EnginePersistenceError, type RunEngineError } from "../engine/error.ts"
 import { RunReader } from "../run-reader/run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
 import type { TriggerCondition } from "../trigger-condition.ts";
+import { foreignKeys, migrationNameColumn } from "./dialect.ts";
 import { RunDatabase } from "./database.ts";
 
 const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -115,8 +115,7 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
     Effect.gen(function* () {
       const drizzle = yield* SQLiteDrizzle.makeWithDefaults();
       const client = yield* SqlClient.SqlClient;
-      const columns =
-        yield* client`SELECT name FROM pragma_table_info('usine_migrations') WHERE name = 'name'`;
+      const columns = yield* migrationNameColumn(client);
       if (columns.length > 0) {
         const renamed =
           yield* client`UPDATE usine_migrations SET name = '20261029101340_member_approval_source' WHERE name = '20261029101340_bored_paladin' RETURNING id`;
@@ -126,18 +125,11 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
       // SQLite ignores `foreign_keys` changes inside a transaction, and Drizzle rebuilds
       // referenced tables while migrating, so enforcement is turned off before migrating and
       // back on even if a migration fails.
-      yield* drizzle.run(sql`PRAGMA foreign_keys = OFF`).execute();
+      yield* drizzle.run(foreignKeys.disable).execute();
       yield* migrate(drizzle, {
         migrationsFolder,
         migrationsTable: "usine_migrations",
-      }).pipe(
-        Effect.ensuring(
-          drizzle
-            .run(sql`PRAGMA foreign_keys = ON`)
-            .execute()
-            .pipe(Effect.orDie),
-        ),
-      );
+      }).pipe(Effect.ensuring(drizzle.run(foreignKeys.enable).execute().pipe(Effect.orDie)));
       return drizzle;
     }).pipe(Effect.mapError((cause) => startupError("initialize local database", cause))),
   );

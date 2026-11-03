@@ -3,6 +3,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 
 import { DateTime, Effect, Match, Option } from "effect";
+import { jsonExtract } from "../database/dialect.ts";
 import type { RunDatabaseClient } from "../database/database.ts";
 import { attemptTranscripts, poolRateLimits, sessionUsage } from "../database/schema.ts";
 
@@ -181,7 +182,7 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
           )
           .groupBy(
             sql`coalesce(${attemptTranscripts.sessionId}, '@parent')`,
-            sql`json_extract(${attemptTranscripts.envelope}, '$.payload.inputSequence')`,
+            jsonExtract(attemptTranscripts.envelope, "$.payload.inputSequence"),
           );
         return selection
           .where(inArray(attemptTranscripts.sequence, latestSessions.unionAll(latestInterventions)))

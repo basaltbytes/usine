@@ -32,6 +32,7 @@ import {
   RepositoryLabelCatalog,
   RepositoryNotModified,
 } from "@usine/github/polling";
+import { GitHubApiError } from "@usine/github/github-app";
 import { DateTime, Effect, Layer, Logger, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import {
@@ -218,6 +219,11 @@ const capturedLogs = () => {
 };
 
 const FAILED = /Loop evaluation failed on an Item/u;
+
+const storedUnfetchedItems = (cursors: ReturnType<typeof memoryCursorStore>) =>
+  Schema.decodeUnknownSync(
+    Schema.Struct({ unfetchedItems: Schema.Array(Schema.Struct({ number: Schema.Number })) }),
+  )(cursors.stored.get(`github-poll:${repository}`)).unfetchedItems.map(({ number }) => number);
 
 const storedFailingItems = (cursors: ReturnType<typeof memoryCursorStore>) =>
   Schema.decodeUnknownSync(
@@ -524,6 +530,118 @@ describe("Loop evaluation failures", () => {
         const cycle = yield* polling.poll(reloaded);
         assert.deepStrictEqual(cycle.failures, []);
         assert.deepStrictEqual(storedFailingItems(cursors), []);
+      }).pipe(Effect.provide(processLayer(github, cursors.store)));
+    }),
+  );
+
+  it.effect("retries only the Items whose snapshots failed with a GitHub server error", () =>
+    Effect.gen(function* () {
+      submissions.length = 0;
+      const cursors = memoryCursorStore();
+      const fetched: Array<number> = [];
+      const unavailable = new Set([3, 5, 7]);
+      const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
+        missingIssues: () => Effect.succeed([]),
+        labels: () =>
+          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+        changes: changesOnce(
+          Array.from(
+            { length: 10 },
+            (_, index) => new ChangedIssue({ number: index + 1, updatedAt }),
+          ),
+        ),
+        snapshot: (_repository, item) =>
+          Effect.gen(function* () {
+            fetched.push(item.number);
+            if (unavailable.delete(item.number))
+              return yield* new GitHubApiError({
+                operation: "fetch-issue-snapshot",
+                status: Option.some(504),
+                message: "GitHub returned HTTP status 504",
+              });
+            return new IssueSnapshot({
+              payload: issuePayload(item.number, null),
+              contentHash: ContentHash.make("e".repeat(64)),
+            });
+          }),
+      };
+      const instance = instanceWith([
+        loop("plan", 'item.state == "OPEN"', "Plan {{ item.number }}."),
+      ]);
+
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const first = yield* polling.poll(instance);
+        assert.deepStrictEqual(first.failures, []);
+        assert.strictEqual(first.submissions.length, 7);
+        const saved = Schema.decodeUnknownSync(Schema.Struct({ cursor: PollCursor }))(
+          cursors.stored.get(`github-poll:${repository}`),
+        );
+        assert.deepStrictEqual(saved.cursor, advanced);
+        assert.deepStrictEqual(storedUnfetchedItems(cursors), [3, 5, 7]);
+
+        fetched.length = 0;
+        const second = yield* polling.poll(instance);
+        assert.deepStrictEqual(second.failures, []);
+        assert.deepStrictEqual(
+          [...fetched].sort((left, right) => left - right),
+          [3, 5, 7],
+        );
+        assert.strictEqual(second.submissions.length, 3);
+        assert.deepStrictEqual(storedUnfetchedItems(cursors), []);
+
+        fetched.length = 0;
+        yield* polling.poll(instance);
+        assert.deepStrictEqual(fetched, []);
+        assert.strictEqual(submissions.length, 10);
+      }).pipe(Effect.provide(processLayer(github, cursors.store)));
+    }),
+  );
+
+  it.effect("fails the cycle and keeps the cursor when a snapshot fails with a client error", () =>
+    Effect.gen(function* () {
+      submissions.length = 0;
+      const cursors = memoryCursorStore();
+      const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
+        missingIssues: () => Effect.succeed([]),
+        labels: () =>
+          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+        changes: changesOnce([
+          new ChangedIssue({ number: 28, updatedAt }),
+          new ChangedIssue({ number: 29, updatedAt }),
+        ]),
+        snapshot: (_repository, item) =>
+          item.number === 29
+            ? Effect.fail(
+                new GitHubApiError({
+                  operation: "fetch-issue-snapshot",
+                  status: Option.some(401),
+                  message: "GitHub returned HTTP status 401",
+                }),
+              )
+            : Effect.succeed(
+                new IssueSnapshot({
+                  payload: issuePayload(item.number, null),
+                  contentHash: ContentHash.make("f".repeat(64)),
+                }),
+              ),
+      };
+      const instance = instanceWith([
+        loop("plan", 'item.state == "OPEN"', "Plan {{ item.number }}."),
+      ]);
+
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          const cycle = yield* polling.poll(instance);
+          assert.deepStrictEqual(
+            cycle.failures.map(({ errorTag }) => errorTag),
+            attempt === 3 ? ["GitHubApiError"] : [],
+          );
+          assert.strictEqual(cursors.stored.size, 0);
+        }
       }).pipe(Effect.provide(processLayer(github, cursors.store)));
     }),
   );

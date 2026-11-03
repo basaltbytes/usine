@@ -5,6 +5,7 @@ import * as RunState from "@usine/core/run/state";
 import { RunId } from "@usine/core/run";
 import { and, asc, eq, exists, isNotNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
+import { jsonExtract } from "../database/dialect.ts";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
   attempts,
@@ -57,7 +58,7 @@ export const cycleQueries = (database: RunDatabaseClient) => {
         .from(attempts)
         .where(eq(attempts.runId, runs.runId)),
     );
-    const state = sql`json_extract(${runs.stateJson}, '$._tag')`;
+    const state = jsonExtract(runs.stateJson, "$._tag");
     const rows = yield* database
       .select({
         loop: cycleReservations.loop,
