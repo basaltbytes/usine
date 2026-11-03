@@ -4,13 +4,22 @@ import { RunId } from "@usine/core/run";
 import { RunState } from "@usine/core/run/state";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { Array as EffectArray, Effect, Schema } from "effect";
+import {
+  jsonArrayValues,
+  jsonEach,
+  jsonExtract,
+  jsonGroupArray,
+  jsonObject,
+  jsonValue,
+  elapsedMillis,
+} from "../database/dialect.ts";
 import type { RunDatabaseClient } from "../database/database.ts";
 import { attempts, runs, steps, triggerEvents } from "../database/schema.ts";
 import { ItemRunHistory, RunUsageSource } from "../run-reader/model.ts";
 
 export const runPullRequestUrl = sql<
   string | null
->`(select json_extract(fact.value, '$.url') from json_each(${steps.result}, '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1)`;
+>`(select ${jsonExtract(sql`fact.value`, "$.url")} from ${jsonEach(steps.result, "$.facts")} as fact where ${jsonExtract(sql`fact.value`, "$._tag")} = 'PullRequest' limit 1)`;
 
 const Totals = Schema.Struct({
   itemKey: ItemKey,
@@ -45,15 +54,18 @@ export const boardHistoryQueries = (database: RunDatabaseClient) => {
       EffectArray.chunksOf([...new Set(itemKeys)], 100),
       (keys) =>
         Effect.gen(function* () {
-          const selected = sql`${triggerEvents.itemKey} in (select value from json_each(${JSON.stringify(keys)}))`;
+          const selected = sql`${triggerEvents.itemKey} in (${jsonArrayValues(keys)})`;
           const totals = yield* database
             .select({
               itemKey: triggerEvents.itemKey,
               runCount: sql<number>`count(distinct ${runs.runId})`,
               attemptCount: sql<number>`count(${attempts.attemptId})`,
-              durationMillis: sql<number>`coalesce(sum(case when ${attempts.endedAt} is not null then max(0, round((julianday(${attempts.endedAt}) - julianday(${attempts.startedAt})) * 86400000)) else 0 end), 0)`,
+              durationMillis: sql<number>`coalesce(sum(case when ${attempts.endedAt} is not null then ${elapsedMillis(attempts.startedAt, attempts.endedAt)} else 0 end), 0)`,
               unmeasured: sql<number>`count(case when ${attempts.outcomeJson} is not null and ${attempts.endedAt} is null then 1 end)`,
-              runningSince: sql<string>`json_group_array(${attempts.startedAt}) filter (where ${attempts.attemptId} is not null and ${attempts.outcomeJson} is null)`,
+              runningSince: jsonGroupArray(
+                attempts.startedAt,
+                sql`${attempts.attemptId} is not null and ${attempts.outcomeJson} is null`,
+              ),
             })
             .from(runs)
             .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
@@ -95,7 +107,18 @@ export const boardHistoryQueries = (database: RunDatabaseClient) => {
             .select({
               itemKey: triggerEvents.itemKey,
               runId: runs.runId,
-              attempts: sql<string>`json_group_array(json_object('id', ${attempts.attemptId}, 'ended', json(case when ${attempts.outcomeJson} is null then 'false' else 'true' end))) filter (where ${attempts.attemptId} is not null)`,
+              attempts: jsonGroupArray(
+                jsonObject([
+                  ["id", attempts.attemptId],
+                  [
+                    "ended",
+                    jsonValue(
+                      sql`case when ${attempts.outcomeJson} is null then 'false' else 'true' end`,
+                    ),
+                  ],
+                ]),
+                sql`${attempts.attemptId} is not null`,
+              ),
             })
             .from(runs)
             .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))

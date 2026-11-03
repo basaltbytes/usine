@@ -40,11 +40,14 @@ declare module "vitest/browser" {
 const list = "/projects/board-test-repo/tasks";
 
 // Task pages request their Task; this fake server returns not found, so only the URL is checked.
-globalThis.fetch = async () =>
+const missingTask = async () =>
   new Response(JSON.stringify({ error: "BoardItemNotFoundError", message: "No Task" }), {
     status: 404,
     headers: { "content-type": "application/json" },
   });
+
+let respond: typeof globalThis.fetch = missingTask;
+globalThis.fetch = (...args) => respond(...args);
 
 const desk = (notMoving: ReturnType<typeof boardStalled>) =>
   new DeskView({ running: [], notMoving, lastOutcomes: [], workers: [], polls: [] });
@@ -106,39 +109,42 @@ const mount = async (path: string, width = 1440) => {
 
 const table = () => page.getByRole("table", { name: "board-test/repo tasks" });
 
-it.each([404, 503])("handles a task list refresh returning HTTP %s", async (status) => {
-  await mount(list);
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    new Response(
-      JSON.stringify({
-        error: status === 404 ? "BoardProjectNotFoundError" : "BackendUnavailableError",
-        message: status === 404 ? "Project removed" : "Temporarily unavailable",
-      }),
-      { status, headers: { "content-type": "application/json" } },
-    );
-  try {
-    await invalidateChanges(
-      queryClient,
-      new ChangeNotice({
-        revision: 1,
-        reset: false,
-        changes: [{ kind: "project", id: "board-test-repo" }],
-      }),
-    );
-    if (status === 404) {
-      await expect.element(page.getByText("Project not found", { exact: true })).toBeVisible();
-      await expect.element(table()).not.toBeInTheDocument();
-    } else {
-      await expect.element(table()).toBeVisible();
-      await expect
-        .element(page.getByText("Project not found", { exact: true }))
-        .not.toBeInTheDocument();
+it.each([404, 503])(
+  "shows Project not found only for a removed task list (HTTP %s)",
+  async (status) => {
+    await mount(list);
+    const originalFetch = respond;
+    respond = async () =>
+      new Response(
+        JSON.stringify({
+          error: status === 404 ? "BoardProjectNotFoundError" : "BackendUnavailableError",
+          message: status === 404 ? "Project removed" : "Temporarily unavailable",
+        }),
+        { status, headers: { "content-type": "application/json" } },
+      );
+    try {
+      await invalidateChanges(
+        queryClient,
+        new ChangeNotice({
+          revision: 1,
+          reset: false,
+          changes: [{ kind: "project", id: "board-test-repo" }],
+        }),
+      );
+      if (status === 404) {
+        await expect.element(page.getByText("Project not found", { exact: true })).toBeVisible();
+        await expect.element(table()).not.toBeInTheDocument();
+      } else {
+        await expect.element(table()).toBeVisible();
+        await expect
+          .element(page.getByText("Project not found", { exact: true }))
+          .not.toBeInTheDocument();
+      }
+    } finally {
+      respond = originalFetch;
     }
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
+  },
+);
 const rowOf = (title: RegExp) => table().getByRole("row").filter({ hasText: title });
 /** Returns the Task and Status cell text of each row, in table order. */
 const rowTexts = () =>

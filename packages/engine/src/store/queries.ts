@@ -43,6 +43,7 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { Array as EffectArray, DateTime, Effect, Option, Schema, Struct } from "effect";
+import { jsonArrayValues, jsonExtract, jsonObject, isTrue } from "../database/dialect.ts";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
   approvals,
@@ -186,16 +187,16 @@ export const attemptSelection = {
 
 const runSummarySelection = {
   ...Struct.omit(runSelection, ["task", "result", "revision", "parentModel", "stepName", "agent"]),
-  agent:
-    sql<Schema.Json>`json_object('name', json_extract(${runs.agentJson}, '$.name'), 'brain', json_extract(${runs.agentJson}, '$.brain'))`.mapWith(
-      runs.agentJson,
-    ),
+  agent: jsonObject([
+    ["name", jsonExtract(runs.agentJson, "$.name")],
+    ["brain", jsonExtract(runs.agentJson, "$.brain")],
+  ]).mapWith(runs.agentJson),
   pullRequestUrl: runPullRequestUrl,
 } as const;
 
 const attemptSummarySelection = Struct.omit(attemptSelection, ["task", "comments"]);
 
-const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
+const storedStateTag = jsonExtract(runs.stateJson, "$._tag");
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
 // The Json round-trip gives `queriesFor` a portable named type; without it tsc
@@ -296,7 +297,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
           itemKey: triggerEvents.itemKey,
           number: attempts.attemptNumber,
           permissions: triggerEvents.permissions,
-          outcome: sql<string>`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '')`,
+          outcome: sql<string>`coalesce(${jsonExtract(attempts.outcomeJson, "$._tag")}, '')`,
           salvage: attempts.salvageJson,
         })
         .from(attempts)
@@ -456,11 +457,9 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
           })
           .from(runs)
           .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-          .where(
-            sql`${triggerEvents.itemKey} in (select value from json_each(${JSON.stringify(keys)}))`,
-          )
+          .where(sql`${triggerEvents.itemKey} in (${jsonArrayValues(keys)})`)
           .as("board_current_runs");
-        const state = sql`json_extract(${ranked.state}, '$._tag')`;
+        const state = jsonExtract(ranked.state, "$._tag");
         const current = () =>
           database
             .select({ runId: ranked.runId })
@@ -473,7 +472,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
                   eq(state, "Failed"),
                   or(isNull(ranked.resolved), ne(ranked.resolved, ranked.latestAttempt)),
                 ),
-                sql`${ranked.runId} in (select value from json_each(${JSON.stringify(attentionRunIds)}))`,
+                sql`${ranked.runId} in (${jsonArrayValues(attentionRunIds)})`,
               ),
             );
         const selectedRuns = current().unionAll(
@@ -481,7 +480,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
             .select({ runId: runs.runId })
             .from(runs)
             .where(
-              inArray(sql`cast(json_extract(${runs.stateJson}, '$.fixRunId') as text)`, current()),
+              inArray(sql`cast(${jsonExtract(runs.stateJson, "$.fixRunId")} as text)`, current()),
             ),
         );
         return selectRunSummaries()
@@ -511,7 +510,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
         .execute()
         .pipe(Effect.flatMap(decodeRunSummaryRows)),
       selectRunSummaries()
-        .where(eq(sql<number>`${runs.closedAt} is not null`, 1))
+        .where(isTrue(sql`${runs.closedAt} is not null`))
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .limit(closedLimit)
         .execute()
@@ -553,7 +552,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
           isNotNull(runs.closedAt),
           repositories === undefined
             ? undefined
-            : sql`lower(${runs.repository}) in (select value from json_each(${JSON.stringify(repositories.map(canonicalRepositoryName))}))`,
+            : sql`lower(${runs.repository}) in (${jsonArrayValues(repositories.map(canonicalRepositoryName))})`,
         ),
       )
       .orderBy(desc(runs.closedAt), desc(runs.runId))
@@ -711,8 +710,8 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
         .where(
           and(
             eq(attempts.attemptId, attemptId),
-            sql`json_extract(${attempts.outcomeJson}, '$._tag') = 'Failed'`,
-            sql`json_extract(${attempts.outcomeJson}, '$.failure._tag') != 'GitHubPushFailure'`,
+            sql`${jsonExtract(attempts.outcomeJson, "$._tag")} = 'Failed'`,
+            sql`${jsonExtract(attempts.outcomeJson, "$.failure._tag")} != 'GitHubPushFailure'`,
           ),
         )
         .execute();
@@ -788,7 +787,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       .where(
         and(
           eq(attempts.runId, runId),
-          sql`json_extract(${attempts.outcomeJson}, '$._tag') = 'AwaitingCi'`,
+          sql`${jsonExtract(attempts.outcomeJson, "$._tag")} = 'AwaitingCi'`,
         ),
       )
       .execute();

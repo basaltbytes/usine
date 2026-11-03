@@ -13,6 +13,7 @@ import type { RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { sql } from "drizzle-orm";
 import { DateTime, Effect, Match } from "effect";
+import { jsonExtract } from "../database/dialect.ts";
 import type { RunDatabase } from "../database/database.ts";
 import { runs } from "../database/schema.ts";
 import { persistence } from "./codec.ts";
@@ -25,7 +26,7 @@ export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBu
       const rows = yield* database
         .select({ runId: runs.runId })
         .from(runs)
-        .where(sql`json_extract(${runs.stateJson}, '$._tag') = 'AwaitingCi'`)
+        .where(sql`${jsonExtract(runs.stateJson, "$._tag")} = 'AwaitingCi'`)
         .execute();
       return yield* Effect.forEach(rows, ({ runId }) => queriesFor(database).snapshot(runId));
     },

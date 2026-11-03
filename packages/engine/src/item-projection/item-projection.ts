@@ -3,6 +3,7 @@ import { type ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
+import { distinctFrom, jsonExtract } from "../database/dialect.ts";
 import { RunDatabase } from "../database/database.ts";
 import { itemProjections } from "../database/schema.ts";
 import { EnginePersistenceError } from "../engine/error.ts";
@@ -85,7 +86,7 @@ const makeReader = Effect.gen(function* () {
             eq(itemProjections.repository, repository),
             eq(itemProjections.source, "issue"),
             isNull(itemProjections.goneAt),
-            sql`json_extract(${itemProjections.payloadJson}, '$.state') = 'OPEN'`,
+            sql`${jsonExtract(itemProjections.payloadJson, "$.state")} = 'OPEN'`,
           ),
         )
         .orderBy(asc(itemProjections.itemNumber))
@@ -127,7 +128,7 @@ const makeWriter = Effect.gen(function* () {
             payloadJson: encodePayload(item.payload),
             goneAt,
           },
-          setWhere: sql`${itemProjections.contentHash} != ${item.contentHash} OR ${itemProjections.goneAt} IS NOT ${goneAt}`,
+          setWhere: sql`${itemProjections.contentHash} != ${item.contentHash} OR ${distinctFrom(itemProjections.goneAt, sql`${goneAt}`)}`,
         })
         .returning({ itemKey: itemProjections.itemKey })
         .execute();

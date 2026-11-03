@@ -96,6 +96,9 @@ export const configurationEditorResponses = async (
   await page.route("**/api/configuration", (route) =>
     route.fulfill({ contentType: "application/json", body: configuration }),
   );
+  await page.route("**/api/workers", (route) =>
+    route.fulfill({ contentType: "application/json", body: configuration }),
+  );
   await page.route("**/api/configuration/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());

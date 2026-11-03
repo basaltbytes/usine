@@ -1,6 +1,7 @@
 import { ChangeBus, type ChangeAudience } from "@usine/core/changes";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
+import { jsonEach, jsonExtract } from "../database/dialect.ts";
 import { RunDatabase } from "../database/database.ts";
 import { attentionAcknowledgements } from "../database/schema.ts";
 import { EnginePersistenceError } from "../engine/error.ts";
@@ -76,9 +77,9 @@ export class AttentionAcknowledgements extends Context.Service<
           const removed = yield* database
             .delete(attentionAcknowledgements)
             .where(sql`not exists (
-              select 1 from json_each(${JSON.stringify(current)}) as current
-              where json_extract(current.value, '$.id') = ${attentionAcknowledgements.id}
-                and json_extract(current.value, '$.revision') = ${attentionAcknowledgements.revision}
+              select 1 from ${jsonEach(sql`${JSON.stringify(current)}`)} as current
+              where ${jsonExtract(sql`current.value`, "$.id")} = ${attentionAcknowledgements.id}
+                and ${jsonExtract(sql`current.value`, "$.revision")} = ${attentionAcknowledgements.revision}
             )`)
             .returning({ id: attentionAcknowledgements.id })
             .execute();

@@ -82,6 +82,10 @@ const manyTasks = (count: number): ReadonlyArray<BoardTaskView> => {
     });
   });
 };
+const browserFetch = globalThis.fetch;
+let respond: typeof globalThis.fetch = browserFetch;
+globalThis.fetch = (...args) => respond(...args);
+
 let host: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
@@ -90,7 +94,9 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+  queryClient = new QueryClient({
+    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+  });
   queryClient.setQueryData(
     deskQuery().queryKey,
     new DeskView({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
@@ -204,45 +210,47 @@ it("scrolls a long lane on its own and fades the edges that hide cards", async (
   expect(lane("Ready").getBoundingClientRect().top).toBe(otherLane);
 });
 
-it.each([404, 503])("handles a board refresh returning HTTP %s", async (status) => {
-  await mountBoard(1024);
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : String(input), location.href);
-    if (!url.pathname.startsWith("/api/projects/")) return originalFetch(input, init);
-    return new Response(
-      JSON.stringify({
-        error: status === 404 ? "BoardProjectNotFoundError" : "BackendUnavailableError",
-        message: status === 404 ? "Project removed" : "Temporarily unavailable",
-      }),
-      { status, headers: { "content-type": "application/json" } },
-    );
-  };
-  queryClient.setQueryDefaults(projectQuery(projectId(project)).queryKey, { retry: false });
-  try {
-    await invalidateChanges(
-      queryClient,
-      new ChangeNotice({
-        revision: 1,
-        reset: false,
-        changes: [{ kind: "project", id: projectId(project) }],
-      }),
-    );
-    if (status === 404) {
-      await expect.element(page.getByText("Project not found", { exact: true })).toBeVisible();
-      await expect
-        .element(page.getByLabelText(`${repository} project board`))
-        .not.toBeInTheDocument();
-    } else {
-      await expect.element(page.getByLabelText(`${repository} project board`)).toBeVisible();
-      await expect
-        .element(page.getByText("Project not found", { exact: true }))
-        .not.toBeInTheDocument();
+it.each([404, 503])(
+  "shows Project not found only for a removed board (HTTP %s)",
+  async (status) => {
+    await mountBoard(1024);
+    const originalFetch = respond;
+    respond = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+      if (!url.pathname.startsWith("/api/projects/")) return originalFetch(input, init);
+      return new Response(
+        JSON.stringify({
+          error: status === 404 ? "BoardProjectNotFoundError" : "BackendUnavailableError",
+          message: status === 404 ? "Project removed" : "Temporarily unavailable",
+        }),
+        { status, headers: { "content-type": "application/json" } },
+      );
+    };
+    try {
+      await invalidateChanges(
+        queryClient,
+        new ChangeNotice({
+          revision: 1,
+          reset: false,
+          changes: [{ kind: "project", id: projectId(project) }],
+        }),
+      );
+      if (status === 404) {
+        await expect.element(page.getByText("Project not found", { exact: true })).toBeVisible();
+        await expect
+          .element(page.getByLabelText(`${repository} project board`))
+          .not.toBeInTheDocument();
+      } else {
+        await expect.element(page.getByLabelText(`${repository} project board`)).toBeVisible();
+        await expect
+          .element(page.getByText("Project not found", { exact: true }))
+          .not.toBeInTheDocument();
+      }
+    } finally {
+      respond = originalFetch;
     }
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
+  },
+);
 
 it("loads every Done card as the virtual lane scrolls", async () => {
   const cards = manyTasks(120);
@@ -266,8 +274,8 @@ it("loads every Done card as the virtual lane scrolls", async () => {
     new ReadyOverview({ projects: [view], loops: [], needsYou: [] }),
   );
   const offsets: number[] = [];
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input, init) => {
+  const originalFetch = respond;
+  respond = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), location.href);
     if (!url.pathname.endsWith("/lanes/Done/items")) return originalFetch(input, init);
     const offset = Number(url.searchParams.get("offset") ?? 0);
@@ -311,6 +319,6 @@ it("loads every Done card as the virtual lane scrolls", async () => {
     expect(scroller.querySelectorAll("h3").length).toBeLessThan(50);
     expect(offsets).toEqual([0, 50, 100]);
   } finally {
-    globalThis.fetch = originalFetch;
+    respond = originalFetch;
   }
 });

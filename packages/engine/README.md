@@ -231,3 +231,11 @@ Operator audit fields accept `OperatorActor`: a GitHub login or the reserved `lo
 An admitted CI fix closes its source run as `HandedOff` with the fix run ID and failure reason. The source attempt also ends neutrally. A same-loop fix for the recorded failed head can pass cycle-budget admission while the source awaits CI, since its attempt has ended. Refused fixes and exhausted budgets leave the source failed.
 
 Polling run summaries omit task prompts, step results, attempt prompts, harvested comments, and agent personas from SQL selections. They extract only the pull request URL from a step result. Run and task detail use full snapshots. Board reads select current runs with SQL windows and aggregate historical counts, timing, loop states, and PR links; token attribution reads only run and attempt identities and terminal status. Recent closed-run lists apply their limits in SQL.
+
+## Persistence contracts
+
+The domain services are the persistence boundary. `RunDatabase` is the current SQLite composition service; another SQL dialect supplies the same domain ports through Effect layers. [ADR 0020](../../docs/adr/0020-drizzle-portable-sqlite-projection.md#amendment-2026-11-03-896-sqlite-and-postgres-adapters) defines SQLite for self-hosted instances and Postgres as the next hosted backend, with schemas and migrations owned by each adapter.
+
+`src/database/dialect.ts` centralizes SQLite query expressions, including JSON access and aggregation. Keep JSON paths literal where they match expression indexes. The [persistence inventory](../../docs/persistence.md) lists every store and its dialect dependencies.
+
+`test/contracts/persistence.test.ts` registers adapters against the port suites. An adapter fixture supplies service layers, isolated storage, reopening, and write-failure injection. These contracts run through `pnpm test`, alongside SQLite-specific migration and query-plan tests.
