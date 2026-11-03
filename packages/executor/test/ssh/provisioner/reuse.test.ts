@@ -13,7 +13,7 @@ import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
-import { boatAddress, hetznerAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
+import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 
 const policy = new ProvisionerReuse({
@@ -67,7 +67,9 @@ for (const address of [hetznerAddress, boatAddress]) {
         return Effect.gen(function* () {
           const machines = yield* WorkerMachines;
           const executor = yield* Executor;
-          const first = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+          const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+            TEST_AGENT.brain,
+          ]);
           yield* Effect.scoped(
             Effect.gen(function* () {
               yield* (yield* executor.prepare(request)).launch(sink);
@@ -80,7 +82,7 @@ for (const address of [hetznerAddress, boatAddress]) {
           assert.strictEqual(machine.state.containers.size, 0);
           assert.strictEqual(machine.state.credentials.size, 0);
           assert.strictEqual(records.size, 0, "reset removes the completed attempt connection");
-          const reused = yield* machines.create(WORKER, RUN, second, [TEST_AGENT.brain]);
+          const reused = yield* machines.create(WORKER, MACHINE_RUN, second, [TEST_AGENT.brain]);
           assert.isTrue(records.has(second));
           assert.strictEqual(reused.id, first.id);
           assert.notEqual(reused.hold, first.hold);
@@ -99,7 +101,7 @@ for (const address of [hetznerAddress, boatAddress]) {
           yield* machines.release(reused.hold);
           assert.lengthOf(yield* machines.machines, 0);
           assert.strictEqual(records.size, 0, "deletion leaves no previous attempt connections");
-          const fresh = yield* machines.create(WORKER, RUN, third, [TEST_AGENT.brain]);
+          const fresh = yield* machines.create(WORKER, MACHINE_RUN, third, [TEST_AGENT.brain]);
           assert.notEqual(fresh.id, first.id);
           assert.strictEqual((yield* machines.starts)[0]?.count, 2);
           yield* machines.release(fresh.hold);
@@ -123,9 +125,9 @@ for (const address of [hetznerAddress, boatAddress]) {
       const providers = fakeProviders();
       return Effect.gen(function* () {
         const machines = yield* WorkerMachines;
-        const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+        const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
         yield* machines.release(first.hold);
-        const next = yield* machines.create(WORKER, RUN, second, []);
+        const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
         assert.notEqual(next.id, first.id);
         yield* machines.release(next.hold);
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
@@ -137,7 +139,9 @@ for (const address of [hetznerAddress, boatAddress]) {
       return Effect.gen(function* () {
         const machines = yield* WorkerMachines;
         const executor = yield* Executor;
-        const first = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+        const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          TEST_AGENT.brain,
+        ]);
         yield* Effect.scoped(
           Effect.gen(function* () {
             const prepared = yield* executor.prepare(request);
@@ -148,7 +152,7 @@ for (const address of [hetznerAddress, boatAddress]) {
         machine.state.containerRemovalFails = false;
         yield* machines.release(first.hold);
         assert.lengthOf(yield* machines.machines, 0);
-        const next = yield* machines.create(WORKER, RUN, second, []);
+        const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
         assert.notEqual(next.id, first.id);
         yield* machines.release(next.hold);
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, reuseAddress(address))));
@@ -162,11 +166,11 @@ it.effect("retires an idle machine at its age limit without waiting for another 
   providers.hetzner.startingReads = 0;
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
-    const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+    const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
     yield* machines.release(first.hold);
     yield* TestClock.adjust("2 hours");
     assert.strictEqual(providers.hetzner.servers.size, 0);
-    const next = yield* machines.create(WORKER, RUN, second, []);
+    const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
     assert.notEqual(next.id, first.id);
     yield* machines.release(next.hold);
   }).pipe(
@@ -180,13 +184,13 @@ it.live("retires a reused machine when preflight fails and retries on a fresh on
   const providers = fakeProviders();
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
-    const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+    const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
     yield* machines.release(first.hold);
     machine.state.rootWritable = false;
-    yield* machines.create(WORKER, RUN, second, []).pipe(Effect.flip);
+    yield* machines.create(WORKER, MACHINE_RUN, second, []).pipe(Effect.flip);
     assert.strictEqual(providers.hetzner.servers.size, 0);
     machine.state.rootWritable = true;
-    const next = yield* machines.create(WORKER, RUN, second, []);
+    const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
     assert.notEqual(next.id, first.id);
     yield* machines.release(next.hold);
   }).pipe(
@@ -203,7 +207,7 @@ for (const transition of ["removed", "idle revision", "active revision"] as cons
     return Effect.gen(function* () {
       const machines = yield* WorkerMachines;
       const workers = yield* SshWorkers;
-      const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+      const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
       if (transition !== "active revision") yield* machines.release(first.hold);
       if (transition === "removed") yield* workers.removeWorker(WORKER);
       yield* workers.addWorker({ ...address, root: WorkerRoot.make("/replacement") });
@@ -216,7 +220,7 @@ for (const transition of ["removed", "idle revision", "active revision"] as cons
         yield* machines.release(first.hold);
       }
       assert.strictEqual(providers.hetzner.servers.size, 0);
-      const next = yield* machines.create(WORKER, RUN, second, []);
+      const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
       assert.notEqual(next.id, first.id);
       yield* machines.release(next.hold);
     }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
@@ -228,7 +232,7 @@ it.live("preserves machine-start counts across executor restarts and deletion", 
   const providers = fakeProviders();
   const create = Effect.gen(function* () {
     const machines = yield* WorkerMachines;
-    const grant = yield* machines.create(WORKER, RUN, request.attemptId, []);
+    const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
     yield* machines.release(grant.hold);
     return yield* machines.starts;
   });
@@ -250,10 +254,13 @@ it.live("assigns an idle machine to only one of two concurrent attempts", () => 
   const providers = fakeProviders();
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
-    const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+    const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
     yield* machines.release(first.hold);
     const grants = yield* Effect.all(
-      [machines.create(WORKER, RUN, second, []), machines.create(WORKER, RUN, third, [])],
+      [
+        machines.create(WORKER, MACHINE_RUN, second, []),
+        machines.create(WORKER, MACHINE_RUN, third, []),
+      ],
       { concurrency: "unbounded" },
     );
     assert.notEqual(grants[0].id, grants[1].id);
@@ -275,7 +282,9 @@ it.live("requires container isolation before enabling machine reuse", () => {
   const providers = fakeProviders();
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
-    const failure = yield* machines.create(WORKER, RUN, request.attemptId, []).pipe(Effect.flip);
+    const failure = yield* machines
+      .create(WORKER, MACHINE_RUN, request.attemptId, [])
+      .pipe(Effect.flip);
     assert.strictEqual(failure._tag, "WorkerCapabilityError");
     assert.strictEqual(providers.hetzner.servers.size, 0);
     assert.strictEqual(
@@ -295,7 +304,7 @@ it.effect("retires a machine when reset stops responding over SSH", () => {
   providers.hetzner.startingReads = 0;
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
-    const first = yield* machines.create(WORKER, RUN, request.attemptId, []);
+    const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
     machine.state.stalled = true;
     const releasing = yield* machines.release(first.hold).pipe(Effect.forkChild);
     yield* TestClock.adjust("1 second");

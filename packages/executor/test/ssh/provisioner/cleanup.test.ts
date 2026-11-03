@@ -7,7 +7,7 @@ import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { hetznerDriverFor } from "../../../src/ssh/provisioner/hetzner.ts";
 import { capturedLogs, fakeMachine, INSTANCE, request, TEST_AGENT, WORKER } from "../support.ts";
-import { boatAddress, hetznerAddress, RUN, runtimeOf } from "./fixtures.ts";
+import { MACHINE_RUN, boatAddress, hetznerAddress, RUN, runtimeOf } from "./fixtures.ts";
 import { BOAT_TEST_API, fakeProviders, HETZNER_TEST_API } from "./fake-providers.ts";
 
 for (const address of [hetznerAddress, boatAddress]) {
@@ -48,7 +48,9 @@ for (const address of [hetznerAddress, boatAddress]) {
             provisioner: { ...settings, token: Redacted.make("rotated-token") },
           },
         });
-        const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+        const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          TEST_AGENT.brain,
+        ]);
         assert.isTrue(Option.isSome(grant.checked));
         yield* machines.release(grant.hold);
         assert.lengthOf(yield* machines.machines, 0);
@@ -102,7 +104,9 @@ it.live("reports a failed final deletion and still removes the worker configurat
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
     const workers = yield* SshWorkers;
-    const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+    const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+      TEST_AGENT.brain,
+    ]);
     providers.hetzner.deleteFails = { status: 500, code: "server_error", message: "down" };
     yield* machines.release(grant.hold);
     yield* workers.removeWorker(WORKER);
@@ -132,18 +136,24 @@ it.live("removes an ambiguously created machine before retrying the same Attempt
   return Effect.gen(function* () {
     const machines = yield* WorkerMachines;
     providers.hetzner.createAnswerFails = true;
-    yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]).pipe(Effect.flip);
+    yield* machines
+      .create(WORKER, MACHINE_RUN, request.attemptId, [TEST_AGENT.brain])
+      .pipe(Effect.flip);
     assert.strictEqual(providers.hetzner.servers.size, 1);
     providers.hetzner.createAnswerFails = false;
     providers.hetzner.deleteFails = { status: 500, code: "server_error", message: "down" };
-    yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]).pipe(Effect.flip);
+    yield* machines
+      .create(WORKER, MACHINE_RUN, request.attemptId, [TEST_AGENT.brain])
+      .pipe(Effect.flip);
     assert.strictEqual(
       providers.hetzner.servers.size,
       1,
       "failed cleanup creates no second machine",
     );
     providers.hetzner.deleteFails = undefined;
-    const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+    const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+      TEST_AGENT.brain,
+    ]);
     assert.deepStrictEqual([...providers.hetzner.servers.keys()], [Number(grant.id)]);
     yield* machines.release(grant.hold);
     assert.strictEqual(providers.hetzner.servers.size, 0);

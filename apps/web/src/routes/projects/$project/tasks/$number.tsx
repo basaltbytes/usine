@@ -1,3 +1,4 @@
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { createFileRoute, notFound, redirect } from "@tanstack/react-router";
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
@@ -64,7 +65,10 @@ export const Route = createFileRoute("/projects/$project/tasks/$number")({
     )
       throw notFound();
     try {
-      await context.queryClient.ensureQueryData(taskQuery(repository, number.value));
+      await Promise.all([
+        context.queryClient.ensureQueryData(taskQuery(repository, number.value)),
+        context.queryClient.ensureQueryData(projectTasksQuery(projectId(project))),
+      ]);
     } catch (error) {
       if (error instanceof OperatorHttpError && error.error === "BoardItemNotFoundError")
         throw notFound();

@@ -1,3 +1,5 @@
+import { ProjectId } from "@usine/core/project";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
@@ -7,16 +9,16 @@ import { ProjectNotFound } from "~/components/project-not-found";
 import { deskQuery } from "~/lib/desk/queries";
 import { overviewQuery, projectId, projectForRepository } from "~/lib/overview";
 import { TaskList } from "~/features/tasks/list.page";
+import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 
 const TasksRoute = () => {
   const { project: slug } = Route.useParams();
-  const { data } = useSuspenseQuery(overviewQuery());
+  const { data: project, error } = useSuspenseQuery(projectTasksQuery(ProjectId.make(slug)));
   const { repository } = Route.useSearch();
   const navigate = Route.useNavigate();
   const desk = useSuspenseQuery(deskQuery());
-  const project = data.projects.find((entry) => projectId(entry) === slug);
-  // A refetch after the loader ran can remove the project.
-  if (project === undefined) return <ProjectNotFound />;
+  if (error instanceof OperatorHttpError && error.error === "BoardProjectNotFoundError")
+    return <ProjectNotFound />;
   return (
     <TaskList
       project={project}
@@ -51,6 +53,7 @@ export const Route = createFileRoute("/projects/$project/tasks/")({
           replace: true,
         });
     }
+    await context.queryClient.ensureQueryData(projectTasksQuery(ProjectId.make(params.project)));
   },
   pendingComponent: RoutePending,
   errorComponent: RouteError,

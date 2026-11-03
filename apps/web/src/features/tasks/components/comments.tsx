@@ -31,7 +31,7 @@ type TaskCommentsProps = { readonly task: TaskView };
 
 export const TaskComments = ({ task }: TaskCommentsProps) => {
   const projectLinks = useProjectLinks();
-  const runs = new Map(task.runs.map((run) => [run.id, run]));
+  const runs = new Map((task.commentRuns ?? task.runs).map((run) => [run.id, run]));
   const items = new Map(task.items.map((item) => [item.itemKey, item]));
   return (
     <section aria-labelledby="task-comments" className="flex flex-col gap-2">

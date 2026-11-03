@@ -85,7 +85,7 @@ The menu button names the current issue or PR, whose labels a move changes. It s
 
 ### Card moves
 
-A moved card stays in its destination while the label write and GitHub refresh finish, showing saving, then saved and waiting for sync, with the old lane labels hidden. Other cards stay usable, and accepted moves persist across project switches. An unrelated label update doesn't undo a move; a newer lane or item state replaces it. While moves are pending, the board polls every second, so confirmation and approval prompts appear quickly. A failed write shows its error and reloads the board.
+A moved card stays in its destination while the label write and GitHub refresh finish, showing saving, then saved and waiting for sync, with the old lane labels hidden. Other cards stay usable, and accepted moves persist across project switches. An unrelated label update doesn't undo a move; a newer lane or item state replaces it. Change notices refresh the affected board and reveal confirmation and approval prompts. A failed write shows its error and reloads the board.
 
 ## Tasks list
 
@@ -380,6 +380,10 @@ After failed CI starts a fix run, the source run shows a neutral handoff with a 
 
 The run page lists **Prompt received by** disclosures in each attempt's details. Each disclosure shows the exact initial prompt sent to that child, including the rendered loop task and supplemental parent context. Older transcripts omit the disclosure.
 
-The overview and desk polling queries use run and attempt summaries. Run and task detail queries provide task prompts and result text. Board and stalled-item **Run again** actions fetch run detail on demand before submitting the saved task and agent.
+The overview and desk queries use run and attempt summaries. Run and task detail queries provide task prompts and result text. Board and stalled-item **Run again** actions fetch run detail on demand before submitting the saved task and agent.
 
 Board cards use compact run summaries and aggregate counts and usage. The task list retains each loop’s latest state and totals across full task history. Opening a card’s **Run history** submenu loads the complete run list from task detail.
+
+## Data updates
+
+One server-sent events connection invalidates scoped queries. Disconnected screens revalidate active reads every minute and show connection status in the refresh indicator. Navigation uses compact task identities; attention, boards, workers, and task run history have separate queries. Settled lanes load 50 cards per page, and task run histories load 25 runs per page. Long lists virtualize their rows. Route intent preloading fetches task and run pages on hover or focus. See [ADR 0034](../../docs/adr/0034-web-change-notices.md).

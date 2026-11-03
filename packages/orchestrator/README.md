@@ -416,3 +416,5 @@ A recorded head with no checks and GitHub mergeability `CONFLICTING` starts the 
 The overview includes every open run and the latest 50 closed runs across the instance. Board cards include a run count, attempt count, aggregate usage, each loop’s latest state, and summaries needed for current actions, activity, and CI handoffs. Task detail and statistics use complete run history. Needs attention includes older unresolved failures.
 
 Board polling uses current runs selected in SQL and aggregate history, including links from older run results. Complete prompts, results, and harvested comments are read for detail views.
+
+The operator HTTP contract includes identifier-only change notices, scoped navigation and attention representations, worker reads, and paginated board cards and task runs. See [ADR 0034](../../docs/adr/0034-web-change-notices.md).

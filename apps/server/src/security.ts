@@ -8,7 +8,14 @@ export const CrossSiteRequestError = Schema.Struct({
 });
 
 const METHODS = ["GET", "POST", "PUT", "DELETE"];
-const REQUEST_HEADERS = ["authorization", "content-type", "x-usine-csrf"];
+const REQUEST_HEADERS = [
+  "authorization",
+  "content-type",
+  "x-usine-csrf",
+  "x-usine-view",
+  "if-none-match",
+  "last-event-id",
+];
 const SECURITY_HEADERS = {
   "content-security-policy": [
     "default-src 'self'",
@@ -56,6 +63,7 @@ export const securityMiddleware = (options: {
               ? HttpServerResponse.setHeaders(secured, {
                   "access-control-allow-origin": origin,
                   "access-control-allow-credentials": "true",
+                  "access-control-expose-headers": "etag",
                 })
               : secured,
           );

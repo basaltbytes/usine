@@ -1,3 +1,5 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -24,7 +26,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { boardOverview } from "~/lib/projects/fixture";
 import { routeTree } from "~/route-tree.gen";
@@ -121,6 +123,13 @@ const mount = async (path: string, width: number) => {
     context: { queryClient: client },
     history: createMemoryHistory({ initialEntries: [path] }),
   });
+
+  const cachedOverview = client.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined) client.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    client.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    client.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   flushSync(() =>
     root.render(

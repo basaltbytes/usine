@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import { ConfigParser } from "@usine/config/parser";
 import { FactoryConfigError, InstancePath } from "@usine/config/file";
 import {
@@ -34,6 +35,7 @@ import {
 } from "effect";
 import {
   agentsWithNewBrains,
+  reloadAudiences,
   InstanceReload,
   instanceReload,
   RestartBlock,
@@ -201,6 +203,7 @@ export class CurrentInstance extends Context.Service<
     Layer.effect(
       CurrentInstance,
       Effect.gen(function* () {
+        const bus = yield* ChangeBus;
         const store = yield* ConfigurationStore;
         const parser = yield* ConfigParser;
         const observed = yield* Ref.make(
@@ -250,6 +253,12 @@ export class CurrentInstance extends Context.Service<
               return Effect.gen(function* () {
                 yield* Ref.set(observed, snapshot);
                 yield* SubscriptionRef.set(current, loaded).pipe(Effect.andThen(applyWorkers));
+                yield* bus.publish(
+                  reloadAudiences(changes).map((audience) => ({
+                    audience,
+                    target: { kind: "configuration", id: "instance" },
+                  })),
+                );
                 yield* Effect.logInfo(
                   "Stored configuration applied; new runs use the new configuration",
                   {

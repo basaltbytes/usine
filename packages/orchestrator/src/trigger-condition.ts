@@ -13,7 +13,7 @@ import {
 import { Effect, Layer, Option, Schema } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { repositoryFailureLogFields } from "./polling/cycle.ts";
-import { GitHubItemKey } from "./polling/repository-sync.ts";
+import { GitHubItemKey } from "@usine/core/item";
 
 const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
 

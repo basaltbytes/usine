@@ -49,7 +49,13 @@ export const configurationEditorResponses = async (
   await page.route("**/api/overview", (route) =>
     route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ _tag: "Ready", projects: [], loops: [], needsYou: [] }),
+      body: JSON.stringify({
+        _tag: "Ready",
+        projects: [],
+        loops: [],
+        needsYou: [],
+        dismissedNeeds: [],
+      }),
     }),
   );
   await page.route("**/api/upgrade", (route) =>
@@ -88,6 +94,9 @@ export const configurationEditorResponses = async (
     ],
   });
   await page.route("**/api/configuration", (route) =>
+    route.fulfill({ contentType: "application/json", body: configuration }),
+  );
+  await page.route("**/api/workers", (route) =>
     route.fulfill({ contentType: "application/json", body: configuration }),
   );
   await page.route("**/api/configuration/**", async (route) => {

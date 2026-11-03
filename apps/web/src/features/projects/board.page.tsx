@@ -21,7 +21,9 @@ import type {
   StalledItemView,
 } from "@usine/orchestrator/operator";
 import { projectId, projectName } from "~/lib/overview";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
+import { loadedLaneItemsQuery } from "~/features/projects/queries";
 import { ErrorAlert } from "~/components/error-alert";
 import { PageHeading } from "~/components/page";
 import { RepositoryMark } from "~/components/repository-mark";
@@ -70,9 +72,27 @@ export const ProjectBoard = ({
   const disabled = readOnly || !permitted;
   const [active, setActive] = useState<DragSource | null>(null);
   const [over, setOver] = useState<BoardLaneId | null>(null);
-  const { moves, moveItem, isPending, error } = useBoardMoves(project);
+  const id = projectId(project);
+  const history = useQueries({
+    queries: project.board.lanes.map((lane) => loadedLaneItemsQuery(id, lane.id)),
+    combine: (results) => results.map(({ data }) => data),
+  });
+  const loadedProject = useMemo(
+    () => ({
+      ...project,
+      board: {
+        ...project.board,
+        lanes: project.board.lanes.map((lane, index) => ({
+          ...lane,
+          items: lane.totalItems === undefined ? lane.items : (history[index] ?? lane.items),
+        })),
+      },
+    }),
+    [project, history],
+  );
+  const { moves, moveItem, isPending, error } = useBoardMoves(loadedProject);
   const uncarded = runsWithoutCard(project);
-  const lanes = moves.reduce(applyMove, orderLanes(project.board.lanes));
+  const lanes = moves.reduce(applyMove, orderLanes(loadedProject.board.lanes));
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: laneKeyboardCoordinates(lanes) }),
@@ -83,7 +103,10 @@ export const ProjectBoard = ({
       ? loops
       : loops.filter((loop) => loop.name.startsWith(`${project.id}/`)),
   );
-  const itemCount = lanes.reduce((total, lane) => total + lane.items.length, 0);
+  const itemCount = lanes.reduce(
+    (total, lane) => total + (lane.totalItems ?? lane.items.length),
+    0,
+  );
   const stallOf = (task: BoardTaskView): StalledItemView | null => taskStall(stalled, task);
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const pending = disabled || isPending;

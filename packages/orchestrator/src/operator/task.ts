@@ -1,3 +1,4 @@
+import { LoopName } from "@usine/core/loop";
 import { boardRepositories } from "@usine/config/project";
 import { LaneName } from "@usine/config/board";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -116,6 +117,14 @@ export class TaskView extends Schema.Class<TaskView>("@usine/orchestrator/TaskVi
   items: Schema.NonEmptyArray(TaskItemView),
   /** Every saved Run on the Task's Items, newest first. */
   runs: Schema.Array(RunView),
+  /** Total runs when history is read in pages. */
+  runsTotal: Schema.optionalKey(Schema.Int),
+  /** Run identities for comments outside the first history page. */
+  commentRuns: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ id: RunId, repository: RepositoryName, itemKey: ItemKey, loop: LoopName }),
+    ),
+  ),
   /** The harvested comments and reviews of those Runs, newest Run first, and newest first within a Run. */
   comments: Schema.Array(TaskCommentView),
 }) {}

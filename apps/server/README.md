@@ -245,6 +245,8 @@ Members receive access through configuration role bindings. Browser sessions use
 
 `GET /api/overview` returns compact board cards and every open run plus the latest 50 closed runs across the instance. Cards retain counts, aggregate usage, and summaries needed for their current state and actions. Task and run endpoints provide complete history and prompts.
 
+The web UI uses `GET /api/changes` for entity invalidation. The authenticated stream supports `Last-Event-ID`, bounded replay, and 15-second heartbeats. Reverse proxies must allow streaming responses without buffering. JSON reads support private ETags and conditional 304 responses. See [ADR 0034](../../docs/adr/0034-web-change-notices.md) for read projections and pagination.
+
 ## Event-loop delay
 
 `usine up` logs `Event-loop delay` once per minute, including `p99Millis`, `maxMillis`, and `intervalSeconds`. The values describe the preceding minute with a 10 ms sampling resolution. Use maximum delay to detect isolated stalls; p99 describes the slowest 1% of samples. The monitor stops when the server scope closes. Runtime reads use the SQLite read worker so a long standalone read permits transcript appends and HTTP health responses to continue.

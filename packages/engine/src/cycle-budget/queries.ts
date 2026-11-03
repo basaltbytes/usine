@@ -1,3 +1,4 @@
+import type { RecordChange } from "../store/changes.ts";
 import { CycleBudgetAsk, CycleBudgetAskId, LoopCycleCount } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
 import { EventId } from "@usine/core/event";
@@ -29,7 +30,7 @@ const decodeBudget = Schema.decodeUnknownEffect(Schema.Array(BudgetRow), {
 });
 
 /** Returns the admission and reservation queries that run inside a Run store transaction. */
-export const cycleQueries = (database: RunDatabaseClient) => {
+export const cycleQueries = (database: RunDatabaseClient, record?: RecordChange) => {
   // Admission and queue ordering use the same generation filter, so stale Events can't hide
   // eligible work after a reset.
   const currentEvent = eq(
@@ -94,6 +95,16 @@ export const cycleQueries = (database: RunDatabaseClient) => {
           .set({ askJson: Schema.encodeSync(CycleBudgetAsk)(ask) })
           .where(eq(itemCycleBudgets.itemKey, submission.itemKey))
           .execute();
+        if (record !== undefined) {
+          yield* record({
+            audience: { _tag: "Repository", repository: ask.repository },
+            target: { kind: "attention", id: "instance" },
+          });
+          yield* record({
+            audience: { _tag: "Repository", repository: ask.repository },
+            target: { kind: "item", id: ask.itemKey },
+          });
+        }
         yield* Effect.logInfo("Cycle budget ask updated for a newly blocked event", {
           itemKey: submission.itemKey,
           repository: submission.repository,
@@ -138,6 +149,16 @@ export const cycleQueries = (database: RunDatabaseClient) => {
       .set({ askJson: Schema.encodeSync(CycleBudgetAsk)(ask) })
       .where(eq(itemCycleBudgets.itemKey, submission.itemKey))
       .execute();
+    if (record !== undefined) {
+      yield* record({
+        audience: { _tag: "Repository", repository: ask.repository },
+        target: { kind: "attention", id: "instance" },
+      });
+      yield* record({
+        audience: { _tag: "Repository", repository: ask.repository },
+        target: { kind: "item", id: ask.itemKey },
+      });
+    }
     yield* Effect.logWarning("Item cycle budget exhausted; operator reset required", {
       itemKey: submission.itemKey,
       repository: submission.repository,

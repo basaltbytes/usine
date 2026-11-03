@@ -1,6 +1,6 @@
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
-import type { RunId } from "@usine/core/run";
+import type { Run } from "@usine/core/run";
 import { DateTime, Duration, Effect, Equal, Exit, Option, Ref, Result, type Scope } from "effect";
 import {
   MachineGrant,
@@ -43,7 +43,7 @@ export const machineReuseFor = (options: ReuseOptions) => {
   const take = Effect.fn("SshExecutor.reuseMachine")(
     (
       entry: SshWorkerEntry,
-      runId: RunId,
+      run: Pick<Run, "id" | "loop">,
       attemptId: AttemptId,
       brains: ReadonlyArray<BrainSpec>,
       driver: MachineDriver,
@@ -51,8 +51,9 @@ export const machineReuseFor = (options: ReuseOptions) => {
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const worker = entry.address.name;
+          const runId = run.id;
           yield* Effect.annotateCurrentSpan({ worker, runId, attemptId });
-          const found = yield* holds.takeIdle(worker, runId, attemptId);
+          const found = yield* holds.takeIdle(worker, run, attemptId);
           if (Option.isNone(found)) return Option.none<MachineGrant>();
           const candidate = found.value;
           const available = Option.all([candidate.id, candidate.machine]);
@@ -178,7 +179,7 @@ export const machineReuseFor = (options: ReuseOptions) => {
         ...entry,
         state: "idle",
         attemptId: Option.none(),
-        runId: Option.none(),
+        run: Option.none(),
       }));
       yield* Effect.logInfo("Machine is idle and available for reuse", {
         worker: current.worker,

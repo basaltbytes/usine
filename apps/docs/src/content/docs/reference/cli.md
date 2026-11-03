@@ -26,7 +26,7 @@ Missing or invalid App credentials start setup mode. Polling and schedules stay 
 
 A second process cannot run the same instance folder. Temporary paths are refused by default because runtime state needs persistent storage. On macOS, startup warns if system sleep can interrupt remote sessions. Logs use ISO 8601 UTC timestamps.
 
-Session usage and pool rate-limit projection updates log at Debug. Use `usine up --log-level debug` or `USINE_LOG_LEVEL=debug` to include these per-report diagnostics.
+Session usage and pool rate-limit projection updates, including pool reset scheduling decisions, log at Debug. Use `usine up --log-level debug` or `USINE_LOG_LEVEL=debug` to include these per-report diagnostics. Reaching a pool reset deadline logs at Info.
 
 ### Background start
 

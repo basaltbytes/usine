@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import { type Attempt, type AttemptId, pendingProviderRetry } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -158,6 +159,11 @@ export class RunDriver extends Context.Service<
   static readonly layer = Layer.effect(
     RunDriver,
     Effect.gen(function* () {
+      const bus = yield* ChangeBus;
+      const changedStop = (stop: UnconfirmedStop) =>
+        bus.publish([
+          { audience: { _tag: "Loop", loop: stop.loop }, target: { kind: "run", id: stop.runId } },
+        ]);
       const store = yield* RunStore;
       const executor = yield* StepExecutor;
       const admission = yield* AttemptAdmission;
@@ -655,9 +661,11 @@ export class RunDriver extends Context.Service<
 
       /** Records `stop` for `reconcile` to retry, keeping the first record of its Attempt. */
       const recordUnconfirmed = (stop: UnconfirmedStop) =>
-        Ref.update(unconfirmed, (stops) =>
-          stops.has(stop.attemptId) ? stops : new Map(stops).set(stop.attemptId, stop),
-        );
+        Ref.modify(unconfirmed, (stops) =>
+          stops.has(stop.attemptId)
+            ? ([false, stops] as const)
+            : ([true, new Map(stops).set(stop.attemptId, stop)] as const),
+        ).pipe(Effect.flatMap((added) => (added ? changedStop(stop) : Effect.void)));
 
       /**
        * Confirms through `StepExecutor.interrupt` that the parent task of the Attempt of `stop`,
@@ -676,6 +684,7 @@ export class RunDriver extends Context.Service<
         const stopped = yield* executor.interrupt(attemptId, stop.reason).pipe(Effect.result);
         if (Result.isSuccess(stopped)) {
           yield* Ref.update(unconfirmed, (stops) => without(stops, attemptId));
+          yield* changedStop(stop);
           yield* Effect.logDebug(
             "The parent task of the failed Attempt is confirmed stopped; the Run's slot is freed",
             fields,
@@ -704,6 +713,7 @@ export class RunDriver extends Context.Service<
         yield* recordUnconfirmed(stop);
         yield* checkouts.reconcile(stop.attemptId, stop.reason);
         yield* Ref.update(unconfirmed, (stops) => without(stops, stop.attemptId));
+        yield* changedStop(stop);
         yield* Effect.logInfo("Parent stop confirmed; runs on the item can start attempts again", {
           ...stop,
         });

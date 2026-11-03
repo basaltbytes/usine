@@ -55,6 +55,10 @@ const useRefreshRun = () => {
     Promise.all([
       queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey }),
       queryClient.invalidateQueries({ queryKey: deskQuery().queryKey }),
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          ["Task", "Runs", "Board", "Tasks"].includes(query.meta?.refreshLabel ?? ""),
+      }),
       queryClient.invalidateQueries({ queryKey: runDetailKey(runId) }),
     ]);
 };
@@ -78,8 +82,9 @@ export const useRunAction = () => {
     onSuccess: (_, { runId }) => {
       // The overview refetch can take seconds; until then Needs you would still offer the action.
       // The refetch cancels overview requests in flight, so an older response cannot restore them.
-      queryClient.setQueryData<FactoryOverview>(overviewQuery().queryKey, (overview) =>
-        overview === undefined ? overview : withoutRunNeeds(overview, runId),
+      queryClient.setQueriesData<FactoryOverview>(
+        { queryKey: overviewQuery().queryKey },
+        (overview) => (overview === undefined ? overview : withoutRunNeeds(overview, runId)),
       );
       return refresh(runId);
     },

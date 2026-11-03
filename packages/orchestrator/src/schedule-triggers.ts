@@ -1,3 +1,4 @@
+import { ChangeBus } from "@usine/core/changes";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import type { ConfigFileError } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -252,6 +253,7 @@ export class ScheduleTriggers extends Context.Service<
   static readonly layer = Layer.effect(
     ScheduleTriggers,
     Effect.gen(function* () {
+      const bus = yield* ChangeBus;
       const config = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const runs = yield* RunEngine;
@@ -513,7 +515,26 @@ export class ScheduleTriggers extends Context.Service<
           failures: [...agentFailures, ...cronFailures, ...tickFailures],
           nextTickAt: earliest(nexts),
         });
-        yield* Ref.set(latestCycle, Option.some(cycle));
+        const previous = yield* Ref.getAndSet(latestCycle, Option.some(cycle));
+        if (
+          Option.isNone(previous) ||
+          JSON.stringify(previous.value.failures) !== JSON.stringify(cycle.failures)
+        ) {
+          const affected = [
+            ...new Set(
+              [
+                ...cycle.failures,
+                ...Option.toArray(previous).flatMap(({ failures }) => failures),
+              ].map(({ loop }) => loop),
+            ),
+          ];
+          yield* bus.publish(
+            affected.map((loop) => ({
+              audience: { _tag: "Loop", loop },
+              target: { kind: "attention", id: "instance" },
+            })),
+          );
+        }
         return cycle;
       });
 

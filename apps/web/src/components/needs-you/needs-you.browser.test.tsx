@@ -1,3 +1,5 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -38,7 +40,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
@@ -164,6 +166,14 @@ beforeEach(async () => {
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   flushSync(() =>
     root.render(
@@ -218,7 +228,7 @@ it("holds the Run's approval in Needs attention while the drawer approves it, an
       timeout: 10_000,
     })
     .toBe("idle");
-  expect(await commands.lateOverviewRequests()).toBe(1);
+  expect(await commands.lateOverviewRequests()).toBe(2);
   await expect.element(held).not.toBeInTheDocument();
   await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
 });
@@ -234,7 +244,7 @@ it("shows no error on a Needs attention approval refused because the Run was app
   await held.getByRole("button", { name: "Approve", exact: true }).click();
   await commands.answerApproval(409, rejection);
   // The rejection triggers an overview refetch; the entry's buttons stay disabled until it returns.
-  await expect.poll(() => commands.lateOverviewRequests()).toBe(1);
+  await expect.poll(() => commands.lateOverviewRequests()).toBe(2);
   await expect.element(held.getByRole("button", { name: "Approving…" })).toBeDisabled();
   await expect.element(held.getByText("Cannot approve", { exact: false })).not.toBeInTheDocument();
   await expect.element(held, { timeout: 10_000 }).not.toBeInTheDocument();

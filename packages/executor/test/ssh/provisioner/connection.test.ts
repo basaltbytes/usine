@@ -8,7 +8,7 @@ import { CheckoutRequest, Executor, WorkerMachines } from "../../../src/executor
 import { remoteCommandsFor } from "../../../src/remote/commands.ts";
 import { fakeMachine, LOCAL_TEMPORARY_DIRECTORY, request, TEST_AGENT, WORKER } from "../support.ts";
 import { fakeProviders } from "./fake-providers.ts";
-import { boatAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
+import { MACHINE_RUN, boatAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
 
 const observing = (notices: Array<AttemptChannel.WorkerNotice>) => ({
   ...sink,
@@ -48,7 +48,9 @@ describe("Boat SSH connection recovery", () => {
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
         const machines = yield* WorkerMachines;
-        const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+        const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          TEST_AGENT.brain,
+        ]);
         const launch = yield* (yield* executor.prepare(request))
           .launch(observing(notices))
           .pipe(Effect.forkChild);
@@ -104,7 +106,9 @@ describe("Boat SSH connection recovery", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const machines = yield* WorkerMachines;
-          const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+          const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+            TEST_AGENT.brain,
+          ]);
           const launch = yield* (yield* executor.prepare(request))
             .launch(observing(notices))
             .pipe(Effect.forkChild);
@@ -159,7 +163,9 @@ describe("Boat SSH connection recovery", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const machines = yield* WorkerMachines;
-          const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+          const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+            TEST_AGENT.brain,
+          ]);
           const launch = yield* (yield* executor.prepare(request))
             .launch(observing(notices))
             .pipe(Effect.forkChild);
@@ -179,9 +185,12 @@ describe("Boat SSH connection recovery", () => {
           );
 
           machine.state.closedSshEndpoints.clear();
-          const next = yield* machines.create(WORKER, RUN, AttemptId.make(`${RUN}/execute/2`), [
-            TEST_AGENT.brain,
-          ]);
+          const next = yield* machines.create(
+            WORKER,
+            MACHINE_RUN,
+            AttemptId.make(`${RUN}/execute/2`),
+            [TEST_AGENT.brain],
+          );
           assert.notStrictEqual(next.id, grant.id);
           yield* machines.release(next.hold);
           yield* machines.release(grant.hold);
@@ -215,13 +224,17 @@ describe("Boat SSH connection recovery", () => {
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
         const machines = yield* WorkerMachines;
-        const first = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+        const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+          TEST_AGENT.brain,
+        ]);
         const firstLaunch = yield* (yield* executor.prepare(request))
           .launch(sink)
           .pipe(Effect.forkChild);
         yield* Deferred.await(firstWorking);
         providers.boat.sshEndpoint = "203.0.113.10:22002";
-        const other = yield* machines.create(WORKER, RUN, second.attemptId, [TEST_AGENT.brain]);
+        const other = yield* machines.create(WORKER, MACHINE_RUN, second.attemptId, [
+          TEST_AGENT.brain,
+        ]);
         const otherLaunch = yield* (yield* executor.prepare(second))
           .launch(sink)
           .pipe(Effect.forkChild);

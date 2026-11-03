@@ -1,3 +1,5 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
 import { AttemptTask } from "@usine/core/attempt";
 import { boardTaskRuns, AttemptView, RunView } from "@usine/orchestrator/operator";
 import { administratorPermissions } from "@usine/core/access";
@@ -13,7 +15,7 @@ import { ProjectId } from "@usine/core/project";
 import { RunId } from "@usine/core/run";
 import { runDetailQuery } from "~/lib/runs/queries";
 import { RepositoryName } from "@usine/core/repository";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { configurationFixture } from "~/lib/configuration/fixture";
@@ -79,6 +81,13 @@ beforeEach(async () => {
     context: { queryClient: client },
     history: createMemoryHistory({ initialEntries: ["/projects/product/tasks"] }),
   });
+
+  const cachedOverview = client.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined) client.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    client.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    client.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   flushSync(() =>
     root.render(

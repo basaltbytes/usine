@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -55,6 +56,7 @@ describe("Worker scheduler startup", () => {
   it.effect("releases a canceled manual preflight reservation so a queued attempt can start", () =>
     withWorkers(localWorkers([["local", 1]]), () =>
       Effect.gen(function* () {
+        const bus = yield* ChangeBus;
         const entered = yield* Deferred.make<void>();
         let initial = true;
         const config = Schema.decodeUnknownSync(UsineConfig)({
@@ -83,6 +85,16 @@ describe("Worker scheduler startup", () => {
             Layer.provide(testAppLayer),
           ),
         );
+        const startupJournal = yield* bus.open;
+        assert.strictEqual(startupJournal.history.length, 2);
+        assert(
+          startupJournal.history.every(
+            ({ changes }) =>
+              changes.length === 1 &&
+              changes[0]?.target.kind === "worker" &&
+              changes[0]?.target.id === worker,
+          ),
+        );
         const status = Context.get(context, WorkerStatus);
         const steps = Context.get(context, StepExecutor);
         const check = yield* status.runPreflight(worker).pipe(Effect.forkChild);
@@ -102,8 +114,14 @@ describe("Worker scheduler startup", () => {
           (yield* Effect.flip(status.runPreflight(worker))).reason,
           "attempt-running",
         );
+        const beforeRelease = (yield* bus.open).revision;
         yield* lease.release;
-      }).pipe(Effect.scoped),
+        const afterRelease = yield* bus.open;
+        assert.strictEqual(afterRelease.revision, beforeRelease + 1);
+        assert.deepStrictEqual(afterRelease.history.at(-1)?.changes, [
+          { audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } },
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(changeBusLayer)),
     ),
   );
 
