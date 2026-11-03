@@ -221,6 +221,20 @@ export const runs = snakeCase.table(
     nextStartJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
+    index("usine_runs_state_opened").on(
+      sql`json_extract(${table.stateJson}, '$._tag')`,
+      table.openedAt,
+      table.runId,
+    ),
+    index("usine_runs_closed").on(table.closedAt, table.runId),
+    index("usine_runs_closed_opened").on(
+      sql`${table.closedAt} is not null`,
+      table.openedAt,
+      table.runId,
+    ),
+    index("usine_runs_fix_run").on(
+      sql`cast(json_extract(${table.stateJson}, '$.fixRunId') as text)`,
+    ),
     check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`),
     check("usine_runs_agent_json_valid", sql`json_valid(${table.agentJson})`),
   ],
@@ -289,6 +303,7 @@ export const attempts = snakeCase.table(
       "usine_attempts_salvage_json_valid",
       sql`${table.salvageJson} is null or json_valid(${table.salvageJson})`,
     ),
+    index("usine_attempts_run_number").on(table.runId, table.attemptNumber),
     uniqueIndex("usine_attempt_number").on(table.runId, table.stepName, table.attemptNumber),
     uniqueIndex("usine_one_in_flight_attempt")
       .on(table.runId)

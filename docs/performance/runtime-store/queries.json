@@ -1,0 +1,3043 @@
+{
+  "baselineCommit": "92f21cee0373ea64dc5d98c81b4f017941bde399",
+  "environment": {
+    "node": "v22.23.4",
+    "cpus": 4,
+    "cpu": "AMD EPYC-Rome Processor",
+    "before": {
+      "sqlite": "3.53.4",
+      "transcriptSha256": "135f825eb4ebfa47502c620feb91524e43d9cf59aa7dc519de16f4048520a102",
+      "counts": {
+        "usine_runs": 1000,
+        "usine_attempts": 1000,
+        "usine_attempt_transcripts": 200000
+      }
+    },
+    "after": {
+      "sqlite": "3.53.4",
+      "transcriptSha256": "135f825eb4ebfa47502c620feb91524e43d9cf59aa7dc519de16f4048520a102",
+      "counts": {
+        "usine_runs": 1000,
+        "usine_attempts": 1000,
+        "usine_attempt_transcripts": 200000
+      }
+    }
+  },
+  "before": {
+    "bytes": 789692416,
+    "migrationMillis": 36.24126300000012,
+    "readerTimes": [
+      {
+        "reader": "overview/desk open runs",
+        "millis": 18.35299800000007
+      },
+      {
+        "reader": "overview recent history",
+        "millis": 19.69440499999996
+      },
+      {
+        "reader": "desk recently closed",
+        "millis": 10.026803999999856
+      },
+      {
+        "reader": "desk project closed",
+        "millis": 10.251416000000063
+      },
+      {
+        "reader": "statistics window",
+        "millis": 47.55703500000004
+      },
+      {
+        "reader": "statistics all history",
+        "millis": 67.44539499999996
+      },
+      {
+        "reader": "board history/current runs",
+        "millis": 61.122129000000086
+      },
+      {
+        "reader": "task history",
+        "millis": 3.033241999999973
+      },
+      {
+        "reader": "run detail",
+        "millis": 4.136793000000125
+      },
+      {
+        "reader": "run summary",
+        "millis": 1.6600349999998798
+      },
+      {
+        "reader": "run events",
+        "millis": 0.6751170000000002
+      },
+      {
+        "reader": "run transcript page",
+        "millis": 7.423318999999992
+      },
+      {
+        "reader": "run session state",
+        "millis": 3.5073620000000574
+      },
+      {
+        "reader": "run worker state",
+        "millis": 1.6364209999999275
+      },
+      {
+        "reader": "usage per attempt",
+        "millis": 2.147609999999986
+      },
+      {
+        "reader": "usage across all runs",
+        "millis": 1718.2095399999998
+      },
+      {
+        "reader": "usage pool limits",
+        "millis": 1.0700389999997242
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "millis": 2.487959000000046
+      },
+      {
+        "reader": "polling admitted event",
+        "millis": 0.8142390000002706
+      },
+      {
+        "reader": "polling blocking run",
+        "millis": 0.6063979999998992
+      },
+      {
+        "reader": "polling next queued",
+        "millis": 1.7813420000002225
+      },
+      {
+        "reader": "reconciliation runs to drive",
+        "millis": 0.9494620000000396
+      }
+    ],
+    "queries": [
+      {
+        "reader": "overview/desk open runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?) order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi"
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 11,
+        "medianMillis": 0.6222190000003138
+      },
+      {
+        "reader": "overview/desk open runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') not in (?, ?, ?, ?, ?) order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc limit ?",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          0
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 0,
+        "medianMillis": 0.13441199999988385
+      },
+      {
+        "reader": "overview/desk open runs",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-999",
+          "run-998",
+          "run-997",
+          "run-996",
+          "run-995",
+          "run-994",
+          "run-993",
+          "run-992",
+          "run-991",
+          "run-990",
+          "run-989"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 11,
+        "medianMillis": 0.08176400000002104
+      },
+      {
+        "reader": "overview recent history",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?) order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi"
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 11,
+        "medianMillis": 0.6983209999998508
+      },
+      {
+        "reader": "overview recent history",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') not in (?, ?, ?, ?, ?) order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc limit ?",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          50
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 50,
+        "medianMillis": 4.89353200000005
+      },
+      {
+        "reader": "overview recent history",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-999",
+          "run-998",
+          "run-997",
+          "run-996",
+          "run-995",
+          "run-994",
+          "run-993",
+          "run-992",
+          "run-991",
+          "run-990",
+          "run-989",
+          "run-988",
+          "run-987",
+          "run-986",
+          "run-985",
+          "run-984",
+          "run-983",
+          "run-982",
+          "run-981",
+          "run-980",
+          "run-979",
+          "run-978",
+          "run-977",
+          "run-976",
+          "run-975",
+          "run-974",
+          "run-973",
+          "run-972",
+          "run-971",
+          "run-970",
+          "run-969",
+          "run-968",
+          "run-967",
+          "run-966",
+          "run-965",
+          "run-964",
+          "run-963",
+          "run-962",
+          "run-961",
+          "run-960",
+          "run-959",
+          "run-958",
+          "run-957",
+          "run-956",
+          "run-955",
+          "run-954",
+          "run-953",
+          "run-952",
+          "run-951",
+          "run-950",
+          "run-949",
+          "run-948",
+          "run-947",
+          "run-946",
+          "run-945",
+          "run-944",
+          "run-943",
+          "run-942",
+          "run-941",
+          "run-940",
+          "run-939"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 61,
+        "medianMillis": 0.307205999999951
+      },
+      {
+        "reader": "desk recently closed",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') not in (?, ?, ?, ?, ?) order by \"usine_runs\".\"closed_at\" desc, \"usine_runs\".\"run_id\" desc limit ?",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          20
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 20,
+        "medianMillis": 4.016545999999835
+      },
+      {
+        "reader": "desk recently closed",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-988",
+          "run-987",
+          "run-986",
+          "run-985",
+          "run-984",
+          "run-983",
+          "run-982",
+          "run-981",
+          "run-980",
+          "run-979",
+          "run-978",
+          "run-977",
+          "run-976",
+          "run-975",
+          "run-974",
+          "run-973",
+          "run-972",
+          "run-971",
+          "run-970",
+          "run-969"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 20,
+        "medianMillis": 0.17264399999976376
+      },
+      {
+        "reader": "desk project closed",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where ((json_extract(\"usine_runs\".\"state_json\", '$._tag') not in (?, ?, ?, ?, ?)) and (lower(\"usine_runs\".\"repository\") in (select value from json_each(?)))) order by \"usine_runs\".\"closed_at\" desc, \"usine_runs\".\"run_id\" desc limit ?",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          "[\"basaltbytes/usine\"]",
+          20
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "LIST SUBQUERY 2",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "CREATE BLOOM FILTER",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 20,
+        "medianMillis": 5.331083999999919
+      },
+      {
+        "reader": "desk project closed",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-988",
+          "run-987",
+          "run-986",
+          "run-985",
+          "run-984",
+          "run-983",
+          "run-982",
+          "run-981",
+          "run-980",
+          "run-979",
+          "run-978",
+          "run-977",
+          "run-976",
+          "run-975",
+          "run-974",
+          "run-973",
+          "run-972",
+          "run-971",
+          "run-970",
+          "run-969"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 20,
+        "medianMillis": 0.1860990000000129
+      },
+      {
+        "reader": "statistics window",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where ((json_extract(\"usine_runs\".\"state_json\", '$._tag') not in (?, ?, ?, ?, ?)) and (\"usine_runs\".\"closed_at\" >= ?)) order by \"usine_runs\".\"closed_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          "2026-11-01T00:10:00.000Z"
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 390,
+        "medianMillis": 3.7789010000001326
+      },
+      {
+        "reader": "statistics window",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-788",
+          "run-787",
+          "run-786",
+          "run-785",
+          "run-784",
+          "run-783",
+          "run-782",
+          "run-781",
+          "run-780",
+          "run-779",
+          "run-778",
+          "run-777",
+          "run-776",
+          "run-775",
+          "run-774",
+          "run-773",
+          "run-772",
+          "run-771",
+          "run-770",
+          "run-769",
+          "run-768",
+          "run-767",
+          "run-766",
+          "run-765",
+          "run-764",
+          "run-763",
+          "run-762",
+          "run-761",
+          "run-760",
+          "run-759",
+          "run-758",
+          "run-757",
+          "run-756",
+          "run-755",
+          "run-754",
+          "run-753",
+          "run-752",
+          "run-751",
+          "run-750",
+          "run-749",
+          "run-748",
+          "run-747",
+          "run-746",
+          "run-745",
+          "run-744",
+          "run-743",
+          "run-742",
+          "run-741",
+          "run-740",
+          "run-739",
+          "run-738",
+          "run-737",
+          "run-736",
+          "run-735",
+          "run-734",
+          "run-733",
+          "run-732",
+          "run-731",
+          "run-730",
+          "run-729",
+          "run-728",
+          "run-727",
+          "run-726",
+          "run-725",
+          "run-724",
+          "run-723",
+          "run-722",
+          "run-721",
+          "run-720",
+          "run-719",
+          "run-718",
+          "run-717",
+          "run-716",
+          "run-715",
+          "run-714",
+          "run-713",
+          "run-712",
+          "run-711",
+          "run-710",
+          "run-709",
+          "run-708",
+          "run-707",
+          "run-706",
+          "run-705",
+          "run-704",
+          "run-703",
+          "run-702",
+          "run-701",
+          "run-700",
+          "run-699",
+          "run-698",
+          "run-697",
+          "run-696",
+          "run-695",
+          "run-694",
+          "run-693",
+          "run-692",
+          "run-691",
+          "run-690",
+          "run-689"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 100,
+        "medianMillis": 0.6464519999999538
+      },
+      {
+        "reader": "statistics window",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-688",
+          "run-687",
+          "run-686",
+          "run-685",
+          "run-684",
+          "run-683",
+          "run-682",
+          "run-681",
+          "run-680",
+          "run-679",
+          "run-678",
+          "run-677",
+          "run-676",
+          "run-675",
+          "run-674",
+          "run-673",
+          "run-672",
+          "run-671",
+          "run-670",
+          "run-669",
+          "run-668",
+          "run-667",
+          "run-666",
+          "run-665",
+          "run-664",
+          "run-663",
+          "run-662",
+          "run-661",
+          "run-660",
+          "run-659",
+          "run-658",
+          "run-657",
+          "run-656",
+          "run-655",
+          "run-654",
+          "run-653",
+          "run-652",
+          "run-651",
+          "run-650",
+          "run-649",
+          "run-648",
+          "run-647",
+          "run-646",
+          "run-645",
+          "run-644",
+          "run-643",
+          "run-642",
+          "run-641",
+          "run-640",
+          "run-639",
+          "run-638",
+          "run-637",
+          "run-636",
+          "run-635",
+          "run-634",
+          "run-633",
+          "run-632",
+          "run-631",
+          "run-630",
+          "run-629",
+          "run-628",
+          "run-627",
+          "run-626",
+          "run-625",
+          "run-624",
+          "run-623",
+          "run-622",
+          "run-621",
+          "run-620",
+          "run-619",
+          "run-618",
+          "run-617",
+          "run-616",
+          "run-615",
+          "run-614",
+          "run-613",
+          "run-612",
+          "run-611",
+          "run-610",
+          "run-609",
+          "run-608",
+          "run-607",
+          "run-606",
+          "run-605",
+          "run-604",
+          "run-603",
+          "run-602",
+          "run-601",
+          "run-600",
+          "run-599"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 90,
+        "medianMillis": 0.6477659999995922
+      },
+      {
+        "reader": "statistics all history",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') not in (?, ?, ?, ?, ?) order by \"usine_runs\".\"closed_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi"
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 989,
+        "medianMillis": 6.606656999999814
+      },
+      {
+        "reader": "statistics all history",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-188",
+          "run-187",
+          "run-186",
+          "run-185",
+          "run-184",
+          "run-183",
+          "run-182",
+          "run-181",
+          "run-180",
+          "run-179",
+          "run-178",
+          "run-177",
+          "run-176",
+          "run-175",
+          "run-174",
+          "run-173",
+          "run-172",
+          "run-171",
+          "run-170",
+          "run-169",
+          "run-168",
+          "run-167",
+          "run-166",
+          "run-165",
+          "run-164",
+          "run-163",
+          "run-162",
+          "run-161",
+          "run-160",
+          "run-159",
+          "run-158",
+          "run-157",
+          "run-156",
+          "run-155",
+          "run-154",
+          "run-153",
+          "run-152",
+          "run-151",
+          "run-150",
+          "run-149",
+          "run-148",
+          "run-147",
+          "run-146",
+          "run-145",
+          "run-144",
+          "run-143",
+          "run-142",
+          "run-141",
+          "run-140",
+          "run-139",
+          "run-138",
+          "run-137",
+          "run-136",
+          "run-135",
+          "run-134",
+          "run-133",
+          "run-132",
+          "run-131",
+          "run-130",
+          "run-129",
+          "run-128",
+          "run-127",
+          "run-126",
+          "run-125",
+          "run-124",
+          "run-123",
+          "run-122",
+          "run-121",
+          "run-120",
+          "run-119",
+          "run-118",
+          "run-117",
+          "run-116",
+          "run-115",
+          "run-114",
+          "run-113",
+          "run-112",
+          "run-111",
+          "run-110",
+          "run-109",
+          "run-108",
+          "run-107",
+          "run-106",
+          "run-105",
+          "run-104",
+          "run-103",
+          "run-102",
+          "run-101",
+          "run-100",
+          "run-99",
+          "run-98",
+          "run-97",
+          "run-96",
+          "run-95",
+          "run-94",
+          "run-93",
+          "run-92",
+          "run-91",
+          "run-90",
+          "run-89"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 100,
+        "medianMillis": 0.4656729999996969
+      },
+      {
+        "reader": "statistics all history",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-88",
+          "run-87",
+          "run-86",
+          "run-85",
+          "run-84",
+          "run-83",
+          "run-82",
+          "run-81",
+          "run-80",
+          "run-79",
+          "run-78",
+          "run-77",
+          "run-76",
+          "run-75",
+          "run-74",
+          "run-73",
+          "run-72",
+          "run-71",
+          "run-70",
+          "run-69",
+          "run-68",
+          "run-67",
+          "run-66",
+          "run-65",
+          "run-64",
+          "run-63",
+          "run-62",
+          "run-61",
+          "run-60",
+          "run-59",
+          "run-58",
+          "run-57",
+          "run-56",
+          "run-55",
+          "run-54",
+          "run-53",
+          "run-52",
+          "run-51",
+          "run-50",
+          "run-49",
+          "run-48",
+          "run-47",
+          "run-46",
+          "run-45",
+          "run-44",
+          "run-43",
+          "run-42",
+          "run-41",
+          "run-40",
+          "run-39",
+          "run-38",
+          "run-37",
+          "run-36",
+          "run-35",
+          "run-34",
+          "run-33",
+          "run-32",
+          "run-31",
+          "run-30",
+          "run-29",
+          "run-28",
+          "run-27",
+          "run-26",
+          "run-25",
+          "run-24",
+          "run-23",
+          "run-22",
+          "run-21",
+          "run-20",
+          "run-19",
+          "run-18",
+          "run-17",
+          "run-16",
+          "run-15",
+          "run-14",
+          "run-13",
+          "run-12",
+          "run-11",
+          "run-10",
+          "run-9",
+          "run-8",
+          "run-7",
+          "run-6",
+          "run-5",
+          "run-4",
+          "run-3",
+          "run-2",
+          "run-1",
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 89,
+        "medianMillis": 0.47780599999987317
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", count(distinct \"usine_runs\".\"run_id\"), count(\"usine_attempts\".\"attempt_id\"), coalesce(sum(case when \"usine_attempts\".\"ended_at\" is not null then max(0, round((julianday(\"usine_attempts\".\"ended_at\") - julianday(\"usine_attempts\".\"started_at\")) * 86400000)) else 0 end), 0), count(case when \"usine_attempts\".\"outcome_json\" is not null and \"usine_attempts\".\"ended_at\" is null then 1 end), json_group_array(\"usine_attempts\".\"started_at\") filter (where \"usine_attempts\".\"attempt_id\" is not null and \"usine_attempts\".\"outcome_json\" is null) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" left join \"usine_attempts\" on \"usine_attempts\".\"run_id\" = \"usine_runs\".\"run_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?)) group by \"usine_trigger_events\".\"item_key\"",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 1",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?) LEFT-JOIN",
+          "USE TEMP B-TREE FOR count(DISTINCT)"
+        ],
+        "rows": 100,
+        "medianMillis": 3.020367999999962
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"item_key\", \"loop_name\", \"state_json\", \"first_opened_at\", \"first_run_id\", \"opened_at\", \"run_id\", \"rank\" from (select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", first_value(\"usine_runs\".\"opened_at\") over (partition by \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"loop_name\" order by \"usine_runs\".\"opened_at\", \"usine_runs\".\"run_id\") as \"first_opened_at\", first_value(\"usine_runs\".\"run_id\") over (partition by \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"loop_name\" order by \"usine_runs\".\"opened_at\", \"usine_runs\".\"run_id\") as \"first_run_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"run_id\", row_number() over (partition by \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"loop_name\" order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc) as \"rank\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?))) \"board_loop_history\" where \"board_loop_history\".\"rank\" = ?",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]",
+          1
+        ],
+        "plan": [
+          "CO-ROUTINE board_loop_history",
+          "CO-ROUTINE (subquery-4)",
+          "CO-ROUTINE (subquery-5)",
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 1",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "USE TEMP B-TREE FOR LAST 3 TERMS OF ORDER BY",
+          "SCAN (subquery-5)",
+          "USE TEMP B-TREE FOR ORDER BY",
+          "SCAN (subquery-4)",
+          "SCAN board_loop_history"
+        ],
+        "rows": 100,
+        "medianMillis": 6.9250230000002375
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", json_group_array(json_object('id', \"usine_attempts\".\"attempt_id\", 'ended', json(case when \"usine_attempts\".\"outcome_json\" is null then 'false' else 'true' end))) filter (where \"usine_attempts\".\"attempt_id\" is not null) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" left join \"usine_attempts\" on \"usine_attempts\".\"run_id\" = \"usine_runs\".\"run_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?)) group by \"usine_runs\".\"run_id\", \"usine_trigger_events\".\"item_key\" order by \"usine_runs\".\"opened_at\" asc, \"usine_runs\".\"run_id\" asc",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 1",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?) LEFT-JOIN",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 1000,
+        "medianMillis": 4.491157000000385
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select distinct \"usine_trigger_events\".\"item_key\", (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" where ((\"usine_trigger_events\".\"item_key\" in (select value from json_each(?))) and (((select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) is not null)))",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 2",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "CORRELATED SCALAR SUBQUERY 3",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR DISTINCT"
+        ],
+        "rows": 0,
+        "medianMillis": 1.61549100000002
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where ((\"usine_runs\".\"run_id\" in (select \"run_id\" from (select \"usine_runs\".\"run_id\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", (select \"usine_attempts\".\"attempt_id\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" = \"usine_runs\".\"run_id\" order by \"usine_attempts\".\"attempt_number\" desc limit 1) as \"latest_attempt\", row_number() over (partition by \"usine_trigger_events\".\"item_key\" order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc) as \"rank\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?))) \"board_current_runs\" where ((\"board_current_runs\".\"rank\" = ?) or (json_extract(\"board_current_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?)) or (((json_extract(\"board_current_runs\".\"state_json\", '$._tag') = ?) and ((((\"board_current_runs\".\"resolved_failure_attempt_id\" is null)) or (\"board_current_runs\".\"resolved_failure_attempt_id\" <> \"board_current_runs\".\"latest_attempt\"))))) or (\"board_current_runs\".\"run_id\" in (select value from json_each(?)))))) or (json_extract(\"usine_runs\".\"state_json\", '$.fixRunId') in (select \"run_id\" from (select \"usine_runs\".\"run_id\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", (select \"usine_attempts\".\"attempt_id\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" = \"usine_runs\".\"run_id\" order by \"usine_attempts\".\"attempt_number\" desc limit 1) as \"latest_attempt\", row_number() over (partition by \"usine_trigger_events\".\"item_key\" order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc) as \"rank\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?))) \"board_current_runs\" where ((\"board_current_runs\".\"rank\" = ?) or (json_extract(\"board_current_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?)) or (((json_extract(\"board_current_runs\".\"state_json\", '$._tag') = ?) and ((((\"board_current_runs\".\"resolved_failure_attempt_id\" is null)) or (\"board_current_runs\".\"resolved_failure_attempt_id\" <> \"board_current_runs\".\"latest_attempt\"))))) or (\"board_current_runs\".\"run_id\" in (select value from json_each(?))))))) order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]",
+          1,
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          "Failed",
+          "[]",
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]",
+          1,
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          "Failed",
+          "[]"
+        ],
+        "plan": [
+          "SCAN usine_steps",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "LIST SUBQUERY 6",
+          "CO-ROUTINE board_current_runs",
+          "CO-ROUTINE (subquery-13)",
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 3",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY",
+          "SCAN (subquery-13)",
+          "CORRELATED SCALAR SUBQUERY 2",
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY",
+          "SCAN board_current_runs",
+          "LIST SUBQUERY 5",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "CREATE BLOOM FILTER",
+          "CREATE BLOOM FILTER",
+          "LIST SUBQUERY 11",
+          "CO-ROUTINE board_current_runs",
+          "CO-ROUTINE (subquery-14)",
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 8",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY",
+          "SCAN (subquery-14)",
+          "CORRELATED SCALAR SUBQUERY 7",
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY",
+          "SCAN board_current_runs",
+          "LIST SUBQUERY 10",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "CREATE BLOOM FILTER",
+          "CREATE BLOOM FILTER",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 101,
+        "medianMillis": 11.83294399999977
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-999",
+          "run-998",
+          "run-997",
+          "run-996",
+          "run-995",
+          "run-994",
+          "run-993",
+          "run-992",
+          "run-991",
+          "run-990",
+          "run-989",
+          "run-988",
+          "run-987",
+          "run-986",
+          "run-985",
+          "run-984",
+          "run-983",
+          "run-982",
+          "run-981",
+          "run-980",
+          "run-979",
+          "run-978",
+          "run-977",
+          "run-976",
+          "run-975",
+          "run-974",
+          "run-973",
+          "run-972",
+          "run-971",
+          "run-970",
+          "run-969",
+          "run-968",
+          "run-967",
+          "run-966",
+          "run-965",
+          "run-964",
+          "run-963",
+          "run-962",
+          "run-961",
+          "run-960",
+          "run-959",
+          "run-958",
+          "run-957",
+          "run-956",
+          "run-955",
+          "run-954",
+          "run-953",
+          "run-952",
+          "run-951",
+          "run-950",
+          "run-949",
+          "run-948",
+          "run-947",
+          "run-946",
+          "run-945",
+          "run-944",
+          "run-943",
+          "run-942",
+          "run-941",
+          "run-940",
+          "run-939",
+          "run-938",
+          "run-937",
+          "run-936",
+          "run-935",
+          "run-934",
+          "run-933",
+          "run-932",
+          "run-931",
+          "run-930",
+          "run-929",
+          "run-928",
+          "run-927",
+          "run-926",
+          "run-925",
+          "run-924",
+          "run-923",
+          "run-922",
+          "run-921",
+          "run-920",
+          "run-919",
+          "run-918",
+          "run-917",
+          "run-916",
+          "run-915",
+          "run-914",
+          "run-913",
+          "run-912",
+          "run-911",
+          "run-910",
+          "run-909",
+          "run-908",
+          "run-907",
+          "run-906",
+          "run-905",
+          "run-904",
+          "run-903",
+          "run-902",
+          "run-901",
+          "run-900"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 100,
+        "medianMillis": 0.5019130000000587
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-888"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 1,
+        "medianMillis": 0.03417399999989357
+      },
+      {
+        "reader": "task history",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_trigger_events\".\"item_key\" in (?)",
+        "params": [
+          "item-0"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 10,
+        "medianMillis": 0.09489799999983006
+      },
+      {
+        "reader": "task history",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-900",
+          "run-800",
+          "run-700",
+          "run-600",
+          "run-500",
+          "run-400",
+          "run-300",
+          "run-200",
+          "run-100",
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 10,
+        "medianMillis": 0.09408799999982875
+      },
+      {
+        "reader": "run detail",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_runs\".\"revision\", \"usine_runs\".\"task\", \"usine_runs\".\"agent_json\", \"usine_runs\".\"parent_model\", \"usine_steps\".\"step_name\", \"usine_steps\".\"result\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN"
+        ],
+        "rows": 1,
+        "medianMillis": 0.034904999999980646
+      },
+      {
+        "reader": "run detail",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"task\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"comments_json\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" = ? order by \"usine_attempts\".\"attempt_number\"",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 1,
+        "medianMillis": 0.033501999999771215
+      },
+      {
+        "reader": "run detail",
+        "sql": "select \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\", \"usine_trigger_events\".\"item_key\", \"usine_trigger_events\".\"loop_name\", \"usine_trigger_events\".\"step_name\", \"usine_trigger_events\".\"approval\", \"usine_trigger_events\".\"approval_reason\", \"usine_trigger_events\".\"permissions\", \"usine_trigger_events\".\"ci_policy_json\", \"usine_trigger_events\".\"ci_failure_head\", \"usine_trigger_events\".\"ci_on_green_json\", \"usine_trigger_events\".\"cycle_limit\", \"usine_trigger_events\".\"cycle_generation\", \"usine_trigger_events\".\"repository\", \"usine_trigger_events\".\"revision\", \"usine_trigger_events\".\"task\", \"usine_trigger_events\".\"agent_json\", \"usine_trigger_events\".\"parent_model\" from \"usine_runs\" inner join \"usine_events\" on \"usine_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_events\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.03741099999979269
+      },
+      {
+        "reader": "run summary",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" = ? limit ?",
+        "params": [
+          "run-0",
+          1
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 1,
+        "medianMillis": 0.123602000000119
+      },
+      {
+        "reader": "run summary",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ],
+        "rows": 1,
+        "medianMillis": 0.04246999999986656
+      },
+      {
+        "reader": "run events",
+        "sql": "select \"usine_runs\".\"run_id\", \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\" from \"usine_runs\" inner join \"usine_events\" on \"usine_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" in (?)",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.025848999999652733
+      },
+      {
+        "reader": "run transcript page",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"attempt_id\" = ? order by \"usine_attempt_transcripts\".\"sequence\" desc limit ?",
+        "params": [
+          "attempt-0",
+          50
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)"
+        ],
+        "rows": 50,
+        "medianMillis": 0.16980899999998655
+      },
+      {
+        "reader": "run session state",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select max(\"sequence\") from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and ((\n            json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') IN ('InterventionApplied', 'InterventionRejected')\n            OR (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent'\n              AND json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') IN ('SessionStarted', 'SessionIdle', 'SessionResumed', 'SessionFinished'))\n          ))) group by coalesce(json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.intervention.target.sessionId'), '@parent'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent', json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.inputSequence'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionStarted') order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 1",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ],
+        "rows": 2,
+        "medianMillis": 0.9421769999999015
+      },
+      {
+        "reader": "run worker state",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (\"usine_attempt_transcripts\".\"direction\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') IN ('WorkerUnresponsive', 'WorkerResponsive'))) order by \"usine_attempt_transcripts\".\"sequence\" desc limit ?",
+        "params": [
+          "attempt-0",
+          "outbound",
+          1
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)"
+        ],
+        "rows": 0,
+        "medianMillis": 0.7969560000001366
+      },
+      {
+        "reader": "usage per attempt",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select \"sequence\" from (select \"sequence\", max(json_extract(\"envelope\", '$.payload.event.totalTokens')) as \"tokens\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionTokensUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id')) \"highest\") order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "CO-ROUTINE highest",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "SCAN highest"
+        ],
+        "rows": 2,
+        "medianMillis": 0.8092589999996562
+      },
+      {
+        "reader": "usage across all runs",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select \"sequence\" from (select \"sequence\", max(json_extract(\"envelope\", '$.payload.event.totalTokens')) as \"tokens\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionTokensUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id')) \"highest\") order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-999"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "CO-ROUTINE highest",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "SCAN highest"
+        ],
+        "rows": 2,
+        "medianMillis": 0.9777850000000399
+      },
+      {
+        "reader": "usage pool limits",
+        "sql": "select json_extract(\"envelope\", '$.payload.event') from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select max(\"sequence\") from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"direction\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'PoolRateLimitsUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.pool'))",
+        "params": [
+          "outbound"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 1",
+          "SCAN usine_attempt_transcripts USING INDEX usine_attempt_transcript_pool_limits"
+        ],
+        "rows": 0,
+        "medianMillis": 0.06438100000013947
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "sql": "select \"run_id\" from \"usine_runs\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') = 'AwaitingCi'",
+        "params": [],
+        "plan": [
+          "SCAN usine_runs"
+        ],
+        "rows": 1,
+        "medianMillis": 0.18772200000012162
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_runs\".\"revision\", \"usine_runs\".\"task\", \"usine_runs\".\"agent_json\", \"usine_runs\".\"parent_model\", \"usine_steps\".\"step_name\", \"usine_steps\".\"result\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-989"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN"
+        ],
+        "rows": 1,
+        "medianMillis": 0.04185899999993126
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"task\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"comments_json\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" = ? order by \"usine_attempts\".\"attempt_number\"",
+        "params": [
+          "run-989"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempt_number (run_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 1,
+        "medianMillis": 0.04718800000000556
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "sql": "select \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\", \"usine_trigger_events\".\"item_key\", \"usine_trigger_events\".\"loop_name\", \"usine_trigger_events\".\"step_name\", \"usine_trigger_events\".\"approval\", \"usine_trigger_events\".\"approval_reason\", \"usine_trigger_events\".\"permissions\", \"usine_trigger_events\".\"ci_policy_json\", \"usine_trigger_events\".\"ci_failure_head\", \"usine_trigger_events\".\"ci_on_green_json\", \"usine_trigger_events\".\"cycle_limit\", \"usine_trigger_events\".\"cycle_generation\", \"usine_trigger_events\".\"repository\", \"usine_trigger_events\".\"revision\", \"usine_trigger_events\".\"task\", \"usine_trigger_events\".\"agent_json\", \"usine_trigger_events\".\"parent_model\" from \"usine_runs\" inner join \"usine_events\" on \"usine_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_events\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-989"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.03676900000027672
+      },
+      {
+        "reader": "polling admitted event",
+        "sql": "select \"usine_runs\".\"run_id\" from \"usine_events\" inner join \"usine_runs\" on \"usine_runs\".\"event_id\" = \"usine_events\".\"event_id\" where \"usine_events\".\"dedup_key\" = ?",
+        "params": [
+          "dedup-0"
+        ],
+        "plan": [
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_2 (dedup_key=?)",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.030366999999841937
+      },
+      {
+        "reader": "polling blocking run",
+        "sql": "select \"usine_runs\".\"run_id\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" where ((\"usine_trigger_events\".\"loop_name\" = ?) and (\"usine_trigger_events\".\"item_key\" = ?) and (json_extract(\"usine_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?))) order by \"usine_runs\".\"opened_at\" desc limit ?",
+        "params": [
+          "lifecycle-loop",
+          "item-0",
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          1
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item (loop_name=? AND item_key=?)",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 0,
+        "medianMillis": 0.1038260000000264
+      },
+      {
+        "reader": "polling next queued",
+        "sql": "select \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\", \"usine_trigger_events\".\"item_key\", \"usine_trigger_events\".\"loop_name\", \"usine_trigger_events\".\"step_name\", \"usine_trigger_events\".\"approval\", \"usine_trigger_events\".\"approval_reason\", \"usine_trigger_events\".\"permissions\", \"usine_trigger_events\".\"ci_policy_json\", \"usine_trigger_events\".\"ci_failure_head\", \"usine_trigger_events\".\"ci_on_green_json\", \"usine_trigger_events\".\"cycle_limit\", \"usine_trigger_events\".\"cycle_generation\", \"usine_trigger_events\".\"repository\", \"usine_trigger_events\".\"revision\", \"usine_trigger_events\".\"task\", \"usine_trigger_events\".\"agent_json\", \"usine_trigger_events\".\"parent_model\" from \"usine_runs\" inner join \"usine_events\" on \"usine_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_events\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.03416400000014619
+      },
+      {
+        "reader": "polling next queued",
+        "sql": "select \"observed_event_id\", \"suppressed_by_run_id\", \"suppressed_event_id\" from \"usine_loop_items\" where ((\"usine_loop_items\".\"loop_name\" = ?) and (\"usine_loop_items\".\"item_key\" = ?))",
+        "params": [
+          "lifecycle-loop",
+          "item-0"
+        ],
+        "plan": [
+          "SEARCH usine_loop_items USING INDEX sqlite_autoindex_usine_loop_items_1 (loop_name=? AND item_key=?)"
+        ],
+        "rows": 0,
+        "medianMillis": 0.018625000000156433
+      },
+      {
+        "reader": "polling next queued",
+        "sql": "select \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\", \"usine_trigger_events\".\"item_key\", \"usine_trigger_events\".\"loop_name\", \"usine_trigger_events\".\"step_name\", \"usine_trigger_events\".\"approval\", \"usine_trigger_events\".\"approval_reason\", \"usine_trigger_events\".\"permissions\", \"usine_trigger_events\".\"ci_policy_json\", \"usine_trigger_events\".\"ci_failure_head\", \"usine_trigger_events\".\"ci_on_green_json\", \"usine_trigger_events\".\"cycle_limit\", \"usine_trigger_events\".\"cycle_generation\", \"usine_trigger_events\".\"repository\", \"usine_trigger_events\".\"revision\", \"usine_trigger_events\".\"task\", \"usine_trigger_events\".\"agent_json\", \"usine_trigger_events\".\"parent_model\" from \"usine_events\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_events\".\"event_id\" left join \"usine_runs\" on \"usine_runs\".\"event_id\" = \"usine_events\".\"event_id\" left join \"usine_ignored_events\" on \"usine_ignored_events\".\"event_id\" = \"usine_events\".\"event_id\" where ((\"usine_trigger_events\".\"loop_name\" = ?) and (\"usine_trigger_events\".\"item_key\" = ?) and (\"usine_trigger_events\".\"cycle_generation\" = coalesce((\n    select \"usine_item_cycle_budgets\".\"generation\" from \"usine_item_cycle_budgets\"\n    where \"usine_item_cycle_budgets\".\"item_key\" = \"usine_trigger_events\".\"item_key\"\n  ), 0)) and ((\"usine_runs\".\"run_id\" is null)) and ((\"usine_ignored_events\".\"event_id\" is null))) order by \"usine_events\".\"received_at\" desc",
+        "params": [
+          "lifecycle-loop",
+          "item-0"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item (loop_name=? AND item_key=?)",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SEARCH usine_item_cycle_budgets USING INDEX sqlite_autoindex_usine_item_cycle_budgets_1 (item_key=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_ignored_events USING COVERING INDEX sqlite_autoindex_usine_ignored_events_1 (event_id=?) LEFT-JOIN",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 0,
+        "medianMillis": 0.048950999999760825
+      },
+      {
+        "reader": "reconciliation runs to drive",
+        "sql": "select \"run_id\" from \"usine_runs\" where ((json_extract(\"usine_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?)) and (json_extract(\"usine_runs\".\"state_json\", '$._tag') <> ?) and (json_extract(\"usine_runs\".\"state_json\", '$._tag') <> ?))",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          "Waiting",
+          "AwaitingCi"
+        ],
+        "plan": [
+          "SCAN usine_runs"
+        ],
+        "rows": 10,
+        "medianMillis": 0.3226049999998395
+      }
+    ]
+  },
+  "after": {
+    "bytes": 789872640,
+    "migrationMillis": 47.595136999999795,
+    "readerTimes": [
+      {
+        "reader": "overview/desk open runs",
+        "millis": 21.524157999999943
+      },
+      {
+        "reader": "overview recent history",
+        "millis": 11.899237999999968
+      },
+      {
+        "reader": "desk recently closed",
+        "millis": 5.025299000000132
+      },
+      {
+        "reader": "desk project closed",
+        "millis": 4.21806400000014
+      },
+      {
+        "reader": "statistics window",
+        "millis": 55.413967000000184
+      },
+      {
+        "reader": "statistics all history",
+        "millis": 113.61284299999988
+      },
+      {
+        "reader": "board history/current runs",
+        "millis": 84.159627
+      },
+      {
+        "reader": "task history",
+        "millis": 2.060175000000072
+      },
+      {
+        "reader": "run detail",
+        "millis": 4.066890999999941
+      },
+      {
+        "reader": "run summary",
+        "millis": 1.3899380000000292
+      },
+      {
+        "reader": "run events",
+        "millis": 0.6859460000000581
+      },
+      {
+        "reader": "run transcript page",
+        "millis": 23.54505999999992
+      },
+      {
+        "reader": "run session state",
+        "millis": 5.099287999999888
+      },
+      {
+        "reader": "run worker state",
+        "millis": 2.521250999999893
+      },
+      {
+        "reader": "usage per attempt",
+        "millis": 3.5204349999999067
+      },
+      {
+        "reader": "usage across all runs",
+        "millis": 2102.282649
+      },
+      {
+        "reader": "usage pool limits",
+        "millis": 0.9128339999997479
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "millis": 2.9803820000001906
+      },
+      {
+        "reader": "polling admitted event",
+        "millis": 0.524134000000231
+      },
+      {
+        "reader": "polling blocking run",
+        "millis": 0.9191949999999451
+      },
+      {
+        "reader": "polling next queued",
+        "millis": 2.7700769999996737
+      },
+      {
+        "reader": "reconciliation runs to drive",
+        "millis": 0.4313999999999396
+      }
+    ],
+    "queries": [
+      {
+        "reader": "overview/desk open runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?) order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX usine_runs_state_opened (<expr>=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 11,
+        "medianMillis": 0.1452129999997851
+      },
+      {
+        "reader": "overview/desk open runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"closed_at\" is not null = ? order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc limit ?",
+        "params": [
+          1,
+          0
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX usine_runs_closed_opened (<expr>=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 0,
+        "medianMillis": 0.16973800000005212
+      },
+      {
+        "reader": "overview/desk open runs",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-999",
+          "run-998",
+          "run-997",
+          "run-996",
+          "run-995",
+          "run-994",
+          "run-993",
+          "run-992",
+          "run-991",
+          "run-990",
+          "run-989"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 11,
+        "medianMillis": 0.10780299999987619
+      },
+      {
+        "reader": "overview recent history",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?) order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX usine_runs_state_opened (<expr>=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 11,
+        "medianMillis": 0.14050399999996444
+      },
+      {
+        "reader": "overview recent history",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"closed_at\" is not null = ? order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc limit ?",
+        "params": [
+          1,
+          50
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX usine_runs_closed_opened (<expr>=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 50,
+        "medianMillis": 0.437460000000101
+      },
+      {
+        "reader": "overview recent history",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-999",
+          "run-998",
+          "run-997",
+          "run-996",
+          "run-995",
+          "run-994",
+          "run-993",
+          "run-992",
+          "run-991",
+          "run-990",
+          "run-989",
+          "run-988",
+          "run-987",
+          "run-986",
+          "run-985",
+          "run-984",
+          "run-983",
+          "run-982",
+          "run-981",
+          "run-980",
+          "run-979",
+          "run-978",
+          "run-977",
+          "run-976",
+          "run-975",
+          "run-974",
+          "run-973",
+          "run-972",
+          "run-971",
+          "run-970",
+          "run-969",
+          "run-968",
+          "run-967",
+          "run-966",
+          "run-965",
+          "run-964",
+          "run-963",
+          "run-962",
+          "run-961",
+          "run-960",
+          "run-959",
+          "run-958",
+          "run-957",
+          "run-956",
+          "run-955",
+          "run-954",
+          "run-953",
+          "run-952",
+          "run-951",
+          "run-950",
+          "run-949",
+          "run-948",
+          "run-947",
+          "run-946",
+          "run-945",
+          "run-944",
+          "run-943",
+          "run-942",
+          "run-941",
+          "run-940",
+          "run-939"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 61,
+        "medianMillis": 0.31200600000011036
+      },
+      {
+        "reader": "desk recently closed",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where (\"usine_runs\".\"closed_at\" is not null) order by \"usine_runs\".\"closed_at\" desc, \"usine_runs\".\"run_id\" desc limit ?",
+        "params": [
+          20
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX usine_runs_closed (closed_at>?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 20,
+        "medianMillis": 0.28289100000029066
+      },
+      {
+        "reader": "desk recently closed",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-988",
+          "run-987",
+          "run-986",
+          "run-985",
+          "run-984",
+          "run-983",
+          "run-982",
+          "run-981",
+          "run-980",
+          "run-979",
+          "run-978",
+          "run-977",
+          "run-976",
+          "run-975",
+          "run-974",
+          "run-973",
+          "run-972",
+          "run-971",
+          "run-970",
+          "run-969"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 20,
+        "medianMillis": 0.1538980000000265
+      },
+      {
+        "reader": "desk project closed",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where (((\"usine_runs\".\"closed_at\" is not null)) and (lower(\"usine_runs\".\"repository\") in (select value from json_each(?)))) order by \"usine_runs\".\"closed_at\" desc, \"usine_runs\".\"run_id\" desc limit ?",
+        "params": [
+          "[\"basaltbytes/usine\"]",
+          20
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX usine_runs_closed (closed_at>?)",
+          "LIST SUBQUERY 2",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "CREATE BLOOM FILTER",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 20,
+        "medianMillis": 0.3143889999996645
+      },
+      {
+        "reader": "desk project closed",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-988",
+          "run-987",
+          "run-986",
+          "run-985",
+          "run-984",
+          "run-983",
+          "run-982",
+          "run-981",
+          "run-980",
+          "run-979",
+          "run-978",
+          "run-977",
+          "run-976",
+          "run-975",
+          "run-974",
+          "run-973",
+          "run-972",
+          "run-971",
+          "run-970",
+          "run-969"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 20,
+        "medianMillis": 0.1057980000000498
+      },
+      {
+        "reader": "statistics window",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where (((\"usine_runs\".\"closed_at\" is not null)) and (\"usine_runs\".\"closed_at\" >= ?)) order by \"usine_runs\".\"closed_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "2026-11-01T00:10:00.000Z"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX usine_runs_closed (closed_at>?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 390,
+        "medianMillis": 1.89606700000013
+      },
+      {
+        "reader": "statistics window",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-788",
+          "run-787",
+          "run-786",
+          "run-785",
+          "run-784",
+          "run-783",
+          "run-782",
+          "run-781",
+          "run-780",
+          "run-779",
+          "run-778",
+          "run-777",
+          "run-776",
+          "run-775",
+          "run-774",
+          "run-773",
+          "run-772",
+          "run-771",
+          "run-770",
+          "run-769",
+          "run-768",
+          "run-767",
+          "run-766",
+          "run-765",
+          "run-764",
+          "run-763",
+          "run-762",
+          "run-761",
+          "run-760",
+          "run-759",
+          "run-758",
+          "run-757",
+          "run-756",
+          "run-755",
+          "run-754",
+          "run-753",
+          "run-752",
+          "run-751",
+          "run-750",
+          "run-749",
+          "run-748",
+          "run-747",
+          "run-746",
+          "run-745",
+          "run-744",
+          "run-743",
+          "run-742",
+          "run-741",
+          "run-740",
+          "run-739",
+          "run-738",
+          "run-737",
+          "run-736",
+          "run-735",
+          "run-734",
+          "run-733",
+          "run-732",
+          "run-731",
+          "run-730",
+          "run-729",
+          "run-728",
+          "run-727",
+          "run-726",
+          "run-725",
+          "run-724",
+          "run-723",
+          "run-722",
+          "run-721",
+          "run-720",
+          "run-719",
+          "run-718",
+          "run-717",
+          "run-716",
+          "run-715",
+          "run-714",
+          "run-713",
+          "run-712",
+          "run-711",
+          "run-710",
+          "run-709",
+          "run-708",
+          "run-707",
+          "run-706",
+          "run-705",
+          "run-704",
+          "run-703",
+          "run-702",
+          "run-701",
+          "run-700",
+          "run-699",
+          "run-698",
+          "run-697",
+          "run-696",
+          "run-695",
+          "run-694",
+          "run-693",
+          "run-692",
+          "run-691",
+          "run-690",
+          "run-689"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 100,
+        "medianMillis": 0.33122999999977765
+      },
+      {
+        "reader": "statistics window",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-688",
+          "run-687",
+          "run-686",
+          "run-685",
+          "run-684",
+          "run-683",
+          "run-682",
+          "run-681",
+          "run-680",
+          "run-679",
+          "run-678",
+          "run-677",
+          "run-676",
+          "run-675",
+          "run-674",
+          "run-673",
+          "run-672",
+          "run-671",
+          "run-670",
+          "run-669",
+          "run-668",
+          "run-667",
+          "run-666",
+          "run-665",
+          "run-664",
+          "run-663",
+          "run-662",
+          "run-661",
+          "run-660",
+          "run-659",
+          "run-658",
+          "run-657",
+          "run-656",
+          "run-655",
+          "run-654",
+          "run-653",
+          "run-652",
+          "run-651",
+          "run-650",
+          "run-649",
+          "run-648",
+          "run-647",
+          "run-646",
+          "run-645",
+          "run-644",
+          "run-643",
+          "run-642",
+          "run-641",
+          "run-640",
+          "run-639",
+          "run-638",
+          "run-637",
+          "run-636",
+          "run-635",
+          "run-634",
+          "run-633",
+          "run-632",
+          "run-631",
+          "run-630",
+          "run-629",
+          "run-628",
+          "run-627",
+          "run-626",
+          "run-625",
+          "run-624",
+          "run-623",
+          "run-622",
+          "run-621",
+          "run-620",
+          "run-619",
+          "run-618",
+          "run-617",
+          "run-616",
+          "run-615",
+          "run-614",
+          "run-613",
+          "run-612",
+          "run-611",
+          "run-610",
+          "run-609",
+          "run-608",
+          "run-607",
+          "run-606",
+          "run-605",
+          "run-604",
+          "run-603",
+          "run-602",
+          "run-601",
+          "run-600",
+          "run-599"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 90,
+        "medianMillis": 0.33095000000002983
+      },
+      {
+        "reader": "statistics all history",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where (\"usine_runs\".\"closed_at\" is not null) order by \"usine_runs\".\"closed_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [],
+        "plan": [
+          "SEARCH usine_runs USING INDEX usine_runs_closed (closed_at>?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 989,
+        "medianMillis": 11.960633000000144
+      },
+      {
+        "reader": "statistics all history",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-188",
+          "run-187",
+          "run-186",
+          "run-185",
+          "run-184",
+          "run-183",
+          "run-182",
+          "run-181",
+          "run-180",
+          "run-179",
+          "run-178",
+          "run-177",
+          "run-176",
+          "run-175",
+          "run-174",
+          "run-173",
+          "run-172",
+          "run-171",
+          "run-170",
+          "run-169",
+          "run-168",
+          "run-167",
+          "run-166",
+          "run-165",
+          "run-164",
+          "run-163",
+          "run-162",
+          "run-161",
+          "run-160",
+          "run-159",
+          "run-158",
+          "run-157",
+          "run-156",
+          "run-155",
+          "run-154",
+          "run-153",
+          "run-152",
+          "run-151",
+          "run-150",
+          "run-149",
+          "run-148",
+          "run-147",
+          "run-146",
+          "run-145",
+          "run-144",
+          "run-143",
+          "run-142",
+          "run-141",
+          "run-140",
+          "run-139",
+          "run-138",
+          "run-137",
+          "run-136",
+          "run-135",
+          "run-134",
+          "run-133",
+          "run-132",
+          "run-131",
+          "run-130",
+          "run-129",
+          "run-128",
+          "run-127",
+          "run-126",
+          "run-125",
+          "run-124",
+          "run-123",
+          "run-122",
+          "run-121",
+          "run-120",
+          "run-119",
+          "run-118",
+          "run-117",
+          "run-116",
+          "run-115",
+          "run-114",
+          "run-113",
+          "run-112",
+          "run-111",
+          "run-110",
+          "run-109",
+          "run-108",
+          "run-107",
+          "run-106",
+          "run-105",
+          "run-104",
+          "run-103",
+          "run-102",
+          "run-101",
+          "run-100",
+          "run-99",
+          "run-98",
+          "run-97",
+          "run-96",
+          "run-95",
+          "run-94",
+          "run-93",
+          "run-92",
+          "run-91",
+          "run-90",
+          "run-89"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 100,
+        "medianMillis": 0.644289000000299
+      },
+      {
+        "reader": "statistics all history",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-88",
+          "run-87",
+          "run-86",
+          "run-85",
+          "run-84",
+          "run-83",
+          "run-82",
+          "run-81",
+          "run-80",
+          "run-79",
+          "run-78",
+          "run-77",
+          "run-76",
+          "run-75",
+          "run-74",
+          "run-73",
+          "run-72",
+          "run-71",
+          "run-70",
+          "run-69",
+          "run-68",
+          "run-67",
+          "run-66",
+          "run-65",
+          "run-64",
+          "run-63",
+          "run-62",
+          "run-61",
+          "run-60",
+          "run-59",
+          "run-58",
+          "run-57",
+          "run-56",
+          "run-55",
+          "run-54",
+          "run-53",
+          "run-52",
+          "run-51",
+          "run-50",
+          "run-49",
+          "run-48",
+          "run-47",
+          "run-46",
+          "run-45",
+          "run-44",
+          "run-43",
+          "run-42",
+          "run-41",
+          "run-40",
+          "run-39",
+          "run-38",
+          "run-37",
+          "run-36",
+          "run-35",
+          "run-34",
+          "run-33",
+          "run-32",
+          "run-31",
+          "run-30",
+          "run-29",
+          "run-28",
+          "run-27",
+          "run-26",
+          "run-25",
+          "run-24",
+          "run-23",
+          "run-22",
+          "run-21",
+          "run-20",
+          "run-19",
+          "run-18",
+          "run-17",
+          "run-16",
+          "run-15",
+          "run-14",
+          "run-13",
+          "run-12",
+          "run-11",
+          "run-10",
+          "run-9",
+          "run-8",
+          "run-7",
+          "run-6",
+          "run-5",
+          "run-4",
+          "run-3",
+          "run-2",
+          "run-1",
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 89,
+        "medianMillis": 0.6054559999997764
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", count(distinct \"usine_runs\".\"run_id\"), count(\"usine_attempts\".\"attempt_id\"), coalesce(sum(case when \"usine_attempts\".\"ended_at\" is not null then max(0, round((julianday(\"usine_attempts\".\"ended_at\") - julianday(\"usine_attempts\".\"started_at\")) * 86400000)) else 0 end), 0), count(case when \"usine_attempts\".\"outcome_json\" is not null and \"usine_attempts\".\"ended_at\" is null then 1 end), json_group_array(\"usine_attempts\".\"started_at\") filter (where \"usine_attempts\".\"attempt_id\" is not null and \"usine_attempts\".\"outcome_json\" is null) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" left join \"usine_attempts\" on \"usine_attempts\".\"run_id\" = \"usine_runs\".\"run_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?)) group by \"usine_trigger_events\".\"item_key\"",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 1",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?) LEFT-JOIN",
+          "USE TEMP B-TREE FOR count(DISTINCT)"
+        ],
+        "rows": 100,
+        "medianMillis": 3.8161300000001575
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"item_key\", \"loop_name\", \"state_json\", \"first_opened_at\", \"first_run_id\", \"opened_at\", \"run_id\", \"rank\" from (select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", first_value(\"usine_runs\".\"opened_at\") over (partition by \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"loop_name\" order by \"usine_runs\".\"opened_at\", \"usine_runs\".\"run_id\") as \"first_opened_at\", first_value(\"usine_runs\".\"run_id\") over (partition by \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"loop_name\" order by \"usine_runs\".\"opened_at\", \"usine_runs\".\"run_id\") as \"first_run_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"run_id\", row_number() over (partition by \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"loop_name\" order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc) as \"rank\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?))) \"board_loop_history\" where \"board_loop_history\".\"rank\" = ?",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]",
+          1
+        ],
+        "plan": [
+          "CO-ROUTINE board_loop_history",
+          "CO-ROUTINE (subquery-4)",
+          "CO-ROUTINE (subquery-5)",
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 1",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "USE TEMP B-TREE FOR LAST 3 TERMS OF ORDER BY",
+          "SCAN (subquery-5)",
+          "USE TEMP B-TREE FOR ORDER BY",
+          "SCAN (subquery-4)",
+          "SCAN board_loop_history"
+        ],
+        "rows": 100,
+        "medianMillis": 5.399500999999873
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", json_group_array(json_object('id', \"usine_attempts\".\"attempt_id\", 'ended', json(case when \"usine_attempts\".\"outcome_json\" is null then 'false' else 'true' end))) filter (where \"usine_attempts\".\"attempt_id\" is not null) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" left join \"usine_attempts\" on \"usine_attempts\".\"run_id\" = \"usine_runs\".\"run_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?)) group by \"usine_runs\".\"run_id\", \"usine_trigger_events\".\"item_key\" order by \"usine_runs\".\"opened_at\" asc, \"usine_runs\".\"run_id\" asc",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 1",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?) LEFT-JOIN",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 1000,
+        "medianMillis": 3.3349370000000818
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select distinct \"usine_trigger_events\".\"item_key\", (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" where ((\"usine_trigger_events\".\"item_key\" in (select value from json_each(?))) and (((select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) is not null)))",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 2",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "CORRELATED SCALAR SUBQUERY 3",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR DISTINCT"
+        ],
+        "rows": 0,
+        "medianMillis": 1.3280819999999949
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" in (select \"run_id\" from (select \"usine_runs\".\"run_id\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", (select \"usine_attempts\".\"attempt_id\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" = \"usine_runs\".\"run_id\" order by \"usine_attempts\".\"attempt_number\" desc limit 1) as \"latest_attempt\", row_number() over (partition by \"usine_trigger_events\".\"item_key\" order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc) as \"rank\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?))) \"board_current_runs\" where ((\"board_current_runs\".\"rank\" = ?) or (json_extract(\"board_current_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?)) or (((json_extract(\"board_current_runs\".\"state_json\", '$._tag') = ?) and ((((\"board_current_runs\".\"resolved_failure_attempt_id\" is null)) or (\"board_current_runs\".\"resolved_failure_attempt_id\" <> \"board_current_runs\".\"latest_attempt\"))))) or (\"board_current_runs\".\"run_id\" in (select value from json_each(?)))) union all select \"run_id\" from \"usine_runs\" where cast(json_extract(\"usine_runs\".\"state_json\", '$.fixRunId') as text) in (select \"run_id\" from (select \"usine_runs\".\"run_id\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", (select \"usine_attempts\".\"attempt_id\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" = \"usine_runs\".\"run_id\" order by \"usine_attempts\".\"attempt_number\" desc limit 1) as \"latest_attempt\", row_number() over (partition by \"usine_trigger_events\".\"item_key\" order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc) as \"rank\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_trigger_events\".\"item_key\" in (select value from json_each(?))) \"board_current_runs\" where ((\"board_current_runs\".\"rank\" = ?) or (json_extract(\"board_current_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?)) or (((json_extract(\"board_current_runs\".\"state_json\", '$._tag') = ?) and ((((\"board_current_runs\".\"resolved_failure_attempt_id\" is null)) or (\"board_current_runs\".\"resolved_failure_attempt_id\" <> \"board_current_runs\".\"latest_attempt\"))))) or (\"board_current_runs\".\"run_id\" in (select value from json_each(?)))))) order by \"usine_runs\".\"opened_at\" desc, \"usine_runs\".\"run_id\" desc",
+        "params": [
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]",
+          1,
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          "Failed",
+          "[]",
+          "[\"item-0\",\"item-1\",\"item-2\",\"item-3\",\"item-4\",\"item-5\",\"item-6\",\"item-7\",\"item-8\",\"item-9\",\"item-10\",\"item-11\",\"item-12\",\"item-13\",\"item-14\",\"item-15\",\"item-16\",\"item-17\",\"item-18\",\"item-19\",\"item-20\",\"item-21\",\"item-22\",\"item-23\",\"item-24\",\"item-25\",\"item-26\",\"item-27\",\"item-28\",\"item-29\",\"item-30\",\"item-31\",\"item-32\",\"item-33\",\"item-34\",\"item-35\",\"item-36\",\"item-37\",\"item-38\",\"item-39\",\"item-40\",\"item-41\",\"item-42\",\"item-43\",\"item-44\",\"item-45\",\"item-46\",\"item-47\",\"item-48\",\"item-49\",\"item-50\",\"item-51\",\"item-52\",\"item-53\",\"item-54\",\"item-55\",\"item-56\",\"item-57\",\"item-58\",\"item-59\",\"item-60\",\"item-61\",\"item-62\",\"item-63\",\"item-64\",\"item-65\",\"item-66\",\"item-67\",\"item-68\",\"item-69\",\"item-70\",\"item-71\",\"item-72\",\"item-73\",\"item-74\",\"item-75\",\"item-76\",\"item-77\",\"item-78\",\"item-79\",\"item-80\",\"item-81\",\"item-82\",\"item-83\",\"item-84\",\"item-85\",\"item-86\",\"item-87\",\"item-88\",\"item-89\",\"item-90\",\"item-91\",\"item-92\",\"item-93\",\"item-94\",\"item-95\",\"item-96\",\"item-97\",\"item-98\",\"item-99\"]",
+          1,
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          "Failed",
+          "[]"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "LIST SUBQUERY 12",
+          "COMPOUND QUERY",
+          "LEFT-MOST SUBQUERY",
+          "CO-ROUTINE board_current_runs",
+          "CO-ROUTINE (subquery-14)",
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 3",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY",
+          "SCAN (subquery-14)",
+          "CORRELATED SCALAR SUBQUERY 2",
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)",
+          "SCAN board_current_runs",
+          "LIST SUBQUERY 5",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "CREATE BLOOM FILTER",
+          "UNION ALL",
+          "SEARCH usine_runs USING INDEX usine_runs_fix_run (<expr>=?)",
+          "LIST SUBQUERY 11",
+          "CO-ROUTINE board_current_runs",
+          "CO-ROUTINE (subquery-15)",
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "LIST SUBQUERY 8",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY",
+          "SCAN (subquery-15)",
+          "CORRELATED SCALAR SUBQUERY 7",
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)",
+          "SCAN board_current_runs",
+          "LIST SUBQUERY 10",
+          "SCAN json_each VIRTUAL TABLE INDEX 1:",
+          "CREATE BLOOM FILTER",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 101,
+        "medianMillis": 9.010647999999946
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-999",
+          "run-998",
+          "run-997",
+          "run-996",
+          "run-995",
+          "run-994",
+          "run-993",
+          "run-992",
+          "run-991",
+          "run-990",
+          "run-989",
+          "run-988",
+          "run-987",
+          "run-986",
+          "run-985",
+          "run-984",
+          "run-983",
+          "run-982",
+          "run-981",
+          "run-980",
+          "run-979",
+          "run-978",
+          "run-977",
+          "run-976",
+          "run-975",
+          "run-974",
+          "run-973",
+          "run-972",
+          "run-971",
+          "run-970",
+          "run-969",
+          "run-968",
+          "run-967",
+          "run-966",
+          "run-965",
+          "run-964",
+          "run-963",
+          "run-962",
+          "run-961",
+          "run-960",
+          "run-959",
+          "run-958",
+          "run-957",
+          "run-956",
+          "run-955",
+          "run-954",
+          "run-953",
+          "run-952",
+          "run-951",
+          "run-950",
+          "run-949",
+          "run-948",
+          "run-947",
+          "run-946",
+          "run-945",
+          "run-944",
+          "run-943",
+          "run-942",
+          "run-941",
+          "run-940",
+          "run-939",
+          "run-938",
+          "run-937",
+          "run-936",
+          "run-935",
+          "run-934",
+          "run-933",
+          "run-932",
+          "run-931",
+          "run-930",
+          "run-929",
+          "run-928",
+          "run-927",
+          "run-926",
+          "run-925",
+          "run-924",
+          "run-923",
+          "run-922",
+          "run-921",
+          "run-920",
+          "run-919",
+          "run-918",
+          "run-917",
+          "run-916",
+          "run-915",
+          "run-914",
+          "run-913",
+          "run-912",
+          "run-911",
+          "run-910",
+          "run-909",
+          "run-908",
+          "run-907",
+          "run-906",
+          "run-905",
+          "run-904",
+          "run-903",
+          "run-902",
+          "run-901",
+          "run-900"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 100,
+        "medianMillis": 0.3213640000003579
+      },
+      {
+        "reader": "board history/current runs",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-888"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.024736000000302738
+      },
+      {
+        "reader": "task history",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_trigger_events\".\"item_key\" in (?)",
+        "params": [
+          "item-0"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item_history (item_key=?)",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 10,
+        "medianMillis": 0.11209999999982756
+      },
+      {
+        "reader": "task history",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-900",
+          "run-800",
+          "run-700",
+          "run-600",
+          "run-500",
+          "run-400",
+          "run-300",
+          "run-200",
+          "run-100",
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 10,
+        "medianMillis": 0.06825900000012552
+      },
+      {
+        "reader": "run detail",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_runs\".\"revision\", \"usine_runs\".\"task\", \"usine_runs\".\"agent_json\", \"usine_runs\".\"parent_model\", \"usine_steps\".\"step_name\", \"usine_steps\".\"result\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN"
+        ],
+        "rows": 1,
+        "medianMillis": 0.03582699999969918
+      },
+      {
+        "reader": "run detail",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"task\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"comments_json\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" = ? order by \"usine_attempts\".\"attempt_number\"",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.02784299999984796
+      },
+      {
+        "reader": "run detail",
+        "sql": "select \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\", \"usine_trigger_events\".\"item_key\", \"usine_trigger_events\".\"loop_name\", \"usine_trigger_events\".\"step_name\", \"usine_trigger_events\".\"approval\", \"usine_trigger_events\".\"approval_reason\", \"usine_trigger_events\".\"permissions\", \"usine_trigger_events\".\"ci_policy_json\", \"usine_trigger_events\".\"ci_failure_head\", \"usine_trigger_events\".\"ci_on_green_json\", \"usine_trigger_events\".\"cycle_limit\", \"usine_trigger_events\".\"cycle_generation\", \"usine_trigger_events\".\"repository\", \"usine_trigger_events\".\"revision\", \"usine_trigger_events\".\"task\", \"usine_trigger_events\".\"agent_json\", \"usine_trigger_events\".\"parent_model\" from \"usine_runs\" inner join \"usine_events\" on \"usine_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_events\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.028684000000339438
+      },
+      {
+        "reader": "run summary",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\", json_object('name', json_extract(\"usine_runs\".\"agent_json\", '$.name'), 'brain', json_extract(\"usine_runs\".\"agent_json\", '$.brain')), (select json_extract(fact.value, '$.url') from json_each(\"usine_steps\".\"result\", '$.facts') as fact where json_extract(fact.value, '$._tag') = 'PullRequest' limit 1) from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" = ? limit ?",
+        "params": [
+          "run-0",
+          1
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SCAN fact VIRTUAL TABLE INDEX 3:"
+        ],
+        "rows": 1,
+        "medianMillis": 0.1258259999999609
+      },
+      {
+        "reader": "run summary",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" in (?) order by \"usine_attempts\".\"run_id\" asc, \"usine_attempts\".\"attempt_number\" asc",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.025829000000157976
+      },
+      {
+        "reader": "run events",
+        "sql": "select \"usine_runs\".\"run_id\", \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\" from \"usine_runs\" inner join \"usine_events\" on \"usine_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" in (?)",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.024417000000084954
+      },
+      {
+        "reader": "run transcript page",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"attempt_id\" = ? order by \"usine_attempt_transcripts\".\"sequence\" desc limit ?",
+        "params": [
+          "attempt-0",
+          50
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)"
+        ],
+        "rows": 50,
+        "medianMillis": 0.1558420000001206
+      },
+      {
+        "reader": "run session state",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select max(\"sequence\") from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and ((\n            json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') IN ('InterventionApplied', 'InterventionRejected')\n            OR (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent'\n              AND json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') IN ('SessionStarted', 'SessionIdle', 'SessionResumed', 'SessionFinished'))\n          ))) group by coalesce(json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.intervention.target.sessionId'), '@parent'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent', json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.inputSequence'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionStarted') order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 1",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ],
+        "rows": 2,
+        "medianMillis": 0.8859130000000732
+      },
+      {
+        "reader": "run worker state",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (\"usine_attempt_transcripts\".\"direction\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') IN ('WorkerUnresponsive', 'WorkerResponsive'))) order by \"usine_attempt_transcripts\".\"sequence\" desc limit ?",
+        "params": [
+          "attempt-0",
+          "outbound",
+          1
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)"
+        ],
+        "rows": 0,
+        "medianMillis": 0.7125270000001365
+      },
+      {
+        "reader": "usage per attempt",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select \"sequence\" from (select \"sequence\", max(json_extract(\"envelope\", '$.payload.event.totalTokens')) as \"tokens\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionTokensUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id')) \"highest\") order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "CO-ROUTINE highest",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "SCAN highest"
+        ],
+        "rows": 2,
+        "medianMillis": 0.7605869999997594
+      },
+      {
+        "reader": "usage across all runs",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select \"sequence\" from (select \"sequence\", max(json_extract(\"envelope\", '$.payload.event.totalTokens')) as \"tokens\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionTokensUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id')) \"highest\") order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-999"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "CO-ROUTINE highest",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "SCAN highest"
+        ],
+        "rows": 2,
+        "medianMillis": 0.7742929999999433
+      },
+      {
+        "reader": "usage pool limits",
+        "sql": "select json_extract(\"envelope\", '$.payload.event') from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select max(\"sequence\") from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"direction\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'PoolRateLimitsUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.pool'))",
+        "params": [
+          "outbound"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 1",
+          "SCAN usine_attempt_transcripts USING INDEX usine_attempt_transcript_pool_limits"
+        ],
+        "rows": 0,
+        "medianMillis": 0.05878100000018094
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "sql": "select \"run_id\" from \"usine_runs\" where json_extract(\"usine_runs\".\"state_json\", '$._tag') = 'AwaitingCi'",
+        "params": [],
+        "plan": [
+          "SEARCH usine_runs USING COVERING INDEX usine_runs_state_opened (<expr>=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.018946000000141794
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "sql": "select \"usine_trigger_events\".\"item_key\", \"usine_runs\".\"run_id\", \"usine_runs\".\"event_id\", \"usine_runs\".\"loop_name\", \"usine_runs\".\"state_json\", \"usine_runs\".\"resolved_failure_attempt_id\", \"usine_runs\".\"opened_at\", \"usine_runs\".\"closed_at\", \"usine_runs\".\"repository\", \"usine_runs\".\"revision\", \"usine_runs\".\"task\", \"usine_runs\".\"agent_json\", \"usine_runs\".\"parent_model\", \"usine_steps\".\"step_name\", \"usine_steps\".\"result\", \"usine_trigger_events\".\"approval_reason\", \"approval_event\".\"received_at\", \"usine_approvals\".\"channel\", \"usine_approvals\".\"approver\", \"usine_run_again_events\".\"from_run_id\", \"usine_run_again_events\".\"requested_by\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_steps\" on \"usine_steps\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_approvals\" on \"usine_approvals\".\"run_id\" = \"usine_runs\".\"run_id\" left join \"usine_events\" \"approval_event\" on \"approval_event\".\"event_id\" = \"usine_approvals\".\"event_id\" left join \"usine_run_again_events\" on \"usine_run_again_events\".\"event_id\" = \"usine_runs\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-989"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)",
+          "SEARCH usine_steps USING INDEX sqlite_autoindex_usine_steps_1 (run_id=?)",
+          "SEARCH usine_approvals USING INDEX sqlite_autoindex_usine_approvals_1 (run_id=?) LEFT-JOIN",
+          "SEARCH approval_event USING INDEX sqlite_autoindex_usine_events_1 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_run_again_events USING INDEX sqlite_autoindex_usine_run_again_events_1 (event_id=?) LEFT-JOIN"
+        ],
+        "rows": 1,
+        "medianMillis": 0.0403559999999743
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "sql": "select \"attempt_id\", \"run_id\", \"step_name\", \"worker_name\", \"attempt_number\", \"brain_json\", \"task\", \"agent\", \"operator_intervened\", \"parent_model\", \"started_at\", \"outcome_json\", \"ended_at\", \"salvage_json\", \"start_json\", \"failure_resolution_json\", \"reattached_at\", \"comments_json\", \"out_of_memory_json\" from \"usine_attempts\" where \"usine_attempts\".\"run_id\" = ? order by \"usine_attempts\".\"attempt_number\"",
+        "params": [
+          "run-989"
+        ],
+        "plan": [
+          "SEARCH usine_attempts USING INDEX usine_attempts_run_number (run_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.04347199999983786
+      },
+      {
+        "reader": "CI wait reconciliation",
+        "sql": "select \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\", \"usine_trigger_events\".\"item_key\", \"usine_trigger_events\".\"loop_name\", \"usine_trigger_events\".\"step_name\", \"usine_trigger_events\".\"approval\", \"usine_trigger_events\".\"approval_reason\", \"usine_trigger_events\".\"permissions\", \"usine_trigger_events\".\"ci_policy_json\", \"usine_trigger_events\".\"ci_failure_head\", \"usine_trigger_events\".\"ci_on_green_json\", \"usine_trigger_events\".\"cycle_limit\", \"usine_trigger_events\".\"cycle_generation\", \"usine_trigger_events\".\"repository\", \"usine_trigger_events\".\"revision\", \"usine_trigger_events\".\"task\", \"usine_trigger_events\".\"agent_json\", \"usine_trigger_events\".\"parent_model\" from \"usine_runs\" inner join \"usine_events\" on \"usine_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_events\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-989"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.04679800000030809
+      },
+      {
+        "reader": "polling admitted event",
+        "sql": "select \"usine_runs\".\"run_id\" from \"usine_events\" inner join \"usine_runs\" on \"usine_runs\".\"event_id\" = \"usine_events\".\"event_id\" where \"usine_events\".\"dedup_key\" = ?",
+        "params": [
+          "dedup-0"
+        ],
+        "plan": [
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_2 (dedup_key=?)",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.028052000000116095
+      },
+      {
+        "reader": "polling blocking run",
+        "sql": "select \"usine_runs\".\"run_id\" from \"usine_runs\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_runs\".\"event_id\" where ((\"usine_trigger_events\".\"loop_name\" = ?) and (\"usine_trigger_events\".\"item_key\" = ?) and (json_extract(\"usine_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?))) order by \"usine_runs\".\"opened_at\" desc limit ?",
+        "params": [
+          "lifecycle-loop",
+          "item-0",
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          1
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item (loop_name=? AND item_key=?)",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 0,
+        "medianMillis": 0.1444709999996121
+      },
+      {
+        "reader": "polling next queued",
+        "sql": "select \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\", \"usine_trigger_events\".\"item_key\", \"usine_trigger_events\".\"loop_name\", \"usine_trigger_events\".\"step_name\", \"usine_trigger_events\".\"approval\", \"usine_trigger_events\".\"approval_reason\", \"usine_trigger_events\".\"permissions\", \"usine_trigger_events\".\"ci_policy_json\", \"usine_trigger_events\".\"ci_failure_head\", \"usine_trigger_events\".\"ci_on_green_json\", \"usine_trigger_events\".\"cycle_limit\", \"usine_trigger_events\".\"cycle_generation\", \"usine_trigger_events\".\"repository\", \"usine_trigger_events\".\"revision\", \"usine_trigger_events\".\"task\", \"usine_trigger_events\".\"agent_json\", \"usine_trigger_events\".\"parent_model\" from \"usine_runs\" inner join \"usine_events\" on \"usine_events\".\"event_id\" = \"usine_runs\".\"event_id\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_events\".\"event_id\" where \"usine_runs\".\"run_id\" = ?",
+        "params": [
+          "run-0"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_1 (run_id=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)",
+          "SEARCH usine_trigger_events USING INDEX sqlite_autoindex_usine_trigger_events_1 (event_id=?)"
+        ],
+        "rows": 1,
+        "medianMillis": 0.03227100000003702
+      },
+      {
+        "reader": "polling next queued",
+        "sql": "select \"observed_event_id\", \"suppressed_by_run_id\", \"suppressed_event_id\" from \"usine_loop_items\" where ((\"usine_loop_items\".\"loop_name\" = ?) and (\"usine_loop_items\".\"item_key\" = ?))",
+        "params": [
+          "lifecycle-loop",
+          "item-0"
+        ],
+        "plan": [
+          "SEARCH usine_loop_items USING INDEX sqlite_autoindex_usine_loop_items_1 (loop_name=? AND item_key=?)"
+        ],
+        "rows": 0,
+        "medianMillis": 0.02193100000022241
+      },
+      {
+        "reader": "polling next queued",
+        "sql": "select \"usine_events\".\"event_id\", \"usine_events\".\"dedup_key\", \"usine_events\".\"payload_json\", \"usine_events\".\"received_at\", \"usine_trigger_events\".\"item_key\", \"usine_trigger_events\".\"loop_name\", \"usine_trigger_events\".\"step_name\", \"usine_trigger_events\".\"approval\", \"usine_trigger_events\".\"approval_reason\", \"usine_trigger_events\".\"permissions\", \"usine_trigger_events\".\"ci_policy_json\", \"usine_trigger_events\".\"ci_failure_head\", \"usine_trigger_events\".\"ci_on_green_json\", \"usine_trigger_events\".\"cycle_limit\", \"usine_trigger_events\".\"cycle_generation\", \"usine_trigger_events\".\"repository\", \"usine_trigger_events\".\"revision\", \"usine_trigger_events\".\"task\", \"usine_trigger_events\".\"agent_json\", \"usine_trigger_events\".\"parent_model\" from \"usine_events\" inner join \"usine_trigger_events\" on \"usine_trigger_events\".\"event_id\" = \"usine_events\".\"event_id\" left join \"usine_runs\" on \"usine_runs\".\"event_id\" = \"usine_events\".\"event_id\" left join \"usine_ignored_events\" on \"usine_ignored_events\".\"event_id\" = \"usine_events\".\"event_id\" where ((\"usine_trigger_events\".\"loop_name\" = ?) and (\"usine_trigger_events\".\"item_key\" = ?) and (\"usine_trigger_events\".\"cycle_generation\" = coalesce((\n    select \"usine_item_cycle_budgets\".\"generation\" from \"usine_item_cycle_budgets\"\n    where \"usine_item_cycle_budgets\".\"item_key\" = \"usine_trigger_events\".\"item_key\"\n  ), 0)) and ((\"usine_runs\".\"run_id\" is null)) and ((\"usine_ignored_events\".\"event_id\" is null))) order by \"usine_events\".\"received_at\" desc",
+        "params": [
+          "lifecycle-loop",
+          "item-0"
+        ],
+        "plan": [
+          "SEARCH usine_trigger_events USING INDEX usine_trigger_events_item (loop_name=? AND item_key=?)",
+          "CORRELATED SCALAR SUBQUERY 1",
+          "SEARCH usine_item_cycle_budgets USING INDEX sqlite_autoindex_usine_item_cycle_budgets_1 (item_key=?)",
+          "SEARCH usine_events USING INDEX sqlite_autoindex_usine_events_1 (event_id=?)",
+          "SEARCH usine_runs USING INDEX sqlite_autoindex_usine_runs_2 (event_id=?) LEFT-JOIN",
+          "SEARCH usine_ignored_events USING COVERING INDEX sqlite_autoindex_usine_ignored_events_1 (event_id=?) LEFT-JOIN",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 0,
+        "medianMillis": 0.04026500000009037
+      },
+      {
+        "reader": "reconciliation runs to drive",
+        "sql": "select \"run_id\" from \"usine_runs\" where ((json_extract(\"usine_runs\".\"state_json\", '$._tag') in (?, ?, ?, ?, ?)) and (json_extract(\"usine_runs\".\"state_json\", '$._tag') <> ?) and (json_extract(\"usine_runs\".\"state_json\", '$._tag') <> ?))",
+        "params": [
+          "Pending",
+          "Waiting",
+          "Queued",
+          "Running",
+          "AwaitingCi",
+          "Waiting",
+          "AwaitingCi"
+        ],
+        "plan": [
+          "SEARCH usine_runs USING COVERING INDEX usine_runs_state_opened (<expr>=?)"
+        ],
+        "rows": 10,
+        "medianMillis": 0.04735900000014226
+      }
+    ]
+  }
+}

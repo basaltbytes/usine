@@ -24,6 +24,8 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 - `attemptsByWorker()`: per worker, the attempts that startup still visits, and how many are open.
 - `revision()`: lets callers reuse an unchanged projection.
 
+The local adapter applies runtime migrations before exposing the store. Run-state and history indexes support the current readers, and attempt ordering uses a run-and-number index. [Runtime store measurements](../../docs/performance/runtime-store/report.md) include the captured SQL, query plans, and migration timing.
+
 ## Runtime rules
 
 ### Approval and retries
