@@ -128,7 +128,7 @@ for (const scenario of [
         loop,
         agent: agent.agent,
         repository: Schema.decodeSync(ManagedRepo)({ name: "acme/project" }),
-        payload: Schema.decodeUnknownSync(Schema.Json)(scenario.payload),
+        payload: Schema.decodeSync(Schema.Json)(scenario.payload),
         dedupKey: DedupKey.make("approval-event"),
         cycleGeneration: CycleGeneration.make(0),
         itemKey: ItemKey.make("github:acme/project:1"),
