@@ -20,58 +20,71 @@ export const connectionQuery = () =>
 
 /** Invalidates only projections identified by a decoded notice. */
 export const invalidateChanges = (client: QueryClient, notice: ChangeNotice) =>
-  client.invalidateQueries({
-    predicate: (query) => {
-      if (query.meta?.refreshLabel === undefined) return false;
-      if (notice.reset) return true;
-      return notice.changes.some(({ kind, id }) => {
-        const [key, entity] = query.queryKey;
-        switch (kind) {
-          case "project":
-            return (key === "project" && entity === id) || key === "search";
-          case "run":
-            return (
-              (key === "run" && entity === id) ||
-              (key === "run-github-changes" && entity === id) ||
-              key === "statistics"
-            );
-          case "attempt":
-            return query.meta?.attemptId === id;
-          case "item": {
-            const item = decodeItemKey(id);
-            const repository = decodeRepository(entity);
-            return (
-              query.meta?.itemKeys?.includes(id) === true ||
-              (key === "task" &&
-                Option.isSome(item) &&
-                Option.isSome(repository) &&
-                canonicalRepositoryName(repository.value) ===
-                  canonicalRepositoryName(item.value[1]))
-            );
-          }
-          case "worker":
-            return key === "desk" || key === "workers" || key === "configuration";
-          case "configuration":
-            return (
-              key === "configuration" ||
-              key === "configuration-editor" ||
-              key === "upgrade" ||
-              key === "overview" ||
-              key === "agents" ||
-              key === "run" ||
-              key === "project" ||
-              key === "search"
-            );
-          case "navigation":
-            return (key === "overview" && entity !== "attention") || key === "search";
-          case "attention":
-            return key === "overview" && entity === "attention";
-          case "activity":
-            return key === "desk" || key === "statistics";
-        }
-      });
-    },
-  });
+  Promise.all(
+    client
+      .getQueryCache()
+      .findAll({
+        predicate: (query) => {
+          if (query.meta?.refreshLabel === undefined) return false;
+          if (notice.reset) return true;
+          return notice.changes.some(({ kind, id }) => {
+            const [key, entity] = query.queryKey;
+            switch (kind) {
+              case "project":
+                return (key === "project" && entity === id) || key === "search";
+              case "run":
+                return (
+                  (key === "run" && entity === id) ||
+                  (key === "run-github-changes" && entity === id) ||
+                  key === "statistics"
+                );
+              case "attempt":
+                return query.meta?.attemptId === id;
+              case "item": {
+                const item = decodeItemKey(id);
+                const repository = decodeRepository(entity);
+                return (
+                  query.meta?.itemKeys?.includes(id) === true ||
+                  (key === "task" &&
+                    Option.isSome(item) &&
+                    Option.isSome(repository) &&
+                    canonicalRepositoryName(repository.value) ===
+                      canonicalRepositoryName(item.value[1]))
+                );
+              }
+              case "worker":
+                return key === "desk" || key === "workers" || key === "configuration";
+              case "configuration":
+                return (
+                  key === "configuration" ||
+                  key === "configuration-editor" ||
+                  key === "upgrade" ||
+                  key === "overview" ||
+                  key === "agents" ||
+                  key === "run" ||
+                  key === "project" ||
+                  key === "search"
+                );
+              case "navigation":
+                return (key === "overview" && entity !== "attention") || key === "search";
+              case "attention":
+                return key === "overview" && entity === "attention";
+              case "activity":
+                return key === "desk" || key === "statistics";
+            }
+          });
+        },
+      })
+      .map((query) => {
+        const refresh = () =>
+          client.invalidateQueries(
+            { predicate: (candidate) => candidate === query },
+            { cancelRefetch: false },
+          );
+        const pending = query.state.fetchStatus === "fetching" ? query.promise : undefined;
+        return pending === undefined ? refresh() : pending.then(refresh, refresh);
+      }),
+  );
 
 type ChangeSource = Pick<EventTarget, "addEventListener"> & {
   onopen: ((event: Event) => void) | null;

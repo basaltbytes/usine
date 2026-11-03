@@ -1,13 +1,107 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { GitHubItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { Schema } from "effect";
-import { assert, expect, it } from "vitest";
+import { assert, expect, it, vi } from "vitest";
 import { fullTask, quietTask, taskRepository } from "~/lib/tasks/fixture";
 import { taskHistoryQuery, taskQuery } from "~/lib/tasks/queries";
 import { invalidateChanges } from "./changes";
+
+it("retains a pending refresh when the ongoing read fails", async () => {
+  vi.useFakeTimers();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let reads = 0;
+  const queryKey = ["project", "one"];
+  const observer = new QueryObserver(client, {
+    queryKey,
+    initialData: 0,
+    staleTime: Infinity,
+    meta: { refreshLabel: "Board" },
+    queryFn: async () => {
+      reads++;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (reads === 1) throw new Error("Read failed");
+      return reads;
+    },
+  });
+  const unsubscribe = observer.subscribe(() => {});
+  const notice = new ChangeNotice({
+    revision: 1,
+    reset: false,
+    changes: [{ kind: "project", id: "one" }],
+  });
+  try {
+    const first = invalidateChanges(client, notice);
+    const pending = invalidateChanges(client, notice);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.all([first, pending]);
+    expect(client.getQueryData(queryKey)).toBe(2);
+    expect(reads).toBe(2);
+  } finally {
+    unsubscribe();
+    client.clear();
+    vi.useRealTimers();
+  }
+});
+
+it.each([false, true])(
+  "keeps reads updating during sustained notices and refreshes after the final change (reset: %s)",
+  async (reset) => {
+    vi.useFakeTimers();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let current = 1;
+    let reads = 0;
+    const queryKey = ["project", "one"];
+    const observer = new QueryObserver(client, {
+      queryKey,
+      initialData: 0,
+      staleTime: Infinity,
+      meta: { refreshLabel: "Board" },
+      queryFn: async () => {
+        reads++;
+        const snapshot = current;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return snapshot;
+      },
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    const refresh = () =>
+      invalidateChanges(
+        client,
+        new ChangeNotice({
+          revision: current,
+          reset,
+          changes: [{ kind: "project", id: "one" }],
+        }),
+      );
+    try {
+      const pending = [refresh()];
+      let previous = 0;
+      for (let tick = 1; tick <= 15; tick++) {
+        await vi.advanceTimersByTimeAsync(200);
+        current++;
+        pending.push(refresh());
+        if (tick % 3 === 0) {
+          const displayed = client.getQueryData<number>(queryKey) ?? 0;
+          expect(displayed).toBeGreaterThan(previous);
+          previous = displayed;
+        }
+      }
+      await vi.advanceTimersByTimeAsync(1_000);
+      await Promise.all(pending);
+      expect(client.getQueryData(queryKey)).toBe(current);
+      expect(reads).toBe(8);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(reads).toBe(8);
+    } finally {
+      unsubscribe();
+      client.clear();
+      vi.useRealTimers();
+    }
+  },
+);
 
 it("refreshes task reads in the changed item's repository without refreshing other repositories", async () => {
   const client = new QueryClient();
