@@ -235,7 +235,7 @@ describe("PollingTriggers open-issue check", () => {
   );
 
   it.effect(
-    "checks a repository's open issues at most once every 10 minutes, a failed check included",
+    "retries failed open-issue checks each cycle and applies the cooldown after recovery",
     () => {
       const instance = instanceWith([]);
       let requests = 0;
@@ -248,7 +248,7 @@ describe("PollingTriggers open-issue check", () => {
         missingIssues: () =>
           Effect.suspend(() => {
             requests += 1;
-            return requests === 1
+            return requests <= 3 || (requests >= 5 && requests <= 7)
               ? Effect.fail(
                   new GitHubApiError({
                     operation: "find-missing-issues",
@@ -271,15 +271,36 @@ describe("PollingTriggers open-issue check", () => {
         assert.strictEqual(requests, 1);
         assert.deepStrictEqual(failed.failures, []);
 
+        yield* TestClock.adjust("1 minute");
+        const failedAgain = yield* polling.poll(instance);
+        assert.strictEqual(requests, 2);
+        assert.deepStrictEqual(failedAgain.failures, []);
+
+        yield* TestClock.adjust("1 minute");
+        const sustained = yield* polling.poll(instance);
+        assert.strictEqual(requests, 3);
+        assert.strictEqual(sustained.failures[0]?.errorTag, "GitHubApiError");
+        assert.include(sustained.failures[0]?.message ?? "", "find-missing-issues");
+
+        const recovered = yield* polling.poll(instance);
+        assert.strictEqual(requests, 4);
+        assert.deepStrictEqual(recovered.failures, []);
+
         yield* TestClock.adjust("9 minutes");
         const skipped = yield* polling.poll(instance);
-        assert.strictEqual(requests, 1);
+        assert.strictEqual(requests, 4);
         assert.deepStrictEqual(skipped.failures, []);
 
         yield* TestClock.adjust("1 minute");
-        const checked = yield* polling.poll(instance);
-        assert.strictEqual(requests, 2);
-        assert.deepStrictEqual(checked.failures, []);
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          const cycle = yield* polling.poll(instance);
+          assert.strictEqual(requests, 4 + attempt);
+          assert.strictEqual(cycle.failures.length, attempt === 3 ? 1 : 0);
+        }
+
+        const recoveredAgain = yield* polling.poll(instance);
+        assert.strictEqual(requests, 8);
+        assert.deepStrictEqual(recoveredAgain.failures, []);
       }).pipe(
         Effect.provide(
           pollingTestLayer(github, [], undefined, undefined, undefined, undefined, items),

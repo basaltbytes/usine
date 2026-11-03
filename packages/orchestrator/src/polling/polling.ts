@@ -203,7 +203,7 @@ export class PollingTriggers extends Context.Service<
         instance: Option.none(),
         repositories: new Set(),
       });
-      // When each repository's open issues were last checked against GitHub.
+      // When each repository's open issues were last successfully checked against GitHub.
       const openIssueChecks = yield* Ref.make<ReadonlyMap<CursorKey, number>>(new Map());
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
@@ -242,7 +242,7 @@ export class PollingTriggers extends Context.Service<
         yield* cursors.write(cursorKey(watched.repository), StoredPollCursor, cursor);
       });
 
-      /** Checks the repository's open issues unless the last check started less than 10 minutes ago. */
+      /** Checks open issues unless the last successful check started less than 10 minutes ago. */
       const checkOpenIssuesWhenDue = Effect.fn("PollingTriggers.checkOpenIssuesWhenDue")(function* (
         watched: WatchedRepository,
       ) {
@@ -260,8 +260,17 @@ export class PollingTriggers extends Context.Service<
           });
           return NO_OPEN_ISSUE_CHECK;
         }
-        yield* Ref.update(openIssueChecks, (checks) => new Map(checks).set(key, now));
-        return yield* checkOpenIssues(watched.repository, watched.loops);
+        const checked = yield* checkOpenIssues(watched.repository, watched.loops);
+        if (checked.failures.length === 0 && Option.isNone(checked.nextPollAt)) {
+          yield* Ref.update(openIssueChecks, (checks) => new Map(checks).set(key, now));
+        } else {
+          yield* Effect.logInfo("Open-issue check remains due for the next poll cycle", {
+            repository: watched.repository.name,
+            failures: checked.failures.length,
+            rateLimited: Option.isSome(checked.nextPollAt),
+          });
+        }
+        return checked;
       });
 
       const pollRepository = Effect.fn("PollingTriggers.pollRepository")(function* (
