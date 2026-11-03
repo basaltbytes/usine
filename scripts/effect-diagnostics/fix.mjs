@@ -1,7 +1,7 @@
 // Applies each configured Effect autofix until a pass changes no files, then formats changed files.
 // Usage, from the repository root: node scripts/effect-diagnostics/fix.mjs [paths...]
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -32,8 +32,8 @@ const failed = (result) => {
 
 const files = run("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
 if (files.status !== 0) failed(files);
-const sources = [...new Set(files.stdout.split("\0"))].filter((file) =>
-  /\.[cm]?[jt]sx?$/u.test(file),
+const sources = [...new Set(files.stdout.split("\0"))].filter(
+  (file) => /\.[cm]?[jt]sx?$/u.test(file) && existsSync(join(root, file)),
 );
 const snapshot = () =>
   new Map(sources.map((file) => [file, readFileSync(join(root, file), "utf8")]));

@@ -45,13 +45,32 @@ require("node:fs").writeFileSync("formatted.json", JSON.stringify(process.argv.s
   await writeFile(join(root, "unchanged.ts"), "existing local edit\n");
   return {
     read: (file) => readFile(join(root, file), "utf8"),
-    run: () =>
-      spawnSync(process.execPath, ["scripts/effect-diagnostics/fix.mjs"], {
+    remove: (file) => rm(join(root, file)),
+    run: (...paths) =>
+      spawnSync(process.execPath, ["scripts/effect-diagnostics/fix.mjs", ...paths], {
         cwd: root,
         encoding: "utf8",
       }),
   };
 };
+
+test("an unrelated unstaged deletion does not block fixes to a targeted file", async (t) => {
+  const project = await fixture(
+    t,
+    { "effecttsgo/new-schema-class": "error" },
+    `const content = fs.readFileSync("changed.ts", "utf8");
+if (!fixing) report(content === "fixed" ? [] : ["changed.ts"]);
+fs.writeFileSync("changed.ts", "fixed");
+report([]);`,
+  );
+  await project.remove("crash.ts");
+  const result = project.run("changed.ts");
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(await project.read("changed.ts"), "fixed");
+  await assert.rejects(project.read("crash.ts"), { code: "ENOENT" });
+  assert.equal(await project.read("unchanged.ts"), "existing local edit\n");
+  assert.deepEqual(JSON.parse(await project.read("formatted.json")), ["changed.ts"]);
+});
 
 test("an autofixer crash fails with its stderr instead of reporting success", async (t) => {
   const project = await fixture(
