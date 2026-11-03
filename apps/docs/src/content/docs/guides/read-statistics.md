@@ -21,4 +21,6 @@ The selected window updates the counts and charts. Missing timing or pricing is 
 
 A completed task has a merged pull request in the window and at least one usine run. Task time starts at its first run and ends at its last closed run, capped at merge for an open run. It excludes the later wait for a human merge. Days use UTC; windows longer than 62 days group by week.
 
+Open statistics refresh at UTC midnight, including expanded **Details**. The 7-day and 30-day windows advance automatically, so tasks and runs outside the selected window leave the counts and charts.
+
 **First time right** counts tasks without the same loop succeeding twice on one item. Operator actions include approvals, retries, resolutions, and budget resets. Subscription cost has an estimate marker. Worker utilization divides occupied attempt time by available slot-time using configuration revisions. Machine-start counts survive machine deletion and restarts.

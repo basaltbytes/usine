@@ -10,6 +10,8 @@ One journal retains the latest 256 notices with monotonically increasing revisio
 
 Elapsed times derive from timestamps in the browser. Known attention deadlines, such as webhook silence and pool resets, schedule one notice at the deadline without computing projections. Startup restores future pool reset deadlines from each pool’s latest persisted report; expired and superseded reports schedule no notices. Poll completion publishes attention notices when failures or preflight findings change. Unchanged polls publish no notices, so idle boards keep their cached activity reads. Poll completion timestamps refresh on the next state change or manual refresh.
 
+The browser schedules statistics invalidation at each UTC midnight. Active task and run statistics refresh as their rolling windows advance; inactive statistics become stale for their next read. A read already in progress finishes before the rollover refresh starts. The timer ends when the app closes its change subscription.
+
 Navigation and attention reads omit board payloads. Navigation retains compact task identities for headings and notifications. Project reads supply boards. Settled lanes load cards in pages of 50; task run history loads in pages of 25. Both lists virtualize long histories. Command search loads its searchable projection when opened. Route loaders prefetch screen data, and intent preloading fetches task and run links on hover or focus.
 
 Successful JSON reads have private ETags. Authorization precedes conditional response handling, and validators vary by browser credentials and read representation. Browsers revalidate cached reads without transferring an unchanged body. The stream disables caching and proxy buffering.

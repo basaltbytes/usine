@@ -1,4 +1,9 @@
-import { type QueryClient, queryOptions, skipToken } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  type QueryFilters,
+  queryOptions,
+  skipToken,
+} from "@tanstack/react-query";
 import { GitHubItemKey } from "@usine/core/item";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
@@ -18,63 +23,11 @@ export const connectionQuery = () =>
     gcTime: Infinity,
   });
 
-/** Invalidates only projections identified by a decoded notice. */
-export const invalidateChanges = (client: QueryClient, notice: ChangeNotice) =>
+const refreshQueries = (client: QueryClient, filters: QueryFilters) =>
   Promise.all(
     client
       .getQueryCache()
-      .findAll({
-        predicate: (query) => {
-          if (query.meta?.refreshLabel === undefined) return false;
-          if (notice.reset) return true;
-          return notice.changes.some(({ kind, id }) => {
-            const [key, entity] = query.queryKey;
-            switch (kind) {
-              case "project":
-                return (key === "project" && entity === id) || key === "search";
-              case "run":
-                return (
-                  (key === "run" && entity === id) ||
-                  (key === "run-github-changes" && entity === id) ||
-                  key === "statistics"
-                );
-              case "attempt":
-                return query.meta?.attemptId === id;
-              case "item": {
-                const item = decodeItemKey(id);
-                const repository = decodeRepository(entity);
-                return (
-                  query.meta?.itemKeys?.includes(id) === true ||
-                  (key === "task" &&
-                    Option.isSome(item) &&
-                    Option.isSome(repository) &&
-                    canonicalRepositoryName(repository.value) ===
-                      canonicalRepositoryName(item.value[1]))
-                );
-              }
-              case "worker":
-                return key === "desk" || key === "workers" || key === "configuration";
-              case "configuration":
-                return (
-                  key === "configuration" ||
-                  key === "configuration-editor" ||
-                  key === "upgrade" ||
-                  key === "overview" ||
-                  key === "agents" ||
-                  key === "run" ||
-                  key === "project" ||
-                  key === "search"
-                );
-              case "navigation":
-                return (key === "overview" && entity !== "attention") || key === "search";
-              case "attention":
-                return key === "overview" && entity === "attention";
-              case "activity":
-                return key === "desk" || key === "statistics";
-            }
-          });
-        },
-      })
+      .findAll(filters)
       .map((query) => {
         const refresh = () =>
           client.invalidateQueries(
@@ -85,6 +38,61 @@ export const invalidateChanges = (client: QueryClient, notice: ChangeNotice) =>
         return pending === undefined ? refresh() : pending.then(refresh, refresh);
       }),
   );
+
+/** Invalidates only projections identified by a decoded notice. */
+export const invalidateChanges = (client: QueryClient, notice: ChangeNotice) =>
+  refreshQueries(client, {
+    predicate: (query) => {
+      if (query.meta?.refreshLabel === undefined) return false;
+      if (notice.reset) return true;
+      return notice.changes.some(({ kind, id }) => {
+        const [key, entity] = query.queryKey;
+        switch (kind) {
+          case "project":
+            return (key === "project" && entity === id) || key === "search";
+          case "run":
+            return (
+              (key === "run" && entity === id) ||
+              (key === "run-github-changes" && entity === id) ||
+              key === "statistics"
+            );
+          case "attempt":
+            return query.meta?.attemptId === id;
+          case "item": {
+            const item = decodeItemKey(id);
+            const repository = decodeRepository(entity);
+            return (
+              query.meta?.itemKeys?.includes(id) === true ||
+              (key === "task" &&
+                Option.isSome(item) &&
+                Option.isSome(repository) &&
+                canonicalRepositoryName(repository.value) ===
+                  canonicalRepositoryName(item.value[1]))
+            );
+          }
+          case "worker":
+            return key === "desk" || key === "workers" || key === "configuration";
+          case "configuration":
+            return (
+              key === "configuration" ||
+              key === "configuration-editor" ||
+              key === "upgrade" ||
+              key === "overview" ||
+              key === "agents" ||
+              key === "run" ||
+              key === "project" ||
+              key === "search"
+            );
+          case "navigation":
+            return (key === "overview" && entity !== "attention") || key === "search";
+          case "attention":
+            return key === "overview" && entity === "attention";
+          case "activity":
+            return key === "desk" || key === "statistics";
+        }
+      });
+    },
+  });
 
 type ChangeSource = Pick<EventTarget, "addEventListener"> & {
   onopen: ((event: Event) => void) | null;
@@ -100,6 +108,15 @@ export const connectChanges = (
   const source = createSource();
   let fallback: ReturnType<typeof setInterval> | undefined;
   let active = true;
+  const scheduleRollover = (): ReturnType<typeof setTimeout> => {
+    const now = new Date();
+    const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    return setTimeout(() => {
+      void refreshQueries(client, { queryKey: ["statistics"] });
+      rollover = scheduleRollover();
+    }, midnight - now.getTime());
+  };
+  let rollover = scheduleRollover();
   const state = (value: "connected" | "disconnected") => {
     if (!active) return;
     client.setQueryData(connectionQuery().queryKey, value);
@@ -133,5 +150,6 @@ export const connectChanges = (
     active = false;
     source.close();
     if (fallback !== undefined) clearInterval(fallback);
+    clearTimeout(rollover);
   };
 };
