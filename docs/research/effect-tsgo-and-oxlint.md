@@ -24,7 +24,7 @@ Effect-TS/tsgo isn't a GitHub fork of typescript-go. It's a separate repository 
 | Oxlint tracked | 1.88.0, 1.89.0, 1.90.0, with oxlint-tsgolint 7.0.2004 or 7.0.2005 | same |
 | Our versions | TypeScript 7.0.2 and Oxlint 1.90.0 are supported. With 7.0.2 installed, `effect-tsgo tsc` runs the build of that exact version. Effect 4.0.6 is detected as v4: v4-only rules such as `lazyEffect` and `preferBarrelImport` fire. | runs |
 | License | MIT, copyright Effect | `LICENSE` |
-| Install size | The darwin-arm64 platform package is 199 MB: compilers for three TypeScript versions, tsrs, and patched Oxlint bindings. | `du` |
+| Install size | Unpacked, the linux-x64 platform package is 236 MB and the darwin-arm64 one 208 MB: compilers for three TypeScript versions, tsrs, and patched Oxlint bindings. `@effect/tsgo` itself is 11 MB. | `npm view <package>@0.64.1 dist.unpackedSize` |
 
 The Oxlint integration is marked experimental in `effect-tsgo patch --help`. The packaged tsrs and Oxlint builds don't support Linux musl.
 
@@ -115,7 +115,7 @@ The branch changes:
 
 - `pnpm-workspace.yaml` and the root `package.json`: replace `@effect/language-service` 0.87.5 with `@effect/tsgo` 0.64.1 and add `oxlint-tsgolint` 7.0.2005.
 - `tooling/tsconfig/base.json`: the target plugin block.
-- `scripts/effect-diagnostics/check.mjs`: the ratchet. It runs `effect-tsgo tsc -p <tsconfig> --pretty false`, fails on any compiler or configuration error, counts Effect warnings and errors per file and rule for files inside the package, and compares the counts with the package's `effect-baseline.json`.
+- `scripts/effect-diagnostics/check.mjs`: the ratchet. It runs the Effect-patched compiler that `@effect/tsgo/lib/getExePath` picks for the installed TypeScript version (`-p <tsconfig> --pretty false`), fails on any compiler or configuration error, counts Effect warnings and errors per file and rule for files inside the package, and compares the counts with the package's `effect-baseline.json`.
 - `scripts/effect-diagnostics/baseline.mjs`: the rules for changing a baseline, shared by the ratchet and the CI step. `scripts/effect-diagnostics/diff.mjs`: the CI step. `baseline.test.mjs` covers renames, splits, deletions, uncovered violations, and raised counts; root `pnpm test` runs it.
 - `.github/workflows/ci.yml`: on pull requests, `node scripts/effect-diagnostics/diff.mjs HEAD^1`.
 - `AGENTS.md`: one rule for agents on keeping baselines.
@@ -276,7 +276,7 @@ Times on an Apple Silicon laptop, uncached, same machine load, two runs each.
 - Patched `tsc -b` fails builds while violations exist, so `effect-tsgo patch` stays out of `prepare` until the cleanup ends.
 - `apps/server` tests import `packages/engine/test/support.ts`, so the server project type-checks engine sources and reports engine diagnostics a second time. The ratchet only counts files inside the package under check.
 - `redundantSchemaTagIdentifier`'s autofix leaves a lone comma when the arguments span several lines (`apps/server/src/configuration/command.ts:38`, `TS1135`). `yieldInCallArgument`'s autofix, applied in bulk, declared `value_1` twice in one scope and passed an array where a string was expected (`packages/github/test/github-app.test.ts:146`). Both are excluded from `effect:fix`. Not reported upstream.
-- The CI install grows by one platform package: 199 MB on darwin-arm64; linux-x64 unverified.
+- The CI install grows by the linux-x64 platform package, 236 MB unpacked. On the ubuntu-latest runner, `pnpm install --frozen-lockfile` took 12 s in this change's first pull request run (CI run 41717271588), against 8 s in two earlier pull request runs the same day. `pnpm check` took 34 s against 18–21 s; that run had no turbo cache for the new `check` inputs. `effect-tsgo` ran on the runner without changes.
 - `effect-tsgo oxlint` reported `unstable-api-usage` warnings that the Oxlint configuration didn't enable. It appears to fall back on the tsconfig plugin defaults. Unverified.
 
 ## Target configuration
@@ -353,7 +353,6 @@ The cleanup runs as five changes, grouped by kind of change across the repositor
 ## Unverified
 
 - Editor integration: VS Code through `patch --typescript` and `js/ts.experimental.useTsgo`, and `effect-tsgo tsc --lsp --stdio` in other editors. Not run.
-- Size of the linux-x64 platform package, and `effect-tsgo` on the CI runner.
 - Whether `${configDir}` in plugin `overrides` is unsupported or a bug. Observed: no match.
 - Why `effect-tsgo oxlint` reports rules missing from the Oxlint configuration.
 - Whether `effect` 4.0.6 has a cipher API that would satisfy `nodeBuiltinImport` in `packages/gateway/src/node/attachments.ts`.
