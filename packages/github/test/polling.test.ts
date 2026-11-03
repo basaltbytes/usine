@@ -4,7 +4,7 @@ import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
-import { GitHubApp } from "../src/github-app.ts";
+import { GitHubApp, isServerError } from "../src/github-app.ts";
 import {
   AppSlug,
   Installation,
@@ -534,6 +534,60 @@ describe("GitHubPolling", () => {
       if (failure._tag === "InvalidGitHubResponseError") {
         assert.match(failure.detail, /Something went wrong/u);
       }
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  for (const [status, serverError] of [
+    [502, true],
+    [504, true],
+    [401, false],
+    [404, false],
+  ] as const) {
+    it.effect(
+      `classifies a snapshot that fails with HTTP ${status} as ${serverError ? "a" : "no"} server error`,
+      () => {
+        const client = HttpClient.make((request) =>
+          Effect.succeed(response(request, { message: "unavailable" }, { status })),
+        );
+
+        return Effect.gen(function* () {
+          const polling = yield* GitHubPolling;
+          const failure = yield* polling
+            .snapshot(
+              repository,
+              new ChangedPullRequest({
+                number: 12,
+                updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+              }),
+            )
+            .pipe(Effect.flip);
+          assert.strictEqual(failure._tag, "GitHubApiError");
+          assert.strictEqual(isServerError(failure), serverError);
+        }).pipe(Effect.provide(pollingLayer(client)));
+      },
+    );
+  }
+
+  it.effect("does not classify a GraphQL rate limit as a server error", () => {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        response(request, {
+          data: null,
+          errors: [{ type: "RATE_LIMITED", message: "API rate limit exhausted" }],
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const limited = yield* polling
+        .snapshot(
+          repository,
+          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual(limited._tag, "GitHubRateLimitError");
+      assert.isFalse(isServerError(limited));
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 

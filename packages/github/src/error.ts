@@ -102,3 +102,15 @@ export const isRefusal = (error: GitHubAppError): boolean =>
     GitHubRateLimitError: () => false,
     InvalidGitHubResponseError: () => false,
   });
+
+/** A `GitHubApiError` whose response had an HTTP 5xx status. */
+export type GitHubServerError = GitHubApiError & { readonly status: Option.Some<number> };
+
+/**
+ * Returns whether `error` is a `GitHubApiError` with an HTTP 5xx status. GitHub server errors are
+ * usually transient, so the same request can succeed later. Rate limits, refusals, send failures
+ * without a response, and invalid responses aren't server errors.
+ */
+export const isServerError = <E>(error: E): error is E & GitHubServerError =>
+  error instanceof GitHubApiError &&
+  Option.exists(error.status, (status) => status >= 500 && status <= 599);
