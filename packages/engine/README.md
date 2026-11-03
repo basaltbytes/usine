@@ -16,7 +16,7 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 
 `RunReader`:
 
-- `list()`: lightweight run summaries, newest first, without event payloads or a snapshot read per run.
+- `list()`: lightweight run summaries, newest first, without event payloads or a snapshot read per run. Open runs, recent closed runs, and their attempts use one transaction, so concurrent completions preserve a consistent list with one entry per run.
 - `closed({ limit })`: the runs that closed last, by their last attempt's end.
 - `forItems(itemKeys)`: every saved run and its attempts for those items, outside the recent-history window.
 - `events(runIds)`: in one batch, the event that opened each run. Its payload is the item as the trigger saw it, before the agent changed it.

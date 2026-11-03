@@ -1,5 +1,6 @@
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { assert, it } from "@effect/vitest";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import { AgentFailure } from "@usine/core/attempt/failure";
@@ -14,13 +15,84 @@ import { WorkerName } from "@usine/core/worker";
 import { EffectLogger } from "drizzle-orm/effect-core";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { DateTime, Effect, FileSystem, Layer, Option, Result } from "effect";
+import { Reactivity } from "effect/reactivity";
 import { TestClock } from "effect/testing";
 import { RunDatabase } from "../../src/database/database.ts";
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
+import { withReadWorker } from "../../src/database/sqlite-reader/reader.ts";
 import { Submission } from "../../src/engine/submission.ts";
 import { RunReader } from "../../src/run-reader/run-reader.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission } from "./support.ts";
+
+for (const [phase, selection] of [
+  ["closed runs", /"closed_at" is not null/u],
+  ["attempts", /from "usine_attempts"/u],
+] as const) {
+  it.live(`run lists stay coherent when completion commits before reading ${phase}`, () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
+      );
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("completing-during-list");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        // A read-only transaction lets the other connection commit between SELECTs.
+        const connection = yield* SqliteClient.make({
+          filename: `${directory}/.usine/runtime.sqlite`,
+          readonly: true,
+        });
+        const routed = yield* withReadWorker(connection);
+        let completed = false;
+        const logger = Layer.succeed(EffectLogger)({
+          logQuery: (query) =>
+            Effect.gen(function* () {
+              if (completed || !selection.test(query)) return;
+              yield* store.finishAttempt(
+                started.execution.attempt,
+                Result.succeed(new StepResult({ message: "Completed during listing", facts: [] })),
+              );
+              completed = true;
+            }).pipe(Effect.orDie),
+        });
+        const database = yield* SQLiteDrizzle.make().pipe(
+          Effect.provide(logger),
+          Effect.provide(SQLiteDrizzle.DefaultServices),
+          Effect.provideService(SqliteClient.SqliteClient, routed.client),
+        );
+        yield* Effect.gen(function* () {
+          const reader = yield* RunReader;
+          const listed = yield* reader.list({ closedLimit: 10 });
+          assert(completed, "completion must commit between list queries");
+          assert.strictEqual(listed.length, 1);
+          const summary = listed[0];
+          assert(summary !== undefined);
+          assert.strictEqual(summary.run.id, runId);
+          assert.strictEqual(summary.run.state._tag, "Running");
+          assert.strictEqual(summary.attempts.length, 1);
+          const attempt = summary.attempts[0];
+          assert(attempt !== undefined);
+          assert(Option.isNone(attempt.outcome));
+          assert(Option.isNone(attempt.endedAt));
+          const after = yield* reader.list({ closedLimit: 10 });
+          assert.strictEqual(after.length, 1);
+          const finished = after[0];
+          assert(finished !== undefined);
+          assert.strictEqual(finished.run.id, runId);
+          assert.strictEqual(finished.run.state._tag, "Succeeded");
+          const finishedAttempt = finished.attempts[0];
+          assert(finishedAttempt !== undefined);
+          assert.strictEqual(Option.getOrNull(finishedAttempt.outcome)?._tag, "Succeeded");
+          assert(Option.isSome(finishedAttempt.endedAt));
+        }).pipe(Effect.provide(RunReader.layer), Effect.provide(RunDatabase.layer(database)));
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
+  );
+}
 
 it.effect(
   "polling SQL excludes long text and selects recent and current runs before decoding",

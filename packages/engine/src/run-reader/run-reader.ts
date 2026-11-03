@@ -74,9 +74,17 @@ const makeRunReader = Effect.gen(function* () {
   const summary = Effect.fn("RunReader.summary")((runId: RunId) =>
     queries.runSummary(runId).pipe(persistence("read run summary")),
   );
-  const list = Effect.fn("RunReader.list")((options: { readonly closedLimit: number }) =>
-    queries.runSummaries(options.closedLimit).pipe(persistence("list runs")),
-  );
+  const list = Effect.fn("RunReader.list")(function* (options: { readonly closedLimit: number }) {
+    yield* Effect.annotateCurrentSpan({ closedLimit: options.closedLimit });
+    const summaries = yield* database
+      .transaction((transaction) => queriesFor(transaction).runSummaries(options.closedLimit))
+      .pipe(persistence("list runs"));
+    yield* Effect.logDebug("Read run list", {
+      closedLimit: options.closedLimit,
+      runs: summaries.length,
+    });
+    return summaries;
+  });
   const closed = Effect.fn("RunReader.closed")(function* (options: {
     readonly limit: number;
     readonly repositories?: ReadonlyArray<RepositoryName>;
@@ -176,7 +184,7 @@ export class RunReader extends Context.Service<
     ) => Effect.Effect<Option.Option<RunId>, RunStoreError>;
     /** Returns a Run snapshot and all its transcript entries, in append order, from one transaction. */
     readonly evidence: (runId: RunId) => Effect.Effect<RunEvidence, RunStoreError>;
-    /** Returns every open Run plus the newest `closedLimit` closed ones, newest first. */
+    /** Returns every open Run plus the newest `closedLimit` closed ones and their Attempts from one transaction, newest first. */
     readonly list: (options: {
       readonly closedLimit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
