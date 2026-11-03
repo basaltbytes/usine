@@ -152,16 +152,16 @@ const makeRunStore = Effect.gen(function* () {
       yield* FiberMap.remove(poolResets, key);
       const limit = event.rateLimits[window];
       if (Option.isNone(limit) || Option.isNone(limit.value.resetsAt)) {
-        yield* Effect.logInfo("Pool reset has no deadline", { pool: event.pool, window });
+        yield* Effect.logDebug("Pool reset has no deadline", { pool: event.pool, window });
         continue;
       }
       const resetsAt = limit.value.resetsAt.value;
       const delay = Duration.toMillis(DateTime.distance(yield* DateTime.now, resetsAt));
       if (delay <= 0) {
-        yield* Effect.logInfo("Pool reset deadline has passed", { pool: event.pool, window });
+        yield* Effect.logDebug("Pool reset deadline has passed", { pool: event.pool, window });
         continue;
       }
-      yield* Effect.logInfo("Scheduled pool reset notification", {
+      yield* Effect.logDebug("Scheduled pool reset notification", {
         pool: event.pool,
         window,
         resetsAt,

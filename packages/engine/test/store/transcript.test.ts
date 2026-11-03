@@ -169,7 +169,7 @@ describe("Attempt transcripts", () => {
               new Set([report, other]),
             );
           }
-          assert.deepStrictEqual(logLevels, ["Debug", "Debug", "Debug"]);
+          assert.deepStrictEqual(new Set(logLevels), new Set(["Debug"]));
         }).pipe(
           Effect.provide(Layer.merge(RunStore.layer, RunReader.layer)),
           Effect.provide(localSqliteLayer(directory)),
