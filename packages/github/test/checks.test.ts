@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import { assert, it } from "@effect/vitest";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
-import { DateTime, Effect, Layer, Redacted, type Schema } from "effect";
+import { DateTime, Effect, Fiber, Layer, Option, Redacted, type Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
+import { TestClock } from "effect/testing";
 import { strToU8, zipSync } from "fflate/browser";
 import { GitHubApp } from "../src/github-app.ts";
 import { GitHubChecks } from "../src/checks.ts";
@@ -537,4 +538,70 @@ for (const endpoint of ["metadata", "logs"]) {
       ),
     ),
   );
+}
+
+for (const endpoint of ["check-runs", "status", "actions/jobs/", "logs"]) {
+  for (const status of [502, 503, 504]) {
+    it.effect(`recovers CI evidence after ${endpoint} returns HTTP ${status}`, () => {
+      let attempts = 0;
+      return Effect.gen(function* () {
+        const checks = yield* GitHubChecks;
+        const pending = yield* checks.failures(repository, head).pipe(Effect.forkChild);
+        yield* TestClock.adjust("10 seconds");
+        const evidence = yield* Fiber.join(pending);
+        assert.strictEqual(attempts, 2);
+        assert.deepStrictEqual(evidence.jobs, [endpoint === "status" ? "external-ci" : "ci"]);
+        assert.include(
+          evidence.excerpt,
+          endpoint === "status"
+            ? "Build failed"
+            : "expected -4391 to be greater than or equal to 0",
+        );
+      }).pipe(
+        Effect.provide(
+          withClient((url) => {
+            if (url.includes(endpoint) && ++attempts === 1) return new Response(null, { status });
+            if (url.includes("check-runs"))
+              return json(endpoint === "status" ? { total_count: 0, check_runs: [] } : failedCheck);
+            if (url.includes("/status"))
+              return json({
+                statuses: [
+                  { context: "external-ci", state: "failure", description: "Build failed" },
+                ],
+              });
+            if (url.includes("/actions/jobs/")) return new Response(recordedJob);
+            return new Response(new Uint8Array(recordedArchive));
+          }),
+        ),
+      );
+    });
+  }
+}
+
+for (const status of [403, 429, 503]) {
+  it.effect(`bounds retries and preserves the CI error for HTTP ${status}`, () => {
+    let attempts = 0;
+    return Effect.gen(function* () {
+      const checks = yield* GitHubChecks;
+      const pending = yield* checks.failures(repository, head).pipe(Effect.flip, Effect.forkChild);
+      yield* TestClock.adjust("10 seconds");
+      const error = yield* Fiber.join(pending);
+      assert.strictEqual(attempts, status === 503 ? 3 : 1);
+      assert.strictEqual(error._tag, status === 429 ? "GitHubRateLimitError" : "GitHubApiError");
+      if (error._tag === "GitHubApiError" || error._tag === "GitHubRateLimitError")
+        assert.strictEqual(error.operation, "read-ci-checks");
+      if (error._tag === "GitHubApiError")
+        assert.deepStrictEqual(error.status, Option.some(status));
+    }).pipe(
+      Effect.provide(
+        withClient(() => {
+          attempts++;
+          return new Response(null, {
+            status,
+            headers: status === 429 ? { "retry-after": "60" } : {},
+          });
+        }),
+      ),
+    );
+  });
 }

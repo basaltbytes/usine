@@ -7,7 +7,7 @@ import { RepositoryPollFailure, repositoryFailureLogFields } from "./cycle.ts";
 import { revokeMissingItem } from "./loop-evaluation.ts";
 import { markItemGone } from "./repository-sync.ts";
 
-/** The minimum time between open issue checks of a repository. */
+/** The cooldown after a successful open issue check of a repository. */
 export const OPEN_ISSUE_CHECK_INTERVAL = Duration.minutes(10);
 
 /** The result of one open issue check in a poll cycle. */
@@ -46,7 +46,7 @@ export const checkOpenIssues = Effect.fn("PollingTriggers.checkOpenIssues")(func
   if (Result.isFailure(result)) {
     const error = result.failure;
     if (error._tag === "GitHubRateLimitError") {
-      yield* Effect.logWarning("Open-issue check rate-limited; checking again in 10 minutes", {
+      yield* Effect.logWarning("Open-issue check rate-limited; retrying after GitHub backoff", {
         repository: repository.name,
         openIssues: open.length,
         operation: error.operation,
@@ -54,7 +54,7 @@ export const checkOpenIssues = Effect.fn("PollingTriggers.checkOpenIssues")(func
       });
       return { ...NO_OPEN_ISSUE_CHECK, nextPollAt: Option.some(error.retryAt) };
     }
-    yield* Effect.logError("Open-issue check failed; checking again in 10 minutes", {
+    yield* Effect.logError("Open-issue check failed; retrying next poll cycle", {
       repository: repository.name,
       openIssues: open.length,
       ...repositoryFailureLogFields(error),

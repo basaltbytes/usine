@@ -1293,6 +1293,8 @@ describe("Operator", () => {
         });
         const cycle = yield* Effect.gen(function* () {
           const polling = yield* PollingTriggers;
+          assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
+          assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
           return yield* polling.poll(instance);
         }).pipe(Effect.provide(pollingTestLayer(github)), Effect.withLogger(logger));
         const failure = cycle.failures[0];

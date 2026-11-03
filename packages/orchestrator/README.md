@@ -24,7 +24,7 @@ actors when present. Existing runs retain their original decision.
 
 `Operator.overview(instance)` keeps the latest polling and schedule failures visible after sibling work continues. Concurrent reads at one durable revision share a computation.
 
-GitHub poll failures identify the failed operation in logs and Needs attention. Invalid responses include the decode detail, limited to 500 characters. Logs also include structured `operation` and `detail` fields when the error provides them.
+GitHub request failures appear in Needs attention after three consecutive failed repository poll cycles in this process. Deferred snapshot failures count toward this threshold while sibling items continue processing. CI observation failures also count for persisted waits whose repositories are no longer configured. The next successful cycle clears the entry and resets the count; rate-limit pauses do not increment or reset it. Configuration, expression, and persistence failures remain visible immediately. GitHub poll failures identify the failed operation in logs and Needs attention. Invalid responses include the decode detail, limited to 500 characters. Logs also include structured `operation` and `detail` fields when the error provides them.
 
 Approval needs include the item's number, title, and GitHub link even when it has no board card. The overview reads those details from the stored item using the run's item key. Schedule runs and items without a readable stored projection have no item link.
 
@@ -114,7 +114,7 @@ Each cycle first refreshes every repo's label catalog, which supplies lane color
 
 It then gets changed items from `GitHubPolling`, fetches one snapshot each, updates the projection, and evaluates each stream-matching loop's CEL `if:`. A match renders every `{{ CEL expression }}` in the loop body, resolves the agent and parent model, and stores that immutable context with the event, whose identity covers the loop, canonical repo, item number, and timestamp-free content hash. An unmatch revokes the loop's pending or approval-waiting work on the item. Repos without matching loops are still polled for the board.
 
-Change detection never lists deleted or transferred issues, so at most every 10 minutes per repo, the cycle checks every stored open issue with `GitHubPolling.missingIssues`. Missing ones are marked gone, leaving the open lanes, and their pending or approval-waiting work is revoked. A failed check is logged and reported, and retried 10 minutes later.
+Change detection never lists deleted or transferred issues, so the cycle checks every stored open issue with `GitHubPolling.missingIssues`. A successful check starts a 10-minute cooldown per repo. Missing issues are marked gone, leaving the open lanes, and their pending or approval-waiting work is revoked. A failed check is logged and retried on the next poll cycle, respecting GitHub's backoff. GitHub request failures appear in Needs attention after three consecutive failed cycles and clear after recovery.
 
 A pull request's mergeability changes when its base branch moves, without a change that detection lists. The cursor keeps each open pull request with its base branch, `mergeable`, and whether checks are unsettled, plus the head of each base branch. Each cycle reads every base head with `GitHubPolling.baseRefHead`, and fetches an open pull request again when its base head moved or can't be read, or while its `mergeable` is `UNKNOWN`. The first read of a head counts as moved.
 

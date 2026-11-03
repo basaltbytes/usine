@@ -974,8 +974,11 @@ describe("PollingTriggers", () => {
       const secondRun = claimedRun(degraded);
       assert.notStrictEqual(secondRun, firstRun);
       yield* waitForState(engine, secondRun, "Waiting");
+      assert.deepStrictEqual(degraded.failures, []);
+      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
+      const sustained = yield* polling.poll(instance);
       assert.deepStrictEqual(
-        degraded.failures
+        sustained.failures
           .map(({ repository, errorTag }) => ({ repository, errorTag }))
           .sort((left, right) => left.repository.localeCompare(right.repository)),
         [
@@ -1316,6 +1319,10 @@ describe("PollingTriggers", () => {
       const polling = yield* PollingTriggers;
       // One repository's typed failure never stops its siblings: the cycle
       // reports the failure and the healthy repository still submits.
+      const first = yield* polling.poll(instance);
+      assert.deepStrictEqual(first.failures, []);
+      assert.strictEqual(first.submissions.length, 1);
+      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
       const cycle = yield* polling.poll(instance);
       assert.strictEqual(cycle.repositories, 2);
       assert.strictEqual(cycle.failures.length, 1);
@@ -1334,10 +1341,12 @@ describe("PollingTriggers", () => {
       // A repository whose poll fails keeps the time its last poll completed.
       failing = false;
       yield* TestClock.adjust("1 minute");
-      yield* polling.poll(instance);
+      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
       failing = true;
       yield* TestClock.adjust("1 minute");
-      assert.deepStrictEqual(completions(yield* polling.poll(instance)), [
+      const resumed = yield* polling.poll(instance);
+      assert.deepStrictEqual(resumed.failures, []);
+      assert.deepStrictEqual(completions(resumed), [
         ["basaltbytes/failing", "1970-01-01T00:01:00.000Z"],
         ["basaltbytes/healthy", "1970-01-01T00:02:00.000Z"],
       ]);

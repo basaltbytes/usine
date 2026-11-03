@@ -534,7 +534,7 @@ describe("Loop evaluation failures", () => {
     }),
   );
 
-  it.effect("retries only the Items whose snapshots failed with a GitHub server error", () =>
+  it.effect("reports sustained snapshot failures while retrying only the deferred Items", () =>
     Effect.gen(function* () {
       submissions.length = 0;
       const cursors = memoryCursorStore();
@@ -554,7 +554,7 @@ describe("Loop evaluation failures", () => {
         snapshot: (_repository, item) =>
           Effect.gen(function* () {
             fetched.push(item.number);
-            if (unavailable.delete(item.number))
+            if (unavailable.has(item.number))
               return yield* new GitHubApiError({
                 operation: "fetch-issue-snapshot",
                 status: Option.some(504),
@@ -581,14 +581,24 @@ describe("Loop evaluation failures", () => {
         assert.deepStrictEqual(saved.cursor, advanced);
         assert.deepStrictEqual(storedUnfetchedItems(cursors), [3, 5, 7]);
 
-        fetched.length = 0;
         const second = yield* polling.poll(instance);
         assert.deepStrictEqual(second.failures, []);
+        const third = yield* polling.poll(instance);
+        assert.strictEqual(third.failures.length, 3);
+        assert(third.failures.every(({ errorTag }) => errorTag === "GitHubApiError"));
+        assert(third.failures.every(({ message }) => message.includes("fetch-issue-snapshot")));
+        assert.deepStrictEqual(storedUnfetchedItems(cursors), [3, 5, 7]);
+        assert.strictEqual(third.submissions.length, 0);
+
+        unavailable.clear();
+        fetched.length = 0;
+        const recovered = yield* polling.poll(instance);
+        assert.deepStrictEqual(recovered.failures, []);
         assert.deepStrictEqual(
           [...fetched].sort((left, right) => left - right),
           [3, 5, 7],
         );
-        assert.strictEqual(second.submissions.length, 3);
+        assert.strictEqual(recovered.submissions.length, 3);
         assert.deepStrictEqual(storedUnfetchedItems(cursors), []);
 
         fetched.length = 0;
@@ -634,12 +644,14 @@ describe("Loop evaluation failures", () => {
 
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        const cycle = yield* polling.poll(instance);
-        assert.deepStrictEqual(
-          cycle.failures.map(({ errorTag }) => errorTag),
-          ["GitHubApiError"],
-        );
-        assert.strictEqual(cursors.stored.size, 0);
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          const cycle = yield* polling.poll(instance);
+          assert.deepStrictEqual(
+            cycle.failures.map(({ errorTag }) => errorTag),
+            attempt === 3 ? ["GitHubApiError"] : [],
+          );
+          assert.strictEqual(cursors.stored.size, 0);
+        }
       }).pipe(Effect.provide(processLayer(github, cursors.store)));
     }),
   );

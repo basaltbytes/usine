@@ -27,6 +27,7 @@ import {
   latestPollAt,
   repositoryFailureLogFields,
 } from "./polling/cycle.ts";
+import type { RepositoryOutcome } from "./polling/failure-streaks.ts";
 import { observeItem } from "./polling/repository-sync.ts";
 
 /** Settles persisted CI waits during polling and webhook hints, without worker reservations. */
@@ -38,6 +39,8 @@ export class CiMonitor extends Context.Service<
       repository: Option.Option<RepositoryName>,
     ) => Effect.Effect<
       {
+        /** Settled observations and paused repositories with persisted CI waits. */
+        readonly outcomes: ReadonlyArray<RepositoryOutcome>;
         readonly failures: ReadonlyArray<RepositoryPollFailure>;
         readonly nextPollAt: Option.Option<DateTime.Utc>;
       },
@@ -295,8 +298,18 @@ export class CiMonitor extends Context.Service<
           );
           const failures: Array<RepositoryPollFailure> = [];
           const backoffs: Array<Option.Option<DateTime.Utc>> = [];
+          const polled = new Map<string, RepositoryName>();
+          const remaining = new Map<string, number>();
+          for (const wait of waits) {
+            const key = canonicalRepositoryName(wait.repository);
+            remaining.set(key, (remaining.get(key) ?? 0) + 1);
+          }
           for (const wait of waits) {
             const result = yield* reconcileOne(instance, wait).pipe(Effect.result);
+            const key = canonicalRepositoryName(wait.repository);
+            const pending = (remaining.get(key) ?? 0) - 1;
+            remaining.set(key, pending);
+            if (pending === 0) polled.set(key, wait.repository);
             if (Result.isSuccess(result)) continue;
             const error: RepositoryPollError = result.failure;
             yield* Effect.logError("CI observation failed; this wait will be retried", {
@@ -312,11 +325,27 @@ export class CiMonitor extends Context.Service<
               }),
             );
             if (error._tag === "GitHubRateLimitError") {
+              polled.delete(key);
               backoffs.push(Option.some(error.retryAt));
               break;
             }
           }
-          return { failures, nextPollAt: latestPollAt(backoffs) };
+          return {
+            outcomes: [
+              ...new Map(
+                waits.map((wait) => [canonicalRepositoryName(wait.repository), wait.repository]),
+              ).entries(),
+            ].map(([key, repository]): RepositoryOutcome => ({
+              _tag: polled.has(key) ? "Polled" : "RateLimited",
+              source: "Ci",
+              repository,
+              failures: failures.filter(
+                (failure) => canonicalRepositoryName(failure.repository) === key,
+              ),
+            })),
+            failures,
+            nextPollAt: latestPollAt(backoffs),
+          };
         }),
       };
     }),

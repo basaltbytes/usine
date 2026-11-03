@@ -147,10 +147,7 @@ describe("PollingTriggers label preflight", () => {
 
       assert.deepStrictEqual(operations, ["changes"]);
       assert.deepStrictEqual(cycle.preflightFindings, []);
-      assert.deepStrictEqual(
-        cycle.failures.map(({ errorTag }) => errorTag),
-        ["GitHubApiError"],
-      );
+      assert.deepStrictEqual(cycle.failures, []);
     }).pipe(Effect.provide(pollingTestLayer(github, [], writer)));
   });
 
@@ -181,8 +178,11 @@ describe("PollingTriggers label preflight", () => {
       const polling = yield* PollingTriggers;
       const cycle = yield* polling.poll(instance);
 
+      assert.deepStrictEqual(cycle.failures, []);
+      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
+      const sustained = yield* polling.poll(instance);
       assert.deepStrictEqual(
-        cycle.failures.map(({ message }) => message),
+        sustained.failures.map(({ message }) => message),
         [
           "list-repository-labels: catalog request failed",
           "poll-repository-changes: change detection failed",
@@ -192,19 +192,28 @@ describe("PollingTriggers label preflight", () => {
     }).pipe(Effect.provide(pollingTestLayer(github)));
   });
 
-  it.effect("defers provisioning while the catalog request is rate-limited", () => {
+  it.effect("preserves catalog failures and defers provisioning while rate-limited", () => {
     const retryAt = DateTime.makeUnsafe("2026-09-03T12:03:00Z");
+    let rateLimited = false;
     const github: GitHubPolling["Service"] = {
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
-        Effect.fail(
-          new GitHubRateLimitError({
-            operation: "list-repository-labels",
-            retryAt,
-            message: "catalog rate-limited",
-          }),
-        ),
+        rateLimited
+          ? Effect.fail(
+              new GitHubRateLimitError({
+                operation: "list-repository-labels",
+                retryAt,
+                message: "catalog rate-limited",
+              }),
+            )
+          : Effect.fail(
+              new GitHubApiError({
+                operation: "list-repository-labels",
+                status: Option.some(502),
+                message: "catalog request failed",
+              }),
+            ),
       changes: (_repository, cursor) =>
         Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
@@ -216,8 +225,15 @@ describe("PollingTriggers label preflight", () => {
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
+      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
+      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
+      const sustained = yield* polling.poll(instance);
+      assert.lengthOf(sustained.failures, 1);
+      assert.include(sustained.failures[0]?.message ?? "", "list-repository-labels");
+      rateLimited = true;
       const cycle = yield* polling.poll(instance);
 
+      assert.deepStrictEqual(cycle.failures, sustained.failures);
       assert.deepStrictEqual(cycle.preflightFindings, []);
       assert(Option.isSome(cycle.nextPollAt));
       assert.strictEqual(

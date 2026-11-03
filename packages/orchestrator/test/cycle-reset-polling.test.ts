@@ -154,7 +154,7 @@ describe("cycle reset polling", () => {
         assert.deepStrictEqual(seen[1], fresh);
         pending = [reset];
         fails = true;
-        assert.strictEqual((yield* polling.poll(instance)).failures.length, 1);
+        assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
         assert.deepStrictEqual(seen[2], PollCursor.empty);
         assert.deepStrictEqual(pending, [reset]);
         assert.deepStrictEqual(acknowledgements, []);

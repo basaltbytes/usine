@@ -15,6 +15,7 @@ import {
 } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../github-app.ts";
+import { isTransientStatus, retryTransientRequest } from "../retry.ts";
 import { queryGraphql } from "../graphql.ts";
 import {
   API_ROOT,
@@ -279,10 +280,15 @@ export class GitHubPolling extends Context.Service<
         operation: GitHubOperation,
         request: HttpClientRequest.HttpClientRequest,
       ) {
-        return yield* http
+        yield* Effect.annotateCurrentSpan({ operation });
+        const response = yield* http
           .execute(request)
           .pipe(Effect.mapError((error) => transportError(operation, error)));
-      });
+        if (isTransientStatus(response.status)) {
+          return yield* statusError(operation, response, yield* Clock.currentTimeMillis);
+        }
+        return response;
+      }, retryTransientRequest);
 
       const changesPage = Effect.fn("GitHubPolling.changesPage")(function* (url: string) {
         const token = yield* app.installationToken();

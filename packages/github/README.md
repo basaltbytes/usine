@@ -81,6 +81,10 @@ the snapshot keeps the events found and omits labels whose history is unavailabl
 Older stored payloads decode with an empty map. Actor changes affect the content
 hash; timestamp-only changes do not.
 
+Polling REST reads and GraphQL queries retry HTTP 502, 503, and 504 responses and GraphQL server errors up to twice. Delays are approximately one and three seconds, with 20% jitter. Each retry logs a warning with the operation, error tag, retry number, and delay. HTTP failures also include the response status. Other HTTP errors and invalid payloads return immediately; rate-limit responses retain their existing backoff.
+
+GraphQL `NOT_FOUND` errors leave null fields for decoding and do not prevent retries of server errors in the same response. Permission and validation errors fail immediately, including in mixed responses.
+
 Change detection separates `nextPollAt`, the earliest next conditional poll, from `backoffUntil`, a delay from `Retry-After` or rate-limit pressure. Self-write hints can fetch a snapshot within the poll interval while respecting backoff.
 
 The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's event ledger deduplicates. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`.
@@ -125,6 +129,6 @@ Enable the App webhook to record deliveries. A delivery with a failed HTTP statu
 
 ## CI checks
 
-`GitHubChecks` from `/checks` reads the live PR head and aggregate check state. When checks are absent and GitHub reports `CONFLICTING`, the snapshot state is `conflict`. Missing checks otherwise stay pending, including while mergeability is `UNKNOWN`. Failure diagnostics include failed check and step names and up to 12,000 characters from four Actions jobs. The excerpt reads numbered step files when available, or separates the archive’s combined job log with step timestamps and matching runner headers. It keeps context around failure markers plus each failed step’s final output. When combined step boundaries are ambiguous, diagnostics use the check output. Legacy commit statuses provide their context and description. Grant the App **Actions: read-only** to read job logs. Without this optional permission, diagnostics use the check output. Rate limits propagate to the caller's polling backoff. `GitHubChecks.layer` needs `GitHubApp` and an Effect HTTP client.
+`GitHubChecks` from `/checks` reads the live PR head and aggregate check state. When checks are absent and GitHub reports `CONFLICTING`, the snapshot state is `conflict`. Missing checks otherwise stay pending, including while mergeability is `UNKNOWN`. Failure diagnostics include failed check and step names and up to 12,000 characters from four Actions jobs. The excerpt reads numbered step files when available, or separates the archive’s combined job log with step timestamps and matching runner headers. It keeps context around failure markers plus each failed step’s final output. When combined step boundaries are ambiguous, diagnostics use the check output. Legacy commit statuses provide their context and description. Grant the App **Actions: read-only** to read job logs. Without this optional permission, diagnostics use the check output. CI REST reads, including check runs, commit statuses, job metadata, and log archives, use the same bounded retry policy as polling reads. Rate limits propagate to the caller's polling backoff. `GitHubChecks.layer` needs `GitHubApp` and an Effect HTTP client.
 
 `ItemLabelMutation.add` and `remove` can each be empty. Removal-only actions send no additions request, and repeated removals ignore missing labels.
