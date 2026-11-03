@@ -23,7 +23,7 @@ import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { GitHubApiError } from "@usine/github/github-app";
+import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
   ChangedIssue,
   ContentHash,
@@ -235,10 +235,11 @@ describe("PollingTriggers open-issue check", () => {
   );
 
   it.effect(
-    "retries failed open-issue checks each cycle and applies the cooldown after recovery",
+    "keeps failed open-issue checks due through rate limits and applies the cooldown after recovery",
     () => {
       const instance = instanceWith([]);
       let requests = 0;
+      const retryAt = DateTime.makeUnsafe(5 * 60_000);
       const github: GitHubPolling["Service"] = {
         labels: () => Effect.succeed(emptyCatalog),
         changes: (_, cursor) =>
@@ -246,17 +247,23 @@ describe("PollingTriggers open-issue check", () => {
         snapshot: () => Effect.die("no Item changed"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () =>
-          Effect.suspend(() => {
+          Effect.gen(function* () {
             requests += 1;
-            return requests <= 3 || (requests >= 5 && requests <= 7)
-              ? Effect.fail(
-                  new GitHubApiError({
-                    operation: "find-missing-issues",
-                    status: Option.some(502),
-                    message: "GitHub returned HTTP status 502",
-                  }),
-                )
-              : Effect.succeed([]);
+            if (requests === 4) {
+              return yield* new GitHubRateLimitError({
+                operation: "find-missing-issues",
+                retryAt,
+                message: "GitHub rate limit reached",
+              });
+            }
+            if (requests <= 3 || (requests >= 6 && requests <= 8)) {
+              return yield* new GitHubApiError({
+                operation: "find-missing-issues",
+                status: Option.some(502),
+                message: "GitHub returned HTTP status 502",
+              });
+            }
+            return [];
           }),
       };
       const items: ItemProjectionReader["Service"] = {
@@ -282,24 +289,30 @@ describe("PollingTriggers open-issue check", () => {
         assert.strictEqual(sustained.failures[0]?.errorTag, "GitHubApiError");
         assert.include(sustained.failures[0]?.message ?? "", "find-missing-issues");
 
-        const recovered = yield* polling.poll(instance);
+        const paused = yield* polling.poll(instance);
         assert.strictEqual(requests, 4);
+        assert.deepStrictEqual(paused.failures, sustained.failures);
+        assert.deepStrictEqual(paused.nextPollAt, Option.some(retryAt));
+
+        yield* TestClock.adjust("3 minutes");
+        const recovered = yield* polling.poll(instance);
+        assert.strictEqual(requests, 5);
         assert.deepStrictEqual(recovered.failures, []);
 
         yield* TestClock.adjust("9 minutes");
         const skipped = yield* polling.poll(instance);
-        assert.strictEqual(requests, 4);
+        assert.strictEqual(requests, 5);
         assert.deepStrictEqual(skipped.failures, []);
 
         yield* TestClock.adjust("1 minute");
         for (let attempt = 1; attempt <= 3; attempt += 1) {
           const cycle = yield* polling.poll(instance);
-          assert.strictEqual(requests, 4 + attempt);
+          assert.strictEqual(requests, 5 + attempt);
           assert.strictEqual(cycle.failures.length, attempt === 3 ? 1 : 0);
         }
 
         const recoveredAgain = yield* polling.poll(instance);
-        assert.strictEqual(requests, 8);
+        assert.strictEqual(requests, 9);
         assert.deepStrictEqual(recoveredAgain.failures, []);
       }).pipe(
         Effect.provide(

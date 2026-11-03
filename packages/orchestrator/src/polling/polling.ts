@@ -111,6 +111,7 @@ interface RepositoryCycle {
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
+  readonly rateLimited: boolean;
 }
 
 const cursorKey = (repository: ManagedRepo): CursorKey =>
@@ -452,6 +453,8 @@ export class PollingTriggers extends Context.Service<
             ],
             preflightFindings: preflight.preflightFindings,
             nextPollAt: latestPollAt([nextPollAt, openIssueCheck.nextPollAt]),
+            rateLimited:
+              Option.isSome(preflight.nextPollAt) || Option.isSome(openIssueCheck.nextPollAt),
           } satisfies RepositoryCycle;
         }).pipe(
           Effect.mapError((error): InterruptedRepositoryCycle => ({
@@ -529,7 +532,13 @@ export class PollingTriggers extends Context.Service<
           const polled: Array<RepositoryName> = [];
           for (const { repository, result } of settled) {
             if (Result.isSuccess(result)) {
-              polled.push(repository.repository.name);
+              if (result.success.rateLimited) {
+                yield* Effect.logInfo("Rate-limited repository poll preserved its failure count", {
+                  repository: repository.repository.name,
+                });
+              } else {
+                polled.push(repository.repository.name);
+              }
               cycles.push(result.success);
               preflightFindings.push(...result.success.preflightFindings);
               yield* Ref.update(completedPolls, (current) =>

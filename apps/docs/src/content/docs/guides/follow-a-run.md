@@ -47,6 +47,6 @@ Polling retries GitHub HTTP 502, 503, and 504 responses and GraphQL server error
 
 GitHub request failures appear in **Needs attention** after three consecutive failed repository poll cycles in the running process. A successful cycle clears the entry and resets the count; rate-limit pauses do not increment or reset it. Configuration, expression, and persistence failures appear immediately. GitHub poll failures include the failed operation, such as `poll-repository-changes`. Invalid responses also show the decode detail, limited to 500 characters. The corresponding error log includes structured `operation` and `detail` fields when available. Use these diagnostics to identify the GitHub call and the response field that failed to decode.
 
-Open-issue checks run at most once every 10 minutes after a successful check. Failed checks retry on the next poll cycle, respecting GitHub's backoff, so repeated failures appear in **Needs attention** until the check succeeds.
+Open-issue checks run at most once every 10 minutes after a successful check. Failed checks retry on the next poll cycle, respecting GitHub's backoff, so repeated failures appear in **Needs attention** until the check succeeds. A rate-limited open-issue check preserves the failure count and any existing entry until polling resumes.
 
 A GitHub server error (HTTP 5xx) for one item's snapshot doesn't fail the poll. usine logs a warning with the item, operation, and status, processes the other items, and fetches that item again in the next poll.
