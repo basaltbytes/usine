@@ -1,4 +1,4 @@
-import { Deferred, Effect, Option, Schema } from "effect";
+import { Deferred, Effect, Option, Schema, type Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { ConnectionError, SqlError, classifySqliteError } from "effect/sql/SqlError";
 import { Worker } from "node:worker_threads";
@@ -24,11 +24,25 @@ export const connectionError = (cause: unknown) =>
 const Rows = Schema.Array(Schema.Record(Schema.String, Schema.Unknown));
 const Values = Schema.Array(Schema.Array(Schema.Unknown));
 
+export interface ReadConnection {
+  readonly rows: (
+    sql: string,
+    params: ReadonlyArray<unknown>,
+  ) => Effect.Effect<typeof Rows.Type, SqlError>;
+  readonly values: (
+    sql: string,
+    params: ReadonlyArray<unknown>,
+  ) => Effect.Effect<typeof Values.Type, SqlError>;
+  readonly failure: Effect.Effect<never, SqlError>;
+}
+
 export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* (
   filename: string,
   spawn: typeof spawnWorker,
-) {
+  onStopped: Effect.Effect<void>,
+): Effect.fn.Return<ReadConnection, SqlError, Scope.Scope> {
   yield* Effect.annotateCurrentSpan({ filename });
+  const run = Effect.runForkWith(yield* Effect.context<never>());
   const pending = new Map<number, (result: Effect.Effect<unknown, SqlError>) => void>();
   let stopped: SqlError | undefined;
   const failure = yield* Deferred.make<never, SqlError>();
@@ -36,6 +50,8 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
   const stop = (cause: unknown) => {
     if (stopped !== undefined) return;
     stopped = connectionError(cause);
+    // Publish fallback before resuming failed reads.
+    run(onStopped);
     Deferred.doneUnsafe(failure, Effect.fail(stopped));
     for (const resume of pending.values()) resume(Effect.fail(stopped));
     pending.clear();
@@ -114,5 +130,5 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
         Schema.decodeUnknownEffect(Values)(result).pipe(Effect.mapError(connectionError)),
       ),
     );
-  return { rows, values, available: () => stopped === undefined, failure: Deferred.await(failure) };
+  return { rows, values, failure: Deferred.await(failure) };
 });

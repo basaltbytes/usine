@@ -179,7 +179,7 @@ it.live(
 );
 
 it.live(
-  "a worker killed mid-read fails that read, serves reads on the writer, and recovers after probing",
+  "a killed reader exposes worker, fallback, respawning, and worker states and resets its backoff",
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -218,7 +218,8 @@ it.live(
       const sql = reader.client;
       yield* sql`CREATE TABLE shared_value AS SELECT 42 AS value`;
       yield* sql`CREATE TEMP TABLE writer_only AS SELECT 1 AS value`;
-      assert.strictEqual(yield* reader.state, "worker");
+      const states = [yield* reader.state];
+      assert.strictEqual(states[0], "worker");
       const slow = yield* sql`WITH RECURSIVE numbers(i) AS (
       VALUES(1) UNION ALL SELECT i + 1 FROM numbers WHERE i < 32000000
     ) SELECT sum(i) AS total FROM numbers`.pipe(Effect.result, Effect.forkScoped);
@@ -228,7 +229,8 @@ it.live(
       const interrupted = yield* Fiber.join(slow);
       assert(interrupted._tag === "Failure");
       assert.strictEqual(interrupted.failure.reason._tag, "ConnectionError");
-      assert.strictEqual(yield* reader.state, "fallback");
+      states.push(yield* reader.state);
+      assert.strictEqual(states[1], "fallback");
       assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
       assert.deepStrictEqual(yield* sql`SELECT value FROM writer_only`.values, [[1]]);
       assert.deepStrictEqual(yield* sql`SELECT value FROM writer_only`.raw, [{ value: 1 }]);
@@ -239,21 +241,37 @@ it.live(
         [{ value: 9007199254740993n }],
       );
       yield* Deferred.await(respawned);
-      assert.strictEqual(yield* reader.state, "respawning");
+      states.push(yield* reader.state);
+      assert.strictEqual(states[2], "respawning");
       assert.deepStrictEqual(yield* sql`SELECT value FROM writer_only`, [{ value: 1 }]);
       Atomics.store(gate, 0, 1);
       Atomics.notify(gate, 0);
+      states.push(
+        yield* reader.state.pipe(
+          Effect.repeat({
+            until: (state) => state === "worker",
+            schedule: Schedule.spaced("10 millis"),
+          }),
+          Effect.timeout("5 seconds"),
+        ),
+      );
+      assert.deepStrictEqual(states, ["worker", "fallback", "respawning", "worker"]);
+      assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
+      const workerRead = yield* sql`SELECT value FROM writer_only`.pipe(Effect.flip);
+      assert.strictEqual(workerRead._tag, "SqlError");
+      assert.strictEqual(yield* reader.state, "worker");
+      const recovered = workers[1];
+      assert(recovered !== undefined);
+      yield* Effect.promise(() => recovered.terminate());
+      assert.strictEqual(yield* reader.state, "fallback");
       yield* reader.state.pipe(
         Effect.repeat({
           until: (state) => state === "worker",
           schedule: Schedule.spaced("10 millis"),
         }),
-        Effect.timeout("5 seconds"),
+        Effect.timeout("3 seconds"),
       );
       assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
-      const workerRead = yield* sql`SELECT value FROM writer_only`.pipe(Effect.flip);
-      assert.strictEqual(workerRead._tag, "SqlError");
-      assert.strictEqual(yield* reader.state, "worker");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
 );
 
