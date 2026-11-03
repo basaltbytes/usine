@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { SshDestination, WorkerName } from "@usine/core/worker";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
@@ -72,7 +72,9 @@ describe("SSH Workers added and removed while the executor runs", () => {
         );
       }).pipe(
         Effect.scoped,
-        Effect.provide([gatewayRuntime(machine, mintingProvider(), gateway), logs.layer]),
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -118,7 +120,9 @@ describe("SSH Workers added and removed while the executor runs", () => {
         assert.include(logged, "Closed the forward to the Gateway's admin API");
       }).pipe(
         Effect.scoped,
-        Effect.provide([gatewayRuntime(machine, mintingProvider(), gateway), logs.layer]),
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );

@@ -262,7 +262,10 @@ it.effect(
           acknowledgements.undo(AttentionKey.make(acknowledgement), [audience]),
         );
       }).pipe(Effect.provide(services));
-    }).pipe(Effect.provide([NodeServices.layer, changeBusLayer]), Effect.scoped),
+    }).pipe(
+      Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(changeBusLayer))),
+      Effect.scoped,
+    ),
 );
 
 it.effect("restores only the latest future pool reset deadlines after a store restart", () =>
@@ -346,5 +349,8 @@ it.effect("restores only the latest future pool reset deadlines after a store re
         assert.strictEqual((yield* bus.open).revision, beforeRestart + 2);
       }),
     );
-  }).pipe(Effect.provide([NodeServices.layer, changeBusLayer]), Effect.scoped),
+  }).pipe(
+    Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(changeBusLayer))),
+    Effect.scoped,
+  ),
 );

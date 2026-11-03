@@ -3,7 +3,7 @@ import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import type { ContainerOutOfMemoryKills } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { completes, type StubParent } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber, Option } from "effect";
+import { Deferred, Effect, Fiber, Option, Layer } from "effect";
 import { Executor } from "../../src/executor.ts";
 import { ATTEMPT_IMAGE } from "../../src/ssh/ssh.ts";
 import { fakeGateway, gatewayRuntime } from "./gateway/support.ts";
@@ -86,7 +86,10 @@ describe("rootless Podman", () => {
           (line) => line.includes("--entrypoint") || line.includes("volume create"),
         );
         assert.isAbove(firstContainer, pull);
-      }).pipe(Effect.scoped, Effect.provide([runtime(machine, mintingProvider()), logs.layer]));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+      );
     },
   );
 
@@ -119,7 +122,9 @@ describe("rootless Podman", () => {
       const probe = machine.state.calls.find(({ line }) => line.includes("/sys/fs/cgroup/cpu.max"));
       assert.match(probe?.container ?? "", /^usine-preflight-/u);
       assert.strictEqual(machine.state.containers.size, 0);
-    }).pipe(Effect.provide([runtime(machine, mintingProvider()), logs.layer]));
+    }).pipe(
+      Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+    );
   });
 
   it.effect.each([
@@ -311,7 +316,10 @@ describe("rootless Podman", () => {
         assert.deepStrictEqual(kills, []);
         assert.include(logs.lines.join("\n"), "Could not record the processes the kernel killed");
         assert.strictEqual(machine.state.containers.size, 0);
-      }).pipe(Effect.scoped, Effect.provide([runtime(machine, mintingProvider()), logs.layer]));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+      );
     },
   );
 

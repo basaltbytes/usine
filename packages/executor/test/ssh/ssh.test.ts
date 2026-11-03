@@ -177,7 +177,10 @@ describe("SSH Worker", () => {
         }
         assert.notInclude(JSON.stringify(given.environment), TOKEN_PREFIX);
         assert.notInclude(logs.lines.join("\n"), TOKEN_PREFIX);
-      }).pipe(Effect.scoped, Effect.provide([runtime(machine, credentials, parent), logs.layer]));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, credentials, parent).pipe(Layer.provideMerge(logs.layer))),
+      );
     },
   );
 
@@ -790,7 +793,7 @@ describe("SSH Worker", () => {
       assert.notInclude(reported, TOKEN_PREFIX);
       assert.notInclude(logs.lines.join("\n"), TOKEN_PREFIX);
       assert.strictEqual(machine.state.credentials.size, 0);
-    }).pipe(Effect.provide([runtime(machine, credentials), logs.layer]));
+    }).pipe(Effect.provide(runtime(machine, credentials).pipe(Layer.provideMerge(logs.layer))));
   });
 
   it.effect("preflight reports an unreachable machine or root without changing either", () => {
@@ -864,7 +867,7 @@ describe("SSH Worker", () => {
         assert.include(withoutSwap.message, "has no swap, and max_concurrent_attempts is 2");
         const shortWithoutSwap = yield* executor.preflight(WORKER, [], 5).pipe(Effect.flip);
         assert.include(shortWithoutSwap.message, "Set max_concurrent_attempts to 1 or less");
-      }).pipe(Effect.provide([runtime(machine, credentials), logs.layer]));
+      }).pipe(Effect.provide(runtime(machine, credentials).pipe(Layer.provideMerge(logs.layer))));
     },
   );
 });

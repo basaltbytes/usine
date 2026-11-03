@@ -58,6 +58,9 @@
     "instanceOfSchema": 1,
     "strictBooleanExpressions": 4
   },
+  "src/preflight/preflight.ts": {
+    "strictEffectProvide": 1
+  },
   "src/prompt.ts": {
     "globalJson": 1
   },

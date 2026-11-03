@@ -204,11 +204,7 @@ describe("Attempt transcripts", () => {
           );
           yield* database.run(sql`DROP TRIGGER reject_usage`).execute();
         }
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-        ),
-      );
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -269,11 +265,7 @@ describe("Attempt transcripts", () => {
         assert(entry !== undefined);
         assert.strictEqual(entry.envelope.version, version);
         assert.strictEqual(entry.envelope.payload._tag, "Interrupted");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-        ),
-      );
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -353,11 +345,7 @@ describe("Attempt transcripts", () => {
           assert.strictEqual(entry.envelope.target._tag, "Parent");
         }
         assert.strictEqual(entry.envelope.payload._tag, "Steer");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-        ),
-      );
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

@@ -170,6 +170,9 @@ it("answers the version while recovering 400 finished attempts without per-attem
         "runtime routes replace startup responses on the same listener",
       );
       assert.strictEqual(ready.headers["x-frame-options"], "DENY");
-    }).pipe(Effect.scoped, Effect.provide([NodeHttpServer.layerTest, NodeServices.layer])),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer))),
+    ),
   );
 }, 30_000);

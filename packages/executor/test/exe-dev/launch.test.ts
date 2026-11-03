@@ -848,10 +848,11 @@ describe("exe.dev launch", () => {
           );
         }).pipe(
           Effect.scoped,
-          Effect.provide([
-            runtime(ssh.layer, completes, storage, parentFailed),
-            Logger.layer([logger]),
-          ]),
+          Effect.provide(
+            runtime(ssh.layer, completes, storage, parentFailed).pipe(
+              Layer.provideMerge(Logger.layer([logger])),
+            ),
+          ),
         );
         assert.deepStrictEqual(recorded, []);
         const issued = ssh.state.commands.slice(restart);

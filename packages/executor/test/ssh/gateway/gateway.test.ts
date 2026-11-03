@@ -24,7 +24,7 @@ import {
   SettingsInForce,
   UpstreamBase,
 } from "@usine/gateway";
-import { DateTime, Deferred, Effect, Fiber, Option, Redacted } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Option, Redacted, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../../src/remote/commands.ts";
@@ -211,7 +211,11 @@ describe("SSH Worker behind a Gateway", () => {
         assert.notInclude(logs.lines.join("\n"), callerToken);
       }).pipe(
         Effect.scoped,
-        Effect.provide([gatewayRuntime(machine, credentials, gateway, { parent }), logs.layer]),
+        Effect.provide(
+          gatewayRuntime(machine, credentials, gateway, { parent }).pipe(
+            Layer.provideMerge(logs.layer),
+          ),
+        ),
       );
     },
   );
@@ -300,7 +304,9 @@ describe("SSH Worker behind a Gateway", () => {
           assert.include(logged, line);
       }).pipe(
         Effect.scoped,
-        Effect.provide([gatewayRuntime(machine, credentials, gateway), logs.layer]),
+        Effect.provide(
+          gatewayRuntime(machine, credentials, gateway).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -376,7 +382,9 @@ describe("SSH Worker behind a Gateway", () => {
         yield* prepared.launch(sink);
       }).pipe(
         Effect.scoped,
-        Effect.provide([gatewayRuntime(machine, credentials, gateway), logs.layer]),
+        Effect.provide(
+          gatewayRuntime(machine, credentials, gateway).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -405,7 +413,9 @@ describe("SSH Worker behind a Gateway", () => {
         yield* eventually(() => tries() >= before + 5, "1 minute");
       }).pipe(
         Effect.scoped,
-        Effect.provide([gatewayRuntime(machine, credentials, gateway), logs.layer]),
+        Effect.provide(
+          gatewayRuntime(machine, credentials, gateway).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -441,7 +451,9 @@ describe("SSH Worker behind a Gateway", () => {
         assert.include(third.message, unanswered("1970-01-01T00:02:00.000Z"));
       }).pipe(
         Effect.scoped,
-        Effect.provide([gatewayRuntime(machine, credentials, gateway), logs.layer]),
+        Effect.provide(
+          gatewayRuntime(machine, credentials, gateway).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -705,7 +717,9 @@ describe("SSH Worker behind a Gateway", () => {
       assert.strictEqual((yield* attachmentsInForce).length, 1);
     }).pipe(
       Effect.scoped,
-      Effect.provide([gatewayRuntime(machine, credentials, gateway), logs.layer]),
+      Effect.provide(
+        gatewayRuntime(machine, credentials, gateway).pipe(Layer.provideMerge(logs.layer)),
+      ),
     );
   });
 
@@ -919,10 +933,11 @@ describe("SSH Worker behind a Gateway", () => {
         assert.strictEqual(warnings().length, 1);
       }).pipe(
         Effect.scoped,
-        Effect.provide([
-          gatewayRuntime(machine, mintingProvider(), gateway, { parent }),
-          logs.layer,
-        ]),
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, { parent }).pipe(
+            Layer.provideMerge(logs.layer),
+          ),
+        ),
       );
     },
   );

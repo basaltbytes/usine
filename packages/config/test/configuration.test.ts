@@ -265,7 +265,8 @@ for (const [name, layer] of adapters)
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          Layer.mergeAll(layer, ConfigurationFolder.layer.pipe(Layer.provide(parserLayer))).pipe(
+          layer.pipe(
+            Layer.provideMerge(ConfigurationFolder.layer.pipe(Layer.provide(parserLayer))),
             Layer.provideMerge(NodeServices.layer),
           ),
         ),
@@ -584,7 +585,8 @@ it.effect(
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        Layer.mergeAll(ConfigurationFolder.layer.pipe(Layer.provide(parserLayer))).pipe(
+        ConfigurationFolder.layer.pipe(
+          Layer.provide(parserLayer),
           Layer.provideMerge(NodeServices.layer),
         ),
       ),

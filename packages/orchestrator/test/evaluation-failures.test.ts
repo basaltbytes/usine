@@ -281,7 +281,13 @@ describe("Loop evaluation failures", () => {
           assert.deepStrictEqual(second.failures, first.failures);
           assert.deepStrictEqual(fetched.sort(), [28, 29]);
           assert.strictEqual(logs.errors(FAILED), 1);
-        }).pipe(Effect.provide([processLayer(github, cursors.store), Logger.layer([logs.logger])]));
+        }).pipe(
+          Effect.provide(
+            processLayer(github, cursors.store).pipe(
+              Layer.provideMerge(Logger.layer([logs.logger])),
+            ),
+          ),
+        );
       }),
   );
 
@@ -332,7 +338,11 @@ describe("Loop evaluation failures", () => {
         yield* polling.poll(instance);
         assert.strictEqual(logs.errors(FAILED), 2);
         assert.deepStrictEqual(submissions, []);
-      }).pipe(Effect.provide([processLayer(github, cursors.store), Logger.layer([logs.logger])]));
+      }).pipe(
+        Effect.provide(
+          processLayer(github, cursors.store).pipe(Layer.provideMerge(Logger.layer([logs.logger]))),
+        ),
+      );
     }),
   );
 

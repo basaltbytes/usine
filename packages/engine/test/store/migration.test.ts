@@ -154,11 +154,7 @@ describe("Attempt migrations", () => {
         const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
         assert(Schema.is(Schema.Int)(before));
         assert.strictEqual(after, before + 1);
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-        ),
-      );
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -215,11 +211,7 @@ describe("Run driver migration", () => {
         assert.deepStrictEqual(remaining, []);
         const store = yield* RunStore;
         assert.strictEqual((yield* store.snapshot(runId)).run.state._tag, "Pending");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-        ),
-      );
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -285,9 +277,7 @@ describe("Event reopening migration", () => {
           const sql = yield* SqlClient.SqlClient;
           assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
         }).pipe(
-          Effect.provide(
-            Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-          ),
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -368,9 +358,7 @@ describe("Attempt salvage check migration", () => {
           assert(Schema.is(Schema.Int)(before));
           assert.strictEqual(after, before + 1);
         }).pipe(
-          Effect.provide(
-            Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-          ),
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -434,9 +422,7 @@ describe("Attempt start migration", () => {
           );
           assert(attempts.every(({ reattachedAt }) => Option.isNone(reattachedAt)));
         }).pipe(
-          Effect.provide(
-            Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-          ),
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -563,9 +549,7 @@ describe("Run approval source migration", () => {
               );
             assert.include(String(rejected.reason.cause), "CHECK constraint failed");
           }).pipe(
-            Effect.provide(
-              Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-            ),
+            Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
           );
         }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
@@ -624,11 +608,7 @@ describe("Run close time migration", () => {
           (yield* store.snapshot(runId)).closedAt,
           Option.some(DateTime.makeUnsafe("2026-10-19T01:00:00.000Z")),
         );
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-        ),
-      );
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

@@ -3,7 +3,7 @@ import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { TestClock } from "effect/testing";
 import { ReleaseVersion } from "@usine/core/upgrade";
 import { RunId } from "@usine/core/run";
-import { Deferred, Effect, Fiber, Ref } from "effect";
+import { Deferred, Effect, Fiber, Ref, Layer } from "effect";
 import { RunEngineShutdown } from "../src/engine/shutdown.ts";
 import { AttemptAdmission } from "../src/engine/admission.ts";
 
@@ -86,5 +86,8 @@ it.effect("publishes upgrade admission changes and its attention deadline once",
       assert.deepStrictEqual(notice.changes, [
         { audience: { _tag: "Readers" }, target: { kind: "configuration", id: "instance" } },
       ]);
-  }).pipe(Effect.provide([AttemptAdmission.layer, changeBusLayer]), Effect.scoped),
+  }).pipe(
+    Effect.provide(AttemptAdmission.layer.pipe(Layer.provideMerge(changeBusLayer))),
+    Effect.scoped,
+  ),
 );

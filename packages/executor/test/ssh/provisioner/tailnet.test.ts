@@ -198,7 +198,7 @@ describe("Boat tailnet", () => {
       yield* (yield* WorkerMachines).sweep;
       assert.strictEqual(boat.boat.sandboxes.size, 0);
       assert.lengthOf(api.calls, 0);
-    }).pipe(Effect.scoped, Effect.provide([layer, boat.layer]));
+    }).pipe(Effect.scoped, Effect.provide(layer.pipe(Layer.provideMerge(boat.layer))));
   });
 
   it.effect("scrubs an auth key echoed by a failed SSH command before creating its error", () => {

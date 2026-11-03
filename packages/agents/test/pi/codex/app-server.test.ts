@@ -157,9 +157,7 @@ describe("Codex app-server transport", () => {
         }).pipe(Effect.ensuring(Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(0)))),
       ).pipe(
         Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(
-            Layer.provideMerge(spawnerFor(process, { exitOnEof: false })),
-          ),
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { exitOnEof: false }))),
         ),
       );
     }),
@@ -181,9 +179,7 @@ describe("Codex app-server transport", () => {
         }),
       ).pipe(
         Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(
-            Layer.provideMerge(spawnerFor(process, { exitOnEof: false })),
-          ),
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { exitOnEof: false }))),
         ),
         Effect.forkChild,
       );
@@ -224,11 +220,7 @@ describe("Codex app-server transport", () => {
           assert(outcome.failure instanceof SessionOperationError);
           assert.strictEqual(outcome.failure.operation, "steer");
         }),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(Layer.provideMerge(spawnerFor(process))),
-        ),
-      );
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 
@@ -253,9 +245,7 @@ describe("Codex app-server transport", () => {
         }),
       ).pipe(
         Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(
-            Layer.provideMerge(spawnerFor(process, { exitOnEof: false })),
-          ),
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { exitOnEof: false }))),
         ),
       );
     }),
@@ -300,9 +290,7 @@ describe("Codex app-server transport", () => {
         }).pipe(Effect.ensuring(Deferred.succeed(readOutput, undefined))),
       ).pipe(
         Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(
-            Layer.provideMerge(spawnerFor(process, { stdout })),
-          ),
+          codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { stdout }))),
         ),
       );
     }),
@@ -392,11 +380,7 @@ describe("Codex app-server transport", () => {
           const result = yield* Fiber.join(pending);
           assert.deepStrictEqual(result, { userAgent: "codex" });
         }),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(Layer.provideMerge(spawnerFor(process))),
-        ),
-      );
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 
@@ -424,11 +408,7 @@ describe("Codex app-server transport", () => {
           const first = yield* Fiber.join(notifications);
           assert.deepStrictEqual(first, Option.some({ method: "turn/started", params: {} }));
         }),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(Layer.provideMerge(spawnerFor(process))),
-        ),
-      );
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 
@@ -459,11 +439,7 @@ describe("Codex app-server transport", () => {
           const afterFailure = yield* Effect.flip(connection.request("steer", "turn/steer", {}));
           assert.strictEqual(afterFailure, error, "later requests preserve the recorded failure");
         }),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(Layer.provideMerge(spawnerFor(process))),
-        ),
-      );
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 
@@ -486,11 +462,7 @@ describe("Codex app-server transport", () => {
           assert(error instanceof SessionOperationError);
           assert.match(error.message, /didn't respond to initialize/u);
         }),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(codexAppServerLive).pipe(Layer.provideMerge(spawnerFor(process))),
-        ),
-      );
+      ).pipe(Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process)))));
     }),
   );
 });

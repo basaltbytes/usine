@@ -26,7 +26,7 @@ import {
   UpstreamBase,
 } from "@usine/gateway";
 import { TestClock } from "effect/testing";
-import { Deferred, Effect, Fiber, Option, Redacted, Schema } from "effect";
+import { Deferred, Effect, Fiber, Option, Redacted, Schema, Layer } from "effect";
 import { CheckoutRequest, Executor, MachineCheck, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
@@ -360,7 +360,11 @@ describe("Provisioned SSH Worker", () => {
         assert.include(logs.lines.join("\n"), "Deleted the machine");
       }).pipe(
         Effect.scoped,
-        Effect.provide([runtimeOf(machine, providers, hetznerAddress, { parent }), logs.layer]),
+        Effect.provide(
+          runtimeOf(machine, providers, hetznerAddress, { parent }).pipe(
+            Layer.provideMerge(logs.layer),
+          ),
+        ),
       );
     },
   );

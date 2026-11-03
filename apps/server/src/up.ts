@@ -383,7 +383,9 @@ export const up = (command: UpCommand) =>
         ),
       );
       yield* seedOperator(config.operator).pipe(
-        Effect.provide([authDependencies, Layer.succeedContext(accessContext)]),
+        Effect.provide(
+          authDependencies.pipe(Layer.provideMerge(Layer.succeedContext(accessContext))),
+        ),
       );
       const localToken = yield* writeAdminToken(directory).pipe(Effect.provide(NodeServices.layer));
       const authContext = yield* Layer.build(

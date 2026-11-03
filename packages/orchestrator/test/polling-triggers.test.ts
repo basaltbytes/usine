@@ -695,7 +695,10 @@ describe("PollingTriggers", () => {
           "five idle minutes with real polls emit no invalidations",
         );
         yield* Fiber.interrupt(fiber);
-      }).pipe(Effect.provide([pollingTestLayer(github), changeBusLayer]), Effect.scoped);
+      }).pipe(
+        Effect.provide(pollingTestLayer(github).pipe(Layer.provideMerge(changeBusLayer))),
+        Effect.scoped,
+      );
     },
   );
 

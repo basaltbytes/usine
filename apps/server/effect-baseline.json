@@ -160,7 +160,7 @@
   },
   "src/up.ts": {
     "nodeBuiltinImport": 2,
-    "strictEffectProvide": 13,
+    "strictEffectProvide": 14,
     "yieldInCallArgument": 1
   },
   "src/upgrade/control.ts": {

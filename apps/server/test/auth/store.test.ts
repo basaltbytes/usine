@@ -57,7 +57,7 @@ for (const [name, layer] of [
           if (first === undefined) return;
           assert.equal((yield* store.remove(first.id).pipe(Effect.flip)).status, 409);
           assert.lengthOf(yield* store.members, 1);
-        }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
+        }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
       ));
     it("changes only owned token scopes and preserves them when recording use", async () =>
       Effect.runPromise(
@@ -90,7 +90,7 @@ for (const [name, layer] of [
           const access = yield* store.authenticate(token.hash, 61000);
           assert.deepEqual(Option.getOrNull(access)?.token.scopes, scopes);
           assert.deepEqual((yield* store.tokens(alice.id))[0]?.scopes, scopes);
-        }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
+        }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
       ));
     it("revokes every credential when a member is removed", async () =>
       Effect.runPromise(
@@ -143,7 +143,7 @@ for (const [name, layer] of [
           );
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 7)));
           assert.deepEqual(yield* store.tokens(alice.id), []);
-        }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
+        }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
       ));
     it("rejects duplicate logins regardless of case and revokes a member's own token", async () =>
       Effect.runPromise(
@@ -164,7 +164,7 @@ for (const [name, layer] of [
           yield* store.issue(token);
           yield* store.revoke(alice.id, token.id);
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 2)));
-        }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
+        }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
       ));
   });
 
@@ -229,7 +229,7 @@ for (const [name, layer] of [
         assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("expired"), 1)));
         assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("other-member"), 1)));
         assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 120_000)));
-      }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
+      }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
     ));
 
 it("authenticates recently used SQLite tokens while another connection has the write lock", async () =>

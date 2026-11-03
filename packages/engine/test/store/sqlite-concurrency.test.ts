@@ -98,7 +98,7 @@ for (const method of ["standalone", "list", "board"] as const) {
               }).pipe(Effect.orDie),
           });
           const database = yield* SQLiteDrizzle.make().pipe(
-            Effect.provide([logger, SQLiteDrizzle.DefaultServices]),
+            Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
           );
           const read =
             method === "standalone"
@@ -115,9 +115,7 @@ for (const method of ["standalone", "list", "board"] as const) {
                   }
                 }).pipe(
                   Effect.provide(
-                    Layer.mergeAll(RunReader.layer).pipe(
-                      Layer.provideMerge(RunDatabase.layer(database)),
-                    ),
+                    RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database))),
                   ),
                 );
           const readStarted = performance.now();
@@ -153,9 +151,7 @@ for (const method of ["standalone", "list", "board"] as const) {
             [{ count: 3 }],
           );
         }).pipe(
-          Effect.provide(
-            Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-          ),
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -345,7 +341,10 @@ it.live(
         Effect.timeout("3 seconds"),
       );
       assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
-    }).pipe(Effect.scoped, Effect.provide([NodeServices.layer, Reactivity.layer])),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
+    ),
 );
 
 it.live(
@@ -397,7 +396,10 @@ it.live(
         { value: 3 },
       ]);
       assert.strictEqual(yield* reader.state, "worker");
-    }).pipe(Effect.scoped, Effect.provide([NodeServices.layer, Reactivity.layer])),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
+    ),
 );
 
 it.effect(
@@ -428,5 +430,5 @@ it.effect(
       const closedStarts = starts;
       yield* TestClock.adjust("10 minutes");
       assert.strictEqual(starts, closedStarts);
-    }).pipe(Effect.provide([NodeServices.layer, Reactivity.layer])),
+    }).pipe(Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer)))),
 );

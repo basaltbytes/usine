@@ -15,7 +15,7 @@ import {
   RepositoryLabelCatalog,
   RepositoryNotModified,
 } from "@usine/github/polling";
-import { DateTime, Effect, Logger, Option, Schema } from "effect";
+import { DateTime, Effect, Logger, Option, Schema, Layer } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { baseBranches, memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
 
@@ -390,7 +390,9 @@ describe("open pull request refresh", () => {
         });
         assert.strictEqual(warnings.length, 1);
         assert.match(warnings[0] ?? "", /Could not read the base branch head/u);
-      }).pipe(Effect.provide([testLayer(github, cursors), Logger.layer([logger])]));
+      }).pipe(
+        Effect.provide(testLayer(github, cursors).pipe(Layer.provideMerge(Logger.layer([logger])))),
+      );
     },
   );
 });

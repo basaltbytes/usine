@@ -74,10 +74,11 @@ const spanExport = <A, E>(
     ),
   ).pipe(
     Effect.withLogger(Logger.make(({ message }) => options.logs?.push(JSON.stringify(message)))),
-    Effect.provide([
-      ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.environment ?? {} })),
-      NodeServices.layer,
-    ]),
+    Effect.provide(
+      ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.environment ?? {} })).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
   );
 
 describe("tracingLayer", () => {

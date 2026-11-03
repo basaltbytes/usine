@@ -710,7 +710,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             [],
             "the Attempt's attachment is detached",
           );
-        }).pipe(Effect.provide([runtime, FetchHttpClient.layer]));
+        }).pipe(Effect.provide(runtime.pipe(Layer.provideMerge(FetchHttpClient.layer))));
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
     { timeout: 300_000 },
   );

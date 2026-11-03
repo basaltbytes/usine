@@ -20,8 +20,9 @@ describe("Pi child live contract", () => {
         return yield* steeringContract(yield* PiChildBackend, brain);
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(piChildBackendLayer, NodeServices.layer).pipe(
+          piChildBackendLayer.pipe(
             Layer.provideMerge(piSdkLive),
+            Layer.provideMerge(NodeServices.layer),
           ),
         ),
       ),
@@ -35,8 +36,9 @@ describe("Pi child live contract", () => {
         return yield* interruptionContract(yield* PiChildBackend, brain);
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(piChildBackendLayer, NodeServices.layer).pipe(
+          piChildBackendLayer.pipe(
             Layer.provideMerge(piSdkLive),
+            Layer.provideMerge(NodeServices.layer),
           ),
         ),
       ),

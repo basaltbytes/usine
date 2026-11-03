@@ -110,11 +110,7 @@ describe("Webhook delivery polling", () => {
           yield* Effect.gen(function* () {
             yield* (yield* CursorStore).write(key, Schema.Int, 9);
           }).pipe(
-            Effect.provide(
-              Layer.mergeAll(CursorStore.layer).pipe(
-                Layer.provideMerge(localSqliteLayer(directory)),
-              ),
-            ),
+            Effect.provide(CursorStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
           );
         }
         const cycle = Effect.gen(function* () {
@@ -123,10 +119,10 @@ describe("Webhook delivery polling", () => {
           assert.deepStrictEqual(stored, Option.some("3851199271760044123"));
         }).pipe(
           Effect.provide(
-            Layer.mergeAll(WebhookDeliveries.layer).pipe(
-              Layer.provideMerge(CursorStore.layer),
-              Layer.provideMerge(polling),
+            WebhookDeliveries.layer.pipe(
               Layer.provideMerge(app),
+              Layer.provideMerge(polling),
+              Layer.provideMerge(CursorStore.layer),
             ),
           ),
         );
@@ -218,10 +214,10 @@ describe("Webhook delivery polling", () => {
       yield* Fiber.interrupt(enabled);
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(WebhookDeliveries.layer).pipe(
-          Layer.provideMerge(Layer.succeed(CursorStore)(memoryCursorStore().store)),
-          Layer.provideMerge(Layer.mock(PollingTriggers)({})),
+        WebhookDeliveries.layer.pipe(
           Layer.provideMerge(app),
+          Layer.provideMerge(Layer.mock(PollingTriggers)({})),
+          Layer.provideMerge(Layer.succeed(CursorStore)(memoryCursorStore().store)),
         ),
       ),
     );
@@ -257,10 +253,10 @@ describe("Webhook delivery polling", () => {
       yield* Fiber.interrupt(fiber);
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(WebhookDeliveries.layer).pipe(
-          Layer.provideMerge(Layer.succeed(CursorStore)(cursors.store)),
-          Layer.provideMerge(Layer.mock(PollingTriggers)({})),
+        WebhookDeliveries.layer.pipe(
           Layer.provideMerge(app),
+          Layer.provideMerge(Layer.mock(PollingTriggers)({})),
+          Layer.provideMerge(Layer.succeed(CursorStore)(cursors.store)),
         ),
       ),
     );
@@ -312,8 +308,8 @@ it.effect(
         yield* Fiber.interrupt(running);
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(WebhookDeliveries.layer).pipe(
-            Layer.provideMerge(Layer.succeed(CursorStore, cursors.store)),
+          WebhookDeliveries.layer.pipe(
+            Layer.provideMerge(app),
             Layer.provideMerge(
               Layer.mock(PollingTriggers)({
                 hint: (hinted) => {
@@ -322,7 +318,7 @@ it.effect(
                 },
               }),
             ),
-            Layer.provideMerge(app),
+            Layer.provideMerge(Layer.succeed(CursorStore, cursors.store)),
           ),
         ),
       );

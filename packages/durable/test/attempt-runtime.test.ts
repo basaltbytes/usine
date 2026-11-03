@@ -346,7 +346,7 @@ describe("durable AttemptRuntime", () => {
           logs.matching(/Dropped the Worker notices kept for a parent that never started/u),
           1,
         );
-      }).pipe(Effect.provide([layer({ database, parent: [] }), logs.layer]));
+      }).pipe(Effect.provide(layer({ database, parent: [] }).pipe(Layer.provideMerge(logs.layer))));
     }).pipe(Effect.scoped),
   );
 

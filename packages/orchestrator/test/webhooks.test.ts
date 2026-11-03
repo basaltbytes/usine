@@ -1,7 +1,7 @@
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { OperatorLogin } from "@usine/core/operator";
 import { assert, it } from "@effect/vitest";
-import { Effect, Option, Ref } from "effect";
+import { Effect, Option, Ref, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { AttentionAcknowledgement } from "@usine/engine/attention";
 import { WebhookHealth } from "../src/webhooks.ts";
@@ -61,5 +61,8 @@ it.effect(
       assert.strictEqual((yield* bus.open).revision, revision + 2);
       assert.deepStrictEqual((yield* attention(overview, config)).needsYou, []);
       assert.deepStrictEqual((yield* attention(overview, config)).dismissedNeeds, []);
-    }).pipe(Effect.provide([WebhookHealth.layer, changeBusLayer]), Effect.scoped),
+    }).pipe(
+      Effect.provide(WebhookHealth.layer.pipe(Layer.provideMerge(changeBusLayer))),
+      Effect.scoped,
+    ),
 );

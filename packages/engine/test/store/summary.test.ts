@@ -85,7 +85,7 @@ for (const [method, phase, selection, transition] of [
             }).pipe(Effect.orDie),
         });
         const database = yield* SQLiteDrizzle.make().pipe(
-          Effect.provide([logger, SQLiteDrizzle.DefaultServices]),
+          Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
           Effect.provideService(SqliteClient.SqliteClient, routed.client),
         );
         yield* Effect.gen(function* () {
@@ -160,19 +160,16 @@ for (const [method, phase, selection, transition] of [
           );
           assert(Option.isSome(finishedAttempt.endedAt));
         }).pipe(
-          Effect.provide(
-            Layer.mergeAll(RunReader.layer).pipe(Layer.provideMerge(RunDatabase.layer(database))),
-          ),
+          Effect.provide(RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database)))),
           Effect.provideService(ReadSnapshot, {
             run: (_database, effect) => routed.readSnapshot(effect),
           }),
         );
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-        ),
-      );
-    }).pipe(Effect.scoped, Effect.provide([NodeServices.layer, Reactivity.layer])),
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
+    ),
   );
 }
 
@@ -250,7 +247,7 @@ it.effect(
             }),
         });
         const database = yield* SQLiteDrizzle.make().pipe(
-          Effect.provide([logger, SQLiteDrizzle.DefaultServices]),
+          Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
         );
         yield* Effect.gen(function* () {
           const reader = yield* RunReader;
@@ -324,14 +321,8 @@ it.effect(
           assert.strictEqual(Option.getOrNull(detail.step.result)?.message, message);
           assert(statements.some((query) => /"task"/u.test(query)));
         }).pipe(
-          Effect.provide(
-            Layer.mergeAll(RunReader.layer).pipe(Layer.provideMerge(RunDatabase.layer(database))),
-          ),
+          Effect.provide(RunReader.layer.pipe(Layer.provideMerge(RunDatabase.layer(database)))),
         );
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(RunStore.layer).pipe(Layer.provideMerge(localSqliteLayer(directory))),
-        ),
-      );
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.provide(NodeServices.layer)),
 );

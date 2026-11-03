@@ -187,6 +187,13 @@ for (const scenario of [
           Option.getOrNull(submission.approvalReason),
         );
       }).pipe(Effect.provide(observationLayer(directory)));
-    }).pipe(Effect.provide([parser, NodeServices.layer, Logger.layer([logger])]));
+    }).pipe(
+      Effect.provide(
+        parser.pipe(
+          Layer.provideMerge(NodeServices.layer),
+          Layer.provideMerge(Logger.layer([logger])),
+        ),
+      ),
+    );
   });
 }

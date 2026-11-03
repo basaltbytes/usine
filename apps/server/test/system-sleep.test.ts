@@ -48,7 +48,9 @@ const warnings = async (output: string) => {
     ),
   );
   await Effect.runPromise(
-    warnIfSystemSleeps().pipe(Effect.provide([pmsetPrinting, Logger.layer([logger])])),
+    warnIfSystemSleeps().pipe(
+      Effect.provide(pmsetPrinting.pipe(Layer.provideMerge(Logger.layer([logger])))),
+    ),
   );
   return logged;
 };

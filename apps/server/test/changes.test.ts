@@ -108,7 +108,10 @@ it.effect("keeps a connected stream idle for 30 seconds without reading projecti
     assert.include(frames[0] ?? "", '"reset":true');
     assert.deepStrictEqual(frames.slice(1), [": heartbeat\n\n", ": heartbeat\n\n"]);
     assert.deepStrictEqual(reads, { overview: 0, desk: 0, configuration: 0 });
-  }).pipe(Effect.provide([live, backend, changeBusLayer]), Effect.scoped);
+  }).pipe(
+    Effect.provide(live.pipe(Layer.provideMerge(backend), Layer.provideMerge(changeBusLayer))),
+    Effect.scoped,
+  );
 });
 
 it.effect(
@@ -153,7 +156,7 @@ it.effect(
       assert.notInclude(replay, '"reset":true');
       const admin = yield* (yield* open(initial.revision)).pipe(Stream.take(1), Stream.runCollect);
       assert.include(admin.join(""), "secret-worker");
-    }).pipe(Effect.provide([live, changeBusLayer]), Effect.scoped),
+    }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );
 
 it.effect("resets expired and future cursors and slow subscribers after a bounded replay gap", () =>
@@ -169,7 +172,7 @@ it.effect("resets expired and future cursors and slow subscribers after a bounde
       assert.include(frames.join(""), '"reset":true');
     }
     assert.strictEqual((yield* bus.open).history.length, 256);
-  }).pipe(Effect.provide([live, changeBusLayer]), Effect.scoped),
+  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );
 
 it.effect("revalidates credentials before a write can reveal an identifier", () =>
@@ -198,7 +201,7 @@ it.effect("revalidates credentials before a write can reveal an identifier", () 
     const exit = yield* Fiber.await(reader);
     assert.strictEqual(exit._tag, "Failure");
     assert.notInclude(frames.join(""), "hidden-after-revocation");
-  }).pipe(Effect.provide([live, changeBusLayer]), Effect.scoped),
+  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );
 
 it.effect("resets a live subscriber whose queue drops committed writes", () =>
@@ -225,7 +228,7 @@ it.effect("resets a live subscriber whose queue drops committed writes", () =>
     yield* Deferred.succeed(release, undefined);
     const frames = yield* Fiber.join(reader);
     assert.include(frames[1] ?? "", '"reset":true');
-  }).pipe(Effect.provide([live, changeBusLayer]), Effect.scoped),
+  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );
 
 it.effect(
@@ -268,5 +271,5 @@ it.effect(
       assert.include(liveFrame, '{"kind":"run","id":"preparing-run"}');
       assert.include(liveFrame, '{"kind":"project","id":"visible"}');
       assert.notInclude(liveFrame, '"reset":true');
-    }).pipe(Effect.provide([live, changeBusLayer]), Effect.scoped),
+    }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
 );

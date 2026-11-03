@@ -66,7 +66,7 @@ it.live(
           }),
       });
       const database = yield* SQLiteDrizzle.make().pipe(
-        Effect.provide([logger, SQLiteDrizzle.DefaultServices]),
+        Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
         Effect.provideContext(context),
       );
       yield* Effect.gen(function* () {
@@ -145,7 +145,7 @@ it.live(
         yield* capture("reconciliation runs to drive", query.runIdsToDrive());
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(Layer.merge(RunReader.layer, RunStore.layer)).pipe(
+          Layer.merge(RunReader.layer, RunStore.layer).pipe(
             Layer.provideMerge(RunDatabase.layer(database)),
           ),
         ),

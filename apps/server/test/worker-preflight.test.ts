@@ -269,6 +269,9 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         assert.strictEqual(failedChecks, 3, "a passing manual check cancels automatic retries");
       }).pipe(Effect.provide(server));
     }).pipe(Effect.provide(observation));
-  }).pipe(Effect.scoped, Effect.provide([NodeServices.layer, TestClock.layer()]));
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(TestClock.layer()))),
+  );
   await Effect.runPromise(program);
 }, 30_000);

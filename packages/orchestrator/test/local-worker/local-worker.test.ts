@@ -776,7 +776,7 @@ describe("local worker", () => {
           Layer.provide(testAppLayer),
         );
         yield* Effect.asVoid(RunEngine).pipe(
-          Effect.provide([runtime, Logger.layer([logger])]),
+          Effect.provide(runtime.pipe(Layer.provideMerge(Logger.layer([logger])))),
           Effect.provideService(References.MinimumLogLevel, "Debug"),
         );
 

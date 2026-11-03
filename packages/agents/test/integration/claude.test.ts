@@ -20,10 +20,10 @@ const live = <A, E>(
 ) =>
   effect.pipe(
     Effect.provide(
-      Layer.mergeAll(claudeChildBackendLayer).pipe(
-        Layer.provideMerge(NodeServices.layer),
-        Layer.provideMerge(noLoginLock),
+      claudeChildBackendLayer.pipe(
         Layer.provideMerge(claudeSdkLive),
+        Layer.provideMerge(noLoginLock),
+        Layer.provideMerge(NodeServices.layer),
       ),
     ),
   );

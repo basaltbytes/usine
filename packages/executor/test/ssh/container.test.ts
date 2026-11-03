@@ -171,7 +171,10 @@ describe("SSH Worker with Docker", () => {
           durationMillis: 0,
         });
         assert.include(logs.lines.join("\n"), "Ran the attempt image user probe");
-      }).pipe(Effect.scoped, Effect.provide([runtime(machine, mintingProvider()), logs.layer]));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
+      );
     },
   );
 
@@ -198,7 +201,7 @@ describe("SSH Worker with Docker", () => {
         for (const line of unreadable) assert.strictEqual(JSON.parse(line)[1].stdout, stdout);
       }).pipe(
         Effect.scoped,
-        Effect.provide([runtime(machine, mintingProvider()), logs.layer]),
+        Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
         Effect.provideService(References.MinimumLogLevel, "Debug"),
       );
     },
@@ -323,7 +326,9 @@ describe("SSH Worker with Docker", () => {
         );
       }).pipe(
         Effect.scoped,
-        Effect.provide([runtime(machine, mintingProvider(), parent), logs.layer]),
+        Effect.provide(
+          runtime(machine, mintingProvider(), parent).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -363,10 +368,12 @@ describe("SSH Worker with Docker", () => {
           });
       }).pipe(
         Effect.scoped,
-        Effect.provide([
-          executorLayer(machine, mintingProvider(), address).pipe(Layer.provide(noGateway)),
-          logs.layer,
-        ]),
+        Effect.provide(
+          executorLayer(machine, mintingProvider(), address).pipe(
+            Layer.provide(noGateway),
+            Layer.provideMerge(logs.layer),
+          ),
+        ),
       );
     },
   );
@@ -444,10 +451,12 @@ describe("SSH Worker with Docker", () => {
         assert.deepStrictEqual(limitsIn(runOf(machine, CONTAINER).words), limits);
       }).pipe(
         Effect.scoped,
-        Effect.provide([
-          executorLayer(machine, mintingProvider(), address).pipe(Layer.provide(noGateway)),
-          logs.layer,
-        ]),
+        Effect.provide(
+          executorLayer(machine, mintingProvider(), address).pipe(
+            Layer.provide(noGateway),
+            Layer.provideMerge(logs.layer),
+          ),
+        ),
       );
     },
   );
@@ -585,7 +594,9 @@ describe("SSH Worker with Docker", () => {
         assert(!linesOf(machine).some((line) => line.startsWith("exec 'docker' 'run' ")));
       }).pipe(
         Effect.scoped,
-        Effect.provide([runtime(machine, mintingProvider(), parent), logs.layer]),
+        Effect.provide(
+          runtime(machine, mintingProvider(), parent).pipe(Layer.provideMerge(logs.layer)),
+        ),
       );
     },
   );
@@ -969,10 +980,12 @@ describe("SSH Worker with Docker", () => {
           );
         }).pipe(
           Effect.scoped,
-          Effect.provide([
-            executorLayer(machine, credentials, address).pipe(Layer.provide(noGateway)),
-            logs.layer,
-          ]),
+          Effect.provide(
+            executorLayer(machine, credentials, address).pipe(
+              Layer.provide(noGateway),
+              Layer.provideMerge(logs.layer),
+            ),
+          ),
         );
         assert.lengthOf(
           linesOf(machine)
@@ -1084,7 +1097,11 @@ describe("SSH Worker with Docker", () => {
         );
       }).pipe(
         Effect.scoped,
-        Effect.provide([runtime(machine, mintingProvider(), stopsItsContainer), logs.layer]),
+        Effect.provide(
+          runtime(machine, mintingProvider(), stopsItsContainer).pipe(
+            Layer.provideMerge(logs.layer),
+          ),
+        ),
       );
     },
   );

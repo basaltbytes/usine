@@ -283,12 +283,12 @@ const readConfiguration = Effect.gen(function* () {
     const instance = yield* (yield* CurrentInstance).get;
     return yield* (yield* OperatorConfiguration).view(instance);
   }).pipe(
-    Effect.provide([
+    Effect.provide(
       OperatorConfiguration.layer.pipe(
         Layer.provide(Layer.mergeAll(controls, labels, polling, workers)),
+        Layer.provideMerge(reloadableInstanceLayer(root)),
       ),
-      reloadableInstanceLayer(root),
-    ]),
+    ),
     Effect.map(Schema.encodeSync(ConfigurationView)),
   );
 }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
@@ -509,12 +509,12 @@ describe("Configuration view", () => {
         const instance = yield* (yield* CurrentInstance).get;
         return yield* (yield* OperatorConfiguration).view(instance);
       }).pipe(
-        Effect.provide([
+        Effect.provide(
           OperatorConfiguration.layer.pipe(
             Layer.provide(Layer.mergeAll(controls, labels, idleTriggersLayer, WorkerStatus.idle)),
+            Layer.provideMerge(reloadableInstanceLayer(root)),
           ),
-          reloadableInstanceLayer(root),
-        ]),
+        ),
         Effect.map(Schema.encodeSync(ConfigurationView)),
       );
       assert.deepStrictEqual(

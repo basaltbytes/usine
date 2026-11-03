@@ -4,7 +4,7 @@ import {
   HarnessReady,
   HarnessUnavailableError,
 } from "@usine/core/agent/capability";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option, Schema, Layer } from "effect";
 import { homedir } from "node:os";
 import type { ChildHost } from "../child-host/child-host.ts";
 import { SessionOperationError, WorkingDirectory } from "../runtime.ts";
@@ -195,4 +195,7 @@ export const preflight = (
   brain: BrainSpec,
   host: ChildHost,
   environment: Readonly<Record<string, string>>,
-) => verifyHarness(brain, host, environment).pipe(Effect.provide([codexAppServerLive, piSdkLive]));
+) =>
+  verifyHarness(brain, host, environment).pipe(
+    Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(piSdkLive))),
+  );

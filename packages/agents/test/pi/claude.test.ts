@@ -341,7 +341,7 @@ describe("Claude child backend", () => {
         assert.lengthOf(retries, 1);
         assert.include(retries[0], '"delay":"15s"');
       }).pipe(
-        Effect.provide(Layer.mergeAll(claudeChild, logs.layer).pipe(Layer.provideMerge(sdk))),
+        Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
         Effect.scoped,
       );
     }),
@@ -363,7 +363,7 @@ describe("Claude child backend", () => {
           ["15s", "30s", "1m"],
         );
       }).pipe(
-        Effect.provide(Layer.mergeAll(claudeChild, logs.layer).pipe(Layer.provideMerge(sdk))),
+        Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(logs.layer))),
         Effect.scoped,
       );
     }),
@@ -378,10 +378,7 @@ describe("Claude child backend", () => {
         yield* Fiber.interrupt(launching);
         yield* TestClock.adjust("2 minutes");
         assert.lengthOf(launches, 1, "the canceled child starts no retry");
-      }).pipe(
-        Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk))),
-        Effect.scoped,
-      );
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
     }),
   );
 
@@ -432,10 +429,7 @@ describe("Claude child backend", () => {
           yield* TestClock.adjust("1 minute");
           yield* Fiber.join(waitingForSilence);
           yield* Fiber.join(silent);
-        }).pipe(
-          Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk))),
-          Effect.scoped,
-        );
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
       }),
   );
 
@@ -456,7 +450,7 @@ describe("Claude child backend", () => {
           assert(error instanceof SessionOperationError);
           assert.strictEqual(error.operation, "stream");
           assert.match(error.message, /invalid completion update/u);
-        }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
   );
@@ -482,7 +476,7 @@ describe("Claude child backend", () => {
       Effect.gen(function* () {
         const session = yield* (yield* ChildBackend).launch(request());
         assert.strictEqual((yield* session.result).message, "Updated answer");
-      }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -535,7 +529,7 @@ describe("Claude child backend", () => {
             events.map((event) => event._tag),
             ["SessionStarted", "TextOutput", "SessionFinished"],
           );
-        }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
   );
@@ -569,7 +563,7 @@ describe("Claude child backend", () => {
           const error = yield* Effect.flip(session.result);
           assert(error instanceof SessionOperationError);
           assert.strictEqual(error.operation, "stream");
-        }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
   );
@@ -622,7 +616,7 @@ describe("Claude child backend", () => {
         const [read] = reads;
         assert(read !== undefined && Option.isSome(read));
         assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk))));
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
 
@@ -720,7 +714,7 @@ describe("Claude child backend", () => {
           seen.filter((tag) => tag === "SessionStarted"),
           ["SessionStarted"],
         );
-      }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk))));
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
   it.effect("closes a paused tool hook with its child scope even without a vendor abort", () =>
@@ -748,10 +742,7 @@ describe("Claude child backend", () => {
       yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void));
       const running = yield* Effect.gen(function* () {
         return yield* (yield* ChildBackend).launch(request());
-      }).pipe(
-        Scope.provide(owner),
-        Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk))),
-      );
+      }).pipe(Scope.provide(owner), Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))));
       yield* running.intervene(Interrupt.make(), noDelivery);
       const hook = options?.hooks?.PreToolUse?.[0]?.hooks[0];
       assert(hook !== undefined);
@@ -830,7 +821,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(options?.spawnClaudeCodeProcess, undefined);
         const first = yield* Effect.promise(() => input![Symbol.asyncIterator]().next());
         assert.strictEqual(first.value?.message.content, "Implement the focused task.");
-      }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -893,7 +884,7 @@ describe("Claude child backend", () => {
         assert.lengthOf(retries, 2, "one warning per API retry");
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(claudeChild, Logger.layer([logger])).pipe(Layer.provideMerge(sdk)),
+          claudeChild.pipe(Layer.provideMerge(sdk), Layer.provideMerge(Logger.layer([logger]))),
         ),
       ),
     );
@@ -949,7 +940,7 @@ describe("Claude child backend", () => {
         ]);
         assert.strictEqual(spawned.env.RECORD_TO, record);
         assert.strictEqual(spawned.env.HOME, undefined, "the SSH client inherits nothing");
-      }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -990,7 +981,7 @@ describe("Claude child backend", () => {
       assert.strictEqual(usage.totalTokens, 180, "usage carries over from the broken launch");
       assert.deepStrictEqual(usage.costUsd, Option.some(0.5));
     }).pipe(
-      Effect.provide(Layer.mergeAll(claudeChildWith(worker.layer)).pipe(Layer.provideMerge(sdk))),
+      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
       Effect.scoped,
     );
   });
@@ -1008,7 +999,7 @@ describe("Claude child backend", () => {
       assert.deepStrictEqual(resumed, []);
       assert.deepStrictEqual(worker.commands, []);
     }).pipe(
-      Effect.provide(Layer.mergeAll(claudeChildWith(worker.layer)).pipe(Layer.provideMerge(sdk))),
+      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
       Effect.scoped,
     );
   });
@@ -1026,7 +1017,7 @@ describe("Claude child backend", () => {
       assert.lengthOf(worker.commands, 6, "one stop per resume try");
       assert.deepStrictEqual(resumed, [], "no Claude process starts before the old one stops");
     }).pipe(
-      Effect.provide(Layer.mergeAll(claudeChildWith(worker.layer)).pipe(Layer.provideMerge(sdk))),
+      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
       Effect.scoped,
     );
   });
@@ -1049,7 +1040,7 @@ describe("Claude child backend", () => {
           const error = yield* Effect.flip(backend.launch(request("claude-never-existed")));
           assert(error instanceof UnknownModelError);
           assert.strictEqual(error.model, "claude-never-existed");
-        }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
       assert.strictEqual(closed, true);
     });
@@ -1072,7 +1063,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(captured[0] !== undefined && "effort" in captured[0], false);
         assert.deepStrictEqual(captured[1]?.thinking, { type: "adaptive" });
         assert.strictEqual(captured[1]?.effort, "low");
-      }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -1170,7 +1161,7 @@ describe("Claude child backend", () => {
           const error = yield* Effect.flip(session.result);
           assert.strictEqual(error instanceof AgentCapacityError, capacity);
           if (!capacity) assert(error instanceof AgentResultError);
-        }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
       );
     },
   );
@@ -1187,7 +1178,7 @@ describe("Claude child backend", () => {
         assert(error instanceof SessionOperationError);
         assert.strictEqual(error.operation, "stream");
         assert.match(error.message, /closed without a result/u);
-      }).pipe(Effect.provide(Layer.mergeAll(claudeChild).pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
   });
 });

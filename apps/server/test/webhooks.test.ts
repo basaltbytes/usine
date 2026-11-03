@@ -152,7 +152,7 @@ it("verifies the raw body outside operator authentication and hints only current
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.equal(hints.length, 2);
     }).pipe(
-      Effect.provide([WebhookHealth.layer, TestClock.layer()]),
+      Effect.provide(WebhookHealth.layer.pipe(Layer.provideMerge(TestClock.layer()))),
       Effect.provideService(ConfigProvider.ConfigProvider, configured),
       Effect.scoped,
     ),
@@ -205,7 +205,7 @@ it("requires a nonempty secret only in endpoint mode and keeps the endpoint avai
       yield* Effect.addFinalizer(() => Effect.promise(() => web.dispose()));
       assert.equal((yield* send(web.handler, "{}", signature("{}"), "ping")).status, 204);
     }).pipe(
-      Effect.provide([WebhookHealth.layer, TestClock.layer()]),
+      Effect.provide(WebhookHealth.layer.pipe(Layer.provideMerge(TestClock.layer()))),
       Effect.provideService(ConfigProvider.ConfigProvider, configured),
       Effect.scoped,
     ),
@@ -244,7 +244,7 @@ it("bounds startup hook configuration and request bodies on the Node HTTP server
         }
       }).pipe(Effect.provide(server));
     }).pipe(
-      Effect.provide([WebhookHealth.layer, TestClock.layer()]),
+      Effect.provide(WebhookHealth.layer.pipe(Layer.provideMerge(TestClock.layer()))),
       Effect.provideService(ConfigProvider.ConfigProvider, configured),
       Effect.scoped,
     ),
@@ -307,7 +307,7 @@ it("switches a running endpoint between modes and public URLs without rebuilding
       }
       assert.deepEqual(hints, [repository]);
     }).pipe(
-      Effect.provide([WebhookHealth.layer, TestClock.layer()]),
+      Effect.provide(WebhookHealth.layer.pipe(Layer.provideMerge(TestClock.layer()))),
       Effect.provideService(ConfigProvider.ConfigProvider, configured),
       Effect.scoped,
     ),

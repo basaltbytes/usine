@@ -63,10 +63,10 @@ describe("child backend dispatcher", () => {
         }
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(childDispatcherLayer).pipe(
-            Layer.provideMerge(Layer.succeed(PiChildBackend)(backend("pi"))),
-            Layer.provideMerge(Layer.succeed(CodexChildBackend)(backend("codex"))),
+          childDispatcherLayer.pipe(
             Layer.provideMerge(Layer.succeed(ClaudeChildBackend)(backend("claude"))),
+            Layer.provideMerge(Layer.succeed(CodexChildBackend)(backend("codex"))),
+            Layer.provideMerge(Layer.succeed(PiChildBackend)(backend("pi"))),
           ),
         ),
       ),

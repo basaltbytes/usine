@@ -130,7 +130,9 @@ describe("Run evidence reader", () => {
           });
           const database = Layer.effect(
             RunDatabase,
-            SQLiteDrizzle.make().pipe(Effect.provide([logger, SQLiteDrizzle.DefaultServices])),
+            SQLiteDrizzle.make().pipe(
+              Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
+            ),
           ).pipe(Layer.provide(readConnection));
           // The engine already provides RunReader; keep this reader on its own
           // connection instead of reusing the engine layer's memoized instance.

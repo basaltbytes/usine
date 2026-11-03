@@ -69,7 +69,7 @@ const inDatabase = <A, E>(
   work: Effect.Effect<A, E, RunStore | CycleBudgets>,
 ) =>
   work.pipe(
-    Effect.provide(Layer.mergeAll(services).pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+    Effect.provide(services.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
     Effect.scoped,
   );
 const withDirectory = <A, E, R>(work: (directory: InstanceDirectory) => Effect.Effect<A, E, R>) =>

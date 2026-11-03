@@ -92,12 +92,11 @@ describe("Claude login lock", () => {
           yield* Fiber.joinAll([first, sameMachine, otherMachine]);
         }).pipe(
           Effect.provide(
-            Layer.mergeAll(
-              claudeChildLayer.pipe(
-                Layer.provide(claudeLoginLockLayer),
-                Layer.provide(NodeServices.layer),
-              ),
-            ).pipe(Layer.provideMerge(sdk)),
+            claudeChildLayer.pipe(
+              Layer.provide(claudeLoginLockLayer),
+              Layer.provide(NodeServices.layer),
+              Layer.provideMerge(sdk),
+            ),
           ),
           Effect.scoped,
         );

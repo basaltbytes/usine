@@ -545,9 +545,11 @@ it.live(
         assert.deepStrictEqual(yield* budgets.asks(), []);
       }).pipe(Effect.provide(runtime));
     }).pipe(
-      Effect.provide([
-        ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
-        NodeServices.layer,
-      ]),
+      Effect.provide(
+        ConfigParser.layer.pipe(
+          Layer.provide(MarcbachmannCelLayer),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
     ),
 );

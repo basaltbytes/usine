@@ -78,7 +78,7 @@ for (const mode of ["rest", "graphql"] as const) {
           });
           assert.isAtLeast(finished - started, 800);
           assert.isAtMost(finished - started, 1200);
-        }).pipe(Effect.provide([polling, Logger.layer([logger])]));
+        }).pipe(Effect.provide(polling.pipe(Layer.provideMerge(Logger.layer([logger])))));
       });
     }
   });
