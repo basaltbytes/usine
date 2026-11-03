@@ -32,7 +32,7 @@ An open screen receives change notices over one server-sent events connection an
 
 The **No project access** page checks permissions every minute. When an admin grants access, the page opens your projects automatically. Task pages refresh after label changes on any linked item and merge conflict changes on any linked pull request, including older pull requests. Task history menus refresh for the same linked-item changes.
 
-Open run drawers and run pages refresh after configuration changes. If an agent definition changes, failed runs show the warning that **Edit and retry** uses the current definition.
+Open run drawers and run pages refresh during machine preparation and quota backoff, including for members with project access only. They also refresh after configuration changes. If an agent definition changes, failed runs show the warning that **Edit and retry** uses the current definition.
 
 Board moves appear immediately. A failed label write restores the card's previous lane and displays the error. An accepted move remains visible until GitHub synchronization confirms the lane. Open **Done** and scroll to load all its cards; loaded cards support **Move to** and dragging to a writable lane. Long lanes and run histories load more rows as you scroll.
 
@@ -43,3 +43,5 @@ If you serve the UI through a reverse proxy, disable response buffering for `/ap
 Change notices publish after state writes commit. The stream filters identifiers using your current project access and checks credentials before each notice and every 15 seconds. Reconnecting replays up to 256 notices; an expired cursor or a slow connection requests a fresh read. Elapsed times update in the browser from recorded timestamps.
 
 Pool rate warnings clear at their recorded reset times, including after the orchestrator restarts. A newer report replaces the previous reset times.
+
+Unchanged GitHub polls keep the board’s cached activity data. The last-checked time refreshes on the next state change or manual refresh.

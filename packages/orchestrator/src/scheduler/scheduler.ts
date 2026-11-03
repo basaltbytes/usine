@@ -1,4 +1,4 @@
-import { ChangeBus } from "@usine/core/changes";
+import { ChangeBus, type ScopedChange } from "@usine/core/changes";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { positionFor, positionFields } from "./position.ts";
 import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
@@ -259,6 +259,8 @@ export interface StepExecutorOptions {
 type LeaseMachine = Ref.Ref<Option.Option<MachineHold>>;
 
 interface RunMachine {
+  readonly loop: LoopName;
+  readonly itemKey: ItemKey;
   readonly worker: WorkerName;
   readonly machine: LeaseMachine;
 }
@@ -316,9 +318,24 @@ export const stepExecutorLayer = (
       );
       const machines = options.machines;
       const declaredWorkers = yield* Ref.make(workers);
-      const provisioning = yield* provisioningPausesFor(instances);
       // The machine of each Run's lease, which `execute` gives to the Run's Attempt.
       const runMachines = yield* Ref.make<ReadonlyMap<RunId, RunMachine>>(new Map());
+      const provisioning = yield* provisioningPausesFor(instances, (worker) =>
+        Effect.gen(function* () {
+          const changes: ScopedChange[] = [
+            { audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } },
+          ];
+          for (const [runId, lease] of yield* Ref.get(runMachines)) {
+            if (lease.worker !== worker) continue;
+            const audience = { _tag: "Loop", loop: lease.loop } as const;
+            changes.push(
+              { audience, target: { kind: "run", id: runId } },
+              { audience, target: { kind: "item", id: lease.itemKey } },
+            );
+          }
+          yield* bus.publish(changes);
+        }),
+      );
       const provisions = (worker: WorkerName) =>
         Effect.gen(function* () {
           const configured = (yield* Ref.get(declaredWorkers)).find(({ name }) => name === worker);
@@ -565,21 +582,26 @@ export const stepExecutorLayer = (
       const makeLease = Effect.fn("WorkerScheduler.makeLease")(function* (
         worker: WorkerName,
         hold: Option.Option<MachineHold> = Option.none(),
-        runId: Option.Option<RunId> = Option.none(),
+        run: Option.Option<Pick<Reservation, "runId" | "loop" | "itemKey">> = Option.none(),
       ) {
         const released = yield* Ref.make(false);
         const machine: LeaseMachine = yield* Ref.make(hold);
-        if (Option.isSome(runId))
+        if (Option.isSome(run))
           yield* Ref.update(runMachines, (current) =>
-            new Map(current).set(runId.value, { worker, machine }),
+            new Map(current).set(run.value.runId, {
+              worker,
+              machine,
+              loop: run.value.loop,
+              itemKey: run.value.itemKey,
+            }),
           );
-        const forget = Option.match(runId, {
+        const forget = Option.match(run, {
           onNone: () => Effect.void,
-          onSome: (run) =>
+          onSome: ({ runId }) =>
             Ref.update(runMachines, (current) => {
-              if (current.get(run)?.machine !== machine) return current;
+              if (current.get(runId)?.machine !== machine) return current;
               const next = new Map(current);
-              next.delete(run);
+              next.delete(runId);
               return next;
             }),
         });
@@ -624,7 +646,7 @@ export const stepExecutorLayer = (
         Effect.gen(function* () {
           const { worker, reservation, passed } = yield* nextAssignment;
           yield* changedWorker(worker);
-          const lease = yield* makeLease(worker, Option.none(), Option.some(reservation.runId));
+          const lease = yield* makeLease(worker, Option.none(), Option.some(reservation));
           const assign = yield* Ref.modify(reservation.state, (state) =>
             state._tag === "Pending"
               ? [true, { _tag: "Assigned", lease } satisfies ReservationState]
@@ -804,7 +826,7 @@ export const stepExecutorLayer = (
             return;
           }
           const created = yield* Effect.uninterruptibleMask((restore) =>
-            restore(machines.create(worker, execution.run.id, attemptId, roster)).pipe(
+            restore(machines.create(worker, execution.run, attemptId, roster)).pipe(
               Effect.tap((grant) => Ref.set(machine, Option.some(grant.hold))),
               Effect.result,
             ),

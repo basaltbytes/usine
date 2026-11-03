@@ -18,6 +18,8 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import {
+  MachineView,
+  MachineQuotaWait,
   AgentFailureView,
   GitHubPushFailureView,
   ApprovalNeed,
@@ -368,6 +370,119 @@ it("marks a closed issue in its drawer and refreshes the agent definition warnin
       }),
     );
     await expect.element(warning).toBeVisible();
+  } finally {
+    flushSync(() => root.unmount());
+    queryClient.clear();
+    host.remove();
+  }
+});
+
+it("refreshes an open queued run during machine preparation and quota backoff", async () => {
+  const queued = new RunView({
+    ...run,
+    state: "Queued",
+    closedAt: null,
+    attempts: [],
+    canRetry: false,
+    canResolveFailure: false,
+  });
+  const machine = new MachineView({
+    worker: WorkerName.make("pool"),
+    provider: "hetzner",
+    state: "creating",
+    id: null,
+    runId,
+    attemptId,
+    since: "2026-09-17T00:00:00Z",
+  });
+  const detail = new RunDetailView({
+    run: queued,
+    machine,
+    agentDefinitionChanged: false,
+    eventDedupKey: "event",
+    eventPayload: {},
+    transcript: [],
+    sessionState: [],
+    earlierTranscript: [],
+  });
+  const overview = new ReadyOverview({
+    projects: [
+      new ProjectView({
+        repository,
+        status: "clear",
+        runs: [queued],
+        board: new BoardView({ lanes: [], failures: [] }),
+        labels: [],
+        preflightFindings: [],
+      }),
+    ],
+    loops: [],
+    needsYou: [],
+  });
+  const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
+  const serve = (next: RunDetailView) => {
+    const json = JSON.stringify(Schema.encodeSync(RunDetailView)(next));
+    return commands.failureResolutionResponses(overviewJson, overviewJson, json, json, attemptId);
+  };
+  await serve(detail);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: [`/?run=${runId}`] }),
+  });
+  await router.load();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const refresh = () =>
+    invalidateChanges(
+      queryClient,
+      new ChangeNotice({
+        revision: 1,
+        reset: false,
+        changes: [{ kind: "run", id: runId }],
+      }),
+    );
+  try {
+    flushSync(() =>
+      root.render(
+        <PermissionsContext.Provider value={administratorPermissions}>
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </PermissionsContext.Provider>,
+      ),
+    );
+    const drawer = page.getByRole("dialog");
+    await expect.element(drawer.getByText(/^Creating a Hetzner machine,/)).toBeVisible();
+    const preparing = new RunDetailView({
+      ...detail,
+      machine: new MachineView({ ...machine, state: "preparing" }),
+    });
+    await serve(preparing);
+    await refresh();
+    await expect.element(drawer.getByText(/^Preparing the attempt image,/)).toBeVisible();
+    const message = "shared core limit exceeded";
+    await serve(
+      new RunDetailView({
+        ...detail,
+        machine: null,
+        run: new RunView({
+          ...queued,
+          machineWait: new MachineQuotaWait({ worker: machine.worker, message }),
+        }),
+      }),
+    );
+    await refresh();
+    await expect.element(drawer.getByText(message, { exact: false }).first()).toBeVisible();
+    await serve(preparing);
+    await refresh();
+    await expect
+      .element(drawer.getByText(message, { exact: false }).first())
+      .not.toBeInTheDocument();
+    await expect.element(drawer.getByText(/^Preparing the attempt image,/)).toBeVisible();
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();

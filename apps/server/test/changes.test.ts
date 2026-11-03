@@ -233,42 +233,45 @@ it.effect("resets a live subscriber whose queue drops committed writes", () =>
   }).pipe(Effect.provide(live), Effect.provide(changeBusLayer), Effect.scoped),
 );
 
-it.effect("filters live writes and leaves unchanged poll completions scoped to activity", () =>
-  Effect.gen(function* () {
-    const bus = yield* ChangeBus;
-    const ready = yield* Deferred.make<void>();
-    const grants = [
-      new PermissionGrant({ permission: "read", scope: new ProjectScope({ project }) }),
-    ];
-    let first = true;
-    const reader = yield* (yield* open(undefined, grants)).pipe(
-      Stream.tap(() => {
-        if (!first) return Effect.void;
-        first = false;
-        return Deferred.succeed(ready, undefined);
-      }),
-      Stream.take(2),
-      Stream.runCollect,
-      Effect.forkChild,
-    );
-    yield* Deferred.await(ready);
-    yield* bus.publish([
-      {
-        audience: { _tag: "Repository", repository: RepositoryName.make("owner/hidden") },
-        target: { kind: "item", id: "secret-live" },
-      },
-      { audience: new InstanceScope(), target: { kind: "worker", id: "secret-worker" } },
-    ]);
-    yield* bus.publish([
-      {
-        audience: { _tag: "Repository", repository },
-        target: { kind: "activity", id: "instance" },
-      },
-    ]);
-    const frames = yield* Fiber.join(reader);
-    const liveFrame = frames[1] ?? "";
-    assert.notInclude(frames.join(""), "secret");
-    assert.include(liveFrame, '"changes":[{"kind":"activity","id":"instance"}]');
-    assert.notInclude(liveFrame, '"reset":true');
-  }).pipe(Effect.provide(live), Effect.provide(changeBusLayer), Effect.scoped),
+it.effect(
+  "filters live run transitions by loop ownership and keeps worker identities private",
+  () =>
+    Effect.gen(function* () {
+      const bus = yield* ChangeBus;
+      const ready = yield* Deferred.make<void>();
+      const grants = [
+        new PermissionGrant({ permission: "read", scope: new ProjectScope({ project }) }),
+      ];
+      let first = true;
+      const reader = yield* (yield* open(undefined, grants)).pipe(
+        Stream.tap(() => {
+          if (!first) return Effect.void;
+          first = false;
+          return Deferred.succeed(ready, undefined);
+        }),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Deferred.await(ready);
+      yield* bus.publish([
+        {
+          audience: { _tag: "Repository", repository: RepositoryName.make("owner/hidden") },
+          target: { kind: "item", id: "secret-live" },
+        },
+        { audience: new InstanceScope(), target: { kind: "worker", id: "secret-worker" } },
+      ]);
+      yield* bus.publish([
+        {
+          audience: { _tag: "Loop", loop: LoopName.make("visible/developer") },
+          target: { kind: "run", id: "preparing-run" },
+        },
+      ]);
+      const frames = yield* Fiber.join(reader);
+      const liveFrame = frames[1] ?? "";
+      assert.notInclude(frames.join(""), "secret");
+      assert.include(liveFrame, '{"kind":"run","id":"preparing-run"}');
+      assert.include(liveFrame, '{"kind":"project","id":"visible"}');
+      assert.notInclude(liveFrame, '"reset":true');
+    }).pipe(Effect.provide(live), Effect.provide(changeBusLayer), Effect.scoped),
 );

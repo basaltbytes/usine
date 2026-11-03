@@ -1,6 +1,6 @@
-import { ChangeBus } from "@usine/core/changes";
+import { ChangeBus, type ScopedChange } from "@usine/core/changes";
 import type { AttemptId } from "@usine/core/attempt";
-import type { RunId } from "@usine/core/run";
+import type { Run } from "@usine/core/run";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Option, Ref } from "effect";
 import { MachineHold, MachineStatus } from "../../executor.ts";
@@ -24,7 +24,7 @@ export interface Held {
   readonly uses: number;
   readonly since: DateTime.Utc;
   readonly id: Option.Option<MachineId>;
-  readonly runId: Option.Option<RunId>;
+  readonly run: Option.Option<Pick<Run, "id" | "loop">>;
   readonly attemptId: Option.Option<AttemptId>;
   readonly machine: Option.Option<SshMachine>;
   /**
@@ -46,7 +46,7 @@ export const machineStatusOf = (entry: Held): MachineStatus =>
     provider: entry.provider,
     state: entry.state === "located" || entry.state === "unlocated" ? "ready" : entry.state,
     id: entry.id,
-    runId: entry.runId,
+    runId: Option.map(entry.run, ({ id }) => id),
     attemptId: entry.attemptId,
     since: entry.since,
     attempts: entry.uses,
@@ -54,8 +54,21 @@ export const machineStatusOf = (entry: Held): MachineStatus =>
 
 export const machineHolds = Effect.gen(function* () {
   const bus = yield* ChangeBus;
-  const changed = (entry: Held) =>
-    bus.publish([{ audience: { _tag: "Instance" }, target: { kind: "worker", id: entry.worker } }]);
+  const changed = (...entries: ReadonlyArray<Held>) => {
+    const changes = new Map<string, ScopedChange>();
+    for (const entry of entries) {
+      changes.set(`worker:${entry.worker}`, {
+        audience: { _tag: "Instance" },
+        target: { kind: "worker", id: entry.worker },
+      });
+      for (const run of Option.toArray(entry.run))
+        changes.set(`run:${run.id}`, {
+          audience: { _tag: "Loop", loop: run.loop },
+          target: { kind: "run", id: run.id },
+        });
+    }
+    return bus.publish([...changes.values()]);
+  };
   const held = yield* Ref.make<ReadonlyMap<MachineHold, Held>>(new Map());
   const nextHold = yield* Ref.make(0);
   const register = (fields: Omit<Held, "hold">) =>
@@ -70,10 +83,14 @@ export const machineHolds = Effect.gen(function* () {
   const update = (hold: MachineHold, change: (entry: Held) => Held) =>
     Ref.modify(held, (current) => {
       const entry = current.get(hold);
-      if (entry === undefined) return [Option.none<Held>(), current] as const;
+      if (entry === undefined) return [Option.none<readonly [Held, Held]>(), current] as const;
       const next = change(entry);
-      return [Option.some(next), new Map(current).set(hold, next)] as const;
-    }).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: changed })));
+      return [Option.some([entry, next] as const), new Map(current).set(hold, next)] as const;
+    }).pipe(
+      Effect.flatMap(
+        Option.match({ onNone: () => Effect.void, onSome: (entries) => changed(...entries) }),
+      ),
+    );
   const unregister = (hold: MachineHold) =>
     Ref.modify(held, (current) => {
       const next = new Map(current);
@@ -93,7 +110,7 @@ export const machineHolds = Effect.gen(function* () {
       ),
     );
 
-  const takeIdle = (worker: WorkerName, runId: RunId, attemptId: AttemptId) =>
+  const takeIdle = (worker: WorkerName, run: Pick<Run, "id" | "loop">, attemptId: AttemptId) =>
     Ref.getAndUpdate(nextHold, (count) => count + 1).pipe(
       Effect.flatMap((count) =>
         Ref.modify(held, (current) => {
@@ -105,7 +122,7 @@ export const machineHolds = Effect.gen(function* () {
             ...idle,
             hold: MachineHold.make(`machine-${count}`),
             state: "located",
-            runId: Option.some(runId),
+            run: Option.some(run),
             attemptId: Option.some(attemptId),
             uses: idle.uses + 1,
           };

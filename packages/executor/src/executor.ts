@@ -8,7 +8,7 @@ import { AttemptFailure } from "@usine/core/attempt/failure";
 import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { RunId } from "@usine/core/run";
+import { RunId, type Run } from "@usine/core/run";
 import {
   BotAccount,
   BotLogin,
@@ -482,7 +482,7 @@ export class WorkerMachines extends Context.Service<
      */
     readonly create: (
       worker: WorkerName,
-      runId: RunId,
+      run: Pick<Run, "id" | "loop">,
       attemptId: AttemptId,
       brains: ReadonlyArray<BrainSpec>,
     ) => Effect.Effect<MachineGrant, MachineUnavailableError | WorkerCapabilityError>;

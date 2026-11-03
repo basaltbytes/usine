@@ -610,27 +610,23 @@ export class PollingTriggers extends Context.Service<
           yield* bus.publish(
             watched.flatMap(({ repository }) => {
               const audience = { _tag: "Repository", repository: repository.name } as const;
-              const findings = (value: PollCycle) =>
+              const findings = (value: PollCycle | undefined) =>
                 JSON.stringify([
-                  value.failures.filter(
+                  (value?.failures ?? []).filter(
                     (failure) =>
                       canonicalRepositoryName(failure.repository) ===
                       canonicalRepositoryName(repository.name),
                   ),
-                  value.preflightFindings.filter(
+                  (value?.preflightFindings ?? []).filter(
                     (finding) =>
                       canonicalRepositoryName(finding.repository) ===
                       canonicalRepositoryName(repository.name),
                   ),
                 ]);
-              const changed =
-                Option.isNone(previous) || findings(previous.value) !== findings(cycle);
-              return [
-                { audience, target: { kind: "activity", id: "instance" } as const },
-                ...(changed
-                  ? [{ audience, target: { kind: "attention", id: "instance" } as const }]
-                  : []),
-              ];
+              const changed = findings(Option.getOrUndefined(previous)) !== findings(cycle);
+              return changed
+                ? [{ audience, target: { kind: "attention", id: "instance" } as const }]
+                : [];
             }),
           );
           return cycle;

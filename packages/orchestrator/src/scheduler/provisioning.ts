@@ -1,4 +1,3 @@
-import { ChangeBus } from "@usine/core/changes";
 import type { ProvisionerTimings, WorkerName } from "@usine/core/worker";
 import type { MachineUnavailableError, WorkerCapabilityError } from "@usine/executor";
 import { DateTime, Duration, Effect, FiberMap, Option, Semaphore, TxRef } from "effect";
@@ -18,10 +17,8 @@ const pauseAfter = (failures: number, timings: ProvisionerTimings): Duration.Dur
 
 export const provisioningPausesFor = Effect.fn("WorkerScheduler.provisioningPausesFor")(function* (
   instances: Pick<CurrentInstance["Service"], "get">,
+  changed: (worker: WorkerName) => Effect.Effect<void>,
 ) {
-  const bus = yield* ChangeBus;
-  const changed = (worker: WorkerName) =>
-    bus.publish([{ audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } }]);
   const timers = yield* FiberMap.make<WorkerName>();
   const exclusive = yield* Semaphore.make(1);
   const paused = yield* TxRef.make<ReadonlyMap<WorkerName, WorkerPause>>(new Map());

@@ -678,20 +678,7 @@ describe("PollingTriggers", () => {
         yield* Effect.yieldNow;
         assert.strictEqual(changeRequests, 2);
         const journal = yield* bus.open;
-        assert.strictEqual(journal.history.length, 1);
-        assert.deepStrictEqual(
-          journal.history[0]?.changes,
-          config.repos.flatMap(({ name }) => [
-            {
-              audience: { _tag: "Repository", repository: name },
-              target: { kind: "activity", id: "instance" },
-            },
-            {
-              audience: { _tag: "Repository", repository: name },
-              target: { kind: "attention", id: "instance" },
-            },
-          ]),
-        );
+        assert.strictEqual(journal.history.length, 0, "an idle poll emits no invalidations");
         yield* TestClock.adjust("30 seconds");
         yield* SubscriptionRef.set(
           current,
@@ -701,6 +688,13 @@ describe("PollingTriggers", () => {
         assert.strictEqual(changeRequests, 2, "a reload does not poll before GitHub's time");
         yield* TestClock.adjust("1 second");
         assert.strictEqual(changeRequests, 4);
+        yield* TestClock.adjust("180 seconds");
+        assert.strictEqual(changeRequests, 6);
+        assert.strictEqual(
+          (yield* bus.open).history.length,
+          0,
+          "five idle minutes with real polls emit no invalidations",
+        );
         yield* Fiber.interrupt(fiber);
       }).pipe(
         Effect.provide(pollingTestLayer(github)),
