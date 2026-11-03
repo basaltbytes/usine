@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import {
@@ -21,8 +21,12 @@ import { DatabaseSync, backup } from "node:sqlite";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 
-assert.equal(process.argv.length, 5, "usage: measure.mjs REPO NEW_DIRECTORY LITESTREAM");
-const [repo, root, binary] = process.argv.slice(2).map((p) => resolve(p));
+assert(
+  process.argv.length === 5 || (process.argv.length === 6 && process.argv[5] === "--large-only"),
+  "usage: measure.mjs REPO NEW_DIRECTORY LITESTREAM [--large-only]",
+);
+const [repo, root, binary] = process.argv.slice(2, 5).map((p) => resolve(p));
+const largeOnly = process.argv[5] === "--large-only";
 mkdirSync(root, { recursive: false });
 const exec = promisify(execFile);
 const env = { ...process.env, GOMAXPROCS: "1", GOMEMLIMIT: "256MiB" };
@@ -45,21 +49,30 @@ const treeBytes = (p) =>
         0,
       );
 const timed = async (name, args) => {
-  const out = join(root, `${name}.time.json`);
-  const timer = `import json, resource, subprocess, sys, time
-start = time.perf_counter()
-code = subprocess.run(sys.argv[2:], timeout=175).returncode
-usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-with open(sys.argv[1], 'w') as output:
-    json.dump(dict(wall_s=time.perf_counter()-start, user_s=usage.ru_utime, system_s=usage.ru_stime, max_rss_kib=usage.ru_maxrss), output)
-sys.exit(code)
-`;
-  await exec("python3", ["-c", timer, out, binary, ...args], {
-    env,
+  const out = join(root, `${name}.time.txt`);
+  const start = performance.now();
+  await exec("timeout", ["--signal=KILL", "175", "time", "-v", "-o", out, binary, ...args], {
+    env: { ...env, LC_ALL: "C" },
     timeout: 180000,
+    killSignal: "SIGKILL",
     maxBuffer: 4 * 1024 * 1024,
   });
-  return JSON.parse(readFileSync(out, "utf8"));
+  const wall = (performance.now() - start) / 1000;
+  const usage = readFileSync(out, "utf8");
+  const value = (label) =>
+    Number(
+      usage
+        .split("\n")
+        .find((line) => line.trimStart().startsWith(label))
+        .split(":")
+        .at(-1),
+    );
+  return {
+    wall_s: wall,
+    user_s: value("User time (seconds):"),
+    system_s: value("System time (seconds):"),
+    max_rss_kib: value("Maximum resident set size (kbytes):"),
+  };
 };
 const startReplica = async (dir, paths) => {
   const socketDirectory = mkdtempSync(join(tmpdir(), "usine-ls-"));
@@ -145,7 +158,16 @@ for (const p of ["journal_mode", "synchronous", "wal_autocheckpoint", "busy_time
 await durable.close();
 save("pi_settings", piSettings);
 
-for (const mode of ["baseline", "auto1000", "auto0", "pi-auto1000", "pi-auto0"]) {
+save("measurement", {
+  mode: largeOnly ? "large-only" : "full",
+  cpu_affinity: readFileSync("/proc/self/status", "utf8").match(/^Cpus_allowed_list:\s+(.+)$/m)[1],
+  memory_max_bytes: Number(readFileSync("/sys/fs/cgroup/memory.max", "utf8")),
+  memory_swap_max_bytes: Number(readFileSync("/sys/fs/cgroup/memory.swap.max", "utf8")),
+  replication_rss_method: "ps -o rss= -p PID, sampled every 100 ms across replication and restores",
+  restore_rss_method: "GNU time -v: Maximum resident set size (kbytes)",
+});
+
+for (const mode of largeOnly ? [] : ["baseline", "auto1000", "auto0", "pi-auto1000", "pi-auto0"]) {
   const dir = join(root, mode);
   mkdirSync(dir);
   const path = join(dir, "runtime.sqlite");
@@ -290,14 +312,19 @@ for (const [name, rows] of [
 const t = performance.now();
 const replica = await startReplica(big, paths);
 const largeSamples = [];
-const largeTimer = setInterval(() => {
-  const status = readFileSync(`/proc/${replica.child.pid}/status`, "utf8");
+const sampleLarge = () => {
   const stat = readFileSync(`/proc/${replica.child.pid}/stat`, "utf8").split(" ");
   largeSamples.push({
-    rss_kib: Number(status.match(/^VmRSS:\s+(\d+)/m)[1]),
+    rss_kib: Number(
+      execFileSync("ps", ["-o", "rss=", "-p", String(replica.child.pid)], {
+        encoding: "utf8",
+      }).trim(),
+    ),
     cpu_ticks: Number(stat[13]) + Number(stat[14]),
   });
-}, 100);
+};
+sampleLarge();
+const largeTimer = setInterval(sampleLarge, 100);
 try {
   const markers = [];
   for (const path of paths) markers.push(await replica.sync(path));
@@ -367,8 +394,16 @@ try {
     markers,
     attempts,
     timestamp_wall_s: timestampTime.wall_s,
+    timestamp_max_rss_kib: timestampTime.max_rss_kib,
     exact_txid_and_timestamp_verified: true,
   });
+  sampleLarge();
+  save("large_replication", {
+    rss_max_kib: Math.max(...largeSamples.map((s) => s.rss_kib)),
+    cpu_s: largeSamples.at(-1).cpu_ticks / 100,
+    sample_count: largeSamples.length,
+  });
+  writeFileSync(join(big, "samples.json"), JSON.stringify(largeSamples));
 } finally {
   clearInterval(largeTimer);
   await replica.stop();

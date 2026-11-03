@@ -2,11 +2,12 @@
 
 Research date: 2026-11-03. Issue: [#897](https://github.com/basaltbytes/usine/issues/897).
 Repository baseline: `2482038ecbe239be05898ef6ce40efc0fbf7bbc8`.
+Memory follow-up: the same dependency lockfile and large-fixture workload.
 
 ## Recommendation
 
 **Keep full-copy backups for managed upgrades.** A 751.88 MiB runtime database and
-150.36 MiB durable database restored in 24.13–30.13 seconds from local replicas.
+150.36 MiB durable database restored in 23.05–39.26 seconds across the local trials.
 Litestream can replicate both usine SQLite files, and a recorded replica
 transaction ID can recover a database from
 before a migration. Replacing the helper's backups also requires a write barrier
@@ -26,7 +27,9 @@ The experiment uses **Litestream 0.5.17**, released on 2026-08-31, under the
 release's `checksums.txt`. Sources: [release][release], [license][license].
 
 [measure.mjs](./measure.mjs) contains the executable experiment;
-[results.json](./results.json) contains its results. The checked-in JSON replaces
+[results.json](./results.json) contains the original full-run results;
+[memory-results.json](./memory-results.json) contains a separate large-fixture
+memory run. The checked-in JSON replaces
 the absolute measurement directory with `<measurement-directory>`; numeric values
 are unchanged. All replicas use local files on the worker's persistent
 filesystem. The experiment uses generated data, rather
@@ -36,10 +39,11 @@ the size targets, not a captured production write trace.
 The worker runs Linux 6.8 on x86-64, Node 22.23.4, and the dependency versions in
 `pnpm-lock.yaml`. The experiment and its children share CPU affinity to **one core**
 through `taskset -c 0`. The worker has 7.75 GiB of RAM and a cgroup memory limit of
-about 6.75 GiB. An unprivileged process cannot create a separate 2 GiB cgroup here.
-Litestream runs with `GOMAXPROCS=1` and `GOMEMLIMIT=256MiB`; the latter is a soft Go
-memory target, **not an RSS limit**. Memory measurements therefore describe observed
-use on one core, not a test on a machine limited to 2 GiB.
+about 6.75 GiB, with no swap. The attempt container cannot create cgroups or user
+namespaces, so the experiment measures process memory without enforcing a 2 GiB
+limit. Litestream runs with `GOMAXPROCS=1` and `GOMEMLIMIT=256MiB`; the latter is a
+soft Go memory target, **not an RSS limit**. The factory budget for comparison is
+**1 vCPU, 1.9 GB RAM, no swap**, with the usine server using about **300–500 MB**.
 
 The WAL probe uses Node's SQLite connection with settings read from the installed
 Effect and pi-durable adapters. Each commit appends a 2 KiB payload and updates a
@@ -54,11 +58,16 @@ It reuses the same payload, so its replication CPU and byte counts describe a
 compressible write case. Each WAL case runs once in sequence; latency differences
 between cases are not a controlled performance comparison.
 
-WAL size and Litestream RSS are sampled with a 100 ms timer. Synchronous SQLite
-batches can delay that timer, so sampled peaks can miss brief spikes. CPU seconds
-come from Linux `/proc/<pid>/stat` with `CLK_TCK=100`. Restore measurements use
-Python `resource.getrusage(RUSAGE_CHILDREN)` and a monotonic wall clock; they
-include process startup and the requested quick integrity check. The filesystem
+The original full run samples WAL size and Litestream RSS with a 100 ms timer.
+Synchronous SQLite batches can delay that timer, so sampled peaks can miss brief
+spikes. CPU seconds come from Linux `/proc/<pid>/stat` with `CLK_TCK=100`. Its
+restore measurements use Python `resource.getrusage(RUSAGE_CHILDREN)` and a
+monotonic wall clock. The memory run samples replicator RSS with `ps -o rss=` at
+100 ms intervals, from control-socket readiness through the final restore. Each
+restore runs under GNU `time -v`, recording **Maximum resident set size (kbytes)**,
+user and system CPU time, and a monotonic wall clock. On Linux these memory values
+use KiB; the tables convert them to MiB. Both runs include process startup and the
+requested quick integrity check. The filesystem
 cache is warm, with replicas and destinations on the same disk. Network latency,
 S3 throttling, retries, cold disk reads, package installation, and server startup
 are outside those restore timings.
@@ -131,7 +140,7 @@ refuse an upgrade when its recovery point cannot be confirmed.
 
 ### Restore measurements
 
-The large fixture contains a runtime database in the 750 MiB size class and a
+The original full run uses a runtime database in the 750 MiB size class and a
 durable database in the 150 MiB size class. Each starts with random 3900-byte blobs;
 deleting every fourth row leaves free pages without vacuuming. SQLite's backup
 API copies each fixture before replication starts.
@@ -174,6 +183,52 @@ restore and service start. It is not an existing limit on the whole rollback:
 `healthy`. A replacement needs its own bounded restore deadline and must reserve
 time for package recovery and startup. The measured local pair fits within 180
 seconds; that result cannot guarantee a remote restore within the same interval.
+
+### Factory memory budget
+
+The separate memory run uses the same **751.88 MiB runtime** and **150.36 MiB
+durable** fixture sizes, including the same free-page counts. It repeats initial
+replication, migration-marker rollback, three sequential restore pairs, and the
+timestamp restore on one CPU core. The replicator remains active during these
+restores so its samples include overlapping snapshot and compaction work.
+[memory-results.json](./memory-results.json) records the measurements and methods.
+
+Initial replication takes **46.79 s** and **15.74 CPU seconds**, with **79.84 MiB**
+sampled peak replicator RSS. Across initial replication and all restores, the
+replicator reaches **84.09 MiB** sampled peak RSS and uses **25.13 CPU seconds**;
+the probe collects **1564 samples**. The replica directories total **1492.62 MiB**
+after initial replication. This total varies with compaction timing.
+
+| Trial | Runtime restore (s) | Durable restore (s) | Pair (s) | Runtime peak RSS (MiB) | Durable peak RSS (MiB) | Extra full integrity checks (s) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 35.46 | 3.80 | 39.26 | 88.32 | 49.35 | 0.23 |
+| 2 | 19.90 | 3.80 | 23.70 | 90.94 | 49.98 | 0.23 |
+| 3 | 19.10 | 3.95 | 23.05 | 78.30 | 49.22 | 0.27 |
+
+All restored pairs recover the pre-migration marker and schema and pass full
+integrity checks. The confirmed runtime TXID is `0000000000000002`; the durable
+TXID is `0000000000000001`. The timestamp restore also recovers the pre-migration
+marker, taking **22.48 s** with **84.27 MiB** peak RSS.
+
+For the factory's **1.9 GB RAM, no-swap** budget, allow **300–500 MB** for the usine
+server. These budget values use decimal GB and MB. Adding the upper **500 MB**
+server allowance to the separately observed **84.09 MiB** replicator peak and
+**90.94 MiB** largest restore peak totals about **684 MB**, leaving about
+**1.22 GB** for the operating system, filesystem cache, Pi parents, and other
+services. The restore commands run sequentially, so this calculation uses the
+largest single restore peak. It sums separate peaks as a planning allowance;
+it does not measure simultaneous total host use.
+
+The observed process memory fits this allowance, but **RSS does not include the
+host's filesystem cache or memory used by other processes**. The worker's cgroup
+memory limit remains about 6.75 GiB. Its warm cache can improve restore
+times compared with the factory, and no 2 GiB memory limit is enforced. Sampling
+can miss short replicator spikes, including work before socket readiness and at
+shutdown; GNU `time -v` records each restore's process high-water RSS. The sampling
+commands also consume CPU on the shared core. These results support a process
+memory budget, not a guarantee against memory pressure, an out-of-memory kill, or
+a factory restore deadline. The two runs are separate observations, not a
+controlled timing comparison.
 
 ### Record TXIDs, not just a wall-clock timestamp
 
@@ -269,11 +324,12 @@ can wrap a child process, but it couples shutdown to that child; embedding the G
 library in the Node server would add an integration boundary without helping the
 independent helper. Sources: [replicate command][replicate], [sample configuration][defaults].
 
-The measured RSS and CPU values above describe the replicator in isolation. On a
-1 vCPU / 2 GiB host, a deployment must also budget for the orchestrator, Pi parents,
-the operating system, and filesystem cache. Repeat sustained-write and concurrent
-restore/startup tests under an actual 2 GiB limit before sizing the service. An
-initial snapshot or compaction can be much heavier than idle replication.
+The factory memory comparison above budgets for the usine server as well as
+Litestream. Reserve the remaining memory for the operating system, filesystem
+cache, Pi parents, and other services. Initial snapshots and compaction also
+compete with usine for the single CPU; their peak work differs from idle
+replication. Measure sustained writes and restore/startup overlap on the factory
+before adopting replication.
 
 Litestream still creates full snapshots and local tracking files. Replacing
 per-upgrade copies would reduce repeated snapshot creation at each upgrade, but
@@ -301,14 +357,18 @@ Those are transfer calculations, not benchmark results.
 
 Use the repository baseline above and its lockfile. Install workspace dependencies,
 download the pinned release from [the release page][release], verify its checksum
-above, and extract it. On Linux, with Python 3,
-`taskset`, and a free persistent disk directory:
+above, and extract it. On Linux, with GNU `time` and `timeout` on `PATH`, `ps`,
+`taskset`, a cgroup v2 memory controller, and a free persistent disk directory:
 
 ```sh
 pnpm install --frozen-lockfile
 taskset -c 0 node docs/research/litestream/measure.mjs \
   "$PWD" /absolute/path/to/new-measurement-directory /absolute/path/to/litestream
 ```
+
+Add `--large-only` after the Litestream path to repeat only the large-fixture
+replication and restore measurements, as in `memory-results.json`. Keep the new
+results separate from the original full run.
 
 Use a directory that does not exist; the script creates it and leaves databases,
 replicas, logs, timing files, and WAL/RSS samples there for inspection. Reserve at
