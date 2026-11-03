@@ -20,6 +20,7 @@ import {
 } from "@usine/engine/attention";
 import {
   attentionKey,
+  attentionAudiences,
   partitionNeeds,
   taskNeedsAttention,
   projectAttention,
@@ -41,7 +42,7 @@ import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
 import type { WorkerName } from "@usine/core/worker";
-import type { ItemKey, ItemNumber } from "@usine/core/item";
+import { GitHubItemKey, type ItemKey, type ItemNumber } from "@usine/core/item";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import {
   RetryRequest,
@@ -86,7 +87,7 @@ import { settledItemState } from "../board/items.ts";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { LoopMatches } from "../loop-matches.ts";
-import { GitHubItemKey, PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
+import { PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import { cycleLimitOf } from "../trigger-submission.ts";
 import {
@@ -1025,12 +1026,13 @@ const makeOperator = Effect.gen(function* () {
         dismissedBy: yield* requestActor(instance.config.operator),
         dismissedAt: yield* DateTime.now,
       }),
+      attentionAudiences(key),
     );
   });
   const undoDismissNeed = Effect.fn("Operator.undoDismissNeed")(function* (key: AttentionKey) {
     yield* requirePermission("admin", new InstanceScope());
     yield* Effect.annotateCurrentSpan({ needId: key.id });
-    yield* acknowledgements.undo(key);
+    yield* acknowledgements.undo(key, attentionAudiences(key));
   });
 
   const requireRunOperation = Effect.fn("Operator.requireRunOperation")(function* (
@@ -1702,8 +1704,10 @@ export {
   TranscriptAttemptNotFoundError,
 } from "./transcript.ts";
 
-export { attentionKey, projectAttention } from "./attention.ts";
+export { attentionKey, attentionAudiences, projectAttention } from "./attention.ts";
 
 export { ConfigurationEditor, type ConfigurationEditorError } from "./configuration/editor.ts";
 
 export { SetupState } from "./setup.ts";
+
+export { TaskIdentityView } from "./overview.ts";

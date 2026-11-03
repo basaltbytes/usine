@@ -106,6 +106,7 @@ export const allRepositoriesLabel = "All repositories";
 export const repositoryCountLabel = (count: number): string => `${count} repositories`;
 
 export const refreshCopy = {
+  disconnected: " Live updates disconnected. Checking every minute.",
   label: "Last updated",
   waiting: "Waiting for the first refresh",
   failed: (sources: string) =>

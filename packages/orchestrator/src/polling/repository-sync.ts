@@ -1,7 +1,7 @@
 import type { DeclaredLabel } from "@usine/config/label";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
-import { ItemKey, ItemNumber } from "@usine/core/item";
+import { GitHubItemKey, ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import {
   ItemContentHash,
@@ -33,17 +33,6 @@ import {
   repositoryFailureLogFields,
 } from "./cycle.ts";
 
-/**
- * The stable key of a GitHub issue or pull request: the canonical repository name and Item number.
- * Schedule Run keys contain only the repository and don't decode as an Item.
- */
-export const GitHubItemKey = Schema.toType(ItemKey).pipe(
-  Schema.decodeTo(
-    Schema.fromJsonString(Schema.Tuple([Schema.Literal("github"), RepositoryName, ItemNumber])),
-  ),
-);
-// `toType` keeps the ItemKey brand on the encoded side, so the encoder produces the key used by
-// both the Board projection and the Run engine.
 const encodeGitHubItemKey = Schema.encodeSync(GitHubItemKey);
 
 /**

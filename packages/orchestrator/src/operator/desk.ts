@@ -623,8 +623,7 @@ const makeDesk = Effect.gen(function* () {
         const projected = yield* Effect.result(projectedItem(stored));
         // The Board reports an Item it can't project in Needs you.
         if (Result.isFailure(projected)) continue;
-        const { itemKey, kind, number, title, url, state } = projected.success;
-        links.set(itemKey, new BoardItemLink({ itemKey, kind, number, title, url, state }));
+        links.set(projected.success.itemKey, new BoardItemLink(projected.success));
       }
     }
 

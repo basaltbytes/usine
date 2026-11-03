@@ -1,6 +1,6 @@
 import type { LaneItemState, SettledItemState } from "@usine/config/board";
 import type { ItemNumber } from "@usine/core/item";
-import type { BoardTaskView, FactoryOverview, RunView } from "@usine/orchestrator/operator";
+import type { TaskIdentityView, FactoryOverview, RunView } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Option, Schema } from "effect";
 import { cardIdentity, pullRequestAt, taskCard } from "~/components/item/identity";
@@ -128,7 +128,7 @@ export interface RunHeaderItems {
 export const runHeaderItems = (
   run: Pick<RunView, "pullRequestUrl">,
   item: Option.Option<RunItem>,
-  card: Option.Option<BoardTaskView>,
+  card: Option.Option<TaskIdentityView>,
   settled: SettledItemState | null,
 ): RunHeaderItems => {
   const identity = Option.map(card, cardIdentity);

@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { noCycleBudgets } from "./support/polling.ts";
@@ -665,6 +666,7 @@ describe("PollingTriggers", () => {
       };
 
       return Effect.gen(function* () {
+        const bus = yield* ChangeBus;
         const polling = yield* PollingTriggers;
         const current = yield* SubscriptionRef.make(instanceWith([issueLoop("start-dev")]));
         const fiber = yield* Effect.forkChild(
@@ -675,6 +677,8 @@ describe("PollingTriggers", () => {
         );
         yield* Effect.yieldNow;
         assert.strictEqual(changeRequests, 2);
+        const journal = yield* bus.open;
+        assert.strictEqual(journal.history.length, 0, "an idle poll emits no invalidations");
         yield* TestClock.adjust("30 seconds");
         yield* SubscriptionRef.set(
           current,
@@ -684,8 +688,19 @@ describe("PollingTriggers", () => {
         assert.strictEqual(changeRequests, 2, "a reload does not poll before GitHub's time");
         yield* TestClock.adjust("1 second");
         assert.strictEqual(changeRequests, 4);
+        yield* TestClock.adjust("180 seconds");
+        assert.strictEqual(changeRequests, 6);
+        assert.strictEqual(
+          (yield* bus.open).history.length,
+          0,
+          "five idle minutes with real polls emit no invalidations",
+        );
         yield* Fiber.interrupt(fiber);
-      }).pipe(Effect.provide(pollingTestLayer(github)));
+      }).pipe(
+        Effect.provide(pollingTestLayer(github)),
+        Effect.provide(changeBusLayer),
+        Effect.scoped,
+      );
     },
   );
 

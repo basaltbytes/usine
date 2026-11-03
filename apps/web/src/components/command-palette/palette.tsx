@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { searchQuery } from "~/lib/overview";
 import { defaultFilter } from "cmdk";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import type { FactoryOverview } from "@usine/orchestrator/operator";
@@ -21,6 +23,13 @@ type CommandPaletteProps = { readonly overview: FactoryOverview };
 export const CommandPalette = ({ overview }: CommandPaletteProps) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const { data: searchable } = useQuery({
+    ...searchQuery(),
+    enabled:
+      open &&
+      search.trim().length > 0 &&
+      overview.projects.every(({ board }) => board.lanes.length === 0),
+  });
   const commands = useContext(PageCommandsContext);
   const currentCommands = useRef(commands);
   currentCommands.current = commands;
@@ -96,7 +105,7 @@ export const CommandPalette = ({ overview }: CommandPaletteProps) => {
           <CommandList className="max-h-[min(18rem,50dvh)]">
             <CommandEmpty>{paletteCopy.empty}</CommandEmpty>
             <NavigationCommands
-              overview={overview}
+              overview={searchable ?? overview}
               select={select}
               searching={search.trim().length > 0}
             />

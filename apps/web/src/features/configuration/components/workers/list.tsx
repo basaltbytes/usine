@@ -4,7 +4,9 @@ import { ConfigurationPage } from "~/features/configuration/components/section";
 import { WorkerRow } from "~/features/configuration/components/workers/row";
 import { plural } from "~/features/configuration/strings";
 
-type WorkersListProps = { readonly configuration: ConfigurationView };
+type WorkersListProps = {
+  readonly configuration: Pick<ConfigurationView, "workers" | "removedWorkers">;
+};
 
 /** Renders the Workers declared in `usine.yaml`, then the Workers removed by a reload that still run Attempts. */
 export const WorkersList = ({ configuration }: WorkersListProps) => {

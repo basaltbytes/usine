@@ -15,8 +15,9 @@ export default defineConfig({
         test: {
           name: "latency",
           include: [latencyTest],
-          // Other suites' CPU and SQLite work must finish before measuring response times.
+          // Measure read latency after other server tests release the CPU.
           sequence: { groupOrder: 1 },
+          fileParallelism: false,
         },
       },
     ],

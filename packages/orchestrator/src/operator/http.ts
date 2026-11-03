@@ -1,3 +1,11 @@
+import {
+  repositoryPart,
+  changesRead,
+  workersRead,
+  boardLaneItemsRead,
+  taskRunsRead,
+} from "./reads.ts";
+export { ChangeNotice, ChangeTarget } from "./changes.ts";
 import { WorkerPreflightView } from "./preflight.ts";
 import { ProjectId } from "@usine/core/project";
 import { ProjectView } from "./overview.ts";
@@ -394,9 +402,6 @@ const transcriptQuery = Schema.Union([
   ),
 ]);
 
-const repositoryPart = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9_.-]+$/u, { message: "Expected a repository path segment" }),
-);
 const acknowledged = Schema.Struct({ ok: Schema.Literal(true) }).annotate({
   title: "Acknowledgement",
   description: "The request was accepted. An asynchronous action may still be running.",
@@ -474,6 +479,8 @@ export const OperatorApi = operatorApi.add(
           OpenApi.Description,
           "Accepts an upgrade when idle or an immediate restart. Poll upgrade status for the outcome.",
         ),
+      changesRead,
+      workersRead,
       HttpApiEndpoint.get("overview", "/api/overview", { success: FactoryOverview })
         .annotate(OpenApi.Summary, "Read the instance overview")
         .annotate(
@@ -638,6 +645,7 @@ export const OperatorApi = operatorApi.add(
           OpenApi.Description,
           "Returns the project and its board across member repositories.",
         ),
+      boardLaneItemsRead,
       HttpApiEndpoint.get("projectTask", "/api/projects/:project/tasks/:item", {
         params: {
           project: ProjectId,
@@ -731,6 +739,7 @@ export const OperatorApi = operatorApi.add(
         ),
     )
     .add(
+      taskRunsRead,
       HttpApiEndpoint.get("task", "/api/projects/:owner/:repository/tasks/:item", {
         params: {
           owner: repositoryPart,
@@ -932,9 +941,13 @@ export const operatorPermissions = {
   cancelUpgrade: "admin",
   requestUpgrade: "admin",
   overview: "read",
+  workers: "admin",
+  changes: "read",
   project: "read",
+  boardLaneItems: "read",
   projectTask: "read",
   task: "read",
+  taskRuns: "read",
   detail: "read",
   githubChanges: "read",
   desk: "read",

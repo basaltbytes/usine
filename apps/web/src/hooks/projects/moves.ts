@@ -5,7 +5,7 @@ import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import type { BoardLaneView, BoardTaskView, ProjectView } from "@usine/orchestrator/operator";
 import { useEffect } from "react";
 import { api } from "~/lib/api";
-import { projectId, overviewQuery } from "~/lib/overview";
+import { projectId } from "~/lib/overview";
 
 /** A card whose label change is still saving or not yet shown on the Board. */
 export interface BoardMoveProgress {
@@ -56,8 +56,6 @@ export const useBoardMoves = (project: ProjectView) => {
   const moves: ReadonlyArray<BoardMoveProgress> = pendingMoves.filter((move) =>
     stillSyncing(move, project.board.lanes),
   );
-  // A first move has no open Run, so the idle interval would delay confirmation and approval.
-  useQuery({ ...overviewQuery(), enabled: moves.length > 0, refetchInterval: 1_000 });
   useEffect(() => {
     queryClient.setQueryData<ReadonlyArray<TrackedMove>>(moveKey(projectId(project)), (current) => {
       const remaining = current?.filter((move) => stillSyncing(move, project.board.lanes));
@@ -76,6 +74,7 @@ export const useBoardMoves = (project: ProjectView) => {
       readonly itemKey: ItemKey;
       readonly item: ItemNumber;
       readonly toLane: BoardLaneView["id"];
+      readonly tracking: TrackedMove;
     }) => {
       const { owner, name } = splitRepositoryName(repository);
       return api((client) =>
@@ -85,17 +84,24 @@ export const useBoardMoves = (project: ProjectView) => {
         }),
       );
     },
+    onMutate: ({ boardProject, tracking }) => {
+      updateMoves(boardProject, (moves) => [...moves, tracking]);
+    },
     // Callbacks use the request's board because navigation can replace the observer's options
     // while the request is in flight.
     onSuccess: (_, { boardProject, itemKey }) => {
       updateMoves(boardProject, (moves) =>
         moves.map((move) => (move.itemKey === itemKey ? { ...move, phase: "syncing" } : move)),
       );
-      return queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+      return queryClient.invalidateQueries({
+        predicate: (query) => query.meta?.projectId === boardProject,
+      });
     },
     onError: (_, { boardProject, itemKey }) => {
       updateMoves(boardProject, (moves) => moves.filter((move) => move.itemKey !== itemKey));
-      return queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+      return queryClient.invalidateQueries({
+        predicate: (query) => query.meta?.projectId === boardProject,
+      });
     },
   });
 
@@ -114,9 +120,13 @@ export const useBoardMoves = (project: ProjectView) => {
     const laneLabels = project.board.lanes.flatMap((lane) =>
       lane._tag === "WritableBoardLane" ? lane.labels : [],
     );
-    updateMoves(projectId(project), (moves) => [
-      ...moves,
-      {
+    write.mutate({
+      repository: item.repository,
+      boardProject: projectId(project),
+      itemKey: item.itemKey,
+      item: item.number,
+      toLane: target.id,
+      tracking: {
         itemKey: item.itemKey,
         toLane: target.id,
         source: {
@@ -126,13 +136,6 @@ export const useBoardMoves = (project: ProjectView) => {
         laneLabels,
         phase: "saving",
       },
-    ]);
-    write.mutate({
-      repository: item.repository,
-      boardProject: projectId(project),
-      itemKey: item.itemKey,
-      item: item.number,
-      toLane: target.id,
     });
   };
   const belongsToProject = write.variables?.boardProject === projectId(project);

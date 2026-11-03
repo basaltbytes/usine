@@ -1,3 +1,4 @@
+import type { ChangeAudience } from "@usine/core/changes";
 import { type AgentFile, InvalidAgent } from "@usine/config/agent";
 import type { Worker as ConfigWorker } from "@usine/config/factory";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -254,4 +255,31 @@ export const workersChange = (
     });
   }
   return { resized, updated, added, removed, restart };
+};
+
+/** Resolves project-local reloads separately from changes to shared definitions and settings. */
+export const reloadAudiences = (changes: InstanceReload): ReadonlyArray<ChangeAudience> => {
+  const audiences: ChangeAudience[] = [
+    { _tag: "Instance" },
+    ...[...changes.loops.added, ...changes.loops.removed, ...changes.loops.changed].map(
+      (loop): ChangeAudience => ({ _tag: "Loop", loop }),
+    ),
+    ...[...changes.projects.added, ...changes.projects.removed, ...changes.projects.changed].map(
+      (project): ChangeAudience => ({ _tag: "Project", project }),
+    ),
+    ...[...changes.repos.added, ...changes.repos.removed, ...changes.repos.changed].map(
+      (repository): ChangeAudience => ({ _tag: "Repository", repository }),
+    ),
+  ];
+  if (
+    [changes.agents, changes.labels].some(
+      ({ added, removed, changed }) => added.length + removed.length + changed.length > 0,
+    ) ||
+    changes.settingsChanged ||
+    changes.operatorChanged ||
+    changes.quarantinedLoops.length > 0 ||
+    changes.invalidAgents.length > 0
+  )
+    audiences.push({ _tag: "Readers" });
+  return audiences;
 };

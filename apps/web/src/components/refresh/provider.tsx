@@ -1,12 +1,6 @@
-import { notifyManager, useQueryClient } from "@tanstack/react-query";
-import { isFunction } from "effect/Predicate";
+import { connectionQuery, type ConnectionState } from "~/lib/changes";
+import { notifyManager, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useEffect, useState, type ReactNode } from "react";
-
-declare module "@tanstack/react-query" {
-  interface Register {
-    queryMeta: { readonly refreshLabel?: string };
-  }
-}
 
 type RefreshSource = {
   readonly label: string;
@@ -14,13 +8,17 @@ type RefreshSource = {
   readonly failedSince: number | null;
 };
 
-export const RefreshContext = createContext<ReadonlyArray<RefreshSource>>([]);
+export const RefreshContext = createContext<{
+  readonly sources: ReadonlyArray<RefreshSource>;
+  readonly connection: ConnectionState;
+}>({ sources: [], connection: "connecting" });
 
 type RefreshProviderProps = { readonly children: ReactNode };
 
-/** Tracks successful reads and continuous failures for the page's active polling queries. */
+/** Tracks successful reads and continuous failures for the page's active queries. */
 export const RefreshProvider = ({ children }: RefreshProviderProps) => {
   const client = useQueryClient();
+  const { data: connection = "connecting" } = useQuery(connectionQuery());
   const [sources, setSources] = useState<ReadonlyArray<RefreshSource>>([]);
   useEffect(() => {
     const cache = client.getQueryCache();
@@ -34,20 +32,7 @@ export const RefreshProvider = ({ children }: RefreshProviderProps) => {
         if (query.state.status === "success") failures.delete(query.queryHash);
         else if (query.state.status === "error" && !failures.has(query.queryHash))
           failures.set(query.queryHash, query.state.errorUpdatedAt);
-        const polling = query.observers.some(({ options }) => {
-          const enabled = isFunction(options.enabled) ? options.enabled(query) : options.enabled;
-          const interval = isFunction(options.refetchInterval)
-            ? options.refetchInterval(query)
-            : options.refetchInterval;
-          return (
-            enabled !== false &&
-            interval !== false &&
-            interval !== undefined &&
-            interval > 0 &&
-            Number.isFinite(interval)
-          );
-        });
-        if (polling)
+        if (query.isActive())
           next.push({
             label,
             updatedAt: query.state.dataUpdatedAt,
@@ -81,5 +66,5 @@ export const RefreshProvider = ({ children }: RefreshProviderProps) => {
       unsubscribe();
     };
   }, [client]);
-  return <RefreshContext value={sources}>{children}</RefreshContext>;
+  return <RefreshContext value={{ sources, connection }}>{children}</RefreshContext>;
 };

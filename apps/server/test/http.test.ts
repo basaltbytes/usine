@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import {
   RequestPermissions,
   RoleBinding,
@@ -24,6 +25,7 @@ import {
   type AttentionAcknowledgement,
 } from "@usine/engine/attention";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { TokenCount } from "@usine/core/agent/session";
 import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -32,7 +34,7 @@ import { join } from "node:path";
 import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
 import { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/config/label";
-import { LaneName } from "@usine/config/board";
+import { LaneName, StateLaneSource } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -95,6 +97,11 @@ import {
   TaskItemView,
   TaskLaneView,
   TaskView,
+  BoardItemLink,
+  BoardTaskView,
+  ReadOnlyBoardLaneView,
+  boardRunSummary,
+  TaskUsageView,
   ConfigurationView,
   type OperatorConfiguration,
   SettingsView,
@@ -106,7 +113,7 @@ import {
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
-import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { afterAll, assert, describe, it } from "vitest";
@@ -439,6 +446,32 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
+      const authorizedRead = yield* Effect.promise(() =>
+        secured.handler(
+          new Request("http://127.0.0.1/api/overview", {
+            headers: { authorization: `Bearer ${localSecret}` },
+          }),
+        ),
+      );
+      assert.equal(authorizedRead.headers.get("cache-control"), "private, no-cache");
+      const validator = authorizedRead.headers.get("etag");
+      assert(validator !== null);
+      const unauthorizedRead = yield* Effect.promise(() =>
+        secured.handler(
+          new Request("http://127.0.0.1/api/overview", { headers: { "if-none-match": validator } }),
+        ),
+      );
+      assert.equal(unauthorizedRead.status, 401);
+      const sessionRead = yield* Effect.promise(() =>
+        secured.handler(
+          new Request("http://127.0.0.1/api/auth/session", {
+            headers: { authorization: `Bearer ${localSecret}` },
+          }),
+        ),
+      );
+      assert.equal(sessionRead.headers.get("cache-control"), "no-store");
+      assert.equal(sessionRead.headers.get("etag"), null);
+
       const publicRoutes = new Set([
         "GET /api/health",
         "GET /api/version",
@@ -1462,4 +1495,160 @@ it("checks the declared permission for every operator route and each role", asyn
       await secured.dispose();
     }
   }
+});
+
+it("returns a private validator and an empty 304 for unchanged authorized reads", async () => {
+  const request = (headers: Record<string, string> = {}) =>
+    app.handler(new Request("http://localhost/api/overview", { headers }));
+  const first = await request();
+  assert.strictEqual(first.status, 200);
+  const etag = first.headers.get("etag");
+  assert(etag !== null);
+  assert.strictEqual(first.headers.get("cache-control"), "private, no-cache");
+  const second = await request({ "if-none-match": `W/${etag}` });
+  assert.strictEqual(second.status, 304);
+  assert.strictEqual(await second.text(), "");
+  const shell = await request({ "x-usine-view": "shell", "if-none-match": etag });
+  assert.strictEqual(shell.status, 200);
+  assert.include(shell.headers.get("vary") ?? "", "x-usine-view");
+});
+
+it("retains all linked card membership when the board read omits settled cards", async () => {
+  const item = task.items[0];
+  const original = overview.projects[0];
+  assert(item !== undefined && original !== undefined);
+  const member = new BoardItemLink(item);
+  const current = new BoardItemLink({
+    ...member,
+    itemKey: ItemKey.make("github:basaltbytes/usine:42"),
+    kind: "pr",
+    number: ItemNumber.make(42),
+    state: "pr-merged",
+  });
+  const card = new BoardTaskView({
+    ...current,
+    repository: repositoryName,
+    items: [member, current],
+    ...boardRunSummary([run], run, [member, current]),
+    run,
+    pullRequest: null,
+    needsYou: false,
+    loops: [],
+    usage: new TaskUsageView({
+      durationMillis: 0,
+      runningSince: [],
+      unmeasured: 0,
+      tokens: TokenCount.make(0),
+      pools: [],
+      cost: null,
+    }),
+  });
+  const project = new ProjectView({
+    ...original,
+    board: new BoardView({
+      failures: [],
+      lanes: [
+        new ReadOnlyBoardLaneView({
+          id: BoardLaneId.make("Done"),
+          name: LaneName.make("Done"),
+          origin: "authored",
+          sources: [new StateLaneSource({ state: "pr-merged" })],
+          items: [card],
+        }),
+      ],
+    }),
+  });
+  const read = Layer.effect(
+    FactoryBackend,
+    Effect.map(FactoryBackend, (service) => ({
+      ...service,
+      overview: Effect.succeed(new ReadyOverview({ ...overview, projects: [project] })),
+    })),
+  ).pipe(Layer.provide(backend));
+  const boardApp = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(read)), {
+    disableLogger: true,
+  });
+  try {
+    const response = await boardApp.handler(
+      new Request("http://localhost/api/projects/workspace", {
+        headers: { "x-usine-view": "board" },
+      }),
+    );
+    assert.strictEqual(response.status, 200);
+    const paged = Schema.decodeUnknownSync(ProjectView)(await response.json());
+    assert.deepStrictEqual(paged.board.cardedItemKeys, [member.itemKey, current.itemKey]);
+    assert.deepStrictEqual(paged.board.lanes[0]?.items, []);
+    assert.strictEqual(paged.board.lanes[0]?.totalItems, 1);
+    assert.deepStrictEqual(
+      paged.runs.map(({ id }) => id),
+      project.runs.map(({ id }) => id),
+    );
+  } finally {
+    await boardApp.dispose();
+  }
+});
+
+it("streams small changes and replays missed revisions without payloads", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(changeBusLayer);
+        const bus = Context.get(context, ChangeBus);
+        yield* Effect.promise(async () => {
+          const streamApp = HttpRouter.toWebHandler(
+            apiRoutes().pipe(
+              Layer.provide(Layer.succeed(ChangeBus, bus)),
+              HttpRouter.provideRequest(backend),
+            ),
+            {
+              disableLogger: true,
+            },
+          );
+          const open = (last?: string) =>
+            streamApp.handler(
+              new Request("http://localhost/api/changes", {
+                headers: last === undefined ? {} : { "last-event-id": last },
+              }),
+            );
+          try {
+            const response = await open();
+            assert.strictEqual(response.headers.get("content-type"), "text/event-stream");
+            const reader = response.body?.getReader();
+            assert(reader !== undefined);
+            const first = new TextDecoder().decode((await reader.read()).value);
+            assert.include(first, ": heartbeat");
+            const cursor = /id: (\d+)/u.exec(first)?.[1];
+            assert(cursor !== undefined);
+            await Effect.runPromise(
+              bus.publish([
+                { audience: new InstanceScope(), target: { kind: "project", id: "workspace" } },
+              ]),
+            );
+            const changed = new TextDecoder().decode((await reader.read()).value);
+            assert.include(changed, '"kind":"project","id":"workspace"');
+            assert.notInclude(changed, "Renamed workspace");
+            assert.isBelow(changed.length, 1_024);
+            await reader.cancel();
+            const resumed = await open(cursor);
+            const replayReader = resumed.body?.getReader();
+            assert(replayReader !== undefined);
+            const replay = new TextDecoder().decode((await replayReader.read()).value);
+            assert.include(replay, '"reset":false');
+            assert.include(replay, '"kind":"project","id":"workspace"');
+            await replayReader.cancel();
+            for (const invalidCursor of ["not-a-revision", "0", String(Number.MAX_SAFE_INTEGER)]) {
+              const reset = await open(invalidCursor);
+              const resetReader = reset.body?.getReader();
+              assert(resetReader !== undefined);
+              const frame = new TextDecoder().decode((await resetReader.read()).value);
+              assert.include(frame, '"reset":true');
+              await resetReader.cancel();
+            }
+          } finally {
+            await streamApp.dispose();
+          }
+        });
+      }),
+    ),
+  );
 });

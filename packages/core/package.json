@@ -130,6 +130,10 @@
     "./ci": {
       "types": "./dist/ci.d.ts",
       "default": "./dist/ci.js"
+    },
+    "./changes": {
+      "types": "./dist/changes.d.ts",
+      "default": "./dist/changes.js"
     }
   },
   "publishConfig": {

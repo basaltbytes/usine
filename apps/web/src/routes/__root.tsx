@@ -1,3 +1,4 @@
+import { connectChanges } from "~/lib/changes";
 import { MemberShell } from "~/components/member-shell";
 import { canReadOverview, sessionQuery } from "~/lib/permissions";
 import { CommandPalette } from "~/components/command-palette/palette";
@@ -5,7 +6,7 @@ import { PageCommandsProvider, PageCommandsScope } from "~/components/command-pa
 import { RefreshProvider } from "~/components/refresh/provider";
 import { membersLabel, tokensPageLabel } from "~/lib/strings";
 import { WarningIcon } from "@phosphor-icons/react";
-import { useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   type ErrorComponentProps,
@@ -21,7 +22,7 @@ import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository"
 import { RunId } from "@usine/core/run";
 import type { FactoryOverview, ProjectView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { runDetailQuery } from "~/lib/runs/queries";
 import { AppSidebar, type OperatorView, useOperatorView } from "~/components/app-sidebar";
 import { BootScreen } from "~/components/boot-screen";
@@ -43,6 +44,7 @@ import { ConfigurationCrumbs } from "~/components/configuration/navigation";
 import { NotificationTray } from "~/components/needs-you/notification-tray";
 import { rejectionMessage } from "~/lib/api";
 import {
+  attentionQuery,
   needsYouByProject,
   overviewQuery,
   projectId,
@@ -77,13 +79,16 @@ const Unreachable = ({ error }: UnreachableProps) => {
 
 /** Returns the name of the Task with the item `number`: its originating item, else the item. */
 const taskCrumb = (overview: FactoryOverview, repository: RepositoryName, number: string) => {
-  const card = projectForRepository(overview.projects, repository)
-    ?.board.lanes.flatMap(({ items }) => items)
-    .find(
-      (card) =>
-        canonicalRepositoryName(card.repository) === canonicalRepositoryName(repository) &&
-        card.items.some((member) => String(member.number) === number),
-    );
+  const card = [
+    ...overview.identities,
+    ...(projectForRepository(overview.projects, repository)?.board.lanes.flatMap(
+      ({ items }) => items,
+    ) ?? []),
+  ].find(
+    (card) =>
+      canonicalRepositoryName(card.repository) === canonicalRepositoryName(repository) &&
+      card.items.some((member) => String(member.number) === number),
+  );
   return card === undefined
     ? `Item #${number}`
     : itemLabel({ ...cardIdentity(card).origin, state: null });
@@ -170,7 +175,13 @@ const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
 };
 
 const Shell = () => {
+  const queryClient = useQueryClient();
+  useEffect(() => connectChanges(queryClient), [queryClient]);
   const { data } = useSuspenseQuery(overviewQuery());
+  const { data: needs } = useSuspenseQuery({
+    ...attentionQuery(),
+    select: (view) => view.needsYou,
+  });
   const { run } = Route.useSearch();
   // Plain useNavigate resolves "." against the current route; Route.useNavigate would pin it to "/".
   const navigate = useNavigate();
@@ -195,8 +206,8 @@ const Shell = () => {
         projects={data.projects}
         view={view}
         project={project === undefined ? undefined : projectId(project)}
-        needsYou={needsYouByProject(data.needsYou, data.projects)}
-        needsYouTotal={data.needsYou.length}
+        needsYou={needsYouByProject(needs, data.projects)}
+        needsYouTotal={needs.length}
         runningTotal={
           new Set(
             data.projects.flatMap(({ runs }) =>
@@ -225,7 +236,7 @@ const Shell = () => {
               </BreadcrumbList>
             </Breadcrumb>
             <CommandPalette overview={data} />
-            <NotificationTray needs={data.needsYou} />
+            <NotificationTray needs={needs} />
           </header>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             {data._tag === "NeedsSetup" && (
@@ -286,6 +297,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     if (!canReadOverview(session.permissions)) return;
     await Promise.all([
       queryClient.ensureQueryData(overviewQuery()),
+      queryClient.ensureQueryData(attentionQuery()),
       // A rejected drawer query is displayed inside the drawer.
       Promise.allSettled(
         run === undefined ? [] : [queryClient.ensureQueryData(runDetailQuery(queryClient, run))],

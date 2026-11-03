@@ -21,7 +21,7 @@ import {
 } from "@usine/github/item-history";
 import type { RepositoryLabel } from "@usine/github/polling";
 import { Clock, Context, DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
-import { GitHubItemKey } from "../polling/repository-sync.ts";
+import { GitHubItemKey } from "@usine/core/item";
 import { LabelView } from "./board.ts";
 
 /**

@@ -1,3 +1,4 @@
+import { changes } from "~/lib/query-changes";
 import { ProjectId } from "@usine/core/project";
 import { queryOptions } from "@tanstack/react-query";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
@@ -38,23 +39,13 @@ export const needsYouByProject = (
   return counts;
 };
 
-const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
-const IDLE_OVERVIEW_REFRESH_MS = 15_000;
-
-/** Returns the overview query, which every route uses; the root loader prefetches it. */
+/** Navigation and attention data; boards and histories have separate queries. */
 export const overviewQuery = () =>
   queryOptions({
     queryKey: ["overview"] as const,
-    queryFn: () => api((client) => client.overview()),
-    meta: { refreshLabel: "Overview" },
-    refetchInterval: (query) => {
-      const overview = query.state.data;
-      if (overview?._tag === "NeedsSetup") return false;
-      const hasOpenRun = overview?.projects.some((project) =>
-        project.runs.some(({ canCancel }) => canCancel),
-      );
-      return hasOpenRun === true ? ACTIVE_OVERVIEW_REFRESH_MS : IDLE_OVERVIEW_REFRESH_MS;
-    },
+    queryFn: () => api((client) => client.overview(), "shell"),
+    staleTime: 60_000,
+    meta: { refreshLabel: "Overview", changes: changes.kind("navigation", "configuration") },
   });
 
 export const projectId = (project: ProjectView): ProjectId =>
@@ -72,3 +63,24 @@ export const projectParams = (projects: ReadonlyArray<ProjectView>, repository: 
   const project = projectForRepository(projects, repository);
   return project === undefined ? undefined : { project: projectId(project) };
 };
+
+/** Loads searchable board cards only when command search opens. */
+export const searchQuery = () =>
+  queryOptions({
+    queryKey: ["search"] as const,
+    queryFn: () => api((client) => client.overview()),
+    staleTime: 60_000,
+    meta: {
+      refreshLabel: "Search",
+      changes: changes.kind("project", "configuration", "navigation"),
+    },
+  });
+
+/** Attention reads are separate from navigation so board changes do not refresh the tray. */
+export const attentionQuery = () =>
+  queryOptions({
+    queryKey: ["overview", "attention"] as const,
+    queryFn: () => api((client) => client.overview(), "attention"),
+    staleTime: 30_000,
+    meta: { refreshLabel: "Needs attention", changes: changes.kind("attention") },
+  });

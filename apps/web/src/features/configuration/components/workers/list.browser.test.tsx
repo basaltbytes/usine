@@ -1,3 +1,6 @@
+import { projectQuery } from "~/features/projects/queries";
+import { projectTasksQuery } from "~/features/tasks/queries";
+import { workersQuery } from "~/features/configuration/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { Schema } from "effect";
@@ -12,12 +15,14 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { creationFailuresLine, nextCreationLine } from "~/lib/workers/strings";
 import { routeTree } from "~/route-tree.gen";
 import { configurationFixture } from "~/lib/configuration/fixture";
 import "~/index.css";
+import { ChangeNotice } from "@usine/orchestrator/operator/http";
+import { invalidateChanges } from "~/lib/changes";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -37,6 +42,7 @@ beforeEach(() => {
     new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
   );
   queryClient.setQueryData(configurationQuery().queryKey, configuration);
+  queryClient.setQueryData(workersQuery().queryKey, configuration);
 });
 
 afterEach(() => {
@@ -54,6 +60,14 @@ const mount = async (path: string, width = 1280, height = 900) => {
     history: createMemoryHistory({ initialEntries: [path] }),
     context: { queryClient },
   });
+
+  const cachedOverview = queryClient.getQueryData(overviewQuery().queryKey);
+  if (cachedOverview !== undefined)
+    queryClient.setQueryData(attentionQuery().queryKey, cachedOverview);
+  for (const project of cachedOverview?.projects ?? []) {
+    queryClient.setQueryData(projectQuery(projectId(project)).queryKey, project);
+    queryClient.setQueryData(projectTasksQuery(projectId(project)).queryKey, project);
+  }
   await router.load();
   flushSync(() =>
     root.render(
@@ -167,6 +181,26 @@ it("says on the Workers list that a worker's machine creation is paused", async 
   await expect.element(row(/^boat-pool/u).getByText("Deferred", { exact: true })).toBeVisible();
 });
 
+it("fetches current workers on a first visit after cached configuration is invalidated", async () => {
+  await commands.workerPreflightResponses(encodeConfiguration(configuration));
+  await queryClient.fetchQuery({ ...configurationQuery(), staleTime: 0 });
+  queryClient.removeQueries({ queryKey: workersQuery().queryKey });
+  const updated = withPreflight({ _tag: "Passed", checkedAt: "2026-10-30T12:01:00Z" });
+  await commands.workerPreflightResponses(encodeConfiguration(updated));
+  await invalidateChanges(
+    queryClient,
+    new ChangeNotice({
+      revision: 1,
+      reset: false,
+      changes: [{ kind: "worker", id: "eu-1" }],
+    }),
+  );
+  expect(queryClient.getQueryState(configurationQuery().queryKey)?.isInvalidated).toBe(true);
+  await mount("/configuration/workers");
+  await expect.element(row(/eu-1/u).getByText("Passed", { exact: true })).toBeVisible();
+  expect(queryClient.getQueryData(configurationQuery().queryKey)).toEqual(configuration);
+});
+
 declare module "vitest/browser" {
   interface BrowserCommands {
     workerPreflightResponses: (configuration: string) => Promise<void>;
@@ -208,7 +242,7 @@ it("disables preflight for a busy worker and shows the reason", async () => {
     .element(page.getByRole("button", { name: "Run preflight on eu-1", exact: true }))
     .toBeEnabled();
   queryClient.setQueryData(
-    configurationQuery().queryKey,
+    workersQuery().queryKey,
     new ConfigurationView({
       ...configuration,
       workers: configuration.workers.map((worker) =>

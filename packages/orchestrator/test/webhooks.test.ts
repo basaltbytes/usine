@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { OperatorLogin } from "@usine/core/operator";
 import { assert, it } from "@effect/vitest";
 import { Effect, Option, Ref } from "effect";
@@ -13,6 +14,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const health = yield* WebhookHealth;
+      const bus = yield* ChangeBus;
+      const revision = (yield* bus.open).revision;
       const saved = yield* Ref.make<ReadonlyArray<AttentionAcknowledgement>>([]);
       const attention = webhookAttentionFor(health, { list: () => Ref.get(saved) });
       const overview = new ReadyOverview({ projects: [], loops: [], needsYou: [] });
@@ -25,6 +28,10 @@ it.effect(
       assert.deepStrictEqual((yield* attention(overview, config)).needsYou, []);
       yield* TestClock.adjust("1 second");
       assert.isTrue(yield* health.silent);
+      assert.strictEqual((yield* bus.open).revision, revision + 1);
+      assert.deepStrictEqual((yield* bus.open).history.at(-1)?.changes, [
+        { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+      ]);
       assert.deepStrictEqual((yield* attention(overview, { mode: "off" })).needsYou, []);
       assert.deepStrictEqual((yield* attention(overview, { mode: "deliveries" })).needsYou, []);
       const warning = yield* attention(overview, config);
@@ -47,9 +54,13 @@ it.effect(
       yield* Ref.set(saved, []);
       assert.strictEqual((yield* attention(overview, config)).needsYou.length, 1);
       yield* health.received;
+      assert.strictEqual((yield* bus.open).revision, revision + 2);
+      yield* health.received;
+      assert.strictEqual((yield* bus.open).revision, revision + 2);
       yield* TestClock.adjust("1 day");
       assert.isFalse(yield* health.silent);
+      assert.strictEqual((yield* bus.open).revision, revision + 2);
       assert.deepStrictEqual((yield* attention(overview, config)).needsYou, []);
       assert.deepStrictEqual((yield* attention(overview, config)).dismissedNeeds, []);
-    }).pipe(Effect.provide(WebhookHealth.layer)),
+    }).pipe(Effect.provide(WebhookHealth.layer), Effect.provide(changeBusLayer), Effect.scoped),
 );

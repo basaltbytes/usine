@@ -4,13 +4,18 @@ import { Effect } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 
-const makeClient = () =>
+const makeClient = (view?: "shell" | "board" | "task" | "attention") =>
   HttpApiClient.make(OperatorApi, {
     baseUrl: globalThis.location.origin,
     transformClient: (client) =>
       client.pipe(
         HttpClient.mapRequest((request) =>
-          HttpClientRequest.setHeader(request, "x-usine-csrf", csrfToken()),
+          HttpClientRequest.setHeaders(
+            request,
+            view === undefined
+              ? { "x-usine-csrf": csrfToken() }
+              : { "x-usine-csrf": csrfToken(), "x-usine-view": view },
+          ),
         ),
         HttpClient.tap((response) =>
           Effect.sync(() => {
@@ -25,9 +30,10 @@ export const api = <A, E>(
   request: (
     client: Effect.Success<ReturnType<typeof makeClient>>["operator"],
   ) => Effect.Effect<A, E>,
+  view?: "shell" | "board" | "task" | "attention",
 ): Promise<A> =>
   Effect.runPromise(
-    Effect.flatMap(makeClient(), (client) => request(client.operator)).pipe(
+    Effect.flatMap(makeClient(view), (client) => request(client.operator)).pipe(
       // No exporter sees the browser's spans, so a trace header would give each request span a
       // parent that no collector has.
       Effect.provideService(HttpClient.TracerPropagationEnabled, false),

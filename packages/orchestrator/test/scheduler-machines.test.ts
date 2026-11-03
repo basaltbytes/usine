@@ -1,3 +1,4 @@
+import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { MachineQuotaWait, quotaWaits } from "../src/operator/machines.ts";
 import { workerAttentionFor } from "../src/operator/worker-attention.ts";
@@ -80,8 +81,9 @@ const fakeMachines = () =>
     const machines = WorkerMachines.of({
       provisions: (worker) =>
         Ref.get(provisioned).pipe(Effect.map((enabled) => enabled && worker === POOL)),
-      create: (worker, runId, attemptId) =>
+      create: (worker, run, attemptId) =>
         Effect.gen(function* () {
+          const runId = run.id;
           calls.push(`create ${worker} ${runId} ${attemptId}`);
           const waiting = yield* Ref.get(gate);
           if (Option.isSome(waiting)) yield* Deferred.await(waiting.value);
@@ -95,7 +97,7 @@ const fakeMachines = () =>
             provider: "hetzner",
             checked: Option.fromNullishOr(checks.shift()),
           });
-        }).pipe(Effect.onInterrupt(() => Effect.sync(() => calls.push(`interrupted ${runId}`)))),
+        }).pipe(Effect.onInterrupt(() => Effect.sync(() => calls.push(`interrupted ${run.id}`)))),
       adopt: (worker, attemptId) =>
         Effect.sync(() => {
           calls.push(`adopt ${worker} ${attemptId}`);
@@ -542,6 +544,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
     "retains quota attention through transient retries and clears the run wait after creation",
     () =>
       Effect.gen(function* () {
+        const bus = yield* ChangeBus;
         const fake = yield* fakeMachines();
         const message = "shared core limit exceeded";
         const context = yield* scheduler(fake.machines, configWithTimings({}, 2));
@@ -599,7 +602,37 @@ describe("Worker scheduler on a provisioned Worker", () => {
           );
         });
         yield* assertQuota;
-        yield* TestClock.adjust("30 seconds");
+        const assertNotice = Effect.gen(function* () {
+          const notices = (yield* bus.open).history;
+          assert(
+            notices.some(({ changes }) =>
+              changes.some(
+                ({ audience, target }) =>
+                  audience._tag === "Loop" &&
+                  audience.loop === submission(1).loop &&
+                  target.kind === "run" &&
+                  target.id === runId,
+              ),
+            ),
+          );
+          assert(
+            notices.some(({ changes }) =>
+              changes.some(
+                ({ audience, target }) =>
+                  audience._tag === "Loop" &&
+                  audience.loop === submission(1).loop &&
+                  target.kind === "item" &&
+                  target.id === submission(1).itemKey,
+              ),
+            ),
+          );
+        });
+        yield* assertNotice;
+        const pausedRevision = (yield* bus.open).revision;
+        yield* TestClock.adjust("29 seconds");
+        assert.strictEqual((yield* bus.open).revision, pausedRevision);
+        assert.isUndefined(waiting.pollUnsafe());
+        yield* TestClock.adjust("1 second");
         yield* settle;
         yield* assertQuota;
         const [pause] = yield* status.provisioning;
@@ -617,7 +650,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
         assert.strictEqual(fake.calls.filter((call) => call.startsWith("create")).length, 4);
         yield* lease.release;
         yield* readyLease.release;
-      }).pipe(Effect.scoped),
+      }).pipe(Effect.scoped, Effect.provide(changeBusLayer)),
   );
 
   it.effect("resumes reservations after cancellation during creation backoff", () =>

@@ -3,7 +3,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { GitHubLabelName } from "@usine/config/label";
 import { isSettledItemState, LaneItemState, LaneName, LaneSource } from "@usine/config/board";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { RunStateTag, RunSummaryView } from "./run.ts";
 import { TaskUsageView } from "./usage.ts";
 
@@ -32,6 +32,10 @@ export class BoardItemLink extends Schema.Class<BoardItemLink>("@usine/orchestra
     url: Schema.NonEmptyString,
     /** The last polled issue or pull request state used for lane placement. */
     state: LaneItemState,
+    /** The last polled labels, including labels on non-current linked items. */
+    labels: Schema.Array(GitHubLabelName).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+    /** Whether this item is an open pull request with conflicts against its base. */
+    conflicting: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   },
 ) {}
 
@@ -154,6 +158,8 @@ const BoardLaneViewFields = {
   sources: Schema.Array(LaneSource),
   origin: BoardLaneOrigin,
   items: Schema.Array(BoardTaskView),
+  /** Total cards when a lane is read in pages. */
+  totalItems: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 } as const;
 
 /**
@@ -209,6 +215,8 @@ export class BoardProjectionError extends Schema.TaggedError<BoardProjectionErro
 export class BoardView extends Schema.Class<BoardView>("@usine/orchestrator/BoardView")({
   /** The configured or proposed lanes, including the unmapped lane when needed. */
   lanes: Schema.Array(BoardLaneView),
+  /** All linked item keys with cards, including cards omitted from paginated lanes. */
+  cardedItemKeys: Schema.optionalKey(Schema.Array(ItemKey)),
   /** Items excluded from projection because their stored data could not be decoded. */
   failures: Schema.Array(BoardProjectionError),
 }) {}

@@ -7,7 +7,7 @@ import { Link } from "@tanstack/react-router";
 import { Button } from "~/components/ui/button";
 import { useNow } from "~/hooks/use-now";
 import { NeedsYou } from "~/components/needs-you/needs-you";
-import { overviewQuery } from "~/lib/overview";
+import { attentionQuery, overviewQuery } from "~/lib/overview";
 import {
   deskCounts,
   lastCheckedLabel,
@@ -66,6 +66,7 @@ export const DeskNeedsYou = ({ needs, dismissedNeeds = [], polls, now }: DeskNee
  */
 export const Desk = () => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
+  const { data: attention } = useSuspenseQuery(attentionQuery());
   const desk = useSuspenseQuery(deskQuery());
   const now = useNow(15_000);
   const readOnly = overview._tag === "NeedsSetup";
@@ -76,8 +77,8 @@ export const Desk = () => {
         {overview.projects.length === 0 && <NoProjects />}
         <Statistics />
         <DeskNeedsYou
-          dismissedNeeds={overview.dismissedNeeds}
-          needs={overview.needsYou}
+          dismissedNeeds={attention.dismissedNeeds}
+          needs={attention.needsYou}
           polls={desk.data.polls}
           now={now}
         />
