@@ -5,6 +5,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "./github-app.ts";
 import type { GitHubAppError } from "./error.ts";
 import { queryGraphql } from "./graphql.ts";
+import { retryTransientRequest } from "./retry.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
 import { ActionsJob, FAILED_CONCLUSIONS, failedStepsExcerpt } from "./actions-log.ts";
 
@@ -91,7 +92,7 @@ export class GitHubChecks extends Context.Service<
         if (response.status !== 200)
           return yield* statusError("read-ci-checks", response, yield* Clock.currentTimeMillis);
         return response;
-      });
+      }, retryTransientRequest);
       const jobFailure = Effect.fn("GitHubChecks.jobFailure")(function* (
         prefix: string,
         job: string,
