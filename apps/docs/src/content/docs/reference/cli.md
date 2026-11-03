@@ -20,7 +20,7 @@ usine up
 usine up --detach --origin https://usine.example.com
 ```
 
-Startup takes the instance lock, checks the listener, loads stored configuration, reads App and worker credentials, checks workers, and recovers attempts. Empty configuration tables accept a bootstrap import or initialize empty setup configuration. [Import and export format](/reference/configuration/import-export/) describes bootstrap input. Later starts read the database.
+Startup takes the instance lock, checks the listener, applies runtime database migrations, loads stored configuration, reads App and worker credentials, checks workers, and recovers attempts. Empty configuration tables accept a bootstrap import or initialize empty setup configuration. [Import and export format](/reference/configuration/import-export/) describes bootstrap input. Later starts read the database.
 
 Missing or invalid App credentials start setup mode. Polling and schedules stay idle until setup completes. Worker preflight failure stops runtime startup. The App secrets file, `.usine/github-app.json`, must be a regular file with mode `0600`; environment values override corresponding file fields.
 
