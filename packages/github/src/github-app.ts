@@ -533,7 +533,9 @@ export {
   GitHubRateLimitError,
   InvalidGitHubResponseError,
   GitHubAppError,
+  type GitHubServerError,
   isRefusal,
+  isServerError,
 } from "./error.ts";
 
 export { WebhookDelivery, WebhookDeliveryId } from "./delivery.ts";

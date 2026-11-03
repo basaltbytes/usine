@@ -22,8 +22,8 @@ export const ReadSnapshot = Context.Reference<{
 });
 
 /**
- * The database service for engine records. Adapters must provide atomic SQLite transactions and
- * apply engine migrations before use (ADR 0020).
+ * The SQLite composition service for engine records, with atomic transactions and migrations
+ * applied before use. Other dialects implement the domain ports directly (ADR 0020).
  */
 export class RunDatabase extends Context.Service<RunDatabase, RunDatabaseClient>()(
   "@usine/engine/internal/RunDatabase",

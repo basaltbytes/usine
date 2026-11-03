@@ -1,6 +1,7 @@
 import { Context, type DateTime, Effect, Layer, Option, Schema } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { eq, sql } from "drizzle-orm";
+import { jsonExtract } from "../database/dialect.ts";
 import { poolRateLimits, events as storedEvents, runs } from "../database/schema.ts";
 import type { DedupKey } from "@usine/core/event";
 import type { RepositoryName } from "@usine/core/repository";
@@ -146,7 +147,7 @@ const makeRunReader = Effect.gen(function* () {
   const latestPoolRateLimits = Effect.fn("RunReader.latestPoolRateLimits")(function* () {
     const rows = yield* database
       .select({
-        event: sql<string>`json_extract(${poolRateLimits.envelope}, '$.payload.event')`,
+        event: sql<string>`${jsonExtract(poolRateLimits.envelope, "$.payload.event")}`,
       })
       .from(poolRateLimits)
       .execute();

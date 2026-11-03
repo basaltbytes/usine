@@ -53,16 +53,13 @@ import {
   RepositoryPollFailure,
   repositoryFailureLogFields,
 } from "./cycle.ts";
-import {
-  changedItem,
-  FailingItem,
-  failingItem,
-  failingItemPollFailures,
-  logItemEvaluation,
-} from "./evaluation-failures.ts";
+import { changedItem, FailingItem, failingItemPollFailures } from "./evaluation-failures.ts";
 import { closeAsksOfClosedItems } from "./closed-item-asks.ts";
-import { evaluateItem, revokeMissingItem } from "./loop-evaluation.ts";
-import { markItemGone, observeItem, synchronizeLabels } from "./repository-sync.ts";
+import { evaluateChangedItem } from "./item-cycle.ts";
+import { evaluateItem } from "./loop-evaluation.ts";
+import { observeItem, synchronizeLabels } from "./repository-sync.ts";
+import { acknowledgeResets, planResetRefresh } from "./reset-refresh.ts";
+import { retryUnfetchedItems, UnfetchedItem } from "./unfetched-items.ts";
 import { ItemHints, type ItemHint } from "./hints.ts";
 import { checkOpenIssues, NO_OPEN_ISSUE_CHECK, OPEN_ISSUE_CHECK_INTERVAL } from "./open-issues.ts";
 import { OpenPullRequest, openPullRequest, openPullRequestRefresh } from "./open-pull-requests.ts";
@@ -87,6 +84,9 @@ class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   labelEntityTag: Schema.OptionFromNullOr(EntityTag),
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
   failingItems: Schema.Array(FailingItem).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  unfetchedItems: Schema.Array(UnfetchedItem).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
 }) {}
 
 interface WatchedRepository {
@@ -186,7 +186,6 @@ export class PollingTriggers extends Context.Service<
     Effect.gen(function* () {
       const ci = yield* CiMonitor;
       const cursors = yield* CursorStore;
-      const budgets = yield* CycleBudgets;
       const github = yield* GitHubPolling;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
@@ -212,6 +211,7 @@ export class PollingTriggers extends Context.Service<
           labelEntityTag: Option.none(),
           watches,
           failingItems: [],
+          unfetchedItems: [],
         });
 
       const readCursor = Effect.fn("PollingTriggers.readCursor")(function* (
@@ -265,18 +265,11 @@ export class PollingTriggers extends Context.Service<
         watched: WatchedRepository,
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
-        const resets = (yield* budgets.pendingResets()).filter(
-          ({ repository }) =>
-            canonicalRepositoryName(repository) ===
-            canonicalRepositoryName(watched.repository.name),
-        );
+        const resetRefresh = yield* planResetRefresh(watched.repository.name);
         const stored =
-          resets.length > 0 ? emptyCursor(watched.watches) : yield* readCursor(watched);
-        if (resets.length > 0)
-          yield* Effect.logInfo("Cycle budget reset requests fresh repository polling", {
-            repository: watched.repository.name,
-            items: resets.map(({ itemKey }) => itemKey),
-          });
+          resetRefresh._tag === "FromScratch"
+            ? emptyCursor(watched.watches)
+            : yield* readCursor(watched);
         const preflight = yield* synchronizeLabels(
           watched.repository.name,
           watched.declaredLabels,
@@ -293,6 +286,12 @@ export class PollingTriggers extends Context.Service<
           )
             ? []
             : stored.failingItems;
+          // Items fetched whatever detection reports: those a GitHub server error deferred in the
+          // last cycle, and those a cycle-budget reset names.
+          const targeted = [
+            ...(yield* retryUnfetchedItems(watched.repository.name, stored.unfetchedItems)),
+            ...resetRefresh.items,
+          ];
           const detectedItems = detected._tag === "RepositoryChanges" ? detected.items : [];
           const detectedNumbers = new Set(detectedItems.map(({ number }) => number));
           // Mergeability changes when the base branch moves, without an updated_at or ETag change
@@ -301,10 +300,14 @@ export class PollingTriggers extends Context.Service<
             watched.repository.name,
             stored.openPullRequests,
             stored.baseRefHeads,
-            new Set([...detectedNumbers, ...retrying.map(({ number }) => number)]),
+            new Set([
+              ...detectedNumbers,
+              ...[...retrying, ...targeted].map(({ number }) => number),
+            ]),
           );
           const items = new Map<number, ChangedItem>([
             ...retrying.map((failing) => [failing.number, changedItem(failing)] as const),
+            ...targeted.map((item) => [item.number, item] as const),
             ...refresh.refreshed.map(
               ({ number, updatedAt }) =>
                 [number, new ChangedPullRequest({ number, updatedAt })] as const,
@@ -318,10 +321,10 @@ export class PollingTriggers extends Context.Service<
               backlog: detected.backlog,
             });
           }
-          // Items fetched only because the cursor kept them: refreshed open pull requests and Items
-          // whose Loops failed before this process or instance.
+          // Items fetched only because the cursor or a reset kept them: refreshed open pull
+          // requests, Items whose Loops failed before this process or instance, and targeted Items.
           const cursorOnly = new Set(
-            [...refresh.refreshed, ...retrying]
+            [...refresh.refreshed, ...retrying, ...targeted]
               .map(({ number }) => number)
               .filter((number) => !detectedNumbers.has(number)),
           );
@@ -348,61 +351,25 @@ export class PollingTriggers extends Context.Service<
           const evaluations = yield* Effect.forEach(
             items.values(),
             (item) =>
-              Effect.gen(function* () {
-                const observation = yield* observeItem(watched.repository.name, item);
-                const cycle = yield* evaluateItem(watched.repository, watched.loops, observation);
-                const failing = failingItem(
-                  item,
-                  observation.projection.contentHash,
-                  cycle.failures,
-                );
-                yield* logItemEvaluation(
-                  watched.repository.name,
-                  item.number,
-                  Option.fromNullishOr(recorded.get(item.number)),
-                  failing,
-                );
-                return { _tag: "Evaluated", item, observation, cycle, failing } as const;
-              }).pipe(
-                // An Item kept only by the cursor may have been deleted or transferred, and must
-                // not stall the repository. Other failures still interrupt the cycle, which retries
-                // next time.
-                Effect.catchTag("GitHubItemNotFoundError", (error) =>
-                  Effect.gen(function* () {
-                    if (!cursorOnly.has(item.number)) return yield* error;
-                    const revokedRuns = yield* revokeMissingItem(
-                      watched.repository,
-                      watched.loops,
-                      item._tag === "ChangedIssue" ? "issue" : "pr",
-                      item.number,
-                    );
-                    const projectionMarkedGone = yield* markItemGone(
-                      watched.repository.name,
-                      item.number,
-                    );
-                    yield* Effect.logWarning(
-                      "GitHub no longer has an Item the poll cursor kept; it is dropped from the cursor",
-                      {
-                        repository: watched.repository.name,
-                        item: item.number,
-                        openPullRequest: stored.openPullRequests.some(
-                          ({ number }) => number === item.number,
-                        ),
-                        revokedRuns,
-                        projectionMarkedGone,
-                        errorTag: error._tag,
-                        message: error.message,
-                      },
-                    );
-                    return { _tag: "Missing", revokedRuns } as const;
-                  }),
+              evaluateChangedItem(watched.repository, watched.loops, item, {
+                recorded: Option.fromNullishOr(recorded.get(item.number)),
+                cursorOnly: cursorOnly.has(item.number),
+                openPullRequest: stored.openPullRequests.some(
+                  ({ number }) => number === item.number,
                 ),
-              ),
+              }),
             { concurrency: ITEM_CONCURRENCY },
           );
           const observed = evaluations.flatMap((evaluation) =>
             evaluation._tag === "Evaluated" ? [evaluation] : [],
           );
+          const unfetchedItems = evaluations
+            .flatMap((evaluation) =>
+              evaluation._tag === "Unfetched" ? [evaluation.unfetched] : [],
+            )
+            .sort((left, right) => left.number - right.number);
+          const unfetchedNumbers = new Set<number>(unfetchedItems.map(({ number }) => number));
+          const evaluated = (number: number) => items.has(number) && !unfetchedNumbers.has(number);
           const missingRevokedRuns = evaluations.reduce(
             (sum, evaluation) => sum + (evaluation._tag === "Missing" ? evaluation.revokedRuns : 0),
             0,
@@ -412,14 +379,14 @@ export class PollingTriggers extends Context.Service<
           yield* hints.defer(openIssueCheck.nextPollAt);
           // Runs after this cycle's projections and gone marks, so an Item closed now closes its Ask.
           yield* closeAsksOfClosedItems(watched.repository.name);
-          // An Item the cycle did not fetch keeps its recorded failures.
+          // An Item the cycle did not evaluate keeps its recorded failures.
           const failingItems = [
-            ...stored.failingItems.filter(({ number }) => !items.has(number)),
+            ...stored.failingItems.filter(({ number }) => !evaluated(number)),
             ...observed.flatMap(({ failing }) => Option.toArray(failing)),
           ].sort((left, right) => left.number - right.number);
-          // An open pull request the cycle did not fetch keeps its entry.
+          // An open pull request the cycle did not evaluate keeps its entry.
           const openPullRequests = [
-            ...stored.openPullRequests.filter(({ number }) => !items.has(number)),
+            ...stored.openPullRequests.filter(({ number }) => !evaluated(number)),
             ...observed.flatMap(({ item, observation }) =>
               Option.toArray(openPullRequest(item, observation.snapshot)),
             ),
@@ -437,10 +404,11 @@ export class PollingTriggers extends Context.Service<
             openPullRequests,
             baseRefHeads,
             failingItems,
+            unfetchedItems,
           });
           // Advancing the cursor is the commit point: every changed Item was fetched, evaluated,
-          // and submitted or revoked. After a failure, the old cursor stays so the next cycle polls
-          // again.
+          // and submitted or revoked, or kept for the next cycle after a GitHub server error. After
+          // a failure, the old cursor stays so the next cycle polls again.
           if (
             detected._tag === "RepositoryChanges" ||
             items.size > 0 ||
@@ -453,7 +421,7 @@ export class PollingTriggers extends Context.Service<
             ...retried,
             repositories: new Set([...retried.repositories, cursorKey(watched.repository)]),
           }));
-          yield* Effect.forEach(resets, budgets.acknowledgeReset, { discard: true });
+          yield* acknowledgeResets(watched.repository.name, resetRefresh.resets, unfetchedItems);
           return {
             // Refreshed open PRs are observed, not reported as changed by
             // GitHub; counting them would make every idle poll look busy.

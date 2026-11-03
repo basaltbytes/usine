@@ -1,0 +1,177 @@
+{
+  "node": "v22.23.4",
+  "sqlite": "3.53.4",
+  "env": {
+    "GOMAXPROCS": "1",
+    "GOMEMLIMIT": "256MiB"
+  },
+  "effect_settings": {
+    "journal_mode": [
+      {
+        "journal_mode": "wal"
+      }
+    ],
+    "synchronous": [
+      {
+        "synchronous": 2
+      }
+    ],
+    "wal_autocheckpoint": [
+      {
+        "wal_autocheckpoint": 1000
+      }
+    ],
+    "busy_timeout": [
+      {
+        "timeout": 5000
+      }
+    ],
+    "page_size": [
+      {
+        "page_size": 4096
+      }
+    ]
+  },
+  "pi_settings": {
+    "journal_mode": {
+      "journal_mode": "wal"
+    },
+    "synchronous": {
+      "synchronous": 1
+    },
+    "wal_autocheckpoint": {
+      "wal_autocheckpoint": 1000
+    },
+    "busy_timeout": {
+      "timeout": 5000
+    },
+    "page_size": {
+      "page_size": 4096
+    }
+  },
+  "measurement": {
+    "mode": "large-only",
+    "cpu_affinity": "0",
+    "memory_max_bytes": 7253000192,
+    "memory_swap_max_bytes": 0,
+    "replication_rss_method": "ps -o rss= -p PID, sampled every 100 ms across replication and restores",
+    "restore_rss_method": "GNU time -v: Maximum resident set size (kbytes)"
+  },
+  "runtime_fixture": {
+    "bytes": 788402176,
+    "backup_bytes": 788402176,
+    "backup_s": 16.322979221999994,
+    "page_count": 192481,
+    "freelist_count": 47999,
+    "rows": 143999
+  },
+  "durable_fixture": {
+    "bytes": 157667328,
+    "backup_bytes": 157667328,
+    "backup_s": 3.253080710000009,
+    "page_count": 38493,
+    "freelist_count": 9599,
+    "rows": 28799
+  },
+  "initial_replication": {
+    "wall_s": 46.792480595,
+    "markers": [
+      {
+        "db_path": "<measurement-directory>/large/runtime.sqlite",
+        "txid": 2,
+        "replica_txid": 2,
+        "duration_ms": 46210
+      },
+      {
+        "db_path": "<measurement-directory>/large/durable.sqlite",
+        "txid": 1,
+        "replica_txid": 1,
+        "duration_ms": 377
+      }
+    ],
+    "replica_bytes": [1260288814, 304833470],
+    "rss_max_kib": 81760,
+    "cpu_s": 15.74
+  },
+  "rollback": {
+    "boundary": "2026-11-03T11:53:09.153Z",
+    "markers": [
+      {
+        "db_path": "<measurement-directory>/large/runtime.sqlite",
+        "txid": 2,
+        "replica_txid": 2,
+        "duration_ms": 46210
+      },
+      {
+        "db_path": "<measurement-directory>/large/durable.sqlite",
+        "txid": 1,
+        "replica_txid": 1,
+        "duration_ms": 377
+      }
+    ],
+    "attempts": [
+      [
+        {
+          "wall_s": 35.463911710999994,
+          "user_s": 2.72,
+          "system_s": 0.72,
+          "max_rss_kib": 90436,
+          "full_integrity_s": 0.19232932900000013,
+          "bytes": 788402176
+        },
+        {
+          "wall_s": 3.7999664150000028,
+          "user_s": 0.54,
+          "system_s": 0.17,
+          "max_rss_kib": 50536,
+          "full_integrity_s": 0.035328031000011834,
+          "bytes": 157667328
+        }
+      ],
+      [
+        {
+          "wall_s": 19.898055389999993,
+          "user_s": 2.74,
+          "system_s": 0.86,
+          "max_rss_kib": 93120,
+          "full_integrity_s": 0.19195135200000368,
+          "bytes": 788402176
+        },
+        {
+          "wall_s": 3.8036645509999945,
+          "user_s": 0.56,
+          "system_s": 0.16,
+          "max_rss_kib": 51184,
+          "full_integrity_s": 0.03366188199998578,
+          "bytes": 157667328
+        }
+      ],
+      [
+        {
+          "wall_s": 19.100519705000014,
+          "user_s": 2.63,
+          "system_s": 0.81,
+          "max_rss_kib": 80184,
+          "full_integrity_s": 0.22921785499999534,
+          "bytes": 788402176
+        },
+        {
+          "wall_s": 3.948296788000007,
+          "user_s": 0.58,
+          "system_s": 0.21,
+          "max_rss_kib": 50400,
+          "full_integrity_s": 0.04398311700002523,
+          "bytes": 157667328
+        }
+      ]
+    ],
+    "timestamp_wall_s": 22.480538447,
+    "timestamp_max_rss_kib": 86288,
+    "exact_txid_and_timestamp_verified": true
+  },
+  "large_replication": {
+    "rss_max_kib": 86104,
+    "cpu_s": 25.13,
+    "sample_count": 1564
+  }
+}
