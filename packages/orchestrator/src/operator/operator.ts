@@ -42,7 +42,7 @@ import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
 import type { WorkerName } from "@usine/core/worker";
-import type { ItemKey, ItemNumber } from "@usine/core/item";
+import { GitHubItemKey, type ItemKey, type ItemNumber } from "@usine/core/item";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import {
   RetryRequest,
@@ -87,7 +87,7 @@ import { settledItemState } from "../board/items.ts";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { LoopMatches } from "../loop-matches.ts";
-import { GitHubItemKey, PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
+import { PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import { cycleLimitOf } from "../trigger-submission.ts";
 import {

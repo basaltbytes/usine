@@ -179,19 +179,43 @@ it.effect(
         });
         const blocked = yield* expectWrite(store.recordAndClaim(next, RunId.make("blocked")), [
           { kind: "attention", id: "instance" },
+          { kind: "item", id: start.itemKey },
         ]);
         assert(blocked.result._tag === "CycleBlocked");
         yield* expectUnchanged(store.recordAndClaim(next, RunId.make("blocked")));
         const budgets = yield* CycleBudgets;
+        const later = new Submission({
+          ...next,
+          event: new Event({
+            ...next.event,
+            id: EventId.make("later-event"),
+            dedupKey: DedupKey.make("later-event"),
+          }),
+        });
+        yield* expectWrite(store.recordAndClaim(later, RunId.make("later-blocked")), [
+          { kind: "attention", id: "instance" },
+          { kind: "item", id: start.itemKey },
+        ]);
+        yield* expectWrite(budgets.close(blocked.result.ask.id, "ItemClosed"), [
+          { kind: "attention", id: "instance" },
+          { kind: "item", id: start.itemKey },
+        ]);
+        yield* expectUnchanged(budgets.close(blocked.result.ask.id, "ItemClosed"));
+        const reopened = yield* expectWrite(store.recordAndClaim(next, RunId.make("blocked")), [
+          { kind: "attention", id: "instance" },
+          { kind: "item", id: start.itemKey },
+        ]);
+        assert(reopened.result._tag === "CycleBlocked");
         const answer = new Event({
           ...start.event,
           id: EventId.make("reset"),
           dedupKey: DedupKey.make("reset"),
         });
-        yield* expectWrite(budgets.reset(blocked.result.ask.id, answer), [
+        yield* expectWrite(budgets.reset(reopened.result.ask.id, answer), [
           { kind: "attention", id: "instance" },
+          { kind: "item", id: start.itemKey },
         ]);
-        yield* expectUnchanged(budgets.reset(blocked.result.ask.id, answer));
+        yield* expectUnchanged(budgets.reset(reopened.result.ask.id, answer));
         const item = new ItemProjection({
           itemKey: ItemKey.make("older-linked-pr"),
           repository: start.repository,

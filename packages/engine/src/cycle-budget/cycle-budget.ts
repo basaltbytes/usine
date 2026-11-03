@@ -170,6 +170,10 @@ export class CycleBudgets extends Context.Service<
               audience: { _tag: "Repository", repository: ask.repository },
               target: { kind: "attention", id: "instance" },
             });
+            yield* record({
+              audience: { _tag: "Repository", repository: ask.repository },
+              target: { kind: "item", id: ask.itemKey },
+            });
             yield* Effect.logInfo("Operator reset Item cycle budget", {
               askId,
               eventId: answer.id,
@@ -216,6 +220,10 @@ export class CycleBudgets extends Context.Service<
             yield* record({
               audience: { _tag: "Repository", repository: ask.repository },
               target: { kind: "attention", id: "instance" },
+            });
+            yield* record({
+              audience: { _tag: "Repository", repository: ask.repository },
+              target: { kind: "item", id: ask.itemKey },
             });
             yield* Effect.logInfo("Closed cycle-budget Ask without a reset", {
               askId,

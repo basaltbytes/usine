@@ -94,11 +94,16 @@ export const cycleQueries = (database: RunDatabaseClient, record?: RecordChange)
           .set({ askJson: Schema.encodeSync(CycleBudgetAsk)(ask) })
           .where(eq(itemCycleBudgets.itemKey, submission.itemKey))
           .execute();
-        if (record !== undefined)
+        if (record !== undefined) {
           yield* record({
             audience: { _tag: "Repository", repository: ask.repository },
             target: { kind: "attention", id: "instance" },
           });
+          yield* record({
+            audience: { _tag: "Repository", repository: ask.repository },
+            target: { kind: "item", id: ask.itemKey },
+          });
+        }
         yield* Effect.logInfo("Cycle budget ask updated for a newly blocked event", {
           itemKey: submission.itemKey,
           repository: submission.repository,
@@ -143,11 +148,16 @@ export const cycleQueries = (database: RunDatabaseClient, record?: RecordChange)
       .set({ askJson: Schema.encodeSync(CycleBudgetAsk)(ask) })
       .where(eq(itemCycleBudgets.itemKey, submission.itemKey))
       .execute();
-    if (record !== undefined)
+    if (record !== undefined) {
       yield* record({
         audience: { _tag: "Repository", repository: ask.repository },
         target: { kind: "attention", id: "instance" },
       });
+      yield* record({
+        audience: { _tag: "Repository", repository: ask.repository },
+        target: { kind: "item", id: ask.itemKey },
+      });
+    }
     yield* Effect.logWarning("Item cycle budget exhausted; operator reset required", {
       itemKey: submission.itemKey,
       repository: submission.repository,

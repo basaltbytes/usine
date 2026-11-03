@@ -1,7 +1,11 @@
 import { type QueryClient, queryOptions, skipToken } from "@tanstack/react-query";
-import type { TaskView } from "@usine/orchestrator/operator";
+import { GitHubItemKey } from "@usine/core/item";
+import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
+
+const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
+const decodeRepository = Schema.decodeUnknownOption(RepositoryName);
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
@@ -33,15 +37,18 @@ export const invalidateChanges = (client: QueryClient, notice: ChangeNotice) =>
             );
           case "attempt":
             return query.meta?.attemptId === id;
-          case "item":
+          case "item": {
+            const item = decodeItemKey(id);
+            const repository = decodeRepository(entity);
             return (
               query.meta?.itemKeys?.includes(id) === true ||
               (key === "task" &&
-                (query.queryKey[3] === undefined || query.queryKey[3] === "history") &&
-                client
-                  .getQueryData<TaskView>(query.queryKey)
-                  ?.items.some(({ itemKey }) => itemKey === id) === true)
+                Option.isSome(item) &&
+                Option.isSome(repository) &&
+                canonicalRepositoryName(repository.value) ===
+                  canonicalRepositoryName(item.value[1]))
             );
+          }
           case "worker":
             return key === "desk" || key === "workers" || key === "configuration";
           case "configuration":
