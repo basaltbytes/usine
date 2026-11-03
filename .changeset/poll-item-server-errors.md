@@ -1,4 +1,5 @@
 ---
+"@usine/github": patch
 "@usine/orchestrator": patch
 "@usine/server": patch
 ---

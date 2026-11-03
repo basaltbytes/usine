@@ -6,7 +6,7 @@ import { ConfigParser } from "@usine/config/parser";
 import { labelsForRepository, matchesLoop } from "@usine/config/project";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import { CursorKey, CursorStore } from "@usine/engine/cursor";
-import { type CycleBudgetReset, CycleBudgets } from "@usine/engine/cycle-budget";
+import { CycleBudgets } from "@usine/engine/cycle-budget";
 import {
   RunEngine,
   type EnginePersistenceError,
@@ -21,7 +21,6 @@ import {
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import {
   BaseRefHead,
-  ChangedIssue,
   ChangedPullRequest,
   type ChangedItem,
   EntityTag,
@@ -54,18 +53,13 @@ import {
   RepositoryPollFailure,
   repositoryFailureLogFields,
 } from "./cycle.ts";
-import {
-  changedItem,
-  FailingItem,
-  failingItem,
-  failingItemPollFailures,
-  logItemEvaluation,
-  UnfetchedItem,
-  unfetchedItem,
-} from "./evaluation-failures.ts";
+import { changedItem, FailingItem, failingItemPollFailures } from "./evaluation-failures.ts";
 import { closeAsksOfClosedItems } from "./closed-item-asks.ts";
-import { evaluateItem, revokeMissingItem } from "./loop-evaluation.ts";
-import { gitHubItemKey, markItemGone, observeItem, synchronizeLabels } from "./repository-sync.ts";
+import { evaluateChangedItem } from "./item-cycle.ts";
+import { evaluateItem } from "./loop-evaluation.ts";
+import { observeItem, synchronizeLabels } from "./repository-sync.ts";
+import { acknowledgeResets, planResetRefresh } from "./reset-refresh.ts";
+import { retryUnfetchedItems, UnfetchedItem } from "./unfetched-items.ts";
 import { ItemHints, type ItemHint } from "./hints.ts";
 import { checkOpenIssues, NO_OPEN_ISSUE_CHECK, OPEN_ISSUE_CHECK_INTERVAL } from "./open-issues.ts";
 import { OpenPullRequest, openPullRequest, openPullRequestRefresh } from "./open-pull-requests.ts";
@@ -94,10 +88,6 @@ class StoredPollCursor extends Schema.Class<StoredPollCursor>(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
   ),
 }) {}
-
-/** The part of a stored Item payload that a cycle-budget reset reads to fetch the Item again. */
-const ResetItemPayload = Schema.Struct({ updatedAt: Schema.DateTimeUtcFromString });
-const decodeResetItemPayload = Schema.decodeUnknownOption(ResetItemPayload);
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
@@ -196,7 +186,6 @@ export class PollingTriggers extends Context.Service<
     Effect.gen(function* () {
       const ci = yield* CiMonitor;
       const cursors = yield* CursorStore;
-      const budgets = yield* CycleBudgets;
       const github = yield* GitHubPolling;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
@@ -272,55 +261,15 @@ export class PollingTriggers extends Context.Service<
         return yield* checkOpenIssues(watched.repository, watched.loops);
       });
 
-      /**
-       * Returns the detection entry that fetches a reset's Item again, or `None` if polling never
-       * stored the Item.
-       */
-      const resetItem = Effect.fn("PollingTriggers.resetItem")(function* (reset: CycleBudgetReset) {
-        yield* Effect.annotateCurrentSpan({ itemKey: reset.itemKey });
-        const projections = yield* ItemProjectionReader;
-        const projection = yield* projections.get(reset.itemKey);
-        return Option.flatMap(projection, (item) =>
-          Option.flatMap(decodeResetItemPayload(item.payload), ({ updatedAt }) =>
-            item.source === "issue"
-              ? Option.some<ChangedItem>(new ChangedIssue({ number: item.number, updatedAt }))
-              : item.source === "pr"
-                ? Option.some<ChangedItem>(
-                    new ChangedPullRequest({ number: item.number, updatedAt }),
-                  )
-                : Option.none(),
-          ),
-        );
-      });
-
       const pollRepository = Effect.fn("PollingTriggers.pollRepository")(function* (
         watched: WatchedRepository,
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
-        const resets = (yield* budgets.pendingResets()).filter(
-          ({ repository }) =>
-            canonicalRepositoryName(repository) ===
-            canonicalRepositoryName(watched.repository.name),
-        );
-        const resetItems = Option.all(yield* Effect.forEach(resets, resetItem));
-        // A reset Item that polling never stored can only be found by polling from scratch.
-        const fullRefresh = resets.length > 0 && Option.isNone(resetItems);
-        const stored = fullRefresh ? emptyCursor(watched.watches) : yield* readCursor(watched);
-        const resetRefreshes = Option.getOrElse(resetItems, (): ReadonlyArray<ChangedItem> => []);
-        if (fullRefresh) {
-          yield* Effect.logInfo(
-            "Cycle budget reset names an Item polling never stored; re-polling the repository from scratch",
-            {
-              repository: watched.repository.name,
-              items: resets.map(({ itemKey }) => itemKey),
-            },
-          );
-        } else if (resetRefreshes.length > 0) {
-          yield* Effect.logInfo("Cycle budget reset refreshes its Items", {
-            repository: watched.repository.name,
-            items: resetRefreshes.map(({ number }) => number).join(", "),
-          });
-        }
+        const resetRefresh = yield* planResetRefresh(watched.repository.name);
+        const stored =
+          resetRefresh._tag === "FromScratch"
+            ? emptyCursor(watched.watches)
+            : yield* readCursor(watched);
         const preflight = yield* synchronizeLabels(
           watched.repository.name,
           watched.declaredLabels,
@@ -337,9 +286,12 @@ export class PollingTriggers extends Context.Service<
           )
             ? []
             : stored.failingItems;
-          // Items fetched whatever detection reports: those a GitHub server error kept from the last
-          // cycle, and those a cycle-budget reset names.
-          const targeted = [...stored.unfetchedItems.map(changedItem), ...resetRefreshes];
+          // Items fetched whatever detection reports: those a GitHub server error deferred in the
+          // last cycle, and those a cycle-budget reset names.
+          const targeted = [
+            ...(yield* retryUnfetchedItems(watched.repository.name, stored.unfetchedItems)),
+            ...resetRefresh.items,
+          ];
           const detectedItems = detected._tag === "RepositoryChanges" ? detected.items : [];
           const detectedNumbers = new Set(detectedItems.map(({ number }) => number));
           // Mergeability changes when the base branch moves, without an updated_at or ETag change
@@ -376,12 +328,6 @@ export class PollingTriggers extends Context.Service<
               .map(({ number }) => number)
               .filter((number) => !detectedNumbers.has(number)),
           );
-          if (stored.unfetchedItems.length > 0) {
-            yield* Effect.logInfo("Fetching Items again after a GitHub server error", {
-              repository: watched.repository.name,
-              items: stored.unfetchedItems.map(({ number }) => number).join(", "),
-            });
-          }
           if (retrying.length > 0) {
             yield* Effect.logInfo(
               "Evaluating Items whose Loops failed before this process started or the instance was reloaded",
@@ -405,75 +351,13 @@ export class PollingTriggers extends Context.Service<
           const evaluations = yield* Effect.forEach(
             items.values(),
             (item) =>
-              Effect.gen(function* () {
-                const observation = yield* observeItem(watched.repository.name, item);
-                const cycle = yield* evaluateItem(watched.repository, watched.loops, observation);
-                const failing = failingItem(
-                  item,
-                  observation.projection.contentHash,
-                  cycle.failures,
-                );
-                yield* logItemEvaluation(
-                  watched.repository.name,
-                  item.number,
-                  Option.fromNullishOr(recorded.get(item.number)),
-                  failing,
-                );
-                return { _tag: "Evaluated", item, observation, cycle, failing } as const;
-              }).pipe(
-                // A GitHub server error is usually transient: the cursor keeps the Item for the
-                // next cycle, and this cycle commits the other Items.
-                Effect.catchTag("GitHubApiError", (error) =>
-                  Effect.gen(function* () {
-                    if (!Option.exists(error.status, (status) => status >= 500))
-                      return yield* error;
-                    yield* Effect.logWarning(
-                      "GitHub returned a server error for an Item; the next cycle fetches it again",
-                      {
-                        repository: watched.repository.name,
-                        item: item.number,
-                        operation: error.operation,
-                        status: Option.getOrNull(error.status),
-                        message: error.message,
-                      },
-                    );
-                    return { _tag: "Unfetched", item } as const;
-                  }),
+              evaluateChangedItem(watched.repository, watched.loops, item, {
+                recorded: Option.fromNullishOr(recorded.get(item.number)),
+                cursorOnly: cursorOnly.has(item.number),
+                openPullRequest: stored.openPullRequests.some(
+                  ({ number }) => number === item.number,
                 ),
-                // An Item kept only by the cursor may have been deleted or transferred, and must
-                // not stall the repository. Other failures still interrupt the cycle, which retries
-                // next time.
-                Effect.catchTag("GitHubItemNotFoundError", (error) =>
-                  Effect.gen(function* () {
-                    if (!cursorOnly.has(item.number)) return yield* error;
-                    const revokedRuns = yield* revokeMissingItem(
-                      watched.repository,
-                      watched.loops,
-                      item._tag === "ChangedIssue" ? "issue" : "pr",
-                      item.number,
-                    );
-                    const projectionMarkedGone = yield* markItemGone(
-                      watched.repository.name,
-                      item.number,
-                    );
-                    yield* Effect.logWarning(
-                      "GitHub no longer has an Item the poll cursor kept; it is dropped from the cursor",
-                      {
-                        repository: watched.repository.name,
-                        item: item.number,
-                        openPullRequest: stored.openPullRequests.some(
-                          ({ number }) => number === item.number,
-                        ),
-                        revokedRuns,
-                        projectionMarkedGone,
-                        errorTag: error._tag,
-                        message: error.message,
-                      },
-                    );
-                    return { _tag: "Missing", revokedRuns } as const;
-                  }),
-                ),
-              ),
+              }),
             { concurrency: ITEM_CONCURRENCY },
           );
           const observed = evaluations.flatMap((evaluation) =>
@@ -481,7 +365,7 @@ export class PollingTriggers extends Context.Service<
           );
           const unfetchedItems = evaluations
             .flatMap((evaluation) =>
-              evaluation._tag === "Unfetched" ? [unfetchedItem(evaluation.item)] : [],
+              evaluation._tag === "Unfetched" ? [evaluation.unfetched] : [],
             )
             .sort((left, right) => left.number - right.number);
           const unfetchedNumbers = new Set<number>(unfetchedItems.map(({ number }) => number));
@@ -537,19 +421,7 @@ export class PollingTriggers extends Context.Service<
             ...retried,
             repositories: new Set([...retried.repositories, cursorKey(watched.repository)]),
           }));
-          // A reset stays pending until its Item is evaluated.
-          const unfetchedKeys = new Set(
-            unfetchedItems.map(({ number }) => gitHubItemKey(watched.repository.name, number)),
-          );
-          const deferredResets = resets.filter(({ itemKey }) => unfetchedKeys.has(itemKey));
-          const evaluatedResets = resets.filter(({ itemKey }) => !unfetchedKeys.has(itemKey));
-          if (deferredResets.length > 0) {
-            yield* Effect.logInfo("Cycle budget reset stays pending until its Item is fetched", {
-              repository: watched.repository.name,
-              items: deferredResets.map(({ itemKey }) => itemKey),
-            });
-          }
-          yield* Effect.forEach(evaluatedResets, budgets.acknowledgeReset, { discard: true });
+          yield* acknowledgeResets(watched.repository.name, resetRefresh.resets, unfetchedItems);
           return {
             // Refreshed open PRs are observed, not reported as changed by
             // GitHub; counting them would make every idle poll look busy.
