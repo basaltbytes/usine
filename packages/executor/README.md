@@ -59,7 +59,7 @@ SSH image preparation logs local image presence and inspection time before start
 
 A failed pull logs its attempt number, exit code, duration, and up to 1,000 characters of stderr. If the image is absent, preparation retries on the same machine after 5 seconds and then 15 seconds, for at most three pulls. Preflight fails with the last pull error if the image remains absent. A failed pull can use an existing local image.
 
-A missing image on a provisioned machine logs a warning to rebuild the snapshot with the specified image. The image user probe and each shared cache preparation report their durations; cache preparation also reports `runDurationMillis` for the container run separately from the complete remote script when the host reports a readable duration. Unreadable timing output, such as from a host without GNU date, is recorded at debug level, and preparation succeeds without `runDurationMillis`. Provisioned machines report `preparing` during preflight and first-use cache preparation, then `ready` when preparation completes.
+A missing image on a Boat machine logs at Info level before downloading it, because Boat snapshots do not retain container images. Each new Boat machine pulls the image; bounded machine reuse spreads that cost across attempts. A missing image on a Hetzner machine logs a warning to rebuild the snapshot with the specified image. The image user probe and each shared cache preparation report their durations; cache preparation also reports `runDurationMillis` for the container run separately from the complete remote script when the host reports a readable duration. Unreadable timing output, such as from a host without GNU date, is recorded at debug level, and preparation succeeds without `runDurationMillis`. Provisioned machines report `preparing` during preflight and first-use cache preparation, then `ready` when preparation completes.
 
 Every adapter compares the machine's memory with `maxConcurrentAttempts`. The local adapter reads `/proc/meminfo` on Linux and physical memory on macOS, where swap grows on demand; exe.dev and SSH read `/proc/meminfo` over SSH. Under 1.5 GiB per concurrent attempt, or no swap with more than one, is a `memory` `WorkerCapabilityError`; under 3 GiB logs a warning ([#270](https://github.com/basaltbytes/usine/issues/270)).
 
@@ -151,6 +151,8 @@ The integration keeps the GitHub credential at exe.dev's network edge: no GitHub
 Salvage inspection, staging, or snapshot failures keep the checkout, uncommitted files included. Restart recovery uses fresh credentials and records the recovered ref before releasing the worktree.
 
 ## SSH worker
+
+Attempt containers mount `/dev/shm` and `/tmp` in memory and set `TMPDIR=/tmp` for Docker and Podman. `SshWorkerContainer.shmSizeMib` and `tmpfsSizeMib` override each filesystem's default capacity of 2048 MiB. Each capacity is capped at the container memory limit; both filesystems and running processes share that limit. Temporary files are removed with the container. The executor logs the applied capacities when it records and starts a container.
 
 `@usine/executor/ssh` runs the same contract on any Linux machine that the orchestrator reaches over SSH ([ADR 0026](../../docs/adr/0026-eu-ssh-worker.md)); `infra/hetzner` creates one on Hetzner Cloud. Each worker has an SSH destination, an optional identity file and port, and a root under which it keeps `workers/<name>/repos`, `attempts`, and `credentials`. The machine needs Git, rootless Podman or Docker, and the roster's harness logins for the SSH user.
 
@@ -271,6 +273,8 @@ const executorLayer = layer({
         cpus: Option.none(),
         memoryMib: Option.some(ContainerMemoryMib.make(6144)),
         pids: Option.none(),
+        shmSizeMib: Option.none(),
+        tmpfsSizeMib: Option.none(),
       },
     },
   ],
@@ -333,3 +337,5 @@ See [Development](../../README.md#development) for temporary storage selection a
 `SshExecutorOptions.attemptConnections` and `CloudflareExecutorOptions.attemptConnections` accept an `AttemptConnections<Address>` store from the host. The executor records the connection before allocating resources, restores it before reattachment or recovery, and removes a failed creation's record before retrying. Without a store, connections survive live revisions within that executor instance. The Node orchestrator supplies a durable store using credential references. Hosts must persist references rather than resolved secrets.
 
 SSH recovery uses the cached checkout listing to skip finished attempts without a checkout. Checkouts acquired in the current process are tracked separately, so later recovery also finds checkouts created after that listing. It records a legacy connection only when that listing contains the attempt’s checkout, and removes a fixed worker’s record after checkout and resource cleanup succeed. Incomplete cleanup keeps the original connection for recovery; provisioned machines keep it until a reset for reuse or deletion succeeds. Container reclamation failures preserve the record until recovery succeeds after a restart. Failed listings stay cached for that connection until restart; retained connections have separate listings even when they share a worker name. Cloudflare recovery resolves sandbox presence through its API and retains its connection records.
+
+Remote Codex children keep their app-server running when SSH disconnects. Reconnection uses the retained machine connection and reads output from its last received position. Confirmed Boat machine loss drains the attempt as an infrastructure failure; the engine retries from the latest pushed salvage. Work that exists only on a deleted machine cannot be recovered.

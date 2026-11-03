@@ -41241,13 +41241,39 @@
                 "type": "null"
               }
             ]
+          },
+          "shmSizeMib": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tmpfsSizeMib": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "image",
           "cpus",
           "memoryMib",
-          "pids"
+          "pids",
+          "shmSizeMib",
+          "tmpfsSizeMib"
         ],
         "additionalProperties": false
       },

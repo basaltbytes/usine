@@ -430,8 +430,7 @@ describe("Codex app-server transport", () => {
           });
 
           const afterFailure = yield* Effect.flip(connection.request("steer", "turn/steer", {}));
-          assert(afterFailure instanceof SessionOperationError);
-          assert.match(afterFailure.message, /already failed/u);
+          assert.strictEqual(afterFailure, error, "later requests preserve the recorded failure");
         }),
       ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process)));
     }),

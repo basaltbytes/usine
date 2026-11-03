@@ -407,7 +407,13 @@ describe("SSH Worker with Docker", () => {
       machine.state.memoryGib = 8;
       const address: SshWorkerAddress = {
         ...ADDRESS,
-        container: { image: Option.none(), cpus: Option.none(), memoryMib, pids: Option.none() },
+        container: {
+          ...ADDRESS.container,
+          image: Option.none(),
+          cpus: Option.none(),
+          memoryMib,
+          pids: Option.none(),
+        },
       };
       const limitsIn = (words: ReadonlyArray<string>) => [
         optionOf(words, "--cpus"),
@@ -945,6 +951,8 @@ describe("SSH Worker with Docker", () => {
           cpus: Option.none(),
           memoryMib: Option.none(),
           pids: Option.none(),
+          shmSizeMib: Option.none(),
+          tmpfsSizeMib: Option.none(),
         },
       };
       return Effect.gen(function* () {

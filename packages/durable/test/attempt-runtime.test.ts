@@ -839,9 +839,15 @@ describe("durable AttemptRuntime", () => {
           assert.include(next.request.prompt, "Fix the third finding.");
           assert.strictEqual(execution.pollUnsafe(), undefined);
           yield* next.reply("The third finding is fixed.");
-          const report = yield* Fiber.join(execution);
-          assert.strictEqual(report.message, "All three findings are fixed.");
-          assert.isFalse(report.answeredOperator);
+          if (delivery === "unread") {
+            const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+            assert.strictEqual(failure._tag, "InfraFailure");
+            assert.strictEqual(failure.message, "The child stopped before reading the steer");
+          } else {
+            const report = yield* Fiber.join(execution);
+            assert.strictEqual(report.message, "All three findings are fixed.");
+            assert.isFalse(report.answeredOperator);
+          }
           const expected =
             delivery === "unread"
               ? [
@@ -1976,6 +1982,87 @@ describe("durable AttemptRuntime", () => {
       );
     }).pipe(Effect.scoped),
   );
+
+  it.live("keeps a child transport loss as infrastructure when the parent reports a blocker", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/824");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+        yield* (yield* (yield* StubChildren).next).crash("Codex machine disappeared");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.strictEqual(failure.message, "Codex machine disappeared");
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              delegate("Complete the task"),
+              answer("[usine:blocked]\nThe SSH connection failed."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "fails as infrastructure when the parent returns partial progress after a code-0 child exit",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/824-zero-exit");
+          const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+          yield* (yield* (yield* StubChildren).next).crash("Codex app-server exited with code 0");
+          const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+          assert.strictEqual(failure._tag, "InfraFailure");
+          assert.strictEqual(failure.message, "Codex app-server exited with code 0");
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Complete the task"),
+                answer("Merged main and started the gate. No changes have been pushed."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  for (const report of ["ask", "block"] as const) {
+    it.live(`prioritizes a child transport loss over an earlier child ${report} report`, () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/824-earlier-report");
+          const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+          yield* (yield* (yield* StubChildren).next)[report]("Publishing needs operator guidance.");
+          yield* (yield* (yield* StubChildren).next).crash("Codex machine disappeared");
+          const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+          assert.strictEqual(failure._tag, "InfraFailure");
+          assert.strictEqual(failure.message, "Codex machine disappeared");
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Complete the task"),
+                delegate("Inspect the checkout and continue"),
+                answer("[usine:blocked]\nThe SSH connection failed."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+    );
+  }
 
   it.live("ends the Attempt with the parent's own blocker", () =>
     Effect.gen(function* () {

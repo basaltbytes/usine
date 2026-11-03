@@ -635,6 +635,7 @@ export const fakeMachine = () => {
     }
     if (line === "exec 'git' '--version'") return oneShotHandle("git version 2.47.3\n", 0);
     if (line === "exec 'claude' '--version'") return oneShotHandle(claudeVersionOutput, 0);
+    if (line === "exec 'node' '--version'") return oneShotHandle("v24.11.0\n", 0);
     if (
       line ===
       "exec 'codex' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false' '--version'"
@@ -871,12 +872,14 @@ export const writesCredential = (line: string) => line.includes("IFS= read -r to
 export const capturedLogs = () => {
   const lines: Array<string> = [];
   const warnings: Array<string> = [];
+  const infos: Array<string> = [];
   const logger = Logger.make<unknown, void>(({ message, logLevel }) => {
     const line = JSON.stringify(message);
     lines.push(line);
     if (logLevel === "Warn") warnings.push(line);
+    if (logLevel === "Info") infos.push(line);
   });
-  return { lines, warnings, layer: Logger.layer([logger]) };
+  return { lines, warnings, infos, layer: Logger.layer([logger]) };
 };
 
 /** The test Worker's address, without a Gateway. */
@@ -892,6 +895,8 @@ export const ADDRESS: SshWorkerAddress = {
     cpus: Option.some(ContainerCpus.make(2)),
     memoryMib: Option.some(ContainerMemoryMib.make(4096)),
     pids: Option.some(ContainerPids.make(4096)),
+    shmSizeMib: Option.none(),
+    tmpfsSizeMib: Option.none(),
   },
 };
 

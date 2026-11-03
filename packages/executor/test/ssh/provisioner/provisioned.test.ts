@@ -505,6 +505,8 @@ describe("Provisioned SSH Worker", () => {
           cpus: Option.none(),
           memoryMib: Option.none(),
           pids: Option.none(),
+          shmSizeMib: Option.none(),
+          tmpfsSizeMib: Option.none(),
         },
       };
       return Effect.gen(function* () {

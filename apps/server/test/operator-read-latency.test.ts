@@ -61,7 +61,7 @@ const LABELS = [
   "agent-review-findings",
   "review-passed",
 ];
-// Maximum read latency while an Attempt starts (#464).
+// CI-calibrated read latency while an attempt starts (#464).
 const READ_BUDGET_MILLIS = 500;
 const READS = 3;
 
@@ -200,9 +200,10 @@ describe("operator read latency", () => {
     readonly history: boolean;
   }) => {
     const program = Effect.gen(function* () {
+      const startedAt = yield* Clock.currentTimeMillis;
       const fileSystem = yield* FileSystem.FileSystem;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        directory: history ? undefined : sqliteTempDirectory(),
+        directory: sqliteTempDirectory(undefined, (history ? 512 : 64) * 1024 ** 2),
         prefix: "usine-read-latency-",
       });
       const preparing = yield* Deferred.make<void>();
@@ -423,12 +424,12 @@ describe("operator read latency", () => {
             );
           }
           const fastest = (millis: ReadonlyArray<number>) => Math.min(...millis);
-          const timings = JSON.stringify(
-            rounds.map(({ overview, desk }) => ({
-              overview: overview.millis,
-              desk: desk.millis,
-            })),
-          );
+          const measurements = rounds.map(({ overview, desk }) => ({
+            overview: overview.millis,
+            desk: desk.millis,
+          }));
+          yield* Effect.logInfo("Operator read latency", { rounds: measurements });
+          const timings = JSON.stringify(measurements);
           assert.isBelow(
             fastest(rounds.map(({ overview }) => overview.millis)),
             READ_BUDGET_MILLIS,
@@ -441,9 +442,14 @@ describe("operator read latency", () => {
           );
         }).pipe(Effect.provide(server));
       }).pipe(Effect.provide(observation));
+      yield* Effect.logInfo("Operator latency fixture completed", {
+        history,
+        elapsedMillis: (yield* Clock.currentTimeMillis) - startedAt,
+      });
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
     await Effect.runPromise(program);
   };
+  // CI-calibrated fixture setup and read budget.
   it.each([
     {
       fixture: "keeps 300 done tasks and 800 runs below 500 KB",

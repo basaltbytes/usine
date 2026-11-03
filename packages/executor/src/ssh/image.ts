@@ -53,13 +53,23 @@ export const prepareAttemptImage = Effect.fn("SshExecutor.prepareAttemptImage")(
   });
   const before = yield* inspect();
   if (operation === "prepare" && Option.isSome(before)) return;
-  if (Option.isNone(before))
-    yield* Effect.logWarning(
-      Option.isSome(machine.provisioned)
-        ? "The worker snapshot lacks the attempt image; downloading it. Rebuild the snapshot with this image."
-        : "The attempt image is absent on the worker; downloading it",
-      fields,
-    );
+  if (Option.isNone(before)) {
+    if (
+      machine.address.machine._tag === "Provisioned" &&
+      machine.address.machine.provisioner.provider === "boat"
+    )
+      yield* Effect.logInfo(
+        "The attempt image is absent on the Boat machine; downloading it",
+        fields,
+      );
+    else
+      yield* Effect.logWarning(
+        Option.isSome(machine.provisioned)
+          ? "The worker snapshot lacks the attempt image; downloading it. Rebuild the snapshot with this image."
+          : "The attempt image is absent on the worker; downloading it",
+        fields,
+      );
+  }
   for (let attempt = 1; attempt <= 3; attempt++) {
     yield* Effect.logInfo("Pulling the attempt image", { ...fields, attempt });
     const [duration, pulled] = yield* commands

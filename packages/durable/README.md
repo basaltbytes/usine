@@ -103,3 +103,5 @@ A child's provider capacity refusal remains `ProviderCapacityFailure` when the p
 Durable storage fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts).
 
 See [Development](../../README.md#development) for temporary storage selection and worker concurrency.
+
+A child's `SessionOperationError` is recorded as an infrastructure failure. This classification takes precedence over a later parent blocker, so the engine can retry the attempt from its recorded salvage.

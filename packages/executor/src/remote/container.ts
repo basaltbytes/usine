@@ -8,6 +8,7 @@ import {
   ContainerId,
   type ContainerImage,
   type ContainerLimits,
+  type ContainerScratchMib,
   type WorkerName,
 } from "@usine/core/worker";
 import { Duration, Effect, Option, Redacted, Ref, Schema } from "effect";
@@ -91,6 +92,8 @@ export interface ContainerSettings {
   readonly hosts: Readonly<Record<string, string>>;
   readonly image: ContainerImage;
   readonly limits: ContainerLimits;
+  readonly shmSizeMib: ContainerScratchMib;
+  readonly tmpfsSizeMib: ContainerScratchMib;
   /** The value of the instance label, which the instances that share a GitHub App share too. */
   readonly instance: string;
   /** The value of the instance ID label, which tells apart the instances that share the App. */
@@ -418,6 +421,7 @@ export const containersFor = (commands: RemoteCommands) => {
       });
     const envFile = yield* environmentFile(operation, {
       ...spec.environment,
+      TMPDIR: "/tmp",
       ...Object.fromEntries(
         Object.entries(spec.secrets).map(([name, value]) => [name, Redacted.value(value)]),
       ),
@@ -480,6 +484,10 @@ export const containersFor = (commands: RemoteCommands) => {
       `${spec.settings.limits.memoryMib}m`,
       "--pids-limit",
       String(spec.settings.limits.pids),
+      "--shm-size",
+      `${spec.settings.shmSizeMib}m`,
+      "--tmpfs",
+      `/tmp:rw,exec,nosuid,nodev,size=${spec.settings.tmpfsSizeMib}m,mode=1777`,
       "--env-file",
       "/dev/stdin",
       ...SHARED_CACHES.flatMap(({ mount }) => ["--volume", mount]),
@@ -499,6 +507,8 @@ export const containersFor = (commands: RemoteCommands) => {
       .pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(envFile))));
     yield* Effect.logInfo("Started the container", {
       ...fields,
+      shmSizeMib: spec.settings.shmSizeMib,
+      tmpfsSizeMib: spec.settings.tmpfsSizeMib,
       logins: found.map(({ file }) => file).join(","),
       readOnly: readOnly.join(","),
     });

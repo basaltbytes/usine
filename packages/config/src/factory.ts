@@ -16,6 +16,7 @@ import {
   ContainerCpus,
   ContainerImage,
   ContainerMemoryMib,
+  ContainerScratchMib,
   ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
@@ -135,6 +136,10 @@ export class WorkerContainer extends Schema.Class<WorkerContainer>("@usine/confi
     memoryMib: Schema.OptionFromOptionalKey(ContainerMemoryMib),
     /** The process limit per attempt container, or `None` to derive it at preflight. */
     pids: Schema.OptionFromOptionalKey(ContainerPids),
+    /** The shared-memory capacity in MiB, or `None` for 2048, capped at the memory limit. */
+    shmSizeMib: Schema.OptionFromOptionalKey(ContainerScratchMib),
+    /** The temporary-file capacity in MiB, or `None` for 2048, capped at the memory limit. */
+    tmpfsSizeMib: Schema.OptionFromOptionalKey(ContainerScratchMib),
   },
 ) {}
 
@@ -312,7 +317,11 @@ export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker"
   ),
   /** The attempt image and resource limits; decoding defaults to executor-selected values. */
   container: WorkerContainer.pipe(
-    Schema.encodeKeys({ memoryMib: "memory_mib" }),
+    Schema.encodeKeys({
+      memoryMib: "memory_mib",
+      shmSizeMib: "shm_size_mib",
+      tmpfsSizeMib: "tmpfs_size_mib",
+    }),
     Schema.withDecodingDefaultKey(Effect.succeed({})),
   ),
 }) {}

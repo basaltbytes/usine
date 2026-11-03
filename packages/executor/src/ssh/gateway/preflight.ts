@@ -282,6 +282,16 @@ export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(fu
 ) {
   const label = harness === "claude" ? "Claude Code" : "Codex";
   yield* Effect.annotateCurrentSpan({ host, harness, credential });
+  if (harness === "codex") {
+    const runtime = yield* commands.inspect("preflight", shell, "node", ["--version"]);
+    if (runtime.exitCode === SSH_FAILURE) return yield* unreachable(host, "node", runtime);
+    if (runtime.exitCode !== 0)
+      return new HarnessUnavailableError({
+        harness,
+        capability: "binary",
+        message: "Remote Codex children require Node.js on the worker's command path.",
+      });
+  }
   const args = harness === "codex" ? [...codexConfigArgs, "--version"] : ["--version"];
   const result = yield* commands.inspect("preflight", shell, harness, args);
   if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, harness, result);

@@ -161,6 +161,12 @@ export const ContainerMemoryMib = Schema.Int.check(Schema.isGreaterThanOrEqualTo
 );
 export type ContainerMemoryMib = typeof ContainerMemoryMib.Type;
 
+/** The capacity of a memory-backed container scratch filesystem in MiB. */
+export const ContainerScratchMib = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+  Schema.brand("ContainerScratchMib"),
+);
+export type ContainerScratchMib = typeof ContainerScratchMib.Type;
+
 /** The maximum number of processes and threads in a container. */
 export const ContainerPids = Schema.Int.check(Schema.isGreaterThanOrEqualTo(64)).pipe(
   Schema.brand("ContainerPids"),

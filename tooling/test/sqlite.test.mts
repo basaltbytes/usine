@@ -18,7 +18,7 @@ test("SQLite fixtures use the OS temp directory when memory storage is unavailab
   }
 });
 
-test("SQLite fixtures select writable shared memory when available", async (t) => {
+test("SQLite fixtures select shared memory only when enough space is available", async (t) => {
   try {
     assert.equal((await statfs("/dev/shm")).type, 0x01021994);
     await access("/dev/shm", constants.W_OK | constants.X_OK);
@@ -26,7 +26,16 @@ test("SQLite fixtures select writable shared memory when available", async (t) =
     t.skip("Writable tmpfs is unavailable on this host");
     return;
   }
-  const directory = await mkdtemp(join(sqliteTempDirectory(), "usine-temp-selection-"));
+  const filesystem = await statfs("/dev/shm");
+  assert.equal(sqliteTempDirectory("/dev/shm", 0), "/dev/shm");
+  assert.equal(
+    sqliteTempDirectory("/dev/shm", filesystem.bavail * filesystem.bsize + 1),
+    tmpdir(),
+    "a tmpfs smaller than the fixture size hint uses the OS temporary directory",
+  );
+  const directory = await mkdtemp(
+    join(sqliteTempDirectory("/dev/shm", 0), "usine-temp-selection-"),
+  );
   t.after(() => rm(directory, { recursive: true, force: true }));
   assert.equal((await statfs(directory)).type, 0x01021994);
 });

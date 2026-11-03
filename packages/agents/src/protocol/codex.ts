@@ -38,6 +38,15 @@ export interface ThreadStartParams {
   readonly ephemeral?: boolean | null;
 }
 
+export interface ThreadResumeParams {
+  readonly threadId: string;
+  readonly model?: string | null;
+  readonly cwd?: string | null;
+  readonly approvalPolicy?: "never" | "on-request" | "untrusted" | null;
+  readonly sandbox?: "read-only" | "workspace-write" | "danger-full-access" | null;
+  readonly excludeTurns?: boolean;
+}
+
 interface TextInput {
   readonly type: "text";
   readonly text: string;
@@ -93,6 +102,15 @@ export const ThreadStartResponse = Schema.Struct({
   thread: Schema.Struct({ id: HarnessSessionId }),
   model: Schema.NonEmptyString,
   instructionSources: Schema.Array(Schema.String),
+});
+/** The saved items needed to check whether the resumed thread contains its original task. */
+export const ThreadResumeResponse = Schema.Struct({
+  thread: Schema.Struct({
+    id: HarnessSessionId,
+    turns: Schema.Array(
+      Schema.Struct({ items: Schema.Array(Schema.Struct({ type: Schema.String })) }),
+    ),
+  }),
 });
 /** The turn ID, needed to steer or interrupt the turn. */
 export const TurnStartResponse = Schema.Struct({

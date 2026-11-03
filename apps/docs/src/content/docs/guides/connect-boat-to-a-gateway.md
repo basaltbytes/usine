@@ -21,13 +21,17 @@ A configured Boat worker, a paid Boat plan supporting saved snapshots, a gateway
 
    Remove broader grants matching attempt nodes because grants are additive. Normal Boat SSH uses Boat’s endpoint.
 
-4. Build a saved snapshot with Tailscale and the release’s attempt image:
+4. Build a saved snapshot with Tailscale:
 
    ```sh
-   infra/boat/build-snapshot.sh usine-attempt <attempt-image> ~/.ssh/usine_boat
+   infra/boat/build-snapshot.sh usine-attempt ~/.ssh/usine_boat
    ```
 
-   Set `BOAT_API_KEY` in this shell. Use the image from the matching release’s worker image setting. The script requires `curl`, `jq`, and OpenSSH and removes Tailscale identity before saving. Keep credentials and repository checkouts out of the source snapshot.
+   Set `BOAT_API_KEY` in this shell. The script requires `curl`, `jq`, and OpenSSH. It installs Tailscale, stops its daemon, removes its identity, and flushes filesystem writes before saving. Keep credentials and repository checkouts out of the source snapshot.
+
+   After Boat reports the snapshot ready, the script creates a verification sandbox from it with a 15-minute TTL and runs `tailscale version`. It reports success only after this check and deletes both temporary sandboxes on exit. If Tailscale verification fails, it exits with an error. You can rerun the script with the same snapshot name.
+
+   Boat snapshots do not retain container images. Each new machine pulls the attempt image during preflight. [Machine reuse](/reference/configuration/workers/#provisioner) spreads the download cost across attempts; attempt image upgrades do not require rebuilding the Boat snapshot.
 
 5. Edit the Boat worker. Set the gateway’s domain, SSH destination, admin-token variable, and provider list. Set provisioner snapshot `usine-attempt`, tailnet gateway address, client-ID variable `TAILSCALE_CLIENT_ID`, and client-secret variable `TAILSCALE_CLIENT_SECRET`. Save.
 
