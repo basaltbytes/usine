@@ -36,6 +36,9 @@ import type { StepExecutor } from "../step-executor.ts";
 import type { TriggerCondition } from "../trigger-condition.ts";
 import { RunDatabase } from "./database.ts";
 import { withReadWorker } from "./sqlite-reader/reader.ts";
+import { SqliteReader, type SqliteReaderState } from "./sqlite-reader/status.ts";
+
+export { SqliteReader, SqliteReaderState } from "./sqlite-reader/status.ts";
 
 const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
@@ -85,11 +88,15 @@ const openSqliteLayer = <E>(
       yield* Effect.logDebug("SQLite statement cache span isolation installed", {
         filename: config.filename,
       });
-      if (config.readonly === true) return context;
+      if (config.readonly === true)
+        return Context.add(context, SqliteReader, {
+          state: Effect.succeed<SqliteReaderState>("fallback"),
+        });
       const routed = yield* withReadWorker(client);
       return context.pipe(
-        Context.add(SqlClient.SqlClient, routed),
-        Context.add(SqliteClient.SqliteClient, routed),
+        Context.add(SqlClient.SqlClient, routed.client),
+        Context.add(SqliteClient.SqliteClient, routed.client),
+        Context.add(SqliteReader, { state: routed.state }),
       );
     }).pipe(Effect.mapError(onError)),
   );

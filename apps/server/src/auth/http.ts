@@ -1,3 +1,4 @@
+import type { SqliteReader } from "@usine/engine/local-sqlite";
 import { SetupApi, setupPermissions } from "../setup/api.ts";
 import { permits, InstanceScope, RequestPermissions } from "@usine/core/access";
 import { ActingMember, localActor } from "@usine/core/operator";
@@ -24,6 +25,7 @@ export interface AuthServices {
   readonly authentication: Authentication["Service"];
   readonly store: AuthStore["Service"];
   readonly github: GitHubSignIn["Service"];
+  readonly sqliteReader?: SqliteReader["Service"];
 }
 const RequestAccess = Context.Reference<Option.Option<Access>>("@usine/server/RequestAccess", {
   defaultValue: Option.none,
@@ -79,7 +81,11 @@ export const authenticatedRoutes = (services: AuthServices) => {
     HttpRouter.route(
       AuthApi.endpoints.health.method,
       AuthApi.endpoints.health.path,
-      json({ ok: true }),
+      services.sqliteReader === undefined
+        ? json({ ok: true })
+        : Effect.map(services.sqliteReader.state, (sqliteReader) =>
+            json({ ok: true, sqliteReader }),
+          ),
     ),
     HttpRouter.route(
       AuthApi.endpoints.info.method,

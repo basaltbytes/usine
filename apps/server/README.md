@@ -248,3 +248,7 @@ Members receive access through configuration role bindings. Browser sessions use
 ## Event-loop delay
 
 `usine up` logs `Event-loop delay` once per minute, including `p99Millis`, `maxMillis`, and `intervalSeconds`. The values describe the preceding minute with a 10 ms sampling resolution. Use maximum delay to detect isolated stalls; p99 describes the slowest 1% of samples. The monitor stops when the server scope closes. Runtime reads use the SQLite read worker so a long standalone read permits transcript appends and HTTP health responses to continue.
+
+If the SQLite read worker stops, the server logs the cause at Error and fails its in-flight reads. Later reads use the main connection, where long reads can delay appends and HTTP responses. The server retries worker startup after 1 second, 5 seconds, 30 seconds, and then every 5 minutes. A replacement serves reads after a successful probe; successful recovery resets the retry delay.
+
+Read `GET /api/health` to check `sqliteReader`: `worker` means standalone reads use the worker, `fallback` means they use the main connection while waiting to retry, and `respawning` means a replacement is starting and reads still use the main connection. The endpoint remains a liveness check and returns HTTP 200 in each state.

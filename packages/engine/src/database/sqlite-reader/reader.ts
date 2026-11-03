@@ -1,144 +1,115 @@
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Effect, Option, Schema } from "effect";
+import { Deferred, Effect } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient, Statement } from "effect/sql";
 import type { Connection } from "effect/sql/SqlConnection";
-import { ConnectionError, SqlError, classifySqliteError } from "effect/sql/SqlError";
-import { Worker } from "node:worker_threads";
-import { Response } from "./protocol.ts";
+import type { SqlError } from "effect/sql/SqlError";
+import { connectionError, readConnection, spawnWorker } from "./connection.ts";
+import type { SqliteReaderState } from "./status.ts";
 import { isReadQuery } from "./query.ts";
 
-const connectionError = (cause: unknown) =>
-  new SqlError({
-    reason: new ConnectionError({
-      cause,
-      message: "SQLite read worker stopped",
-      operation: "read",
-    }),
-  });
-const Rows = Schema.Array(Schema.Record(Schema.String, Schema.Unknown));
-const Values = Schema.Array(Schema.Array(Schema.Unknown));
+const retryDelays = [1000, 5000, 30000];
 
-const readConnection = Effect.fn("LocalSqlite.readConnection")(function* (filename: string) {
+const supervise = Effect.fn("LocalSqlite.superviseReader")(function* (
+  filename: string,
+  spawn: typeof spawnWorker,
+) {
   yield* Effect.annotateCurrentSpan({ filename });
-  const pending = new Map<number, (result: Effect.Effect<unknown, SqlError>) => void>();
-  let stopped: SqlError | undefined;
-  let sequence = 0;
-  const stop = (cause: unknown) => {
-    stopped = connectionError(cause);
-    for (const resume of pending.values()) resume(Effect.fail(stopped));
-    pending.clear();
-  };
-  const worker = yield* Effect.acquireRelease(
-    Effect.try({
-      try: () =>
-        new Worker(
-          new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.js", import.meta.url),
-          {
-            workerData: { filename },
-            execArgv: import.meta.url.endsWith(".ts") ? ["--experimental-strip-types"] : [],
-          },
-        ),
-      catch: connectionError,
-    }),
-    (worker) =>
+  type Reader = Effect.Success<ReturnType<typeof readConnection>>;
+  let active: Reader | undefined;
+  let state: SqliteReaderState = "respawning";
+  let attempt = 0;
+  const initialized = yield* Deferred.make<void>();
+  const cycle = Effect.gen(function* () {
+    state = "respawning";
+    yield* Effect.logInfo("SQLite read worker starting", { filename, attempt });
+    yield* Effect.scoped(
       Effect.gen(function* () {
-        stop("SQLite reader scope closed");
-        yield* Effect.promise(() => worker.terminate());
-      }),
-  );
-  worker.on("error", stop);
-  worker.on("exit", (code) => stop(`SQLite reader exited with code ${code}`));
-  worker.on("message", (message) => {
-    const decoded = Schema.decodeUnknownOption(Response)(message);
-    if (Option.isNone(decoded)) {
-      stop("Invalid SQLite reader response");
-      return;
-    }
-    const response = decoded.value;
-    const resume = pending.get(response.id);
-    pending.delete(response.id);
-    resume?.(
-      response.ok
-        ? Effect.succeed(response.result)
-        : Effect.fail(
-            new SqlError({
-              reason: classifySqliteError(response.cause, {
-                message: response.cause.message,
-                operation: "execute",
-              }),
-            }),
-          ),
-    );
-  });
-  const request = (sql: string, params: ReadonlyArray<unknown>, values: boolean) =>
-    Effect.flatMap(Effect.service(SqlClient.SafeIntegers), (safeIntegers) =>
-      Effect.callback<unknown, SqlError>((resume) => {
-        if (stopped !== undefined) {
-          resume(Effect.fail(stopped));
-          return;
-        }
-        const id = ++sequence;
-        pending.set(id, resume);
-        try {
-          worker.postMessage({ id, sql, params, values, safeIntegers });
-        } catch (cause) {
-          pending.delete(id);
-          resume(Effect.fail(connectionError(cause)));
-        }
-        return Effect.sync(() => {
-          pending.delete(id);
-        });
+        const reader = yield* readConnection(filename, spawn);
+        yield* reader.rows("SELECT 1", []).pipe(
+          Effect.timeoutOrElse({
+            duration: "5 seconds",
+            orElse: () => Effect.fail(connectionError("SQLite reader probe timed out")),
+          }),
+        );
+        active = reader;
+        state = "worker";
+        attempt = 0;
+        yield* Effect.logInfo("SQLite read worker ready", { filename });
+        yield* Deferred.succeed(initialized, undefined);
+        return yield* reader.failure;
       }),
     ).pipe(
-      Effect.tapError((error) =>
-        Effect.logError("SQLite read failed", {
-          filename,
-          reason: error.reason._tag,
+      Effect.catchTag("SqlError", (error) =>
+        Effect.gen(function* () {
+          active = undefined;
+          state = "fallback";
+          const delayMs = retryDelays[attempt] ?? 300000;
+          attempt++;
+          yield* Effect.logError("SQLite read worker unavailable; using main connection", {
+            filename,
+            cause: error.reason.cause,
+            attempt,
+            delayMs,
+          });
+          yield* Deferred.succeed(initialized, undefined);
+          yield* Effect.sleep(delayMs);
         }),
       ),
     );
-  const rows = (sql: string, params: ReadonlyArray<unknown>) =>
-    request(sql, params, false).pipe(
-      Effect.flatMap((result) =>
-        Schema.decodeUnknownEffect(Rows)(result).pipe(Effect.mapError(connectionError)),
-      ),
-    );
-  const values = (sql: string, params: ReadonlyArray<unknown>) =>
-    request(sql, params, true).pipe(
-      Effect.flatMap((result) =>
-        Schema.decodeUnknownEffect(Values)(result).pipe(Effect.mapError(connectionError)),
-      ),
-    );
-  yield* rows("SELECT 1", []);
-  yield* Effect.logDebug("SQLite read worker opened", { filename });
-  return { rows, values };
+  });
+  yield* cycle.pipe(Effect.forever, Effect.forkScoped);
+  yield* Deferred.await(initialized);
+  return {
+    current: () => (active?.available() ? active : undefined),
+    state: Effect.sync(() => (active !== undefined && !active.available() ? "fallback" : state)),
+  };
 });
 
 /** Keeps transactions and reserved connections on the writer; standalone SELECTs use WAL snapshots. */
 export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* (
   writer: SqliteClient.SqliteClient,
+  spawn: typeof spawnWorker = spawnWorker,
 ) {
-  const reader = yield* readConnection(writer.config.filename);
+  yield* Effect.annotateCurrentSpan({ filename: writer.config.filename });
+  const reader = yield* supervise(writer.config.filename, spawn);
   const onWriter = <A>(use: (connection: Connection) => Effect.Effect<A, SqlError>) =>
     Effect.scoped(Effect.flatMap(writer.reserve, use));
-  const rows: Connection["execute"] = (sql, params, transform) => {
-    if (!isReadQuery(sql))
-      return onWriter((connection) => connection.execute(sql, params, transform));
-    const result = reader.rows(sql, params);
-    return transform === undefined ? result : Effect.map(result, transform);
-  };
+  const route = <A>(
+    sql: string,
+    onReader: (
+      current: NonNullable<ReturnType<typeof reader.current>>,
+    ) => Effect.Effect<A, SqlError>,
+    useWriter: (connection: Connection) => Effect.Effect<A, SqlError>,
+  ) =>
+    Effect.suspend(() => {
+      const current = reader.current();
+      return isReadQuery(sql) && current !== undefined ? onReader(current) : onWriter(useWriter);
+    });
+  const rows: Connection["execute"] = (sql, params, transform) =>
+    route(
+      sql,
+      (current) => {
+        const result = current.rows(sql, params);
+        return transform === undefined ? result : Effect.map(result, transform);
+      },
+      (connection) => connection.execute(sql, params, transform),
+    );
   const values: Connection["executeValues"] = (sql, params) =>
-    isReadQuery(sql)
-      ? reader.values(sql, params)
-      : onWriter((connection) => connection.executeValues(sql, params));
+    route(
+      sql,
+      (current) => current.values(sql, params),
+      (connection) => connection.executeValues(sql, params),
+    );
   const connection: Connection = {
     execute: rows,
     executeUnprepared: rows,
     executeRaw: (sql, params) =>
-      isReadQuery(sql)
-        ? reader.rows(sql, params)
-        : onWriter((connection) => connection.executeRaw(sql, params)),
+      route(
+        sql,
+        (current) => current.rows(sql, params),
+        (connection) => connection.executeRaw(sql, params),
+      ),
     executeValues: values,
     executeValuesUnprepared: values,
     executeStream: (...args) => writer.unsafe(args[0], args[1]).stream,
@@ -152,7 +123,7 @@ export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* 
     transactionAcquirer: writer.reserve,
     transactionService: writer.transactionService,
   }).pipe(Effect.provide(Reactivity.layer));
-  return Object.assign(routed, {
+  const client = Object.assign(routed, {
     [SqliteClient.TypeId]: SqliteClient.TypeId,
     config: writer.config,
     updateValues: writer.updateValues,
@@ -163,4 +134,5 @@ export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* 
     reactive: writer.reactive,
     reactiveMailbox: writer.reactiveMailbox,
   });
+  return { client, state: reader.state };
 });

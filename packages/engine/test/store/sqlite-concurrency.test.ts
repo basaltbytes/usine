@@ -1,10 +1,18 @@
+import { NodeServices } from "@effect/platform-node";
+import { SqliteClient } from "@effect/sql-sqlite-node";
+import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { assert, it } from "@effect/vitest";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Fiber, Option, Schema } from "effect";
+import { DateTime, Deferred, Effect, Fiber, FileSystem, Option, Schedule, Schema } from "effect";
 import { SqlClient } from "effect/sql";
+import { Reactivity } from "effect/reactivity";
+import { TestClock } from "effect/testing";
+import { Worker } from "node:worker_threads";
+import { spawnWorker } from "../../src/database/sqlite-reader/connection.ts";
+import { withReadWorker } from "../../src/database/sqlite-reader/reader.ts";
 import { createServer } from "node:http";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission, testAgent, withRunStore } from "./support.ts";
@@ -168,4 +176,114 @@ it.live(
         assert.deepStrictEqual(yield* sql`SELECT 42 AS value`, [{ value: 42 }]);
       }),
     ),
+);
+
+it.live(
+  "a worker killed mid-read fails that read, serves reads on the writer, and recovers after probing",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() });
+      const writer = yield* SqliteClient.make({ filename: `${directory}/runtime.sqlite` });
+      const workers: Worker[] = [];
+      const gate = new Int32Array(new SharedArrayBuffer(4));
+      const respawned = yield* Deferred.make<void>();
+      const reader = yield* withReadWorker(writer, (filename) => {
+        const worker =
+          workers.length === 0
+            ? spawnWorker(filename)
+            : new Worker(
+                `
+        const { workerData } = require("node:worker_threads");
+        Atomics.wait(workerData.gate, 0, 0);
+        import(workerData.module);
+      `,
+                {
+                  eval: true,
+                  execArgv: ["--experimental-strip-types"],
+                  workerData: {
+                    filename,
+                    gate,
+                    module: new URL("../../src/database/sqlite-reader/worker.ts", import.meta.url)
+                      .href,
+                  },
+                },
+              );
+        workers.push(worker);
+        if (workers.length === 2) Deferred.doneUnsafe(respawned, Effect.void);
+        return worker;
+      });
+      const first = workers[0];
+      assert(first !== undefined);
+      const sql = reader.client;
+      yield* sql`CREATE TABLE shared_value AS SELECT 42 AS value`;
+      yield* sql`CREATE TEMP TABLE writer_only AS SELECT 1 AS value`;
+      assert.strictEqual(yield* reader.state, "worker");
+      const slow = yield* sql`WITH RECURSIVE numbers(i) AS (
+      VALUES(1) UNION ALL SELECT i + 1 FROM numbers WHERE i < 32000000
+    ) SELECT sum(i) AS total FROM numbers`.pipe(Effect.result, Effect.forkScoped);
+      yield* Effect.sleep("20 millis");
+      assert(slow.pollUnsafe() === undefined);
+      yield* Effect.promise(() => first.terminate());
+      const interrupted = yield* Fiber.join(slow);
+      assert(interrupted._tag === "Failure");
+      assert.strictEqual(interrupted.failure.reason._tag, "ConnectionError");
+      assert.strictEqual(yield* reader.state, "fallback");
+      assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
+      assert.deepStrictEqual(yield* sql`SELECT value FROM writer_only`.values, [[1]]);
+      assert.deepStrictEqual(yield* sql`SELECT value FROM writer_only`.raw, [{ value: 1 }]);
+      assert.deepStrictEqual(
+        yield* sql`SELECT 9007199254740993 AS value`.pipe(
+          Effect.provideService(SqlClient.SafeIntegers, true),
+        ),
+        [{ value: 9007199254740993n }],
+      );
+      yield* Deferred.await(respawned);
+      assert.strictEqual(yield* reader.state, "respawning");
+      assert.deepStrictEqual(yield* sql`SELECT value FROM writer_only`, [{ value: 1 }]);
+      Atomics.store(gate, 0, 1);
+      Atomics.notify(gate, 0);
+      yield* reader.state.pipe(
+        Effect.repeat({
+          until: (state) => state === "worker",
+          schedule: Schedule.spaced("10 millis"),
+        }),
+        Effect.timeout("5 seconds"),
+      );
+      assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
+      const workerRead = yield* sql`SELECT value FROM writer_only`.pipe(Effect.flip);
+      assert.strictEqual(workerRead._tag, "SqlError");
+      assert.strictEqual(yield* reader.state, "worker");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
+);
+
+it.effect(
+  "failed worker starts back off to five minutes and stop retrying when the scope closes",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() });
+      const writer = yield* SqliteClient.make({ filename: `${directory}/runtime.sqlite` });
+      let starts = 0;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const reader = yield* withReadWorker(writer, () => {
+            starts++;
+            throw new Error("worker creation failed");
+          });
+          assert.strictEqual(yield* reader.state, "fallback");
+          assert.deepStrictEqual(yield* reader.client`SELECT 42 AS value`, [{ value: 42 }]);
+          for (const delay of [1000, 5000, 30000, 300000, 300000]) {
+            const before = starts;
+            yield* TestClock.adjust(delay - 1);
+            assert.strictEqual(starts, before);
+            yield* TestClock.adjust(1);
+            assert.strictEqual(starts, before + 1);
+          }
+        }),
+      );
+      const closedStarts = starts;
+      yield* TestClock.adjust("10 minutes");
+      assert.strictEqual(starts, closedStarts);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.provide(Reactivity.layer)),
 );

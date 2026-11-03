@@ -1,3 +1,4 @@
+import { SqliteReaderState } from "@usine/engine/local-sqlite";
 import { PermissionGrant } from "@usine/core/access";
 import { OperatorLogin } from "@usine/core/operator";
 import { Schema, Struct } from "effect";
@@ -42,9 +43,17 @@ export const AuthApi = HttpApiGroup.make("authentication")
     "GitHub sign-in, browser sessions, instance tokens, and membership.",
   )
   .add(
-    HttpApiEndpoint.get("health", "/api/health", { success: acknowledged })
+    HttpApiEndpoint.get("health", "/api/health", {
+      success: Schema.Struct({
+        ok: Schema.Literal(true),
+        sqliteReader: Schema.optionalKey(SqliteReaderState),
+      }),
+    })
       .annotate(OpenApi.Summary, "Check server health")
-      .annotate(OpenApi.Description, "Public liveness check; does not require instance setup."),
+      .annotate(
+        OpenApi.Description,
+        "Public liveness check with the SQLite reader state; does not require instance setup.",
+      ),
     HttpApiEndpoint.get("info", "/api/auth/info", {
       success: Schema.Struct({ github: Schema.Boolean }),
     })

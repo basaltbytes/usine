@@ -1,8 +1,9 @@
+import type { SqliteReaderState } from "@usine/engine/local-sqlite";
 import { MemberAccess } from "../../src/auth/access.ts";
 import { securityMiddleware } from "../../src/security.ts";
 import { TestClock } from "effect/testing";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
-import { Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { assert, it } from "vitest";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
@@ -383,4 +384,31 @@ it("defers operator enrollment when GitHub is unavailable and retries on the nex
       yield* seed.pipe(Effect.provideService(GitHubSignIn, services.github));
       assert.equal((yield* services.store.members)[0]?.id, alice.id);
     }).pipe(Effect.scoped),
+  ));
+
+it("public health reports SQLite degradation and recovery without failing liveness", async () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* authFixture();
+        const state = yield* Ref.make<SqliteReaderState>("worker");
+        const app = HttpRouter.toWebHandler(
+          authenticatedRoutes({
+            ...services,
+            sqliteReader: { state: Ref.get(state) },
+          }).routes,
+          { disableLogger: true },
+        );
+        yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+        for (const sqliteReader of ["worker", "fallback", "respawning", "worker"] as const) {
+          yield* Ref.set(state, sqliteReader);
+          const response = yield* Effect.promise(() => request(app, "/api/health"));
+          assert.equal(response.status, 200);
+          assert.deepEqual(yield* Effect.promise(() => response.json()), {
+            ok: true,
+            sqliteReader,
+          });
+        }
+      }),
+    ),
   ));

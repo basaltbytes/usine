@@ -23,6 +23,10 @@ Paths use `/api/...`. The schema’s `info.version` is `unversioned`; `GET /api/
 
 The reference covers the operator HTTP API, including sign-in, members, and tokens. Static UI assets and the separate signature-verified GitHub webhook listener are outside this contract.
 
+## SQLite reader health
+
+`GET /api/health` is public and returns `{ "ok": true, "sqliteReader": "worker" }` during normal operation. `sqliteReader` changes to `fallback` while the server uses the main connection and waits to retry worker startup, or `respawning` while a replacement starts and passes its probe. Reads use the main connection in both states. The endpoint returns HTTP 200 throughout recovery; long reads on the main connection can delay responses. The server logs worker failures and retries after 1 second, 5 seconds, 30 seconds, and then every 5 minutes. Recovery resets this delay.
+
 ## Polling summaries and detail
 
 `GET /api/overview` returns project and board summaries with item titles, states, labels, counts, and identities. Its runs use `RunSummaryView` and its attempts use `AttemptSummaryView`. `GET /api/desk` uses the same summary types for running, stalled, and recent runs.

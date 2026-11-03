@@ -28068,7 +28068,7 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "The request completed successfully.",
+            "description": "Success",
             "content": {
               "application/json": {
                 "schema": {
@@ -28079,13 +28079,20 @@
                       "enum": [
                         true
                       ]
+                    },
+                    "sqliteReader": {
+                      "type": "string",
+                      "enum": [
+                        "worker",
+                        "fallback",
+                        "respawning"
+                      ]
                     }
                   },
                   "required": [
                     "ok"
                   ],
-                  "additionalProperties": false,
-                  "description": "The request completed successfully."
+                  "additionalProperties": false
                 }
               }
             }
@@ -28117,7 +28124,7 @@
             }
           }
         },
-        "description": "Public liveness check; does not require instance setup.",
+        "description": "Public liveness check with the SQLite reader state; does not require instance setup.",
         "summary": "Check server health"
       }
     },
