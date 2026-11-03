@@ -2,8 +2,9 @@ import { CycleBudgetAsk, CycleBudgetAskId, CycleGeneration } from "@usine/core/c
 import { ItemKey } from "@usine/core/item";
 import { Event } from "@usine/core/event";
 import * as RunState from "@usine/core/run/state";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
+import { jsonExtract } from "../database/dialect.ts";
 import { RunDatabase } from "../database/database.ts";
 import {
   cycleAskClosures,
@@ -156,7 +157,7 @@ export class CycleBudgets extends Context.Service<
                         .select({ runId: runs.runId })
                         .from(runs)
                         .where(
-                          inArray(sql`json_extract(${runs.stateJson}, '$._tag')`, [
+                          inArray(jsonExtract(runs.stateJson, "$._tag"), [
                             ...RunState.UNSTARTED_STATE_TAGS,
                           ]),
                         ),

@@ -3,6 +3,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { and, asc, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 
 import { DateTime, Effect, Match, Option } from "effect";
+import { jsonExtract, maximumRowSequence } from "../database/dialect.ts";
 import type { RunDatabaseClient } from "../database/database.ts";
 import { attemptTranscripts } from "../database/schema.ts";
 
@@ -52,7 +53,7 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
         and(
           eq(attemptTranscripts.attemptId, attemptId),
           eq(attemptTranscripts.direction, "outbound"),
-          sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') IN ('WorkerUnresponsive', 'WorkerResponsive')`,
+          sql`${jsonExtract(attemptTranscripts.envelope, "$.payload._tag")} IN ('WorkerUnresponsive', 'WorkerResponsive')`,
         ),
       TranscriptSessionsQuery: ({ attemptId }) =>
         inArray(
@@ -64,43 +65,32 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
               and(
                 eq(attemptTranscripts.attemptId, attemptId),
                 sql`(
-            json_extract(${attemptTranscripts.envelope}, '$.payload._tag') IN ('InterventionApplied', 'InterventionRejected')
-            OR (json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'
-              AND json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') IN ('SessionStarted', 'SessionIdle', 'SessionResumed', 'SessionFinished'))
+            ${jsonExtract(attemptTranscripts.envelope, "$.payload._tag")} IN ('InterventionApplied', 'InterventionRejected')
+            OR (${jsonExtract(attemptTranscripts.envelope, "$.payload._tag")} = 'SessionEvent'
+              AND ${jsonExtract(attemptTranscripts.envelope, "$.payload.event._tag")} IN ('SessionStarted', 'SessionIdle', 'SessionResumed', 'SessionFinished'))
           )`,
               ),
             )
             .groupBy(
-              sql`coalesce(json_extract(${attemptTranscripts.envelope}, '$.payload.event.session.id'), json_extract(${attemptTranscripts.envelope}, '$.payload.intervention.target.sessionId'), '@parent')`,
-              sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'`,
-              sql`json_extract(${attemptTranscripts.envelope}, '$.payload.inputSequence')`,
+              sql`coalesce(${jsonExtract(attemptTranscripts.envelope, "$.payload.event.session.id")}, ${jsonExtract(attemptTranscripts.envelope, "$.payload.intervention.target.sessionId")}, '@parent')`,
+              sql`${jsonExtract(attemptTranscripts.envelope, "$.payload._tag")} = 'SessionEvent'`,
+              jsonExtract(attemptTranscripts.envelope, "$.payload.inputSequence"),
               // Keeps launch metadata next to the latest lifecycle state, even after completion.
-              sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'SessionStarted'`,
+              sql`${jsonExtract(attemptTranscripts.envelope, "$.payload.event._tag")} = 'SessionStarted'`,
             ),
         ),
       TranscriptUsageQuery: ({ attemptId }) => {
-        // SQLite returns a bare column from the row with the group's max().
-        const highest = database
-          .select({
-            sequence: attemptTranscripts.sequence,
-            tokens:
-              sql<number>`max(json_extract(${attemptTranscripts.envelope}, '$.payload.event.totalTokens'))`.as(
-                "tokens",
-              ),
-          })
-          .from(attemptTranscripts)
-          .where(
-            and(
-              eq(attemptTranscripts.attemptId, attemptId),
-              sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'`,
-              sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'SessionTokensUpdated'`,
-            ),
-          )
-          .groupBy(sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event.session.id')`)
-          .as("highest");
         return inArray(
           attemptTranscripts.sequence,
-          database.select({ sequence: highest.sequence }).from(highest),
+          maximumRowSequence({
+            table: sql`${attemptTranscripts}`,
+            sequence: attemptTranscripts.sequence,
+            value: jsonExtract(attemptTranscripts.envelope, "$.payload.event.totalTokens"),
+            by: jsonExtract(attemptTranscripts.envelope, "$.payload.event.session.id"),
+            where: sql`${attemptTranscripts.attemptId} = ${attemptId}
+            and ${jsonExtract(attemptTranscripts.envelope, "$.payload._tag")} = 'SessionEvent'
+            and ${jsonExtract(attemptTranscripts.envelope, "$.payload.event._tag")} = 'SessionTokensUpdated'`,
+          }),
         );
       },
       TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),

@@ -1,4 +1,5 @@
 import type { Schema } from "effect";
+import { jsonExtract, jsonValid } from "./dialect.ts";
 import { AttentionRevision } from "../attention/model.ts";
 import { ModelId } from "@usine/core/agent/brain";
 import { AgentName } from "@usine/core/agent";
@@ -45,7 +46,7 @@ export const events = snakeCase.table(
     payloadJson: text({ mode: "json" }).$type<unknown>().notNull(),
     receivedAt: text().notNull(),
   },
-  (table) => [check("usine_events_payload_json_valid", sql`json_valid(${table.payloadJson})`)],
+  (table) => [check("usine_events_payload_json_valid", jsonValid(table.payloadJson))],
 );
 
 export const triggerEvents = snakeCase.table(
@@ -90,7 +91,7 @@ export const triggerEvents = snakeCase.table(
       "usine_trigger_events_cycle_limit",
       sql`${table.cycleLimit} is null or ${table.cycleLimit} >= 1`,
     ),
-    check("usine_trigger_events_agent_json_valid", sql`json_valid(${table.agentJson})`),
+    check("usine_trigger_events_agent_json_valid", jsonValid(table.agentJson)),
     index("usine_trigger_events_item").on(table.loopName, table.itemKey),
     index("usine_trigger_events_item_history").on(table.itemKey),
     uniqueIndex("usine_trigger_event_reopening").on(table.reopensEventId, table.reopening),
@@ -133,7 +134,7 @@ export const itemCycleBudgets = snakeCase.table(
     check("usine_item_cycle_generation", sql`${table.generation} >= 0`),
     check(
       "usine_item_cycle_ask_json",
-      sql`${table.askJson} is null or json_valid(${table.askJson})`,
+      sql`${table.askJson} is null or ${jsonValid(table.askJson)}`,
     ),
   ],
 );
@@ -188,7 +189,7 @@ export const cycleAskClosures = snakeCase.table(
   },
   (table) => [
     check("usine_cycle_ask_closures_reason", sql`${table.reason} in ('ItemClosed')`),
-    check("usine_cycle_ask_closures_ask_json", sql`json_valid(${table.askJson})`),
+    check("usine_cycle_ask_closures_ask_json", jsonValid(table.askJson)),
   ],
 );
 
@@ -222,7 +223,7 @@ export const runs = snakeCase.table(
   },
   (table) => [
     index("usine_runs_state_opened").on(
-      sql`json_extract(${table.stateJson}, '$._tag')`,
+      jsonExtract(table.stateJson, "$._tag"),
       table.openedAt,
       table.runId,
     ),
@@ -233,10 +234,10 @@ export const runs = snakeCase.table(
       table.runId,
     ),
     index("usine_runs_fix_run").on(
-      sql`cast(json_extract(${table.stateJson}, '$.fixRunId') as text)`,
+      sql`cast(${jsonExtract(table.stateJson, "$.fixRunId")} as text)`,
     ),
-    check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`),
-    check("usine_runs_agent_json_valid", sql`json_valid(${table.agentJson})`),
+    check("usine_runs_state_json_valid", jsonValid(table.stateJson)),
+    check("usine_runs_agent_json_valid", jsonValid(table.agentJson)),
   ],
 );
 
@@ -254,7 +255,7 @@ export const steps = snakeCase.table(
     primaryKey({ columns: [table.runId, table.stepName] }),
     check(
       "usine_steps_result_json_valid",
-      sql`${table.result} is null or json_valid(${table.result})`,
+      sql`${table.result} is null or ${jsonValid(table.result)}`,
     ),
   ],
 );
@@ -294,14 +295,14 @@ export const attempts = snakeCase.table(
   },
   (table) => [
     check("usine_attempts_number", sql`${table.attemptNumber} >= 1`),
-    check("usine_attempts_brain_json_valid", sql`json_valid(${table.brainJson})`),
+    check("usine_attempts_brain_json_valid", jsonValid(table.brainJson)),
     check(
       "usine_attempts_outcome_json_valid",
-      sql`${table.outcomeJson} is null or json_valid(${table.outcomeJson})`,
+      sql`${table.outcomeJson} is null or ${jsonValid(table.outcomeJson)}`,
     ),
     check(
       "usine_attempts_salvage_json_valid",
-      sql`${table.salvageJson} is null or json_valid(${table.salvageJson})`,
+      sql`${table.salvageJson} is null or ${jsonValid(table.salvageJson)}`,
     ),
     index("usine_attempts_run_number").on(table.runId, table.attemptNumber),
     uniqueIndex("usine_attempt_number").on(table.runId, table.stepName, table.attemptNumber),
@@ -334,7 +335,7 @@ export const attemptTranscripts = snakeCase.table(
       sql`${table.direction} in ('inbound', 'outbound')`,
     ),
     check("usine_attempt_transcripts_sequence", sql`${table.channelSequence} >= 1`),
-    check("usine_attempt_transcripts_envelope_json_valid", sql`json_valid(${table.envelope})`),
+    check("usine_attempt_transcripts_envelope_json_valid", jsonValid(table.envelope)),
     uniqueIndex("usine_attempt_transcript_envelope").on(
       table.attemptId,
       table.direction,
@@ -342,11 +343,11 @@ export const attemptTranscripts = snakeCase.table(
     ),
     index("usine_attempt_transcript_tail").on(table.attemptId, table.sequence),
     index("usine_attempt_transcript_pool_limits").on(
-      sql`json_extract(${table.envelope}, '$.payload.event.pool')`,
+      jsonExtract(table.envelope, "$.payload.event.pool"),
       table.sequence,
     ).where(sql`${table.direction} = 'outbound'
-        and json_extract(${table.envelope}, '$.payload._tag') = 'SessionEvent'
-        and json_extract(${table.envelope}, '$.payload.event._tag') = 'PoolRateLimitsUpdated'`),
+        and ${jsonExtract(table.envelope, "$.payload._tag")} = 'SessionEvent'
+        and ${jsonExtract(table.envelope, "$.payload.event._tag")} = 'PoolRateLimitsUpdated'`),
   ],
 );
 
@@ -414,7 +415,7 @@ export const cursors = snakeCase.table(
     cursorKey: text().primaryKey(),
     valueJson: text({ mode: "json" }).$type<unknown>().notNull(),
   },
-  (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
+  (table) => [check("usine_cursors_value_json_valid", jsonValid(table.valueJson))],
 );
 
 /** The latest payload of each Item, and the time a poll found it missing on GitHub. */
@@ -431,7 +432,7 @@ export const itemProjections = snakeCase.table(
   },
   (table) => [
     check("usine_item_projections_number", sql`${table.itemNumber} >= 1`),
-    check("usine_item_projections_payload_json_valid", sql`json_valid(${table.payloadJson})`),
+    check("usine_item_projections_payload_json_valid", jsonValid(table.payloadJson)),
     uniqueIndex("usine_item_projection_number").on(table.repository, table.itemNumber),
   ],
 );
@@ -444,10 +445,7 @@ export const repositoryLabelProjections = snakeCase.table(
     labelsJson: text({ mode: "json" }).$type<unknown>().notNull(),
   },
   (table) => [
-    check(
-      "usine_repository_label_projections_labels_json_valid",
-      sql`json_valid(${table.labelsJson})`,
-    ),
+    check("usine_repository_label_projections_labels_json_valid", jsonValid(table.labelsJson)),
   ],
 );
 
@@ -465,8 +463,8 @@ export const boardMoves = snakeCase.table(
     removedJson: text({ mode: "json" }).$type<unknown>().notNull(),
   },
   (table) => [
-    check("usine_board_moves_added_json_valid", sql`json_valid(${table.addedJson})`),
-    check("usine_board_moves_removed_json_valid", sql`json_valid(${table.removedJson})`),
+    check("usine_board_moves_added_json_valid", jsonValid(table.addedJson)),
+    check("usine_board_moves_removed_json_valid", jsonValid(table.removedJson)),
     index("usine_board_moves_item").on(table.itemKey, table.movedAt),
   ],
 );
