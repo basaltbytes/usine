@@ -7,4 +7,4 @@ Run standalone SQLite reads on a read-only worker connection so long queries per
 
 Recover from read worker failures by routing later reads to the main connection, restarting the worker with bounded backoff, and reporting its state through `/api/health`.
 
-Read run lists and their attempts in one transaction to preserve consistent lifecycle states during concurrent completion.
+Read run summaries, their attempts, and board history aggregates in one transaction per read to preserve consistent lifecycle states during concurrent completion and retries.

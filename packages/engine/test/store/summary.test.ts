@@ -25,11 +25,17 @@ import { RunReader } from "../../src/run-reader/run-reader.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission } from "./support.ts";
 
-for (const [phase, selection] of [
-  ["closed runs", /"closed_at" is not null/u],
-  ["attempts", /from "usine_attempts"/u],
+for (const [method, phase, selection, transition] of [
+  ["list", "closed runs", /"closed_at" is not null/u, "completion"],
+  ["list", "attempts", /from "usine_attempts"/u, "completion"],
+  ["summary", "attempts", /from "usine_attempts"/u, "completion"],
+  ["forItems", "attempts", /from "usine_attempts"/u, "completion"],
+  ["board", "loop history", /"board_loop_history"/u, "completion"],
+  ["board", "current runs", /from "usine_attempts"/u, "completion"],
+  ["closed", "attempts", /from "usine_attempts"/u, "retry"],
+  ["closedSince", "attempts", /from "usine_attempts"/u, "retry"],
 ] as const) {
-  it.live(`run lists stay coherent when completion commits before reading ${phase}`, () =>
+  it.live(`${method} stays coherent when ${transition} commits before reading ${phase}`, () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
@@ -37,26 +43,44 @@ for (const [phase, selection] of [
       );
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
-        const runId = RunId.make("completing-during-list");
+        const runId = RunId.make("changing-during-summary");
         yield* store.recordAndClaim(lifecycleSubmission, runId);
         const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert(started._tag === "AttemptStarted");
+        if (transition === "retry") {
+          yield* store.finishAttempt(
+            started.execution.attempt,
+            Result.fail(new AgentFailure({ message: "Retry during summary read" })),
+          );
+        }
         // A read-only transaction lets the other connection commit between SELECTs.
         const connection = yield* SqliteClient.make({
           filename: `${directory}/.usine/runtime.sqlite`,
           readonly: true,
         });
         const routed = yield* withReadWorker(connection);
-        let completed = false;
+        let changed = false;
         const logger = Layer.succeed(EffectLogger)({
           logQuery: (query) =>
             Effect.gen(function* () {
-              if (completed || !selection.test(query)) return;
-              yield* store.finishAttempt(
-                started.execution.attempt,
-                Result.succeed(new StepResult({ message: "Completed during listing", facts: [] })),
-              );
-              completed = true;
+              if (changed || !selection.test(query)) return;
+              if (transition === "completion") {
+                yield* store.finishAttempt(
+                  started.execution.attempt,
+                  Result.succeed(
+                    new StepResult({ message: "Completed during summary read", facts: [] }),
+                  ),
+                );
+              } else {
+                assert(yield* store.retry(runId));
+                const retried = yield* store.beginAttempt(
+                  runId,
+                  WorkerName.make("local"),
+                  Option.none(),
+                );
+                assert(retried._tag === "AttemptStarted");
+              }
+              changed = true;
             }).pipe(Effect.orDie),
         });
         const database = yield* SQLiteDrizzle.make().pipe(
@@ -66,27 +90,70 @@ for (const [phase, selection] of [
         );
         yield* Effect.gen(function* () {
           const reader = yield* RunReader;
-          const listed = yield* reader.list({ closedLimit: 10 });
-          assert(completed, "completion must commit between list queries");
+          const read = () => {
+            switch (method) {
+              case "list":
+                return reader.list({ closedLimit: 10 });
+              case "summary":
+                return reader.summary(runId).pipe(Effect.map((summary) => [summary]));
+              case "forItems":
+                return reader.forItems([lifecycleSubmission.itemKey]);
+              case "board":
+                return reader.board([lifecycleSubmission.itemKey], []).pipe(
+                  Effect.map((history) => {
+                    const item = history.items[0];
+                    const run = history.runs[0];
+                    assert(item !== undefined && run !== undefined);
+                    assert.strictEqual(item.loops[0]?.state._tag, run.run.state._tag);
+                    assert.strictEqual(item.attemptCount, run.attempts.length);
+                    assert.strictEqual(
+                      item.runningSince.length,
+                      run.attempts.filter(({ endedAt }) => Option.isNone(endedAt)).length,
+                    );
+                    assert.strictEqual(
+                      item.usageSources[0]?.attempts[0]?.ended,
+                      Option.isSome(run.attempts[0]?.outcome ?? Option.none()),
+                    );
+                    return history.runs;
+                  }),
+                );
+              case "closed":
+                return reader.closed({ limit: 10 });
+              case "closedSince":
+                return reader.closedSince(Option.none());
+            }
+          };
+          const listed = yield* read();
+          assert(changed, "lifecycle change must commit between summary queries");
           assert.strictEqual(listed.length, 1);
           const summary = listed[0];
           assert(summary !== undefined);
           assert.strictEqual(summary.run.id, runId);
-          assert.strictEqual(summary.run.state._tag, "Running");
+          assert.strictEqual(
+            summary.run.state._tag,
+            transition === "completion" ? "Running" : "Failed",
+          );
           assert.strictEqual(summary.attempts.length, 1);
           const attempt = summary.attempts[0];
           assert(attempt !== undefined);
-          assert(Option.isNone(attempt.outcome));
-          assert(Option.isNone(attempt.endedAt));
-          const after = yield* reader.list({ closedLimit: 10 });
+          assert.strictEqual(Option.isSome(attempt.outcome), transition === "retry");
+          assert.strictEqual(Option.isSome(attempt.endedAt), transition === "retry");
+          const after = yield* reader.forItems([lifecycleSubmission.itemKey]);
           assert.strictEqual(after.length, 1);
           const finished = after[0];
           assert(finished !== undefined);
           assert.strictEqual(finished.run.id, runId);
-          assert.strictEqual(finished.run.state._tag, "Succeeded");
+          assert.strictEqual(
+            finished.run.state._tag,
+            transition === "completion" ? "Succeeded" : "Running",
+          );
+          assert.strictEqual(finished.attempts.length, transition === "completion" ? 1 : 2);
           const finishedAttempt = finished.attempts[0];
           assert(finishedAttempt !== undefined);
-          assert.strictEqual(Option.getOrNull(finishedAttempt.outcome)?._tag, "Succeeded");
+          assert.strictEqual(
+            Option.getOrNull(finishedAttempt.outcome)?._tag,
+            transition === "completion" ? "Succeeded" : "Failed",
+          );
           assert(Option.isSome(finishedAttempt.endedAt));
         }).pipe(Effect.provide(RunReader.layer), Effect.provide(RunDatabase.layer(database)));
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));

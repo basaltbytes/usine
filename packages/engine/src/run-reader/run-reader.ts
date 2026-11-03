@@ -71,9 +71,14 @@ const makeRunReader = Effect.gen(function* () {
     });
     return evidence;
   });
-  const summary = Effect.fn("RunReader.summary")((runId: RunId) =>
-    queries.runSummary(runId).pipe(persistence("read run summary")),
-  );
+  const summary = Effect.fn("RunReader.summary")(function* (runId: RunId) {
+    yield* Effect.annotateCurrentSpan({ runId });
+    const summary = yield* database
+      .transaction((transaction) => queriesFor(transaction).runSummary(runId))
+      .pipe(persistence("read run summary"));
+    yield* Effect.logDebug("Read run summary", { runId, state: summary.run.state._tag });
+    return summary;
+  });
   const list = Effect.fn("RunReader.list")(function* (options: { readonly closedLimit: number }) {
     yield* Effect.annotateCurrentSpan({ closedLimit: options.closedLimit });
     const summaries = yield* database
@@ -93,8 +98,10 @@ const makeRunReader = Effect.gen(function* () {
       limit: options.limit,
       repositories: options.repositories ?? "all",
     });
-    const summaries = yield* queries
-      .closedRunSummaries(options.limit, options.repositories)
+    const summaries = yield* database
+      .transaction((transaction) =>
+        queriesFor(transaction).closedRunSummaries(options.limit, options.repositories),
+      )
       .pipe(persistence("list closed runs"));
     yield* Effect.logDebug("Read closed runs", {
       limit: options.limit,
@@ -103,21 +110,38 @@ const makeRunReader = Effect.gen(function* () {
     });
     return summaries;
   });
-  const closedSince = Effect.fn("RunReader.closedSince")((since: Option.Option<DateTime.Utc>) =>
-    queries.closedRunSummariesSince(since).pipe(persistence("list runs closed since a time")),
-  );
+  const closedSince = Effect.fn("RunReader.closedSince")(function* (
+    since: Option.Option<DateTime.Utc>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ since });
+    const summaries = yield* database
+      .transaction((transaction) => queriesFor(transaction).closedRunSummariesSince(since))
+      .pipe(persistence("list runs closed since a time"));
+    yield* Effect.logDebug("Read runs closed since a time", { since, runs: summaries.length });
+    return summaries;
+  });
   const revision = Effect.fn("RunReader.revision")(() =>
     queries.revision().pipe(persistence("read projection revision")),
   );
-  const forItems = Effect.fn("RunReader.forItems")((itemKeys: ReadonlyArray<ItemKey>) =>
-    queries.itemRunSummaries(itemKeys).pipe(persistence("read item run histories")),
-  );
-  const board = Effect.fn("RunReader.board")(
-    (itemKeys: ReadonlyArray<ItemKey>, attentionRunIds: ReadonlyArray<RunId>) =>
-      queries
-        .boardRunSummaries(itemKeys, attentionRunIds)
-        .pipe(persistence("read current board runs and history totals")),
-  );
+  const forItems = Effect.fn("RunReader.forItems")(function* (itemKeys: ReadonlyArray<ItemKey>) {
+    yield* Effect.annotateCurrentSpan({ itemKeys });
+    const summaries = yield* database
+      .transaction((transaction) => queriesFor(transaction).itemRunSummaries(itemKeys))
+      .pipe(persistence("read item run histories"));
+    yield* Effect.logDebug("Read item run histories", { itemKeys, runs: summaries.length });
+    return summaries;
+  });
+  const board = Effect.fn("RunReader.board")(function* (
+    itemKeys: ReadonlyArray<ItemKey>,
+    attentionRunIds: ReadonlyArray<RunId>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ itemKeys, attentionRunIds });
+    return yield* database
+      .transaction((transaction) =>
+        queriesFor(transaction).boardRunSummaries(itemKeys, attentionRunIds),
+      )
+      .pipe(persistence("read current board runs and history totals"));
+  });
   const events = Effect.fn("RunReader.events")((runIds: ReadonlyArray<RunId>) =>
     queries.runEvents(runIds).pipe(persistence("read the events of runs")),
   );
@@ -170,7 +194,10 @@ const makeRunReader = Effect.gen(function* () {
   } as const;
 });
 
-/** The service that reads saved Run state and transcripts without starting or recovering execution. */
+/**
+ * Reads saved run state and transcripts without starting or recovering execution.
+ * Each summary read returns run state, attempts, and board aggregates from one transaction.
+ */
 export class RunReader extends Context.Service<
   RunReader,
   {

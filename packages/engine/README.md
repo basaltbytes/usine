@@ -14,7 +14,7 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 - `RepositoryLabelProjectionReader` and `RepositoryLabelProjectionWriter` store each repo's full label catalog from polling, so repos without items still get proposed lanes. Writes change the revision only if the label set changes.
 - `BoardMoves` (`/board-moves`) stores each board move: repo, item, send time, source and destination lanes, and labels added and removed. The orchestrator records a move before sending its labels, so the factory app's label change for the operator isn't taken for an agent's. `onItem(itemKey, since)` returns an item's moves from `since`, oldest first. Moves don't change the revision.
 
-`RunReader`:
+`RunReader` reads each summary, including its run state, attempts, and board aggregates, from one transaction. Concurrent completion and retries preserve a consistent database snapshot.
 
 - `list()`: lightweight run summaries, newest first, without event payloads or a snapshot read per run. Open runs, recent closed runs, and their attempts use one transaction, so concurrent completions preserve a consistent list with one entry per run.
 - `closed({ limit })`: the runs that closed last, by their last attempt's end.
