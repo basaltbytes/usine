@@ -1036,7 +1036,10 @@ const makeRunStore = Effect.gen(function* () {
     revoke,
     revokeQueued,
     runAgain,
-    snapshot: (runId: RunId) => queries.snapshot(runId).pipe(persistence("read run")),
+    snapshot: (runId: RunId) =>
+      database
+        .transaction((transaction) => queriesFor(transaction).snapshot(runId))
+        .pipe(persistence("read run")),
     transcript,
   } as const;
 });

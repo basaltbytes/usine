@@ -1,0 +1,70 @@
+{
+  "node": "v22.23.4",
+  "bytes": 801275904,
+  "query": "SELECT sum(json_extract(envelope, '$.payload.event.totalTokens')) AS total FROM usine_attempt_transcripts",
+  "rows": {
+    "count": 200001
+  },
+  "report": [
+    {
+      "name": "main node:sqlite (before)",
+      "queryMillis": [
+        333.240083,
+        341.89482599999997,
+        340.6187179999997
+      ],
+      "appendAndHealthMillis": [
+        365.280179,
+        364.24704399999996,
+        362.61025100000006
+      ],
+      "p99Millis": 346.292223,
+      "maxMillis": 346.292223
+    },
+    {
+      "name": "read worker (after)",
+      "queryMillis": [
+        303.9418029999997,
+        313.406473,
+        325.87016600000015
+      ],
+      "appendAndHealthMillis": [
+        23.030191999999715,
+        22.606195000000298,
+        22.462928999999804
+      ],
+      "p99Millis": 10.616831,
+      "maxMillis": 11.157503
+    },
+    {
+      "name": "Turso 0.8.3 promise API",
+      "queryMillis": [
+        547.6966259999999,
+        539.3756739999999,
+        572.7673709999999
+      ],
+      "appendAndHealthMillis": [
+        549.4097789999996,
+        540.9912239999994,
+        575.9420049999999
+      ],
+      "p99Millis": 583.008255,
+      "maxMillis": 583.008255
+    },
+    {
+      "name": "sqlite3 5.1.7 async API",
+      "queryMillis": [
+        322.74470499999916,
+        319.0055339999999,
+        319.00794100000076
+      ],
+      "appendAndHealthMillis": [
+        21.858507999999347,
+        21.915375999999924,
+        21.732944000000316
+      ],
+      "p99Millis": 10.797055,
+      "maxMillis": 11.182079
+    }
+  ]
+}

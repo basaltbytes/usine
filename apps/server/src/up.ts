@@ -77,6 +77,7 @@ import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 import { warnIfSystemSleeps } from "./system-sleep.ts";
 import { tracingLayer } from "./tracing.ts";
+import { monitorEventLoop } from "./event-loop.ts";
 
 // Untraced: a span around a server that never returns would parent every request span.
 const serve = Effect.fnUntraced(function* (options: {
@@ -319,6 +320,7 @@ export const up = (command: UpCommand) =>
   Effect.scoped(
     Effect.gen(function* () {
       const { port, origin } = command;
+      yield* monitorEventLoop;
       const directory = InstanceDirectory.make(process.cwd());
       yield* refuseVolatileInstance(directory, command.allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),

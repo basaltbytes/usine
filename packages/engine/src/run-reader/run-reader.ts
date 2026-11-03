@@ -28,7 +28,9 @@ const makeRunReader = Effect.gen(function* () {
   const queries = queriesFor(database);
 
   const inspect = Effect.fn("RunReader.inspect")((runId: RunId) =>
-    queries.snapshot(runId).pipe(persistence("read run")),
+    database
+      .transaction((transaction) => queriesFor(transaction).snapshot(runId))
+      .pipe(persistence("read run")),
   );
   const runForEvent = Effect.fn("RunReader.runForEvent")(function* (dedupKey: DedupKey) {
     yield* Effect.annotateCurrentSpan({ dedupKey });

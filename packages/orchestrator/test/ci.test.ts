@@ -612,6 +612,13 @@ it.live.each([
           yield* Ref.set(setup.mergeable, "UNKNOWN");
         }
         yield* Deferred.succeed(completion, new StepResult({ message: "Fixed", facts: [] }));
+        yield* Ref.get(setup.tasks).pipe(
+          Effect.repeat({
+            until: (all) => all.length === 3,
+            schedule: Schedule.spaced("10 millis"),
+          }),
+          Effect.timeout("5 seconds"),
+        );
         yield* engine.drain();
         yield* Ref.set(setup.mergeable, "CONFLICTING");
         if (outcome === "admitted and pushed") {

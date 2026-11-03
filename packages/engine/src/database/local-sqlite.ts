@@ -35,6 +35,7 @@ import { RunReader } from "../run-reader/run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
 import type { TriggerCondition } from "../trigger-condition.ts";
 import { RunDatabase } from "./database.ts";
+import { withReadWorker } from "./sqlite-reader/reader.ts";
 
 const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
@@ -84,7 +85,12 @@ const openSqliteLayer = <E>(
       yield* Effect.logDebug("SQLite statement cache span isolation installed", {
         filename: config.filename,
       });
-      return context;
+      if (config.readonly === true) return context;
+      const routed = yield* withReadWorker(client);
+      return context.pipe(
+        Context.add(SqlClient.SqlClient, routed),
+        Context.add(SqliteClient.SqliteClient, routed),
+      );
     }).pipe(Effect.mapError(onError)),
   );
 
@@ -106,7 +112,7 @@ const sqliteClientLayer = (instanceDirectory: InstanceDirectory) =>
 /**
  * Returns a Node SQLite layer at `<instanceDirectory>/.usine/runtime.sqlite`, creating the
  * directory and applying engine migrations. Provides `RunDatabase` and its matching `SqlClient`;
- * reuse the layer to share one connection (ADR 0020).
+ * reuse the layer to share the writer and read worker (ADR 0020).
  */
 export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
   const sqlClient = sqliteClientLayer(instanceDirectory);

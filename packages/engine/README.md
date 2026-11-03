@@ -190,11 +190,15 @@ The Drizzle schema defines usine's tables. After changing it, generate and revie
 pnpm --filter @usine/engine db:generate --name <migration_name>
 ```
 
-## Shared runtime connection
+## Shared runtime database
 
-`localSqliteLayer(directory)` provides `RunDatabase` and the matching `SqlClient`. The `layer` and `observationLayer` functions in `/local-sqlite` accept that database layer as their second argument. Applications can build the connection once and pass its context to the engine and the configuration store; each package maintains its own migration ledger in the runtime file.
+`localSqliteLayer(directory)` provides `RunDatabase` and the matching `SqlClient`. The `layer` and `observationLayer` functions in `/local-sqlite` accept that database layer as their second argument. Applications can build the database layer once and pass its context to the engine and the configuration store; each package maintains its own migration ledger in the runtime file.
 
-Cached SQLite statements use external parent span references containing trace IDs and sampling state. This lets completed request spans and response bodies be collected while statements remain cached. SQL spans retain their request trace relationships and query attributes.
+Standalone `SELECT` statements, including `WITH ... SELECT`, run on a read-only worker connection. WAL lets the main connection append transcripts and commit other writes while that read runs. Statements in transactions and operations on reserved connections use the main connection, including reads of uncommitted data and temporary tables. Run snapshots read the run and its attempts in one transaction to keep lifecycle state consistent. Use a transaction or reserved connection for connection-local state, such as temporary tables, `changes()`, and `last_insert_rowid()`. Pragmas and other statement kinds use the main connection.
+
+The worker has a bounded prepared-statement cache. Its errors use the existing `SqlError` channel; a worker exit fails pending and subsequent reads. Closing the database layer terminates the worker. Large result transfer and application-side decoding still consume main-thread time. [Event-loop measurements](../../docs/performance/sqlite-event-loop/report.md) compare this adapter with synchronous and asynchronous drivers.
+
+Cached SQLite statements on the main connection use external parent span references containing trace IDs and sampling state. This lets completed request spans and response bodies be collected while statements remain cached. SQL spans retain their request trace relationships and query attributes.
 
 ## Attention acknowledgements
 
