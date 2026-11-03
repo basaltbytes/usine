@@ -45,18 +45,6 @@ export const projectMigrationDialect = (client: SqlClient) => ({
   unqualified: (value: Fragment) => client`instr(${value}, '/') = 0`,
 });
 
-/** SQLite selects the bare sequence from the row that supplies the group's maximum. */
-export const maximumRowSequence = (options: {
-  readonly table: SQLWrapper;
-  readonly sequence: SQLWrapper;
-  readonly value: SQLWrapper;
-  readonly by: SQLWrapper;
-  readonly where: SQLWrapper;
-}) => sql`(select highest.sequence from (
-  select ${options.sequence} as sequence, max(${options.value}) as tokens
-  from ${options.table} where ${options.where} group by ${options.by}
-) as highest)`;
-
 export const foreignKeys = {
   disable: sql`PRAGMA foreign_keys = OFF`,
   enable: sql`PRAGMA foreign_keys = ON`,

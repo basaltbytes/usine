@@ -8,6 +8,19 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 
 import { Agent } from "@usine/core/agent";
+import {
+  AgentSessionId,
+  ParentSession,
+  ChildSession,
+  SessionTokensUpdated,
+  TokenCount,
+  UsdAmount,
+  PoolRateLimitsUpdated,
+  RateLimitsSnapshot,
+  PoolLogin,
+} from "@usine/core/agent/session";
+import { AttemptId } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { BrainSpec } from "@usine/core/agent/brain";
 
 import { RunId } from "@usine/core/run";
@@ -589,5 +602,168 @@ describe("Run close time migration", () => {
         );
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("Transcript read model migration", () => {
+  it.live(
+    "backfills the same usage and pool snapshots as transcript grouping and preserves envelopes",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-transcript-upgrade-",
+          }),
+        );
+        const historical = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-transcript-migrations-",
+        });
+        const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
+        for (const name of yield* fs.readDirectory(source)) {
+          if (name >= "20261103105216_transcript_read_models") continue;
+          yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
+        }
+        yield* fs.makeDirectory(`${directory}/.usine`);
+        const previous = Layer.effect(
+          RunDatabase,
+          Effect.gen(function* () {
+            const database = yield* SQLiteDrizzle.makeWithDefaults();
+            yield* migrate(database, {
+              migrationsFolder: historical,
+              migrationsTable: "usine_migrations",
+            });
+            return database;
+          }),
+        ).pipe(
+          Layer.provideMerge(
+            SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` }),
+          ),
+        );
+        const expected = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const runId = RunId.make("transcript-upgrade");
+            yield* seedPendingRun(runId);
+            const at = DateTime.makeUnsafe("2026-11-01T00:00:00.000Z");
+            const brain = JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain));
+            for (const attempt of [1, 2]) {
+              const attemptId = AttemptId.make(`transcript-upgrade-${attempt}`);
+              yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, task, agent, started_at, outcome_json)
+            VALUES (${attemptId}, ${runId}, ${lifecycleSubmission.step}, 'local', ${attempt}, ${brain}, ${lifecycleSubmission.task}, ${testAgent.name}, '2026-11-01T00:00:00.000Z', '{"_tag":"Succeeded"}')`;
+              const parent = new ParentSession({
+                id: AgentSessionId.make("shared-parent"),
+                agent: testAgent.name,
+                brain: testAgent.brain,
+              });
+              const child = new ChildSession({
+                id: AgentSessionId.make("shared-child"),
+                parentId: parent.id,
+                agent: testAgent.name,
+                brain: testAgent.brain,
+              });
+              const events = [
+                new SessionTokensUpdated({
+                  session: parent,
+                  totalTokens: TokenCount.make(100 * attempt),
+                }),
+                new SessionTokensUpdated({
+                  session: child,
+                  totalTokens: TokenCount.make(40 * attempt),
+                }),
+                new SessionTokensUpdated({
+                  session: parent,
+                  totalTokens: TokenCount.make(250 * attempt),
+                }),
+                new SessionTokensUpdated({
+                  session: child,
+                  totalTokens: TokenCount.make(90 * attempt),
+                  costUsd: Option.some(UsdAmount.make(1)),
+                }),
+                new SessionTokensUpdated({
+                  session: parent,
+                  totalTokens: TokenCount.make(200 * attempt),
+                }),
+                new SessionTokensUpdated({
+                  session: child,
+                  totalTokens: TokenCount.make(90 * attempt),
+                  costUsd: Option.some(UsdAmount.make(2)),
+                }),
+                ...(["chatgptPlan", "claudePlan"] as const).map(
+                  (pool) =>
+                    new PoolRateLimitsUpdated({
+                      session: parent,
+                      pool,
+                      login: Option.some(PoolLogin.make(`login-${attempt}`)),
+                      rateLimits: new RateLimitsSnapshot({
+                        limitId: Option.none(),
+                        limitName: Option.none(),
+                        primary: Option.none(),
+                        secondary: Option.none(),
+                      }),
+                    }),
+                ),
+              ];
+              for (const [i, event] of events.entries()) {
+                const envelope = JSON.stringify(
+                  Schema.encodeSync(AttemptChannel.Envelope)(
+                    new AttemptChannel.OutboundEnvelope({
+                      version: AttemptChannel.PROTOCOL_VERSION,
+                      attemptId,
+                      sequence: AttemptChannel.Sequence.make(i + 1),
+                      sentAt: at,
+                      payload: new AttemptChannel.SessionEvent({ event }),
+                    }),
+                  ),
+                );
+                yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at)
+              VALUES (${attemptId}, 'outbound', ${i + 1}, ${envelope}, '2026-11-01T00:00:00.000Z')`;
+                yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at)
+              VALUES (${attemptId}, 'outbound', ${i + 1}, ${envelope}, '2026-11-02T00:00:00.000Z') ON CONFLICT DO NOTHING`;
+              }
+            }
+            return {
+              all: yield* sql`SELECT * FROM usine_attempt_transcripts ORDER BY sequence`,
+              usage:
+                yield* sql`SELECT attempt_id, json_extract(envelope, '$.payload.event.session.id') AS session_id,
+            max(json_extract(envelope, '$.payload.event.totalTokens')) AS total_tokens, sequence, received_at, envelope
+            FROM usine_attempt_transcripts WHERE direction = 'outbound'
+            AND json_extract(envelope, '$.payload._tag') = 'SessionEvent'
+            AND json_extract(envelope, '$.payload.event._tag') = 'SessionTokensUpdated'
+            GROUP BY attempt_id, json_extract(envelope, '$.payload.event.session.id') ORDER BY attempt_id, session_id`,
+              pools:
+                yield* sql`SELECT json_extract(envelope, '$.payload.event.pool') AS pool, max(sequence) AS sequence, attempt_id, received_at, envelope
+            FROM usine_attempt_transcripts WHERE direction = 'outbound'
+            AND json_extract(envelope, '$.payload._tag') = 'SessionEvent'
+            AND json_extract(envelope, '$.payload.event._tag') = 'PoolRateLimitsUpdated'
+            GROUP BY json_extract(envelope, '$.payload.event.pool') ORDER BY pool`,
+            };
+          }).pipe(Effect.provide(previous)),
+        );
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          assert.deepStrictEqual(
+            yield* sql`SELECT * FROM usine_session_usage ORDER BY attempt_id, session_id`,
+            expected.usage,
+          );
+          assert.deepStrictEqual(
+            yield* sql`SELECT * FROM usine_pool_rate_limits ORDER BY pool`,
+            expected.pools,
+          );
+          assert.deepStrictEqual(
+            yield* sql`SELECT sequence, attempt_id, direction, channel_sequence, envelope, received_at FROM usine_attempt_transcripts ORDER BY sequence`,
+            expected.all,
+          );
+          const columns = yield* sql`PRAGMA table_xinfo(usine_attempt_transcripts)`;
+          assert.deepStrictEqual(
+            columns.filter(({ hidden }) => hidden === 2).map(({ name }) => name),
+            ["payload_tag", "event_tag", "session_id"],
+          );
+          assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+          assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
+        }).pipe(Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
