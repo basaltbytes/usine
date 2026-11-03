@@ -6,8 +6,8 @@ Research date: 2026-11-03. Versions: `@effect/tsgo` 0.64.1, `typescript` 7.0.2, 
 
 - Replace `@effect/language-service` with `@effect/tsgo` (closes #913). Run the Effect diagnostics through the Effect-patched `tsc` in each package's `check` task, so CI, turbo caching, and the editor read one configuration: the plugin block in `tooling/tsconfig/base.json`.
 - Configure every diagnostic at its target severity. 134 of the 140 diagnostics that apply to Effect v4 are at `error`; 6 are `off` for the reasons in [Target configuration](#target-configuration). Two path overrides turn off rules whose premise doesn't hold in tests and in the React app.
-- Land the configuration without blocking CI through a per-package baseline (`effect-baseline.json`) that records a count per file and rule and can only shrink. `pnpm check` fails on any new violation and on any baseline entry that is higher than the current count.
-- The Effect Oxlint rules are the same 146 diagnostics, built from the same Go code, exposed through a patched Oxlint binding. Don't gate on both: every violation would be reported twice. Use the Oxlint front end as the codemod for the 65 rules with safe autofixes (`pnpm effect:fix`), which clears about 60% of today's violations.
+- Land the configuration without blocking CI through a per-package baseline (`effect-baseline.json`) that records a count per file and rule and can only shrink. `pnpm check` fails on any new violation and on any baseline that differs from the current counts. A pull request step fails when any count rose against the base branch.
+- The Effect Oxlint rules are the same 146 diagnostics, built from the same Go code, exposed through a patched Oxlint binding. Don't gate on both: every violation would be reported twice. Use the Oxlint front end as the codemod for the 60 rules with safe, mechanical autofixes (`pnpm effect:fix`), which clears 5,375 of today's violations.
 - Drop the custom `usine/no-instanceof-tagged-error` rule planned in #910. `instanceOfSchema` reports the same sites with type information, and its autofix rewrites them to `Schema.is`.
 
 The prototype is on branch `worktree-agent-a5c09b2753db54b9a`. Today's gap is 9,335 violations in 736 files: about 3,240 in source and 6,100 in tests.
@@ -115,10 +115,13 @@ The branch changes:
 
 - `pnpm-workspace.yaml` and the root `package.json`: replace `@effect/language-service` 0.87.5 with `@effect/tsgo` 0.64.1 and add `oxlint-tsgolint` 7.0.2005.
 - `tooling/tsconfig/base.json`: the target plugin block.
-- `scripts/effect-diagnostics.mjs`: the ratchet. It runs `effect-tsgo tsc -p <tsconfig> --pretty false`, fails on any compiler or configuration error, counts Effect warnings and errors per file and rule for files inside the package, and compares the counts with the package's `effect-baseline.json`.
-- Each Effect package's `check` script calls the ratchet; `effect:baseline` lowers the baseline. Root `pnpm effect:baseline` runs it everywhere; root `pnpm effect:fix [paths]` runs the Oxlint autofixes from `tooling/oxlint/effect-fix.json`.
+- `scripts/effect-diagnostics/check.mjs`: the ratchet. It runs `effect-tsgo tsc -p <tsconfig> --pretty false`, fails on any compiler or configuration error, counts Effect warnings and errors per file and rule for files inside the package, and compares the counts with the package's `effect-baseline.json`.
+- `scripts/effect-diagnostics/baseline.mjs`: the rules for changing a baseline, shared by the ratchet and the CI step. `scripts/effect-diagnostics/diff.mjs`: the CI step. `baseline.test.mjs` covers renames, splits, deletions, uncovered violations, and raised counts; root `pnpm test` runs it.
+- `.github/workflows/ci.yml`: on pull requests, `node scripts/effect-diagnostics/diff.mjs HEAD^1`.
+- `AGENTS.md`: one rule for agents on keeping baselines.
+- Each Effect package's `check` script calls the ratchet; `effect:baseline` lowers the baseline. Root `pnpm effect:fix [paths]` runs `scripts/effect-diagnostics/fix.mjs`, which applies the autofixes in `tooling/oxlint/effect-fix.json` until a pass leaves nothing fixable (overlapping fixes need a second pass), then runs `oxfmt`. Root `pnpm effect:baseline` is a turbo task that builds dependencies first, because a package's check reads its dependencies' declarations.
 - 14 `effect-baseline.json` files, one per package or app.
-- `turbo.json`: the ratchet script is a `check` input. `knip.json`: ignore `@effect/language-service` in `tooling/tsconfig`, because knip reads the plugin name as a dependency.
+- `turbo.json`: the ratchet scripts are `check` inputs. `knip.json`: ignore `@effect/language-service` in `tooling/tsconfig`, because knip reads the plugin name as a dependency.
 
 `apps/docs` keeps `tsc --noEmit`: its tsconfig extends Astro's and has no Effect plugin.
 
@@ -218,7 +221,7 @@ Per diagnostic:
 
 `tooling/test/sqlite.mts` has one `nodeBuiltinImport`. It belongs to no package, so no baseline gates it.
 
-Autofix "yes" means the rule is in `tooling/oxlint/effect-fix.json`. Those rules account for 5,614 of the 9,335 violations. On `packages/github`, `pnpm effect:fix` converged in two passes and lowered the package from 248 to 139 violations; after `oxfmt`, the package type-checked and its 141 tests passed.
+Autofix "yes" means the upstream fix is safe in bulk. `tooling/oxlint/effect-fix.json` holds those rules except the ones left to a reviewed change: `instanceOfSchema`, `deterministicKeys`, `missingReturnYieldStar`, `effectFnIife`, and `schemaStructWithTag`. Its 60 rules account for 5,375 of the 9,335 violations. On `packages/github`, `pnpm effect:fix` converged in two passes and lowered the package from 248 to 139 violations; after `oxfmt`, the package type-checked and its 141 tests passed.
 
 If the three `preferEffect*` rules were on, they would add 5,685 violations, none autofixable: `preferEffectArray` 3,917, `preferEffectString` 1,620, `preferEffectRecord` 148 (counted before the web override).
 
@@ -287,7 +290,7 @@ Off, with the reason:
 | `apiStabilityLeak` | Doesn't apply. It guards the `@stability` contract of a published library. usine has no stability tags, so every export that uses an `effect/http` type would report. |
 | `missingPipeableSignature` | Doesn't apply. It asks for dual data-first and data-last signatures, a convention for library modules, on every exported function. |
 | `preferNamespaceImport` | Mutually exclusive with `preferBarrelImport`. The repository imports from the `effect` barrel, which `preferBarrelImport` enforces. |
-| `preferEffectArray`, `preferEffectRecord`, `preferEffectString` | No defect class removed. They ask to replace every native array, string, and `Object` call (`xs.map`, `s.trim()`) with the `effect` module function. The upstream docs mark the suggestions as having semantic caveats (`find` becomes `findFirst` returning `Option`, different callback parameters). They aren't autofixable, and Effect ships them off. This is a judgement call: turning them on adds 5,685 manual edits. |
+| `preferEffectArray`, `preferEffectRecord`, `preferEffectString` | No defect class removed. They ask to replace every native array, string, and `Object` call (`xs.map`, `s.trim()`) with the `effect` module function. The upstream docs mark the suggestions as having semantic caveats (`find` becomes `findFirst` returning `Option`, different callback parameters). They aren't autofixable, and Effect ships them off. Off for now, to revisit: turning them on adds 5,685 manual edits. |
 
 `preferSchemaOverJson` isn't listed: it's deprecated, and listing it raises a configuration warning. `globalJson` and `globalJsonInEffect` replace it.
 
@@ -309,11 +312,20 @@ Overrides:
 Recommended: the per-package baseline on the branch.
 
 1. Land the configuration at target severity with every package's current counts in `effect-baseline.json`. CI passes on day one.
-2. `pnpm check` (already in `ci.yml`) runs the ratchet in every package's `check` task. It fails when a file and rule count exceeds the baseline, which blocks every new violation; and when a count drops below the baseline, until the PR commits the lowered file with `pnpm effect:baseline`. `--update` never raises a count, so the baseline only shrinks.
-3. Each cleanup PR fixes violations and commits the smaller baseline. A package whose baseline empties loses the file; switch its `check` back to `effect-tsgo tsc -p tsconfig.check.json`.
-4. When every baseline is gone, delete `scripts/effect-diagnostics.mjs` and add `"prepare": "effect-tsgo patch --typescript"` so editors and builds run the patched compiler.
+2. `pnpm check` (already in `ci.yml`) runs the ratchet in every package's `check` task. It fails unless the baseline equals the current counts. A new violation fails it; so does a fixed one, until the PR commits the lowered file from `pnpm effect:baseline`.
+3. `pnpm effect:baseline` rewrites a package's baseline from its current counts under these rules:
+   - A file the baseline lists keeps at most its listed count.
+   - Per rule, the count that leaves listed files (by a fix, a deletion, a rename, or code moving out) can follow into files the baseline doesn't list. So a rename, a split, or a move within the package keeps its allowance, and the rule's total for the package never rises.
+   - Anything those rules don't cover stays a violation: the command prints it and exits 1.
+   - Moving code into a file the baseline already lists, or into another package, doesn't carry the allowance; fix the moved violations.
+   - The allowance released by a fix can cover an equal number of violations of the same rule in a new file of the same package, in the same change. The package total still can't rise.
+4. On pull requests, CI runs `node scripts/effect-diagnostics/diff.mjs HEAD^1`. The pull request checkout is the test merge commit, whose first parent is the base branch tip. The step fails when any baseline has a file count above its count at the base, a rule total above its total at the base, or a baseline the base doesn't have. A hand edit that raises a count fails here even though `pnpm check` accepts it. The base branch tip is used rather than the merge base: it is the stricter comparison, because it includes every count main lowered since the branch point.
+5. Each cleanup PR fixes violations and commits the smaller baseline. A package whose baseline empties loses the file; switch its `check` back to `effect-tsgo tsc -p tsconfig.check.json`.
+6. When every baseline is gone, delete `scripts/effect-diagnostics/` and the CI step, and add `"prepare": "effect-tsgo patch --typescript"` so editors and builds run the patched compiler.
 
-Not prototyped: a hand-edited baseline can still raise a count, and only review catches it. Add a CI step that compares each `effect-baseline.json` with the merge base and fails on any increase.
+A rebase that conflicts on an `effect-baseline.json` resolves by taking either side and rerunning `pnpm effect:baseline`.
+
+Tested by hand on the real packages: a rename of `packages/github/test/request-retry.test.ts`, a split of `Variable` out of `packages/expression/src/environment.ts`, and a file deletion each passed after `pnpm effect:baseline` and passed `diff.mjs`. A copied file with new violations stayed uncovered, and a hand-added entry for it passed `pnpm check` but failed `diff.mjs`.
 
 Rejected:
 
@@ -324,26 +336,19 @@ Rejected:
 
 During the transition, editors don't show Effect diagnostics unless a developer runs `pnpm exec effect-tsgo patch --typescript` locally, which the next install undoes, or configures an LSP command. Agents see them in `pnpm check` output.
 
-## Cleanup chunks
+## Cleanup
 
-Each chunk is one PR that lowers the baselines it touches. Counts are diagnostics and files.
+The cleanup runs as five changes, grouped by kind of change across the repository. Counts are from the committed baselines.
 
-| Chunk | Scope | Size |
+| Change | Rules | Count |
 | --- | --- | --- |
-| 0 | Land this branch. Close #913. Rescope #910 to the autofix of `instanceOfSchema` (chunk 2) and drop its custom rule. | config only |
-| 1 | Correctness and anti-pattern fixes in source: `missingReturnYieldStar`, `schemaClassObjectLiteral`, `errorPayloadShadowsName`, `unknownInEffectCatch`, `anyUnknownInErrorContext`, `globalErrorInEffectFailure`, `effectFnIife`, `returnEffectInGen` (suppressions), `lazyEffect`, `effectTryWithoutCatch`, `strictEffectProvide`, and the one-off style rules. Update the `effect-ts` skill for `lazyEffect`. | 142 in 65 files; split `apps/server` (49) if review gets long |
-| 2 | `instanceOfSchema` by autofix, `preferSchemaTaggedError` by hand. Add #910's anti-pattern row to the `effect-ts` skill. | 133 in 53 files |
-| 3–9 | `pnpm effect:fix` sweep, one package group per PR: orchestrator; web; engine; server; executor; agents, durable, core, and config; gateway, github, cloudflare, expression, and create-usine. Review is typecheck, tests, and a skim. | 1,645 / 124 files; 1,073 / 80; 659 / 78; 566 / 84; 439 / 80; 890 / 93; 342 / 65 |
-| 10–13 | `yieldInCallArgument` by hand or one file at a time: engine; orchestrator; server; the rest. | 314; 300; 214; 384, in 224 files total |
-| 14–15 | `schemaClassMissingBrand`, `schemaStructWithTag`, `redundantSchemaTagIdentifier` (scriptable): orchestrator and core; the rest. | 337; 333, in 162 files total |
-| 16–17 | `schemaSync`, `schemaSyncInEffect`: orchestrator; the rest. | 200; 331, in 140 files total |
-| 18–20 | Native globals (`globalJson*`, `nodeBuiltinImport`, `newPromise`, `globalDate*`, `processEnv*`, `globalFetch*`, `globalTimers`, `cryptoRandomUUID*`): server; gateway, executor, and orchestrator; the rest. | 173; 251; 290, in 203 files total |
-| 21–22 | `asyncFunction`, mostly async test bodies that become `it.effect`: server; the rest. | 173; 137, in 74 files total |
-| 23 | `strictBooleanExpressions`, mostly web. | 156 in 38 files |
-| 24 | `deterministicKeys` (autofix after the key check) and `preferBarrelImport`. | 113 in 93 files |
-| 25 | Remove the ratchet; add the `prepare` patch. | config only |
+| Autofix sweep | Every rule in `tooling/oxlint/effect-fix.json`. Reproduce with `pnpm effect:fix && pnpm effect:baseline`. Largest: `newSchemaClass` 4,734, `preferTypedSchemaDecoder` 211, `multipleEffectProvide` 185, `preferSucceedSomeOrNone` 98, `schemaNumber` 55. | 5,375 in 568 files |
+| Correctness | `instanceOfSchema` 126, `strictEffectProvide` 33, `lazyEffect` 23, `anyUnknownInErrorContext` 13, `effectTryWithoutCatch` 11, `errorPayloadShadowsName` 7, `preferSchemaTaggedError` 7 (including the 3 `Data.TaggedError` checks in `packages/executor/src/ssh/gateway/admin.ts`), `globalErrorInEffectFailure` 7, `unknownInEffectCatch` 5, `effectFnIife` 4, `schemaClassObjectLiteral` 4, `missingReturnYieldStar` 2 | 242 in 98 files |
+| `yieldInCallArgument` | One rule; its bulk autofix is unsafe. | 1,212 in 224 files |
+| Schema | `schemaClassMissingBrand` 637, `schemaSync` 389, `schemaSyncInEffect` 140, `redundantSchemaTagIdentifier` 18, `schemaStructWithTag` 15 | 1,199 in 295 files |
+| Everything left | Native globals (`globalJson` 175, `globalJsonInEffect` 163, `nodeBuiltinImport` 160, `globalDate*` 42, `processEnv*` 37, `globalFetch*` 26, `cryptoRandomUUID*` 16, `globalTimers` 13), `asyncFunction` 310, `newPromise` 69, `strictBooleanExpressions` 156, `deterministicKeys` 92 (check that no key is persisted first), `preferBarrelImport` 21, `returnEffectInGen` 9 (per-line suppressions), and the small style rules. It ends by removing the ratchet and switching every `check` back to `effect-tsgo tsc`. | 1,307 in 325 files |
 
-The chunks overlap on files, so run the autofix sweep (3–9) before the manual chunks that touch the same packages.
+`preferEffectArray`, `preferEffectRecord`, and `preferEffectString` stay off for now, to revisit.
 
 ## Unverified
 

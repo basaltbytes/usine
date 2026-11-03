@@ -48,6 +48,7 @@
           "acquireReleaseDisposable": "error",
           "allOfMapToForEach": "error",
           "anyUnknownInErrorContext": "error",
+          // Off: usine publishes no @stability contract.
           "apiStabilityLeak": "off",
           "asyncFunction": "error",
           "catchAllTagDispatchToCatchTag": "error",
@@ -121,6 +122,7 @@
           "missingEffectContext": "error",
           "missingEffectError": "error",
           "missingLayerContext": "error",
+          // Off: dual data-first and data-last signatures are a library convention.
           "missingPipeableSignature": "off",
           "missingReturnYieldStar": "error",
           "missingStarInYieldEffectGen": "error",
@@ -136,9 +138,11 @@
           "outdatedApi": "error",
           "overriddenSchemaConstructor": "error",
           "preferBarrelImport": "error",
+          // Off for now, to revisit: the three preferEffect* rules swap native calls for effect module functions.
           "preferEffectArray": "off",
           "preferEffectRecord": "off",
           "preferEffectString": "off",
+          // Off: preferBarrelImport enforces imports from the effect barrel.
           "preferNamespaceImport": "off",
           "preferSchemaTaggedError": "error",
           "preferSchemaTypeProperty": "error",

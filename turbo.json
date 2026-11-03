@@ -13,7 +13,7 @@
         "!README.md",
         "!CHANGELOG.md",
         "$TURBO_ROOT$/tooling/test/**",
-        "$TURBO_ROOT$/scripts/effect-diagnostics.mjs"
+        "$TURBO_ROOT$/scripts/effect-diagnostics/*.mjs"
       ]
     },
     "test": {
@@ -25,6 +25,10 @@
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/apps/server/src/**"],
       "outputs": ["dist/**", "public/openapi.json"]
+    },
+    "effect:baseline": {
+      "dependsOn": ["^build"],
+      "cache": false
     }
   }
 }

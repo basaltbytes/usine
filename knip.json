@@ -12,7 +12,7 @@
   ],
   "workspaces": {
     ".": {
-      "entry": ["infra/hetzner/gateway/apply.mjs"],
+      "entry": ["infra/hetzner/gateway/apply.mjs", "scripts/effect-diagnostics/*.mjs"],
       "project": []
     },
     "packages/agents": {
