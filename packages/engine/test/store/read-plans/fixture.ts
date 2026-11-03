@@ -5,6 +5,8 @@ import { Agent } from "@usine/core/agent";
 import {
   AgentSessionId,
   ParentSession,
+  PoolRateLimitsUpdated,
+  RateLimitsSnapshot,
   SessionStarted,
   SessionTokensUpdated,
   TextOutput,
@@ -20,7 +22,7 @@ import {
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
-import { DateTime, Effect, Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { lifecycleSubmission, testAgent } from "../support.ts";
 
@@ -116,6 +118,29 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
         '$.payload.event.session.id', 'session-' || n.i || '-' || (case when t.i < 2 then t.i else (t.i / 20) % 2 end)),
       ${at}
     FROM fixture_numbers n CROSS JOIN fixture_numbers t WHERE t.i < 200`;
+  yield* sql`INSERT INTO usine_session_usage (attempt_id, session_id, total_tokens, sequence, received_at, envelope)
+    SELECT attempt_id, session_id, max(json_extract(envelope, '$.payload.event.totalTokens')), sequence, received_at, envelope
+    FROM usine_attempt_transcripts WHERE payload_tag = 'SessionEvent' AND event_tag = 'SessionTokensUpdated'
+    GROUP BY attempt_id, session_id`;
+  const pool = envelope(
+    new AttemptChannel.SessionEvent({
+      event: new PoolRateLimitsUpdated({
+        session,
+        pool: "chatgptPlan",
+        login: Option.none(),
+        rateLimits: new RateLimitsSnapshot({
+          limitId: Option.none(),
+          limitName: Option.none(),
+          primary: Option.none(),
+          secondary: Option.none(),
+        }),
+      }),
+    }),
+  );
+  yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at)
+    VALUES ('attempt-0', 'outbound', 201, json_set(${pool}, '$.attemptId', 'attempt-0', '$.sequence', 201), ${at})`;
+  yield* sql`INSERT INTO usine_pool_rate_limits (pool, sequence, attempt_id, received_at, envelope)
+    SELECT 'chatgptPlan', sequence, attempt_id, received_at, envelope FROM usine_attempt_transcripts WHERE attempt_id = 'attempt-0' AND channel_sequence = 201`;
   yield* sql`DROP TABLE fixture_numbers`;
   yield* sql`PRAGMA wal_checkpoint(TRUNCATE)`;
 });

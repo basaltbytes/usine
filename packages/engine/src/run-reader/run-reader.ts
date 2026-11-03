@@ -1,7 +1,7 @@
 import { Context, type DateTime, Effect, Layer, Option, Schema } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { attemptTranscripts, events as storedEvents, runs } from "../database/schema.ts";
+import { eq, sql } from "drizzle-orm";
+import { poolRateLimits, events as storedEvents, runs } from "../database/schema.ts";
 import type { DedupKey } from "@usine/core/event";
 import type { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -117,25 +117,9 @@ const makeRunReader = Effect.gen(function* () {
   const latestPoolRateLimits = Effect.fn("RunReader.latestPoolRateLimits")(function* () {
     const rows = yield* database
       .select({
-        event: sql<string>`json_extract(${attemptTranscripts.envelope}, '$.payload.event')`,
+        event: sql<string>`json_extract(${poolRateLimits.envelope}, '$.payload.event')`,
       })
-      .from(attemptTranscripts)
-      .where(
-        inArray(
-          attemptTranscripts.sequence,
-          database
-            .select({ sequence: sql<number>`max(${attemptTranscripts.sequence})` })
-            .from(attemptTranscripts)
-            .where(
-              and(
-                eq(attemptTranscripts.direction, "outbound"),
-                sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'`,
-                sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'PoolRateLimitsUpdated'`,
-              ),
-            )
-            .groupBy(sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event.pool')`),
-        ),
-      )
+      .from(poolRateLimits)
       .execute();
     const events = yield* Schema.decodeUnknownEffect(
       Schema.Array(

@@ -1,0 +1,362 @@
+{
+  "baseline": "2482038ecb",
+  "before": {
+    "bytes": 789884928,
+    "migrationMillis": 136.63261599999987,
+    "readerTimes": [
+      {
+        "reader": "run transcript page",
+        "millis": 17.609048999998777
+      },
+      {
+        "reader": "run session state",
+        "millis": 6.881171999999424
+      },
+      {
+        "reader": "run worker state",
+        "millis": 3.196126999999251
+      },
+      {
+        "reader": "usage per attempt",
+        "millis": 2.1294640000014624
+      },
+      {
+        "reader": "usage across all runs",
+        "millis": 1973.2279360000011
+      },
+      {
+        "reader": "usage pool limits",
+        "millis": 0.8191460000016377
+      }
+    ],
+    "queries": [
+      {
+        "reader": "run transcript page",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"attempt_id\" = ? order by \"usine_attempt_transcripts\".\"sequence\" desc limit ?",
+        "params": [
+          "attempt-0",
+          50
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)"
+        ],
+        "rows": 50,
+        "medianMillis": 0.1914489999999205
+      },
+      {
+        "reader": "run session state",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select max(\"sequence\") from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and ((\n            json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') IN ('InterventionApplied', 'InterventionRejected')\n            OR (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent'\n              AND json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') IN ('SessionStarted', 'SessionIdle', 'SessionResumed', 'SessionFinished'))\n          ))) group by coalesce(json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.intervention.target.sessionId'), '@parent'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent', json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.inputSequence'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionStarted') order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 1",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ],
+        "rows": 2,
+        "medianMillis": 0.9147460000003775
+      },
+      {
+        "reader": "run worker state",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (\"usine_attempt_transcripts\".\"direction\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') IN ('WorkerUnresponsive', 'WorkerResponsive'))) order by \"usine_attempt_transcripts\".\"sequence\" desc limit ?",
+        "params": [
+          "attempt-0",
+          "outbound",
+          1
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)"
+        ],
+        "rows": 0,
+        "medianMillis": 0.7129780000013852
+      },
+      {
+        "reader": "usage per attempt",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select \"sequence\" from (select \"sequence\", max(json_extract(\"envelope\", '$.payload.event.totalTokens')) as \"tokens\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionTokensUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id')) \"highest\") order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-0"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "CO-ROUTINE highest",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "SCAN highest"
+        ],
+        "rows": 2,
+        "medianMillis": 0.8745410000010452
+      },
+      {
+        "reader": "usage across all runs",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select \"sequence\" from (select \"sequence\", max(json_extract(\"envelope\", '$.payload.event.totalTokens')) as \"tokens\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'SessionTokensUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.session.id')) \"highest\") order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-999"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "CO-ROUTINE highest",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "SCAN highest"
+        ],
+        "rows": 2,
+        "medianMillis": 1.0529850000002625
+      },
+      {
+        "reader": "usage pool limits",
+        "sql": "select json_extract(\"envelope\", '$.payload.event') from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select max(\"sequence\") from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"direction\" = ?) and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload._tag') = 'SessionEvent') and (json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event._tag') = 'PoolRateLimitsUpdated')) group by json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.event.pool'))",
+        "params": [
+          "outbound"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 1",
+          "SCAN usine_attempt_transcripts USING INDEX usine_attempt_transcript_pool_limits"
+        ],
+        "rows": 0,
+        "medianMillis": 0.12001500000042142
+      }
+    ]
+  },
+  "after": {
+    "bytes": 800595968,
+    "migrationBytes": 800595968,
+    "migrationMillis": 2182.624148,
+    "readerTimes": [
+      {
+        "reader": "run transcript page",
+        "millis": 7.1311900000000605
+      },
+      {
+        "reader": "run session state",
+        "millis": 1.2896080000000438
+      },
+      {
+        "reader": "run worker state",
+        "millis": 3.0290439999998853
+      },
+      {
+        "reader": "usage per attempt",
+        "millis": 0.6841830000003029
+      },
+      {
+        "reader": "usage across all runs",
+        "millis": 366.7378480000002
+      },
+      {
+        "reader": "usage pool limits",
+        "millis": 0.8106619999998657
+      }
+    ],
+    "queries": [
+      {
+        "reader": "run transcript page",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"attempt_id\" = ? order by \"usine_attempt_transcripts\".\"sequence\" desc limit ?",
+        "params": [
+          "attempt-0",
+          50
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_tail (attempt_id=?)"
+        ],
+        "rows": 50,
+        "medianMillis": 0.17412699999931647
+      },
+      {
+        "reader": "run session state",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" in (select max(\"sequence\") as \"sequence\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (\"usine_attempt_transcripts\".\"payload_tag\" = ?) and (\"usine_attempt_transcripts\".\"event_tag\" in (?, ?, ?, ?))) group by \"usine_attempt_transcripts\".\"session_id\", \"usine_attempt_transcripts\".\"event_tag\" = 'SessionStarted' union all select max(\"sequence\") as \"sequence\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (\"usine_attempt_transcripts\".\"payload_tag\" in (?, ?))) group by coalesce(\"usine_attempt_transcripts\".\"session_id\", '@parent'), json_extract(\"usine_attempt_transcripts\".\"envelope\", '$.payload.inputSequence')) order by \"usine_attempt_transcripts\".\"sequence\" asc",
+        "params": [
+          "attempt-0",
+          "SessionEvent",
+          "SessionStarted",
+          "SessionIdle",
+          "SessionResumed",
+          "SessionFinished",
+          "attempt-0",
+          "InterventionApplied",
+          "InterventionRejected"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "COMPOUND QUERY",
+          "LEFT-MOST SUBQUERY",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=? AND event_tag=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "UNION ALL",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ],
+        "rows": 2,
+        "medianMillis": 0.05730700000003708
+      },
+      {
+        "reader": "run worker state",
+        "sql": "select \"sequence\", \"attempt_id\", \"direction\", \"envelope\", \"received_at\" from \"usine_attempt_transcripts\" where \"usine_attempt_transcripts\".\"sequence\" = (select max(\"sequence\") as \"sequence\" from \"usine_attempt_transcripts\" where ((\"usine_attempt_transcripts\".\"attempt_id\" = ?) and (\"usine_attempt_transcripts\".\"direction\" = ?) and (\"usine_attempt_transcripts\".\"payload_tag\" in (?, ?)) and ((\"usine_attempt_transcripts\".\"event_tag\" is null))))",
+        "params": [
+          "attempt-0",
+          "outbound",
+          "WorkerUnresponsive",
+          "WorkerResponsive"
+        ],
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "SCALAR SUBQUERY 1",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=? AND event_tag=?)"
+        ],
+        "rows": 0,
+        "medianMillis": 0.027411999999458203
+      },
+      {
+        "reader": "usage per attempt",
+        "sql": "select \"sequence\", \"attempt_id\", 'outbound', \"envelope\", \"received_at\" from \"usine_session_usage\" where \"usine_session_usage\".\"attempt_id\" = ? order by \"usine_session_usage\".\"sequence\" asc",
+        "params": [
+          "attempt-0"
+        ],
+        "plan": [
+          "SEARCH usine_session_usage USING INDEX sqlite_autoindex_usine_session_usage_1 (attempt_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 2,
+        "medianMillis": 0.04782000000068365
+      },
+      {
+        "reader": "usage across all runs",
+        "sql": "select \"sequence\", \"attempt_id\", 'outbound', \"envelope\", \"received_at\" from \"usine_session_usage\" where \"usine_session_usage\".\"attempt_id\" = ? order by \"usine_session_usage\".\"sequence\" asc",
+        "params": [
+          "attempt-999"
+        ],
+        "plan": [
+          "SEARCH usine_session_usage USING INDEX sqlite_autoindex_usine_session_usage_1 (attempt_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "rows": 2,
+        "medianMillis": 0.024905999999646156
+      },
+      {
+        "reader": "usage pool limits",
+        "sql": "select json_extract(\"envelope\", '$.payload.event') from \"usine_pool_rate_limits\"",
+        "params": [],
+        "plan": [
+          "SCAN usine_pool_rate_limits"
+        ],
+        "rows": 0,
+        "medianMillis": 0.034945999999763444
+      }
+    ],
+    "transcriptPlans": [
+      {
+        "statistics": "without ANALYZE",
+        "reader": "run session state",
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "COMPOUND QUERY",
+          "LEFT-MOST SUBQUERY",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=? AND event_tag=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "UNION ALL",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      },
+      {
+        "statistics": "without ANALYZE",
+        "reader": "run worker state",
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "SCALAR SUBQUERY 1",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=? AND event_tag=?)"
+        ]
+      },
+      {
+        "statistics": "without ANALYZE",
+        "reader": "usage per attempt",
+        "plan": [
+          "SEARCH usine_session_usage USING INDEX sqlite_autoindex_usine_session_usage_1 (attempt_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      {
+        "statistics": "without ANALYZE",
+        "reader": "usage across all runs",
+        "plan": [
+          "SEARCH usine_session_usage USING INDEX sqlite_autoindex_usine_session_usage_1 (attempt_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      {
+        "statistics": "without ANALYZE",
+        "reader": "usage pool limits",
+        "plan": [
+          "SCAN usine_pool_rate_limits"
+        ]
+      },
+      {
+        "statistics": "with ANALYZE",
+        "reader": "run session state",
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "LIST SUBQUERY 2",
+          "COMPOUND QUERY",
+          "LEFT-MOST SUBQUERY",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=? AND event_tag=?)",
+          "USE TEMP B-TREE FOR GROUP BY",
+          "UNION ALL",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      },
+      {
+        "statistics": "with ANALYZE",
+        "reader": "run worker state",
+        "plan": [
+          "SEARCH usine_attempt_transcripts USING INTEGER PRIMARY KEY (rowid=?)",
+          "SCALAR SUBQUERY 1",
+          "SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind (attempt_id=? AND payload_tag=? AND event_tag=?)"
+        ]
+      },
+      {
+        "statistics": "with ANALYZE",
+        "reader": "usage per attempt",
+        "plan": [
+          "SEARCH usine_session_usage USING INDEX sqlite_autoindex_usine_session_usage_1 (attempt_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      {
+        "statistics": "with ANALYZE",
+        "reader": "usage across all runs",
+        "plan": [
+          "SEARCH usine_session_usage USING INDEX sqlite_autoindex_usine_session_usage_1 (attempt_id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      {
+        "statistics": "with ANALYZE",
+        "reader": "usage pool limits",
+        "plan": [
+          "SCAN usine_pool_rate_limits"
+        ]
+      }
+    ]
+  },
+  "integrity": [
+    {
+      "rows": 200000,
+      "sha256": "dc92def7ec4185952b48ef599248d4c9bf175e5a07467d19b938681806d38c27",
+      "sessions": 2000,
+      "parity": true
+    },
+    {
+      "rows": 200000,
+      "sha256": "dc92def7ec4185952b48ef599248d4c9bf175e5a07467d19b938681806d38c27",
+      "sessions": 2000,
+      "parity": true
+    }
+  ]
+}
