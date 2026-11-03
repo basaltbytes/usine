@@ -70,13 +70,14 @@ export const queryGraphql = Effect.fn("GitHub.queryGraphql")(
       }
       // GitHub reports a missing Item as a NOT_FOUND error with a null field, which `dataSchema`
       // decodes as absent.
-      if (!envelope.errors.every((error) => error.type === "NOT_FOUND")) {
+      const errors = envelope.errors.filter((error) => error.type !== "NOT_FOUND");
+      if (errors.length > 0) {
         const failure = invalidResponse(
           operation,
           `GraphQL errors: ${envelope.errors.map((error) => error.message).join("; ")}`,
         );
         if (
-          envelope.errors.every(
+          errors.every(
             (error) =>
               error.type === "INTERNAL" ||
               error.type === "INTERNAL_SERVER_ERROR" ||

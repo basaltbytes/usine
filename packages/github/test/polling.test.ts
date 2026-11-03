@@ -684,6 +684,63 @@ describe("GitHubPolling", () => {
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
+  it.effect("retries a missing-issue check with both NOT_FOUND and server errors", () => {
+    let requests = 0;
+    const missing = { type: "NOT_FOUND", message: "Issue 28 no longer exists" };
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests++;
+        return response(request, {
+          data: { repository: { i0: null, i1: requests === 1 ? null : { number: 29 } } },
+          errors:
+            requests === 1
+              ? [missing, { type: "INTERNAL", message: "Internal server error" }]
+              : [missing],
+        });
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const pending = yield* polling
+        .missingIssues(repository, [ItemNumber.make(28), ItemNumber.make(29)])
+        .pipe(Effect.result, Effect.forkChild);
+      yield* TestClock.adjust("10 seconds");
+      const result = yield* Fiber.join(pending);
+      assert.strictEqual(result._tag, "Success");
+      if (result._tag !== "Success") return;
+      assert.deepStrictEqual(result.success, [ItemNumber.make(28)]);
+      assert.strictEqual(requests, 2);
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  for (const type of ["FORBIDDEN", "GRAPHQL_VALIDATION_FAILED"]) {
+    it.effect(`does not retry a missing-issue check with NOT_FOUND, INTERNAL, and ${type}`, () => {
+      let requests = 0;
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          requests++;
+          return response(request, {
+            errors: [
+              { type: "NOT_FOUND", message: "Issue 28 no longer exists" },
+              { type: "INTERNAL", message: "Internal server error" },
+              { type, message: "Query cannot be completed" },
+            ],
+          });
+        }),
+      );
+
+      return Effect.gen(function* () {
+        const polling = yield* GitHubPolling;
+        const failure = yield* polling
+          .missingIssues(repository, [ItemNumber.make(28), ItemNumber.make(29)])
+          .pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
+        assert.strictEqual(requests, 1);
+      }).pipe(Effect.provide(pollingLayer(client)));
+    });
+  }
+
   it.effect("hashes canonical issue content without any timestamp fields", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
     const firstVersion = issuePayload({
