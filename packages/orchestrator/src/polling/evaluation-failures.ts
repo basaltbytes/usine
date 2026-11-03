@@ -31,11 +31,31 @@ export class FailingItem extends Schema.Class<FailingItem>("@usine/orchestrator/
   failures: Schema.NonEmptyArray(LoopEvaluationFailure),
 }) {}
 
-/** Returns the detection entry that fetches a failing Item again. */
-export const changedItem = (failing: FailingItem): ChangedItem =>
-  failing.stream === "issue"
-    ? new ChangedIssue({ number: failing.number, updatedAt: failing.updatedAt })
-    : new ChangedPullRequest({ number: failing.number, updatedAt: failing.updatedAt });
+/**
+ * An Item whose snapshot fetch failed with a GitHub server error. The poll cursor keeps it, and the
+ * next cycle fetches it again.
+ */
+export class UnfetchedItem extends Schema.Class<UnfetchedItem>("@usine/orchestrator/UnfetchedItem")(
+  {
+    stream: FailingItem.fields.stream,
+    number: ItemNumber,
+    updatedAt: Schema.DateTimeUtcFromString,
+  },
+) {}
+
+/** Returns the cursor entry that fetches `item` again in the next cycle. */
+export const unfetchedItem = (item: ChangedItem): UnfetchedItem =>
+  new UnfetchedItem({
+    stream: item._tag === "ChangedIssue" ? "issue" : "pr",
+    number: ItemNumber.make(item.number),
+    updatedAt: item.updatedAt,
+  });
+
+/** Returns the detection entry that fetches a failing or unfetched Item again. */
+export const changedItem = (kept: FailingItem | UnfetchedItem): ChangedItem =>
+  kept.stream === "issue"
+    ? new ChangedIssue({ number: kept.number, updatedAt: kept.updatedAt })
+    : new ChangedPullRequest({ number: kept.number, updatedAt: kept.updatedAt });
 
 /** Returns the failing Item that an evaluation leaves, or `None` if every Loop evaluated. */
 export const failingItem = (

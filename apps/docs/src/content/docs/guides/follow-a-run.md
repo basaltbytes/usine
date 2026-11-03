@@ -44,3 +44,5 @@ Usage includes output and uncached input tokens reported by harnesses. Subscript
 Connectivity warnings identify a silent worker or unreachable model provider and its recovery. They do not stop the attempt automatically. Inspect the warning, worker, and provider before [canceling](/guides/cancel-a-run/) or [messaging the agent](/guides/message-an-agent/).
 
 GitHub poll failures appear in **Needs attention** with the failed operation, such as `poll-repository-changes`. Invalid responses also show the decode detail, limited to 500 characters. The corresponding error log includes structured `operation` and `detail` fields when available. Use these diagnostics to identify the GitHub call and the response field that failed to decode.
+
+A GitHub server error (HTTP 5xx) for one item's snapshot doesn't fail the poll. usine logs a warning with the item, operation, and status, processes the other items, and fetches that item again in the next poll.

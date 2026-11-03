@@ -21,17 +21,23 @@ import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.t
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
-import { ItemKey } from "@usine/core/item";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { CycleBudgetReset, CycleBudgets } from "@usine/engine/cycle-budget";
 import { AttentionAcknowledgement, AttentionAcknowledgements } from "@usine/engine/attention";
 import { GitHubApiError } from "@usine/github/github-app";
+import {
+  ItemContentHash,
+  ItemProjection,
+  ItemProjectionSource,
+} from "@usine/engine/item-projection";
 import {
   EntityTag,
   GitHubPolling,
   PollCursor,
   RepositoryChanges,
   RepositoryLabelCatalog,
+  RepositoryNotModified,
 } from "@usine/github/polling";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
@@ -54,9 +60,44 @@ const instance = new LoadedInstance({
   warnings: [],
 });
 
+const issuePayload = (number: number, labels: ReadonlyArray<string> = []): IssuePayload => ({
+  number,
+  title: "Review reset",
+  body: "Review the Item.",
+  url: `https://github.com/basaltbytes/usine/issues/${number}`,
+  state: "OPEN",
+  stateReason: null,
+  createdAt: "2026-09-01T00:00:00Z",
+  updatedAt: "2026-09-05T00:00:00Z",
+  closedAt: null,
+  author: { login: "operator" },
+  issueType: null,
+  milestone: null,
+  labelEvents: {},
+  labels: { totalCount: labels.length, nodes: labels.map((name) => ({ name })) },
+  assignees: { totalCount: 0, nodes: [] },
+  comments: { totalCount: 0, nodes: [] },
+  closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
+});
+
+const storedIssue = (number: number) =>
+  new ItemProjection({
+    itemKey: ItemKey.make(JSON.stringify(["github", repository, number])),
+    repository,
+    source: ItemProjectionSource.make("issue"),
+    number: ItemNumber.make(number),
+    contentHash: ItemContentHash.make("a".repeat(64)),
+    payload: issuePayload(number),
+  });
+
+const storedCursor = new PollCursor({
+  entityTag: Option.some(EntityTag.make('"stored"')),
+  watermark: Option.some(DateTime.makeUnsafe("2026-09-05T00:00:00Z")),
+});
+
 describe("cycle reset polling", () => {
   it.effect(
-    "restarts cursors after reset, retains failed refreshes, and continues a committed backlog",
+    "restarts cursors after a reset of an Item polling never stored, retains failed refreshes, and continues a committed backlog",
     () => {
       const cursors = memoryCursorStore();
       const fresh = new PollCursor({
@@ -128,6 +169,167 @@ describe("cycle reset polling", () => {
       );
     },
   );
+
+  it.effect("refreshes only the reset Item and normal changes, keeping the stored cursor", () => {
+    const cursors = memoryCursorStore();
+    const reset = Schema.decodeUnknownSync(CycleBudgetReset)({
+      itemKey: storedIssue(72).itemKey,
+      repository,
+      generation: 1,
+    });
+    let pending: ReadonlyArray<CycleBudgetReset> = [];
+    let changed: ReadonlyArray<number> = [];
+    const seen: Array<PollCursor> = [];
+    const fetched: Array<number> = [];
+    const acknowledgements: Array<CycleBudgetReset> = [];
+    const budgets: CycleBudgets["Service"] = {
+      ...emptyCycleBudgets,
+      pendingResets: () => Effect.sync(() => pending),
+      acknowledgeReset: (value) =>
+        Effect.sync(() => {
+          acknowledgements.push(value);
+          pending = [];
+        }),
+    };
+    const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
+      missingIssues: () => Effect.succeed([]),
+      labels: () =>
+        Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
+      snapshot: (_repository, item) =>
+        Effect.sync(() => {
+          fetched.push(item.number);
+          return new IssueSnapshot({
+            payload: issuePayload(item.number),
+            contentHash: ContentHash.make("b".repeat(64)),
+          });
+        }),
+      changes: (_repository, cursor) =>
+        Effect.sync(() => {
+          seen.push(cursor);
+          return changed.length === 0
+            ? new RepositoryNotModified({ cursor, nextPollAt: Option.none() })
+            : new RepositoryChanges({
+                cursor: storedCursor,
+                items: changed.map(
+                  (number) =>
+                    new ChangedIssue({
+                      number,
+                      updatedAt: DateTime.makeUnsafe("2026-09-05T00:00:00Z"),
+                    }),
+                ),
+                backlog: false,
+                nextPollAt: Option.none(),
+              });
+        }),
+    };
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      changed = [80, 81];
+      yield* polling.poll(instance);
+      assert.deepStrictEqual(fetched, [80, 81]);
+
+      pending = [reset];
+      changed = [81];
+      fetched.length = 0;
+      const cycle = yield* polling.poll(instance);
+      assert.deepStrictEqual(cycle.failures, []);
+      assert.deepStrictEqual(seen[1], storedCursor);
+      assert.deepStrictEqual(
+        [...fetched].sort((left, right) => left - right),
+        [72, 81],
+      );
+      assert.deepStrictEqual(acknowledgements, [reset]);
+
+      changed = [];
+      fetched.length = 0;
+      yield* polling.poll(instance);
+      assert.deepStrictEqual(seen[2], storedCursor);
+      assert.deepStrictEqual(fetched, []);
+    }).pipe(
+      Effect.provide(
+        pollingTestLayer(github, [], undefined, undefined, cursors.store, budgets, {
+          get: (itemKey) =>
+            Effect.succeed(
+              itemKey === storedIssue(72).itemKey ? Option.some(storedIssue(72)) : Option.none(),
+            ),
+          list: () => Effect.succeed([]),
+          openIssues: () => Effect.succeed([]),
+        }),
+      ),
+    );
+  });
+
+  it.effect("keeps a reset pending while GitHub returns a server error for its Item", () => {
+    const cursors = memoryCursorStore();
+    const reset = Schema.decodeUnknownSync(CycleBudgetReset)({
+      itemKey: storedIssue(72).itemKey,
+      repository,
+      generation: 1,
+    });
+    let pending: ReadonlyArray<CycleBudgetReset> = [reset];
+    let unavailable = true;
+    const fetched: Array<number> = [];
+    const acknowledgements: Array<CycleBudgetReset> = [];
+    const budgets: CycleBudgets["Service"] = {
+      ...emptyCycleBudgets,
+      pendingResets: () => Effect.sync(() => pending),
+      acknowledgeReset: (value) =>
+        Effect.sync(() => {
+          acknowledgements.push(value);
+          pending = [];
+        }),
+    };
+    const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
+      missingIssues: () => Effect.succeed([]),
+      labels: () =>
+        Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
+      snapshot: (_repository, item) =>
+        Effect.gen(function* () {
+          fetched.push(item.number);
+          if (unavailable)
+            return yield* new GitHubApiError({
+              operation: "fetch-issue-snapshot",
+              status: Option.some(504),
+              message: "GitHub returned HTTP status 504",
+            });
+          return new IssueSnapshot({
+            payload: issuePayload(item.number),
+            contentHash: ContentHash.make("b".repeat(64)),
+          });
+        }),
+      changes: (_repository, cursor) =>
+        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+    };
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      const failed = yield* polling.poll(instance);
+      assert.deepStrictEqual(failed.failures, []);
+      assert.deepStrictEqual(fetched, [72]);
+      assert.deepStrictEqual(acknowledgements, []);
+      assert(cursors.stored.size > 0);
+
+      unavailable = false;
+      yield* polling.poll(instance);
+      assert.deepStrictEqual(fetched, [72, 72]);
+      assert.deepStrictEqual(acknowledgements, [reset]);
+
+      yield* polling.poll(instance);
+      assert.deepStrictEqual(fetched, [72, 72]);
+    }).pipe(
+      Effect.provide(
+        pollingTestLayer(github, [], undefined, undefined, cursors.store, budgets, {
+          get: (itemKey) =>
+            Effect.succeed(
+              itemKey === storedIssue(72).itemKey ? Option.some(storedIssue(72)) : Option.none(),
+            ),
+          list: () => Effect.succeed([]),
+          openIssues: () => Effect.succeed([]),
+        }),
+      ),
+    );
+  });
 });
 
 it.live(
