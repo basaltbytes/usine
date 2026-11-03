@@ -58,11 +58,14 @@ describe("sandbox exec stream", () => {
       sandbox.state.run = () => command.process;
       return Effect.gen(function* () {
         const client = yield* fakeSocket;
-        yield* Queue.offer(client.messages, encodeClientMessage(new ExecStart({ command: "cat" })));
+        yield* Queue.offer(
+          client.messages,
+          encodeClientMessage(ExecStart.make({ command: "cat" })),
+        );
         const stream = yield* Effect.forkChild(execStream(NAME, client.socket));
         yield* Effect.yieldNow;
         yield* Queue.offer(client.messages, text("hello"));
-        yield* Queue.offer(client.messages, encodeClientMessage(new StdinEnd()));
+        yield* Queue.offer(client.messages, encodeClientMessage(StdinEnd.make()));
         yield* Effect.promise(() => command.stdout("hello"));
         yield* Effect.promise(() => command.stderr("warning"));
         yield* Effect.promise(() => command.exit(0));
@@ -89,7 +92,7 @@ describe("sandbox exec stream", () => {
       const client = yield* fakeSocket;
       yield* Queue.offer(
         client.messages,
-        encodeClientMessage(new ExecStart({ command: "claude" })),
+        encodeClientMessage(ExecStart.make({ command: "claude" })),
       );
       const stream = yield* Effect.forkChild(execStream(NAME, client.socket));
       yield* Effect.yieldNow;
@@ -124,7 +127,7 @@ describe("sandbox exec stream", () => {
         const client = yield* fakeSocket;
         yield* Queue.offer(
           client.messages,
-          encodeClientMessage(new ExecStart({ command: "git status --porcelain" })),
+          encodeClientMessage(ExecStart.make({ command: "git status --porcelain" })),
         );
         yield* execStream(NAME, client.socket);
 
@@ -162,7 +165,7 @@ describe("sandbox exec stream", () => {
       const client = yield* fakeSocket;
       yield* Queue.offer(
         client.messages,
-        encodeClientMessage(new ExecStart({ command: "git status" })),
+        encodeClientMessage(ExecStart.make({ command: "git status" })),
       );
       yield* execStream(NAME, client.socket);
 

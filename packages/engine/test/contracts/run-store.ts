@@ -43,12 +43,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           assert(first._tag === "AttemptStarted" && recovered._tag === "AttemptStarted");
           yield* store.finishAttempt(
             first.execution.attempt,
-            Result.fail(new AgentFailure({ message: "late failure" })),
+            Result.fail(AgentFailure.make({ message: "late failure" })),
           );
           assert.strictEqual((yield* store.snapshot(runId)).run.state._tag, "Running");
           yield* store.finishAttempt(
             first.execution.attempt,
-            Result.succeed(new StepResult({ message: "late", facts: [] })),
+            Result.succeed(StepResult.make({ message: "late", facts: [] })),
           );
           const current = yield* store.snapshot(runId);
           assert.strictEqual(current.run.state._tag, "Running");
@@ -57,12 +57,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           assert(active !== undefined && Option.isNone(active.outcome));
           yield* store.finishAttempt(
             recovered.execution.attempt,
-            Result.succeed(new StepResult({ message: "current", facts: [] })),
+            Result.succeed(StepResult.make({ message: "current", facts: [] })),
           );
           const finished = yield* store.snapshot(runId);
           yield* store.finishAttempt(
             recovered.execution.attempt,
-            Result.succeed(new StepResult({ message: "duplicate", facts: [] })),
+            Result.succeed(StepResult.make({ message: "duplicate", facts: [] })),
           );
           assert.deepStrictEqual(yield* store.snapshot(runId), finished);
           assert.strictEqual(finished.run.state._tag, "Succeeded");
@@ -81,7 +81,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
             assert(first._tag === "AttemptStarted");
             const attemptId = first.execution.attempt.id;
-            const session = new ParentSession({
+            const session = ParentSession.make({
               id: AgentSessionId.make("parent"),
               agent: testAgent.name,
               brain: testAgent.brain,
@@ -89,13 +89,13 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const emit = (sequence: number, text: string) =>
               store.appendTranscript(
                 "outbound",
-                new AttemptChannel.OutboundEnvelope({
+                AttemptChannel.OutboundEnvelope.make({
                   version: AttemptChannel.PROTOCOL_VERSION,
                   attemptId,
                   sequence: AttemptChannel.Sequence.make(sequence),
                   sentAt: DateTime.makeUnsafe("2026-10-08"),
-                  payload: new AttemptChannel.SessionEvent({
-                    event: new TextOutput({ session, text }),
+                  payload: AttemptChannel.SessionEvent.make({
+                    event: TextOutput.make({ session, text }),
                   }),
                 }),
               );
@@ -112,7 +112,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             assert.strictEqual(reattached.execution.reattach, true);
             yield* emit(2, "redelivered after the restart");
             yield* emit(3, "after the restart");
-            const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+            const transcript = yield* store.transcript(TranscriptAllQuery.make({ attemptId }));
             assert.deepStrictEqual(
               transcript.map(({ envelope }) =>
                 envelope.payload._tag === "SessionEvent" &&
@@ -128,7 +128,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             );
             yield* store.finishAttempt(
               reattached.execution.attempt,
-              Result.succeed(new StepResult({ message: "finished after the restart", facts: [] })),
+              Result.succeed(StepResult.make({ message: "finished after the restart", facts: [] })),
             );
             const finished = yield* store.snapshot(runId);
             assert.strictEqual(finished.run.state._tag, "Succeeded");
@@ -167,7 +167,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const beforeCompletion = yield* store.snapshot(runId);
           // The Run's closing state follows the Attempt outcome and the Step result.
           const restoreRun = yield* failures.rejectRunUpdate;
-          const result = new StepResult({ message: "atomic success", facts: [] });
+          const result = StepResult.make({ message: "atomic success", facts: [] });
           assert.strictEqual(
             (yield* Effect.flip(
               store.finishAttempt(recovered.execution.attempt, Result.succeed(result)),
@@ -208,12 +208,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
-            const envelope = new AttemptChannel.OutboundEnvelope({
+            const envelope = AttemptChannel.OutboundEnvelope.make({
               version: AttemptChannel.PROTOCOL_VERSION,
               attemptId: started.execution.attempt.id,
               sequence: AttemptChannel.Sequence.make(1),
               sentAt: lifecycleSubmission.event.receivedAt,
-              payload: new AttemptChannel.Started({
+              payload: AttemptChannel.Started.make({
                 parentModel: ModelId.make("concurrent-model"),
               }),
             });
@@ -222,13 +222,13 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               { concurrency: "unbounded" },
             );
             const entries = yield* store.transcript(
-              new TranscriptAllQuery({ attemptId: envelope.attemptId }),
+              TranscriptAllQuery.make({ attemptId: envelope.attemptId }),
             );
             assert.deepStrictEqual(
               entries.map(({ envelope }) => envelope),
               [envelope],
             );
-            const result = new StepResult({ message: "Done", facts: [] });
+            const result = StepResult.make({ message: "Done", facts: [] });
             yield* Effect.all(
               Array.from({ length: 4 }, () =>
                 store.finishAttempt(started.execution.attempt, Result.succeed(result)),
@@ -258,12 +258,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           assert(started._tag === "AttemptStarted");
           yield* store.finishAttempt(
             started.execution.attempt,
-            Result.fail(new AgentFailure({ message: "Needs the operator" })),
+            Result.fail(AgentFailure.make({ message: "Needs the operator" })),
           );
           // A Failed Run is closed, so the Item's next Event opens a Run of its own.
-          const later = new Submission({
+          const later = Submission.make({
             ...lifecycleSubmission,
-            event: new Event({
+            event: Event.make({
               id: EventId.make("retry-blocked-later"),
               dedupKey: DedupKey.make("lifecycle/event/later-revision"),
               payload: {},
@@ -342,7 +342,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           );
           yield* store.finishAttempt(
             first.execution.attempt,
-            Result.fail(new AgentFailure({ message: "Checks failed" })),
+            Result.fail(AgentFailure.make({ message: "Checks failed" })),
           );
           yield* store.retry(runId);
           const second = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
@@ -373,14 +373,14 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const store = yield* RunStore;
             const readRun = RunId.make("read-only-review");
             yield* store.recordAndClaim(
-              new Submission({ ...lifecycleSubmission, permissions: "read" }),
+              Submission.make({ ...lifecycleSubmission, permissions: "read" }),
               readRun,
             );
             const writeRun = RunId.make("default-write");
             yield* store.recordAndClaim(
-              new Submission({
+              Submission.make({
                 ...lifecycleSubmission,
-                event: new Event({
+                event: Event.make({
                   ...lifecycleSubmission.event,
                   id: EventId.make("default-write"),
                   dedupKey: DedupKey.make("default/write"),
@@ -398,7 +398,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             assert.strictEqual(first.execution.permissions, "read");
             yield* store.finishAttempt(
               first.execution.attempt,
-              Result.fail(new AgentFailure({ message: "Checks failed" })),
+              Result.fail(AgentFailure.make({ message: "Checks failed" })),
             );
             yield* store.retry(readRun);
             const retried = yield* store.beginAttempt(
@@ -457,7 +457,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const canceled = yield* store.snapshot(runId);
           yield* store.finishAttempt(
             recovered.execution.attempt,
-            Result.succeed(new StepResult({ message: "after cancellation", facts: [] })),
+            Result.succeed(StepResult.make({ message: "after cancellation", facts: [] })),
           );
           assert.deepStrictEqual(yield* store.snapshot(runId), canceled);
         }),
@@ -474,9 +474,9 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const claim = (name: string, loop: string, item: string, agent = testAgent) =>
               store
                 .recordAndClaim(
-                  new Submission({
+                  Submission.make({
                     ...lifecycleSubmission,
-                    event: new Event({
+                    event: Event.make({
                       ...lifecycleSubmission.event,
                       id: EventId.make(name),
                       dedupKey: DedupKey.make(`${name}/revision`),
@@ -501,7 +501,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const fail = (attempt: Attempt) =>
               store.finishAttempt(
                 attempt,
-                Result.fail(new AgentFailure({ message: "Checks failed" })),
+                Result.fail(AgentFailure.make({ message: "Checks failed" })),
               );
             // Each window as its Attempt ID and whether it has ended.
             const windows = (attempt: Attempt) =>
@@ -527,7 +527,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
                 "review",
                 "review",
                 "pull-71",
-                new Agent({ ...testAgent, name: AgentName.make("reviewer") }),
+                Agent.make({ ...testAgent, name: AgentName.make("reviewer") }),
               ),
             );
             yield* TestClock.adjust("2 seconds");
@@ -571,7 +571,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const runId = RunId.make("resolved-failure");
           const operator = Option.some(OperatorLogin.make("Philippe"));
           const resolution = Option.some(
-            new FailureResolution({
+            FailureResolution.make({
               resolvedAt: DateTime.makeUnsafe("2026-08-25T00:15:00Z"),
               operator,
             }),
@@ -599,19 +599,19 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               );
               yield* store.appendTranscript(
                 "outbound",
-                new AttemptChannel.OutboundEnvelope({
+                AttemptChannel.OutboundEnvelope.make({
                   version: AttemptChannel.PROTOCOL_VERSION,
                   attemptId: attempt.id,
                   sequence: AttemptChannel.Sequence.make(1),
                   sentAt: attempt.startedAt,
-                  payload: new AttemptChannel.Failed({
-                    failure: new AgentFailure({ message: "Handled outside usine" }),
+                  payload: AttemptChannel.Failed.make({
+                    failure: AgentFailure.make({ message: "Handled outside usine" }),
                   }),
                 }),
               );
               yield* store.finishAttempt(
                 attempt,
-                Result.fail(new AgentFailure({ message: "Handled outside usine" })),
+                Result.fail(AgentFailure.make({ message: "Handled outside usine" })),
               );
               const evidence = yield* reader.evidence(runId);
               const revision = yield* reader.revision();
@@ -636,7 +636,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               assert(first !== undefined);
               assert.deepStrictEqual(after.snapshot.run, before.snapshot.run);
               assert.deepStrictEqual(after.snapshot.attempts, [
-                new Attempt({ ...first, failureResolution: resolution }),
+                Attempt.make({ ...first, failureResolution: resolution }),
               ]);
               assert.deepStrictEqual(after.transcript, before.transcript);
               assert.deepStrictEqual(
@@ -662,7 +662,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               assert(started._tag === "AttemptStarted");
               yield* store.finishAttempt(
                 started.execution.attempt,
-                Result.fail(new AgentFailure({ message: "New failure" })),
+                Result.fail(AgentFailure.make({ message: "New failure" })),
               );
               const stale = yield* Effect.flip(
                 store.resolveFailure(runId, first.id, Option.none()),
@@ -678,7 +678,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               assert.deepStrictEqual(
                 resolvedAgain.attempts[1]?.failureResolution,
                 Option.some(
-                  new FailureResolution({
+                  FailureResolution.make({
                     resolvedAt: yield* DateTime.now,
                     operator: Option.none(),
                   }),
@@ -695,13 +695,13 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
     it.live("commits the failed state with the capped Attempt", () =>
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
-        const event = new Event({
+        const event = Event.make({
           id: EventId.make("store-event"),
           dedupKey: DedupKey.make("store/event/revision"),
           payload: {},
           receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
         });
-        const submission = new Submission({
+        const submission = Submission.make({
           event,
           itemKey: ItemKey.make("store-item"),
           loop: LoopName.make("store-loop"),
@@ -714,7 +714,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           parentModel: Option.none(),
         });
         const runId = RunId.make("store-run");
-        const failure = new InfraFailure({
+        const failure = InfraFailure.make({
           message: "offline",
           cause: new Error("offline"),
         });
@@ -768,8 +768,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
     it.live("an approved Run records its source once and is Queued until its attempt starts", () =>
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
-        const submission = new Submission({
-          event: new Event({
+        const submission = Submission.make({
+          event: Event.make({
             id: EventId.make("queued-event"),
             dedupKey: DedupKey.make("queued/event/revision"),
             payload: {},
@@ -785,7 +785,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           agent: testAgent,
           parentModel: Option.none(),
         });
-        const approval = new Event({
+        const approval = Event.make({
           id: EventId.make("queued-approval"),
           dedupKey: DedupKey.make("queued/approval"),
           payload: { approved: true },
@@ -794,9 +794,9 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
         const runId = RunId.make("queued-run");
 
         // A UI approval without a configured operator login records only its channel.
-        const unnamed = new ApprovalSource({ channel: "ui", approver: Option.none() });
+        const unnamed = ApprovalSource.make({ channel: "ui", approver: Option.none() });
         const recorded = Option.some(
-          new RunApproval({ approvedAt: approval.receivedAt, source: Option.some(unnamed) }),
+          RunApproval.make({ approvedAt: approval.receivedAt, source: Option.some(unnamed) }),
         );
 
         yield* Effect.gen(function* () {
@@ -813,7 +813,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           yield* store.approve(
             runId,
             approval,
-            new ApprovalSource({
+            ApprovalSource.make({
               channel: "ui",
               approver: Option.some(OperatorLogin.make("Philippe")),
             }),
@@ -834,8 +834,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
     it.live("reports a run closed while queued instead of starting an attempt", () =>
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
-        const submission = new Submission({
-          event: new Event({
+        const submission = Submission.make({
+          event: Event.make({
             id: EventId.make("closed-event"),
             dedupKey: DedupKey.make("closed/event/revision"),
             payload: {},

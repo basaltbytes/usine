@@ -15,23 +15,22 @@ export const formatConfigurationEntity = (
 ): Effect.Effect<string, ConfigurationInvalid> => {
   const source =
     entity.key.kind === "agent"
-      ? Schema.decodeUnknownEffect(AgentJson)(entity.value).pipe(Effect.map(formatAgent))
+      ? Schema.decodeEffect(AgentJson)(entity.value).pipe(Effect.map(formatAgent))
       : entity.key.kind === "loop"
-        ? Schema.decodeUnknownEffect(LoopJson)(entity.value).pipe(Effect.map(formatLoop))
+        ? Schema.decodeEffect(LoopJson)(entity.value).pipe(Effect.map(formatLoop))
         : Effect.succeed(writeYaml(entity.value));
   return source.pipe(
-    Effect.mapError(
-      (error) =>
-        new ConfigurationInvalid({
-          problems: [
-            new ConfigFileError({
-              file: InstancePath.make(entity.key.key),
-              stage: "schema",
-              expression: Option.none(),
-              message: error.message,
-            }),
-          ],
-        }),
+    Effect.mapError((error) =>
+      ConfigurationInvalid.make({
+        problems: [
+          ConfigFileError.make({
+            file: InstancePath.make(entity.key.key),
+            stage: "schema",
+            expression: Option.none(),
+            message: error.message,
+          }),
+        ],
+      }),
     ),
   );
 };
@@ -59,20 +58,21 @@ export const parseConfigurationEntity = (
         : parseYamlDocument(file, source).pipe(
             Effect.flatMap((document) =>
               Schema.decodeUnknownEffect(Schema.Json)(document.toJS()).pipe(
-                Effect.mapError(
-                  (error) =>
-                    new ConfigFileError({
-                      file,
-                      stage: "schema",
-                      expression: Option.none(),
-                      message: error.message,
-                    }),
+                Effect.mapError((error) =>
+                  ConfigFileError.make({
+                    file,
+                    stage: "schema",
+                    expression: Option.none(),
+                    message: error.message,
+                  }),
                 ),
               ),
             ),
           );
   return value.pipe(
-    Effect.map((value) => new ConfigurationEntity({ key, value })),
-    Effect.mapError((problem) => new ConfigurationInvalid({ problems: [problem] })),
+    Effect.mapBoth({
+      onSuccess: (value) => ConfigurationEntity.make({ key, value }),
+      onFailure: (problem) => ConfigurationInvalid.make({ problems: [problem] }),
+    }),
   );
 };

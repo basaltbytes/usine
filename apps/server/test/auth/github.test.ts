@@ -78,7 +78,7 @@ it.each(["none", "id", "secret", "both"] as const)(
   (override) =>
     Effect.runPromise(
       Effect.gen(function* () {
-        const fromFile = yield* Schema.decodeUnknownEffect(GitHubAppSecretsFromJson)(
+        const fromFile = yield* Schema.decodeEffect(GitHubAppSecretsFromJson)(
           JSON.stringify({
             app_id: 123,
             private_key: "-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----",
@@ -109,7 +109,7 @@ it.each(["none", "id", "secret", "both"] as const)(
         const file =
           override === "both"
             ? Effect.die("Complete overrides must not read the file")
-            : Effect.succeed(Option.some(fromFile));
+            : Effect.succeedSome(fromFile);
         const result = yield* Effect.flatMap(GitHubSignIn, (github) =>
           github.web("code", "https://usine.example/api/auth/callback"),
         ).pipe(

@@ -9,7 +9,7 @@ it("resolves a task route through any project member and rejects unassigned repo
   const [original] = boardOverview().projects;
   if (original === undefined) throw new Error("Missing fixture project");
   const second = RepositoryName.make("board-test/second");
-  const project = new ProjectView({
+  const project = ProjectView.make({
     ...original,
     id: ProjectId.make("product"),
     repositories: [original.repository, second],

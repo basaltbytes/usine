@@ -18,7 +18,7 @@ export const fixedInstanceLayer = (instance: LoadedInstance) =>
 /** A fixed instance with `config` and no Agents or Loops, for Worker and engine tests. */
 export const fixedConfigLayer = (config: UsineConfig) =>
   fixedInstanceLayer(
-    new LoadedInstance({
+    LoadedInstance.make({
       config,
       agents: [],
       invalidAgents: [],

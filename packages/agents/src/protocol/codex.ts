@@ -183,9 +183,9 @@ export const TurnActivity = Schema.Struct({ turnId: Schema.String });
 
 // Upstream sends partial updates where any field can be absent, so only `usedPercent` is required.
 export const RateLimitWindow = Schema.Struct({
-  usedPercent: Schema.Number,
-  windowDurationMins: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  resetsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  usedPercent: Schema.Finite,
+  windowDurationMins: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  resetsAt: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
 });
 /** A partial account usage update; omitted windows are also absent in the normalized snapshot. */
 export const RateLimitsUpdated = Schema.Struct({

@@ -71,7 +71,7 @@ const driftFields = (
 };
 
 const createInput = (label: DeclaredLabel): NewRepositoryLabel =>
-  new NewRepositoryLabel({
+  NewRepositoryLabel.make({
     name: RepositoryLabelName.make(label.name),
     color: Option.map(label.color, RepositoryLabelColor.make),
     description: label.description,
@@ -140,7 +140,7 @@ export class LabelReconciler extends Context.Service<
             if (Result.isFailure(created)) {
               const error = created.failure;
               findings.push(
-                new LabelPreflightFinding({
+                LabelPreflightFinding.make({
                   repository,
                   label: declaration.name,
                   errorTag: error._tag,
@@ -173,7 +173,7 @@ export class LabelReconciler extends Context.Service<
               continue;
             }
 
-            const label = new StoredRepositoryLabel({
+            const label = StoredRepositoryLabel.make({
               name: created.success.name,
               color: Option.some(created.success.color),
               description: created.success.description,

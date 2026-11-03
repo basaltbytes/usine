@@ -38,23 +38,21 @@ export const gitHubCredentialLayer: Layer.Layer<
     const discover = (repository: RepositoryName) =>
       instances.get.pipe(
         Effect.flatMap(({ config }) => app.projectAccess(config.repos.map(({ name }) => name))),
-        Effect.map(
-          (access) =>
+        Effect.mapBoth({
+          onSuccess: (access) =>
             new Map(
               access
                 .filter((project): project is CoveredProject => project._tag === "CoveredProject")
                 .map((project) => [project.repository, project]),
             ),
-        ),
-        Effect.mapError(
-          (cause) =>
-            new CredentialUnavailableError({
+          onFailure: (cause) =>
+            CredentialUnavailableError.make({
               repository,
               reason: reasonOf(cause),
               message: `Could not discover GitHub App repository access: ${cause.message}`,
               cause,
             }),
-        ),
+        }),
       );
 
     /** Refreshes the cached project map once on a miss before returning "not covered". */
@@ -82,7 +80,7 @@ export const gitHubCredentialLayer: Layer.Layer<
         }),
       );
       if (Option.isNone(project)) {
-        return yield* new CredentialUnavailableError({
+        return yield* CredentialUnavailableError.make({
           repository,
           reason: "refused",
           message: `The GitHub App installation has no access to "${repository}"`,
@@ -98,14 +96,13 @@ export const gitHubCredentialLayer: Layer.Layer<
           yield* Effect.annotateCurrentSpan({ repository, attemptId, permissions });
           const project = yield* projectFor(repository);
           const token = yield* app.workerToken(project, permissions).pipe(
-            Effect.mapError(
-              (cause) =>
-                new CredentialUnavailableError({
-                  repository,
-                  reason: reasonOf(cause),
-                  message: `Could not create a worker token for "${repository}": ${cause.message}`,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              CredentialUnavailableError.make({
+                repository,
+                reason: reasonOf(cause),
+                message: `Could not create a worker token for "${repository}": ${cause.message}`,
+                cause,
+              }),
             ),
           );
           yield* Effect.logInfo("Minted a single-repository worker token", {
@@ -113,7 +110,7 @@ export const gitHubCredentialLayer: Layer.Layer<
             attemptId,
             permissions,
           });
-          return new WorkerCredential({ value: token.value, expiresAt: token.expiresAt });
+          return WorkerCredential.make({ value: token.value, expiresAt: token.expiresAt });
         },
       ),
     });

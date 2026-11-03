@@ -11,7 +11,7 @@ import { conflictingSalvageMessage, runStateLine } from "~/lib/runs/strings";
 describe("salvage copy in the reader", () => {
   it("names the conflicting salvage a retry starts without", () => {
     const message = conflictingSalvageMessage(
-      new SalvagePushed({
+      SalvagePushed.make({
         ref: SalvageRef.make("usine/salvage/run/2"),
         commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
       }),
@@ -24,7 +24,7 @@ describe("salvage copy in the reader", () => {
 
 describe("run state while a parent task isn't confirmed stopped", () => {
   const stop = (runId: string) =>
-    new UnconfirmedStopView({
+    UnconfirmedStopView.make({
       runId: RunId.make(runId),
       attemptNumber: AttemptNumber.make(1),
       worker: WorkerName.make("local"),
@@ -65,7 +65,7 @@ it("shows the provider refusal and the scheduled attempt in the run header", () 
     attempts: [],
     upgradeWait: null,
     machineWait: null,
-    providerRetry: new ProviderRetry({
+    providerRetry: ProviderRetry.make({
       message,
       nextAttempt: AttemptNumber.make(2),
       retryAt: DateTime.makeUnsafe(new Date(2026, 9, 29, 2, 4)),
@@ -82,7 +82,7 @@ it("shows the assigned worker quota refusal while a persisted attempt waits for 
     attempts: [],
     upgradeWait: null,
     providerRetry: null,
-    machineWait: new MachineQuotaWait({
+    machineWait: MachineQuotaWait.make({
       worker: WorkerName.make("hetzner-pool"),
       message: "shared core limit exceeded",
     }),

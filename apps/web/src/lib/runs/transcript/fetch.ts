@@ -21,8 +21,8 @@ export const fetchRunDetail = async (
   while (!page.run.canCancel) {
     const last = page.transcript.at(-1);
     if (last === undefined) break;
-    page = await read(new TailTranscriptRequest({ after: last.sequence }));
+    page = await read(TailTranscriptRequest.make({ after: last.sequence }));
     transcript = mergeTranscript(transcript, page.transcript);
   }
-  return new RunDetailView({ ...page, transcript });
+  return RunDetailView.make({ ...page, transcript });
 };

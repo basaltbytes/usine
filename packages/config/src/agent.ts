@@ -22,10 +22,10 @@ export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile"
 }) {
   /** Returns the runtime agent with this persona, child brain, and parent overrides. */
   get agent(): Agent {
-    return new Agent({
+    return Agent.make({
       name: this.name,
       persona: this.persona,
-      brain: new BrainSpec({ harness: this.harness, model: this.model, effort: this.effort }),
+      brain: BrainSpec.make({ harness: this.harness, model: this.model, effort: this.effort }),
       parentModel: this.parentModel,
       parentEffort: this.parentEffort,
     });

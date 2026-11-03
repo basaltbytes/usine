@@ -66,8 +66,8 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   ),
   /** The CI requirement for successful pushes, or `None` for loops that finish in the session. */
   ci: Schema.Option(CiPolicy).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** The repository access of the loop's attempts. */
   permissions: LoopPermissions.pipe(
@@ -75,9 +75,7 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
     Schema.withConstructorDefault(Effect.succeed("write" as const)),
   ),
   /** The loop's queue priority; `None` evaluates to zero. */
-  priority: Schema.Option(LoopPriority).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
-  ),
+  priority: Schema.Option(LoopPriority).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
   /** The name of the single step started by each run; file parsing defaults to `run`. */
   step: StepName,
   /** The rostered agent that runs the step. */
@@ -122,13 +120,12 @@ export const evaluateLoopPriority = Effect.fn("Loop.evaluatePriority")(function*
     environmentFor(loop.trigger.on),
     context,
   );
-  return yield* Schema.decodeUnknownEffect(PriorityValue)(Number(value)).pipe(
-    Effect.mapError(
-      () =>
-        new ExpressionEvaluationError({
-          source: priority,
-          message: "Priority must be a safe integer between -9007199254740991 and 9007199254740991",
-        }),
+  return yield* Schema.decodeEffect(PriorityValue)(Number(value)).pipe(
+    Effect.mapError(() =>
+      ExpressionEvaluationError.make({
+        source: priority,
+        message: "Priority must be a safe integer between -9007199254740991 and 9007199254740991",
+      }),
     ),
   );
 });

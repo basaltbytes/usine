@@ -15,7 +15,7 @@ import {
   withInstance,
 } from "./support.ts";
 
-const question = new QuestionFailure({
+const question = QuestionFailure.make({
   question: "Should the egress transport be HTTP CONNECT or a SOCKS proxy?",
 });
 

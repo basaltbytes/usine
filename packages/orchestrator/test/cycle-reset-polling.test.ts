@@ -51,8 +51,8 @@ import {
 } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
   agents: [],
   invalidAgents: [],
   loops: [],
@@ -81,7 +81,7 @@ const issuePayload = (number: number, labels: ReadonlyArray<string> = []): Issue
 });
 
 const storedIssue = (number: number) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey: ItemKey.make(JSON.stringify(["github", repository, number])),
     repository,
     source: ItemProjectionSource.make("issue"),
@@ -90,7 +90,7 @@ const storedIssue = (number: number) =>
     payload: issuePayload(number),
   });
 
-const storedCursor = new PollCursor({
+const storedCursor = PollCursor.make({
   entityTag: Option.some(EntityTag.make('"stored"')),
   watermark: Option.some(DateTime.makeUnsafe("2026-09-05T00:00:00Z")),
 });
@@ -100,11 +100,11 @@ describe("cycle reset polling", () => {
     "restarts cursors after a reset of an Item polling never stored, retains failed refreshes, and continues a committed backlog",
     () => {
       const cursors = memoryCursorStore();
-      const fresh = new PollCursor({
+      const fresh = PollCursor.make({
         entityTag: Option.some(EntityTag.make('"fresh"')),
         watermark: Option.some(DateTime.makeUnsafe("2026-09-05T00:00:00Z")),
       });
-      const reset = Schema.decodeUnknownSync(CycleBudgetReset)({
+      const reset = Schema.decodeSync(CycleBudgetReset)({
         itemKey: ItemKey.make("pr-72"),
         repository,
         generation: 1,
@@ -128,18 +128,18 @@ describe("cycle reset polling", () => {
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
+          Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
         snapshot: () => Effect.die("no Items on this page"),
         changes: (_repository, cursor) =>
           Effect.gen(function* () {
             seen.push(cursor);
             if (fails)
-              return yield* new GitHubApiError({
+              return yield* GitHubApiError.make({
                 operation: "poll-repository-changes",
                 status: Option.some(503),
                 message: "unavailable",
               });
-            return new RepositoryChanges({
+            return RepositoryChanges.make({
               cursor: fresh,
               items: [],
               backlog: true,
@@ -172,7 +172,7 @@ describe("cycle reset polling", () => {
 
   it.effect("refreshes only the reset Item and normal changes, keeping the stored cursor", () => {
     const cursors = memoryCursorStore();
-    const reset = Schema.decodeUnknownSync(CycleBudgetReset)({
+    const reset = Schema.decodeSync(CycleBudgetReset)({
       itemKey: storedIssue(72).itemKey,
       repository,
       generation: 1,
@@ -195,11 +195,11 @@ describe("cycle reset polling", () => {
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
-        Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
+        Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
       snapshot: (_repository, item) =>
         Effect.sync(() => {
           fetched.push(item.number);
-          return new IssueSnapshot({
+          return IssueSnapshot.make({
             payload: issuePayload(item.number),
             contentHash: ContentHash.make("b".repeat(64)),
           });
@@ -208,15 +208,14 @@ describe("cycle reset polling", () => {
         Effect.sync(() => {
           seen.push(cursor);
           return changed.length === 0
-            ? new RepositoryNotModified({ cursor, nextPollAt: Option.none() })
-            : new RepositoryChanges({
+            ? RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })
+            : RepositoryChanges.make({
                 cursor: storedCursor,
-                items: changed.map(
-                  (number) =>
-                    new ChangedIssue({
-                      number,
-                      updatedAt: DateTime.makeUnsafe("2026-09-05T00:00:00Z"),
-                    }),
+                items: changed.map((number) =>
+                  ChangedIssue.make({
+                    number,
+                    updatedAt: DateTime.makeUnsafe("2026-09-05T00:00:00Z"),
+                  }),
                 ),
                 backlog: false,
                 nextPollAt: Option.none(),
@@ -262,7 +261,7 @@ describe("cycle reset polling", () => {
 
   it.effect("keeps a reset pending while GitHub returns a server error for its Item", () => {
     const cursors = memoryCursorStore();
-    const reset = Schema.decodeUnknownSync(CycleBudgetReset)({
+    const reset = Schema.decodeSync(CycleBudgetReset)({
       itemKey: storedIssue(72).itemKey,
       repository,
       generation: 1,
@@ -284,23 +283,23 @@ describe("cycle reset polling", () => {
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
-        Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
+        Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
       snapshot: (_repository, item) =>
         Effect.gen(function* () {
           fetched.push(item.number);
           if (unavailable)
-            return yield* new GitHubApiError({
+            return yield* GitHubApiError.make({
               operation: "fetch-issue-snapshot",
               status: Option.some(504),
               message: "GitHub returned HTTP status 504",
             });
-          return new IssueSnapshot({
+          return IssueSnapshot.make({
             payload: issuePayload(item.number),
             contentHash: ContentHash.make("b".repeat(64)),
           });
         }),
       changes: (_repository, cursor) =>
-        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
     };
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
@@ -350,7 +349,7 @@ it.live(
           `---\ntrigger:\n  on: issue\n  if: 'item.labels.nodes.exists(l, l.name == "ready")'\nmax_cycles: 1\napproval: ${approval}\nagent: reviewer\n---\n${body}`,
         );
       const loop = yield* makeLoop("Original task {{ item.number }}.", "none");
-      const agent = Schema.decodeUnknownSync(AgentFile)({
+      const agent = Schema.decodeSync(AgentFile)({
         name: "reviewer",
         harness: "codex",
         model: "test-model",
@@ -360,7 +359,7 @@ it.live(
         persona: "Review this Item.",
       });
       const withLoop = (loop: LoopFile) =>
-        new LoadedInstance({ ...instance, agents: [agent], loops: [loop] });
+        LoadedInstance.make({ ...instance, agents: [agent], loops: [loop] });
       const entered = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
       let shouldPause = false;
@@ -401,13 +400,13 @@ it.live(
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
-          Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
+          Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
         changes: () =>
           Effect.succeed(
-            new RepositoryChanges({
+            RepositoryChanges.make({
               cursor: PollCursor.empty,
               items: [
-                new ChangedIssue({
+                ChangedIssue.make({
                   number: 72,
                   updatedAt: DateTime.makeUnsafe("2026-09-05T00:00:00Z"),
                 }),
@@ -417,18 +416,17 @@ it.live(
             }),
           ),
         snapshot: () =>
-          Effect.sync(
-            () =>
-              new IssueSnapshot({
-                payload: payload(),
-                contentHash: ContentHash.make(hash.repeat(64)),
-              }),
+          Effect.sync(() =>
+            IssueSnapshot.make({
+              payload: payload(),
+              contentHash: ContentHash.make(hash.repeat(64)),
+            }),
           ),
       };
       const executor = Layer.succeed(StepExecutor)({
         workers: Effect.succeed([WorkerName.make("local")]),
         isLive: () => Effect.succeed(false),
-        outcome: () => Effect.succeed(Option.none()),
+        outcome: () => Effect.succeedNone,
         recover: () => Effect.void,
         intervene: () => Effect.void,
         occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
@@ -436,7 +434,7 @@ it.live(
         discard: () => Effect.void,
         reserve: () => Effect.succeed({ worker: WorkerName.make("test"), release: Effect.void }),
         interrupt: () => Effect.void,
-        execute: () => Effect.succeed(new StepResult({ message: "Reviewed", facts: [] })),
+        execute: () => Effect.succeed(StepResult.make({ message: "Reviewed", facts: [] })),
       });
       const engineLayer = localEngineLayer(directory).pipe(
         Layer.provide(executor),
@@ -451,7 +449,7 @@ it.live(
       );
       const runtime = Layer.merge(
         dependencies,
-        PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
+        PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor), Layer.provide(dependencies)),
       );
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
@@ -471,7 +469,7 @@ it.live(
         assert(blocked?._tag === "CycleBlocked");
         const acknowledgements = yield* AttentionAcknowledgements;
         const needFor = (ask: CycleBudgetAsk) =>
-          new CycleBudgetNeed({
+          CycleBudgetNeed.make({
             id: `cycle-budget:${ask.id}`,
             ask,
             itemLabel: `${repository}#72`,
@@ -479,7 +477,7 @@ it.live(
           });
         const dismiss = (ask: CycleBudgetAsk) =>
           acknowledgements.dismiss(
-            new AttentionAcknowledgement({
+            AttentionAcknowledgement.make({
               ...attentionKey(needFor(ask)),
               dismissedBy: Option.none(),
               dismissedAt: DateTime.makeUnsafe("2026-11-02T19:45:00Z"),
@@ -494,7 +492,7 @@ it.live(
         yield* dismiss(blocked.ask);
         yield* polling.poll(withLoop(loop));
         assert.deepStrictEqual((yield* attention).needsYou, []);
-        const sibling = new LoopFile({ ...loop, name: LoopName.make("fix") });
+        const sibling = LoopFile.make({ ...loop, name: LoopName.make("fix") });
         const refused = (yield* polling.poll(withLoop(sibling))).submissions[0];
         assert(refused?._tag === "CycleBlocked");
         assert.strictEqual(refused.ask.id, blocked.ask.id);
@@ -517,7 +515,7 @@ it.live(
         ready = false;
         yield* budgets.reset(
           blocked.ask.id,
-          new Event({
+          Event.make({
             id: EventId.make("reset-in-flight"),
             dedupKey: DedupKey.make("reset-in-flight"),
             receivedAt: yield* DateTime.now,
@@ -547,7 +545,9 @@ it.live(
         assert.deepStrictEqual(yield* budgets.asks(), []);
       }).pipe(Effect.provide(runtime));
     }).pipe(
-      Effect.provide(ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer))),
-      Effect.provide(NodeServices.layer),
+      Effect.provide([
+        ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
+        NodeServices.layer,
+      ]),
     ),
 );

@@ -102,11 +102,11 @@ export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk
   /** Records a changed block; repeated sightings of the same event preserve the ask. */
   recordBlock(loop: LoopName, eventId: EventId): CycleBudgetAsk {
     if (this.blocks.some((block) => block.loop === loop && block.eventId === eventId)) return this;
-    return new CycleBudgetAsk({
+    return CycleBudgetAsk.make({
       ...this,
       blocks: [
         ...this.blocks.filter((block) => block.loop !== loop),
-        new CycleBudgetBlock({ loop, eventId }),
+        CycleBudgetBlock.make({ loop, eventId }),
       ],
     });
   }

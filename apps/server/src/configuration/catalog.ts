@@ -5,7 +5,7 @@ import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Effect, Option } from "effect";
 
 const unavailable = () =>
-  new OperatorHttpError({
+  OperatorHttpError.make({
     error: "BackendUnavailableError",
     message: "GitHub configuration choices are unavailable. Check the GitHub App credentials.",
   });

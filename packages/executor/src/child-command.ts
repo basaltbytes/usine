@@ -56,15 +56,14 @@ export const collectCommand = (
     }),
   ).pipe(
     Effect.timeout(COMMAND_TIMEOUT),
-    Effect.mapError(
-      (cause) =>
-        new ExecutorOperationError({
-          operation,
-          message: Cause.isTimeoutError(cause)
-            ? `${command} didn't finish within ${COMMAND_TIMEOUT}`
-            : `Can't run ${command}`,
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      ExecutorOperationError.make({
+        operation,
+        message: Cause.isTimeoutError(cause)
+          ? `${command} didn't finish within ${COMMAND_TIMEOUT}`
+          : `Can't run ${command}`,
+        cause,
+      }),
     ),
   );
 
@@ -84,7 +83,7 @@ export const requireSuccess = Effect.fn("Executor.requireSuccess")(function* (
       args: args.join(" "),
       exitCode: String(result.exitCode),
     });
-    return yield* new ExecutorOperationError({
+    return yield* ExecutorOperationError.make({
       operation,
       message: `${command} exited with code ${String(result.exitCode)}`,
       cause: new Error(result.stderr.trim() || `${command} exited without an error message`),

@@ -12,7 +12,7 @@ export const machineStartsFor = Effect.fn("SshExecutor.machineStartsFor")(functi
         .readFileString(file)
         .pipe(
           Effect.flatMap((text) =>
-            Schema.decodeUnknownEffect(CountsJson)(text, { onExcessProperty: "error" }),
+            Schema.decodeEffect(CountsJson)(text, { onExcessProperty: "error" }),
           ),
         )
     : [];
@@ -30,7 +30,7 @@ export const machineStartsFor = Effect.fn("SshExecutor.machineStartsFor")(functi
         );
         const next = current
           .filter((entry) => entry !== previous)
-          .concat(new MachineStarts({ worker, provider, day, count: (previous?.count ?? 0) + 1 }));
+          .concat(MachineStarts.make({ worker, provider, day, count: (previous?.count ?? 0) + 1 }));
         yield* fs.writeFileString(`${file}.next`, yield* Schema.encodeEffect(CountsJson)(next));
         yield* fs.rename(`${file}.next`, file);
         yield* Effect.logInfo("Recorded a machine start", {
@@ -43,14 +43,13 @@ export const machineStartsFor = Effect.fn("SshExecutor.machineStartsFor")(functi
       }),
     ).pipe(
       Effect.uninterruptible,
-      Effect.mapError(
-        (cause) =>
-          new WorkerCapabilityError({
-            worker,
-            capability: "machine",
-            message: `Could not persist the machine start count: ${cause.message}`,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        WorkerCapabilityError.make({
+          worker,
+          capability: "machine",
+          message: `Could not persist the machine start count: ${cause.message}`,
+          cause,
+        }),
       ),
     );
   });

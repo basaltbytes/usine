@@ -155,7 +155,7 @@ const appChange = (botLogin: BotLogin, node: TimelineNode): ReadonlyArray<ItemCh
     actor.__typename === "Bot" &&
     actor.login === botLogin.slice(0, -"[bot]".length);
   const label = (from: typeof TimelineLabel.Type) =>
-    new RepositoryLabel({
+    RepositoryLabel.make({
       name: from.name,
       color: from.color,
       description: Option.fromNullishOr(from.description),
@@ -163,19 +163,19 @@ const appChange = (botLogin: BotLogin, node: TimelineNode): ReadonlyArray<ItemCh
   switch (node.__typename) {
     case "LabeledEvent":
       return byApp(node.actor)
-        ? [new LabelAdded({ at: node.createdAt, label: label(node.label) })]
+        ? [LabelAdded.make({ at: node.createdAt, label: label(node.label) })]
         : [];
     case "UnlabeledEvent":
       return byApp(node.actor)
-        ? [new LabelRemoved({ at: node.createdAt, label: label(node.label) })]
+        ? [LabelRemoved.make({ at: node.createdAt, label: label(node.label) })]
         : [];
     case "IssueComment":
-      return byApp(node.author) ? [new Commented({ at: node.createdAt, url: node.url })] : [];
+      return byApp(node.author) ? [Commented.make({ at: node.createdAt, url: node.url })] : [];
     case "PullRequestReview": {
       const state = node.state;
       // A pending review is a draft visible only to its author and hasn't changed anything on GitHub.
       if (!byApp(node.author) || state === "PENDING") return [];
-      return [new Reviewed({ at: node.submittedAt ?? node.createdAt, url: node.url, state })];
+      return [Reviewed.make({ at: node.submittedAt ?? node.createdAt, url: node.url, state })];
     }
   }
 };
@@ -232,7 +232,7 @@ export class GitHubItemHistory extends Context.Service<
             );
           const found = data.repository.value.issueOrPullRequest;
           if (Option.isNone(found))
-            return yield* new GitHubItemNotFoundError({
+            return yield* GitHubItemNotFoundError.make({
               operation: "fetch-item-timeline",
               item,
               message: `Issue or pull request ${repository}#${item} was not found on GitHub. It was deleted or transferred, or the GitHub App can no longer read it.`,

@@ -19,7 +19,6 @@ export const withRunStore = <A, E>(effect: Effect.Effect<A, E, RunStore | SqlCli
       }),
     );
     return yield* effect.pipe(
-      Effect.provide(RunStore.layer),
-      Effect.provide(localSqliteLayer(directory)),
+      Effect.provide(Layer.mergeAll(RunStore.layer, localSqliteLayer(directory))),
     );
   }).pipe(Effect.provide(NodeServices.layer));

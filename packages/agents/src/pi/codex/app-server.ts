@@ -40,7 +40,7 @@ const RpcSuccessResponse = Schema.Struct({
 const RpcErrorResponse = Schema.Struct({
   id: Schema.Int,
   error: Schema.Struct({
-    code: Schema.Number,
+    code: Schema.Finite,
     message: Schema.String,
     data: Schema.optionalKey(Schema.Json),
   }),
@@ -49,7 +49,7 @@ const RpcResponse = Schema.Union([RpcSuccessResponse, RpcErrorResponse]);
 const RpcMessage = Schema.Struct({
   method: Schema.String,
   params: Schema.optionalKey(Schema.Json),
-  id: Schema.optionalKey(Schema.Union([Schema.Number, Schema.String])),
+  id: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.String])),
 });
 const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 const encoder = new TextEncoder();
@@ -334,7 +334,7 @@ const makeCodexAppServer = Effect.gen(function* () {
                       request,
                       `Codex app-server exited with code ${String(exitCode)}`,
                       request.host._tag === "RemoteShell" && Option.isSome(request.sessionId)
-                        ? new RemoteCodexProcessLost({ message: `exit code ${exitCode}` })
+                        ? RemoteCodexProcessLost.make({ message: `exit code ${exitCode}` })
                         : { exitCode, stderr },
                     ),
                   ),

@@ -17,7 +17,7 @@ export class RetryRequest extends Schema.Class<RetryRequest>("@usine/engine/Retr
 }) {}
 
 /** A retry without a login that keeps the Run's task and Agent. */
-export const plainRetry = new RetryRequest({
+export const plainRetry = RetryRequest.make({
   requestedBy: Option.none(),
   amendment: Option.none(),
 });

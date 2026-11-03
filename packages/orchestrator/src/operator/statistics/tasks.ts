@@ -249,7 +249,7 @@ const measure = (
   const end = workEnd(runs, mergedAt);
   const duration = Math.max(0, end - start);
   return Option.some({
-    view: new TaskDoneView({
+    view: TaskDoneView.make({
       repository: task.repository,
       number: task.number,
       mergedAt: DateTime.formatIso(task.mergedAt),
@@ -275,7 +275,7 @@ const meanShares = (
     : order.flatMap((loop) => {
         const share =
           sum(parts.map(({ whole, loops }) => (loops.get(loop) ?? 0) / whole)) / parts.length;
-        return share > 0 ? [new LoopShareView({ loop, share: Math.min(1, share) })] : [];
+        return share > 0 ? [LoopShareView.make({ loop, share: Math.min(1, share) })] : [];
       });
 
 const timeView = (
@@ -289,7 +289,7 @@ const timeView = (
     waiting,
   }));
   const runs = times.flatMap(({ runs }) => runs);
-  return new TaskTimeView({
+  return TaskTimeView.make({
     tasks: times.length,
     loops: meanShares(parts, order),
     waiting: Math.min(1, sum(parts.map(({ waiting, whole }) => waiting / whole)) / parts.length),
@@ -298,7 +298,7 @@ const timeView = (
       return Option.match(median(durations), {
         onNone: () => [],
         onSome: (middle) => [
-          new LoopRunTimeView({ loop, runs: durations.length, medianMillis: Math.round(middle) }),
+          LoopRunTimeView.make({ loop, runs: durations.length, medianMillis: Math.round(middle) }),
         ],
       });
     }),
@@ -313,7 +313,7 @@ const tokensView = (
     onNone: () => null,
     onSome: (middle) => {
       const costs = tokens.flatMap(({ usd }) => Option.toArray(usd));
-      return new TaskTokensView({
+      return TaskTokensView.make({
         tasks: tokens.length,
         medianTokens: TokenCount.make(Math.round(middle)),
         loops: meanShares(
@@ -323,7 +323,7 @@ const tokensView = (
         cost: Option.match(median(costs), {
           onNone: () => null,
           onSome: (usd) =>
-            new TaskCostView({
+            TaskCostView.make({
               tasks: costs.length,
               medianUsd: UsdAmount.make(usd),
               estimate: tokens.some(({ usd, estimate }) => Option.isSome(usd) && estimate),
@@ -379,7 +379,7 @@ export const taskStatisticsView = ({
     Option.getOrNull(
       Option.map(median(members.map(({ view }) => view.durationMillis)), Math.round),
     );
-  return new StatisticsView({
+  return StatisticsView.make({
     window,
     from: new Date(from).toISOString(),
     to: DateTime.formatIso(now),
@@ -389,7 +389,7 @@ export const taskStatisticsView = ({
     medianMillis: durations(tasks),
     periods: periodStarts(bucket, from, to).map((start) => {
       const members = tasks.filter(({ mergedAt }) => periodStart(bucket, mergedAt) === start);
-      return new TaskPeriodView({
+      return TaskPeriodView.make({
         start: utcDay(start),
         tasks: members.length,
         medianMillis: durations(members),
@@ -402,7 +402,7 @@ export const taskStatisticsView = ({
     time: timeView(times, order),
     tokens: tokensView(metered, order),
     untimed: EffectArray.isReadonlyArrayNonEmpty(untimed)
-      ? new UntimedTasksView({
+      ? UntimedTasksView.make({
           tasks: untimed.length,
           before: utcDay(startOfUtcDay(Math.max(...untimed)) + DAY),
         })

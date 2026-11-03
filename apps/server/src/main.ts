@@ -110,9 +110,9 @@ const main = Effect.gen(function* () {
     Effect.provideService(ConfigProvider.ConfigProvider, environment),
   );
 }).pipe(
-  Effect.provide(Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer, loggerLayer)),
+  Effect.provide([NodeServices.layer, FetchHttpClient.layer, loggerLayer]),
   // Only typed failures are caught: a defect still crashes with its full cause.
-  Effect.catch((failure) => exitWith(failureMessage(failure))),
+  Effect.catch((failure) => failure.pipe(failureMessage, exitWith)),
 );
 
 NodeRuntime.runMain(main);

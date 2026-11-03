@@ -81,7 +81,7 @@ describe("instance manifest", () => {
         .replace('"@usine/gateway":"0.2.1"', '"@usine/gateway":"0.2.2"'),
     );
     assert.strictEqual(
-      bumpPins(pinned, [new EnginePin({ name: "@usine/server", spec: "0.3.0" })], new Map()),
+      bumpPins(pinned, [EnginePin.make({ name: "@usine/server", spec: "0.3.0" })], new Map()),
       pinned,
     );
   });

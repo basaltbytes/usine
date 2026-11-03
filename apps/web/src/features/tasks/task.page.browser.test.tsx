@@ -153,18 +153,17 @@ afterEach(() => {
 it.each(["basaltbytes/usine", "Basaltbytes/Usine"])(
   "names the originating issue in the breadcrumb for secondary repository %s",
   async (repository) => {
-    overview = new ReadyOverview({
+    overview = ReadyOverview.make({
       ...taskOverview(),
-      projects: taskOverview().projects.map(
-        (project) =>
-          new ProjectView({
-            ...project,
-            repository: RepositoryName.make("basaltbytes/primary"),
-            repositories: [
-              RepositoryName.make("basaltbytes/primary"),
-              RepositoryName.make("Basaltbytes/Usine"),
-            ],
-          }),
+      projects: taskOverview().projects.map((project) =>
+        ProjectView.make({
+          ...project,
+          repository: RepositoryName.make("basaltbytes/primary"),
+          repositories: [
+            RepositoryName.make("basaltbytes/primary"),
+            RepositoryName.make("Basaltbytes/Usine"),
+          ],
+        }),
       ),
     });
     queryClient.setQueryData(overviewQuery().queryKey, overview);

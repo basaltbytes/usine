@@ -92,7 +92,7 @@ describe("local worker Loop permissions", () => {
               ].join(" && "),
             );
             observed.set(permissions, { status, push });
-            return yield* new AgentFailure({ message: "The review stopped after its push" });
+            return yield* AgentFailure.make({ message: "The review stopped after its push" });
           });
         const runtime = localExecutorLayer({
           instanceDirectory: InstanceDirectory.make(root),
@@ -104,7 +104,7 @@ describe("local worker Loop permissions", () => {
           Layer.provide(claudeLoginLockLayer),
         );
         const request = (permissions: LoopPermissions) =>
-          new CheckoutRequest({
+          CheckoutRequest.make({
             attemptId: AttemptId.make(`review/run/${permissions}`),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
@@ -206,7 +206,7 @@ describe("local worker Loop permissions", () => {
       return withLocalEngine({ credentials, attemptRuntime }, ({ engine }) =>
         Effect.gen(function* () {
           const accepted = yield* engine.submit(
-            new Submission({ ...submission(8), permissions: "read" }),
+            Submission.make({ ...submission(8), permissions: "read" }),
           );
           assert(accepted._tag === "Claimed");
           yield* waitFor(engine, accepted.runId, "Succeeded");

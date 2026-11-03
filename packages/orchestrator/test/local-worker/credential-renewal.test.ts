@@ -61,9 +61,9 @@ it.effect(
             minted += 1;
             renewalFiber = yield* Effect.fiberId;
             rearmed = false;
-            return new WorkerCredential({
+            return WorkerCredential.make({
               value: Redacted.make(`test-token-${minted}`),
-              expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 3_600_000),
+              expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 3600000),
             });
           }),
       });
@@ -96,7 +96,7 @@ it.effect(
         const scope = yield* Scope.make();
         const prepared = yield* executor
           .prepare(
-            new CheckoutRequest({
+            CheckoutRequest.make({
               attemptId: AttemptId.make("renew/work/1"),
               worker: WorkerName.make("local"),
               repository: RepositoryName.make("acme/demo"),

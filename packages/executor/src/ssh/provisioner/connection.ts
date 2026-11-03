@@ -40,18 +40,17 @@ export const machineConnections = Effect.gen(function* () {
     });
     const state = yield* Ref.make({ selected: endpoint, previous: Option.none<MachineEndpoint>() });
     yield* write(endpoint).pipe(
-      Effect.mapError(
-        (cause) =>
-          new WorkerCapabilityError({
-            worker,
-            capability: "machine",
-            message: `Can't record the SSH endpoint of machine ${id}: ${cause.message}`,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        WorkerCapabilityError.make({
+          worker,
+          capability: "machine",
+          message: `Can't record the SSH endpoint of machine ${id}: ${cause.message}`,
+          cause,
+        }),
       ),
     );
     const base = connect({ ...endpoint, port: Option.none() }).shell;
-    const shell = new RemoteShell({
+    const shell = RemoteShell.make({
       ...base,
       ssh: { command: base.ssh.command, args: ["-F", file, ...base.ssh.args] },
     });

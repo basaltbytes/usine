@@ -35,14 +35,14 @@ const ResourceAttributes = Schema.String.pipe(
 /** Returns the attributes in `OTEL_RESOURCE_ATTRIBUTES`, or none if it's unset. */
 const resourceAttributes = Effect.fn("Tracing.resourceAttributes")(function* () {
   const refuse = (error: { readonly message: string }) =>
-    new ResourceAttributesError({ variable: RESOURCE_ATTRIBUTES, message: error.message });
+    ResourceAttributesError.make({ variable: RESOURCE_ATTRIBUTES, message: error.message });
   const value = yield* Config.option(Config.String(RESOURCE_ATTRIBUTES)).pipe(
     Effect.mapError(refuse),
   );
   return yield* Option.match(value, {
     onNone: () => Effect.succeed({}),
     onSome: (attributes) =>
-      Schema.decodeUnknownEffect(ResourceAttributes)(attributes).pipe(Effect.mapError(refuse)),
+      Schema.decodeEffect(ResourceAttributes)(attributes).pipe(Effect.mapError(refuse)),
   });
 });
 

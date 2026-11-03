@@ -88,14 +88,14 @@ import { WithRouter } from "~/lib/testing/memory-router";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
-const brain = new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
+const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
 const attemptId = AttemptId.make("attempt-1");
 const attempt = (outcome: AttemptView["outcome"], salvage: AttemptView["salvage"] = null) =>
-  new AttemptView({
+  AttemptView.make({
     id: attemptId,
     number: AttemptNumber.make(1),
     worker: WorkerName.make("local"),
-    workerAccess: new LocalWorkerAccess(),
+    workerAccess: LocalWorkerAccess.make(),
     brain,
     task: AttemptTask.make("Fix issue 33."),
     agent: AgentName.make("developer"),
@@ -106,7 +106,7 @@ const attempt = (outcome: AttemptView["outcome"], salvage: AttemptView["salvage"
     salvage,
   });
 const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
-  new RunView({
+  RunView.make({
     agentBrain: brain,
     id: RunId.make("run-33"),
     itemKey,
@@ -118,7 +118,7 @@ const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
     openedAt: "2026-09-01T11:59:00.000Z",
     closedAt: "2026-09-01T12:25:00.000Z",
     task: "Fix issue 33.",
-    attempts: [attempt(new SucceededAttemptView())],
+    attempts: [attempt(SucceededAttemptView.make())],
     approval: null,
     runAgain: null,
     resultMessage: "Opened the pull request.",
@@ -131,7 +131,7 @@ const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
     ...fields,
   });
 const detail = (view: RunView, transcript: ReadonlyArray<TranscriptEventView> = []) =>
-  new RunDetailView({
+  RunDetailView.make({
     agentDefinitionChanged: false,
     run: view,
     eventDedupKey: '["start-dev","basaltbytes/usine",33]',
@@ -152,7 +152,7 @@ const member = (
   state: BoardItemLink["state"],
   title = "Board lanes",
 ) =>
-  new BoardItemLink({
+  BoardItemLink.make({
     itemKey: Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
     kind,
     number: ItemNumber.make(number),
@@ -163,21 +163,21 @@ const member = (
 /** Returns an overview whose Board shows one Task with `members`. */
 const overviewWith = (members: readonly [BoardItemLink, ...Array<BoardItemLink>]) => {
   const current = members.at(-1) ?? members[0];
-  return new ReadyOverview({
+  return ReadyOverview.make({
     projects: [
-      new ProjectView({
+      ProjectView.make({
         repository,
         status: "clear",
         runs: [],
-        board: new BoardView({
+        board: BoardView.make({
           lanes: [
-            new ReadOnlyBoardLaneView({
+            ReadOnlyBoardLaneView.make({
               id: BoardLaneId.make("fallback:all"),
               name: LaneName.make("All"),
               sources: [],
               origin: "fallback",
               items: [
-                new BoardTaskView({
+                BoardTaskView.make({
                   repository,
                   ...current,
                   title: members[0].title,
@@ -221,7 +221,7 @@ const heading = (
 ) =>
   renderToStaticMarkup(
     <RunHeader
-      detail={new RunDetailView({ ...view, eventPayload: payload })}
+      detail={RunDetailView.make({ ...view, eventPayload: payload })}
       overview={members === undefined ? undefined : overviewWith(members)}
       placement={placement}
       shared={shared}
@@ -255,9 +255,9 @@ describe("Run header", () => {
     const failed = run({
       state: "Failed",
       attempts: [
-        attempt(new FailedAttemptView({ failure: new AgentFailureView({ message: "Blocked" }) })),
-        new AttemptView({
-          ...attempt(new FailedAttemptView({ failure: new AgentFailureView({ message: "x" }) })),
+        attempt(FailedAttemptView.make({ failure: AgentFailureView.make({ message: "Blocked" }) })),
+        AttemptView.make({
+          ...attempt(FailedAttemptView.make({ failure: AgentFailureView.make({ message: "x" }) })),
           id: AttemptId.make("attempt-2"),
           number: AttemptNumber.make(2),
         }),
@@ -288,11 +288,11 @@ describe("Run header", () => {
     const failed = run({
       state: "Failed",
       attempts: [
-        attempt(new FailedAttemptView({ failure: new AgentFailureView({ message: "x" }) })),
+        attempt(FailedAttemptView.make({ failure: AgentFailureView.make({ message: "x" }) })),
       ],
     });
     const settled = (state: SettledItemState, payload = detail(failed).eventPayload) =>
-      heading(new RunDetailView({ ...detail(failed), settledItemState: state }), { payload });
+      heading(RunDetailView.make({ ...detail(failed), settledItemState: state }), { payload });
     assert.include(settled("issue-closed"), 'title="Issue #33, closed"');
     assert.include(settled("pr-closed", pullRequestPayload), 'title="Pull request #33, closed"');
     assert.include(settled("pr-merged", pullRequestPayload), 'title="Pull request #33, merged"');
@@ -371,73 +371,73 @@ describe("Run work facts", () => {
   const second = AttemptId.make("attempt-2");
   const twoAttempts = run({
     attempts: [
-      attempt(new SucceededAttemptView()),
-      new AttemptView({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
+      attempt(SucceededAttemptView.make()),
+      AttemptView.make({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
     ],
   });
   const childSession = (id: string, agent: string, harness: BrainSpec["harness"], model: string) =>
-    new ChildSession({
+    ChildSession.make({
       id: AgentSessionId.make(id),
       parentId: AgentSessionId.make("parent"),
       agent: AgentName.make(agent),
-      brain: new BrainSpec({ harness, model: ModelId.make(model), effort: "high" }),
+      brain: BrainSpec.make({ harness, model: ModelId.make(model), effort: "high" }),
     });
-  const parentSession = new ParentSession({
+  const parentSession = ParentSession.make({
     id: AgentSessionId.make("parent"),
     agent: AgentName.make("developer"),
-    brain: new BrainSpec({ harness: "pi", model: ModelId.make("openai/gpt-5.5"), effort: "high" }),
+    brain: BrainSpec.make({ harness: "pi", model: ModelId.make("openai/gpt-5.5"), effort: "high" }),
   });
   const cost = (usd: number, estimate: boolean) =>
-    new UsageCostView({ usd: UsdAmount.make(usd), estimate });
-  const usage = new RunUsageView({
-    tokens: TokenCount.make(27_300),
+    UsageCostView.make({ usd: UsdAmount.make(usd), estimate });
+  const usage = RunUsageView.make({
+    tokens: TokenCount.make(27300),
     pools: [
-      new PoolUsageView({
+      PoolUsageView.make({
         pool: "apiKeys",
-        tokens: TokenCount.make(1_500),
+        tokens: TokenCount.make(1500),
         cost: cost(0.75, false),
       }),
-      new PoolUsageView({
+      PoolUsageView.make({
         pool: "claudePlan",
-        tokens: TokenCount.make(20_000),
+        tokens: TokenCount.make(20000),
         cost: cost(1.25, true),
       }),
-      new PoolUsageView({
+      PoolUsageView.make({
         pool: "chatgptPlan",
-        tokens: TokenCount.make(5_800),
+        tokens: TokenCount.make(5800),
         cost: cost(0.4, true),
       }),
     ],
     sessions: [
-      new SessionUsageView({
+      SessionUsageView.make({
         attemptId,
         session: parentSession,
         pool: "apiKeys",
-        tokens: TokenCount.make(1_500),
+        tokens: TokenCount.make(1500),
         cost: cost(0.75, false),
       }),
-      new SessionUsageView({
+      SessionUsageView.make({
         attemptId,
         session: childSession("claude", "developer", "claude", "claude-opus-4-7"),
         pool: "claudePlan",
-        tokens: TokenCount.make(20_000),
+        tokens: TokenCount.make(20000),
         cost: cost(1.25, true),
       }),
-      new SessionUsageView({
+      SessionUsageView.make({
         attemptId: second,
         session: childSession("codex", "reviewer", "codex", "gpt-5.6-sol"),
         pool: "chatgptPlan",
-        tokens: TokenCount.make(5_800),
+        tokens: TokenCount.make(5800),
         cost: cost(0.4, true),
       }),
     ],
   });
   const worked = (duration: Partial<ConstructorParameters<typeof RunDurationView>[0]> = {}) =>
-    new RunDetailView({
+    RunDetailView.make({
       ...detail(twoAttempts),
       worker: WorkerName.make("usine-worker-1"),
-      duration: new RunDurationView({
-        endedMillis: 25 * 60_000,
+      duration: RunDurationView.make({
+        endedMillis: 25 * 60000,
         runningSince: null,
         unmeasured: 0,
         ...duration,
@@ -498,7 +498,7 @@ describe("provisioned machine", () => {
       .replaceAll(/\s+/gu, " ")
       .replaceAll(" ,", ",");
   const failed = attempt(
-    new FailedAttemptView({ failure: new AgentFailureView({ message: "No" }) }),
+    FailedAttemptView.make({ failure: AgentFailureView.make({ message: "No" }) }),
   );
   const outline = (view: RunView, machine: RunDetailView["machine"]) =>
     visible(
@@ -527,7 +527,7 @@ describe("provisioned machine", () => {
     const steps = outline(queued, machine);
     assert.include(steps, "Creating machine Hetzner, for attempt 2");
     assert.isBelow(steps.indexOf("Attempt 1"), steps.indexOf("Creating machine"));
-    const view = new RunDetailView({ ...detail(queued), machine });
+    const view = RunDetailView.make({ ...detail(queued), machine });
     assert.include(visible(heading(view)), "Queued, creating a Hetzner machine");
     assert.include(
       renderToStaticMarkup(<RunSummary detail={view} />),
@@ -547,7 +547,7 @@ describe("provisioned machine", () => {
       outline(queued, machine),
       "Preparing the attempt image Hetzner 52341896, for attempt 2",
     );
-    const view = new RunDetailView({ ...detail(queued), machine });
+    const view = RunDetailView.make({ ...detail(queued), machine });
     assert.include(visible(heading(view)), "Preparing the attempt image");
     assert.include(
       renderToStaticMarkup(<RunSummary detail={view} />),
@@ -564,7 +564,7 @@ describe("provisioned machine", () => {
       attemptId,
     });
     const markup = heading(
-      new RunDetailView({ ...detail(running), worker: WorkerName.make("hz-pool"), machine }),
+      RunDetailView.make({ ...detail(running), worker: WorkerName.make("hz-pool"), machine }),
     );
     assert.include(visible(markup), "hz-pool 52341896");
     assert.include(markup, 'title="Hetzner server 52341896"');
@@ -578,8 +578,8 @@ describe("Attempt start", () => {
     start: AttemptView["start"],
     reattachedAt: string | null = null,
   ) =>
-    new AttemptView({
-      ...attempt(new FailedAttemptView({ failure: new AgentFailureView({ message: "No" }) })),
+    AttemptView.make({
+      ...attempt(FailedAttemptView.make({ failure: AgentFailureView.make({ message: "No" }) })),
       id: AttemptId.make(`attempt-${number}`),
       number: AttemptNumber.make(number),
       start,
@@ -587,11 +587,11 @@ describe("Attempt start", () => {
     });
   const philippe = Option.some(OperatorLogin.make("Philippe"));
   const attempts = [
-    started(1, new StartedByEvent(), "2026-09-01T12:10:00.000Z"),
-    started(2, new StartedByInfraRetry()),
-    started(3, new StartedAfterRestart()),
-    started(4, new StartedByRetry({ operator: philippe })),
-    started(5, new StartedByEditAndRetry({ operator: Option.none() })),
+    started(1, StartedByEvent.make(), "2026-09-01T12:10:00.000Z"),
+    started(2, StartedByInfraRetry.make()),
+    started(3, StartedAfterRestart.make()),
+    started(4, StartedByRetry.make({ operator: philippe })),
+    started(5, StartedByEditAndRetry.make({ operator: Option.none() })),
     started(6, null),
   ];
   const view = run({ state: "Failed", attempts });
@@ -630,12 +630,10 @@ describe("salvage line", () => {
   it("names the pushed ref and short commit", () => {
     const markup = renderToStaticMarkup(
       <SalvageLine
-        salvage={
-          new SalvagePushed({
-            ref: SalvageRef.make("usine/salvage/run/1"),
-            commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
-          })
-        }
+        salvage={SalvagePushed.make({
+          ref: SalvageRef.make("usine/salvage/run/1"),
+          commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+        })}
       />,
     );
     assert.include(markup, "usine/salvage/run/1");
@@ -646,15 +644,13 @@ describe("salvage line", () => {
   it("names the pushed ref and the checkout that keeps the files the push left out", () => {
     const markup = renderToStaticMarkup(
       <SalvageLine
-        salvage={
-          new SalvagePartlyPushed({
-            ref: SalvageRef.make("usine/salvage/run/1"),
-            commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
-            path: "/workers/local/attempts/run_execute_1",
-            message:
-              "The checkout has files larger than GitHub's 100 MiB limit, which the salvage can't push: dataset.csv (100.0 MiB)",
-          })
-        }
+        salvage={SalvagePartlyPushed.make({
+          ref: SalvageRef.make("usine/salvage/run/1"),
+          commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+          path: "/workers/local/attempts/run_execute_1",
+          message:
+            "The checkout has files larger than GitHub's 100 MiB limit, which the salvage can't push: dataset.csv (100.0 MiB)",
+        })}
       />,
     );
     assert.include(markup, "usine/salvage/run/1");
@@ -666,13 +662,11 @@ describe("salvage line", () => {
   it("shows where retained work lives, that startup retries it, and why the last try failed", () => {
     const markup = renderToStaticMarkup(
       <SalvageLine
-        salvage={
-          new SalvageRetained({
-            path: "/workers/local/attempts/run_execute_1",
-            commit: Option.none(),
-            message: "git exited with code 128: remote: Repository not found.",
-          })
-        }
+        salvage={SalvageRetained.make({
+          path: "/workers/local/attempts/run_execute_1",
+          commit: Option.none(),
+          message: "git exited with code 128: remote: Repository not found.",
+        })}
       />,
     );
     assert.include(markup, "/workers/local/attempts/run_execute_1");
@@ -683,13 +677,11 @@ describe("salvage line", () => {
   it("shows where rejected work lives, that startup doesn't retry it, and the remote's refusal", () => {
     const markup = renderToStaticMarkup(
       <SalvageLine
-        salvage={
-          new SalvageRejected({
-            path: "/workers/local/attempts/run_execute_1",
-            commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
-            message: "git exited with code 1: remote: error: GH001: Large files detected.",
-          })
-        }
+        salvage={SalvageRejected.make({
+          path: "/workers/local/attempts/run_execute_1",
+          commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+          message: "git exited with code 1: remote: error: GH001: Large files detected.",
+        })}
       />,
     );
     assert.include(markup, "/workers/local/attempts/run_execute_1");
@@ -718,10 +710,10 @@ describe("drawer summary", () => {
         state: "Failed",
         attempts: [
           attempt(
-            new FailedAttemptView({
-              failure: new AgentFailureView({ message: "The baseline gate is blocked." }),
+            FailedAttemptView.make({
+              failure: AgentFailureView.make({ message: "The baseline gate is blocked." }),
             }),
-            new SalvagePushed({
+            SalvagePushed.make({
               ref: SalvageRef.make("usine/salvage/run-33/1"),
               commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
             }),
@@ -740,8 +732,8 @@ describe("drawer summary", () => {
         state: "Failed",
         attempts: [
           attempt(
-            new FailedAttemptView({
-              failure: new QuestionFailureView({ question: "Keep the old column?" }),
+            FailedAttemptView.make({
+              failure: QuestionFailureView.make({ question: "Keep the old column?" }),
             }),
           ),
         ],
@@ -756,26 +748,26 @@ describe("drawer summary", () => {
     assert.include(succeeded, "Succeeded");
     assert.include(succeeded, "Opened the pull request.");
     const canceled = summary(
-      run({ state: "Canceled", attempts: [attempt(new CanceledAttemptView())] }),
+      run({ state: "Canceled", attempts: [attempt(CanceledAttemptView.make())] }),
     );
     assert.include(canceled, "Canceled");
     assert.include(canceled, "No salvage branch");
   });
 
   it("shows a running Run's current activity and latest message, without the conversation", () => {
-    const parent = new ParentSession({
+    const parent = ParentSession.make({
       id: AgentSessionId.make("parent"),
       agent: AgentName.make("developer"),
       brain,
     });
-    const child = new ChildSession({
+    const child = ChildSession.make({
       id: AgentSessionId.make("child"),
       parentId: parent.id,
       agent: AgentName.make("reviewer"),
       brain,
     });
     const event = (sequence: number, payload: TranscriptEventView["payload"]) =>
-      new TranscriptEventView({
+      TranscriptEventView.make({
         sequence: TranscriptSequence.make(sequence),
         attemptId,
         receivedAt: `2026-09-01T12:0${sequence}:00.000Z`,
@@ -785,18 +777,18 @@ describe("drawer summary", () => {
     const markup = summary(run({ state: "Running", attempts: [attempt(null)], canCancel: true }), [
       event(
         1,
-        new SessionEvent({ event: new TextOutput({ session: child, text: "First step." }) }),
+        SessionEvent.make({ event: TextOutput.make({ session: child, text: "First step." }) }),
       ),
       event(
         2,
-        new SessionEvent({
-          event: new TextOutput({ session: child, text: "Running the **tests** now." }),
+        SessionEvent.make({
+          event: TextOutput.make({ session: child, text: "Running the **tests** now." }),
         }),
       ),
       event(
         3,
-        new SessionEvent({
-          event: new ToolStarted({
+        SessionEvent.make({
+          event: ToolStarted.make({
             session: child,
             callId: "call",
             tool: "bash",
@@ -813,7 +805,7 @@ describe("drawer summary", () => {
   });
 
   it("warns while a running Run's Worker or a child's provider does not answer", () => {
-    const child = new ChildSession({
+    const child = ChildSession.make({
       id: AgentSessionId.make("child"),
       parentId: AgentSessionId.make("parent"),
       agent: AgentName.make("reviewer"),
@@ -821,24 +813,24 @@ describe("drawer summary", () => {
     });
     const lastAnsweredAt = "2026-09-01T12:01:00.000Z";
     const markup = summary(run({ state: "Running", attempts: [attempt(null)], canCancel: true }), [
-      new TranscriptEventView({
+      TranscriptEventView.make({
         sequence: TranscriptSequence.make(1),
         attemptId,
         receivedAt: "2026-09-01T12:02:00.000Z",
         direction: "outbound",
-        payload: new WorkerUnresponsive({
+        payload: WorkerUnresponsive.make({
           worker: WorkerName.make("usine-worker-1"),
           lastAnsweredAt: DateTime.makeUnsafe(lastAnsweredAt),
           reason: "No answer within 45 seconds",
         }),
       }),
-      new TranscriptEventView({
+      TranscriptEventView.make({
         sequence: TranscriptSequence.make(2),
         attemptId,
         receivedAt: "2026-09-01T12:03:00.000Z",
         direction: "outbound",
-        payload: new SessionEvent({
-          event: new ProviderRetrying({
+        payload: SessionEvent.make({
+          event: ProviderRetrying.make({
             session: child,
             message: "Reconnecting... waiting for network",
             retries: ProviderRetries.make(4),
@@ -865,9 +857,9 @@ describe("Run approval", () => {
   });
   const approvedAt = "2026-09-01T11:59:30.000Z";
   const approved = (source: ApprovalView["source"]) =>
-    run({ approval: new ApprovalView({ approvedAt, source }) });
+    run({ approval: ApprovalView.make({ approvedAt, source }) });
   const philippe = Option.some(OperatorLogin.make("Philippe"));
-  const fromUi = approved(new ApprovalSource({ channel: "ui", approver: philippe }));
+  const fromUi = approved(ApprovalSource.make({ channel: "ui", approver: philippe }));
   // Approved before usine recorded the approver.
   const unrecorded = approved(null);
   const eventDocument = (view: RunView) => {
@@ -929,25 +921,25 @@ describe("Run approval", () => {
     const openedAt = "2026-09-01T11:59:00.000Z";
     const from = RunId.make("4f1c9e2a7b3d4c5e");
     const ranAgain = (requestedBy: RunAgain["requestedBy"]) =>
-      run({ runAgain: new RunAgain({ from, requestedBy }), openedAt });
+      run({ runAgain: RunAgain.make({ from, requestedBy }), openedAt });
     const time = dayTimeLabel(openedAt);
     for (const render of [eventDocument, outline]) {
-      const named = text(render(ranAgain(philippe)));
+      const named = philippe.pipe(ranAgain, render, text);
       assert.include(named, `Run again by Philippe · ${time} · from run 4f1c9e2a`);
-      assert.include(render(ranAgain(philippe)), `dateTime="${openedAt}"`);
-      assert.include(text(render(ranAgain(Option.none()))), `Run again · ${time} · from run`);
+      assert.include(philippe.pipe(ranAgain, render), `dateTime="${openedAt}"`);
+      assert.include(Option.none().pipe(ranAgain, render, text), `Run again · ${time} · from run`);
       assert.include(
-        text(render(new RunView({ ...ranAgain(philippe), approval: fromUi.approval }))),
+        text(render(RunView.make({ ...ranAgain(philippe), approval: fromUi.approval }))),
         `Approved by Philippe · ${dayTimeLabel(approvedAt)} · from the UI`,
       );
       assert.notInclude(render(run()), "Run again");
     }
     // The Event document links to the earlier Run's page; the outline entry is a button instead.
     assert.include(
-      eventDocument(ranAgain(philippe)),
+      philippe.pipe(ranAgain, eventDocument),
       `href="/projects/basaltbytes-usine/runs/${from}"`,
     );
-    assert.notInclude(outline(ranAgain(philippe)), `/runs/${from}`);
+    assert.notInclude(philippe.pipe(ranAgain, outline), `/runs/${from}`);
   });
 });
 
@@ -955,7 +947,7 @@ it("renders a CI handoff neutrally and links to the fix run in the run header", 
   const fixRunId = RunId.make("fix-run-828");
   const source = run({
     state: "HandedOff",
-    handoff: new HandedOff({
+    handoff: HandedOff.make({
       reason: "CI failed: ci.",
       head: CommitSha.make("a".repeat(40)),
       fixLoop: LoopName.make("act-on-findings"),

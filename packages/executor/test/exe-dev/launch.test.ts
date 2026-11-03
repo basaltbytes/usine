@@ -60,14 +60,14 @@ const COMMENT = "https://github.com/acme/demo/issues/42#issuecomment-7";
 const SHARED = "https://github.com/acme/demo/issues/42#issuecomment-8";
 
 /** Another Loop's Attempt of the same Agent, open on issue 42 since 10:05. */
-const OTHER_ATTEMPT = new AttemptWindow({
+const OTHER_ATTEMPT = AttemptWindow.make({
   attemptId: AttemptId.make("docs-run/implement/1"),
   startedAt: DateTime.makeUnsafe("2026-10-20T10:05:00Z"),
   endedAt: Option.none(),
 });
 
 /** The Attempt on issue 42, with the bot login that the fake `gh` lists comments for. */
-const onItem = new CheckoutRequest({
+const onItem = CheckoutRequest.make({
   ...request,
   payload: { number: 42, url: "https://github.com/acme/demo/issues/42" },
   botLogin: Option.some(BotLogin.make("usine-test[bot]")),
@@ -111,12 +111,10 @@ const parentFailed = (stub: Layer.Layer<AttemptRuntime>) =>
         ...runtime,
         isLive: () => Effect.succeed(false),
         finished: () =>
-          Effect.succeed(
-            Option.some(
-              new ParentFailed({
-                failure: new InfraFailure({ message: "The parent stopped", cause: "crash" }),
-              }),
-            ),
+          Effect.succeedSome(
+            ParentFailed.make({
+              failure: InfraFailure.make({ message: "The parent stopped", cause: "crash" }),
+            }),
           ),
       }),
     ),
@@ -133,7 +131,7 @@ const failingResultWrite = (stub: Layer.Layer<AttemptRuntime>) =>
       AttemptRuntime.of({
         ...runtime,
         recordResult: () =>
-          new InfraFailure({ message: "Result write failed", cause: "storage unavailable" }),
+          InfraFailure.make({ message: "Result write failed", cause: "storage unavailable" }),
       }),
     ),
   ).pipe(Layer.provide(stub));
@@ -163,7 +161,7 @@ describe("exe.dev launch", () => {
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
         const prepared = yield* executor.prepare(
-          new CheckoutRequest({ ...request, reattach: true }),
+          CheckoutRequest.make({ ...request, reattach: true }),
         );
         const result = yield* prepared.launch(sink);
         assert.strictEqual(result.message, `Completed: ${request.task}`);
@@ -264,7 +262,7 @@ describe("exe.dev launch", () => {
             AttemptRuntime.of({
               ...runtime,
               cancel: () =>
-                new InfraFailure({ message: "Cancel failed", cause: "storage unavailable" }),
+                InfraFailure.make({ message: "Cancel failed", cause: "storage unavailable" }),
             }),
           ),
         ).pipe(Layer.provide(stub));
@@ -446,7 +444,7 @@ describe("exe.dev launch", () => {
           outOfMemory: () => Effect.void,
           transcript: Effect.succeed([]),
           windows: aloneOnItem().pipe(
-            Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
+            Effect.map(({ own }) => AttemptWindows.make({ own, overlapping: [...opened] })),
           ),
         };
         // The other Attempt opens on the Item while the harvest lists comments, so `SHARED` is
@@ -497,9 +495,9 @@ describe("exe.dev launch", () => {
         outOfMemory: () => Effect.void,
         transcript: Effect.succeed([]),
         windows: Effect.succeed(
-          new AttemptWindows({
+          AttemptWindows.make({
             own: Option.some(
-              new AttemptWindow({
+              AttemptWindow.make({
                 attemptId: ATTEMPT_ID,
                 startedAt: DateTime.makeUnsafe(0),
                 endedAt: Option.some(DateTime.makeUnsafe("2026-10-20T10:05:00Z")),
@@ -598,10 +596,10 @@ describe("exe.dev launch", () => {
         const refused = yield* executor
           .intervene(
             ATTEMPT_ID,
-            new AttemptChannel.Intervention({
+            AttemptChannel.Intervention.make({
               operator: "Philippe",
-              target: new AttemptChannel.ParentTarget(),
-              action: new AttemptChannel.Steer({ message: "Use pnpm" }),
+              target: AttemptChannel.ParentTarget.make(),
+              action: AttemptChannel.Steer.make({ message: "Use pnpm" }),
             }),
           )
           .pipe(Effect.flip);
@@ -645,7 +643,7 @@ describe("exe.dev launch", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const prepared = yield* executor.prepare(
-        new CheckoutRequest({ ...request, maxAttemptMinutes: Option.some(1) }),
+        CheckoutRequest.make({ ...request, maxAttemptMinutes: Option.some(1) }),
       );
       const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
       yield* Deferred.await(started);
@@ -675,10 +673,10 @@ describe("exe.dev launch", () => {
       yield* Deferred.await(started);
       yield* executor.intervene(
         ATTEMPT_ID,
-        new AttemptChannel.Intervention({
+        AttemptChannel.Intervention.make({
           operator: "Philippe",
-          target: new AttemptChannel.ParentTarget(),
-          action: new AttemptChannel.Steer({ message: "Use pnpm" }),
+          target: AttemptChannel.ParentTarget.make(),
+          action: AttemptChannel.Steer.make({ message: "Use pnpm" }),
         }),
       );
       yield* Deferred.succeed(release, undefined);
@@ -721,7 +719,7 @@ describe("exe.dev launch", () => {
           assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
           const before = ssh.state.commands.length;
           const prepared = yield* executor.prepare(
-            new CheckoutRequest({ ...request, reattach: true }),
+            CheckoutRequest.make({ ...request, reattach: true }),
           );
           const issued = ssh.state.commands.slice(before);
           const lines = issued.map(remoteLine);
@@ -758,7 +756,7 @@ describe("exe.dev launch", () => {
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const before = ssh.state.commands.length;
         const error = yield* executor
-          .prepare(new CheckoutRequest({ ...request, reattach: true }))
+          .prepare(CheckoutRequest.make({ ...request, reattach: true }))
           .pipe(Effect.scoped, Effect.flip);
         assert.strictEqual(error._tag, "ExecutorOperationError");
         assert.strictEqual(error.message, "The reattached attempt's checkout no longer exists");
@@ -795,7 +793,7 @@ describe("exe.dev launch", () => {
                     void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
                 ),
               windows: aloneOnItem().pipe(
-                Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
+                Effect.map(({ own }) => AttemptWindows.make({ own, overlapping: [...opened] })),
               ),
             },
             Effect.succeed(COMMIT_AUTHOR),
@@ -850,8 +848,10 @@ describe("exe.dev launch", () => {
           );
         }).pipe(
           Effect.scoped,
-          Effect.provide(runtime(ssh.layer, completes, storage, parentFailed)),
-          Effect.provide(Logger.layer([logger])),
+          Effect.provide([
+            runtime(ssh.layer, completes, storage, parentFailed),
+            Logger.layer([logger]),
+          ]),
         );
         assert.deepStrictEqual(recorded, []);
         const issued = ssh.state.commands.slice(restart);
@@ -868,7 +868,7 @@ describe("exe.dev launch", () => {
       const executor = yield* Executor;
       yield* executor.preflight(
         WORKER,
-        [TEST_AGENT.brain, new BrainSpec({ ...TEST_AGENT.brain })],
+        [TEST_AGENT.brain, BrainSpec.make({ ...TEST_AGENT.brain })],
         1,
       );
       assert.strictEqual(
@@ -892,7 +892,7 @@ describe("exe.dev launch", () => {
         .preflight(
           WORKER,
           [
-            new BrainSpec({
+            BrainSpec.make({
               harness: "pi",
               model: ModelId.make("anthropic/claude"),
               effort: "low",

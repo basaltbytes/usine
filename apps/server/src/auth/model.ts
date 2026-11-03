@@ -9,7 +9,7 @@ export class GitHubIdentity extends Schema.Class<GitHubIdentity>("GitHubIdentity
 }) {}
 export class Member extends Schema.Class<Member>("Member")({
   ...GitHubIdentity.fields,
-  addedAt: Schema.Number,
+  addedAt: Schema.Finite,
   addedBy: OperatorActor,
 }) {}
 export const TokenId = Schema.NonEmptyString.pipe(Schema.brand("TokenId"));
@@ -27,9 +27,9 @@ export class InstanceToken extends Schema.Class<InstanceToken>("InstanceToken")(
   memberId: GitHubUserId,
   name: TokenName,
   hash: TokenHash,
-  createdAt: Schema.Number,
-  lastUsedAt: Schema.Number,
-  expiresAt: Schema.Number,
+  createdAt: Schema.Finite,
+  lastUsedAt: Schema.Finite,
+  expiresAt: Schema.Finite,
   scopes: Schema.Array(PermissionGrant).pipe(
     Schema.withDecodingDefaultKey(
       Effect.succeed([{ permission: "admin", scope: { _tag: "Instance" } }]),
@@ -39,7 +39,7 @@ export class InstanceToken extends Schema.Class<InstanceToken>("InstanceToken")(
   kind: Schema.Literals(["session", "device"]),
 }) {
   recordUse(now: number): InstanceToken {
-    return now - this.lastUsedAt < 60_000 ? this : new InstanceToken({ ...this, lastUsedAt: now });
+    return now - this.lastUsedAt < 60_000 ? this : InstanceToken.make({ ...this, lastUsedAt: now });
   }
 }
 export class AuthError extends Schema.TaggedError<AuthError>("AuthError")("AuthError", {
@@ -47,4 +47,4 @@ export class AuthError extends Schema.TaggedError<AuthError>("AuthError")("AuthE
   message: Schema.String,
 }) {}
 export const authFailure = (message: string, status: AuthError["status"] = 401) =>
-  new AuthError({ status, message });
+  AuthError.make({ status, message });

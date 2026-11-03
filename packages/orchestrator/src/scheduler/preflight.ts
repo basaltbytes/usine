@@ -85,7 +85,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
           Effect.andThen(executor.preflight(worker.name, roster, worker.maxConcurrentAttempts)),
           Effect.mapError((error) =>
             error._tag === "ExecutorOperationError"
-              ? new ExecutorOperationError({
+              ? ExecutorOperationError.make({
                   operation: error.operation,
                   cause: error.cause,
                   message: `worker "${worker.name}": ${error.message}`,
@@ -186,13 +186,13 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     const acquire = Effect.tx(
       Effect.gen(function* () {
         if ((yield* inFlight).has(name))
-          return yield* new WorkerPreflightRejectedError({
+          return yield* WorkerPreflightRejectedError.make({
             worker: name,
             reason: "preflight-running",
             message: `Preflight is already running on worker "${name}".`,
           });
         if ((yield* leased) > 0)
-          return yield* new WorkerPreflightRejectedError({
+          return yield* WorkerPreflightRejectedError.make({
             worker: name,
             reason: "attempt-running",
             message: `An attempt is running on worker "${name}". Run preflight after all attempts end.`,
@@ -208,7 +208,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
             const { workers, roster } = yield* Ref.get(configuration);
             const worker = workers.find((worker) => worker.name === name);
             if (worker === undefined)
-              return yield* new WorkerPreflightRejectedError({
+              return yield* WorkerPreflightRejectedError.make({
                 worker: name,
                 reason: "not-configured",
                 message: `Worker "${name}" is not configured.`,

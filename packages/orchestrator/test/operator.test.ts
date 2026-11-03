@@ -153,13 +153,13 @@ const attemptId = AttemptId.make("attempt-operator-test");
 const loopName = LoopName.make("review-issue");
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = ItemKey.make("github:basaltbytes/usine:31");
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
 });
 
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -174,7 +174,7 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
     },
   ],
 });
-const agentFile = new AgentFile({
+const agentFile = AgentFile.make({
   name: AgentName.make("developer"),
   harness: brain.harness,
   model: brain.model,
@@ -183,16 +183,16 @@ const agentFile = new AgentFile({
   parentEffort: Option.none(),
   persona: AgentPersona.make("Review the issue."),
 });
-const loop = new LoopFile({
+const loop = LoopFile.make({
   name: loopName,
-  trigger: new IssueTrigger({ on: "issue", if: Source.make("true") }),
+  trigger: IssueTrigger.make({ on: "issue", if: Source.make("true") }),
   selector: Option.none(),
   approval: "required",
   step: StepName.make("run"),
   agent: agentFile.name,
   body: PromptTemplate.make("Review it."),
 });
-const instance = new LoadedInstance({
+const instance = LoadedInstance.make({
   config,
   agents: [agentFile],
   invalidAgents: [],
@@ -201,32 +201,32 @@ const instance = new LoadedInstance({
   warnings: [],
 });
 
-const snapshot = new RunSnapshot({
+const snapshot = RunSnapshot.make({
   resolvedFailureAttemptId: Option.none(),
   closedAt: Option.none(),
   approval: Option.none(),
   runAgain: Option.none(),
-  event: new Event({
+  event: Event.make({
     id: EventId.make("event-operator-test"),
     dedupKey: DedupKey.make("event-operator-test"),
     payload: { number: 31 },
     receivedAt: now,
   }),
   itemKey,
-  run: new Run({
+  run: Run.make({
     id: runId,
     eventId: EventId.make("event-operator-test"),
     loop: loopName,
-    state: new RunState.Waiting(),
+    state: RunState.Waiting.make(),
     openedAt: now,
   }),
-  step: new Step({
+  step: Step.make({
     runId,
     name: StepName.make("run"),
     result: Option.none(),
   }),
   attempts: [
-    new Attempt({
+    Attempt.make({
       task: AttemptTask.make("Review issue 31."),
       agent: agentFile.name,
       operatorIntervened: false,
@@ -246,7 +246,7 @@ const snapshot = new RunSnapshot({
   repository,
   revision: RepositoryRevision.make("main"),
   task: AttemptTask.make("Review issue 31."),
-  agent: new Agent({
+  agent: Agent.make({
     name: agentFile.name,
     brain,
     parentModel: Option.none(),
@@ -257,44 +257,44 @@ const snapshot = new RunSnapshot({
   permissions: "write",
 });
 
-const parent = new ParentSession({
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent-session"),
   agent: agentFile.name,
   brain,
 });
-const child = new ChildSession({
+const child = ChildSession.make({
   id: AgentSessionId.make("child-session"),
   parentId: parent.id,
   agent: AgentName.make("researcher"),
   brain,
 });
 const transcript = [
-  new TranscriptEntry({
+  TranscriptEntry.make({
     sequence: TranscriptSequence.make(1),
     attemptId,
     direction: "outbound",
-    envelope: new AttemptChannel.OutboundEnvelope({
+    envelope: AttemptChannel.OutboundEnvelope.make({
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId,
       sequence: AttemptChannel.Sequence.make(1),
       sentAt: now,
-      payload: new AttemptChannel.SessionEvent({
-        event: new TextOutput({ session: parent, text: "Parent update" }),
+      payload: AttemptChannel.SessionEvent.make({
+        event: TextOutput.make({ session: parent, text: "Parent update" }),
       }),
     }),
     receivedAt: now,
   }),
-  new TranscriptEntry({
+  TranscriptEntry.make({
     sequence: TranscriptSequence.make(2),
     attemptId,
     direction: "outbound",
-    envelope: new AttemptChannel.OutboundEnvelope({
+    envelope: AttemptChannel.OutboundEnvelope.make({
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId,
       sequence: AttemptChannel.Sequence.make(2),
       sentAt: now,
-      payload: new AttemptChannel.SessionEvent({
-        event: new ToolStarted({
+      payload: AttemptChannel.SessionEvent.make({
+        event: ToolStarted.make({
           session: child,
           callId: "call-1",
           tool: "search",
@@ -306,17 +306,17 @@ const transcript = [
   }),
   ...Array.from({ length: 500 }, (_, index) => {
     const sequence = index + 3;
-    return new TranscriptEntry({
+    return TranscriptEntry.make({
       sequence: TranscriptSequence.make(sequence),
       attemptId,
       direction: "outbound",
-      envelope: new AttemptChannel.OutboundEnvelope({
+      envelope: AttemptChannel.OutboundEnvelope.make({
         version: AttemptChannel.PROTOCOL_VERSION,
         attemptId,
         sequence: AttemptChannel.Sequence.make(sequence),
         sentAt: now,
-        payload: new AttemptChannel.SessionEvent({
-          event: new TextOutput({
+        payload: AttemptChannel.SessionEvent.make({
+          event: TextOutput.make({
             session: parent,
             text: `Parent update ${sequence}`,
           }),
@@ -334,10 +334,14 @@ const sessionOf = (
   model: string,
   agent: string,
 ): ParentSession | ChildSession => {
-  const sessionBrain = new BrainSpec({ harness, model: ModelId.make(model), effort: "high" });
+  const sessionBrain = BrainSpec.make({ harness, model: ModelId.make(model), effort: "high" });
   return harness === "pi"
-    ? new ParentSession({ id: AgentSessionId.make(id), agent: agentFile.name, brain: sessionBrain })
-    : new ChildSession({
+    ? ParentSession.make({
+        id: AgentSessionId.make(id),
+        agent: agentFile.name,
+        brain: sessionBrain,
+      })
+    : ChildSession.make({
         id: AgentSessionId.make(id),
         parentId: AgentSessionId.make(`parent-of-${id}`),
         agent: AgentName.make(agent),
@@ -349,11 +353,11 @@ const claudeChild = sessionOf("claude-child", "claude", "claude-opus-4-7", "deve
 const planParent = sessionOf("plan-parent", "pi", "openai-codex/gpt-5.5", "developer");
 const codexChild = sessionOf("codex-child", "codex", "gpt-5.6-sol", "reviewer");
 /** A Claude Code child on the SSH Worker whose Gateway billed its model requests to an API key. */
-const gatewayClaudeChild = new ChildSession({
+const gatewayClaudeChild = ChildSession.make({
   id: AgentSessionId.make("gateway-claude-child"),
   parentId: AgentSessionId.make("parent-of-gateway-claude-child"),
   agent: AgentName.make("developer"),
-  brain: new BrainSpec({
+  brain: BrainSpec.make({
     harness: "claude",
     model: ModelId.make("claude-opus-4-7"),
     effort: "high",
@@ -372,17 +376,17 @@ const tokenReport = (
   sequence: number,
   breakdown: Option.Option<TokenBreakdown> = Option.none(),
 ) =>
-  new TranscriptEntry({
+  TranscriptEntry.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId: attempt,
     direction: "outbound",
-    envelope: new AttemptChannel.OutboundEnvelope({
+    envelope: AttemptChannel.OutboundEnvelope.make({
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId: attempt,
       sequence: AttemptChannel.Sequence.make(sequence),
       sentAt: now,
-      payload: new AttemptChannel.SessionEvent({
-        event: new SessionTokensUpdated({
+      payload: AttemptChannel.SessionEvent.make({
+        event: SessionTokensUpdated.make({
           session,
           totalTokens: TokenCount.make(tokens),
           costUsd: usd === null ? Option.none() : Option.some(UsdAmount.make(usd)),
@@ -414,7 +418,7 @@ const usageReports = [
     null,
     1_004,
     Option.some(
-      new TokenBreakdown({ input: 2_500, cachedInput: 100_000, cacheWrite: 0, output: 2_500 }),
+      TokenBreakdown.make({ input: 2500, cachedInput: 100000, cacheWrite: 0, output: 2500 }),
     ),
   ),
   tokenReport(retryAttemptId, gatewayClaudeChild, 3_000, 0.25, 1_005),
@@ -451,7 +455,7 @@ const testLayer = (
     readonly schedule?: ScheduleTriggers["Service"]["latest"];
   } = {},
   workerStatus: Layer.Layer<WorkerStatus> = WorkerStatus.idle,
-  upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>> = Effect.succeed(Option.none()),
+  upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>> = Effect.succeedNone,
 ) => {
   const acknowledged: Array<AttentionAcknowledgement> = [];
   const readTranscript = (query: TranscriptQuery) =>
@@ -532,29 +536,29 @@ const testLayer = (
     events: (runIds) =>
       Effect.succeed(
         runIds.includes(runSnapshot.run.id)
-          ? [new RunEvent({ runId: runSnapshot.run.id, event: runSnapshot.event })]
+          ? [RunEvent.make({ runId: runSnapshot.run.id, event: runSnapshot.event })]
           : [],
       ),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
     attemptsByWorker: () =>
       Effect.succeed([
-        new WorkerAttempts({ worker: WorkerName.make("local"), attempts: 3, running: 1 }),
+        WorkerAttempts.make({ worker: WorkerName.make("local"), attempts: 3, running: 1 }),
       ]),
     sightings: () => Effect.succeed([]),
   });
   const controls = Layer.succeed(LoopControl)({
     isPaused: () => Effect.succeed(true),
-    pause: () => Effect.succeed(new LoopRuntimeState({ loop: loopName, paused: true })),
-    states: Effect.succeed([new LoopRuntimeState({ loop: loopName, paused: true })]),
-    unpause: () => Effect.succeed(new LoopRuntimeState({ loop: loopName, paused: false })),
+    pause: () => Effect.succeed(LoopRuntimeState.make({ loop: loopName, paused: true })),
+    states: Effect.succeed([LoopRuntimeState.make({ loop: loopName, paused: true })]),
+    unpause: () => Effect.succeed(LoopRuntimeState.make({ loop: loopName, paused: false })),
   });
   const itemReader = Layer.succeed(ItemProjectionReader)({
     openIssues: () => Effect.die("the operator does not check open issues"),
-    get: () => Effect.succeed(Option.none()),
+    get: () => Effect.succeedNone,
     list: () =>
       Effect.succeed([
-        new ItemProjection({
+        ItemProjection.make({
           itemKey,
           repository,
           source: ItemProjectionSource.make("issue"),
@@ -582,7 +586,7 @@ const testLayer = (
             closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
           },
         }),
-        new ItemProjection({
+        ItemProjection.make({
           itemKey: ItemKey.make("github:basaltbytes/usine:32"),
           repository,
           source: ItemProjectionSource.make("issue"),
@@ -594,17 +598,15 @@ const testLayer = (
   });
   const repositoryLabelReader = Layer.succeed(RepositoryLabelProjectionReader)({
     get: () =>
-      Effect.succeed(
-        Option.some(
-          Schema.decodeUnknownSync(RepositoryLabelProjection)({
-            repository,
-            labels: ["ready", "ready-for-review", "bug", "documentation"].map((name) => ({
-              name,
-              color: null,
-              description: null,
-            })),
-          }),
-        ),
+      Effect.succeedSome(
+        Schema.decodeSync(RepositoryLabelProjection)({
+          repository,
+          labels: ["ready", "ready-for-review", "bug", "documentation"].map((name) => ({
+            name,
+            color: null,
+            description: null,
+          })),
+        }),
       ),
   });
   const github = Layer.succeed(GitHubItemWriter)({
@@ -612,7 +614,7 @@ const testLayer = (
       Ref.set(movedLabels, mutation).pipe(Effect.as(mutation.add)),
   });
   const polling = Layer.succeed(PollingTriggers)({
-    lastHint: Effect.succeed(Option.none()),
+    lastHint: Effect.succeedNone,
     hint: () =>
       Ref.get(movedLabels).pipe(
         Effect.flatMap((mutation) =>
@@ -625,31 +627,29 @@ const testLayer = (
     run: () => Effect.never,
     latest:
       triggerCycles.poll ??
-      Effect.succeed(
-        Option.some(
-          new PollCycle({
-            repositories: 1,
-            changedItems: 0,
-            submissions: [],
-            revokedRuns: 0,
-            failures: [
-              new RepositoryPollFailure({
-                repository,
-                errorTag: "GitHubApiError",
-                message: "GitHub was unavailable",
-              }),
-            ],
-            preflightFindings: [
-              new LabelPreflightFinding({
-                repository,
-                label: GitHubLabelName.make("ready-for-review"),
-                errorTag: "GitHubApiError",
-                message: "GitHub returned HTTP status 500",
-              }),
-            ],
-            nextPollAt: Option.none(),
-          }),
-        ),
+      Effect.succeedSome(
+        PollCycle.make({
+          repositories: 1,
+          changedItems: 0,
+          submissions: [],
+          revokedRuns: 0,
+          failures: [
+            RepositoryPollFailure.make({
+              repository,
+              errorTag: "GitHubApiError",
+              message: "GitHub was unavailable",
+            }),
+          ],
+          preflightFindings: [
+            LabelPreflightFinding.make({
+              repository,
+              label: GitHubLabelName.make("ready-for-review"),
+              errorTag: "GitHubApiError",
+              message: "GitHub returned HTTP status 500",
+            }),
+          ],
+          nextPollAt: Option.none(),
+        }),
       ),
   });
   const schedules = Layer.succeed(ScheduleTriggers)({
@@ -657,18 +657,16 @@ const testLayer = (
     run: () => Effect.never,
     latest:
       triggerCycles.schedule ??
-      Effect.succeed(
-        Option.some(
-          new ScheduleCycle({
-            loops: 0,
-            fanout: 0,
-            submissions: [],
-            skipped: 0,
-            alreadyFired: 0,
-            failures: [],
-            nextTickAt: Option.none(),
-          }),
-        ),
+      Effect.succeedSome(
+        ScheduleCycle.make({
+          loops: 0,
+          fanout: 0,
+          submissions: [],
+          skipped: 0,
+          alreadyFired: 0,
+          failures: [],
+          nextTickAt: Option.none(),
+        }),
       ),
   });
   const history = Layer.succeed(GitHubItemHistory)({
@@ -747,9 +745,9 @@ describe("Operator", () => {
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-        const endpointInstance = new LoadedInstance({
+        const endpointInstance = LoadedInstance.make({
           ...instance,
-          config: new UsineConfig({
+          config: UsineConfig.make({
             ...instance.config,
             webhooks: {
               mode: "endpoint",
@@ -795,10 +793,10 @@ describe("Operator", () => {
       const running = ["one", "two"].map((id) => {
         const runId = RunId.make(id);
         return runView(
-          new RunSnapshot({
+          RunSnapshot.make({
             ...snapshot,
-            run: new Run({ ...snapshot.run, id: runId, state: new RunState.Running() }),
-            attempts: [new Attempt({ ...original, runId, id: AttemptId.make(id) })],
+            run: Run.make({ ...snapshot.run, id: runId, state: RunState.Running.make() }),
+            attempts: [Attempt.make({ ...original, runId, id: AttemptId.make(id) })],
           }),
           new Set(),
           new Map(),
@@ -808,17 +806,17 @@ describe("Operator", () => {
         {
           transcript: ({ attemptId }) =>
             Effect.succeed([
-              new TranscriptEntry({
+              TranscriptEntry.make({
                 sequence: TranscriptSequence.make(1),
                 attemptId,
                 direction: "outbound",
                 receivedAt: now,
-                envelope: new AttemptChannel.OutboundEnvelope({
+                envelope: AttemptChannel.OutboundEnvelope.make({
                   version: AttemptChannel.PROTOCOL_VERSION,
                   attemptId,
                   sequence: AttemptChannel.Sequence.make(1),
                   sentAt: now,
-                  payload: new AttemptChannel.WorkerUnresponsive({
+                  payload: AttemptChannel.WorkerUnresponsive.make({
                     worker: original.worker,
                     lastAnsweredAt: now,
                     reason: "SSH timed out",
@@ -831,7 +829,7 @@ describe("Operator", () => {
         { list: () => Effect.succeed([]) },
         { unavailable: Effect.succeed([]), provisioning: Effect.succeed([]) },
       );
-      const overview = new ReadyOverview({ projects: [], loops: [], needsYou: [] });
+      const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });
       const grouped = (yield* refresh(overview, running, [])).needsYou;
       assert.lengthOf(grouped, 1);
       const need = grouped[0];
@@ -863,27 +861,27 @@ describe("Operator", () => {
         const resetsAt = DateTime.add(now, { hours: 1 });
         const append = (usedPercent: number, resetTime = resetsAt) =>
           reports.push(
-            new TranscriptEntry({
+            TranscriptEntry.make({
               sequence: TranscriptSequence.make(3000 + reports.length),
               attemptId,
               direction: "outbound",
               receivedAt: now,
-              envelope: new AttemptChannel.OutboundEnvelope({
+              envelope: AttemptChannel.OutboundEnvelope.make({
                 version: AttemptChannel.PROTOCOL_VERSION,
                 attemptId,
                 sequence: AttemptChannel.Sequence.make(3000 + reports.length),
                 sentAt: now,
-                payload: new AttemptChannel.SessionEvent({
-                  event: new PoolRateLimitsUpdated({
+                payload: AttemptChannel.SessionEvent.make({
+                  event: PoolRateLimitsUpdated.make({
                     session: parent,
                     pool: "chatgptPlan",
                     login: Option.some(PoolLogin.make("operator@example.com")),
-                    rateLimits: new RateLimitsSnapshot({
+                    rateLimits: RateLimitsSnapshot.make({
                       limitId: Option.none(),
                       limitName: Option.none(),
                       secondary: Option.none(),
                       primary: Option.some(
-                        new RateLimitWindow({
+                        RateLimitWindow.make({
                           usedPercent,
                           resetsAt: Option.some(resetTime),
                           windowDurationMinutes: Option.some(300),
@@ -932,7 +930,7 @@ describe("Operator", () => {
             assert.strictEqual(dismissed.usedPercent, usedPercent);
           }
           yield* operator.undoDismissNeed(attentionKey(need));
-          assert.deepStrictEqual(yield* needs, [new PoolLimitNeed({ ...need, usedPercent: 89 })]);
+          assert.deepStrictEqual(yield* needs, [PoolLimitNeed.make({ ...need, usedPercent: 89 })]);
           yield* operator.dismissNeed(instance, attentionKey(need));
           append(90);
           const [higherBand] = yield* needs;
@@ -991,9 +989,9 @@ describe("Operator", () => {
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const pauses = yield* Ref.make<ReadonlyArray<ProvisioningPause>>([]);
-        const current = new RunSnapshot({
+        const current = RunSnapshot.make({
           ...snapshot,
-          run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+          run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
         });
         const worker = current.attempts[0]?.worker;
         assert(worker !== undefined);
@@ -1110,18 +1108,18 @@ describe("Operator", () => {
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const notices: Array<TranscriptEntry> = [];
-        const current = new RunSnapshot({
+        const current = RunSnapshot.make({
           ...snapshot,
-          run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+          run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
         });
         const append = (payload: AttemptChannel.OutboundPayload) =>
           notices.push(
-            new TranscriptEntry({
+            TranscriptEntry.make({
               sequence: TranscriptSequence.make(3000 + notices.length),
               attemptId,
               direction: "outbound",
               receivedAt: now,
-              envelope: new AttemptChannel.OutboundEnvelope({
+              envelope: AttemptChannel.OutboundEnvelope.make({
                 version: AttemptChannel.PROTOCOL_VERSION,
                 attemptId,
                 sequence: AttemptChannel.Sequence.make(3000 + notices.length),
@@ -1131,7 +1129,7 @@ describe("Operator", () => {
             }),
           );
         const silent = (unansweredProbes: number, lastAnsweredAt = now) =>
-          new AttemptChannel.WorkerUnresponsive({
+          AttemptChannel.WorkerUnresponsive.make({
             worker: WorkerName.make("local"),
             lastAnsweredAt,
             reason: "SSH timed out",
@@ -1167,7 +1165,7 @@ describe("Operator", () => {
             ),
           );
           append(
-            new AttemptChannel.WorkerResponsive({
+            AttemptChannel.WorkerResponsive.make({
               worker: need.worker,
               lastAnsweredAt: now,
               recovered: false,
@@ -1183,7 +1181,9 @@ describe("Operator", () => {
           assert.lengthOf(yield* workerNeeds, 1, "recovery prunes the previous dismissal");
           append(silent(3, DateTime.add(now, { minutes: 10 })));
           assert.lengthOf(yield* workerNeeds, 1);
-          append(new AttemptChannel.WorkerResponsive({ worker: need.worker, lastAnsweredAt: now }));
+          append(
+            AttemptChannel.WorkerResponsive.make({ worker: need.worker, lastAnsweredAt: now }),
+          );
           assert.deepStrictEqual(yield* workerNeeds, []);
         }).pipe(
           Effect.provide(
@@ -1274,10 +1274,10 @@ describe("Operator", () => {
                   ...app,
                   installationToken: () =>
                     Effect.succeed(
-                      new InstallationToken({
+                      InstallationToken.make({
                         value: Redacted.make("polling-test-token"),
                         expiresAt: DateTime.add(now, { hours: 1 }),
-                        scope: new InstallationWide(),
+                        scope: InstallationWide.make(),
                       }),
                     ),
                 }),
@@ -1335,7 +1335,7 @@ describe("Operator", () => {
               [],
               Effect.succeed([]),
               {
-                poll: Effect.succeed(Option.some(cycle)),
+                poll: Effect.succeedSome(cycle),
               },
             ),
           ),
@@ -1352,45 +1352,45 @@ describe("Operator", () => {
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-      const pollA = new RepositoryPollFailure({
+      const pollA = RepositoryPollFailure.make({
         repository,
         errorTag: "ExpressionEvaluationError",
         message: "Loop review-issue failed on issue #31",
       });
-      const pollB = new RepositoryPollFailure({
+      const pollB = RepositoryPollFailure.make({
         ...pollA,
         message: "Loop review-issue failed on issue #32",
       });
-      const scheduleA = new ScheduleTickFailure({
+      const scheduleA = ScheduleTickFailure.make({
         loop: loopName,
         repository,
         scheduledAt: now,
         errorTag: "GitHubApiError",
         message: "GitHub was unavailable",
       });
-      const scheduleB = new ScheduleTickFailure({
+      const scheduleB = ScheduleTickFailure.make({
         ...scheduleA,
         repository: RepositoryName.make("test/other"),
       });
-      const agentFailure = new ScheduleAgentFailure({
+      const agentFailure = ScheduleAgentFailure.make({
         loop: LoopName.make("missing-agent"),
         agent: agentFile.name,
         message: "Agent is unavailable",
       });
-      const cronFailure = new ScheduleCronFailure({
+      const cronFailure = ScheduleCronFailure.make({
         loop: LoopName.make("invalid-cron"),
         cron: "0 2 * * *",
         tz: "Europe/Paris",
         message: "Could not compute cron boundaries",
       });
-      const poll = new PollCycle({
+      const poll = PollCycle.make({
         repositories: 1,
         changedItems: 0,
         submissions: [],
         revokedRuns: 0,
         failures: [pollA, pollB],
         preflightFindings: [
-          new LabelPreflightFinding({
+          LabelPreflightFinding.make({
             repository,
             label: GitHubLabelName.make("ready-for-review"),
             errorTag: "GitHubApiError",
@@ -1399,7 +1399,7 @@ describe("Operator", () => {
         ],
         nextPollAt: Option.none(),
       });
-      const schedule = new ScheduleCycle({
+      const schedule = ScheduleCycle.make({
         loops: 3,
         fanout: 2,
         submissions: [],
@@ -1457,11 +1457,11 @@ describe("Operator", () => {
         ] as const) {
           yield* Ref.set(
             latestPoll,
-            Option.some(new PollCycle({ ...poll, failures: pollFailures })),
+            Option.some(PollCycle.make({ ...poll, failures: pollFailures })),
           );
           yield* Ref.set(
             latestSchedule,
-            Option.some(new ScheduleCycle({ ...schedule, failures: scheduleFailures })),
+            Option.some(ScheduleCycle.make({ ...schedule, failures: scheduleFailures })),
           );
           const refreshed = yield* operator.overview(instance);
           assert.deepStrictEqual(new Set(refreshed.dismissedNeeds), new Set(dismissed));
@@ -1470,9 +1470,9 @@ describe("Operator", () => {
         yield* Ref.set(
           latestPoll,
           Option.some(
-            new PollCycle({
+            PollCycle.make({
               ...poll,
-              failures: [new RepositoryPollFailure({ ...pollB, message: "Expression changed" })],
+              failures: [RepositoryPollFailure.make({ ...pollB, message: "Expression changed" })],
               preflightFindings: [],
             }),
           ),
@@ -1480,10 +1480,10 @@ describe("Operator", () => {
         yield* Ref.set(
           latestSchedule,
           Option.some(
-            new ScheduleCycle({
+            ScheduleCycle.make({
               ...schedule,
               failures: [
-                new ScheduleTickFailure({
+                ScheduleTickFailure.make({
                   ...scheduleB,
                   scheduledAt: DateTime.add(now, { minutes: 1 }),
                 }),
@@ -1526,11 +1526,11 @@ describe("Operator", () => {
         yield* operator.overview(instance);
         yield* Ref.set(
           latestPoll,
-          Option.some(new PollCycle({ ...poll, failures: [], preflightFindings: [] })),
+          Option.some(PollCycle.make({ ...poll, failures: [], preflightFindings: [] })),
         );
         yield* Ref.set(
           latestSchedule,
-          Option.some(new ScheduleCycle({ ...schedule, failures: [] })),
+          Option.some(ScheduleCycle.make({ ...schedule, failures: [] })),
         );
         yield* operator.overview(instance);
         yield* Ref.set(latestPoll, Option.some(poll));
@@ -1567,20 +1567,20 @@ describe("Operator", () => {
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const original = snapshot.attempts[0];
         assert(original !== undefined);
-        const handoff = new RunState.HandedOff({
+        const handoff = RunState.HandedOff.make({
           reason: "CI failed: ci.",
           head: CommitSha.make("a".repeat(40)),
           fixLoop: loopName,
           fixRunId: RunId.make("fix-828"),
         });
-        const current = new RunSnapshot({
+        const current = RunSnapshot.make({
           ...snapshot,
           closedAt: Option.some(now),
-          run: new Run({ ...snapshot.run, state: handoff }),
+          run: Run.make({ ...snapshot.run, state: handoff }),
           attempts: [
-            new Attempt({
+            Attempt.make({
               ...original,
-              outcome: Option.some(new AttemptHandedOff()),
+              outcome: Option.some(AttemptHandedOff.make()),
               endedAt: Option.some(now),
             }),
           ],
@@ -1609,11 +1609,11 @@ describe("Operator", () => {
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       const original = snapshot.attempts[0];
       assert(original !== undefined);
-      const failed = new Attempt({
+      const failed = Attempt.make({
         ...original,
         outcome: Option.some(
-          new AttemptFailed({
-            failure: new GitHubPushFailure({
+          AttemptFailed.make({
+            failure: GitHubPushFailure.make({
               repository,
               ref: "refs/heads/usine/salvage/run/1",
               message:
@@ -1622,7 +1622,7 @@ describe("Operator", () => {
           }),
         ),
       });
-      const later = new Attempt({
+      const later = Attempt.make({
         ...failed,
         id: AttemptId.make("later-failure"),
         number: AttemptNumber.make(2),
@@ -1633,9 +1633,9 @@ describe("Operator", () => {
         [[failed], Option.some(failed.id), false],
         [[failed, later], Option.some(failed.id), true],
       ] as const) {
-        const current = new RunSnapshot({
+        const current = RunSnapshot.make({
           ...snapshot,
-          run: new Run({ ...snapshot.run, state: new RunState.Failed() }),
+          run: Run.make({ ...snapshot.run, state: RunState.Failed.make() }),
           attempts,
           resolvedFailureAttemptId: resolved,
         });
@@ -1692,15 +1692,15 @@ describe("Operator", () => {
       Effect.gen(function* () {
         const original = snapshot.attempts[0];
         assert(original !== undefined);
-        const failed = new RunSnapshot({
+        const failed = RunSnapshot.make({
           ...snapshot,
-          run: new Run({ ...snapshot.run, state: new RunState.Failed() }),
+          run: Run.make({ ...snapshot.run, state: RunState.Failed.make() }),
           attempts: [
-            new Attempt({
+            Attempt.make({
               ...original,
               outcome: Option.some(
-                new AttemptFailed({
-                  failure: new InfraFailure({
+                AttemptFailed.make({
+                  failure: InfraFailure.make({
                     message: "Worker unavailable",
                     cause: "disconnected",
                   }),
@@ -1709,9 +1709,9 @@ describe("Operator", () => {
             }),
           ],
         });
-        const elsewhere = new LoadedInstance({
+        const elsewhere = LoadedInstance.make({
           ...instance,
-          config: Schema.decodeUnknownSync(UsineConfig)({
+          config: Schema.decodeSync(UsineConfig)({
             version: 1,
             repos: [{ name: "basaltbytes/site" }],
           }),
@@ -1743,24 +1743,24 @@ describe("Operator", () => {
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       const original = snapshot.attempts[0];
       assert(original !== undefined);
-      const failed = new Attempt({
+      const failed = Attempt.make({
         ...original,
         outcome: Option.some(
-          new AttemptFailed({
-            failure: new InfraFailure({ message: "Worker unavailable", cause: "disconnected" }),
+          AttemptFailed.make({
+            failure: InfraFailure.make({ message: "Worker unavailable", cause: "disconnected" }),
           }),
         ),
         endedAt: Option.some(DateTime.add(now, { minutes: 5 })),
       });
-      const running = new Attempt({
+      const running = Attempt.make({
         ...original,
         id: AttemptId.make("running-retry"),
         number: AttemptNumber.make(2),
         startedAt: DateTime.add(now, { minutes: 6 }),
       });
-      const current = new RunSnapshot({
+      const current = RunSnapshot.make({
         ...snapshot,
-        run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+        run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
         attempts: [failed, running],
       });
       yield* Effect.gen(function* () {
@@ -1787,14 +1787,14 @@ describe("Operator", () => {
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       // Issue #31 has `ready` now; its Run was triggered while it had `ready-for-review`.
-      const triggered = new Event({
+      const triggered = Event.make({
         ...snapshot.event,
         payload: { number: 31, labels: { totalCount: 1, nodes: [{ name: "ready-for-review" }] } },
       });
       // No lane has a label that #31 has now.
-      const unlaned = new LoadedInstance({
+      const unlaned = LoadedInstance.make({
         ...instance,
-        config: Schema.decodeUnknownSync(UsineConfig)({
+        config: Schema.decodeSync(UsineConfig)({
           version: 1,
           repos: [
             {
@@ -1816,14 +1816,14 @@ describe("Operator", () => {
           items.some((item) => item.itemKey === itemKey),
         )?.name;
       for (const [loaded, state, lane, toLane] of [
-        [instance, new RunState.Running(), "Ready", "In review"],
-        [unlaned, new RunState.Running(), "In review", "Triage"],
-        [unlaned, new RunState.Waiting(), "Issues", "In review"],
+        [instance, RunState.Running.make(), "Ready", "In review"],
+        [unlaned, RunState.Running.make(), "In review", "Triage"],
+        [unlaned, RunState.Waiting.make(), "Issues", "In review"],
       ] as const) {
-        const current = new RunSnapshot({
+        const current = RunSnapshot.make({
           ...snapshot,
           event: triggered,
-          run: new Run({ ...snapshot.run, state }),
+          run: Run.make({ ...snapshot.run, state }),
         });
         const recordedMoves: Array<BoardMoveRecord> = [];
         yield* Effect.gen(function* () {
@@ -1832,7 +1832,7 @@ describe("Operator", () => {
           // A move records the lane the Board showed the card in.
           yield* operator.moveBoardItem(
             loaded,
-            new BoardMove({
+            BoardMove.make({
               repository,
               item: CoreItemNumber.make(31),
               toLane: BoardLaneId.make(`authored:${toLane}`),
@@ -1866,19 +1866,19 @@ describe("Operator", () => {
     const original = snapshot.attempts[0];
     assert(original !== undefined);
     const closed = (id: string, startMinute: number, endMinute: number | null) =>
-      new Attempt({
+      Attempt.make({
         ...original,
         id: AttemptId.make(id),
         startedAt: DateTime.add(now, { minutes: startMinute }),
         outcome: Option.some(
-          new AttemptFailed({ failure: new InfraFailure({ message: "Lost", cause: "gone" }) }),
+          AttemptFailed.make({ failure: InfraFailure.make({ message: "Lost", cause: "gone" }) }),
         ),
         endedAt:
           endMinute === null
             ? Option.none()
             : Option.some(DateTime.add(now, { minutes: endMinute })),
       });
-    const running = new Attempt({
+    const running = Attempt.make({
       ...original,
       id: AttemptId.make("open"),
       startedAt: DateTime.add(now, { minutes: 30 }),
@@ -1903,34 +1903,34 @@ describe("Operator", () => {
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const original = snapshot.attempts[0];
         assert(original !== undefined);
-        const failed = new Attempt({
+        const failed = Attempt.make({
           ...original,
           outcome: Option.some(
-            new AttemptFailed({
-              failure: new InfraFailure({ message: "Worker unavailable", cause: "disconnected" }),
+            AttemptFailed.make({
+              failure: InfraFailure.make({ message: "Worker unavailable", cause: "disconnected" }),
             }),
           ),
           endedAt: Option.some(DateTime.add(now, { minutes: 5 })),
-          start: Option.some(new StartedByEvent()),
+          start: Option.some(StartedByEvent.make()),
         });
-        const running = new Attempt({
+        const running = Attempt.make({
           ...original,
           id: retryAttemptId,
           number: AttemptNumber.make(2),
           worker: WorkerName.make("usine-worker-1"),
           startedAt: DateTime.add(now, { minutes: 6 }),
-          start: Option.some(new StartedByInfraRetry()),
+          start: Option.some(StartedByInfraRetry.make()),
           reattachedAt: Option.some(DateTime.add(now, { minutes: 9 })),
         });
-        const current = new RunSnapshot({
+        const current = RunSnapshot.make({
           ...snapshot,
-          run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+          run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
           attempts: [failed, running],
         });
         // `instance` declares only `local`; this one also declares `usine-worker-1` over SSH.
-        const declared = new LoadedInstance({
+        const declared = LoadedInstance.make({
           ...instance,
-          config: Schema.decodeUnknownSync(UsineConfig)({
+          config: Schema.decodeSync(UsineConfig)({
             version: 1,
             repos: [{ name: repository }],
             workers: [
@@ -1952,8 +1952,8 @@ describe("Operator", () => {
           assert.deepStrictEqual(
             detail.run.attempts.map(({ workerAccess }) => workerAccess),
             [
-              new LocalWorkerAccess(),
-              new SshWorkerAccess({
+              LocalWorkerAccess.make(),
+              SshWorkerAccess.make({
                 destination: SshDestination.make("usine-worker-1"),
                 port: null,
               }),
@@ -2023,7 +2023,7 @@ describe("Operator", () => {
           assert.strictEqual(again.usage.tokens, 30_300);
           assert.deepStrictEqual(
             again.run.attempts.map(({ workerAccess }) => workerAccess),
-            [new LocalWorkerAccess(), null],
+            [LocalWorkerAccess.make(), null],
           );
           assert.deepStrictEqual(usageQueries, [attemptId, retryAttemptId, retryAttemptId]);
 
@@ -2111,10 +2111,10 @@ describe("Operator", () => {
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const issueLoop = (name: string, condition: string) =>
-          new LoopFile({
+          LoopFile.make({
             ...loop,
             name: LoopName.make(name),
-            trigger: new IssueTrigger({ on: "issue", if: Source.make(condition) }),
+            trigger: IssueTrigger.make({ on: "issue", if: Source.make(condition) }),
           });
         const labelled = issueLoop(
           "start-dev",
@@ -2124,16 +2124,16 @@ describe("Operator", () => {
           "triage",
           'item.labels.nodes.exists(label, label.name == "triage")',
         );
-        const pullRequests = new LoopFile({
+        const pullRequests = LoopFile.make({
           ...loop,
           name: LoopName.make("review-pr"),
-          trigger: new PullRequestTrigger({ on: "pr", if: Source.make("true") }),
+          trigger: PullRequestTrigger.make({ on: "pr", if: Source.make("true") }),
         });
-        const watched = new LoadedInstance({
+        const watched = LoadedInstance.make({
           ...instance,
           loops: [loop, labelled, triage, pullRequests],
         });
-        const reloaded = new LoadedInstance({
+        const reloaded = LoadedInstance.make({
           ...watched,
           loops: [
             loop,
@@ -2168,18 +2168,18 @@ describe("Operator", () => {
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-      const replacement = new AgentFile({ ...agentFile, harness: "claude" });
-      const reloaded = new LoadedInstance({ ...instance, agents: [replacement] });
-      const amended = new RunSnapshot({ ...snapshot, agent: replacement.agent });
-      const changedPersona = new LoadedInstance({
+      const replacement = AgentFile.make({ ...agentFile, harness: "claude" });
+      const reloaded = LoadedInstance.make({ ...instance, agents: [replacement] });
+      const amended = RunSnapshot.make({ ...snapshot, agent: replacement.agent });
+      const changedPersona = LoadedInstance.make({
         ...instance,
         agents: [
-          new AgentFile({ ...agentFile, persona: AgentPersona.make("Changed instructions") }),
+          AgentFile.make({ ...agentFile, persona: AgentPersona.make("Changed instructions") }),
         ],
       });
-      const missing = new LoadedInstance({ ...instance, agents: [], loops: [] });
+      const missing = LoadedInstance.make({ ...instance, agents: [], loops: [] });
       for (const [saved, loaded, changed] of [
-        [new RunSnapshot({ ...snapshot, attempts: [] }), instance, false],
+        [RunSnapshot.make({ ...snapshot, attempts: [] }), instance, false],
         [snapshot, reloaded, true],
         [snapshot, changedPersona, true],
         [amended, reloaded, false],
@@ -2205,7 +2205,7 @@ describe("Operator", () => {
         const edits: Array<AttemptContext> = [];
         const retriedBy: Array<Option.Option<OperatorActor>> = [];
         const inputs: Array<AttemptChannel.Intervention> = [];
-        const replacement = new AgentFile({
+        const replacement = AgentFile.make({
           ...agentFile,
           name: AgentName.make("reviewer"),
           harness: "codex",
@@ -2214,9 +2214,9 @@ describe("Operator", () => {
           parentModel: Option.some(ModelId.make("openai/new-parent")),
           parentEffort: Option.some("medium"),
         });
-        const configured = new LoadedInstance({
+        const configured = LoadedInstance.make({
           ...instance,
-          config: new UsineConfig({
+          config: UsineConfig.make({
             ...instance.config,
             operator: Option.some(OperatorLogin.make("Philippe")),
           }),
@@ -2227,13 +2227,13 @@ describe("Operator", () => {
           yield* operator.editAndRetry(
             configured,
             runId,
-            new EditAndRetry({
+            EditAndRetry.make({
               task: AttemptTask.make("Correct the failed approach"),
               agent: replacement.name,
             }),
           );
           assert.deepStrictEqual(edits, [
-            new AttemptContext({
+            AttemptContext.make({
               task: AttemptTask.make("Correct the failed approach"),
               agent: replacement.agent,
               parentModel: replacement.parentModel,
@@ -2243,7 +2243,7 @@ describe("Operator", () => {
             operator.editAndRetry(
               configured,
               runId,
-              new EditAndRetry({
+              EditAndRetry.make({
                 task: AttemptTask.make("Task"),
                 agent: AgentName.make("missing"),
               }),
@@ -2257,30 +2257,30 @@ describe("Operator", () => {
             Option.some(OperatorLogin.make("Philippe")),
           ]);
           assert.strictEqual(edits.length, 1);
-          const reloadedAgent = new AgentFile({ ...replacement, name: agentFile.name });
+          const reloadedAgent = AgentFile.make({ ...replacement, name: agentFile.name });
           yield* operator.editAndRetry(
-            new LoadedInstance({ ...configured, agents: [reloadedAgent] }),
+            LoadedInstance.make({ ...configured, agents: [reloadedAgent] }),
             runId,
-            new EditAndRetry({ task: snapshot.task, agent: agentFile.name }),
+            EditAndRetry.make({ task: snapshot.task, agent: agentFile.name }),
           );
           assert.deepStrictEqual(
             edits[1],
-            new AttemptContext({
+            AttemptContext.make({
               task: snapshot.task,
               agent: reloadedAgent.agent,
               parentModel: reloadedAgent.parentModel,
             }),
           );
-          const input = Schema.decodeUnknownSync(SessionIntervention)({
+          const input = Schema.decodeSync(SessionIntervention)({
             attemptId,
             action: { _tag: "Steer", message: "Continue" },
           });
           assert.strictEqual(input.target._tag, "Parent");
           yield* operator.intervene(configured, runId, input);
           assert.deepStrictEqual(inputs, [
-            new AttemptChannel.Intervention({
+            AttemptChannel.Intervention.make({
               operator: "Philippe",
-              target: new AttemptChannel.ParentTarget(),
+              target: AttemptChannel.ParentTarget.make(),
               action: input.action,
             }),
           ]);
@@ -2313,27 +2313,27 @@ describe("Operator", () => {
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const requests: Array<[RunId, RunAgainRequest]> = [];
-        const reviewer = new AgentFile({
+        const reviewer = AgentFile.make({
           ...agentFile,
           name: AgentName.make("reviewer"),
           parentModel: Option.some(ModelId.make("openai/new-parent")),
         });
-        const configured = new LoadedInstance({
+        const configured = LoadedInstance.make({
           ...instance,
-          config: new UsineConfig({
+          config: UsineConfig.make({
             ...instance.config,
             operator: Option.some(OperatorLogin.make("Philippe")),
           }),
           agents: [agentFile, reviewer],
-          loops: [new LoopFile({ ...loop, maxCycles: CycleLimit.make(5), permissions: "read" })],
+          loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(5), permissions: "read" })],
         });
-        const opened = new Claimed({
+        const opened = Claimed.make({
           eventId: EventId.make("run-again-event"),
           runId: RunId.make("run-opened-again"),
         });
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const edit = new EditAndRetry({
+          const edit = EditAndRetry.make({
             task: AttemptTask.make("Finish the review"),
             agent: reviewer.name,
           });
@@ -2341,13 +2341,13 @@ describe("Operator", () => {
           assert.deepStrictEqual(requests, [
             [
               runId,
-              new RunAgainRequest({
+              RunAgainRequest.make({
                 step: loop.step,
                 approval: "required",
                 approvalReason: Option.some("Approval required: the loop requires approval"),
                 cycleLimit: Option.some(CycleLimit.make(5)),
                 permissions: "read",
-                context: new AttemptContext({
+                context: AttemptContext.make({
                   task: AttemptTask.make("Finish the review"),
                   agent: reviewer.agent,
                   parentModel: reviewer.parentModel,
@@ -2360,9 +2360,9 @@ describe("Operator", () => {
             ['item.number == 99 && repo.owner == "basaltbytes"', "none"],
             ['item.labelEvents["ready-for-agent"].actor.type != "User"', "required"],
           ] as const) {
-            const conditional = new LoadedInstance({
+            const conditional = LoadedInstance.make({
               ...configured,
-              loops: [new LoopFile({ ...loop, approval: Source.make(approval) })],
+              loops: [LoopFile.make({ ...loop, approval: Source.make(approval) })],
             });
             yield* operator.runAgain(conditional, runId, edit);
             assert.strictEqual(requests.at(-1)?.[1].approval, expected);
@@ -2372,12 +2372,12 @@ describe("Operator", () => {
             operator.runAgain(
               configured,
               runId,
-              new EditAndRetry({ task: edit.task, agent: AgentName.make("missing") }),
+              EditAndRetry.make({ task: edit.task, agent: AgentName.make("missing") }),
             ),
           );
           assert.strictEqual(unknownAgent._tag, "RosterAgentNotFoundError");
           const retired = yield* Effect.flip(
-            operator.runAgain(new LoadedInstance({ ...configured, loops: [] }), runId, edit),
+            operator.runAgain(LoadedInstance.make({ ...configured, loops: [] }), runId, edit),
           );
           assert.strictEqual(retired._tag, "LoopNotFoundError");
           assert.strictEqual(requests.length, 3);
@@ -2399,14 +2399,14 @@ describe("Operator", () => {
 
   it.effect("projects Item-level exhaustion without a new Run and answers the exact Ask", () =>
     Effect.gen(function* () {
-      const ask = new CycleBudgetAsk({
+      const ask = CycleBudgetAsk.make({
         id: CycleBudgetAskId.make("exhausted-round"),
         itemKey,
         repository,
         loop: loopName,
         limit: CycleLimit.make(3),
         counts: [
-          new LoopCycleCount({
+          LoopCycleCount.make({
             loop: loopName,
             admitted: CycleCount.make(3),
             completed: CycleCount.make(3),
@@ -2452,10 +2452,10 @@ describe("Operator", () => {
         assert(dismissed.dismissedNeeds.some((entry) => entry.id === need.id));
         assert.deepStrictEqual(yield* Ref.get(asks), [ask]);
         assert.deepStrictEqual(yield* Ref.get(answered), []);
-        const nextRound = new CycleBudgetAsk({
+        const nextRound = CycleBudgetAsk.make({
           ...ask,
           counts: [
-            new LoopCycleCount({
+            LoopCycleCount.make({
               loop: loopName,
               admitted: CycleCount.make(4),
               completed: CycleCount.make(3),
@@ -2492,15 +2492,15 @@ describe("Operator", () => {
         const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
         const overviewReads = yield* Ref.make(0);
         const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-        const earlierApproval = new ApprovalSource({
+        const earlierApproval = ApprovalSource.make({
           channel: "ui",
           approver: Option.some(OperatorLogin.make("Philippe")),
         });
-        const queued = new RunSnapshot({
+        const queued = RunSnapshot.make({
           ...snapshot,
-          run: new Run({ ...snapshot.run, state: new RunState.Queued() }),
+          run: Run.make({ ...snapshot.run, state: RunState.Queued.make() }),
           approval: Option.some(
-            new RunApproval({ approvedAt: now, source: Option.some(earlierApproval) }),
+            RunApproval.make({ approvedAt: now, source: Option.some(earlierApproval) }),
           ),
         });
         yield* Effect.gen(function* () {
@@ -2518,7 +2518,7 @@ describe("Operator", () => {
           assert.strictEqual(run.canApprove, false);
           assert.strictEqual(run.canCancel, true);
           // The overview and the detail both show who approved, when, and from where.
-          const shown = new ApprovalView({
+          const shown = ApprovalView.make({
             approvedAt: DateTime.formatIso(now),
             source: earlierApproval,
           });
@@ -2589,7 +2589,7 @@ describe("Operator", () => {
           overview.projects[0]?.board.lanes[0]?.items[0]?.items[0],
         );
 
-        const detail = yield* operator.detail(instance, runId, new ColdTranscriptRequest());
+        const detail = yield* operator.detail(instance, runId, ColdTranscriptRequest.make());
         assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
         assert.deepStrictEqual(detail.eventPayload, { number: 31 });
         assert.strictEqual(detail.run.attempts[0]?.number, 1);
@@ -2602,7 +2602,7 @@ describe("Operator", () => {
         const tail = yield* operator.detail(
           instance,
           runId,
-          new TailTranscriptRequest({ after: TranscriptSequence.make(1) }),
+          TailTranscriptRequest.make({ after: TranscriptSequence.make(1) }),
         );
         assert.strictEqual(tail.transcript.length, 500);
         assert.strictEqual(tail.transcript[0]?.sequence, 2);
@@ -2611,7 +2611,7 @@ describe("Operator", () => {
         const remainingTail = yield* operator.detail(
           instance,
           runId,
-          new TailTranscriptRequest({ after: TranscriptSequence.make(501) }),
+          TailTranscriptRequest.make({ after: TranscriptSequence.make(501) }),
         );
         assert.deepStrictEqual(
           remainingTail.transcript.map(({ sequence }) => sequence),
@@ -2621,7 +2621,7 @@ describe("Operator", () => {
         const earlier = yield* operator.detail(
           instance,
           runId,
-          new EarlierTranscriptRequest({
+          EarlierTranscriptRequest.make({
             attemptId,
             before: TranscriptSequence.make(3),
           }),
@@ -2639,7 +2639,7 @@ describe("Operator", () => {
           .detail(
             instance,
             runId,
-            new EarlierTranscriptRequest({
+            EarlierTranscriptRequest.make({
               attemptId: AttemptId.make("another-attempt"),
               before: TranscriptSequence.make(3),
             }),
@@ -2648,9 +2648,9 @@ describe("Operator", () => {
         assert.strictEqual(wrongAttempt._tag, "TranscriptAttemptNotFoundError");
 
         assert.strictEqual(overview.projects[0]?.runs[0]?.approval, null);
-        const configured = new LoadedInstance({
+        const configured = LoadedInstance.make({
           ...instance,
-          config: new UsineConfig({
+          config: UsineConfig.make({
             ...instance.config,
             operator: Option.some(OperatorLogin.make("Philippe")),
           }),
@@ -2665,7 +2665,7 @@ describe("Operator", () => {
         // The authenticated member overrides the historical operator setting.
         assert.deepStrictEqual(
           recorded.source,
-          new ApprovalSource({
+          ApprovalSource.make({
             channel: "ui",
             approver: Option.some(OperatorLogin.make("alice")),
           }),
@@ -2683,7 +2683,7 @@ describe("Operator", () => {
         });
         yield* operator.moveBoardItem(
           instance,
-          new BoardMove({
+          BoardMove.make({
             repository,
             item: CoreItemNumber.make(31),
             toLane: BoardLaneId.make("authored:In review"),
@@ -2712,7 +2712,7 @@ describe("Operator", () => {
             operator
               .moveBoardItem(
                 instance,
-                new BoardMove({
+                BoardMove.make({
                   repository: target,
                   item: CoreItemNumber.make(item),
                   toLane: BoardLaneId.make(toLane),
@@ -2731,9 +2731,9 @@ describe("Operator", () => {
           assert.strictEqual(unknownLane._tag, "BoardLaneNotFoundError");
           const stateLane = yield* rejected(repository, 31, "fallback:unmapped");
           assert.strictEqual(stateLane._tag, "BoardLaneReadOnlyError");
-          const proposed = new LoadedInstance({
+          const proposed = LoadedInstance.make({
             ...instance,
-            config: Schema.decodeUnknownSync(UsineConfig)({
+            config: Schema.decodeSync(UsineConfig)({
               version: 1,
               repos: [{ name: repository }],
             }),
@@ -2741,7 +2741,7 @@ describe("Operator", () => {
           const proposedLane = yield* operator
             .moveBoardItem(
               proposed,
-              new BoardMove({
+              BoardMove.make({
                 repository,
                 item: CoreItemNumber.make(31),
                 toLane: BoardLaneId.make("proposed:ready-for-review"),
@@ -2808,22 +2808,22 @@ describe("Operator", () => {
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       const fileError = (file: string, stage: "schema" | "reference", message: string) =>
-        new ConfigFileError({
+        ConfigFileError.make({
           file: InstancePath.make(file),
           stage,
           expression: Option.none(),
           message,
         });
-      const broken = new LoadedInstance({
+      const broken = LoadedInstance.make({
         ...instance,
         invalidAgents: [
-          new InvalidAgent({
+          InvalidAgent.make({
             file: InstancePath.make("agents/intern.md"),
             error: fileError("agents/intern.md", "schema", "Expected a known harness"),
           }),
         ],
         quarantinedLoops: [
-          new QuarantinedLoop({
+          QuarantinedLoop.make({
             file: InstancePath.make("loops/ghost.md"),
             error: fileError("loops/ghost.md", "reference", "Unknown agent: ghost"),
           }),
@@ -2858,7 +2858,7 @@ describe("Operator", () => {
       );
       const encoded = Schema.encodeUnknownSync(ReadyOverview)(overview);
       assert.deepStrictEqual(
-        Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou.filter(
+        Schema.decodeSync(ReadyOverview)(encoded).needsYou.filter(
           (need) => need._tag === "ConfigFileNeed",
         ),
         needs,
@@ -2882,12 +2882,12 @@ describe("Operator", () => {
         assert.deepStrictEqual(yield* unconfiguredNeeds(instance), []);
         // A reload that changes only the Worker leaves the runtime store as it
         // was; the overview must not answer from its cache.
-        const switched = new LoadedInstance({
+        const switched = LoadedInstance.make({
           ...instance,
-          config: new UsineConfig({
+          config: UsineConfig.make({
             ...instance.config,
             workers: [
-              new LocalWorker({
+              LocalWorker.make({
                 name: WorkerName.make("laptop"),
                 kind: "local",
                 maxConcurrentAttempts: 1,
@@ -2902,9 +2902,9 @@ describe("Operator", () => {
           [["unconfigured-worker:local", "local", 3, 1]],
         );
         const encoded = Schema.encodeUnknownSync(ReadyOverview)(
-          new ReadyOverview({ projects: [], loops: [], needsYou: needs }),
+          ReadyOverview.make({ projects: [], loops: [], needsYou: needs }),
         );
-        assert.deepStrictEqual(Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou, needs);
+        assert.deepStrictEqual(Schema.decodeSync(ReadyOverview)(encoded).needsYou, needs);
       }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
     }),
   );
@@ -2920,16 +2920,16 @@ describe("Operator", () => {
         const local = WorkerName.make("local");
         const original = snapshot.attempts[0];
         assert(original !== undefined);
-        const canceled = new RunSnapshot({
+        const canceled = RunSnapshot.make({
           ...snapshot,
-          run: new Run({
+          run: Run.make({
             ...snapshot.run,
-            state: RunState.cancelByOperator(new RunState.Running()),
+            state: RunState.cancelByOperator(RunState.Running.make()),
           }),
-          attempts: [new Attempt({ ...original, outcome: Option.some(new AttemptCanceled()) })],
+          attempts: [Attempt.make({ ...original, outcome: Option.some(AttemptCanceled.make()) })],
         });
         const stops = yield* Ref.make([
-          new UnconfirmedStop({
+          UnconfirmedStop.make({
             attemptId,
             runId,
             loop: snapshot.run.loop,
@@ -2956,9 +2956,9 @@ describe("Operator", () => {
             [[`unconfirmed-stop:${attemptId}`, repository, runId, loopName, 1, local]],
           );
           const encoded = Schema.encodeUnknownSync(ReadyOverview)(
-            new ReadyOverview({ projects: [], loops: [], needsYou: needs }),
+            ReadyOverview.make({ projects: [], loops: [], needsYou: needs }),
           );
-          assert.deepStrictEqual(Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou, needs);
+          assert.deepStrictEqual(Schema.decodeSync(ReadyOverview)(encoded).needsYou, needs);
           // The stop succeeds without a write to the runtime store; the overview must not answer
           // from its cache.
           yield* Ref.set(stops, []);
@@ -2995,22 +2995,22 @@ describe("Operator", () => {
         const original = snapshot.attempts[0];
         assert(original !== undefined);
         // The failed Attempt's retry waits for its parent task's stop.
-        const retrying = new RunSnapshot({
+        const retrying = RunSnapshot.make({
           ...snapshot,
-          run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+          run: Run.make({ ...snapshot.run, state: RunState.Running.make() }),
           attempts: [
-            new Attempt({
+            Attempt.make({
               ...original,
               outcome: Option.some(
-                new AttemptFailed({
-                  failure: new InfraFailure({ message: "Lost the parent task", cause: "offline" }),
+                AttemptFailed.make({
+                  failure: InfraFailure.make({ message: "Lost the parent task", cause: "offline" }),
                 }),
               ),
             }),
           ],
         });
         const stops = yield* Ref.make([
-          new UnconfirmedStop({
+          UnconfirmedStop.make({
             attemptId,
             runId,
             loop: snapshot.run.loop,
@@ -3027,7 +3027,7 @@ describe("Operator", () => {
           );
           assert.deepStrictEqual(
             yield* shown,
-            new UnconfirmedStopView({ runId, attemptNumber: original.number, worker: local }),
+            UnconfirmedStopView.make({ runId, attemptNumber: original.number, worker: local }),
           );
           yield* Ref.set(stops, []);
           assert.strictEqual(yield* shown, null);
@@ -3053,7 +3053,7 @@ describe("Operator", () => {
 
   it("lists a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {
     const need = (running: number) =>
-      new UnconfiguredWorkerNeed({
+      UnconfiguredWorkerNeed.make({
         id: "unconfigured-worker:local",
         worker: WorkerName.make("local"),
         attempts: 1,
@@ -3066,8 +3066,9 @@ describe("Operator", () => {
   });
 
   it("shows an Agent's blocker to the operator as its own failure kind", () => {
-    const encoded = Schema.encodeUnknownSync(FailureView)(
-      failureView(new BlockedFailure({ message: "The baseline gate fails on main." })),
+    const encoded = BlockedFailure.make({ message: "The baseline gate fails on main." }).pipe(
+      failureView,
+      Schema.encodeUnknownSync(FailureView),
     );
     assert.deepStrictEqual(encoded, {
       _tag: "BlockedFailure",
@@ -3080,7 +3081,7 @@ describe("Operator", () => {
     (Failure) => {
       const secret = "token=super-secret";
       const view = failureView(
-        new Failure({
+        Failure.make({
           message: "The worker connection failed",
           cause: new Error(secret),
         }),
@@ -3107,14 +3108,14 @@ it.effect(
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       const drain = yield* Ref.make(Option.none<UpgradeDrain>());
-      const current = new RunSnapshot({
+      const current = RunSnapshot.make({
         ...snapshot,
-        run: new Run({ ...snapshot.run, state: new RunState.Queued() }),
+        run: Run.make({ ...snapshot.run, state: RunState.Queued.make() }),
         attempts: [],
       });
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
-        const wait = new UpgradeWait({
+        const wait = UpgradeWait.make({
           target: ReleaseVersion.make("1.2.3"),
           since: yield* DateTime.now,
         });
@@ -3124,7 +3125,7 @@ it.effect(
           ),
         );
         assert((yield* runWaits).every((value) => value === null));
-        yield* Ref.set(drain, Option.some(new UpgradeDrain({ wait, runIds: [current.run.id] })));
+        yield* Ref.set(drain, Option.some(UpgradeDrain.make({ wait, runIds: [current.run.id] })));
         assert.deepStrictEqual(yield* runWaits, [wait]);
         assert.deepStrictEqual(
           (yield* operator.detail(instance, current.run.id)).run.upgradeWait,
@@ -3198,9 +3199,9 @@ it.effect("filters cached project lists and refuses actions outside a project bi
     const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
     const alphaLoop = LoopName.make("alpha/review");
     const betaLoop = LoopName.make("beta/review");
-    const loaded = new LoadedInstance({
+    const loaded = LoadedInstance.make({
       ...instance,
-      config: Schema.decodeUnknownSync(UsineConfig)({
+      config: Schema.decodeSync(UsineConfig)({
         version: 2,
         repos: [{ name: repository }, { name: "acme/hidden" }],
         projects: [
@@ -3217,15 +3218,15 @@ it.effect("filters cached project lists and refuses actions outside a project bi
         ],
       }),
       loops: [
-        new LoopFile({ ...loop, name: alphaLoop }),
-        new LoopFile({ ...loop, name: betaLoop }),
+        LoopFile.make({ ...loop, name: alphaLoop }),
+        LoopFile.make({ ...loop, name: betaLoop }),
       ],
     });
-    const grants = new RoleBinding({
+    const grants = RoleBinding.make({
       name: "alpha-operator",
       member: GitHubUserId.make(1),
       role: "operator",
-      scope: new ProjectScope({ project: ProjectId.make("alpha") }),
+      scope: ProjectScope.make({ project: ProjectId.make("alpha") }),
     }).permissions;
     yield* Effect.gen(function* () {
       const operator = yield* Operator;
@@ -3269,14 +3270,14 @@ it.effect("authorizes historical run actions by current repository ownership", (
     const moved = yield* Ref.make<ItemLabelMutation | null>(null);
     const reads = yield* Ref.make(0);
     const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-    const historical = new RunSnapshot({
+    const historical = RunSnapshot.make({
       ...snapshot,
-      run: new Run({ ...snapshot.run, loop: LoopName.make("alpha/review") }),
+      run: Run.make({ ...snapshot.run, loop: LoopName.make("alpha/review") }),
     });
     const loaded = (owner: "alpha" | "beta" | "removed") =>
-      new LoadedInstance({
+      LoadedInstance.make({
         ...instance,
-        config: Schema.decodeUnknownSync(UsineConfig)({
+        config: Schema.decodeSync(UsineConfig)({
           version: 2,
           repos: [{ name: repository }, { name: "acme/alpha" }, { name: "acme/beta" }],
           projects: [
@@ -3292,29 +3293,29 @@ it.effect("authorizes historical run actions by current repository ownership", (
             },
           ],
         }),
-        loops: [new LoopFile({ ...loop, name: historical.run.loop })],
+        loops: [LoopFile.make({ ...loop, name: historical.run.loop })],
       });
     const grants = (project: "alpha" | "beta", role: "operator" | "viewer" = "operator") =>
-      new RoleBinding({
+      RoleBinding.make({
         name: `${project}-${role}`,
         member: GitHubUserId.make(1),
         role,
-        scope: new ProjectScope({ project: ProjectId.make(project) }),
+        scope: ProjectScope.make({ project: ProjectId.make(project) }),
       }).permissions;
-    const edit = new EditAndRetry({ task: snapshot.task, agent: agentFile.name });
-    const intervention = Schema.decodeUnknownSync(SessionIntervention)({
+    const edit = EditAndRetry.make({ task: snapshot.task, agent: agentFile.name });
+    const intervention = Schema.decodeSync(SessionIntervention)({
       attemptId,
       action: { _tag: "Steer", message: "Continue" },
     });
     const actions: Array<string> = [];
-    const ask = new CycleBudgetAsk({
+    const ask = CycleBudgetAsk.make({
       id: CycleBudgetAskId.make("historical-budget"),
       itemKey,
       repository,
       loop: historical.run.loop,
       limit: CycleLimit.make(3),
       counts: [
-        new LoopCycleCount({
+        LoopCycleCount.make({
           loop: historical.run.loop,
           admitted: CycleCount.make(3),
           completed: CycleCount.make(3),

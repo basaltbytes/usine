@@ -116,7 +116,7 @@ const refusingSteerBackend = Layer.effectContext(
             ...child,
             intervene: () =>
               Effect.fail(
-                new SessionOperationError({
+                SessionOperationError.make({
                   operation: "steer",
                   sessionId: Option.some(child.session.id),
                   message: "The child has already stopped accepting input",
@@ -140,13 +140,13 @@ describe("durable AttemptRuntime", () => {
         const task = AttemptTask.make(
           "Review PR #818.\n\n  Add `ready-to-merge` on a clean review.\nDo not wait for CI.\n",
         );
-        const request = new AttemptRequest({
+        const request = AttemptRequest.make({
           ...initial,
-          spec: new AttemptChannel.RunSpec({ ...initial.spec, task }),
+          spec: AttemptChannel.RunSpec.make({ ...initial.spec, task }),
         });
         const recording = recordingSink();
         const lastAnsweredAt = DateTime.makeUnsafe("2026-10-15T19:42:00Z");
-        const silent = new AttemptChannel.WorkerUnresponsive({
+        const silent = AttemptChannel.WorkerUnresponsive.make({
           worker: request.worker,
           lastAnsweredAt,
           reason: "Connection timed out during banner exchange",
@@ -158,7 +158,7 @@ describe("durable AttemptRuntime", () => {
         const child = yield* children.next;
         assert.deepStrictEqual(child.request.environment, workerEnvironment);
         assert.strictEqual(child.request.cwd, "/workspace/usine");
-        assert.deepStrictEqual(child.request.host, new LocalProcess());
+        assert.deepStrictEqual(child.request.host, LocalProcess.make());
         assert.include(child.request.prompt, `# Delegated task\n\n${task}\n`);
         assert.include(
           child.request.prompt,
@@ -175,7 +175,7 @@ describe("durable AttemptRuntime", () => {
         yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(30));
         yield* runtime.notify(
           request.spec.attemptId,
-          new AttemptChannel.WorkerResponsive({ worker: request.worker, lastAnsweredAt }),
+          AttemptChannel.WorkerResponsive.make({ worker: request.worker, lastAnsweredAt }),
         );
         yield* child.reply("Child fixed the test.");
         const report = yield* Fiber.join(execution);
@@ -237,7 +237,7 @@ describe("durable AttemptRuntime", () => {
       // After a restart, the report, the harvested result, and the unsupervised time are still
       // readable.
       const attemptId = attemptRequest("run/step/1").spec.attemptId;
-      const harvested = new StepResult({ message: "Fixed it.", facts: [] });
+      const harvested = StepResult.make({ message: "Fixed it.", facts: [] });
       const finished = yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const reported = yield* runtime.finished(attemptId);
@@ -255,8 +255,8 @@ describe("durable AttemptRuntime", () => {
       assert.deepStrictEqual(
         finished.reported,
         Option.some(
-          new ParentReported({
-            report: new AttemptReport({
+          ParentReported.make({
+            report: AttemptReport.make({
               message: "Fixed the flaky test and opened a pull request.",
             }),
           }),
@@ -264,7 +264,7 @@ describe("durable AttemptRuntime", () => {
       );
       assert.deepStrictEqual(
         finished.recorded,
-        Option.some(new ResultRecorded({ result: harvested })),
+        Option.some(ResultRecorded.make({ result: harvested })),
       );
     }).pipe(Effect.scoped),
   );
@@ -280,12 +280,12 @@ describe("durable AttemptRuntime", () => {
           const recording = recordingSink();
           const lastAnsweredAt = DateTime.makeUnsafe("2026-10-15T19:42:00Z");
           const silent = (reason: string) =>
-            new AttemptChannel.WorkerUnresponsive({
+            AttemptChannel.WorkerUnresponsive.make({
               worker: request.worker,
               lastAnsweredAt,
               reason,
             });
-          const answering = new AttemptChannel.WorkerResponsive({
+          const answering = AttemptChannel.WorkerResponsive.make({
             worker: request.worker,
             lastAnsweredAt,
           });
@@ -322,9 +322,9 @@ describe("durable AttemptRuntime", () => {
       yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const base = attemptRequest("run/step/41");
-        const request = new AttemptRequest({
+        const request = AttemptRequest.make({
           ...base,
-          spec: new AttemptChannel.RunSpec({
+          spec: AttemptChannel.RunSpec.make({
             ...base.spec,
             parentModel: Option.some(ModelId.make("faux/missing")),
           }),
@@ -332,7 +332,7 @@ describe("durable AttemptRuntime", () => {
         const recording = recordingSink();
         yield* runtime.notify(
           request.spec.attemptId,
-          new AttemptChannel.WorkerUnresponsive({
+          AttemptChannel.WorkerUnresponsive.make({
             worker: request.worker,
             lastAnsweredAt: DateTime.makeUnsafe("2026-10-15T19:42:00Z"),
             reason: "Connection timed out during banner exchange",
@@ -346,7 +346,7 @@ describe("durable AttemptRuntime", () => {
           logs.matching(/Dropped the Worker notices kept for a parent that never started/u),
           1,
         );
-      }).pipe(Effect.provide(layer({ database, parent: [] })), Effect.provide(logs.layer));
+      }).pipe(Effect.provide([layer({ database, parent: [] }), logs.layer]));
     }).pipe(Effect.scoped),
   );
 
@@ -384,7 +384,7 @@ describe("durable AttemptRuntime", () => {
             const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
             const child = yield* Context.get(services, StubChildren).next;
             yield* child.emit(
-              new TextOutput({ session: child.request.session, text: "Half way there." }),
+              TextOutput.make({ session: child.request.session, text: "Half way there." }),
             );
             // Running tool output is committed at most every 100 ms.
             yield* Effect.sleep("400 millis");
@@ -468,7 +468,7 @@ describe("durable AttemptRuntime", () => {
               if (target && !stopped) {
                 stopped = true;
                 if (boundary === "after") yield* recording.sink.append(direction, envelope);
-                return yield* new InfraFailure({
+                return yield* InfraFailure.make({
                   message: "The orchestrator stopped",
                   cause: null,
                 });
@@ -485,7 +485,7 @@ describe("durable AttemptRuntime", () => {
             );
             const child = yield* Context.get(services, StubChildren).next;
             yield* child.emit(
-              new TextOutput({ session: child.request.session, text: "Durable child output" }),
+              TextOutput.make({ session: child.request.session, text: "Durable child output" }),
             );
             const result = yield* Fiber.join(execution);
             assert.isTrue(Result.isFailure(result));
@@ -529,7 +529,7 @@ describe("durable AttemptRuntime", () => {
                 deliveries.push(envelope);
                 if (deliveries.length <= 2) {
                   if (boundary === "after") yield* recording.sink.append(direction, envelope);
-                  return yield* new InfraFailure({
+                  return yield* InfraFailure.make({
                     message: "The orchestrator stopped",
                     cause: null,
                   });
@@ -609,7 +609,10 @@ describe("durable AttemptRuntime", () => {
                 return;
               receipts.push(envelope);
               if (receipts.length === 1) {
-                return yield* new InfraFailure({ message: "Receipt delivery failed", cause: null });
+                return yield* InfraFailure.make({
+                  message: "Receipt delivery failed",
+                  cause: null,
+                });
               }
             }),
         };
@@ -619,10 +622,10 @@ describe("durable AttemptRuntime", () => {
         yield* runtime
           .intervene(
             request.spec.attemptId,
-            new AttemptChannel.Intervention({
+            AttemptChannel.Intervention.make({
               operator: "alice",
-              target: new AttemptChannel.ChildTarget({ sessionId: child.request.session.id }),
-              action: new AttemptChannel.Steer({ message: "Keep going" }),
+              target: AttemptChannel.ChildTarget.make({ sessionId: child.request.session.id }),
+              action: AttemptChannel.Steer.make({ message: "Keep going" }),
             }),
           )
           .pipe(Effect.flip);
@@ -661,7 +664,7 @@ describe("durable AttemptRuntime", () => {
                   if (payload.event._tag !== (appendedEvents === 1 ? "TextOutput" : "ToolStarted"))
                     return;
                   crashed = true;
-                  return yield* new InfraFailure({
+                  return yield* InfraFailure.make({
                     message: "The orchestrator stopped",
                     cause: null,
                   });
@@ -754,15 +757,15 @@ describe("durable AttemptRuntime", () => {
           const child = yield* (yield* StubChildren).next;
           yield* runtime.intervene(
             request.spec.attemptId,
-            new AttemptChannel.Intervention({
+            AttemptChannel.Intervention.make({
               operator: "philippe",
-              target: new AttemptChannel.ParentTarget(),
-              action: new AttemptChannel.Steer({ message: "Use pnpm, not npm." }),
+              target: AttemptChannel.ParentTarget.make(),
+              action: AttemptChannel.Steer.make({ message: "Use pnpm, not npm." }),
             }),
           );
           assert.deepStrictEqual(receipts(recording.outbound()), [["Steer", 1, "queued"]]);
           assert.deepStrictEqual(yield* child.interventions, [
-            new AttemptChannel.Steer({ message: "Use pnpm, not npm." }),
+            AttemptChannel.Steer.make({ message: "Use pnpm, not npm." }),
           ]);
           yield* child.readQueued;
           yield* child.reply("Child done.");
@@ -826,10 +829,10 @@ describe("durable AttemptRuntime", () => {
           const child = yield* children.next;
           yield* runtime.intervene(
             request.spec.attemptId,
-            new AttemptChannel.Intervention({
+            AttemptChannel.Intervention.make({
               operator: "philippe",
-              target: new AttemptChannel.ParentTarget(),
-              action: new AttemptChannel.Steer({ message: "Fix the third finding." }),
+              target: AttemptChannel.ParentTarget.make(),
+              action: AttemptChannel.Steer.make({ message: "Fix the third finding." }),
             }),
           );
           if (delivery === "unread")
@@ -885,10 +888,10 @@ describe("durable AttemptRuntime", () => {
           yield* Context.get(services, StubChildren).next;
           yield* runtime.intervene(
             request.spec.attemptId,
-            new AttemptChannel.Intervention({
+            AttemptChannel.Intervention.make({
               operator: "philippe",
-              target: new AttemptChannel.ParentTarget(),
-              action: new AttemptChannel.Steer({ message: "Fix the third finding." }),
+              target: AttemptChannel.ParentTarget.make(),
+              action: AttemptChannel.Steer.make({ message: "Fix the third finding." }),
             }),
           );
           yield* Fiber.interrupt(execution);
@@ -940,14 +943,14 @@ describe("durable AttemptRuntime", () => {
           const operator = (action: AttemptChannel.OperatorAction) =>
             runtime.intervene(
               request.spec.attemptId,
-              new AttemptChannel.Intervention({
+              AttemptChannel.Intervention.make({
                 operator: "philippe",
-                target: new AttemptChannel.ParentTarget(),
+                target: AttemptChannel.ParentTarget.make(),
                 action,
               }),
             );
-          yield* operator(new AttemptChannel.Steer({ message: "Fix the third finding." }));
-          yield* operator(new AttemptChannel.Interrupt());
+          yield* operator(AttemptChannel.Steer.make({ message: "Fix the third finding." }));
+          yield* operator(AttemptChannel.Interrupt.make());
           yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
           yield* Effect.sleep("300 millis");
           assert.isUndefined(execution.pollUnsafe());
@@ -961,7 +964,7 @@ describe("durable AttemptRuntime", () => {
               yield* Effect.sleep("20 millis");
           }).pipe(Effect.timeout("5 seconds"));
           assert.strictEqual(execution.pollUnsafe(), undefined);
-          yield* operator(new AttemptChannel.Release());
+          yield* operator(AttemptChannel.Release.make());
           const report = yield* Fiber.join(execution);
           assert.strictEqual(report.message, "Continued after release.");
           assertAdmitted(request.spec.attemptId, recording.outbound());
@@ -1007,10 +1010,10 @@ describe("durable AttemptRuntime", () => {
           const request = attemptRequest("run/step/33");
           const attemptId = request.spec.attemptId;
           const recording = recordingSink();
-          const steer = new AttemptChannel.Intervention({
+          const steer = AttemptChannel.Intervention.make({
             operator: "engine",
-            target: new AttemptChannel.ParentTarget(),
-            action: new AttemptChannel.Steer({ message: "Commit and push your work now." }),
+            target: AttemptChannel.ParentTarget.make(),
+            action: AttemptChannel.Steer.make({ message: "Commit and push your work now." }),
           });
           // Waits before the Attempt has a task in this process, like a reattached runaway guard
           // (#178).
@@ -1064,13 +1067,13 @@ describe("durable AttemptRuntime", () => {
           const operator = (action: AttemptChannel.OperatorAction) =>
             runtime.intervene(
               request.spec.attemptId,
-              new AttemptChannel.Intervention({
+              AttemptChannel.Intervention.make({
                 operator: "philippe",
-                target: new AttemptChannel.ChildTarget({ sessionId: child.request.session.id }),
+                target: AttemptChannel.ChildTarget.make({ sessionId: child.request.session.id }),
                 action,
               }),
             );
-          yield* operator(new AttemptChannel.OperatorMessage({ message: "Use pnpm, not npm." }));
+          yield* operator(AttemptChannel.OperatorMessage.make({ message: "Use pnpm, not npm." }));
           assert.deepStrictEqual(receipts(recording.outbound()), [
             ["OperatorMessage", 1, "queued"],
           ]);
@@ -1078,7 +1081,7 @@ describe("durable AttemptRuntime", () => {
           yield* Effect.gen(function* () {
             while (receipts(recording.outbound()).length < 2) yield* Effect.sleep("20 millis");
           }).pipe(Effect.timeout("5 seconds"));
-          yield* operator(new AttemptChannel.Release());
+          yield* operator(AttemptChannel.Release.make());
           yield* child.reply("Switched the scripts to pnpm.");
           const report = yield* Fiber.join(execution);
           assert.strictEqual(report.message, "The child switched to pnpm.");
@@ -1127,23 +1130,23 @@ describe("durable AttemptRuntime", () => {
           ) =>
             runtime.intervene(
               request.spec.attemptId,
-              new AttemptChannel.Intervention({ operator: "philippe", target, action }),
+              AttemptChannel.Intervention.make({ operator: "philippe", target, action }),
             );
           const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
           const child = yield* (yield* StubChildren).next;
           yield* operator(
-            new AttemptChannel.ChildTarget({ sessionId: child.request.session.id }),
-            new AttemptChannel.Steer({ message: "Skip the docs." }),
+            AttemptChannel.ChildTarget.make({ sessionId: child.request.session.id }),
+            AttemptChannel.Steer.make({ message: "Skip the docs." }),
           );
-          const parent = new AttemptChannel.ParentTarget();
-          yield* operator(parent, new AttemptChannel.Interrupt());
+          const parent = AttemptChannel.ParentTarget.make();
+          yield* operator(parent, AttemptChannel.Interrupt.make());
           yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
           const steerReceipts = () =>
             receipts(recording.outbound()).filter(([action]) => action === "Steer");
           yield* Effect.gen(function* () {
             while (steerReceipts().length < 2) yield* Effect.sleep("20 millis");
           }).pipe(Effect.timeout("5 seconds"));
-          yield* operator(parent, new AttemptChannel.Release());
+          yield* operator(parent, AttemptChannel.Release.make());
           const report = yield* Fiber.join(execution);
           assert.strictEqual(report.message, "Continued after the release.");
           assertAdmitted(request.spec.attemptId, recording.outbound());
@@ -1185,15 +1188,15 @@ describe("durable AttemptRuntime", () => {
           const operator = (action: AttemptChannel.OperatorAction) =>
             runtime.intervene(
               request.spec.attemptId,
-              new AttemptChannel.Intervention({
+              AttemptChannel.Intervention.make({
                 operator: "philippe",
-                target: new AttemptChannel.ParentTarget(),
+                target: AttemptChannel.ParentTarget.make(),
                 action,
               }),
             );
           const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
           const fixer = yield* children.next;
-          yield* operator(new AttemptChannel.OperatorMessage({ message: "What failed earlier?" }));
+          yield* operator(AttemptChannel.OperatorMessage.make({ message: "What failed earlier?" }));
           yield* fixer.reply("Fixed the flaky test.");
           yield* Effect.gen(function* () {
             while (!trace(recording.outbound()).includes("parent.SessionIdle"))
@@ -1203,7 +1206,7 @@ describe("durable AttemptRuntime", () => {
           yield* Effect.sleep("300 millis");
           assert.isUndefined(execution.pollUnsafe());
           assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
-          yield* operator(new AttemptChannel.Release());
+          yield* operator(AttemptChannel.Release.make());
           yield* (yield* children.next).reply("Opened pull request 7.");
           const report = yield* Fiber.join(execution);
           assert.strictEqual(report.message, "Opened the pull request.");
@@ -1261,26 +1264,26 @@ describe("durable AttemptRuntime", () => {
           const operator = (action: AttemptChannel.OperatorAction) =>
             runtime.intervene(
               request.spec.attemptId,
-              new AttemptChannel.Intervention({
+              AttemptChannel.Intervention.make({
                 operator: "philippe",
-                target: new AttemptChannel.ParentTarget(),
+                target: AttemptChannel.ParentTarget.make(),
                 action,
               }),
             );
           const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
           const reviewer = yield* children.next;
-          yield* operator(new AttemptChannel.OperatorMessage({ message: "Is the review ready?" }));
+          yield* operator(AttemptChannel.OperatorMessage.make({ message: "Is the review ready?" }));
           yield* reviewer.reply("Drafted three findings.");
           yield* Effect.gen(function* () {
             while (!trace(recording.outbound()).includes("parent.SessionIdle"))
               yield* Effect.sleep("20 millis");
           }).pipe(Effect.timeout("5 seconds"));
-          yield* operator(new AttemptChannel.Release());
+          yield* operator(AttemptChannel.Release.make());
           const report = yield* Fiber.join(execution);
           assert.isFalse(report.answeredOperator);
           assert.deepStrictEqual(
             harvestedResult(report, []),
-            Result.succeed(new StepResult({ message: report.message, facts: [] })),
+            Result.succeed(StepResult.make({ message: report.message, facts: [] })),
           );
         }).pipe(
           Effect.provide(
@@ -1310,27 +1313,27 @@ describe("durable AttemptRuntime", () => {
           const operator = (action: AttemptChannel.OperatorAction) =>
             runtime.intervene(
               request.spec.attemptId,
-              new AttemptChannel.Intervention({
+              AttemptChannel.Intervention.make({
                 operator: "philippe",
-                target: new AttemptChannel.ParentTarget(),
+                target: AttemptChannel.ParentTarget.make(),
                 action,
               }),
             );
           const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
           const reviewer = yield* children.next;
-          yield* operator(new AttemptChannel.OperatorMessage({ message: "Is the review ready?" }));
+          yield* operator(AttemptChannel.OperatorMessage.make({ message: "Is the review ready?" }));
           yield* reviewer.reply("Drafted three findings.");
           yield* Effect.gen(function* () {
             while (!trace(recording.outbound()).includes("parent.SessionIdle"))
               yield* Effect.sleep("20 millis");
           }).pipe(Effect.timeout("5 seconds"));
-          yield* operator(new AttemptChannel.Release());
+          yield* operator(AttemptChannel.Release.make());
           const poster = yield* children.next;
           yield* operator(
-            new AttemptChannel.OperatorMessage({ message: "Which findings did you post?" }),
+            AttemptChannel.OperatorMessage.make({ message: "Which findings did you post?" }),
           );
           // Released while the parent delegates, so its next answer ends the Attempt.
-          yield* operator(new AttemptChannel.Release());
+          yield* operator(AttemptChannel.Release.make());
           yield* poster.reply("Posted the review.");
           const report = yield* Fiber.join(execution);
           assert.strictEqual(report.message, "Posted all three findings.");
@@ -1352,20 +1355,20 @@ describe("durable AttemptRuntime", () => {
   );
 
   it("fails an Attempt whose parent ended on its answer to the operator with nothing delivered", () => {
-    const report = new AttemptReport({
+    const report = AttemptReport.make({
       message: "The child returned no details.",
       answeredOperator: true,
     });
     const failed = harvestedResult(report, []);
     assert(Result.isFailure(failed));
     assert.include(failed.failure.message, "The child returned no details.");
-    const commit = new Commit({
+    const commit = Commit.make({
       sha: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
       summary: "Fix the flaky test",
     });
     assert.deepStrictEqual(
       harvestedResult(report, [commit]),
-      Result.succeed(new StepResult({ message: report.message, facts: [commit] })),
+      Result.succeed(StepResult.make({ message: report.message, facts: [commit] })),
     );
   });
 
@@ -1379,21 +1382,21 @@ describe("durable AttemptRuntime", () => {
         const operator = (action: AttemptChannel.OperatorAction) =>
           runtime.intervene(
             request.spec.attemptId,
-            new AttemptChannel.Intervention({
+            AttemptChannel.Intervention.make({
               operator: "philippe",
-              target: new AttemptChannel.ParentTarget(),
+              target: AttemptChannel.ParentTarget.make(),
               action,
             }),
           );
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* (yield* StubChildren).next;
-        yield* operator(new AttemptChannel.OperatorMessage({ message: "Skip the docs." }));
-        yield* operator(new AttemptChannel.Interrupt());
+        yield* operator(AttemptChannel.OperatorMessage.make({ message: "Skip the docs." }));
+        yield* operator(AttemptChannel.Interrupt.make());
         yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
         yield* Effect.sleep("300 millis");
         assert.isUndefined(execution.pollUnsafe());
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
-        yield* operator(new AttemptChannel.Release());
+        yield* operator(AttemptChannel.Release.make());
         const report = yield* Fiber.join(execution);
         assert.strictEqual(report.message, "Continued after the release.");
         const outbound = recording.outbound();
@@ -1435,7 +1438,7 @@ describe("durable AttemptRuntime", () => {
     () =>
       Effect.gen(function* () {
         const database = yield* temporaryDatabase;
-        const host = new RemoteShell({
+        const host = RemoteShell.make({
           ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
           sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
           destination: "worker.exe.xyz",
@@ -1446,7 +1449,7 @@ describe("durable AttemptRuntime", () => {
         const recorded = yield* Ref.make(Option.some<GatewayCredentialKind>("api-key"));
         yield* Effect.gen(function* () {
           const runtime = yield* AttemptRuntime;
-          const request = new AttemptRequest({
+          const request = AttemptRequest.make({
             ...attemptRequest("run/step/11", 3, host),
             machine,
             gatewayCredential: Ref.get(recorded),
@@ -1597,7 +1600,7 @@ describe("durable AttemptRuntime", () => {
             envelope._tag === "OutboundEnvelope" &&
             envelope.payload._tag === "SessionEvent" &&
             envelope.payload.event._tag === "ToolStarted"
-              ? Effect.fail(new RunawayFailure({ ceiling: "tokens" }))
+              ? Effect.fail(RunawayFailure.make({ ceiling: "tokens" }))
               : Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
@@ -1651,7 +1654,7 @@ describe("durable AttemptRuntime", () => {
           const execution = yield* Effect.forkChild(runtime.execute(failed, recordingSink().sink));
           const child = yield* (yield* StubChildren).next;
           failNextCommit = true;
-          yield* child.emit(new TextOutput({ session: child.request.session, text: "Working." }));
+          yield* child.emit(TextOutput.make({ session: child.request.session, text: "Working." }));
           yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
           const failure = yield* Fiber.join(execution).pipe(Effect.flip);
           if (failure._tag !== "InfraFailure") return assert.fail(`Got ${failure._tag}`);
@@ -1706,7 +1709,7 @@ describe("durable AttemptRuntime", () => {
         );
         const child = yield* (yield* StubChildren).next;
         failCommits = true;
-        yield* child.emit(new TextOutput({ session: child.request.session, text: "Working." }));
+        yield* child.emit(TextOutput.make({ session: child.request.session, text: "Working." }));
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "InfraFailure");
 
@@ -1742,7 +1745,7 @@ describe("durable AttemptRuntime", () => {
             );
             const child = yield* Context.get(services, StubChildren).next;
             yield* child.emit(
-              new TextOutput({ session: child.request.session, text: "Half way there." }),
+              TextOutput.make({ session: child.request.session, text: "Half way there." }),
             );
             return { child, execution };
           }),
@@ -1925,7 +1928,7 @@ describe("durable AttemptRuntime", () => {
         assert.strictEqual(outbound.at(-1)?.payload._tag, "Failed");
         assert.deepStrictEqual(
           yield* runtime.finished(request.spec.attemptId),
-          Option.some(new ParentFailed({ failure })),
+          Option.some(ParentFailed.make({ failure })),
         );
       }).pipe(
         Effect.provide(
@@ -1947,7 +1950,7 @@ describe("durable AttemptRuntime", () => {
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
         assert.deepStrictEqual(
           failure,
-          new QuestionFailure({ question: "HTTP CONNECT or SOCKS for egress?" }),
+          QuestionFailure.make({ question: "HTTP CONNECT or SOCKS for egress?" }),
         );
         assertAdmitted(request.spec.attemptId, recording.outbound());
       }).pipe(
@@ -1970,7 +1973,7 @@ describe("durable AttemptRuntime", () => {
         const failure = yield* runtime.execute(request, recordingSink().sink).pipe(Effect.flip);
         assert.deepStrictEqual(
           failure,
-          new QuestionFailure({ question: "Should the migration keep the old column?" }),
+          QuestionFailure.make({ question: "Should the migration keep the old column?" }),
         );
       }).pipe(
         Effect.provide(
@@ -2073,7 +2076,7 @@ describe("durable AttemptRuntime", () => {
         const failure = yield* runtime.execute(request, recordingSink().sink).pipe(Effect.flip);
         assert.deepStrictEqual(
           failure,
-          new BlockedFailure({ message: "The baseline gate fails on main." }),
+          BlockedFailure.make({ message: "The baseline gate fails on main." }),
         );
       }).pipe(
         Effect.provide(
@@ -2098,7 +2101,7 @@ describe("durable AttemptRuntime", () => {
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
         assert.deepStrictEqual(
           failure,
-          new BlockedFailure({ message: "Publishing permission denied." }),
+          BlockedFailure.make({ message: "Publishing permission denied." }),
         );
         assertAdmitted(request.spec.attemptId, recording.outbound());
       }).pipe(
@@ -2130,7 +2133,7 @@ describe("durable AttemptRuntime", () => {
             runtime.execute(attemptRequest("run/step/19"), recordingSink().sink),
           );
           const child = yield* (yield* StubChildren).next;
-          yield* child.emit(new TextOutput({ session: child.request.session, text: "Reading." }));
+          yield* child.emit(TextOutput.make({ session: child.request.session, text: "Reading." }));
           yield* child.reply("Fixed the flaky test.");
           return yield* Fiber.join(execution);
         }).pipe(
@@ -2141,8 +2144,8 @@ describe("durable AttemptRuntime", () => {
   );
 
   it.live.each([
-    new AgentFailure({ message: "Codex turn failed: stream closed." }),
-    new ProviderCapacityFailure({
+    AgentFailure.make({ message: "Codex turn failed: stream closed." }),
+    ProviderCapacityFailure.make({
       message: "Selected model is at capacity. Please try a different model.",
     }),
   ])("preserves a child's harness failure, relayed verbatim or not: $_tag", (expected) =>
@@ -2199,7 +2202,7 @@ describe("durable AttemptRuntime", () => {
           assertAdmitted(request.spec.attemptId, recording.outbound());
           assert.deepStrictEqual(
             yield* runtime.finished(request.spec.attemptId),
-            Option.some(new ParentFailed({ failure })),
+            Option.some(ParentFailed.make({ failure })),
           );
 
           const retry = yield* Effect.forkChild(
@@ -2249,7 +2252,7 @@ it.live(
           }),
         ),
       );
-      assert.deepStrictEqual(failure, new ProviderCapacityFailure({ message }));
+      assert.deepStrictEqual(failure, ProviderCapacityFailure.make({ message }));
     }).pipe(Effect.scoped),
   30_000,
 );

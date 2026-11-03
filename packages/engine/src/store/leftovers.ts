@@ -25,7 +25,7 @@ export const leftoverQueries = (database: RunDatabaseClient) => {
       .groupBy(attempts.workerName)
       .orderBy(asc(attempts.workerName))
       .execute();
-    return yield* Schema.decodeUnknownEffect(Schema.Array(WorkerAttempts))(rows);
+    return yield* Schema.decodeEffect(Schema.Array(WorkerAttempts))(rows);
   });
 
   /** Returns the number of open tracked Attempts on `worker`. */

@@ -24,9 +24,11 @@ export const repositoryEditorEntity = (
     (project) => project.repositories.length === 1 && project.includes(repository.name),
   );
   if (project === undefined) return entity;
-  return new ConfigurationEntity({
+  return ConfigurationEntity.make({
     ...entity,
-    value: Schema.encodeSync(ManagedRepo)(new ManagedRepo({ ...repository, lanes: project.lanes })),
+    value: Schema.encodeSync(ManagedRepo)(
+      ManagedRepo.make({ ...repository, lanes: project.lanes }),
+    ),
   });
 };
 
@@ -39,22 +41,20 @@ export const repositoryEditorChanges = (snapshot: Configuration, entity: Configu
     )
       return { entity, changes: [] };
     const fields = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(entity.value).pipe(
-      Effect.mapError(
-        (error) =>
-          new ConfigurationInvalid({
-            problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
-          }),
+      Effect.mapError((error) =>
+        ConfigurationInvalid.make({
+          problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
+        }),
       ),
     );
     if (!("lanes" in fields)) return { entity, changes: [] };
     const repository = yield* Schema.decodeUnknownEffect(ManagedRepo)(fields, {
       onExcessProperty: "error",
     }).pipe(
-      Effect.mapError(
-        (error) =>
-          new ConfigurationInvalid({
-            problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
-          }),
+      Effect.mapError((error) =>
+        ConfigurationInvalid.make({
+          problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
+        }),
       ),
     );
     const project = snapshot.instance.value.config.projects.find((project) =>
@@ -62,15 +62,15 @@ export const repositoryEditorChanges = (snapshot: Configuration, entity: Configu
     );
     if (project === undefined || project.repositories.length !== 1) return { entity, changes: [] };
     const before = Schema.encodeSync(Project)(project);
-    const key = new ConfigurationEntityKey({
+    const key = ConfigurationEntityKey.make({
       kind: "project",
       identifier: ConfigurationEntityId.make(project.id),
     });
     const { lanes, ...value } = fields;
     return {
-      entity: new ConfigurationEntity({ ...entity, value }),
+      entity: ConfigurationEntity.make({ ...entity, value }),
       changes: [
-        new ConfigurationChange({
+        ConfigurationChange.make({
           key,
           before: Option.some(before),
           after: Option.some({ ...before, lanes }),

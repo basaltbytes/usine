@@ -33,7 +33,7 @@ export interface TaskCard {
 }
 
 const itemLink = (item: ProjectedItem) =>
-  new BoardItemLink({
+  BoardItemLink.make({
     itemKey: item.itemKey,
     kind: item.kind,
     number: item.number,
@@ -131,7 +131,7 @@ export const taskCards = (
     // one, the newest merged one.
     const [pullRequest = null] = prs.flatMap(({ item: { number, url, state } }) =>
       state === "pr-open" || state === "pr-merged"
-        ? [new BoardPullRequestView({ number, url, state })]
+        ? [BoardPullRequestView.make({ number, url, state })]
         : [],
     );
     const preferred =
@@ -167,7 +167,7 @@ export const taskCards = (
         state: state._tag,
       }));
     }
-    const view = new BoardTaskView({
+    const view = BoardTaskView.make({
       ...itemLink(current),
       repository,
       title: origin.item.title,

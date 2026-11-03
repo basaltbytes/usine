@@ -57,15 +57,15 @@ import {
   pinnedEarlier,
 } from "./fixtures.ts";
 
-const codexAgent = new Agent({
+const codexAgent = Agent.make({
   name: AgentName.make("reviewer"),
-  brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5.6-sol"), effort: "high" }),
+  brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5.6-sol"), effort: "high" }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
   persona: AgentPersona.make("Review the change."),
 });
 
-const codexRequest = new CheckoutRequest({ ...request, agent: codexAgent });
+const codexRequest = CheckoutRequest.make({ ...request, agent: codexAgent });
 
 const OPENAI_KEY = "sk-proj-openai-for-provisioned-tests";
 
@@ -75,17 +75,17 @@ const CODEX_HOME = `${ROOT}/workers/eu-one/codex/remote-run_execute_1`;
 /** A Gateway with a Claude subscription token and a ChatGPT login. */
 const SUBSCRIPTION_PROVIDERS = {
   anthropic: Option.some(
-    new AnthropicProvider({
+    AnthropicProvider.make({
       upstream: UpstreamBase.make("https://api.anthropic.com"),
-      credential: new AnthropicSubscriptionToken({
+      credential: AnthropicSubscriptionToken.make({
         token: Redacted.make("sk-ant-oat01-for-provisioned-tests"),
       }),
     }),
   ),
   openai: Option.some(
-    new OpenAiProvider({
+    OpenAiProvider.make({
       upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
-      credential: new ChatGptLogin({
+      credential: ChatGptLogin.make({
         authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
         tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
       }),
@@ -312,7 +312,7 @@ describe("Provisioned SSH Worker", () => {
         assert.deepStrictEqual(
           grant.checked,
           Option.some(
-            new MachineCheck({ brains: [TEST_AGENT.brain], containerLimits: Option.none() }),
+            MachineCheck.make({ brains: [TEST_AGENT.brain], containerLimits: Option.none() }),
           ),
         );
         const statuses = yield* machines.machines;
@@ -360,8 +360,9 @@ describe("Provisioned SSH Worker", () => {
         assert.include(logs.lines.join("\n"), "Deleted the machine");
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtimeOf(machine, providers, hetznerAddress, { parent })),
-        Effect.provide(logs.layer),
+        Effect.provide(
+          Layer.mergeAll(runtimeOf(machine, providers, hetznerAddress, { parent }), logs.layer),
+        ),
       );
     },
   );
@@ -398,7 +399,7 @@ describe("Provisioned SSH Worker", () => {
           _tag: "Provisioned",
           provisioner: hetznerSettings({
             reuse: Option.some(
-              new ProvisionerReuse({
+              ProvisionerReuse.make({
                 attempts: MachineAttemptLimit.make(5),
                 maxAge: MachineMaxAge.make("2h"),
               }),
@@ -468,7 +469,7 @@ describe("Provisioned SSH Worker", () => {
           assert.isTrue(Option.isSome(hold));
           assert.strictEqual((yield* machines.machines)[0]?.attempts, 2);
           const prepared = yield* executor.prepare(
-            new CheckoutRequest({ ...request, reattach: true }),
+            CheckoutRequest.make({ ...request, reattach: true }),
           );
           yield* prepared.launch(sink);
           const [server] = providers.hetzner.servers.values();
@@ -497,7 +498,7 @@ describe("Provisioned SSH Worker", () => {
         machine: {
           _tag: "Provisioned",
           provisioner: hetznerSettings({
-            timings: Schema.decodeUnknownSync(ProvisionerTimings)({ machineCheckInterval: 60 }),
+            timings: Schema.decodeSync(ProvisionerTimings)({ machineCheckInterval: 60 }),
           }),
         },
         container: {
@@ -529,10 +530,10 @@ describe("Provisioned SSH Worker", () => {
         assert.deepStrictEqual(
           first.checked,
           Option.some(
-            new MachineCheck({
+            MachineCheck.make({
               brains: [TEST_AGENT.brain],
               containerLimits: Option.some(
-                new ContainerLimits({
+                ContainerLimits.make({
                   cpus: ContainerCpus.make(4),
                   memoryMib: ContainerMemoryMib.make(7168),
                   pids: ContainerPids.make(60976),
@@ -795,7 +796,7 @@ describe("Provisioned SSH Worker", () => {
           .preflight(
             WORKER,
             [
-              new BrainSpec({
+              BrainSpec.make({
                 harness: "pi",
                 model: ModelId.make("anthropic/claude-sonnet-5"),
                 effort: "high",

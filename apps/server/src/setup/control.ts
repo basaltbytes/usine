@@ -256,7 +256,7 @@ const makeSetup = Effect.fn("Setup.make")(function* (
               ),
             );
           yield* save(
-            new GitHubAppSecrets({
+            GitHubAppSecrets.make({
               appId: converted.appId,
               privateKey: converted.privateKey,
               clientId: Option.some(converted.clientId),
@@ -272,7 +272,7 @@ const makeSetup = Effect.fn("Setup.make")(function* (
       lock.withPermit(
         Effect.gen(function* () {
           yield* needsCredentials;
-          const secrets = yield* Schema.decodeUnknownEffect(GitHubAppSecretsFromJson)(source, {
+          const secrets = yield* Schema.decodeEffect(GitHubAppSecretsFromJson)(source, {
             onExcessProperty: "error",
           }).pipe(
             Effect.mapError(() =>

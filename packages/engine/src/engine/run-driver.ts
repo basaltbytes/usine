@@ -44,7 +44,7 @@ const asAttemptFailure = <A, R>(
 ): Effect.Effect<A, AttemptFailure, R> =>
   Effect.catchTags(effect, {
     EnginePersistenceError: (error: EnginePersistenceError) =>
-      new InfraFailure({
+      InfraFailure.make({
         message: `Runtime store error: could not ${error.operation}`,
         cause: error,
       }),
@@ -469,7 +469,7 @@ export class RunDriver extends Context.Service<
               .attemptWindows(started.execution.attempt.id)
               .pipe(retryingStore(runId, "read the attempt windows"), asAttemptFailure),
             transcript: store
-              .transcript(new TranscriptAllQuery({ attemptId: started.execution.attempt.id }))
+              .transcript(TranscriptAllQuery.make({ attemptId: started.execution.attempt.id }))
               .pipe(
                 retryingStore(runId, "read the attempt transcript"),
                 asAttemptFailure,
@@ -493,7 +493,7 @@ export class RunDriver extends Context.Service<
                 defect: defect instanceof Error ? defect.message : String(defect),
               }).pipe(
                 Effect.andThen(
-                  new DefectFailure({
+                  DefectFailure.make({
                     message: "The step executor crashed with an unexpected error",
                     cause: defect,
                   }),
@@ -507,7 +507,7 @@ export class RunDriver extends Context.Service<
           // credential error, so the next Attempt resumes from its salvage. `reconcile` does nothing
           // once the checkout was acquired, and fails this fiber while the stop is unconfirmed.
           yield* reconcileKept(
-            new UnconfirmedStop({
+            UnconfirmedStop.make({
               attemptId: started.execution.attempt.id,
               runId,
               loop: submission.loop,
@@ -585,7 +585,7 @@ export class RunDriver extends Context.Service<
             // the slot startup occupied is freed. If the stop can't be confirmed, this fiber fails
             // and keeps the slot; the next reconcile drives the Run again.
             yield* reconcileKept(
-              new UnconfirmedStop({
+              UnconfirmedStop.make({
                 attemptId: open.value.attempt.id,
                 runId,
                 loop: submission.loop,
@@ -644,7 +644,7 @@ export class RunDriver extends Context.Service<
       const holdSlot = Effect.fn("RunDriver.holdSlot")(function* (stop: UnconfirmedStop) {
         const { runId, attemptId } = stop;
         yield* Effect.annotateCurrentSpan({ runId, attemptId });
-        yield* recordUnconfirmed(new UnconfirmedStop(stop));
+        yield* recordUnconfirmed(UnconfirmedStop.make(stop));
         const lease = yield* Ref.modify(slots, (held) => [
           Option.fromUndefinedOr(held.get(runId)),
           without(held, runId),
@@ -680,7 +680,7 @@ export class RunDriver extends Context.Service<
         const { attemptId, runId, worker } = stop;
         const fields = { runId, attemptId, worker, reason: stop.reason };
         yield* Effect.annotateCurrentSpan(fields);
-        yield* recordUnconfirmed(new UnconfirmedStop(stop));
+        yield* recordUnconfirmed(UnconfirmedStop.make(stop));
         const stopped = yield* executor.interrupt(attemptId, stop.reason).pipe(Effect.result);
         if (Result.isSuccess(stopped)) {
           yield* Ref.update(unconfirmed, (stops) => without(stops, attemptId));
@@ -741,7 +741,7 @@ export class RunDriver extends Context.Service<
           unstopped,
           ({ attemptId, runId, loop, itemKey, worker }) =>
             recordUnconfirmed(
-              new UnconfirmedStop({ attemptId, runId, loop, itemKey, worker, reason: "startup" }),
+              UnconfirmedStop.make({ attemptId, runId, loop, itemKey, worker, reason: "startup" }),
             ),
           { discard: true },
         );

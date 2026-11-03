@@ -43,7 +43,7 @@ export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness
         }).pipe(Effect.andThen(logins.withLock(worker, machine)(probe(brain))))
       : probe(brain);
     if (result._tag === "HarnessUnavailableError")
-      return yield* new WorkerCapabilityError({
+      return yield* WorkerCapabilityError.make({
         worker,
         capability: result.capability === "login" ? "harness-login" : "toolchain",
         message: result.message,
@@ -74,13 +74,12 @@ export const agentsHarnessProbe =
     preflight(brain, host, environment).pipe(
       Effect.map((ready): HarnessReadiness => ready),
       Effect.catchTag("HarnessUnavailableError", (unavailable) => Effect.succeed(unavailable)),
-      Effect.mapError(
-        (cause) =>
-          new ExecutorOperationError({
-            operation: "preflight",
-            message: cause.message,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        ExecutorOperationError.make({
+          operation: "preflight",
+          message: cause.message,
+          cause,
+        }),
       ),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );

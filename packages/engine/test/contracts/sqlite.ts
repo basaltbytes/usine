@@ -25,8 +25,8 @@ import { WriteFailures, type PersistenceAdapter } from "./adapter.ts";
 
 const persistence = <A, E>(effect: Effect.Effect<A, E>) =>
   effect.pipe(
-    Effect.mapError(
-      (cause) => new EnginePersistenceError({ operation: "inject test write failure", cause }),
+    Effect.mapError((cause) =>
+      EnginePersistenceError.make({ operation: "inject test write failure", cause }),
     ),
   );
 const failures = Layer.effect(
@@ -77,9 +77,8 @@ export const sqliteAdapter: PersistenceAdapter = {
     };
   }).pipe(
     Effect.provide(NodeServices.layer),
-    Effect.mapError(
-      (cause) =>
-        new EnginePersistenceError({ operation: "prepare persistence contract fixture", cause }),
+    Effect.mapError((cause) =>
+      EnginePersistenceError.make({ operation: "prepare persistence contract fixture", cause }),
     ),
   ),
 };

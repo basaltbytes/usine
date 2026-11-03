@@ -42,7 +42,7 @@ export const SessionComposer = ({
       api((client) =>
         client.intervene({
           params: { runId },
-          payload: new SessionIntervention({ attemptId, target, action }),
+          payload: SessionIntervention.make({ attemptId, target, action }),
         }),
       ),
     onSuccess: async (_result, action) => {
@@ -53,7 +53,7 @@ export const SessionComposer = ({
   });
   const send = () => {
     if (message.trim().length > 0 && !mutation.isPending)
-      mutation.mutate(new OperatorMessage({ message }));
+      mutation.mutate(OperatorMessage.make({ message }));
   };
   return (
     <div className="space-y-2">
@@ -85,7 +85,7 @@ export const SessionComposer = ({
           size="sm"
           variant="outline"
           disabled={mutation.isPending || paused}
-          onClick={() => mutation.mutate(new Interrupt())}
+          onClick={() => mutation.mutate(Interrupt.make())}
         >
           Pause session
         </CommandButton>
@@ -95,7 +95,7 @@ export const SessionComposer = ({
             size="sm"
             variant="secondary"
             disabled={mutation.isPending}
-            onClick={() => mutation.mutate(new Release())}
+            onClick={() => mutation.mutate(Release.make())}
           >
             {child ? "Release child" : "Release parent"}
           </CommandButton>

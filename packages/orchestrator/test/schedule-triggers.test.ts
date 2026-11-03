@@ -45,7 +45,7 @@ import {
   ScheduleTriggers,
 } from "../src/schedule-triggers.ts";
 
-const agent = new AgentFile({
+const agent = AgentFile.make({
   name: AgentName.make("developer"),
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
@@ -67,7 +67,7 @@ const isSchedulePayload = Schema.is(
 );
 
 const configWith = (repos: ReadonlyArray<{ readonly name: string; readonly tags?: string[] }>) =>
-  Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos });
+  Schema.decodeSync(UsineConfig)({ version: 1, repos });
 
 const scheduleLoop = (
   config: UsineConfig,
@@ -80,19 +80,19 @@ const scheduleLoop = (
     readonly tz?: string;
   },
 ) =>
-  new LoopFile({
+  LoopFile.make({
     name: LoopName.make(options.name ?? "scheduled-maintenance"),
-    trigger: new ScheduleTrigger({
+    trigger: ScheduleTrigger.make({
       on: "schedule",
       if: Source.make(options.expression ?? "true"),
-      cron: Schema.decodeUnknownSync(CronExpression)(options.cron),
-      tz: Schema.decodeUnknownSync(TimeZone)(options.tz ?? "UTC"),
+      cron: Schema.decodeSync(CronExpression)(options.cron),
+      tz: Schema.decodeSync(TimeZone)(options.tz ?? "UTC"),
     }),
     selector:
       options.selectedTag === undefined
         ? Option.none()
         : Option.some(
-            new Selector({
+            Selector.make({
               repos: Option.none(),
               tags: Option.some([
                 config.repos
@@ -109,7 +109,7 @@ const scheduleLoop = (
   });
 
 const instanceWith = (config: UsineConfig, loops: ReadonlyArray<LoopFile>) =>
-  new LoadedInstance({
+  LoadedInstance.make({
     config,
     agents: [agent],
     invalidAgents: [],
@@ -137,21 +137,21 @@ const fakeLayer = (
     drain: () => Effect.void,
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
-    upgradeDrain: Effect.succeed(Option.none()),
+    upgradeDrain: Effect.succeedNone,
     retry: () => Effect.die("unused"),
     runAgain: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
     submit: (submission) =>
       Option.contains(failRepository, submission.repository)
         ? Effect.fail(
-            new EnginePersistenceError({
+            EnginePersistenceError.make({
               operation: "record-scheduled-event",
               cause: new Error("database unavailable"),
             }),
           )
         : Ref.update(submissions, (values) => [...values, submission]).pipe(
             Effect.as(
-              new Claimed({
+              Claimed.make({
                 eventId: submission.event.id,
                 runId: RunId.make(`run-${submission.event.id}`),
               }),
@@ -185,7 +185,7 @@ const runtimeLayer = (directory: InstanceDirectory) => {
   const executor = Layer.succeed(StepExecutor)({
     workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
-    outcome: () => Effect.succeed(Option.none()),
+    outcome: () => Effect.succeedNone,
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
@@ -210,7 +210,7 @@ describe("ScheduleTriggers", () => {
       const config = configWith([{ name: "basaltbytes/usine" }]);
       const loop = scheduleLoop(config, { cron: "* * * * *" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
-      const state = new LoopRuntimeState({ loop: loop.name, paused: true });
+      const state = LoopRuntimeState.make({ loop: loop.name, paused: true });
 
       yield* Effect.gen(function* () {
         const schedules = yield* ScheduleTriggers;
@@ -231,7 +231,7 @@ describe("ScheduleTriggers", () => {
         { name: "basaltbytes/two", tags: ["active"] },
         { name: "basaltbytes/idle", tags: ["inactive"] },
       ]);
-      const loop = new LoopFile({
+      const loop = LoopFile.make({
         ...scheduleLoop(config, {
           cron: "0 9 * * *",
           tz: "Europe/Warsaw",
@@ -466,7 +466,7 @@ describe("ScheduleTriggers", () => {
         renderPrompt: (loop) =>
           loop.name === broken.name
             ? Effect.fail(
-                new ConfigFileError({
+                ConfigFileError.make({
                   file: InstancePath.make(`loops/${loop.name}.md`),
                   stage: "expression",
                   expression: Option.some(Source.make("item.tick.missing")),

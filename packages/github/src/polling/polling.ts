@@ -87,7 +87,7 @@ const catalogLabel = ({
   color,
   description,
 }: (typeof RestRepositoryLabels.Type)[number]): RepositoryLabel =>
-  new RepositoryLabel({ name, color, description: Option.fromNullishOr(description) });
+  RepositoryLabel.make({ name, color, description: Option.fromNullishOr(description) });
 
 const IssueData = Schema.Struct({
   repository: Schema.OptionFromNullOr(
@@ -127,8 +127,8 @@ const dateTimeAt = (epochMillis: number) => DateTime.make(epochMillis);
 const toChangedItems = (decoded: typeof RestChangedItems.Type): Array<ChangedItem> =>
   decoded.map((item) =>
     item.pullRequest === undefined
-      ? new ChangedIssue({ number: item.number, updatedAt: item.updatedAt })
-      : new ChangedPullRequest({ number: item.number, updatedAt: item.updatedAt }),
+      ? ChangedIssue.make({ number: item.number, updatedAt: item.updatedAt })
+      : ChangedPullRequest.make({ number: item.number, updatedAt: item.updatedAt }),
   );
 
 const latestDateTime = (candidates: ReadonlyArray<Option.Option<number>>) => {
@@ -372,7 +372,7 @@ export class GitHubPolling extends Context.Service<
         }
         const response = yield* execute("list-repository-labels", request);
         const now = yield* Clock.currentTimeMillis;
-        if (response.status === 304) return new RepositoryLabelsNotModified();
+        if (response.status === 304) return RepositoryLabelsNotModified.make();
         if (response.status !== 200) {
           return yield* statusError("list-repository-labels", response, now);
         }
@@ -394,7 +394,7 @@ export class GitHubPolling extends Context.Service<
             },
           );
         }
-        return new RepositoryLabelCatalog({ entityTag: catalogEntityTag, labels: catalog });
+        return RepositoryLabelCatalog.make({ entityTag: catalogEntityTag, labels: catalog });
       });
 
       const changes = Effect.fn("GitHubPolling.changes")(function* (
@@ -412,7 +412,7 @@ export class GitHubPolling extends Context.Service<
         const now = yield* Clock.currentTimeMillis;
         const recommended = nextPollAt(response.headers, now);
         if (response.status === 304) {
-          return new RepositoryNotModified({
+          return RepositoryNotModified.make({
             cursor,
             nextPollAt: recommended,
             backoffUntil: requestBackoff(response.headers, now),
@@ -452,8 +452,8 @@ export class GitHubPolling extends Context.Service<
             items: allItems.length,
           });
         }
-        return new RepositoryChanges({
-          cursor: new PollCursor({ entityTag, watermark: newerWatermark(cursor, allItems) }),
+        return RepositoryChanges.make({
+          cursor: PollCursor.make({ entityTag, watermark: newerWatermark(cursor, allItems) }),
           items: allItems,
           backlog,
           nextPollAt: recommended,
@@ -494,7 +494,7 @@ export class GitHubPolling extends Context.Service<
             },
           );
         }
-        return new BaseRefHead({ baseRefName, sha: decoded.object.sha, entityTag });
+        return BaseRefHead.make({ baseRefName, sha: decoded.object.sha, entityTag });
       });
 
       const graphql = Effect.fn("GitHubPolling.graphql")(function* <
@@ -530,7 +530,7 @@ export class GitHubPolling extends Context.Service<
                 `repository "${repository}" is null: deleted, renamed, or no longer accessible`,
               );
             const itemGone = (operation: GitHubOperation, kind: string) =>
-              new GitHubItemNotFoundError({
+              GitHubItemNotFoundError.make({
                 operation,
                 item: item.number,
                 message: `GitHub ${kind} ${repository}#${item.number} was not found. It was deleted or transferred, or the GitHub App can no longer read it.`,
@@ -579,7 +579,7 @@ export class GitHubPolling extends Context.Service<
                   timelineItems,
                 ),
               };
-              return new IssueSnapshot({
+              return IssueSnapshot.make({
                 payload: completePayload,
                 contentHash: yield* contentHash(completePayload),
               });
@@ -610,7 +610,7 @@ export class GitHubPolling extends Context.Service<
                 timelineItems,
               ),
             };
-            return new PullRequestSnapshot({
+            return PullRequestSnapshot.make({
               payload: completePayload,
               contentHash: yield* contentHash(completePayload),
             });

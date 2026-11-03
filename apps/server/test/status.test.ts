@@ -69,11 +69,11 @@ const closedPort = async () => {
 };
 
 const recordFor = (port: Port) =>
-  new InstanceRecord({
+  InstanceRecord.make({
     pid: ProcessId.make(process.pid),
     version: "1.2.3",
     startedAt: DateTime.makeUnsafe("2026-10-25T16:00:00.000Z"),
-    launch: new InstanceLaunch({
+    launch: InstanceLaunch.make({
       node: process.execPath,
       nodeOptions: [],
       script: "/opt/usine/apps/server/dist/main.js",

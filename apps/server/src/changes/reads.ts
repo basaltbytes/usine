@@ -22,26 +22,25 @@ export const shellOverview = (overview: FactoryOverview): FactoryOverview => {
     needsYou: [],
     dismissedNeeds: [],
     identities: overview.projects.flatMap(({ board }) =>
-      board.lanes.flatMap(({ items }) => items.map((item) => new TaskIdentityView(item))),
+      board.lanes.flatMap(({ items }) => items.map((item) => TaskIdentityView.make(item))),
     ),
-    projects: overview.projects.map(
-      (project) =>
-        new ProjectView({
-          ...project,
-          board: new BoardView({ failures: [], lanes: [] }),
-          labels: [],
-        }),
+    projects: overview.projects.map((project) =>
+      ProjectView.make({
+        ...project,
+        board: BoardView.make({ failures: [], lanes: [] }),
+        labels: [],
+      }),
     ),
   };
   return overview._tag === "Ready"
-    ? new ReadyOverview(values)
-    : new NeedsSetupOverview({ ...values, errorTag: overview.errorTag });
+    ? ReadyOverview.make(values)
+    : NeedsSetupOverview.make({ ...values, errorTag: overview.errorTag });
 };
 
 export const pagedBoard = (project: ProjectView): ProjectView =>
-  new ProjectView({
+  ProjectView.make({
     ...project,
-    board: new BoardView({
+    board: BoardView.make({
       ...project.board,
       cardedItemKeys: project.board.lanes.flatMap(({ items }) =>
         items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
@@ -49,8 +48,8 @@ export const pagedBoard = (project: ProjectView): ProjectView =>
       lanes: project.board.lanes.map((lane) =>
         historyLane(lane)
           ? lane._tag === "ReadOnlyBoardLane"
-            ? new ReadOnlyBoardLaneView({ ...lane, totalItems: lane.items.length, items: [] })
-            : new WritableBoardLaneView({ ...lane, totalItems: lane.items.length, items: [] })
+            ? ReadOnlyBoardLaneView.make({ ...lane, totalItems: lane.items.length, items: [] })
+            : WritableBoardLaneView.make({ ...lane, totalItems: lane.items.length, items: [] })
           : lane,
       ),
     }),
@@ -65,6 +64,6 @@ export const attentionOverview = (overview: FactoryOverview): FactoryOverview =>
     dismissedNeeds: overview.dismissedNeeds,
   };
   return overview._tag === "Ready"
-    ? new ReadyOverview(values)
-    : new NeedsSetupOverview({ ...values, errorTag: overview.errorTag });
+    ? ReadyOverview.make(values)
+    : NeedsSetupOverview.make({ ...values, errorTag: overview.errorTag });
 };

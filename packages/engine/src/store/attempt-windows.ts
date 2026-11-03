@@ -31,7 +31,7 @@ export const attemptWindowQueries = (database: RunDatabaseClient) => {
         "The Attempt ended before end times were recorded, so it has no window and none overlaps it",
         { attemptId },
       );
-      return new AttemptWindows({ own: ownWindow, overlapping: [] });
+      return AttemptWindows.make({ own: ownWindow, overlapping: [] });
     }
     const item = database
       .select({ itemKey: triggerEvents.itemKey })
@@ -53,7 +53,7 @@ export const attemptWindowQueries = (database: RunDatabaseClient) => {
       .orderBy(attempts.startedAt)
       .execute()
       .pipe(Effect.flatMap(decodeAttemptRows));
-    return new AttemptWindows({
+    return AttemptWindows.make({
       own: ownWindow,
       overlapping: others
         .flatMap((row) => Option.toArray(windowOf(attemptFromRow(row))))

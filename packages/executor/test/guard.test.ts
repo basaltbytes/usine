@@ -17,11 +17,11 @@ import { TestClock } from "effect/testing";
 import { type AttemptGuardLimits, attemptGuard, guardSeed } from "../src/guard.ts";
 
 const child = (id: string) =>
-  new ChildSession({
+  ChildSession.make({
     id: AgentSessionId.make(id),
     parentId: AgentSessionId.make("parent"),
     agent: AgentName.make("developer"),
-    brain: new BrainSpec({ harness: "pi", model: ModelId.make("openai/model"), effort: "high" }),
+    brain: BrainSpec.make({ harness: "pi", model: ModelId.make("openai/model"), effort: "high" }),
   });
 const first = child("first");
 const second = child("second");
@@ -96,19 +96,19 @@ const setup = (
             yield* Queue.offer(delivering, undefined);
             yield* io.append(
               "inbound",
-              new AttemptChannel.InboundEnvelope({
+              AttemptChannel.InboundEnvelope.make({
                 version: AttemptChannel.PROTOCOL_VERSION,
                 attemptId,
                 sequence: AttemptChannel.Sequence.make(++inbound),
                 sentAt: yield* DateTime.now,
-                target: new AttemptChannel.ParentTarget(),
+                target: AttemptChannel.ParentTarget.make(),
                 operator: "engine",
-                payload: new AttemptChannel.Steer({ message }),
+                payload: AttemptChannel.Steer.make({ message }),
               }),
             );
             if (options.delivered !== undefined) yield* options.delivered;
             if (options.warnFails === true) {
-              return yield* new AgentFailure({ message: "no live channel" });
+              return yield* AgentFailure.make({ message: "no live channel" });
             }
           }),
         recordUnsupervised: durable.recordUnsupervised,
@@ -137,7 +137,7 @@ const setup = (
         const written = yield* Deferred.make<void, AttemptFailure>();
         yield* Queue.offer(inputs, {
           written,
-          envelope: new AttemptChannel.OutboundEnvelope({
+          envelope: AttemptChannel.OutboundEnvelope.make({
             version: AttemptChannel.PROTOCOL_VERSION,
             attemptId,
             sequence: AttemptChannel.Sequence.make(++sequence),
@@ -149,29 +149,29 @@ const setup = (
       });
     const hold = (session: ChildSession | "parent", held: boolean) =>
       emit(
-        new AttemptChannel.InterventionApplied({
+        AttemptChannel.InterventionApplied.make({
           inputSequence: AttemptChannel.Sequence.make(sequence + 1),
-          intervention: new AttemptChannel.Intervention({
+          intervention: AttemptChannel.Intervention.make({
             operator: "Philippe",
             target:
               session === "parent"
-                ? new AttemptChannel.ParentTarget()
-                : new AttemptChannel.ChildTarget({ sessionId: session.id }),
+                ? AttemptChannel.ParentTarget.make()
+                : AttemptChannel.ChildTarget.make({ sessionId: session.id }),
             action: held
-              ? new AttemptChannel.OperatorMessage({ message: "Review this with me" })
-              : new AttemptChannel.Release(),
+              ? AttemptChannel.OperatorMessage.make({ message: "Review this with me" })
+              : AttemptChannel.Release.make(),
           }),
-          state: new AttemptChannel.InterventionState({ held, paused: false }),
+          state: AttemptChannel.InterventionState.make({ held, paused: false }),
         }),
       );
     const usage = (session: ChildSession, count: number) =>
       emit(
-        new AttemptChannel.SessionEvent({
-          event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(count) }),
+        AttemptChannel.SessionEvent.make({
+          event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(count) }),
         }),
       );
     const started = emit(
-      new AttemptChannel.Started({ parentModel: ModelId.make("openai/parent") }),
+      AttemptChannel.Started.make({ parentModel: ModelId.make("openai/parent") }),
     );
     /** Waits until the guard started delivering `count` warnings. */
     const warned = (count: number) =>
@@ -218,14 +218,14 @@ describe("Attempt guard", () => {
         // A parent waiting for the operator under its Hold is supervised too.
         yield* hold("parent", true);
         yield* emit(
-          new AttemptChannel.InterventionApplied({
+          AttemptChannel.InterventionApplied.make({
             inputSequence: AttemptChannel.Sequence.make(5),
-            intervention: new AttemptChannel.Intervention({
+            intervention: AttemptChannel.Intervention.make({
               operator: "Philippe",
-              target: new AttemptChannel.ParentTarget(),
-              action: new AttemptChannel.Steer({ message: "Continue the delegated work" }),
+              target: AttemptChannel.ParentTarget.make(),
+              action: AttemptChannel.Steer.make({ message: "Continue the delegated work" }),
             }),
-            state: new AttemptChannel.InterventionState({
+            state: AttemptChannel.InterventionState.make({
               held: false,
               paused: false,
               forwardedTo: Option.some(first.id),
@@ -233,7 +233,7 @@ describe("Attempt guard", () => {
           }),
         );
         yield* emit(
-          new AttemptChannel.SessionEvent({ event: new SessionFinished({ session: second }) }),
+          AttemptChannel.SessionEvent.make({ event: SessionFinished.make({ session: second }) }),
         );
         yield* TestClock.adjust("2 hours");
         assert.strictEqual(result.pollUnsafe(), undefined);
@@ -417,7 +417,7 @@ describe("Attempt guard", () => {
       yield* before.started;
       yield* before.usage(first, 60);
       yield* before.emit(
-        new AttemptChannel.SessionEvent({ event: new SessionFinished({ session: first }) }),
+        AttemptChannel.SessionEvent.make({ event: SessionFinished.make({ session: first }) }),
       );
       yield* before.stop;
       const after = yield* setup(ceilings, { attempt: before.attempt });

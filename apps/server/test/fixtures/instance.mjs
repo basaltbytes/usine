@@ -97,7 +97,7 @@ NodeRuntime.runMain(
         return yield* Effect.die(new Error(`Unexpected arguments: ${process.argv}`));
       }
       const { port } = command;
-      const record = new InstanceRecord({
+      const record = InstanceRecord.make({
         pid: ProcessId.make(process.pid),
         version: "0.0.0-fixture",
         startedAt: yield* DateTime.now,

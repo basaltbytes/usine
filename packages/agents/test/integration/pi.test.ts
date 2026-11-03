@@ -6,7 +6,7 @@ import { PiChildBackend } from "../../src/runtime.ts";
 import { piChildBackendLayer, piSdkLive } from "../../src/pi/pi.ts";
 import { steeringContract, interruptionContract } from "./contract.ts";
 
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "pi",
   model: Schema.decodeUnknownSync(ModelId)(process.env.USINE_PI_INTEGRATION_MODEL),
   effort: "low",
@@ -18,11 +18,7 @@ describe("Pi child live contract", () => {
     () =>
       Effect.gen(function* () {
         return yield* steeringContract(yield* PiChildBackend, brain);
-      }).pipe(
-        Effect.provide(piChildBackendLayer),
-        Effect.provide(piSdkLive),
-        Effect.provide(NodeServices.layer),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer, piSdkLive, NodeServices.layer))),
     210_000,
   );
 
@@ -31,11 +27,7 @@ describe("Pi child live contract", () => {
     () =>
       Effect.gen(function* () {
         return yield* interruptionContract(yield* PiChildBackend, brain);
-      }).pipe(
-        Effect.provide(piChildBackendLayer),
-        Effect.provide(piSdkLive),
-        Effect.provide(NodeServices.layer),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer, piSdkLive, NodeServices.layer))),
     150_000,
   );
 });

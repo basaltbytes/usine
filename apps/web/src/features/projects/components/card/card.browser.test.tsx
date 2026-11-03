@@ -412,13 +412,13 @@ const runAgainBody = (result: RunAgainResult) =>
 
 const runDroppedAgain = async () => {
   const run = runOf("run-dropped");
-  const detail = new RunDetailView({
-    run: new RunView({
+  const detail = RunDetailView.make({
+    run: RunView.make({
       ...run,
       task: "Work on #18.",
       resultMessage: null,
-      attempts: run.attempts.map(
-        (attempt) => new AttemptView({ ...attempt, task: AttemptTask.make("Work on #18.") }),
+      attempts: run.attempts.map((attempt) =>
+        AttemptView.make({ ...attempt, task: AttemptTask.make("Work on #18.") }),
       ),
     }),
     agentDefinitionChanged: false,
@@ -444,7 +444,7 @@ it("runs a Task's canceled Run again from the card menu, says so on the card, an
   const sent = await commands.releaseRunAgain(
     200,
     runAgainBody(
-      new Claimed({ eventId: EventId.make("run-again-event"), runId: RunId.make("run-again") }),
+      Claimed.make({ eventId: EventId.make("run-again-event"), runId: RunId.make("run-again") }),
     ),
   );
   expect(sent).toEqual({
@@ -472,7 +472,7 @@ it("keeps a card's Run again through a move to another lane and opens the new Ru
   await commands.releaseRunAgain(
     200,
     runAgainBody(
-      new Claimed({ eventId: EventId.make("run-again-event"), runId: RunId.make("run-again") }),
+      Claimed.make({ eventId: EventId.make("run-again-event"), runId: RunId.make("run-again") }),
     ),
   );
   await expect.poll(() => opened).toEqual(["run-again"]);
@@ -495,16 +495,16 @@ it("says on the card why Run again opened no Run: a refusal, then a used-up cycl
   await commands.releaseRunAgain(
     200,
     runAgainBody(
-      new CycleBlocked({
+      CycleBlocked.make({
         eventId: EventId.make("run-again-event"),
-        ask: new CycleBudgetAsk({
+        ask: CycleBudgetAsk.make({
           id: CycleBudgetAskId.make("exhausted"),
           itemKey: dropped.itemKey,
           repository: dropped.repository,
           loop: dropped.loop,
           limit: CycleLimit.make(1),
           counts: [
-            new LoopCycleCount({
+            LoopCycleCount.make({
               loop: dropped.loop,
               admitted: CycleCount.make(1),
               completed: CycleCount.make(1),
@@ -613,27 +613,27 @@ it("loads older runs only when Run history opens and opens the selected run", as
     .flatMap(({ board }) => board.lanes.flatMap(({ items }) => items))
     .find(({ number }) => number === 18);
   if (task?.run === null || task === undefined) throw new Error("Missing canceled task");
-  const latest = new RunView({
+  const latest = RunView.make({
     ...task.run,
     task: "Saved task",
     resultMessage: null,
     attempts: [],
   });
-  const older = new RunView({
+  const older = RunView.make({
     ...latest,
     id: RunId.make("older-implementation"),
     loop: LoopName.make("older-loop"),
   });
-  const [first, ...rest] = task.items.map(
-    (item) => new TaskItemView({ ...item, labels: [], conflicting: false }),
+  const [first, ...rest] = task.items.map((item) =>
+    TaskItemView.make({ ...item, labels: [], conflicting: false }),
   );
   if (first === undefined) throw new Error("Missing task item");
-  const detail = new TaskView({
+  const detail = TaskView.make({
     repository: task.repository,
     number: task.number,
     title: task.title,
     current: task.itemKey,
-    lane: new TaskLaneView({
+    lane: TaskLaneView.make({
       id: BoardLaneId.make("fallback:unmapped"),
       name: LaneName.make("Done"),
     }),

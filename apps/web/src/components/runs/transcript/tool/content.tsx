@@ -26,7 +26,7 @@ const Value = ({ value }: ValueProps) => {
       </span>
     );
   if (Schema.is(Schema.Boolean)(value)) return <span>{value ? "Yes" : "No"}</span>;
-  if (Schema.is(Schema.Number)(value)) return <span className="font-mono">{value}</span>;
+  if (Schema.is(Schema.Finite)(value)) return <span className="font-mono">{value}</span>;
   const entries = Schema.is(JsonArray)(value)
     ? value.map((item, index) => ({ label: `Item ${index + 1}`, value: item }))
     : Object.entries(value).map(([label, value]) => ({ label, value }));

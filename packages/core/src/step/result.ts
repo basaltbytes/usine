@@ -19,7 +19,7 @@ export class PullRequest extends Schema.TaggedClass<PullRequest>("StepResult/Pul
     url: Schema.URLFromString,
     /** The pushed head, or `None` for facts recorded before CI handoffs. */
     head: Schema.OptionFromOptionalKey(CommitSha).pipe(
-      Schema.withConstructorDefault(Effect.succeed(Option.none())),
+      Schema.withConstructorDefault(Effect.succeedNone),
     ),
   },
 ) {}

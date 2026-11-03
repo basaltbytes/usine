@@ -165,7 +165,7 @@ const labels = Layer.succeed(RepositoryLabelProjectionReader)({
     Effect.succeed(
       repository === usine
         ? Option.some(
-            Schema.decodeUnknownSync(RepositoryLabelProjection)({
+            Schema.decodeSync(RepositoryLabelProjection)({
               repository,
               labels: [
                 { name: "Ready", color: "0e8a16", description: "Ready for an Agent" },
@@ -177,7 +177,7 @@ const labels = Layer.succeed(RepositoryLabelProjectionReader)({
     ),
 });
 
-const finding = new LabelPreflightFinding({
+const finding = LabelPreflightFinding.make({
   repository: usine,
   label: GitHubLabelName.make("ready-for-review"),
   errorTag: "GitHubApiError",
@@ -185,22 +185,20 @@ const finding = new LabelPreflightFinding({
 });
 
 const polling = Layer.succeed(PollingTriggers)({
-  lastHint: Effect.succeed(Option.some(DateTime.makeUnsafe("2026-10-29T12:00:00Z"))),
+  lastHint: Effect.succeedSome(DateTime.makeUnsafe("2026-10-29T12:00:00Z")),
   hint: () => Effect.void,
   poll: () => Effect.die("unused"),
   run: () => Effect.never,
-  latest: Effect.succeed(
-    Option.some(
-      new PollCycle({
-        repositories: 2,
-        changedItems: 0,
-        submissions: [],
-        revokedRuns: 0,
-        failures: [],
-        preflightFindings: [finding],
-        nextPollAt: Option.none(),
-      }),
-    ),
+  latest: Effect.succeedSome(
+    PollCycle.make({
+      repositories: 2,
+      changedItems: 0,
+      submissions: [],
+      revokedRuns: 0,
+      failures: [],
+      preflightFindings: [finding],
+      nextPollAt: Option.none(),
+    }),
   ),
 });
 
@@ -209,16 +207,16 @@ const controls = Layer.succeed(LoopControl)({
   pause: () => Effect.die("unused"),
   unpause: () => Effect.die("unused"),
   states: Effect.succeed([
-    new LoopRuntimeState({ loop: LoopName.make("start-dev"), paused: true }),
-    new LoopRuntimeState({ loop: LoopName.make("review"), paused: false }),
+    LoopRuntimeState.make({ loop: LoopName.make("start-dev"), paused: true }),
+    LoopRuntimeState.make({ loop: LoopName.make("review"), paused: false }),
   ]),
 });
 
-const claudeLoggedOut = new WorkerCapabilityError({
+const claudeLoggedOut = WorkerCapabilityError.make({
   worker: local,
   capability: "harness-login",
   message: "Claude Code is not logged in on Worker local",
-  cause: new HarnessUnavailableError({
+  cause: HarnessUnavailableError.make({
     harness: "claude",
     capability: "login",
     message: "Claude Code is not logged in",
@@ -238,12 +236,12 @@ const workers = Layer.succeed(WorkerStatus)({
   machineStarts: Effect.succeed([]),
   provisioning: Effect.succeed([]),
   preflights: Effect.sync(() => {
-    const codex = new BrainSpec({
+    const codex = BrainSpec.make({
       harness: "codex",
       model: ModelId.make("gpt-5.6-sol"),
       effort: "high",
     });
-    const claude = new BrainSpec({
+    const claude = BrainSpec.make({
       harness: "claude",
       model: ModelId.make("claude-opus-4-1"),
       effort: "xhigh",
@@ -254,7 +252,7 @@ const workers = Layer.succeed(WorkerStatus)({
       startedAt,
       Result.succeed(fullPreflight),
     );
-    const limits = new ContainerLimits({
+    const limits = ContainerLimits.make({
       cpus: ContainerCpus.make(1.16),
       memoryMib: ContainerMemoryMib.make(2389),
       pids: ContainerPids.make(20325),
@@ -285,12 +283,12 @@ const readConfiguration = Effect.gen(function* () {
     const instance = yield* (yield* CurrentInstance).get;
     return yield* (yield* OperatorConfiguration).view(instance);
   }).pipe(
-    Effect.provide(
+    Effect.provide([
       OperatorConfiguration.layer.pipe(
         Layer.provide(Layer.mergeAll(controls, labels, polling, workers)),
       ),
-    ),
-    Effect.provide(reloadableInstanceLayer(root)),
+      reloadableInstanceLayer(root),
+    ]),
     Effect.map(Schema.encodeSync(ConfigurationView)),
   );
 }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
@@ -511,12 +509,12 @@ describe("Configuration view", () => {
         const instance = yield* (yield* CurrentInstance).get;
         return yield* (yield* OperatorConfiguration).view(instance);
       }).pipe(
-        Effect.provide(
+        Effect.provide([
           OperatorConfiguration.layer.pipe(
             Layer.provide(Layer.mergeAll(controls, labels, idleTriggersLayer, WorkerStatus.idle)),
           ),
-        ),
-        Effect.provide(reloadableInstanceLayer(root)),
+          reloadableInstanceLayer(root),
+        ]),
         Effect.map(Schema.encodeSync(ConfigurationView)),
       );
       assert.deepStrictEqual(

@@ -54,7 +54,7 @@ const follow = Effect.fn("GatewayProxy.followDownloadRedirects")(
         return response;
       }
       yield* Stream.runHead(response.stream).pipe(
-        Effect.mapError(() => new DownloadRedirectFailed({ reason: "upstream-failure" })),
+        Effect.mapError(() => DownloadRedirectFailed.make({ reason: "upstream-failure" })),
       );
       if (
         Option.isNone(location) ||
@@ -62,9 +62,9 @@ const follow = Effect.fn("GatewayProxy.followDownloadRedirects")(
         location.value.username !== "" ||
         location.value.password !== ""
       )
-        return yield* new DownloadRedirectFailed({ reason: "invalid-location" });
+        return yield* DownloadRedirectFailed.make({ reason: "invalid-location" });
       if (redirects === MAX_REDIRECTS)
-        return yield* new DownloadRedirectFailed({ reason: "redirect-limit" });
+        return yield* DownloadRedirectFailed.make({ reason: "redirect-limit" });
       redirects += 1;
       yield* Effect.logInfo("Following a GitHub download redirect without credentials", {
         ...fields,
@@ -74,7 +74,7 @@ const follow = Effect.fn("GatewayProxy.followDownloadRedirects")(
       });
       response = yield* client
         .get(location.value.href)
-        .pipe(Effect.mapError(() => new DownloadRedirectFailed({ reason: "upstream-failure" })));
+        .pipe(Effect.mapError(() => DownloadRedirectFailed.make({ reason: "upstream-failure" })));
     }
     yield* Effect.logInfo("Received a GitHub download response", {
       ...fields,

@@ -22,7 +22,7 @@ it("keeps a handed-off task in flight with the fix run status and link", () => {
   const task = lane?.items.find(({ runCount }) => runCount > 0);
   const base = task === undefined ? undefined : boardTaskRuns(task)[0];
   assert(lane !== undefined && task !== undefined && base !== undefined);
-  const fix = new RunSummaryView({
+  const fix = RunSummaryView.make({
     ...base,
     id: RunId.make("fix-run-828"),
     loop: LoopName.make("fix"),
@@ -32,20 +32,20 @@ it("keeps a handed-off task in flight with the fix run status and link", () => {
     canResolveFailure: false,
     canApprove: false,
   });
-  const source = new RunSummaryView({
+  const source = RunSummaryView.make({
     ...base,
     state: "HandedOff",
     canCancel: false,
     canResolveFailure: false,
     canApprove: false,
-    handoff: new HandedOff({
+    handoff: HandedOff.make({
       reason: "CI failed: ci.",
       head: CommitSha.make("a".repeat(40)),
       fixLoop: fix.loop,
       fixRunId: fix.id,
     }),
   });
-  const item = new BoardTaskView({
+  const item = BoardTaskView.make({
     ...task,
     ...boardRunSummary([source, fix], fix, task.items),
     run: fix,

@@ -21,7 +21,9 @@ export const LoopPreview = ({ name, value }: LoopPreviewProps) => {
   const [itemKey, setItemKey] = useState<ItemKey>();
   const input = { name, value };
   const preview = useQuery(
-    loopPreviewQuery(new LoopPreviewRequest(itemKey === undefined ? input : { ...input, itemKey })),
+    loopPreviewQuery(
+      LoopPreviewRequest.make(itemKey === undefined ? input : { ...input, itemKey }),
+    ),
   );
   if (preview.isPending) return <p role="status">{loopFormCopy.previewing}</p>;
   if (preview.isError) return <ErrorAlert message={preview.error.message} />;
@@ -44,37 +46,35 @@ export const LoopPreview = ({ name, value }: LoopPreviewProps) => {
       {data.items.length > 0 && (
         <Table>
           <TableBody>
-            {data.items.map((item) => {
-              return (
-                <TableRow key={item.itemKey}>
-                  <FillCell>
-                    <Link
-                      {...projectLinks.task(item.repository, String(item.number))}
-                      className="text-primary"
-                    >
-                      <ItemHeading
-                        item={Option.some(item)}
-                        title={item.title}
-                        variant="row"
-                        linked={false}
-                      />
-                    </Link>
-                    <p className="text-xs text-muted-foreground">{item.repository}</p>
-                  </FillCell>
-                  <TableCell>{loopFormCopy.evaluatedPriority(item.priority)}</TableCell>
-                  <TableCell>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      aria-pressed={data.prompt?.itemKey === item.itemKey}
-                      onClick={() => setItemKey(item.itemKey)}
-                    >
-                      {loopFormCopy.sample}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+            {data.items.map((item) => (
+              <TableRow key={item.itemKey}>
+                <FillCell>
+                  <Link
+                    {...projectLinks.task(item.repository, String(item.number))}
+                    className="text-primary"
+                  >
+                    <ItemHeading
+                      item={Option.some(item)}
+                      title={item.title}
+                      variant="row"
+                      linked={false}
+                    />
+                  </Link>
+                  <p className="text-xs text-muted-foreground">{item.repository}</p>
+                </FillCell>
+                <TableCell>{loopFormCopy.evaluatedPriority(item.priority)}</TableCell>
+                <TableCell>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-pressed={data.prompt?.itemKey === item.itemKey}
+                    onClick={() => setItemKey(item.itemKey)}
+                  >
+                    {loopFormCopy.sample}
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       )}

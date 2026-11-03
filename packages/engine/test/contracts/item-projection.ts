@@ -21,7 +21,7 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
         const repository = RepositoryName.make("basaltbytes/usine");
-        const item = new ItemProjection({
+        const item = ItemProjection.make({
           itemKey: ItemKey.make("github:basaltbytes/usine:33"),
           repository,
           source: ItemProjectionSource.make("issue"),
@@ -54,7 +54,7 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
         const repository = RepositoryName.make("basaltbytes/usine");
-        const item = new ItemProjection({
+        const item = ItemProjection.make({
           itemKey: ItemKey.make("github:basaltbytes/usine:28"),
           repository,
           source: ItemProjectionSource.make("pr"),
@@ -73,7 +73,7 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
           const before = yield* runs.revision();
 
           assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), true);
-          const gone = new ItemProjection({ ...item, goneAt: Option.some(goneAt) });
+          const gone = ItemProjection.make({ ...item, goneAt: Option.some(goneAt) });
           assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [gone]);
           assert(Option.isSome(before));
           assert.deepStrictEqual(yield* runs.revision(), Option.some(before.value + 1));
@@ -99,7 +99,7 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
           state: string,
           owner: RepositoryName = repository,
         ) =>
-          new ItemProjection({
+          ItemProjection.make({
             itemKey: ItemKey.make(`github:${owner}:${number}`),
             repository: owner,
             source: ItemProjectionSource.make(source),

@@ -161,7 +161,7 @@ const makeRunEngine = Effect.gen(function* () {
       });
     yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
-      return yield* new AttemptCancellationError({
+      return yield* AttemptCancellationError.make({
         attemptId: outcome.openAttempt.value.id,
         cause: handshake.failure,
       });
@@ -185,30 +185,29 @@ const makeRunEngine = Effect.gen(function* () {
         runId,
         attemptId,
       });
-      return yield* new RunInterventionRejectedError({
+      return yield* RunInterventionRejectedError.make({
         runId,
         attemptId,
         message: "This attempt is no longer running",
       });
     }
     yield* stepExecutor.intervene(attemptId, intervention).pipe(
-      Effect.mapError(
-        (error) =>
-          new RunInterventionRejectedError({
-            runId,
-            attemptId,
-            message: Match.valueTags(error, {
-              RunawayFailure: () => "The attempt reached its runaway limit",
-              ChildSessionBudgetFailure: () => "The attempt reached its child-session budget",
-              QuestionFailure: () => "The attempt ended with a question for the operator",
-              BlockedFailure: ({ message }) => message,
-              GitHubPushFailure: ({ message }) => message,
-              InfraFailure: ({ message }) => message,
-              ProviderCapacityFailure: ({ message }) => message,
-              DefectFailure: ({ message }) => message,
-              AgentFailure: ({ message }) => message,
-            }),
+      Effect.mapError((error) =>
+        RunInterventionRejectedError.make({
+          runId,
+          attemptId,
+          message: Match.valueTags(error, {
+            RunawayFailure: () => "The attempt reached its runaway limit",
+            ChildSessionBudgetFailure: () => "The attempt reached its child-session budget",
+            QuestionFailure: () => "The attempt ended with a question for the operator",
+            BlockedFailure: ({ message }) => message,
+            GitHubPushFailure: ({ message }) => message,
+            InfraFailure: ({ message }) => message,
+            ProviderCapacityFailure: ({ message }) => message,
+            DefectFailure: ({ message }) => message,
+            AgentFailure: ({ message }) => message,
           }),
+        }),
       ),
       Effect.tapError((error) =>
         Effect.logWarning("Operator input delivery failed", {
@@ -259,7 +258,7 @@ const makeRunEngine = Effect.gen(function* () {
         "Leftovers kept; the Worker is configured or still runs Attempts, so its Attempts stay tracked",
         { worker, running },
       );
-      return yield* new LeftoversDiscardRejectedError({ worker, running });
+      return yield* LeftoversDiscardRejectedError.make({ worker, running });
     }
     const attempts = yield* store.discardLeftovers(worker);
     yield* Effect.logInfo(

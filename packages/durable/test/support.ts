@@ -14,9 +14,9 @@ import { DateTime, Effect, Option, Result } from "effect";
 import { AttemptRequest } from "../src/attempt-runtime.ts";
 import { PARENT_MODEL } from "../src/testing.ts";
 
-const agent = new Agent({
+const agent = Agent.make({
   name: AgentName.make("developer"),
-  brain: new BrainSpec({
+  brain: BrainSpec.make({
     harness: "claude",
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
@@ -32,10 +32,10 @@ export const workerEnvironment = { PATH: "/usr/bin:/bin", GH_CONFIG_DIR: "/tmp/u
 export const attemptRequest = (
   attemptId: string,
   maxChildren = 3,
-  host: ChildHost = new LocalProcess(),
+  host: ChildHost = LocalProcess.make(),
 ) =>
-  new AttemptRequest({
-    spec: new AttemptChannel.RunSpec({
+  AttemptRequest.make({
+    spec: AttemptChannel.RunSpec.make({
       attemptId: AttemptId.make(attemptId),
       repository: RepositoryName.make("basaltbytes/usine"),
       revision: RepositoryRevision.make("main"),

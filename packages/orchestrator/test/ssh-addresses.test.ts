@@ -6,7 +6,7 @@ import { sshWorkerAddressesOf } from "../src/ssh.ts";
 it.effect(
   "resolves Boat OAuth variables without LLM API keys and reports a missing secret by variable name",
   () => {
-    const config = Schema.decodeUnknownSync(UsineConfig)({
+    const config = Schema.decodeSync(UsineConfig)({
       version: 1,
       repos: [],
       workers: [

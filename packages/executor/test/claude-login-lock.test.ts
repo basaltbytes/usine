@@ -15,12 +15,12 @@ const checkout = (attempt: string) => `/home/usine/.usine/workers/provisioned/at
 
 /** Child `child` of `attempt`, on the machine with provider ID `machine` that the Worker created for it. */
 const claudeChild = (machine: string, attempt: string, child: number) =>
-  new ChildRequest({
-    session: new ChildSession({
+  ChildRequest.make({
+    session: ChildSession.make({
       id: AgentSessionId.make(`parent:${attempt}:child:${String(child)}`),
       parentId: AgentSessionId.make(`parent:${attempt}`),
       agent: AgentName.make("developer"),
-      brain: new BrainSpec({
+      brain: BrainSpec.make({
         harness: "claude",
         model: ModelId.make("claude-sonnet-4-6"),
         effort: "high",
@@ -29,7 +29,7 @@ const claudeChild = (machine: string, attempt: string, child: number) =>
     cwd: WorkingDirectory.make(checkout(attempt)),
     prompt: "Implement the focused task.",
     environment: { HOME: "/home/usine", PATH: "/usr/bin:/bin" },
-    host: new RemoteShell({
+    host: RemoteShell.make({
       ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
       sshEnvironment: {},
       destination: `usine@machine-${machine}`,
@@ -92,12 +92,13 @@ describe("Claude login lock", () => {
           yield* Fiber.joinAll([first, sameMachine, otherMachine]);
         }).pipe(
           Effect.provide(
-            claudeChildLayer.pipe(
-              Layer.provide(claudeLoginLockLayer),
-              Layer.provide(NodeServices.layer),
-            ),
+            Layer.mergeAll(
+              claudeChildLayer.pipe(
+                Layer.provide(claudeLoginLockLayer),
+                Layer.provide(NodeServices.layer),
+              ),
+            ).pipe(Layer.provideMerge(sdk)),
           ),
-          Effect.provide(sdk),
           Effect.scoped,
         );
       }),

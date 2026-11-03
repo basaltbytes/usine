@@ -38,8 +38,8 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   approval: Schema.Option(RunApproval),
   /** The saved approval decision, or None for events recorded before decision explanations. */
   approvalReason: Schema.Option(Schema.NonEmptyString).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** The run-again origin, or `None` for a Run opened by its trigger. */
   runAgain: Schema.Option(RunAgain),
@@ -56,9 +56,7 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions,
   /** The loop CI policy saved when the event matched. */
-  ciPolicy: Schema.Option(CiPolicy).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
-  ),
+  ciPolicy: Schema.Option(CiPolicy).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
 }) {}
 
 /** A Run and the Event it was opened for; the payload is the Item as the trigger saw it. */
@@ -113,14 +111,14 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
 
 /** Builds polling metadata from a snapshot already loaded for a detail read. */
 export const summarizeRun = (snapshot: RunSnapshot): RunSummary =>
-  new RunSummary({
+  RunSummary.make({
     ...snapshot,
     pullRequestUrl: Option.match(snapshot.step.result, {
       onNone: () => null,
       onSome: ({ facts }) =>
         facts.find((fact) => fact._tag === "PullRequest")?.url.toString() ?? null,
     }),
-    attempts: snapshot.attempts.map((attempt) => new AttemptSummary(attempt)),
+    attempts: snapshot.attempts.map((attempt) => AttemptSummary.make(attempt)),
   });
 
 /** The metadata needed to attribute session usage without reading attempt prompts. */

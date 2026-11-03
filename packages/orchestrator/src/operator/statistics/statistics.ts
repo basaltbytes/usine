@@ -187,7 +187,7 @@ const makeStatistics = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const grants = yield* RequestPermissions;
-    const admin = permits(grants, "admin", new InstanceScope());
+    const admin = permits(grants, "admin", InstanceScope.make());
     const repositories = new Set(instance.config.repos.map(({ name }) => name.toLowerCase()));
     const visibleClosed = closed.filter(
       ({ repository }) => admin || repositories.has(repository.toLowerCase()),
@@ -202,7 +202,7 @@ const makeStatistics = Effect.gen(function* () {
       runs: [...visibleClosed, ...open],
       usage: yield* usageOf(visibleClosed),
       workers: yield* Effect.forEach(
-        permits(grants, "admin", new InstanceScope()) ? instance.config.workers : [],
+        permits(grants, "admin", InstanceScope.make()) ? instance.config.workers : [],
         (worker) => readWorkerCapacity(configuration, worker),
         { concurrency: 4 },
       ),
@@ -213,7 +213,7 @@ const makeStatistics = Effect.gen(function* () {
       closedRuns: closed.length,
       openRuns: open.length,
     });
-    return new RunStatisticsView({
+    return RunStatisticsView.make({
       ...view,
       machineStarts: (admin ? yield* workerStatus.machineStarts : []).filter(
         ({ day }) =>

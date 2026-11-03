@@ -20,7 +20,7 @@ import { RunView, type RunStateTag } from "../src/operator/run.ts";
 const repository = RepositoryName.make("basaltbytes/usine");
 
 // The dogfood instance's lanes, where every Loop removes its trigger label first (#467).
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -47,7 +47,7 @@ const labelNodes = (labels: ReadonlyArray<string>) => ({
 const itemKey = (number: number) => ItemKey.make(`github:${repository}:${number}`);
 
 const issue = (number: number, labels: ReadonlyArray<string>) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey: itemKey(number),
     repository,
     source: ItemProjectionSource.make("issue"),
@@ -74,7 +74,7 @@ const issue = (number: number, labels: ReadonlyArray<string>) =>
   });
 
 const pullRequest = (number: number, labels: ReadonlyArray<string>, merged = false) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey: itemKey(number),
     repository,
     source: ItemProjectionSource.make("pr"),
@@ -115,8 +115,8 @@ const isOpen = (state: RunStateTag) =>
   state === "Pending" || state === "Waiting" || state === "Queued" || state === "Running";
 
 const run = (item: ItemProjection, loop: string, state: RunStateTag) =>
-  new RunView({
-    agentBrain: new BrainSpec({
+  RunView.make({
+    agentBrain: BrainSpec.make({
       harness: "codex",
       model: ModelId.make("test-model"),
       effort: "high",
@@ -147,7 +147,7 @@ const run = (item: ItemProjection, loop: string, state: RunStateTag) =>
 const eventOf = (opened: RunView, payload: Schema.JsonObject) =>
   [
     opened.id,
-    new Event({
+    Event.make({
       id: EventId.make(`event-${opened.id}`),
       dedupKey: DedupKey.make(`event-${opened.id}`),
       payload,

@@ -12,7 +12,7 @@ import { loopFormCopy } from "~/features/configuration/strings";
 
 const choiceKey = (key: string, value: string) =>
   key === "repos"
-    ? Option.match(Schema.decodeUnknownOption(RepositoryName)(value), {
+    ? Option.match(Schema.decodeOption(RepositoryName)(value), {
         onNone: () => value,
         onSome: canonicalRepositoryName,
       })

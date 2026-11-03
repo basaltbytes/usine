@@ -36,7 +36,7 @@ export const Upgrades = () => {
     mutationFn: (timing: UpgradeTiming) =>
       api((client) =>
         client.requestUpgrade({
-          payload: new UpgradeRequest({ timing, version: Option.none() }),
+          payload: UpgradeRequest.make({ timing, version: Option.none() }),
         }),
       ),
     onSuccess: () => queries.invalidateQueries(upgradeQuery()),

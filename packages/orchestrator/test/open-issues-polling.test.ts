@@ -47,7 +47,7 @@ import {
 } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -59,7 +59,7 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
     },
   ],
 });
-const agent = new AgentFile({
+const agent = AgentFile.make({
   name: AgentName.make("developer"),
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
@@ -68,9 +68,9 @@ const agent = new AgentFile({
   parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
-const loop = new LoopFile({
+const loop = LoopFile.make({
   name: LoopName.make("start-dev"),
-  trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
+  trigger: IssueTrigger.make({ on: "issue", if: Source.make('item.state == "OPEN"') }),
   selector: Option.none(),
   approval: "required",
   step: StepName.make("run"),
@@ -78,7 +78,7 @@ const loop = new LoopFile({
   body: PromptTemplate.make("Implement issue {{ item.number }}."),
 });
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
-  new LoadedInstance({
+  LoadedInstance.make({
     config,
     agents: [agent],
     invalidAgents: [],
@@ -86,8 +86,8 @@ const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
     quarantinedLoops: [],
     warnings: [],
   });
-const emptyCatalog = new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] });
-const issue28 = new IssueSnapshot({
+const emptyCatalog = RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] });
+const issue28 = IssueSnapshot.make({
   contentHash: ContentHash.make("a".repeat(64)),
   payload: {
     number: 28,
@@ -113,7 +113,7 @@ const issue28 = new IssueSnapshot({
 const gatedExecutor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
-  outcome: () => Effect.succeed(Option.none()),
+  outcome: () => Effect.succeedNone,
   recover: () => Effect.void,
   intervene: () => Effect.void,
   interrupt: () => Effect.void,
@@ -135,7 +135,7 @@ const processLayer = (directory: InstanceDirectory, github: GitHubPolling["Servi
   );
   return Layer.merge(
     dependencies,
-    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
+    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor), Layer.provide(dependencies)),
   );
 };
 
@@ -172,13 +172,13 @@ describe("PollingTriggers open-issue check", () => {
           changes: (_, cursor) =>
             Effect.succeed(
               Option.isNone(cursor.entityTag)
-                ? new RepositoryChanges({
-                    cursor: new PollCursor({
+                ? RepositoryChanges.make({
+                    cursor: PollCursor.make({
                       entityTag: Option.some(EntityTag.make('W/"unchanged"')),
                       watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
                     }),
                     items: [
-                      new ChangedIssue({
+                      ChangedIssue.make({
                         number: 28,
                         updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
                       }),
@@ -186,7 +186,7 @@ describe("PollingTriggers open-issue check", () => {
                     backlog: false,
                     nextPollAt: Option.none(),
                   })
-                : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
+                : RepositoryNotModified.make({ cursor, nextPollAt: Option.none() }),
             ),
           snapshot: () => Effect.succeed(issue28),
           baseRefHead: unmovedBaseRefHead,
@@ -243,21 +243,21 @@ describe("PollingTriggers open-issue check", () => {
       const github: GitHubPolling["Service"] = {
         labels: () => Effect.succeed(emptyCatalog),
         changes: (_, cursor) =>
-          Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+          Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
         snapshot: () => Effect.die("no Item changed"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () =>
           Effect.gen(function* () {
             requests += 1;
             if (requests === 4) {
-              return yield* new GitHubRateLimitError({
+              return yield* GitHubRateLimitError.make({
                 operation: "find-missing-issues",
                 retryAt,
                 message: "GitHub rate limit reached",
               });
             }
             if (requests <= 3 || (requests >= 6 && requests <= 8)) {
-              return yield* new GitHubApiError({
+              return yield* GitHubApiError.make({
                 operation: "find-missing-issues",
                 status: Option.some(502),
                 message: "GitHub returned HTTP status 502",
@@ -267,7 +267,7 @@ describe("PollingTriggers open-issue check", () => {
           }),
       };
       const items: ItemProjectionReader["Service"] = {
-        get: () => Effect.succeed(Option.none()),
+        get: () => Effect.succeedNone,
         list: () => Effect.die("the poll does not list projections"),
         openIssues: () => Effect.succeed([ItemNumber.make(28)]),
       };

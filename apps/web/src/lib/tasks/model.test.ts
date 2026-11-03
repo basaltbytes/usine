@@ -82,24 +82,23 @@ describe("Tasks list model", () => {
     const [item] = task.items;
     const { repository, loop } = lastRunOf(task);
     assert(item !== undefined);
-    return new StalledItemView({ repository, loop, item, reason });
+    return StalledItemView.make({ repository, loop, item, reason });
   };
   /** Returns `overview` with #18's Run, which waited three days, canceled a minute ago before any
    * Attempt started. */
   const canceledJustNow = (overview: ReturnType<typeof boardOverview>) =>
     changeTasks(overview, (task) =>
       task.number === 18
-        ? new BoardTaskView({
+        ? BoardTaskView.make({
             ...task,
             ...boardRunSummary(
-              boardTaskRuns(task).map(
-                (run) =>
-                  new RunSummaryView({
-                    ...run,
-                    openedAt: minutesAgo(3 * 1440),
-                    closedAt: minutesAgo(1),
-                    attempts: [],
-                  }),
+              boardTaskRuns(task).map((run) =>
+                RunSummaryView.make({
+                  ...run,
+                  openedAt: minutesAgo(3 * 1440),
+                  closedAt: minutesAgo(1),
+                  attempts: [],
+                }),
               ),
               task.run,
               task.items,
@@ -135,7 +134,7 @@ describe("Tasks list model", () => {
     const dropped = taskOf(18, canceled);
     const stalled = boardStalled().map((stall) =>
       stall.item.number === 18
-        ? stallOf(dropped, new ClosedUnchangedView({ run: lastRunOf(dropped) }))
+        ? stallOf(dropped, ClosedUnchangedView.make({ run: lastRunOf(dropped) }))
         : stall,
     );
     assert.deepStrictEqual(order(taskRows(lanes(canceled), stalled)).slice(3), [
@@ -188,23 +187,23 @@ describe("Tasks list model", () => {
     // #18's Run was canceled and the Item is unchanged since, or the next poll handles the Item, or
     // the Loop is paused; in each case nothing is in flight.
     assert.strictEqual(
-      statusOf(18, new ClosedUnchangedView({ run: lastRunOf(taskOf(18)) })),
+      statusOf(18, ClosedUnchangedView.make({ run: lastRunOf(taskOf(18)) })),
       "Idle",
     );
-    assert.strictEqual(statusOf(18, new AwaitingPollView()), "Idle");
-    assert.strictEqual(statusOf(18, new LoopPausedView()), "Idle");
+    assert.strictEqual(statusOf(18, AwaitingPollView.make()), "Idle");
+    assert.strictEqual(statusOf(18, LoopPausedView.make()), "Idle");
     // #28's failed review, or the question it ended on, stalls the Loop until the operator acts.
     const pinned = lastRunOf(taskOf(28));
-    assert.strictEqual(statusOf(28, new RunFailedView({ run: pinned })), "Stalled");
-    assert.strictEqual(statusOf(28, new SuppressedForOperatorView({ run: pinned })), "Stalled");
+    assert.strictEqual(statusOf(28, RunFailedView.make({ run: pinned })), "Stalled");
+    assert.strictEqual(statusOf(28, SuppressedForOperatorView.make({ run: pinned })), "Stalled");
     const resolved = boardOverviewResolved();
-    const failure = new RunFailedView({ run: lastRunOf(taskOf(28, resolved)) });
+    const failure = RunFailedView.make({ run: lastRunOf(taskOf(28, resolved)) });
     assert.strictEqual(statusOf(28, failure, resolved), "Idle");
 
     // An earlier failure on #18 needs the operator, so the heading counts it as needing attention;
     // its status is still the stall's.
     const attention = changeTasks(boardOverview(), (task) =>
-      task.number === 18 ? new BoardTaskView({ ...task, needsYou: true }) : task,
+      task.number === 18 ? BoardTaskView.make({ ...task, needsYou: true }) : task,
     );
     const rows = taskRows(lanes(attention), boardStalled());
     assert.strictEqual(rows.find(({ task }) => task.number === 18)?.status._tag, "Idle");
@@ -215,7 +214,7 @@ describe("Tasks list model", () => {
     /** Returns `overview` with a failed audit Run on #28, before its review failed, with the failure
      * resolved. */
     const auditOf = (review: RunSummaryView) =>
-      new RunSummaryView({
+      RunSummaryView.make({
         ...review,
         id: RunId.make("run-pinned-audit"),
         loop: LoopName.make("audit"),
@@ -229,7 +228,7 @@ describe("Tasks list model", () => {
         if (task.number !== 28) return task;
         const review = lastRunOf(task);
         const audit = auditOf(review);
-        return new BoardTaskView({
+        return BoardTaskView.make({
           ...task,
           ...boardRunSummary([audit, ...boardTaskRuns(task)], task.run, task.items),
         });
@@ -240,14 +239,13 @@ describe("Tasks list model", () => {
       const pinned = taskOf(28, overview);
       const [item] = pinned.items;
       assert(item !== undefined);
-      const failures = [auditOf(lastRunOf(pinned)), ...boardTaskRuns(pinned)].map(
-        (run) =>
-          new StalledItemView({
-            repository: run.repository,
-            loop: run.loop,
-            item,
-            reason: new RunFailedView({ run }),
-          }),
+      const failures = [auditOf(lastRunOf(pinned)), ...boardTaskRuns(pinned)].map((run) =>
+        StalledItemView.make({
+          repository: run.repository,
+          loop: run.loop,
+          item,
+          reason: RunFailedView.make({ run }),
+        }),
       );
       assert.deepStrictEqual(
         failures.map(({ loop }) => loop),
@@ -287,12 +285,12 @@ describe("Tasks list model", () => {
     // #9's plan Run succeeded on the issue; the implement Run on its pull request #31 is queued.
     const queued = changeTasks(boardOverview(), (task) =>
       task.number === 31
-        ? new BoardTaskView({
+        ? BoardTaskView.make({
             ...task,
             ...boardRunSummary(
               boardTaskRuns(task).map((run) =>
                 run.state === "Running"
-                  ? new RunSummaryView({ ...run, state: "Queued", attempts: [], canCancel: true })
+                  ? RunSummaryView.make({ ...run, state: "Queued", attempts: [], canCancel: true })
                   : run,
               ),
               task.run,
@@ -305,7 +303,7 @@ describe("Tasks list model", () => {
     const implement = boardTaskRuns(redesign).at(-1);
     const [issue, pullRequest] = redesign.items;
     assert(implement && issue && pullRequest);
-    const plan = new RunSummaryView({
+    const plan = RunSummaryView.make({
       ...implement,
       id: RunId.make("older-plan"),
       itemKey: issue.itemKey,
@@ -315,7 +313,7 @@ describe("Tasks list model", () => {
       canRunAgain: true,
     });
     const stall = (loop: string, item: typeof issue, reason: StalledItemView["reason"]) =>
-      new StalledItemView({
+      StalledItemView.make({
         repository: implement.repository,
         loop: LoopName.make(loop),
         item,
@@ -323,8 +321,8 @@ describe("Tasks list model", () => {
       });
     // The desk lists the closed, unchanged plan Run before the Run waiting for a worker.
     const stalled = [
-      stall("plan", issue, new ClosedUnchangedView({ run: plan })),
-      stall("implement", pullRequest, new QueuedForWorkerView({ run: implement, ahead: null })),
+      stall("plan", issue, ClosedUnchangedView.make({ run: plan })),
+      stall("implement", pullRequest, QueuedForWorkerView.make({ run: implement, ahead: null })),
     ];
     const row = taskRows(lanes(queued), stalled).find(({ task }) => task.number === 31);
     assert(row?.status._tag === "Stalled");

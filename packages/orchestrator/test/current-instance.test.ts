@@ -92,7 +92,7 @@ const startWorkers = (preflighted: Array<string>) =>
         Effect.gen(function* () {
           preflighted.push(...brains.map(({ harness, model }) => `${worker}: ${harness}/${model}`));
           if (brains.some(({ harness }) => harness === "claude"))
-            return yield* new WorkerCapabilityError({
+            return yield* WorkerCapabilityError.make({
               worker,
               capability: "harness-login",
               message: "Claude Code is not logged in.",

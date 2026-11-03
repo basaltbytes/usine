@@ -62,27 +62,27 @@ import { failureMessage } from "~/lib/runs/strings";
 import { WithRouter } from "~/lib/testing/memory-router";
 import { taskUsageOf } from "~/lib/projects/fixture";
 
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
 });
 
 const attempt = (number: number, message: string | null) =>
-  new AttemptView({
+  AttemptView.make({
     task: AttemptTask.make("Review the task"),
     agent: AgentName.make("developer"),
     operatorIntervened: false,
     id: AttemptId.make(`attempt-${number}`),
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),
-    workerAccess: new LocalWorkerAccess(),
+    workerAccess: LocalWorkerAccess.make(),
     brain,
     startedAt: `2026-09-01T12:00:0${number}.000Z`,
     outcome:
       message === null
-        ? new SucceededAttemptView()
-        : new FailedAttemptView({ failure: new AgentFailureView({ message }) }),
+        ? SucceededAttemptView.make()
+        : FailedAttemptView.make({ failure: AgentFailureView.make({ message }) }),
     endedAt: `2026-09-01T12:30:0${number}.000Z`,
     salvage: null,
   });
@@ -90,7 +90,7 @@ const attempt = (number: number, message: string | null) =>
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
 const issueLink = (number: number, title: string) =>
-  new BoardItemLink({
+  BoardItemLink.make({
     itemKey: Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
     kind: "issue",
     number: ItemNumber.make(number),
@@ -100,7 +100,7 @@ const issueLink = (number: number, title: string) =>
   });
 
 const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) =>
-  new RunView({
+  RunView.make({
     agentBrain: brain,
     id: RunId.make("run-33"),
     itemKey,
@@ -127,7 +127,7 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
 const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
   const run = runOnItem(state, attempts);
   const items = [issueLink(33, "Board lanes")];
-  return new BoardTaskView({
+  return BoardTaskView.make({
     repository,
     itemKey,
     kind: "issue",
@@ -166,14 +166,14 @@ describe("Board Run failure copy", () => {
 
   it("shows the newest failure across development and review Runs", () => {
     const card = itemWithRun("Failed", [attempt(1, "old development failure")]);
-    const review = new RunSummaryView({
+    const review = RunSummaryView.make({
       ...runOnItem("Failed", [attempt(1, "new review failure")]),
       id: RunId.make("review-new"),
       openedAt: "2026-09-02T12:00:00.000Z",
     });
     assert.strictEqual(
       itemFailure(
-        new BoardTaskView({
+        BoardTaskView.make({
           ...card,
           ...boardRunSummary([...boardTaskRuns(card), review], review, card.items),
           run: review,
@@ -181,10 +181,10 @@ describe("Board Run failure copy", () => {
       ),
       "new review failure",
     );
-    const resolved = new RunSummaryView({ ...review, canResolveFailure: false });
+    const resolved = RunSummaryView.make({ ...review, canResolveFailure: false });
     assert.strictEqual(
       itemFailure(
-        new BoardTaskView({
+        BoardTaskView.make({
           ...card,
           ...boardRunSummary([...boardTaskRuns(card), resolved], resolved, card.items),
           run: resolved,
@@ -194,7 +194,7 @@ describe("Board Run failure copy", () => {
     );
     assert.strictEqual(
       itemFailure(
-        new BoardTaskView({
+        BoardTaskView.make({
           ...card,
           ...boardRunSummary([resolved], resolved, card.items),
           run: resolved,
@@ -208,10 +208,10 @@ describe("Board Run failure copy", () => {
     const card = itemWithRun("Failed", [attempt(1, "Checks failed")]);
     const [issue] = card.items;
     assert(issue !== undefined);
-    const closed = new BoardTaskView({
+    const closed = BoardTaskView.make({
       ...card,
       state: "issue-closed",
-      items: [new BoardItemLink({ ...issue, state: "issue-closed" })],
+      items: [BoardItemLink.make({ ...issue, state: "issue-closed" })],
       needsYou: false,
     });
     assert.strictEqual(itemFailure(closed), null);
@@ -219,7 +219,7 @@ describe("Board Run failure copy", () => {
   });
 
   it("explains an exhausted child-session budget in the drawer and Needs attention", () => {
-    const failure = new ChildSessionBudgetFailureView({
+    const failure = ChildSessionBudgetFailureView.make({
       maxChildren: ChildSessionBudget.make(4),
       attemptedChildren: ChildSessionCount.make(5),
     });
@@ -229,7 +229,7 @@ describe("Board Run failure copy", () => {
     assert.strictEqual(failureMessage(failure), message);
     assert.deepStrictEqual(
       needCopy(
-        new RunFailureNeed({
+        RunFailureNeed.make({
           id: "run-failure:run-33",
           repository,
           runId,
@@ -252,7 +252,7 @@ describe("Runs without a Board card", () => {
     const carded = itemWithRun("Succeeded", [attempt(1, null)]);
     const cardedRun = boardTaskRuns(carded)[0];
     assert(cardedRun !== undefined);
-    const scheduled = new RunSummaryView({
+    const scheduled = RunSummaryView.make({
       ...cardedRun,
       id: RunId.make("run-schedule"),
       itemKey: ItemKey.make('["github","basaltbytes/usine"]'),
@@ -260,16 +260,16 @@ describe("Runs without a Board card", () => {
       state: "Running",
       canCancel: true,
     });
-    const project = new ProjectView({
+    const project = ProjectView.make({
       repository: RepositoryName.make("basaltbytes/usine"),
       status: "active",
       runs: [cardedRun, scheduled],
       labels: [],
       preflightFindings: [],
-      board: new BoardView({
+      board: BoardView.make({
         failures: [],
         lanes: [
-          new ReadOnlyBoardLaneView({
+          ReadOnlyBoardLaneView.make({
             id: BoardLaneId.make("fallback:unmapped"),
             name: LaneName.make("Unmapped"),
             sources: [],
@@ -283,9 +283,9 @@ describe("Runs without a Board card", () => {
       runsWithoutCard(project).map(({ id }) => id),
       [scheduled.id],
     );
-    const paginated = new ProjectView({
+    const paginated = ProjectView.make({
       ...project,
-      board: new BoardView({
+      board: BoardView.make({
         ...project.board,
         cardedItemKeys: carded.items.map(({ itemKey }) => itemKey),
         lanes: project.board.lanes.map((lane) => ({ ...lane, items: [], totalItems: 1 })),
@@ -304,18 +304,18 @@ describe("Board lane order", () => {
     origin: "authored" | "proposed" | "fallback",
     states: ReadonlyArray<LaneItemState> = [],
   ) =>
-    new ReadOnlyBoardLaneView({
+    ReadOnlyBoardLaneView.make({
       id: BoardLaneId.make(id),
       name: LaneName.make(id),
-      sources: states.map((state) => new StateLaneSource({ state })),
+      sources: states.map((state) => StateLaneSource.make({ state })),
       origin,
       items: [],
     });
   const writable = (id: string) =>
-    new WritableBoardLaneView({
+    WritableBoardLaneView.make({
       id: BoardLaneId.make(id),
       name: LaneName.make(id),
-      sources: [new LabelLaneSource({ label: GitHubLabelName.make(id) })],
+      sources: [LabelLaneSource.make({ label: GitHubLabelName.make(id) })],
       labels: [GitHubLabelName.make(id)],
       origin: "authored",
       items: [],
@@ -345,22 +345,22 @@ describe("Board lane order", () => {
 
 describe("Board flow arrows", () => {
   const card = itemWithRun("Succeeded", [attempt(1, null)]);
-  const waiting = new RunSummaryView({
+  const waiting = RunSummaryView.make({
     ...runOnItem("Succeeded", []),
     state: "Waiting",
     loop: LoopName.make("start-dev"),
   });
   const lane = (name: string, items: ReadonlyArray<BoardTaskView>) =>
-    new WritableBoardLaneView({
+    WritableBoardLaneView.make({
       id: BoardLaneId.make(name),
       name: LaneName.make(name),
-      sources: [new LabelLaneSource({ label: GitHubLabelName.make(name) })],
+      sources: [LabelLaneSource.make({ label: GitHubLabelName.make(name) })],
       labels: [GitHubLabelName.make(name)],
       origin: "authored",
       items,
     });
   const loop = (name: string, paused: boolean) =>
-    new LoopView({
+    LoopView.make({
       name: LoopName.make(name),
       trigger: "issue",
       agent: AgentName.make("developer"),
@@ -371,13 +371,13 @@ describe("Board flow arrows", () => {
     const flows = laneFlows(
       [
         lane("ready", [
-          new BoardTaskView({
+          BoardTaskView.make({
             ...card,
             loops: [LoopName.make("start-dev"), LoopName.make("triage")],
           }),
         ]),
         lane("review", [
-          new BoardTaskView({
+          BoardTaskView.make({
             ...card,
             loops: [],
             ...boardRunSummary([waiting], waiting, card.items),
@@ -402,16 +402,16 @@ describe("Board flow arrows", () => {
 });
 
 describe("Board card stall note", () => {
-  const question = new AttemptView({
+  const question = AttemptView.make({
     ...attempt(1, "unused"),
-    outcome: new FailedAttemptView({
-      failure: new QuestionFailureView({ question: "Which lanes stay on the Board?" }),
+    outcome: FailedAttemptView.make({
+      failure: QuestionFailureView.make({ question: "Which lanes stay on the Board?" }),
     }),
   });
   const suppressingRun = runOnItem("Failed", [question]);
   const suppressed = itemWithRun("Failed", [question]);
   const canceledLink = issueLink(18, "Cache the label catalog");
-  const canceledRun = new RunSummaryView({
+  const canceledRun = RunSummaryView.make({
     ...runOnItem("Succeeded", [attempt(1, null)]),
     id: RunId.make("run-18"),
     itemKey: canceledLink.itemKey,
@@ -419,7 +419,7 @@ describe("Board card stall note", () => {
     state: "Canceled",
     canRunAgain: true,
   });
-  const canceled = new BoardTaskView({
+  const canceled = BoardTaskView.make({
     ...suppressed,
     ...canceledLink,
     items: [canceledLink],
@@ -428,7 +428,7 @@ describe("Board card stall note", () => {
     needsYou: false,
   });
   const pausedLink = issueLink(19, "Review the harvest of PR comments");
-  const paused = new BoardTaskView({
+  const paused = BoardTaskView.make({
     ...suppressed,
     ...pausedLink,
     items: [pausedLink],
@@ -442,46 +442,44 @@ describe("Board card stall note", () => {
         <QueryClientProvider client={new QueryClient()}>
           <WithRouter>
             <ProjectBoard
-              project={
-                new ProjectView({
-                  repository,
-                  status: "needs-you",
-                  runs: [],
-                  labels: [],
-                  preflightFindings: [],
-                  board: new BoardView({
-                    failures: [],
-                    lanes: [
-                      new ReadOnlyBoardLaneView({
-                        id: BoardLaneId.make("authored:Backlog"),
-                        name: LaneName.make("Backlog"),
-                        sources: [],
-                        origin: "authored",
-                        items: [suppressed, canceled, paused],
-                      }),
-                    ],
-                  }),
-                })
-              }
+              project={ProjectView.make({
+                repository,
+                status: "needs-you",
+                runs: [],
+                labels: [],
+                preflightFindings: [],
+                board: BoardView.make({
+                  failures: [],
+                  lanes: [
+                    ReadOnlyBoardLaneView.make({
+                      id: BoardLaneId.make("authored:Backlog"),
+                      name: LaneName.make("Backlog"),
+                      sources: [],
+                      origin: "authored",
+                      items: [suppressed, canceled, paused],
+                    }),
+                  ],
+                }),
+              })}
               loops={[]}
               stalled={[
-                new StalledItemView({
+                StalledItemView.make({
                   repository,
                   loop: LoopName.make("review"),
                   item: issueLink(33, "Board lanes"),
-                  reason: new SuppressedForOperatorView({ run: suppressingRun }),
+                  reason: SuppressedForOperatorView.make({ run: suppressingRun }),
                 }),
-                new StalledItemView({
+                StalledItemView.make({
                   repository,
                   loop: LoopName.make("start-dev"),
                   item: canceledLink,
-                  reason: new ClosedUnchangedView({ run: canceledRun }),
+                  reason: ClosedUnchangedView.make({ run: canceledRun }),
                 }),
-                new StalledItemView({
+                StalledItemView.make({
                   repository,
                   loop: LoopName.make("review-fix"),
                   item: pausedLink,
-                  reason: new LoopPausedView(),
+                  reason: LoopPausedView.make(),
                 }),
               ]}
               disabled={disabled}
@@ -516,25 +514,25 @@ describe("Board drag targets", () => {
   it("offers card moves only when another authored label lane is available", () => {
     const card = itemWithRun("Succeeded", [attempt(1, null)]);
     const render = (origin: "authored" | "proposed", names: ReadonlyArray<string>) => {
-      const project = new ProjectView({
+      const project = ProjectView.make({
         repository,
         status: "clear",
         runs: boardTaskRuns(card),
         labels: [],
         preflightFindings: [],
-        board: new BoardView({
+        board: BoardView.make({
           failures: [],
           lanes: names.map((name, index) => {
             const label = GitHubLabelName.make(name);
             const fields = {
               id: BoardLaneId.make(`${origin}:${name}`),
               name: LaneName.make(name),
-              sources: [new LabelLaneSource({ label })],
+              sources: [LabelLaneSource.make({ label })],
               items: index === 0 ? [card] : [],
             };
             return origin === "authored"
-              ? new WritableBoardLaneView({ ...fields, origin: "authored", labels: [label] })
-              : new ReadOnlyBoardLaneView({ ...fields, origin: "proposed" });
+              ? WritableBoardLaneView.make({ ...fields, origin: "authored", labels: [label] })
+              : ReadOnlyBoardLaneView.make({ ...fields, origin: "proposed" });
           }),
         }),
       });
@@ -568,7 +566,7 @@ describe("Board drag targets", () => {
   });
 
   const lane = (id: string, items: ReadonlyArray<BoardTaskView>) =>
-    new ReadOnlyBoardLaneView({
+    ReadOnlyBoardLaneView.make({
       id: BoardLaneId.make(id),
       name: LaneName.make(id),
       sources: [],
@@ -589,7 +587,7 @@ describe("Board card link", () => {
   it("opens the Task page under its originating Item, with or without a current Run", () => {
     const withRun = itemWithRun("Failed", [attempt(1, "Checks failed")]);
     const prKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(40)]);
-    const pullRequest = new BoardItemLink({
+    const pullRequest = BoardItemLink.make({
       itemKey: prKey,
       kind: "pr",
       number: ItemNumber.make(40),
@@ -598,7 +596,7 @@ describe("Board card link", () => {
       state: "pr-open",
     });
     // A Task whose current Item is its pull request still links to the issue's number.
-    const linked = new BoardTaskView({
+    const linked = BoardTaskView.make({
       ...withRun,
       ...pullRequest,
       title: withRun.title,
@@ -607,12 +605,12 @@ describe("Board card link", () => {
       run: null,
     });
     const quietKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(12)]);
-    const quiet = new BoardTaskView({
+    const quiet = BoardTaskView.make({
       ...withRun,
       itemKey: quietKey,
       number: ItemNumber.make(12),
       items: [
-        new BoardItemLink({
+        BoardItemLink.make({
           itemKey: quietKey,
           kind: "issue",
           number: ItemNumber.make(12),
@@ -625,16 +623,16 @@ describe("Board card link", () => {
       run: null,
       needsYou: false,
     });
-    const project = new ProjectView({
+    const project = ProjectView.make({
       repository,
       status: "clear",
       runs: [],
       labels: [],
       preflightFindings: [],
-      board: new BoardView({
+      board: BoardView.make({
         failures: [],
         lanes: [
-          new ReadOnlyBoardLaneView({
+          ReadOnlyBoardLaneView.make({
             id: BoardLaneId.make("authored:Backlog"),
             name: LaneName.make("Backlog"),
             sources: [],
@@ -675,20 +673,20 @@ describe("Board card labels", () => {
     const ready = GitHubLabelName.make("ready");
     const review = GitHubLabelName.make("review");
     const bug = GitHubLabelName.make("bug");
-    const card = new BoardTaskView({
+    const card = BoardTaskView.make({
       ...itemWithRun("Succeeded", [attempt(1, null)]),
       labels: [ready, bug, review],
     });
-    const lane = new WritableBoardLaneView({
+    const lane = WritableBoardLaneView.make({
       id: BoardLaneId.make("authored:ready"),
       name: LaneName.make("Ready"),
-      sources: [new LabelLaneSource({ label: ready })],
+      sources: [LabelLaneSource.make({ label: ready })],
       origin: "authored",
       labels: [ready],
       items: [card],
     });
     assert.deepStrictEqual(cardLabels(card, lane), [bug, review]);
-    const unmapped = new ReadOnlyBoardLaneView({
+    const unmapped = ReadOnlyBoardLaneView.make({
       id: BoardLaneId.make("fallback:unmapped"),
       name: LaneName.make("Unmapped"),
       sources: [],
@@ -725,9 +723,9 @@ describe("Board card Run line", () => {
     const card = itemWithRun("Failed", [failed]);
     const shown = (state: RunView["state"], canResolveFailure = false) =>
       currentRun(
-        new BoardTaskView({
+        BoardTaskView.make({
           ...card,
-          run: new RunSummaryView({ ...runOnItem("Failed", [failed]), state, canResolveFailure }),
+          run: RunSummaryView.make({ ...runOnItem("Failed", [failed]), state, canResolveFailure }),
         }),
       )?.state ?? null;
     assert.strictEqual(shown("Failed", true), "Failed");
@@ -741,30 +739,30 @@ describe("Board card Run line", () => {
 
   it("counts from the Run's opening, its live Attempt's start, or its last Attempt's end", () => {
     const run = runOnItem("Failed", [failed]);
-    const live = new AttemptView({ ...attempt(2, null), outcome: null, endedAt: null });
+    const live = AttemptView.make({ ...attempt(2, null), outcome: null, endedAt: null });
     assert.strictEqual(
-      runLineSince(new RunSummaryView({ ...run, state: "Waiting" })),
+      runLineSince(RunSummaryView.make({ ...run, state: "Waiting" })),
       run.openedAt,
     );
     assert.strictEqual(
-      runLineSince(new RunSummaryView({ ...run, state: "Running", attempts: [failed, live] })),
+      runLineSince(RunSummaryView.make({ ...run, state: "Running", attempts: [failed, live] })),
       live.startedAt,
     );
     assert.strictEqual(runLineSince(run), failed.endedAt);
     // A retried Run is Running before its next Attempt starts.
-    assert.strictEqual(runLineSince(new RunSummaryView({ ...run, state: "Running" })), null);
+    assert.strictEqual(runLineSince(RunSummaryView.make({ ...run, state: "Running" })), null);
     // Attempts that ended before end times were recorded have no end time.
-    const unrecorded = new AttemptView({ ...failed, endedAt: null });
-    assert.strictEqual(runLineSince(new RunSummaryView({ ...run, attempts: [unrecorded] })), null);
+    const unrecorded = AttemptView.make({ ...failed, endedAt: null });
+    assert.strictEqual(runLineSince(RunSummaryView.make({ ...run, attempts: [unrecorded] })), null);
   });
 });
 
 it("renders the worker and quota refusal below the board run line", () => {
-  const run = new RunSummaryView({
+  const run = RunSummaryView.make({
     ...runOnItem("Failed", []),
     state: "Running",
     closedAt: null,
-    machineWait: new MachineQuotaWait({
+    machineWait: MachineQuotaWait.make({
       worker: WorkerName.make("pool"),
       message: "shared core limit exceeded",
     }),
@@ -774,11 +772,11 @@ it("renders the worker and quota refusal below the board run line", () => {
 });
 
 it("links the waiting board run to its pushed pull request checks", () => {
-  const run = new RunSummaryView({
+  const run = RunSummaryView.make({
     ...runOnItem("Succeeded", [attempt(1, null)]),
     state: "AwaitingCi",
     closedAt: null,
-    ciWait: new CiHandoff({
+    ciWait: CiHandoff.make({
       pullRequest: ItemNumber.make(815),
       head: CommitSha.make("a".repeat(40)),
       fixLoop: LoopName.make("fix"),
@@ -793,7 +791,7 @@ it("links the waiting board run to its pushed pull request checks", () => {
 });
 
 it("shows the continuing fix status and its link on a neutral handed-off board card", () => {
-  const fix = new RunSummaryView({
+  const fix = RunSummaryView.make({
     ...runOnItem("Succeeded", []),
     id: RunId.make("fix-run-828"),
     loop: LoopName.make("fix"),
@@ -801,21 +799,21 @@ it("shows the continuing fix status and its link on a neutral handed-off board c
     closedAt: null,
     canCancel: true,
   });
-  const source = new RunSummaryView({
+  const source = RunSummaryView.make({
     ...runOnItem("Succeeded", []),
     state: "HandedOff",
-    handoff: new HandedOff({
+    handoff: HandedOff.make({
       reason: "CI failed: ci.",
       head: CommitSha.make("a".repeat(40)),
       fixLoop: fix.loop,
       fixRunId: fix.id,
     }),
   });
-  const item = new BoardTaskView({
+  const item = BoardTaskView.make({
     ...itemWithRun("Succeeded", []),
     ...boardRunSummary([source, fix], fix, itemWithRun("Succeeded", []).items),
   });
-  const lane = new ReadOnlyBoardLaneView({
+  const lane = ReadOnlyBoardLaneView.make({
     id: BoardLaneId.make("fallback:unmapped"),
     name: LaneName.make("Unmapped"),
     origin: "fallback",

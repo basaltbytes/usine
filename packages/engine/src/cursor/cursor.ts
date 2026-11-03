@@ -15,7 +15,7 @@ const decodeCursorRows = Schema.decodeUnknownEffect(Schema.Array(CursorRow));
 const persistence =
   (operation: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EnginePersistenceError, R> =>
-    Effect.mapError(effect, (cause) => new EnginePersistenceError({ operation, cause }));
+    Effect.mapError(effect, (cause) => EnginePersistenceError.make({ operation, cause }));
 
 /** The durable cursor store. A stored value that no longer decodes with `schema` reads as `None` and is logged. */
 export class CursorStore extends Context.Service<
@@ -65,7 +65,7 @@ export class CursorStore extends Context.Service<
           return yield* Schema.decodeUnknownEffect(schema)(stored.value.value, {
             onExcessProperty: "error",
           }).pipe(
-            Effect.map(Option.some),
+            Effect.asSome,
             Effect.catch((error) =>
               Effect.logWarning("Stored cursor no longer decodes; treating it as absent", {
                 key,

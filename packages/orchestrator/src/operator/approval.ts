@@ -24,7 +24,7 @@ export const readApprovalItems = Effect.fn("Operator.readApprovalItems")(functio
       return Option.none<BoardItemLink>();
     }
     return yield* projectedItem(stored.value).pipe(
-      Effect.map((item) => Option.some(new BoardItemLink(item))),
+      Effect.map((item) => Option.some(BoardItemLink.make(item))),
       Effect.tap(() =>
         Effect.logDebug("Read approval item outside the board", {
           itemKey,

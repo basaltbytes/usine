@@ -312,7 +312,7 @@ export class WorkerStatus extends Context.Service<
     checking: Effect.succeed(new Set()),
     runPreflight: (worker) =>
       Effect.fail(
-        new WorkerPreflightRejectedError({
+        WorkerPreflightRejectedError.make({
           worker,
           reason: "unavailable",
           message: "Preflight is unavailable until the GitHub App is set up.",

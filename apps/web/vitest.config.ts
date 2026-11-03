@@ -59,7 +59,7 @@ const projectResponses = async (page: Page, overview: () => string) => {
   await page.unroute("**/api/projects/*");
   await page.route("**/api/projects/*", (route) => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1) ?? "");
-    const view = Schema.decodeUnknownSync(Schema.fromJsonString(FactoryOverview))(overview());
+    const view = Schema.decodeSync(Schema.fromJsonString(FactoryOverview))(overview());
     const project = view.projects.find(
       (project) =>
         (project.id ??

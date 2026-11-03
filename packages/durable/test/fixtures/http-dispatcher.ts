@@ -31,7 +31,7 @@ const origin = createServer((request, response) => {
 });
 origin.listen(0, "127.0.0.1");
 await once(origin, "listening");
-const originAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+const originAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
   origin.address(),
 );
 
@@ -51,7 +51,7 @@ proxy.on("connect", (request, socket, head) => {
 });
 proxy.listen(0, "127.0.0.1");
 await once(proxy, "listening");
-const proxyAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+const proxyAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
   proxy.address(),
 );
 const proxyUrl = `http://127.0.0.1:${proxyAddress.port}`;

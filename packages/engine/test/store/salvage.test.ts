@@ -16,14 +16,14 @@ import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission, withRunStore } from "./support.ts";
 
 const runId = RunId.make("refused-push");
-const failure = new GitHubPushFailure({
+const failure = GitHubPushFailure.make({
   repository: lifecycleSubmission.repository,
   ref: "refs/heads/usine/salvage/refused-push/1",
   message:
     "GitHub refused the push (HTTP 403). The token is a single-repository installation token.",
 });
 const commit = CommitSha.make("b".repeat(40));
-const retained = new SalvageRetained({
+const retained = SalvageRetained.make({
   path: "/checkout",
   commit: Option.some(commit),
   message: failure.message,
@@ -43,13 +43,13 @@ it.live.each(["completion", "restart", "closed"] as const)(
         if (phase === "closed")
           yield* store.finishAttempt(
             attempt,
-            Result.fail(new AgentFailure({ message: "Agent stopped" })),
+            Result.fail(AgentFailure.make({ message: "Agent stopped" })),
           );
         yield* store.recordSalvage(attempt.id, retained);
         if (phase === "completion") {
           const decision = yield* store.finishAttempt(
             attempt,
-            Result.fail(new AgentFailure({ message: "Agent stopped" })),
+            Result.fail(AgentFailure.make({ message: "Agent stopped" })),
           );
           assert.strictEqual(decision._tag, "RunFailed");
         } else if (phase === "restart") {
@@ -69,10 +69,10 @@ it.live.each(["completion", "restart", "closed"] as const)(
         assert.deepStrictEqual(refused.attempts[0]?.salvage, Option.some(retained));
         yield* store.recordSalvage(
           attempt.id,
-          new SalvageRetained({
+          SalvageRetained.make({
             ...retained,
             pushFailure: Option.some(
-              new GitHubPushFailure({
+              GitHubPushFailure.make({
                 repository: failure.repository,
                 message: failure.message,
                 ref: "refs/heads/another-salvage",
@@ -83,7 +83,7 @@ it.live.each(["completion", "restart", "closed"] as const)(
         assert.deepStrictEqual((yield* store.snapshot(runId)).attempts[0]?.outcome, outcome);
         yield* store.recordSalvage(
           attempt.id,
-          new SalvagePushed({
+          SalvagePushed.make({
             ref: SalvageRef.make("usine/salvage/refused-push/1"),
             commit,
           }),
@@ -113,8 +113,8 @@ it.live("keeps an operator cancellation when its salvage push is refused", () =>
 );
 
 for (const stop of [
-  new QuestionFailure({ question: "Which branch should be used?" }),
-  new BlockedFailure({ message: "The repository is unavailable" }),
+  QuestionFailure.make({ question: "Which branch should be used?" }),
+  BlockedFailure.make({ message: "The repository is unavailable" }),
 ]) {
   it.live.each(["before", "after"] as const)(
     `preserves ${stop._tag} suppression when salvage is refused %s completion`,
@@ -130,9 +130,9 @@ for (const stop of [
           yield* store.finishAttempt(attempt, Result.fail(stop));
           if (phase === "after") yield* store.recordSalvage(attempt.id, retained);
           const next = (id: string) =>
-            new Submission({
+            Submission.make({
               ...lifecycleSubmission,
-              event: new Event({
+              event: Event.make({
                 ...lifecycleSubmission.event,
                 id: EventId.make(id),
                 dedupKey: DedupKey.make(id),

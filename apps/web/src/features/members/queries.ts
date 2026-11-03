@@ -2,9 +2,9 @@ import { queryOptions } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { authRequest } from "~/lib/auth";
 const Member = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   login: Schema.String,
-  addedAt: Schema.Number,
+  addedAt: Schema.Finite,
   addedBy: Schema.String,
 });
 export const membersQuery = () =>

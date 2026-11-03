@@ -186,10 +186,10 @@ const reportedProviders = Effect.gen(function* () {
 const attach = Effect.gen(function* () {
   const client = yield* adminClient;
   const attached = yield* client.attachments.attach({
-    payload: new AttachRequest({
+    payload: AttachRequest.make({
       worker: WORKER,
       repository: REPOSITORY,
-      credential: new AnonymousCredential(),
+      credential: AnonymousCredential.make(),
       expiresAt: DateTime.add(yield* DateTime.now, { minutes: 60 }),
     }),
   });

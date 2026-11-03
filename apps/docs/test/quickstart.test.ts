@@ -39,6 +39,6 @@ for (const file of ["usine.yaml", "agents/developer.md", "projects/scratch/loops
       yield* fs.writeFileString(`${root}/${file}`, "invalid: true\n");
       const failure = yield* folder.load(root).pipe(Effect.flip);
       expect(failure.problems.map(({ file }) => file)).toContain(file);
-    }).pipe(Effect.scoped, Effect.provide(folderLayer), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide([folderLayer, NodeServices.layer])),
   );
 }

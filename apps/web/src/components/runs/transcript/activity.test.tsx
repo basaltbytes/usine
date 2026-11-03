@@ -27,10 +27,10 @@ const session: TranscriptSession = {
   latestSequence: TranscriptSequence.make(1),
   receivedAt: startedAt,
   attemptId: AttemptId.make("attempt-1"),
-  session: new ParentSession({
+  session: ParentSession.make({
     id: AgentSessionId.make("parent"),
     agent: AgentName.make("developer"),
-    brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
+    brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
   }),
   harnessSession: Option.none(),
   prompt: Option.none(),

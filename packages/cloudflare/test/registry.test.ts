@@ -11,7 +11,7 @@ import {
 import { ATTEMPT, IMAGE, OWNER } from "./support.ts";
 
 const summary = (name: string, owner: SandboxOwner, running: boolean) =>
-  new SandboxSummary({
+  SandboxSummary.make({
     name: SandboxName.make(name),
     owner,
     attempt: ATTEMPT,
@@ -81,7 +81,7 @@ describe("sandbox registry", () => {
         remove: (name) => Effect.sync(() => void recorded.delete(name)),
       }),
       Layer.succeed(SandboxLookup)({
-        get: (name) => Effect.fail(new SandboxLookupFailed({ name, reason: "status 500" })),
+        get: (name) => Effect.fail(SandboxLookupFailed.make({ name, reason: "status 500" })),
       }),
     );
     const web = HttpRouter.toWebHandler(registryRoutes.pipe(HttpRouter.provideRequest(services)), {

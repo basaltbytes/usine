@@ -88,8 +88,7 @@ describe("rootless Podman", () => {
         assert.isAbove(firstContainer, pull);
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider())),
-        Effect.provide(logs.layer),
+        Effect.provide(Layer.mergeAll(runtime(machine, mintingProvider()), logs.layer)),
       );
     },
   );
@@ -123,7 +122,7 @@ describe("rootless Podman", () => {
       const probe = machine.state.calls.find(({ line }) => line.includes("/sys/fs/cgroup/cpu.max"));
       assert.match(probe?.container ?? "", /^usine-preflight-/u);
       assert.strictEqual(machine.state.containers.size, 0);
-    }).pipe(Effect.provide(runtime(machine, mintingProvider())), Effect.provide(logs.layer));
+    }).pipe(Effect.provide(Layer.mergeAll(runtime(machine, mintingProvider()), logs.layer)));
   });
 
   it.effect.each([
@@ -317,8 +316,7 @@ describe("rootless Podman", () => {
         assert.strictEqual(machine.state.containers.size, 0);
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtime(machine, mintingProvider())),
-        Effect.provide(logs.layer),
+        Effect.provide(Layer.mergeAll(runtime(machine, mintingProvider()), logs.layer)),
       );
     },
   );

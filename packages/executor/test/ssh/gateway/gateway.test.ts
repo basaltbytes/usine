@@ -76,24 +76,24 @@ const callerTokenOf = (request: AttemptRequest | undefined): string => {
   return token;
 };
 
-const CODEX_BRAIN = new BrainSpec({
+const CODEX_BRAIN = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
   effort: "low",
 });
 
-const codexRequest = new CheckoutRequest({
+const codexRequest = CheckoutRequest.make({
   ...request,
-  agent: new Agent({ ...TEST_AGENT, brain: CODEX_BRAIN }),
+  agent: Agent.make({ ...TEST_AGENT, brain: CODEX_BRAIN }),
 });
 
 /** A Gateway whose OpenAI credential is a ChatGPT login. */
 const CHATGPT_PROVIDERS = {
   anthropic: Option.none(),
   openai: Option.some(
-    new OpenAiProvider({
+    OpenAiProvider.make({
       upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
-      credential: new ChatGptLogin({
+      credential: ChatGptLogin.make({
         authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
         tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
       }),
@@ -106,11 +106,11 @@ const leftover = (id: string, worker: string) =>
   Effect.gen(function* () {
     const store = yield* Attachments;
     yield* store.attach(
-      new Attachment({
+      Attachment.make({
         id: AttachmentId.make(id),
         worker: WorkerName.make(worker),
         repository: RepositoryName.make("acme/demo"),
-        credential: new InstallationCredential({ token: Redacted.make("ghs_left-by-a-crash") }),
+        credential: InstallationCredential.make({ token: Redacted.make("ghs_left-by-a-crash") }),
         expiresAt: DateTime.add(yield* DateTime.now, { minutes: 50 }),
       }),
     );
@@ -211,8 +211,9 @@ describe("SSH Worker behind a Gateway", () => {
         assert.notInclude(logs.lines.join("\n"), callerToken);
       }).pipe(
         Effect.scoped,
-        Effect.provide(gatewayRuntime(machine, credentials, gateway, { parent })),
-        Effect.provide(logs.layer),
+        Effect.provide(
+          Layer.mergeAll(gatewayRuntime(machine, credentials, gateway, { parent }), logs.layer),
+        ),
       );
     },
   );
@@ -301,8 +302,7 @@ describe("SSH Worker behind a Gateway", () => {
           assert.include(logged, line);
       }).pipe(
         Effect.scoped,
-        Effect.provide(gatewayRuntime(machine, credentials, gateway)),
-        Effect.provide(logs.layer),
+        Effect.provide(Layer.mergeAll(gatewayRuntime(machine, credentials, gateway), logs.layer)),
       );
     },
   );
@@ -378,8 +378,7 @@ describe("SSH Worker behind a Gateway", () => {
         yield* prepared.launch(sink);
       }).pipe(
         Effect.scoped,
-        Effect.provide(gatewayRuntime(machine, credentials, gateway)),
-        Effect.provide(logs.layer),
+        Effect.provide(Layer.mergeAll(gatewayRuntime(machine, credentials, gateway), logs.layer)),
       );
     },
   );
@@ -408,8 +407,7 @@ describe("SSH Worker behind a Gateway", () => {
         yield* eventually(() => tries() >= before + 5, "1 minute");
       }).pipe(
         Effect.scoped,
-        Effect.provide(gatewayRuntime(machine, credentials, gateway)),
-        Effect.provide(logs.layer),
+        Effect.provide(Layer.mergeAll(gatewayRuntime(machine, credentials, gateway), logs.layer)),
       );
     },
   );
@@ -445,8 +443,7 @@ describe("SSH Worker behind a Gateway", () => {
         assert.include(third.message, unanswered("1970-01-01T00:02:00.000Z"));
       }).pipe(
         Effect.scoped,
-        Effect.provide(gatewayRuntime(machine, credentials, gateway)),
-        Effect.provide(logs.layer),
+        Effect.provide(Layer.mergeAll(gatewayRuntime(machine, credentials, gateway), logs.layer)),
       );
     },
   );
@@ -566,7 +563,7 @@ describe("SSH Worker behind a Gateway", () => {
       return Effect.gen(function* () {
         const executor = yield* Executor;
         const prepared = yield* executor.prepare(
-          new CheckoutRequest({
+          CheckoutRequest.make({
             ...request,
             loop: LoopName.make("review-pr"),
             permissions: "read",
@@ -672,7 +669,7 @@ describe("SSH Worker behind a Gateway", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const prepared = yield* executor.prepare(
-            new CheckoutRequest({ ...request, reattach: true }),
+            CheckoutRequest.make({ ...request, reattach: true }),
           );
           const attached = yield* attachmentsInForce;
           assert.strictEqual(attached.length, 1, "the earlier attachment is detached");
@@ -710,8 +707,7 @@ describe("SSH Worker behind a Gateway", () => {
       assert.strictEqual((yield* attachmentsInForce).length, 1);
     }).pipe(
       Effect.scoped,
-      Effect.provide(gatewayRuntime(machine, credentials, gateway)),
-      Effect.provide(logs.layer),
+      Effect.provide(Layer.mergeAll(gatewayRuntime(machine, credentials, gateway), logs.layer)),
     );
   });
 
@@ -862,9 +858,9 @@ describe("SSH Worker behind a Gateway", () => {
           ...(yield* inForce.current),
           providers: {
             anthropic: Option.some(
-              new AnthropicProvider({
+              AnthropicProvider.make({
                 upstream: UpstreamBase.make("https://api.anthropic.com"),
-                credential: new AnthropicSubscriptionToken({
+                credential: AnthropicSubscriptionToken.make({
                   token: Redacted.make("sk-ant-oat01-for-executor-tests"),
                 }),
               }),
@@ -925,8 +921,12 @@ describe("SSH Worker behind a Gateway", () => {
         assert.strictEqual(warnings().length, 1);
       }).pipe(
         Effect.scoped,
-        Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })),
-        Effect.provide(logs.layer),
+        Effect.provide(
+          Layer.mergeAll(
+            gatewayRuntime(machine, mintingProvider(), gateway, { parent }),
+            logs.layer,
+          ),
+        ),
       );
     },
   );
@@ -1016,7 +1016,7 @@ describe("SSH Worker behind a Gateway", () => {
     () => {
       const machine = fakeMachine();
       const gateway = fakeGateway(machine);
-      const codex = new BrainSpec({
+      const codex = BrainSpec.make({
         harness: "codex",
         model: ModelId.make("gpt-5.6-sol"),
         effort: "low",
@@ -1027,8 +1027,8 @@ describe("SSH Worker behind a Gateway", () => {
         Effect.sync(() => {
           login.probes += 1;
           return login.present
-            ? new HarnessReady({ harness: brain.harness })
-            : new HarnessUnavailableError({
+            ? HarnessReady.make({ harness: brain.harness })
+            : HarnessUnavailableError.make({
                 harness: brain.harness,
                 capability: "login",
                 message: "Codex children need a ChatGPT login. Run codex login on the worker.",
@@ -1073,7 +1073,7 @@ describe("SSH Worker behind a Gateway", () => {
       // A login on the machine would fail the check; the Gateway's credential needs none.
       const harnessReadiness = () => (brain: BrainSpec) =>
         Effect.succeed(
-          new HarnessUnavailableError({
+          HarnessUnavailableError.make({
             harness: brain.harness,
             capability: "login",
             message: "Codex children need a ChatGPT login. Run codex login on the worker.",

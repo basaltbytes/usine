@@ -58,14 +58,13 @@ const secretFrom = (
   message: string,
 ) =>
   Config.Redacted(variable).pipe(
-    Effect.mapError(
-      (cause) =>
-        new WorkerCapabilityError({
-          worker: worker.name,
-          capability,
-          message,
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      WorkerCapabilityError.make({
+        worker: worker.name,
+        capability,
+        message,
+        cause,
+      }),
     ),
   );
 
@@ -175,14 +174,13 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: MissingSecret) =>
             llmProviders: settings.llmProviders,
           };
         }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new WorkerCapabilityError({
-                worker: worker.name,
-                capability: "gateway",
-                message: missing("gateway admin token", settings.adminTokenEnv, "admin_token_env"),
-                cause,
-              }),
+          Effect.mapError((cause) =>
+            WorkerCapabilityError.make({
+              worker: worker.name,
+              capability: "gateway",
+              message: missing("gateway admin token", settings.adminTokenEnv, "admin_token_env"),
+              cause,
+            }),
           ),
         ),
       ),
@@ -311,7 +309,7 @@ export const layer = (
                   `The ${secret} for SSH worker "${worker.name}" is missing. Set ${variable} in the orchestrator's environment.`,
               )
             : Effect.fail(
-                new WorkerCapabilityError({
+                WorkerCapabilityError.make({
                   worker: worker.name,
                   capability: "machine",
                   message: "The recorded worker connection is not SSH",

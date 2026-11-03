@@ -31,32 +31,30 @@ export const configurationLoopControlLayer = Layer.effect(
         ) {
           const current = yield* store.read;
           if (Option.isNone(current.instance))
-            return yield* new ConfigurationStoreError({
+            return yield* ConfigurationStoreError.make({
               operation: "migrate runtime project identities",
               cause: "Configuration is empty after commit",
             });
           const instance = current.instance.value;
           yield* migrateProjectLoops(
             instance.config.projects.flatMap((project) =>
-              project.repositories.map(
-                (repository) =>
-                  new RepositoryProject({
-                    repository,
-                    project: project.id,
-                    loops: instance.loops
-                      .filter((loop) => loop.name.startsWith(`${project.id}/`))
-                      .map((loop) => loop.name),
-                  }),
+              project.repositories.map((repository) =>
+                RepositoryProject.make({
+                  repository,
+                  project: project.id,
+                  loops: instance.loops
+                    .filter((loop) => loop.name.startsWith(`${project.id}/`))
+                    .map((loop) => loop.name),
+                }),
               ),
             ),
           ).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
-            Effect.mapError(
-              (cause) =>
-                new ConfigurationStoreError({
-                  operation: "migrate runtime project identities",
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              ConfigurationStoreError.make({
+                operation: "migrate runtime project identities",
+                cause,
+              }),
             ),
           );
           yield* Effect.logInfo("Project migration preserves loop pause states", {
@@ -80,8 +78,8 @@ export const configurationLoopControlLayer = Layer.effect(
           yield* controls
             .pause(LoopName.make(change.key.identifier))
             .pipe(
-              Effect.mapError(
-                (cause) => new ConfigurationStoreError({ operation: "pause created loop", cause }),
+              Effect.mapError((cause) =>
+                ConfigurationStoreError.make({ operation: "pause created loop", cause }),
               ),
             );
           yield* Effect.logInfo("Created loop starts paused", {

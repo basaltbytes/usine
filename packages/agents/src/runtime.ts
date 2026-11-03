@@ -152,8 +152,8 @@ export const harnessFailure = (
   message: string,
 ): AgentResultError | AgentCapacityError =>
   isCapacityMessage(message)
-    ? new AgentCapacityError({ sessionId, message })
-    : new AgentResultError({ sessionId, message });
+    ? AgentCapacityError.make({ sessionId, message })
+    : AgentResultError.make({ sessionId, message });
 
 /** An error for a session that finished with the blocker marker; `message` is the blocker text. */
 export class AgentBlockedError extends Schema.TaggedError<AgentBlockedError>(
@@ -242,7 +242,7 @@ export const reportedOutcome = (
   const trimmed = answer.trim();
   if (trimmed.startsWith(CAPACITY_MARKER)) {
     return Option.some(
-      new AgentCapacityError({
+      AgentCapacityError.make({
         sessionId,
         message:
           trimmed.slice(CAPACITY_MARKER.length).trim() || "The model provider is at capacity.",
@@ -251,7 +251,7 @@ export const reportedOutcome = (
   }
   if (trimmed.startsWith(QUESTION_MARKER)) {
     return Option.some(
-      new AgentQuestionError({
+      AgentQuestionError.make({
         sessionId,
         message:
           trimmed.slice(QUESTION_MARKER.length).trim() ||
@@ -261,7 +261,7 @@ export const reportedOutcome = (
   }
   if (trimmed.startsWith(BLOCKED_MARKER)) {
     return Option.some(
-      new AgentBlockedError({
+      AgentBlockedError.make({
         sessionId,
         message:
           trimmed.slice(BLOCKED_MARKER.length).trim() ||
@@ -271,7 +271,7 @@ export const reportedOutcome = (
   }
   if (trimmed.startsWith(FAILED_MARKER)) {
     return Option.some(
-      new AgentResultError({
+      AgentResultError.make({
         sessionId,
         message:
           trimmed.slice(FAILED_MARKER.length).trim() || "Agent reported a failure without details.",
@@ -300,16 +300,16 @@ export const reportText = (report: AgentReport): string => {
 export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
   Match.valueTags(error, {
     SessionOperationError: (operation) =>
-      new InfraFailure({ message: operation.message, cause: operation.cause }),
-    UnknownModelError: ({ message }) => new AgentFailure({ message }),
-    PoolUnavailableError: ({ message }) => new AgentFailure({ message }),
-    UnsupportedEffortError: ({ message }) => new AgentFailure({ message }),
-    AgentResultError: ({ message }) => new AgentFailure({ message }),
-    AgentCapacityError: ({ message }) => new ProviderCapacityFailure({ message }),
-    AgentBlockedError: ({ message }) => new BlockedFailure({ message }),
-    AgentQuestionError: ({ message }) => new QuestionFailure({ question: message }),
+      InfraFailure.make({ message: operation.message, cause: operation.cause }),
+    UnknownModelError: ({ message }) => AgentFailure.make({ message }),
+    PoolUnavailableError: ({ message }) => AgentFailure.make({ message }),
+    UnsupportedEffortError: ({ message }) => AgentFailure.make({ message }),
+    AgentResultError: ({ message }) => AgentFailure.make({ message }),
+    AgentCapacityError: ({ message }) => ProviderCapacityFailure.make({ message }),
+    AgentBlockedError: ({ message }) => BlockedFailure.make({ message }),
+    AgentQuestionError: ({ message }) => QuestionFailure.make({ question: message }),
     ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>
-      new ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),
+      ChildSessionBudgetFailure.make({ attemptedChildren, maxChildren }),
   });
 
 /** A running parent or child session. */

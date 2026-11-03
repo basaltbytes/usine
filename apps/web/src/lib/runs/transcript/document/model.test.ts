@@ -48,13 +48,13 @@ import { errorTally } from "~/lib/runs/transcript/navigation/model";
 import { checkpointLabel, checkpointText } from "~/lib/runs/transcript/document/text";
 import { projectTranscript } from "~/lib/runs/transcript/model";
 
-const brain = new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "medium" });
-const parent = new ParentSession({
+const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "medium" });
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
   brain,
 });
-const child = new ChildSession({
+const child = ChildSession.make({
   id: AgentSessionId.make("child"),
   parentId: parent.id,
   agent: AgentName.make("developer"),
@@ -63,7 +63,7 @@ const child = new ChildSession({
 const attemptId = AttemptId.make("attempt-1");
 const at = (sequence: number) => new Date(Date.UTC(2026, 9, 15, 19, 31, sequence)).toISOString();
 const record = (sequence: number, payload: TranscriptEventView["payload"]) =>
-  new TranscriptEventView({
+  TranscriptEventView.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId,
     receivedAt: at(sequence),
@@ -71,12 +71,12 @@ const record = (sequence: number, payload: TranscriptEventView["payload"]) =>
     payload,
   });
 const said = (sequence: number, text: string, session: AgentSession = child) =>
-  record(sequence, new AttemptChannel.SessionEvent({ event: new TextOutput({ session, text }) }));
+  record(sequence, AttemptChannel.SessionEvent.make({ event: TextOutput.make({ session, text }) }));
 const delegation = [
   record(
     2,
-    new AttemptChannel.SessionEvent({
-      event: new ToolStarted({
+    AttemptChannel.SessionEvent.make({
+      event: ToolStarted.make({
         session: parent,
         callId: "delegate",
         tool: "subagent",
@@ -86,11 +86,11 @@ const delegation = [
   ),
 ];
 const attempt = (outcome: AttemptView["outcome"]) =>
-  new AttemptView({
+  AttemptView.make({
     id: attemptId,
     number: AttemptNumber.make(1),
     worker: WorkerName.make("usine-worker-1"),
-    workerAccess: new SshWorkerAccess({
+    workerAccess: SshWorkerAccess.make({
       destination: SshDestination.make("usine-worker-1"),
       port: null,
     }),
@@ -117,20 +117,20 @@ const report =
 
 describe("repeated final messages", () => {
   it("shows a failed Attempt's final report once, as the failure note where the child said it", () => {
-    const failure = new AgentFailureView({ message: report });
+    const failure = AgentFailureView.make({ message: report });
     const events = [
-      record(1, new AttemptChannel.Started({ parentModel: ModelId.make("gpt-5") })),
+      record(1, AttemptChannel.Started.make({ parentModel: ModelId.make("gpt-5") })),
       ...delegation,
       said(3, "I'll use the tackle-issue skill."),
       said(9, `[usine:blocked]\n\n${report}`),
       record(
         10,
-        new AttemptChannel.SessionEvent({ event: new SessionFinished({ session: child }) }),
+        AttemptChannel.SessionEvent.make({ event: SessionFinished.make({ session: child }) }),
       ),
       said(11, `[usine:blocked]\n${report}`, parent),
-      record(12, new FailedTranscriptView({ failure })),
+      record(12, FailedTranscriptView.make({ failure })),
     ];
-    const chapter = document(events, [attempt(new FailedAttemptView({ failure }))]).chapters[0];
+    const chapter = document(events, [attempt(FailedAttemptView.make({ failure }))]).chapters[0];
     assert.isDefined(chapter);
     assert.deepEqual(shown(chapter.rows), [
       "Delegation",
@@ -169,7 +169,7 @@ describe("repeated final messages", () => {
       said(4, summary, parent),
       record(
         5,
-        new AttemptChannel.Final({ result: new StepResult({ message: summary, facts: [] }) }),
+        AttemptChannel.Final.make({ result: StepResult.make({ message: summary, facts: [] }) }),
       ),
     ];
     const chapter = document(events, [attempt(null)]).chapters[0];
@@ -186,18 +186,18 @@ describe("repeated final messages", () => {
   });
 
   it("keeps the last message when the failure is not the Agent's own report", () => {
-    const failure = new InfraFailureView({ message: "Worker disconnected" });
+    const failure = InfraFailureView.make({ message: "Worker disconnected" });
     const chapter = document(
-      [said(3, "Worker disconnected"), record(4, new FailedTranscriptView({ failure }))],
-      [attempt(new FailedAttemptView({ failure }))],
+      [said(3, "Worker disconnected"), record(4, FailedTranscriptView.make({ failure }))],
+      [attempt(FailedAttemptView.make({ failure }))],
     ).chapters[0];
     assert.isDefined(chapter);
     assert.deepEqual(shown(chapter.rows), ["developer: Worker disconnected", "Ending"]);
   });
 
   it("ends an Attempt whose terminal envelope is not loaded with its recorded outcome", () => {
-    const failure = new AgentFailureView({ message: "Blocked" });
-    const chapter = document([], [attempt(new FailedAttemptView({ failure }))]).chapters[0];
+    const failure = AgentFailureView.make({ message: "Blocked" });
+    const chapter = document([], [attempt(FailedAttemptView.make({ failure }))]).chapters[0];
     assert.isDefined(chapter);
     const ending = chapter.rows[0];
     assert(ending?._tag === "Ending");
@@ -233,15 +233,15 @@ describe("checkpoints", () => {
   });
 
   it("lists each message under its session and marks blockers and failures", () => {
-    const failure = new AgentFailureView({ message: "Baseline gate fails. No edits made." });
+    const failure = AgentFailureView.make({ message: "Baseline gate fails. No edits made." });
     const events = [
       said(3, "I'll start with the baseline. Then the change."),
       said(4, "Waiting on the developer.", parent),
       said(5, "[usine:blocked]\nThe gate is blocked by memory."),
       record(
         6,
-        new AttemptChannel.SessionEvent({
-          event: new ToolFinished({
+        AttemptChannel.SessionEvent.make({
+          event: ToolFinished.make({
             session: child,
             callId: "x",
             tool: "bash",
@@ -250,9 +250,9 @@ describe("checkpoints", () => {
           }),
         }),
       ),
-      record(7, new FailedTranscriptView({ failure })),
+      record(7, FailedTranscriptView.make({ failure })),
     ];
-    const chapter = document(events, [attempt(new FailedAttemptView({ failure }))]).chapters[0];
+    const chapter = document(events, [attempt(FailedAttemptView.make({ failure }))]).chapters[0];
     assert.isDefined(chapter);
     const childKey = chapter.sessions.find(({ session }) => session.id === child.id)?.key;
     const parentKey = chapter.sessions.find(({ session }) => session.id === parent.id)?.key;
@@ -269,13 +269,13 @@ describe("checkpoints", () => {
   });
 
   it("folds each run of one session's turns into one outline entry and keeps marked rows on their own", () => {
-    const failure = new AgentFailureView({ message: "The gate fails. No edits made." });
-    const steer = new TranscriptEventView({
+    const failure = AgentFailureView.make({ message: "The gate fails. No edits made." });
+    const steer = TranscriptEventView.make({
       sequence: TranscriptSequence.make(7),
       attemptId,
       receivedAt: at(7),
       direction: "inbound",
-      payload: new AttemptChannel.Steer({ message: "Use the deploy key. It is in the vault." }),
+      payload: AttemptChannel.Steer.make({ message: "Use the deploy key. It is in the vault." }),
     });
     const events = [
       said(3, "Reading the issue.", parent),
@@ -285,7 +285,7 @@ describe("checkpoints", () => {
       steer,
       record(
         8,
-        new AttemptChannel.WorkerUnresponsive({
+        AttemptChannel.WorkerUnresponsive.make({
           worker: WorkerName.make("usine-worker-1"),
           lastAnsweredAt: DateTime.makeUnsafe(at(7)),
           reason: "No answer within 45 seconds",
@@ -293,9 +293,9 @@ describe("checkpoints", () => {
       ),
       said(9, "Retrying with more memory."),
       said(10, "The gate passes now."),
-      record(11, new FailedTranscriptView({ failure })),
+      record(11, FailedTranscriptView.make({ failure })),
     ];
-    const chapter = document(events, [attempt(new FailedAttemptView({ failure }))]).chapters[0];
+    const chapter = document(events, [attempt(FailedAttemptView.make({ failure }))]).chapters[0];
     assert.isDefined(chapter);
     assert.deepEqual(
       outlineEntries(chapter).map((entry) =>
@@ -348,8 +348,8 @@ describe("error count", () => {
   const call = (sequence: number, callId: string, isError: boolean) => [
     record(
       sequence,
-      new AttemptChannel.SessionEvent({
-        event: new ToolStarted({
+      AttemptChannel.SessionEvent.make({
+        event: ToolStarted.make({
           session: child,
           callId,
           tool: "bash",
@@ -359,8 +359,8 @@ describe("error count", () => {
     ),
     record(
       sequence + 1,
-      new AttemptChannel.SessionEvent({
-        event: new ToolFinished({ session: child, callId, tool: "bash", output: "", isError }),
+      AttemptChannel.SessionEvent.make({
+        event: ToolFinished.make({ session: child, callId, tool: "bash", output: "", isError }),
       }),
     ),
   ];
@@ -376,23 +376,23 @@ describe("error count", () => {
   };
 
   it("counts failed Attempts and blockers as errors and tool failures the Agent went on from as recovered", () => {
-    const failure = new InfraFailureView({ message: "Worker disconnected" });
+    const failure = InfraFailureView.make({ message: "Worker disconnected" });
     const second = AttemptId.make("attempt-2");
     const retried = (event: TranscriptEventView) =>
-      new TranscriptEventView({ ...event, attemptId: second });
+      TranscriptEventView.make({ ...event, attemptId: second });
     const events = [
       ...call(3, "lint", true),
       said(5, "Lint failed; fixing the import."),
       ...call(6, "lint-again", false),
       ...call(8, "push", true),
-      record(10, new FailedTranscriptView({ failure })),
+      record(10, FailedTranscriptView.make({ failure })),
       retried(said(11, "[usine:blocked]\nThe registry rejects the token.")),
       ...call(12, "build", true).map(retried),
       retried(said(14, "Built after a clean install.")),
     ];
     const counted = tally(events, [
-      attempt(new FailedAttemptView({ failure })),
-      new AttemptView({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
+      attempt(FailedAttemptView.make({ failure })),
+      AttemptView.make({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
     ]);
     // The push is the first Attempt's last call, so the Attempt failure (event:10) counts it.
     const toolKey = (attempt: AttemptId, callId: string) =>
@@ -406,19 +406,19 @@ describe("error count", () => {
   it("counts a refused operator message and a connectivity warning only while it is open", () => {
     const refused = record(
       4,
-      new AttemptChannel.InterventionRejected({
+      AttemptChannel.InterventionRejected.make({
         inputSequence: AttemptChannel.Sequence.make(1),
-        intervention: new AttemptChannel.Intervention({
+        intervention: AttemptChannel.Intervention.make({
           operator: "Philippe",
-          target: new AttemptChannel.ChildTarget({ sessionId: child.id }),
-          action: new AttemptChannel.OperatorMessage({ message: "Stop and push." }),
+          target: AttemptChannel.ChildTarget.make({ sessionId: child.id }),
+          action: AttemptChannel.OperatorMessage.make({ message: "Stop and push." }),
         }),
         message: "The child already finished.",
       }),
     );
     const silent = record(
       5,
-      new AttemptChannel.WorkerUnresponsive({
+      AttemptChannel.WorkerUnresponsive.make({
         worker: WorkerName.make("usine-worker-1"),
         lastAnsweredAt: DateTime.makeUnsafe(at(4)),
         reason: "No answer within 45 seconds",
@@ -432,7 +432,7 @@ describe("error count", () => {
         silent,
         record(
           6,
-          new AttemptChannel.WorkerResponsive({
+          AttemptChannel.WorkerResponsive.make({
             worker: WorkerName.make("usine-worker-1"),
             lastAnsweredAt: DateTime.makeUnsafe(at(4)),
           }),
@@ -445,25 +445,25 @@ describe("error count", () => {
 });
 
 describe("reading place", () => {
-  const failure = new AgentFailureView({ message: "Blocked" });
+  const failure = AgentFailureView.make({ message: "Blocked" });
   const second = AttemptId.make("attempt-2");
   const events = [
     said(3, "First message."),
     said(4, "Second message."),
-    record(5, new FailedTranscriptView({ failure })),
-    new TranscriptEventView({
+    record(5, FailedTranscriptView.make({ failure })),
+    TranscriptEventView.make({
       sequence: TranscriptSequence.make(6),
       attemptId: second,
       receivedAt: at(6),
       direction: "outbound",
-      payload: new AttemptChannel.SessionEvent({
-        event: new TextOutput({ session: child, text: "Retry message." }),
+      payload: AttemptChannel.SessionEvent.make({
+        event: TextOutput.make({ session: child, text: "Retry message." }),
       }),
     }),
   ];
   const attempts = [
-    attempt(new FailedAttemptView({ failure })),
-    new AttemptView({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
+    attempt(FailedAttemptView.make({ failure })),
+    AttemptView.make({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
   ];
   const order = readingOrder(document(events, attempts));
 
@@ -488,16 +488,16 @@ describe("GitHub changes", () => {
   const command = (sequence: number, callId: string, finished: boolean) =>
     record(
       sequence,
-      new AttemptChannel.SessionEvent({
+      AttemptChannel.SessionEvent.make({
         event: finished
-          ? new ToolFinished({
+          ? ToolFinished.make({
               session: child,
               callId,
               tool: "command",
               output: "",
               isError: false,
             })
-          : new ToolStarted({
+          : ToolStarted.make({
               session: child,
               callId,
               tool: "command",
@@ -506,13 +506,13 @@ describe("GitHub changes", () => {
       }),
     );
   const label = (name: string, color: string) =>
-    new LabelView({ name: GitHubLabelName.make(name), color, description: null });
+    LabelView.make({ name: GitHubLabelName.make(name), color, description: null });
   const blocker = "https://github.com/basaltbytes/usine/issues/247#issuecomment-6201011438";
-  const failure = new AgentFailureView({
+  const failure = AgentFailureView.make({
     message: `Baseline lint fails.\n\nRecorded the [signed blocker on #247](${blocker}) and removed \`agent-in-progress\`.`,
   });
   const events = [
-    record(1, new AttemptChannel.Started({ parentModel: ModelId.make("gpt-5") })),
+    record(1, AttemptChannel.Started.make({ parentModel: ModelId.make("gpt-5") })),
     ...delegation,
     said(3, "I'll use the tackle-issue skill."),
     command(4, "claim", false),
@@ -521,14 +521,14 @@ describe("GitHub changes", () => {
     command(8, "blocker", false),
     command(10, "blocker", true),
     said(11, `[usine:blocked]\n${failure.message}`),
-    record(12, new FailedTranscriptView({ failure })),
+    record(12, FailedTranscriptView.make({ failure })),
   ];
   const changes = [
-    new LabelRemovedView({ at: at(5), label: label("ready-for-agent", "1f883d") }),
-    new LabelAddedView({ at: at(5), label: label("agent-in-progress", "fbca04") }),
-    new CommentedView({ at: at(9), url: blocker }),
-    new LabelRemovedView({ at: at(9), label: label("agent-in-progress", "fbca04") }),
-    new LabelAddedView({ at: at(9), label: label("needs-operator", "d93f0b") }),
+    LabelRemovedView.make({ at: at(5), label: label("ready-for-agent", "1f883d") }),
+    LabelAddedView.make({ at: at(5), label: label("agent-in-progress", "fbca04") }),
+    CommentedView.make({ at: at(9), url: blocker }),
+    LabelRemovedView.make({ at: at(9), label: label("agent-in-progress", "fbca04") }),
+    LabelAddedView.make({ at: at(9), label: label("needs-operator", "d93f0b") }),
   ];
   const described = (rows: ReadonlyArray<ChapterRow>) =>
     rows.map((row) => {
@@ -538,7 +538,7 @@ describe("GitHub changes", () => {
       const names = (labels: ReadonlyArray<LabelView>) => labels.map(({ name }) => name).join(" ");
       return `GitHub removed [${names(row.change.removed)}] added [${names(row.change.added)}]`;
     });
-  const failed = [attempt(new FailedAttemptView({ failure }))];
+  const failed = [attempt(FailedAttemptView.make({ failure }))];
 
   it("follows the burst that made each change, swaps labels on one line, and leaves the outcome's own words to it", () => {
     const chapter = withGitHubChanges(
@@ -579,8 +579,8 @@ describe("connectivity", () => {
   const retry = (sequence: number, retries: number, message: string) =>
     record(
       sequence,
-      new AttemptChannel.SessionEvent({
-        event: new ProviderRetrying({
+      AttemptChannel.SessionEvent.make({
+        event: ProviderRetrying.make({
           session: child,
           message,
           retries: ProviderRetries.make(retries),
@@ -592,13 +592,13 @@ describe("connectivity", () => {
   const unreachable =
     "Reconnecting... waiting for network (Connection failed: error sending request)";
   const events = [
-    record(1, new AttemptChannel.Started({ parentModel: ModelId.make("gpt-5") })),
+    record(1, AttemptChannel.Started.make({ parentModel: ModelId.make("gpt-5") })),
     ...delegation,
     said(3, "Running the gate."),
     retry(5, 1, "Reconnecting... 1/5 (request timed out)"),
     record(
       6,
-      new AttemptChannel.WorkerUnresponsive({
+      AttemptChannel.WorkerUnresponsive.make({
         worker,
         lastAnsweredAt,
         reason: "No answer within 45 seconds",
@@ -616,7 +616,7 @@ describe("connectivity", () => {
         said(3, "Running the gate."),
         record(
           60,
-          new AttemptChannel.WorkerResponsive({
+          AttemptChannel.WorkerResponsive.make({
             worker,
             lastAnsweredAt: DateTime.makeUnsafe(at(60)),
             recovered: false,
@@ -640,7 +640,7 @@ describe("connectivity", () => {
         ...events.filter(({ payload }) => payload._tag === "WorkerUnresponsive"),
         record(
           60,
-          new AttemptChannel.WorkerResponsive({
+          AttemptChannel.WorkerResponsive.make({
             worker,
             lastAnsweredAt: DateTime.makeUnsafe(at(60)),
             recovered: false,
@@ -685,11 +685,11 @@ describe("connectivity", () => {
       ...events,
       record(
         9,
-        new AttemptChannel.SessionEvent({
-          event: new ProviderRecovered({ session: child, retries: ProviderRetries.make(3) }),
+        AttemptChannel.SessionEvent.make({
+          event: ProviderRecovered.make({ session: child, retries: ProviderRetries.make(3) }),
         }),
       ),
-      record(10, new AttemptChannel.WorkerResponsive({ worker, lastAnsweredAt })),
+      record(10, AttemptChannel.WorkerResponsive.make({ worker, lastAnsweredAt })),
     ];
     const chapter = document(answered, [attempt(null)]).chapters[0];
     assert(chapter !== undefined);
@@ -699,10 +699,10 @@ describe("connectivity", () => {
       "plain: usine-worker-1 answering again. Silent for 6s",
     ]);
     assert(chapterCheckpoints(chapter).some(({ key }) => key === "event:10"));
-    const failure = new InfraFailureView({ message: "Worker disconnected" });
+    const failure = InfraFailureView.make({ message: "Worker disconnected" });
     const ended = document(
-      [...events, record(9, new FailedTranscriptView({ failure }))],
-      [attempt(new FailedAttemptView({ failure }))],
+      [...events, record(9, FailedTranscriptView.make({ failure }))],
+      [attempt(FailedAttemptView.make({ failure }))],
     ).chapters[0];
     assert.deepStrictEqual(ended?.connectivity, []);
   });

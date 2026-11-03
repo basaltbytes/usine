@@ -31,7 +31,7 @@ export const splitMarkdown = (
       ? "\n"
       : undefined;
   if (newline === undefined) {
-    return new ConfigFileError({
+    return ConfigFileError.make({
       file,
       stage: "frontmatter",
       expression: Option.none(),
@@ -43,7 +43,7 @@ export const splitMarkdown = (
   const closingDelimiter = `${newline}---`;
   const yamlEnd = closingDelimiterAt(source, newline, yamlStart);
   if (yamlEnd < 0) {
-    return new ConfigFileError({
+    return ConfigFileError.make({
       file,
       stage: "frontmatter",
       expression: Option.none(),

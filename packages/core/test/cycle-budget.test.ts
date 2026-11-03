@@ -17,13 +17,12 @@ describe("cycle budget boundaries", () => {
     assert.strictEqual(legacy.completedCycles, 3);
     assert.strictEqual(legacy.blockedLoop, "review");
     assert.deepStrictEqual(legacy.blocks, []);
-    for (const invalid of [0, -1, 1.5])
-      assert.throws(() => Schema.decodeUnknownSync(CycleLimit)(invalid));
+    for (const invalid of [0, -1, 1.5]) assert.throws(() => Schema.decodeSync(CycleLimit)(invalid));
     for (const invalid of [
       { ...count, completed: 4 },
       { ...count, extra: true },
     ]) {
-      assert.throws(() => Schema.decodeUnknownSync(LoopCycleCount)(invalid));
+      assert.throws(() => Schema.decodeSync(LoopCycleCount)(invalid));
     }
     for (const invalid of [
       { ...ask, counts: [] },

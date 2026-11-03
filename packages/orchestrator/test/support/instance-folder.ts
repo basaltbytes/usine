@@ -43,12 +43,12 @@ export const reloadableInstanceLayer = (root: InstanceDirectory) =>
         Layer.provide(
           Layer.succeed(ConfigurationStore)({
             read: folder.load(root).pipe(
-              Effect.map(
-                (instance) => new Configuration({ number, instance: Option.some(instance) }),
-              ),
-              Effect.mapError(
-                (cause) => new ConfigurationStoreError({ operation: "test read", cause }),
-              ),
+              Effect.mapBoth({
+                onSuccess: (instance) =>
+                  Configuration.make({ number, instance: Option.some(instance) }),
+                onFailure: (cause) =>
+                  ConfigurationStoreError.make({ operation: "test read", cause }),
+              }),
             ),
             list: unused,
             revision: unused,

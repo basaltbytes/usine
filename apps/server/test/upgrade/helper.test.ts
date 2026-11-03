@@ -359,7 +359,7 @@ ${helper}`,
             }
           : undefined,
       running: readFileSync(join(folder, "running"), "utf8").trim(),
-      record: Schema.decodeUnknownSync(Schema.fromJsonString(UpgradeRecord))(
+      record: Schema.decodeSync(Schema.fromJsonString(UpgradeRecord))(
         readFileSync(join(folder, "result.json"), "utf8"),
       ),
       commands: readFileSync(join(folder, "commands"), "utf8"),
@@ -743,7 +743,7 @@ it.each(["legacy", "current"])("supports %s upgrade health checks", async (gener
               ),
           ),
         );
-        const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+        const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
           server.address(),
         );
         const script = join(folder, "health.sh");

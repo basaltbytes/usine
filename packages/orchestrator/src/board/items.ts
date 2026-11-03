@@ -36,7 +36,7 @@ export const payloadLabels = (kind: ProjectedItem["kind"], payload: Schema.Json)
   );
 
 const projectionError = (item: ItemProjection, message: string) =>
-  new BoardProjectionError({
+  BoardProjectionError.make({
     repository: item.repository,
     itemKey: item.itemKey,
     message,

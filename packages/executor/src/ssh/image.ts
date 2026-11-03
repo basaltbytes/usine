@@ -17,7 +17,7 @@ export const prepareAttemptImage = Effect.fn("SshExecutor.prepareAttemptImage")(
   const fields = { worker, host: machine.shell.destination, image, runtime };
   yield* Effect.annotateCurrentSpan(fields);
   const gap = (message: string, detail: string) =>
-    new WorkerCapabilityError({
+    WorkerCapabilityError.make({
       worker,
       capability: "container",
       message,

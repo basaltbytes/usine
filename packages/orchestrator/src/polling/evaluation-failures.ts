@@ -36,8 +36,8 @@ export const changedItem = (
   kept: Pick<FailingItem, "stream" | "number" | "updatedAt">,
 ): ChangedItem =>
   kept.stream === "issue"
-    ? new ChangedIssue({ number: kept.number, updatedAt: kept.updatedAt })
-    : new ChangedPullRequest({ number: kept.number, updatedAt: kept.updatedAt });
+    ? ChangedIssue.make({ number: kept.number, updatedAt: kept.updatedAt })
+    : ChangedPullRequest.make({ number: kept.number, updatedAt: kept.updatedAt });
 
 /** Returns the failing Item that an evaluation leaves, or `None` if every Loop evaluated. */
 export const failingItem = (
@@ -49,7 +49,7 @@ export const failingItem = (
   return first === undefined
     ? Option.none()
     : Option.some(
-        new FailingItem({
+        FailingItem.make({
           stream: item._tag === "ChangedIssue" ? "issue" : "pr",
           number: ItemNumber.make(item.number),
           updatedAt: item.updatedAt,
@@ -72,15 +72,12 @@ export const failingItemPollFailures = (
   repository: RepositoryName,
   failing: FailingItem,
 ): ReadonlyArray<RepositoryPollFailure> =>
-  failing.failures.map(
-    (failure) =>
-      new RepositoryPollFailure({
-        repository,
-        errorTag: failure.errorTag,
-        message: `Loop "${failure.loop}": ${failedPart(failure)} failed on ${
-          failing.stream === "issue" ? "issue" : "pull request"
-        } #${failing.number}: ${failure.message}`,
-      }),
+  failing.failures.map((failure) =>
+    RepositoryPollFailure.make({
+      repository,
+      errorTag: failure.errorTag,
+      message: `Loop "${failure.loop}": ${failedPart(failure)} failed on ${failing.stream === "issue" ? "issue" : "pull request"} #${failing.number}: ${failure.message}`,
+    }),
   );
 
 const failuresOf = (failing: Option.Option<FailingItem>): ReadonlyArray<LoopEvaluationFailure> =>

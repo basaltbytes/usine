@@ -18,8 +18,10 @@ const Dependencies = Schema.fromJsonString(Schema.Record(Schema.String, Schema.S
 /** Runs `npm view <name>@<spec> <field> --json` in `directory`, so its `.npmrc` applies. */
 const npmView = (directory: string, name: string, spec: string, field: string) =>
   runCommand("npm", ["view", `${name}@${spec}`, field, "--json"], directory, NPM_VIEW_TIMEOUT).pipe(
-    Effect.map(({ stdout }) => stdout.trim()),
-    Effect.mapError((error) => new PackageLookupError({ name, spec, reason: error.reason })),
+    Effect.mapBoth({
+      onSuccess: ({ stdout }) => stdout.trim(),
+      onFailure: (error) => PackageLookupError.make({ name, spec, reason: error.reason }),
+    }),
   );
 
 /**
@@ -33,15 +35,15 @@ export const resolveVersion = Effect.fn("Registry.resolveVersion")(function* (
 ) {
   yield* Effect.annotateCurrentSpan({ name, spec });
   const output = yield* npmView(directory, name, spec, "version");
-  const decoded = yield* Schema.decodeUnknownEffect(Versions)(output).pipe(
-    Effect.mapError(
-      () => new PackageLookupError({ name, spec, reason: "no published version matches" }),
+  const decoded = yield* Schema.decodeEffect(Versions)(output).pipe(
+    Effect.mapError(() =>
+      PackageLookupError.make({ name, spec, reason: "no published version matches" }),
     ),
   );
   const versions = Schema.is(Schema.String)(decoded) ? [decoded] : decoded;
   const version = versions.at(-1);
   if (version === undefined) {
-    return yield* new PackageLookupError({ name, spec, reason: "no published version matches" });
+    return yield* PackageLookupError.make({ name, spec, reason: "no published version matches" });
   }
   return version;
 });
@@ -54,9 +56,9 @@ export const dependenciesOf = Effect.fn("Registry.dependenciesOf")(function* (
 ) {
   const output = yield* npmView(directory, name, version, "dependencies");
   if (output === "") return {};
-  return yield* Schema.decodeUnknownEffect(Dependencies)(output).pipe(
-    Effect.mapError(
-      (error) => new PackageLookupError({ name, spec: version, reason: error.message }),
+  return yield* Schema.decodeEffect(Dependencies)(output).pipe(
+    Effect.mapError((error) =>
+      PackageLookupError.make({ name, spec: version, reason: error.message }),
     ),
   );
 });

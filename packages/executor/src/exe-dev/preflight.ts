@@ -30,7 +30,7 @@ const capabilityError = (
   capability: WorkerCapability,
   message: string,
   cause: unknown,
-): WorkerCapabilityError => new WorkerCapabilityError({ worker, capability, message, cause });
+): WorkerCapabilityError => WorkerCapabilityError.make({ worker, capability, message, cause });
 
 export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   options: ExeDevExecutorOptions,

@@ -100,7 +100,7 @@ export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment"
     command,
     variables: missing,
   });
-  return yield* new MissingEnvironmentError({ command, variables: missing });
+  return yield* MissingEnvironmentError.make({ command, variables: missing });
 });
 
 /** Returns the Runs with a live Attempt, or none if the operator API doesn't answer. */
@@ -132,7 +132,7 @@ export const refuseLiveAttempts = Effect.fn("Cli.refuseLiveAttempts")(function* 
     command,
     runs,
   });
-  return yield* new LiveAttemptsError({ command, runs });
+  return yield* LiveAttemptsError.make({ command, runs });
 });
 
 /** Returns `true` once the process has exited, or `false` after `timeout`. */
@@ -161,7 +161,7 @@ const killProcess = Effect.fn("Cli.killProcess")(function* (
     pid,
     timeoutSeconds: Duration.toSeconds(KILL_EXIT_TIMEOUT),
   });
-  return yield* new KillTimeoutError({ command, pid, timeout: KILL_EXIT_TIMEOUT });
+  return yield* KillTimeoutError.make({ command, pid, timeout: KILL_EXIT_TIMEOUT });
 });
 
 /**
@@ -223,7 +223,7 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
       timeoutSeconds: Duration.toSeconds(options.timeout),
     });
     if (!options.force) {
-      return yield* new StopTimeoutError({ command, pid, timeout: options.timeout, runs, unit });
+      return yield* StopTimeoutError.make({ command, pid, timeout: options.timeout, runs, unit });
     }
     yield* killProcess(command, pid, options.timeout);
   }
@@ -247,7 +247,7 @@ export const stop = Effect.fn("Cli.stop")(function* (
     return yield* stopProcess("stop", record.pid, Option.some(record), unit, options, directory);
   }
   if (Option.isNone(state.pid)) {
-    return yield* new UnrecordedInstanceError({ command: "stop", directory, pid: state.pid });
+    return yield* UnrecordedInstanceError.make({ command: "stop", directory, pid: state.pid });
   }
   return yield* stopProcess(
     "stop",

@@ -92,7 +92,7 @@ export const readLabelEvents = Effect.fn("GitHubPolling.labelEvents")(function* 
     }
     const item = data.repository.value.issueOrPullRequest;
     if (Option.isNone(item)) {
-      return yield* new GitHubItemNotFoundError({
+      return yield* GitHubItemNotFoundError.make({
         operation: "fetch-item-timeline",
         item: number,
         message: `GitHub item ${repository}#${number} was not found while reading label events`,

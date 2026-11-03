@@ -64,7 +64,7 @@ import {
 } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const developer = new AgentFile({
+const developer = AgentFile.make({
   name: AgentName.make("developer"),
   harness: "codex",
   model: ModelId.make("gpt-6-astra"),
@@ -74,9 +74,9 @@ const developer = new AgentFile({
   persona: AgentPersona.make("Work on the Item."),
 });
 const startDev = (approval: "none" | "required") =>
-  new LoopFile({
+  LoopFile.make({
     name: LoopName.make("start-dev"),
-    trigger: new IssueTrigger({
+    trigger: IssueTrigger.make({
       on: "issue",
       if: Source.make(
         'item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready-for-agent")',
@@ -88,9 +88,9 @@ const startDev = (approval: "none" | "required") =>
     agent: developer.name,
     body: PromptTemplate.make("Implement issue {{ item.number }}."),
   });
-const reviewPr = new LoopFile({
+const reviewPr = LoopFile.make({
   name: LoopName.make("review-pr"),
-  trigger: new PullRequestTrigger({
+  trigger: PullRequestTrigger.make({
     on: "pr",
     if: Source.make(
       'item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready-for-review")',
@@ -103,9 +103,9 @@ const reviewPr = new LoopFile({
   agent: developer.name,
   body: PromptTemplate.make("Review pull request {{ item.number }}."),
 });
-const fixPr = new LoopFile({
+const fixPr = LoopFile.make({
   name: LoopName.make("fix-pr"),
-  trigger: new PullRequestTrigger({
+  trigger: PullRequestTrigger.make({
     on: "pr",
     if: Source.make(
       'item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready-for-fix")',
@@ -118,8 +118,8 @@ const fixPr = new LoopFile({
   body: PromptTemplate.make("Fix pull request {{ item.number }}."),
 });
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
-  new LoadedInstance({
-    config: Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
+  LoadedInstance.make({
+    config: Schema.decodeSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
     agents: [developer],
     invalidAgents: [],
     quarantinedLoops: [],
@@ -195,16 +195,16 @@ const fakeGitHub = (items: Map<number, GitHubItem>): GitHubPolling["Service"] =>
   baseRefHead: unmovedBaseRefHead,
   missingIssues: () => Effect.succeed([]),
   labels: () =>
-    Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
+    Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
   changes: (_repository, cursor) =>
     Effect.gen(function* () {
       const updatedAt = yield* DateTime.now;
-      return new RepositoryChanges({
+      return RepositoryChanges.make({
         cursor,
         items: [...items.values()].map(({ kind, number }) =>
           kind === "pr"
-            ? new ChangedPullRequest({ number, updatedAt })
-            : new ChangedIssue({ number, updatedAt }),
+            ? ChangedPullRequest.make({ number, updatedAt })
+            : ChangedIssue.make({ number, updatedAt }),
         ),
         backlog: false,
         nextPollAt: Option.none(),
@@ -215,11 +215,11 @@ const fakeGitHub = (items: Map<number, GitHubItem>): GitHubPolling["Service"] =>
       const item = items.get(changed.number);
       if (item === undefined) return yield* Effect.die(`no Item ${changed.number}`);
       return item.kind === "pr"
-        ? new PullRequestSnapshot({
+        ? PullRequestSnapshot.make({
             payload: pullRequestPayload(item),
             contentHash: contentHash(item),
           })
-        : new IssueSnapshot({ payload: issuePayload(item), contentHash: contentHash(item) });
+        : IssueSnapshot.make({ payload: issuePayload(item), contentHash: contentHash(item) });
     }),
 });
 
@@ -229,7 +229,7 @@ const question = "Should this be fixed by pre-registering live Attempts?";
 const executor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
-  outcome: () => Effect.succeed(Option.none()),
+  outcome: () => Effect.succeedNone,
   recover: () => Effect.void,
   intervene: () => Effect.void,
   interrupt: () => Effect.void,
@@ -239,8 +239,8 @@ const executor = Layer.succeed(StepExecutor)({
   reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
   execute: (execution) =>
     execution.run.loop === "review-pr"
-      ? Effect.succeed(new StepResult({ message: "Reviewed", facts: [] }))
-      : Effect.fail(new QuestionFailure({ question })),
+      ? Effect.succeed(StepResult.make({ message: "Reviewed", facts: [] }))
+      : Effect.fail(QuestionFailure.make({ question })),
 });
 
 /** Runs `test` against a real engine in a fresh instance folder, a fake GitHub, and the Operator. */
@@ -290,14 +290,15 @@ const withFactory = <A, E>(
         appChanges: () => Effect.die("these tests read no Item history"),
       }),
       Layer.succeed(ScheduleTriggers)({
-        latest: Effect.succeed(Option.none()),
+        latest: Effect.succeedNone,
         run: () => Effect.never,
         tick: () => Effect.die("unused"),
       }),
     );
-    const polling = PollingTriggers.layer
-      .pipe(Layer.provide(idleCiMonitor))
-      .pipe(Layer.provideMerge(dependencies));
+    const polling = PollingTriggers.layer.pipe(
+      Layer.provide(idleCiMonitor),
+      Layer.provideMerge(dependencies),
+    );
     return yield* test.pipe(
       Effect.provide(
         Operator.layer.pipe(Layer.provide(configurationLayer), Layer.provideMerge(polling)),
@@ -468,13 +469,13 @@ describe("Items no Loop acts on", () => {
           },
         ]),
       );
-      const instance = new LoadedInstance({
+      const instance = LoadedInstance.make({
         ...instanceWith([
           kind === "issue"
             ? startDev("required")
-            : new LoopFile({ ...reviewPr, approval: "required" }),
+            : LoopFile.make({ ...reviewPr, approval: "required" }),
         ]),
-        config: Schema.decodeUnknownSync(UsineConfig)({
+        config: Schema.decodeSync(UsineConfig)({
           version: 1,
           repos: [
             {
@@ -509,7 +510,7 @@ describe("Items no Loop acts on", () => {
           }
           yield* operator.moveBoardItem(
             instance,
-            new BoardMove({
+            BoardMove.make({
               repository,
               item: ItemNumber.make(195),
               toLane: BoardLaneId.make("authored:Triage"),
@@ -543,7 +544,7 @@ describe("Items no Loop acts on", () => {
           const stored = yield* reader.get(gitHubItemKey(repository, 182));
           assert(Option.isSome(stored));
           yield* writer.upsert(
-            new ItemProjection({
+            ItemProjection.make({
               ...stored.value,
               contentHash: ItemContentHash.make("relabeled"),
               payload: {
@@ -557,7 +558,7 @@ describe("Items no Loop acts on", () => {
           assert.strictEqual(relabeled.runs[0]?.state, "Waiting");
           if (kind === "issue") {
             yield* writer.upsert(
-              new ItemProjection({
+              ItemProjection.make({
                 itemKey: gitHubItemKey(repository, 702),
                 repository,
                 source: ItemProjectionSource.make("pr"),
@@ -573,7 +574,7 @@ describe("Items no Loop acts on", () => {
               }),
             );
             yield* writer.upsert(
-              new ItemProjection({
+              ItemProjection.make({
                 ...stored.value,
                 contentHash: ItemContentHash.make("linked-issue"),
                 payload: {
@@ -608,7 +609,7 @@ describe("Items no Loop acts on", () => {
             );
           }
           yield* writer.upsert(
-            new ItemProjection({
+            ItemProjection.make({
               ...stored.value,
               contentHash: ItemContentHash.make("malformed"),
               payload: { number: 182 },

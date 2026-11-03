@@ -17,16 +17,16 @@ import {
 } from "../src/installation.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const token = new InstallationToken({
+const token = InstallationToken.make({
   value: Redacted.make("item-writer-token"),
   expiresAt: DateTime.makeUnsafe("2026-09-01T22:00:00Z"),
-  scope: new InstallationWide(),
+  scope: InstallationWide.make(),
 });
 
 const appLayer = Layer.succeed(GitHubApp)({
   installation: () =>
     Effect.succeed(
-      new Installation({
+      Installation.make({
         id: InstallationId.make(77),
         accountLogin: "basaltbytes",
         appSlug: AppSlug.make("usine-basaltbytes"),

@@ -52,7 +52,7 @@ const item = (
   labels: ReadonlyArray<string> = [],
   conflicting = false,
 ) =>
-  new TaskItemView({
+  TaskItemView.make({
     itemKey: keyOf(number),
     kind,
     number: ItemNumber.make(number),
@@ -63,7 +63,7 @@ const item = (
     conflicting,
   });
 
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
@@ -76,11 +76,11 @@ const attempt = (
   outcome: AttemptView["outcome"],
   endedAt: string | null,
 ) =>
-  new AttemptView({
+  AttemptView.make({
     id: AttemptId.make(`${runId}/${number}`),
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),
-    workerAccess: new LocalWorkerAccess(),
+    workerAccess: LocalWorkerAccess.make(),
     brain,
     task: AttemptTask.make("Do the work."),
     agent: AgentName.make("developer"),
@@ -102,7 +102,7 @@ const run = (
     Pick<RunView, "approval" | "runAgain" | "pullRequestUrl" | "canResolveFailure">
   > = {},
 ) =>
-  new RunView({
+  RunView.make({
     agentBrain: brain,
     id: RunId.make(id),
     itemKey: keyOf(number),
@@ -142,12 +142,12 @@ const conflicting = item(
 
 /** Returns issue #40 with a merged pull request, an open conflicting pull request, and a Run of every outcome. */
 export const fullTask = () =>
-  new TaskView({
+  TaskView.make({
     repository: taskRepository,
     number: ItemNumber.make(40),
     title: issue.title,
     current: conflicting.itemKey,
-    lane: new TaskLaneView({
+    lane: TaskLaneView.make({
       id: BoardLaneId.make("authored:In review"),
       name: LaneName.make("In review"),
     }),
@@ -163,7 +163,7 @@ export const fullTask = () =>
         "2026-10-06T08:58:00.000Z",
         [attempt("run-again", 1, "2026-10-06T08:59:00.000Z", null, null)],
         {
-          runAgain: new RunAgain({
+          runAgain: RunAgain.make({
             from: RunId.make("run-canceled"),
             requestedBy: Option.some(OperatorLogin.make("PhilDL")),
           }),
@@ -180,7 +180,7 @@ export const fullTask = () =>
             "run-canceled",
             1,
             "2026-10-05T09:00:00.000Z",
-            new CanceledAttemptView(),
+            CanceledAttemptView.make(),
             "2026-10-05T09:05:00.000Z",
           ),
         ],
@@ -197,14 +197,14 @@ export const fullTask = () =>
             "run-review",
             1,
             "2026-10-04T09:00:00.000Z",
-            new SucceededAttemptView(),
+            SucceededAttemptView.make(),
             "2026-10-04T09:12:00.000Z",
           ),
         ],
         {
-          approval: new ApprovalView({
+          approval: ApprovalView.make({
             approvedAt: "2026-10-04T08:58:00.000Z",
-            source: new ApprovalSource({
+            source: ApprovalSource.make({
               channel: "ui",
               approver: Option.some(OperatorLogin.make("PhilDL")),
             }),
@@ -216,8 +216,8 @@ export const fullTask = () =>
           "run-dev",
           1,
           "2026-10-03T09:00:00.000Z",
-          new FailedAttemptView({
-            failure: new AgentFailureView({ message: "The lint check failed" }),
+          FailedAttemptView.make({
+            failure: AgentFailureView.make({ message: "The lint check failed" }),
           }),
           "2026-10-03T09:30:00.000Z",
         ),
@@ -225,8 +225,8 @@ export const fullTask = () =>
           "run-dev",
           2,
           "2026-10-03T10:00:00.000Z",
-          new FailedAttemptView({
-            failure: new AgentFailureView({ message: "The required check lint failed again" }),
+          FailedAttemptView.make({
+            failure: AgentFailureView.make({ message: "The required check lint failed again" }),
           }),
           "2026-10-03T10:30:00.000Z",
         ),
@@ -242,7 +242,7 @@ export const fullTask = () =>
             "run-plan",
             1,
             "2026-10-02T09:00:00.000Z",
-            new SucceededAttemptView(),
+            SucceededAttemptView.make(),
             "2026-10-02T09:20:00.000Z",
           ),
         ],
@@ -250,14 +250,14 @@ export const fullTask = () =>
       ),
     ],
     comments: [
-      new TaskCommentView({
+      TaskCommentView.make({
         runId: RunId.make("run-review"),
         kind: "review",
         url: `${merged.url}#pullrequestreview-7`,
         postedAt: "2026-10-04T09:05:00.000Z",
         attemptEndedAt: "2026-10-04T09:12:00.000Z",
       }),
-      new TaskCommentView({
+      TaskCommentView.make({
         runId: RunId.make("run-plan"),
         kind: "issue-comment",
         url: `${issue.url}#issuecomment-1`,
@@ -271,12 +271,12 @@ const quiet = item(12, "issue", "Document the cycle budget reset", "issue-open",
 
 /** Returns issue #12 in the Backlog with no Run, pull request, or comment. */
 export const quietTask = () =>
-  new TaskView({
+  TaskView.make({
     repository: taskRepository,
     number: ItemNumber.make(12),
     title: quiet.title,
     current: quiet.itemKey,
-    lane: new TaskLaneView({
+    lane: TaskLaneView.make({
       id: BoardLaneId.make("authored:Backlog"),
       name: LaneName.make("Backlog"),
     }),
@@ -288,11 +288,10 @@ export const quietTask = () =>
 
 const card = (task: TaskView) => {
   const current = task.items.find(({ itemKey }) => itemKey === task.current) ?? task.items[0];
-  const items = task.items.map(
-    ({ itemKey, kind, number, title, url, state }) =>
-      new BoardItemLink({ itemKey, kind, number, title, url, state }),
+  const items = task.items.map(({ itemKey, kind, number, title, url, state }) =>
+    BoardItemLink.make({ itemKey, kind, number, title, url, state }),
   );
-  return new BoardTaskView({
+  return BoardTaskView.make({
     repository: task.repository,
     itemKey: current.itemKey,
     kind: current.kind,
@@ -313,10 +312,10 @@ const card = (task: TaskView) => {
 };
 
 const writable = (name: string, label: string, tasks: ReadonlyArray<TaskView>) =>
-  new WritableBoardLaneView({
+  WritableBoardLaneView.make({
     id: BoardLaneId.make(`authored:${name}`),
     name: LaneName.make(name),
-    sources: [new LabelLaneSource({ label: GitHubLabelName.make(label) })],
+    sources: [LabelLaneSource.make({ label: GitHubLabelName.make(label) })],
     labels: [GitHubLabelName.make(label)],
     origin: "authored",
     items: tasks.map(card),
@@ -324,34 +323,34 @@ const writable = (name: string, label: string, tasks: ReadonlyArray<TaskView>) =
 
 /** Returns an overview whose Board has both Tasks, plus a Ready lane as a move target. */
 export const taskOverview = () =>
-  new ReadyOverview({
+  ReadyOverview.make({
     loops: [],
     needsYou: [],
     projects: [
-      new ProjectView({
+      ProjectView.make({
         repository: taskRepository,
         status: "needs-you",
         runs: [],
         labels: [
-          new LabelView({ name: GitHubLabelName.make("bug"), color: "d73a4a", description: null }),
-          new LabelView({ name: GitHubLabelName.make("ui"), color: "a2eeef", description: null }),
-          new LabelView({
+          LabelView.make({ name: GitHubLabelName.make("bug"), color: "d73a4a", description: null }),
+          LabelView.make({ name: GitHubLabelName.make("ui"), color: "a2eeef", description: null }),
+          LabelView.make({
             name: GitHubLabelName.make("ready-for-review"),
             color: "d93f0b",
             description: null,
           }),
         ],
         preflightFindings: [],
-        board: new BoardView({
+        board: BoardView.make({
           failures: [],
           lanes: [
             writable("Backlog", "backlog", [quietTask()]),
             writable("Ready", "ready-for-agent", []),
             writable("In review", "ready-for-review", [fullTask()]),
-            new ReadOnlyBoardLaneView({
+            ReadOnlyBoardLaneView.make({
               id: BoardLaneId.make("authored:Done"),
               name: LaneName.make("Done"),
-              sources: [new StateLaneSource({ state: "issue-closed" })],
+              sources: [StateLaneSource.make({ state: "issue-closed" })],
               origin: "authored",
               items: [],
             }),

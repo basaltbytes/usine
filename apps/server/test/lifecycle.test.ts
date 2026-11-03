@@ -82,7 +82,7 @@ const run = <A, E>(
 ) => Effect.runPromise(effect.pipe(Effect.provide(services)));
 
 const options = (seconds: number, force = false) =>
-  new LifecycleOptions({ timeout: Duration.seconds(seconds), force });
+  LifecycleOptions.make({ timeout: Duration.seconds(seconds), force });
 
 /** The fallback launch of a restart that must find the instance record. */
 const recordedOnly = Effect.die(new Error("usine restart used the fallback launch"));
@@ -92,7 +92,7 @@ const fixtureLaunch = async (
   logLevel: UpLogLevel = "Info",
   origin = Option.none<UiOrigin>(),
 ) =>
-  new InstanceLaunch({
+  InstanceLaunch.make({
     node: process.execPath,
     nodeOptions: ["--experimental-strip-types", "--no-warnings"],
     script,
@@ -322,7 +322,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     );
     writeFileSync(join(directory, "fixture-drain"), "never");
     // Nothing answers on the new port, so checks that asked it would pass and signal the instance.
-    const fallback = new InstanceLaunch({
+    const fallback = InstanceLaunch.make({
       node: first.launch.node,
       nodeOptions: first.launch.nodeOptions,
       script: FIXTURE,
@@ -364,7 +364,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     async () => {
       const directory = instanceFolder();
       const files = instanceFiles(directory);
-      const fallback = new InstanceLaunch({
+      const fallback = InstanceLaunch.make({
         node: process.execPath,
         nodeOptions: [],
         script: FIXTURE,
@@ -376,7 +376,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
         Effect.gen(function* () {
           yield* holdInstance(
             directory,
-            new InstanceRecord({
+            InstanceRecord.make({
               pid: ProcessId.make(1),
               version: "0.3.0",
               startedAt: yield* DateTime.now,
@@ -493,9 +493,8 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     const server = createHttpServer((_, response) => response.end("ok"));
     await new Promise<void>((resolve) => server.listen({ host: SERVER_HOST, port }, resolve));
     try {
-      const launch = new InstanceLaunch({
+      const launch = InstanceLaunch.make({
         node: process.execPath,
-        // Runs without listening for longer than the probe takes, then exits on its own.
         nodeOptions: ["--eval", "setTimeout(() => {}, 5000)"],
         script: FIXTURE,
         port,
@@ -514,7 +513,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
 
   it("reports a background start whose process exits before it listens", async () => {
     const directory = instanceFolder();
-    const launch = new InstanceLaunch({
+    const launch = InstanceLaunch.make({
       node: process.execPath,
       nodeOptions: ["--eval", "console.error('cannot start'); process.exit(3)"],
       script: FIXTURE,

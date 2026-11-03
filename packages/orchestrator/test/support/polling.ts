@@ -20,7 +20,7 @@ import { LabelReconciler } from "../../src/label-reconciler.ts";
 import { PollingTriggers } from "../../src/polling-triggers.ts";
 
 const baseRefHeadAt = (baseRefName: BaseRefName, revision: number) =>
-  new BaseRefHead({
+  BaseRefHead.make({
     baseRefName,
     sha: CommitSha.make(revision.toString(16).padStart(40, "0")),
     entityTag: Option.some(EntityTag.make(`W/"${revision}"`)),
@@ -61,7 +61,7 @@ export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
 });
 
 const noItemProjections: ItemProjectionReader["Service"] = {
-  get: () => Effect.succeed(Option.none()),
+  get: () => Effect.succeedNone,
   list: () => Effect.succeed([]),
   openIssues: () => Effect.succeed([]),
 };
@@ -89,7 +89,7 @@ export const repositoryLabelProjectionWriterLayer = Layer.succeed(RepositoryLabe
 });
 
 const noRepositoryLabelProjections: RepositoryLabelProjectionReader["Service"] = {
-  get: () => Effect.succeed(Option.none()),
+  get: () => Effect.succeedNone,
 };
 
 export const repositoryLabelProjectionReaderLayer = Layer.succeed(RepositoryLabelProjectionReader)(
@@ -97,7 +97,7 @@ export const repositoryLabelProjectionReaderLayer = Layer.succeed(RepositoryLabe
 );
 
 const forgetfulCursorStore: CursorStore["Service"] = {
-  read: () => Effect.succeed(Option.none()),
+  read: () => Effect.succeedNone,
   write: () => Effect.void,
 };
 
@@ -168,7 +168,7 @@ export const pollingTestLayer = (
     drain: () => Effect.void,
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
-    upgradeDrain: Effect.succeed(Option.none()),
+    upgradeDrain: Effect.succeedNone,
     retry: () => Effect.die("unused"),
     runAgain: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
@@ -192,5 +192,5 @@ export const pollingTestLayer = (
     loopControlLayer(states),
     Layer.succeed(GitHubPolling, github),
   );
-  return PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies));
+  return PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor), Layer.provide(dependencies));
 };

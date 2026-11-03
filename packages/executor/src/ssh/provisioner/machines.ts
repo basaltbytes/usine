@@ -101,7 +101,7 @@ const randomHex = (length: number) =>
 
 const operationError =
   (operation: "prepare" | "cleanup") => (error: { readonly message: string }) =>
-    new ExecutorOperationError({ operation, message: error.message, cause: error });
+    ExecutorOperationError.make({ operation, message: error.message, cause: error });
 
 /**
  * Returns the machines of the SSH executor's provisioned Workers: the `WorkerMachines` port for
@@ -268,14 +268,13 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     key: string,
   ) {
     yield* fs.writeFileString(pinned.file, knownHostsLine(pinned.alias, key)).pipe(
-      Effect.mapError(
-        (error) =>
-          new WorkerCapabilityError({
-            worker,
-            capability: "machine",
-            message: `Can't write the host key file of machine ${id} of worker "${worker}": ${error.message}`,
-            cause: error,
-          }),
+      Effect.mapError((error) =>
+        WorkerCapabilityError.make({
+          worker,
+          capability: "machine",
+          message: `Can't write the host key file of machine ${id} of worker "${worker}": ${error.message}`,
+          cause: error,
+        }),
       ),
     );
   });
@@ -305,7 +304,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       Option.isNone(created) &&
       !(yield* fs.exists(pinned.file).pipe(Effect.orElseSucceed(() => false)))
     )
-      return yield* new MachineUnavailableError({
+      return yield* MachineUnavailableError.make({
         worker,
         provider: driver.provider,
         reason: "provider",
@@ -322,7 +321,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     provider: MachineProvider,
     readyTimeout: Duration.Duration,
   ) =>
-    new MachineUnavailableError({
+    MachineUnavailableError.make({
       worker,
       provider,
       reason: "timeout",
@@ -374,14 +373,13 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           );
         }
       }).pipe(
-        Effect.mapError(
-          (error) =>
-            new MachineUnavailableError({
-              worker,
-              provider: driver.provider,
-              reason: "provider",
-              message: `Could not clean up the attempt's earlier machine creation: ${error.message}`,
-            }),
+        Effect.mapError((error) =>
+          MachineUnavailableError.make({
+            worker,
+            provider: driver.provider,
+            reason: "provider",
+            message: `Could not clean up the attempt's earlier machine creation: ${error.message}`,
+          }),
         ),
       );
       const readyTimeout = readyTimeoutFor(entry);
@@ -420,33 +418,31 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : unregister(hold))));
       const id = created.id;
       yield* update(hold, (current) => ({ ...current, id: Option.some(id) }));
-      const ready = starts
-        .record(worker, driver.provider)
-        .pipe(Effect.andThen(machineOf(entry, driver, id, created.hostKey)))
-        .pipe(
-          Effect.tap((machine) =>
-            awaitMachineSsh(commands, interval, machine).pipe(
-              Effect.catchTag("ExecutorOperationError", (error) =>
-                Effect.fail(
-                  new MachineUnavailableError({
-                    worker,
-                    provider: driver.provider,
-                    reason: "unreachable",
-                    message: error.message,
-                  }),
-                ),
+      const ready = starts.record(worker, driver.provider).pipe(
+        Effect.andThen(machineOf(entry, driver, id, created.hostKey)),
+        Effect.tap((machine) =>
+          awaitMachineSsh(commands, interval, machine).pipe(
+            Effect.catchTag("ExecutorOperationError", (error) =>
+              Effect.fail(
+                MachineUnavailableError.make({
+                  worker,
+                  provider: driver.provider,
+                  reason: "unreachable",
+                  message: error.message,
+                }),
               ),
             ),
           ),
-          Effect.tap((machine) =>
-            update(hold, (current) => ({ ...current, machine: Option.some(machine) })),
-          ),
-          Effect.tap(tailnets.join),
-          Effect.timeoutOrElse({
-            duration: readyTimeout,
-            orElse: () => Effect.fail(timedOut(worker, driver.provider, readyTimeout)),
-          }),
-        );
+        ),
+        Effect.tap((machine) =>
+          update(hold, (current) => ({ ...current, machine: Option.some(machine) })),
+        ),
+        Effect.tap(tailnets.join),
+        Effect.timeoutOrElse({
+          duration: readyTimeout,
+          orElse: () => Effect.fail(timedOut(worker, driver.provider, readyTimeout)),
+        }),
+      );
       const prepared = yield* ready.pipe(
         Effect.flatMap((machine) =>
           update(hold, (current) => ({ ...current, state: "preparing" })).pipe(
@@ -455,7 +451,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
               options.prepareContainers(machine).pipe(
                 Effect.catchTag("ExecutorOperationError", (error) =>
                   Effect.fail(
-                    new WorkerCapabilityError({
+                    WorkerCapabilityError.make({
                       worker,
                       capability: "container",
                       message: error.message,
@@ -487,7 +483,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         seconds: Math.round(Duration.toSeconds(DateTime.distance(since, yield* DateTime.now))),
         checked: Option.isSome(prepared.checked),
       });
-      return new MachineGrant({
+      return MachineGrant.make({
         hold,
         id,
         worker,
@@ -850,7 +846,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       });
       return machine.value;
     }
-    return yield* new ExecutorOperationError({
+    return yield* ExecutorOperationError.make({
       operation: "prepare",
       message: `Worker "${worker}" has no machine for the attempt`,
       cause: new Error(`no machine for attempt ${attemptId}`),

@@ -56,8 +56,7 @@ for (const address of [hetznerAddress, boatAddress]) {
         assert.lengthOf(yield* machines.machines, 0);
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtimeOf(machine, providers, address)),
-        Effect.provide(providers.layer),
+        Effect.provide(Layer.mergeAll(runtimeOf(machine, providers, address), providers.layer)),
       );
     },
   );
@@ -89,9 +88,9 @@ for (const address of [hetznerAddress, boatAddress]) {
         assert.isFalse(logs.lines.some((line) => line.includes(Redacted.value(settings.token))));
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtimeOf(machine, providers, address)),
-        Effect.provide(providers.layer),
-        Effect.provide(logs.layer),
+        Effect.provide(
+          Layer.mergeAll(runtimeOf(machine, providers, address), providers.layer, logs.layer),
+        ),
       );
     },
   );
@@ -125,8 +124,7 @@ it.live("reports a failed final deletion and still removes the worker configurat
     );
   }).pipe(
     Effect.scoped,
-    Effect.provide(runtimeOf(machine, providers, hetznerAddress)),
-    Effect.provide(logs.layer),
+    Effect.provide(Layer.mergeAll(runtimeOf(machine, providers, hetznerAddress), logs.layer)),
   );
 });
 

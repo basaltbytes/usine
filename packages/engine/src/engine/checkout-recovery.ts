@@ -294,7 +294,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
           "Could not confirm that the parent task of a closed Attempt stopped; its Worker's slot stays taken, and no Attempt starts on its Item, until a reconcile confirms the stop",
           failure,
         );
-    return yield* new ParentStopUnconfirmedError({
+    return yield* ParentStopUnconfirmedError.make({
       attemptId,
       worker: occupied.worker,
       cause: stopped.failure,

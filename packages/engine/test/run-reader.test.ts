@@ -50,7 +50,7 @@ describe("Run evidence reader", () => {
       const executor = Layer.succeed(StepExecutor)({
         workers: Effect.succeed([WorkerName.make("local")]),
         isLive: () => Effect.succeed(false),
-        outcome: () => Effect.succeed(Option.none()),
+        outcome: () => Effect.succeedNone,
         recover: () => Effect.void,
         intervene: () => Effect.void,
         occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
@@ -63,12 +63,12 @@ describe("Run evidence reader", () => {
             starts,
             io.append(
               "outbound",
-              new AttemptChannel.OutboundEnvelope({
+              AttemptChannel.OutboundEnvelope.make({
                 version: AttemptChannel.PROTOCOL_VERSION,
                 attemptId: execution.attempt.id,
                 sequence: AttemptChannel.Sequence.make(1),
                 sentAt: now,
-                payload: new AttemptChannel.Started({ parentModel: model }),
+                payload: AttemptChannel.Started.make({ parentModel: model }),
               }),
             ),
           ).pipe(Effect.andThen(Effect.never)),
@@ -88,9 +88,9 @@ describe("Run evidence reader", () => {
           repository: RepositoryName.make("basaltbytes/usine"),
           revision: RepositoryRevision.make("main"),
           task: AttemptTask.make("Retain a consistent record."),
-          agent: new Agent({
+          agent: Agent.make({
             name: AgentName.make("developer"),
-            brain: new BrainSpec({ harness: "codex", model, effort: "high" }),
+            brain: BrainSpec.make({ harness: "codex", model, effort: "high" }),
             parentModel: Option.none(),
             parentEffort: Option.none(),
             persona: AgentPersona.make("Implement the task."),
@@ -102,10 +102,10 @@ describe("Run evidence reader", () => {
         // first boundary not reached, so it doesn't depend on the query structure.
         for (let boundary = 1; ; boundary += 1) {
           const submitted = yield* engine.submit(
-            new Submission({
+            Submission.make({
               ...submission,
               itemKey: ItemKey.make(`evidence-item-${boundary}`),
-              event: new Event({
+              event: Event.make({
                 id: EventId.make(`evidence-event-${boundary}`),
                 dedupKey: DedupKey.make(`evidence/event/${boundary}`),
                 payload: {},
@@ -130,10 +130,7 @@ describe("Run evidence reader", () => {
           });
           const database = Layer.effect(
             RunDatabase,
-            SQLiteDrizzle.make().pipe(
-              Effect.provide(logger),
-              Effect.provide(SQLiteDrizzle.DefaultServices),
-            ),
+            SQLiteDrizzle.make().pipe(Effect.provide([logger, SQLiteDrizzle.DefaultServices])),
           ).pipe(Layer.provide(readConnection));
           // The engine already provides RunReader; keep this reader on its own
           // connection instead of reusing the engine layer's memoized instance.
@@ -177,7 +174,7 @@ describe("Loop sightings", () => {
       withInstance((directory) =>
         Effect.gen(function* () {
           const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-            new BlockedFailure({ message: "The baseline gate fails on main." }),
+            BlockedFailure.make({ message: "The baseline gate fails on main." }),
           ]);
           yield* Effect.gen(function* () {
             const engine = yield* RunEngine;
@@ -271,7 +268,7 @@ describe("Attempts by Worker", () => {
     // A Worker removed by a reload, with its only Attempt still running. If the schema rejected
     // this count, every overview would fail until that Attempt ends.
     const local = WorkerName.make("local");
-    assert.doesNotThrow(() => new WorkerAttempts({ worker: local, attempts: 1, running: 1 }));
-    assert.throws(() => new WorkerAttempts({ worker: local, attempts: 1, running: 2 }));
+    assert.doesNotThrow(() => WorkerAttempts.make({ worker: local, attempts: 1, running: 1 }));
+    assert.throws(() => WorkerAttempts.make({ worker: local, attempts: 1, running: 2 }));
   });
 });

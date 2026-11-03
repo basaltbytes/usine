@@ -97,7 +97,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
             message: "The upgrade helper failed. Restart the service to resume attempt admission.",
           }
         : current;
-    return new UpgradeView({
+    return UpgradeView.make({
       running: options.running,
       channel: settings.upgradeChannel,
       mode: settings.upgradeMode,
@@ -123,7 +123,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
   const request = Effect.fn("Server.requestUpgrade")(
     function* (input: UpgradeRequest) {
       if (Option.isNone(options.platform)) {
-        return yield* new UpgradeError({
+        return yield* UpgradeError.make({
           message: "App upgrades require a global npm install managed by systemd.",
         });
       }
@@ -140,7 +140,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
             timing: input.timing,
           },
         );
-        return yield* new UpgradeError({ message: "No newer version is available." });
+        return yield* UpgradeError.make({ message: "No newer version is available." });
       }
       yield* Effect.annotateCurrentSpan({
         previous: options.running,
@@ -149,10 +149,10 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       });
       const result = yield* outcome;
       if (Option.exists(result, (record) => record.status === "installing")) {
-        return yield* new UpgradeError({ message: "An upgrade is already in progress." });
+        return yield* UpgradeError.make({ message: "An upgrade is already in progress." });
       }
       if ((yield* Ref.get(progress)).phase !== "idle")
-        return yield* new UpgradeError({
+        return yield* UpgradeError.make({
           message:
             "An upgrade was already requested. Cancel it in Settings or with DELETE /api/upgrade while it is waiting.",
         });
@@ -208,7 +208,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       const current = yield* Ref.get(progress);
       if (current.phase !== "waiting") {
         yield* Effect.logInfo("Upgrade cancellation rejected", { phase: current.phase });
-        return yield* new UpgradeError({
+        return yield* UpgradeError.make({
           message: "Only a waiting upgrade can be canceled. Installation may already have started.",
         });
       }
@@ -246,7 +246,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     const newer = compareVersions(target, options.running) > 0;
     if (newer) yield* options.platform.value.checkDependencies(target);
     const candidate = newer
-      ? Option.some(new UpgradeCandidate({ channel: settings.upgradeChannel, version: target }))
+      ? Option.some(UpgradeCandidate.make({ channel: settings.upgradeChannel, version: target }))
       : Option.none();
     const previous = yield* Ref.getAndSet(available, candidate);
     if (!Equal.equals(previous, candidate)) yield* changed;
@@ -278,7 +278,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
         target,
         outcome: result,
       });
-      yield* request(new UpgradeRequest({ timing: "idle", version: Option.none() }));
+      yield* request(UpgradeRequest.make({ timing: "idle", version: Option.none() }));
     } else if (newer && Option.contains(yield* Ref.get(canceled), target)) {
       yield* Effect.logInfo("Automatic upgrade skipped after operator cancellation", { target });
     } else if (newer && blocked) {

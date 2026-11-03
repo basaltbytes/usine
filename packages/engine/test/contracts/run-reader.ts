@@ -29,10 +29,10 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
             const runId = RunId.make(name);
             return store
               .recordAndClaim(
-                new Submission({
+                Submission.make({
                   ...lifecycleSubmission,
                   repository,
-                  event: new Event({
+                  event: Event.make({
                     ...lifecycleSubmission.event,
                     id: EventId.make(name),
                     dedupKey: DedupKey.make(`${name}/revision`),
@@ -60,7 +60,7 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
             store
               .finishAttempt(
                 attempt,
-                Result.succeed(new StepResult({ message: "Done", facts: [] })),
+                Result.succeed(StepResult.make({ message: "Done", facts: [] })),
               )
               .pipe(Effect.tap(() => Effect.sleep("5 millis")));
 
@@ -102,8 +102,8 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
           const canceled = yield* store.snapshot(waited);
           assert.deepStrictEqual(
             canceled.run.state,
-            new RunState.Canceled({
-              reason: new RunState.OperatorCanceled({
+            RunState.Canceled.make({
+              reason: RunState.OperatorCanceled.make({
                 by: Option.some(OperatorLogin.make("alice")),
               }),
             }),
@@ -147,20 +147,20 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
             const store = yield* RunStore;
             const reader = yield* RunReader;
             const ids: RunId[] = [];
-            const link = new PullRequest({
+            const link = PullRequest.make({
               number: 12,
               url: new URL("https://github.com/basaltbytes/usine/pull/12"),
             });
             for (let index = 0; index < 5; index++) {
               const id = RunId.make(`history-${index}`);
               ids.push(id);
-              const event = new Event({
+              const event = Event.make({
                 ...lifecycleSubmission.event,
                 id: EventId.make(id),
                 dedupKey: DedupKey.make(id),
               });
               yield* store.recordAndClaim(
-                new Submission({ ...lifecycleSubmission, event, cycleLimit: Option.none() }),
+                Submission.make({ ...lifecycleSubmission, event, cycleLimit: Option.none() }),
                 id,
               );
               const started = yield* store.beginAttempt(
@@ -174,7 +174,7 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
                 yield* store.finishAttempt(
                   started.execution.attempt,
                   Result.succeed(
-                    new StepResult({ message: "Done", facts: index === 0 ? [link] : [] }),
+                    StepResult.make({ message: "Done", facts: index === 0 ? [link] : [] }),
                   ),
                 );
               yield* TestClock.adjust("1 second");

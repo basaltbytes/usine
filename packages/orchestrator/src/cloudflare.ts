@@ -35,14 +35,13 @@ export const cloudflareWorkersOf = (config: UsineConfig): ReadonlyArray<Cloudfla
 const cloudflareWorkerAddressOf = (worker: CloudflareWorker) => {
   const variable = (name: string) =>
     Config.Redacted(name).pipe(
-      Effect.mapError(
-        (cause) =>
-          new WorkerCapabilityError({
-            worker: worker.name,
-            capability: "credentials",
-            message: `The orchestrator's environment has no ${name}, which cloudflare worker "${worker.name}" names in usine.yaml. Set it and restart usine up.`,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        WorkerCapabilityError.make({
+          worker: worker.name,
+          capability: "credentials",
+          message: `The orchestrator's environment has no ${name}, which cloudflare worker "${worker.name}" names in usine.yaml. Set it and restart usine up.`,
+          cause,
+        }),
       ),
     );
   return Effect.gen(function* () {
@@ -91,7 +90,7 @@ export const layer = (
           worker.kind === "cloudflare"
             ? cloudflareWorkerAddressOf(worker)
             : Effect.fail(
-                new WorkerCapabilityError({
+                WorkerCapabilityError.make({
                   worker: worker.name,
                   capability: "machine",
                   message: "The recorded worker connection is not Cloudflare",

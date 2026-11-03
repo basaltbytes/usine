@@ -47,7 +47,7 @@ export const hetznerAddress: SshWorkerAddress = {
     _tag: "Provisioned",
     provisioner: hetznerSettings({
       network: Option.none(),
-      timings: new ProvisionerTimings({ sshWait: ProvisionerSeconds.make(1) }),
+      timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
       apiKeys: { anthropic: Option.some(Redacted.make(KEY)), openai: Option.none() },
     }),
   },
@@ -61,7 +61,7 @@ export const boatAddress: SshWorkerAddress = {
   machine: {
     _tag: "Provisioned",
     provisioner: boatSettings({
-      timings: new ProvisionerTimings({ sshWait: ProvisionerSeconds.make(1) }),
+      timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
     }),
   },
 };

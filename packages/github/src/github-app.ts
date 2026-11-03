@@ -258,21 +258,21 @@ export class GitHubApp extends Context.Service<
           InstallationsResponse,
         );
         if (found === undefined) {
-          return yield* new InstallationDiscoveryError({
+          return yield* InstallationDiscoveryError.make({
             reason: "missing",
             message:
               "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
           });
         }
         if (others.length > 0) {
-          return yield* new InstallationDiscoveryError({
+          return yield* InstallationDiscoveryError.make({
             reason: "multiple",
             message:
               "The GitHub App has more than one installation. Uninstall it from every account except one.",
           });
         }
         if (found.suspendedAt !== null) {
-          return yield* new InstallationDiscoveryError({
+          return yield* InstallationDiscoveryError.make({
             reason: "suspended",
             message:
               "The GitHub App installation is suspended. Unsuspend it in the installation settings on GitHub.",
@@ -280,12 +280,12 @@ export class GitHubApp extends Context.Service<
         }
         const missing = missingPermissions(found.permissions);
         if (missing.length > 0) {
-          return yield* new AppPermissionError({
+          return yield* AppPermissionError.make({
             missing,
             message: `The GitHub App installation is missing permissions: ${missing.join(", ")}. Grant them in the GitHub App settings, then approve the change on the installation.`,
           });
         }
-        return new Installation({
+        return Installation.make({
           id: found.id,
           accountLogin: found.account.login,
           appSlug: found.appSlug,
@@ -314,7 +314,7 @@ export class GitHubApp extends Context.Service<
         const now = yield* Clock.currentTimeMillis;
         const lifetime = DateTime.toEpochMillis(response.expiresAt) - now;
         if (lifetime <= 0 || lifetime > TOKEN_MAX_LIFETIME_MS + TOKEN_CLOCK_SKEW_MARGIN_MS) {
-          return yield* new InvalidGitHubResponseError({
+          return yield* InvalidGitHubResponseError.make({
             operation,
             message:
               "GitHub returned an installation token that is expired or exceeds the one-hour lifetime limit",
@@ -333,14 +333,14 @@ export class GitHubApp extends Context.Service<
           scope._tag === "SingleRepository" &&
           !(confirmed.length === 1 && confirmed.every((repo) => repo.id === scope.repositoryId))
         ) {
-          return yield* new InvalidGitHubResponseError({
+          return yield* InvalidGitHubResponseError.make({
             operation,
             message:
               "GitHub did not confirm that the worker token is scoped to exactly one repository",
             detail: `expected repository ID ${scope.repositoryId}, got [${confirmed.map((repo) => repo.id).join(", ")}]`,
           });
         }
-        return new InstallationToken({
+        return InstallationToken.make({
           value: Redacted.make(response.token),
           expiresAt: DateTime.makeUnsafe(now + Math.min(lifetime, TOKEN_MAX_LIFETIME_MS)),
           scope,
@@ -362,7 +362,7 @@ export class GitHubApp extends Context.Service<
           installed.push(...response.repositories);
           if (installed.length >= response.totalCount) return installed;
           if (response.repositories.length === 0) {
-            return yield* new InvalidGitHubResponseError({
+            return yield* InvalidGitHubResponseError.make({
               operation: "list-installation-repositories",
               message: "GitHub returned an empty page before it listed total_count repositories",
               detail: `page ${page} was empty after ${installed.length} of ${response.totalCount} repositories`,
@@ -386,7 +386,7 @@ export class GitHubApp extends Context.Service<
               return kept;
             }
             const installation = yield* discoverInstallation();
-            const token = yield* mintToken(installation.id, new InstallationWide());
+            const token = yield* mintToken(installation.id, InstallationWide.make());
             const renewed: Lease = { installation, token };
             const stored: [Lease, Option.Option<Lease>] = [renewed, Option.some(renewed)];
             return stored;
@@ -415,7 +415,7 @@ export class GitHubApp extends Context.Service<
               ).pipe(authorized(token.value)),
               UserResponse,
             );
-            const account = new BotAccount(user);
+            const account = BotAccount.make(user);
             yield* Effect.logInfo("Read the App's bot account", {
               appSlug,
               login: account.login,
@@ -483,7 +483,7 @@ export class GitHubApp extends Context.Service<
           (project: CoveredProject, permissions: LoopPermissions) =>
             mintToken(
               project.installationId,
-              new SingleRepository({
+              SingleRepository.make({
                 repository: project.repository,
                 repositoryId: project.repositoryId,
                 permissions,

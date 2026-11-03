@@ -30,7 +30,7 @@ beforeEach(() => {
   });
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
+    ReadyOverview.make({ projects: [], loops: [], needsYou: [] }),
   );
   queryClient.setQueryData(configurationQuery().queryKey, configurationFixture());
   queryClient.setQueryData(workersQuery().queryKey, configurationFixture());

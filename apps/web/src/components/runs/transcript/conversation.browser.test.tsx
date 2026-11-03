@@ -60,33 +60,33 @@ declare module "vitest/browser" {
 
 const runId = RunId.make("reader-test");
 const attemptId = AttemptId.make("attempt");
-const parent = new ParentSession({
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
-  brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
+  brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
 });
 const record = (sequence: number, event: AgentSessionEvent) =>
-  new TranscriptEventView({
+  TranscriptEventView.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId,
     receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
     direction: "outbound",
-    payload: new SessionEvent({ event }),
+    payload: SessionEvent.make({ event }),
   });
 const message = (sequence: number) =>
   record(
     sequence,
-    new TextOutput({
+    TextOutput.make({
       session: parent,
       text: `Message ${sequence}\n\nConversation content for reading position.\n\nAnother paragraph with enough height to scroll.`,
     }),
   );
 const events = Array.from({ length: 45 }, (_, index) => message(index + 1));
-const liveAttempt = new AttemptView({
+const liveAttempt = AttemptView.make({
   id: attemptId,
   number: AttemptNumber.make(1),
   worker: WorkerName.make("local"),
-  workerAccess: new LocalWorkerAccess(),
+  workerAccess: LocalWorkerAccess.make(),
   brain: parent.brain,
   task: AttemptTask.make("Read the conversation"),
   agent: parent.agent,
@@ -97,7 +97,7 @@ const liveAttempt = new AttemptView({
   salvage: null,
 });
 const runView = (id: RunId, attempts: ReadonlyArray<AttemptView>) =>
-  new RunView({
+  RunView.make({
     agentBrain: parent.brain,
     id,
     itemKey: ItemKey.make("item"),
@@ -140,17 +140,15 @@ const mount = (
         <QueryClientProvider client={queryClient}>
           <RunWorkspace
             key={id}
-            detail={
-              new RunDetailView({
-                agentDefinitionChanged: false,
-                run: runView(id, attempts),
-                eventDedupKey: '["implement","basaltbytes/usine",7]',
-                eventPayload: { tick: "scheduled" },
-                transcript,
-                sessionState: [],
-                earlierTranscript: cursors,
-              })
-            }
+            detail={RunDetailView.make({
+              agentDefinitionChanged: false,
+              run: runView(id, attempts),
+              eventDedupKey: '["implement","basaltbytes/usine",7]',
+              eventPayload: { tick: "scheduled" },
+              transcript,
+              sessionState: [],
+              earlierTranscript: cursors,
+            })}
             history={{ cursors, loading: history.loading, error: null, load: history.load }}
           />
         </QueryClientProvider>
@@ -205,7 +203,7 @@ beforeEach(async () => {
   // line above the reader, which shrinks it mid-test.
   await commands.githubChangesResponse(
     JSON.stringify(
-      Schema.encodeSync(RunGitHubChangesView)(new RunGitHubChangesView({ attempts: [] })),
+      Schema.encodeSync(RunGitHubChangesView)(RunGitHubChangesView.make({ attempts: [] })),
     ),
   );
   localStorage.clear();
@@ -230,7 +228,7 @@ it("reopens and cold-loads the same row offset without consuming activity receiv
   expect(bookmark()?.position._tag).toBe("Anchor");
   const tail = [...events.slice(30), message(46)];
   mount(tail, runId, {
-    earlier: new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(31) }),
+    earlier: TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(31) }),
     loading: false,
     load: () => queueMicrotask(() => mount([...events, message(46)])),
   });
@@ -250,11 +248,11 @@ it("keeps inspected burst and tool disclosures isolated by Run across remounts",
   const tools = [
     record(
       1,
-      new ToolStarted({ session: parent, callId: "a", tool: "read", input: { path: "first.ts" } }),
+      ToolStarted.make({ session: parent, callId: "a", tool: "read", input: { path: "first.ts" } }),
     ),
     record(
       2,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "a",
         tool: "read",
@@ -264,11 +262,16 @@ it("keeps inspected burst and tool disclosures isolated by Run across remounts",
     ),
     record(
       3,
-      new ToolStarted({ session: parent, callId: "b", tool: "read", input: { path: "second.ts" } }),
+      ToolStarted.make({
+        session: parent,
+        callId: "b",
+        tool: "read",
+        input: { path: "second.ts" },
+      }),
     ),
     record(
       4,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "b",
         tool: "read",
@@ -298,7 +301,7 @@ it("lets scrolling cancel a delayed restoration and preserves that choice when t
   close();
   let requested = false;
   mount(events.slice(30), runId, {
-    earlier: new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(31) }),
+    earlier: TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(31) }),
     loading: false,
     load: () => {
       requested = true;
@@ -319,7 +322,7 @@ it("keeps a pending bookmark intact when the page closes before history is avail
   await moveTo(12);
   close();
   mount(events.slice(30), runId, {
-    earlier: new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(31) }),
+    earlier: TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(31) }),
     loading: true,
     load: () => {},
   });
@@ -354,7 +357,7 @@ it("bounds missing-row recovery and leaves unseen activity unread at its visible
     });
   const show = () =>
     mount([...loaded], runId, {
-      earlier: new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(first) }),
+      earlier: TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(first) }),
       loading: false,
       load,
     });
@@ -371,7 +374,7 @@ it("bounds missing-row recovery and leaves unseen activity unread at its visible
 it("flushes the current reading place on page exit and keeps newer results unread after refresh", async () => {
   const started = record(
     1,
-    new ToolStarted({
+    ToolStarted.make({
       session: parent,
       callId: "pending",
       tool: "read",
@@ -386,7 +389,7 @@ it("flushes the current reading place on page exit and keeps newer results unrea
   close();
   const completed = record(
     46,
-    new ToolFinished({
+    ToolFinished.make({
       session: parent,
       callId: "pending",
       tool: "read",
@@ -407,7 +410,7 @@ it("flushes the current reading place on page exit and keeps newer results unrea
 });
 
 it("restores inside a child tool result after its burst gains an earlier member", async () => {
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("child"),
     parentId: parent.id,
     agent: AgentName.make("reviewer"),
@@ -416,7 +419,7 @@ it("restores inside a child tool result after its burst gains an earlier member"
   const tools = [
     record(
       16,
-      new ToolStarted({
+      ToolStarted.make({
         session: child,
         callId: "child-a",
         tool: "read",
@@ -425,7 +428,7 @@ it("restores inside a child tool result after its burst gains an earlier member"
     ),
     record(
       17,
-      new ToolFinished({
+      ToolFinished.make({
         session: child,
         callId: "child-a",
         tool: "read",
@@ -435,7 +438,7 @@ it("restores inside a child tool result after its burst gains an earlier member"
     ),
     record(
       18,
-      new ToolStarted({
+      ToolStarted.make({
         session: child,
         callId: "child-b",
         tool: "read",
@@ -444,7 +447,7 @@ it("restores inside a child tool result after its burst gains an earlier member"
     ),
     record(
       19,
-      new ToolFinished({
+      ToolFinished.make({
         session: child,
         callId: "child-b",
         tool: "read",
@@ -475,7 +478,7 @@ it("restores inside a child tool result after its burst gains an earlier member"
   close();
   const older = record(
     15,
-    new ToolFinished({
+    ToolFinished.make({
       session: child,
       callId: "earlier",
       tool: "read",
@@ -490,7 +493,7 @@ it("restores inside a child tool result after its burst gains an earlier member"
 it("continues following when an inspected tool is collapsed after jumping to latest", async () => {
   const started = record(
     46,
-    new ToolStarted({
+    ToolStarted.make({
       session: parent,
       callId: "latest",
       tool: "read",
@@ -516,7 +519,7 @@ it("lets keyboard navigation supersede an in-flight history restore", async () =
   close();
   let requested = false;
   mount(events.slice(30), runId, {
-    earlier: new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(31) }),
+    earlier: TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(31) }),
     loading: false,
     load: () => {
       requested = true;
@@ -538,7 +541,7 @@ it("reveals an error instead of the pending saved place and preserves unread act
   const error = [
     record(
       46,
-      new ToolStarted({
+      ToolStarted.make({
         session: parent,
         callId: "error",
         tool: "read",
@@ -547,7 +550,7 @@ it("reveals an error instead of the pending saved place and preserves unread act
     ),
     record(
       47,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "error",
         tool: "read",
@@ -559,7 +562,7 @@ it("reveals an error instead of the pending saved place and preserves unread act
     message(48),
   ];
   mount([...events.slice(30), ...error], runId, {
-    earlier: new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(31) }),
+    earlier: TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(31) }),
     loading: true,
     load: () => {},
   });
@@ -581,7 +584,7 @@ it("reveals an error instead of the pending saved place and preserves unread act
 });
 
 it("keeps failed commands inside their burst and reopens inspected errors through a collapsed burst", async () => {
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("child"),
     parentId: parent.id,
     agent: AgentName.make("reviewer"),
@@ -590,11 +593,11 @@ it("keeps failed commands inside their burst and reopens inspected errors throug
   const tools = ["git status", "node check.js", "git diff"].flatMap((command, index) => [
     record(
       16 + index * 2,
-      new ToolStarted({ session: child, callId: command, tool: "Bash", input: { command } }),
+      ToolStarted.make({ session: child, callId: command, tool: "Bash", input: { command } }),
     ),
     record(
       17 + index * 2,
-      new ToolFinished({
+      ToolFinished.make({
         session: child,
         callId: command,
         tool: "Bash",
@@ -630,7 +633,7 @@ it.each(["pointer", "Space"] as const)(
   async (activation) => {
     const started = record(
       46,
-      new ToolStarted({
+      ToolStarted.make({
         session: parent,
         callId: "paused",
         tool: "read",
@@ -669,7 +672,7 @@ it.each(["pointer", "Space"] as const)(
 it("keeps a paused reader paused when Space at latest moves nothing", async () => {
   const started = record(
     46,
-    new ToolStarted({
+    ToolStarted.make({
       session: parent,
       callId: "paused",
       tool: "read",
@@ -728,11 +731,11 @@ it.each(["End", "Space", "ArrowDown", "PageDown", "wheel", "swipe"] as const)(
 const longRead = [
   record(
     46,
-    new ToolStarted({ session: parent, callId: "long", tool: "read", input: { path: "long.ts" } }),
+    ToolStarted.make({ session: parent, callId: "long", tool: "read", input: { path: "long.ts" } }),
   ),
   record(
     47,
-    new ToolFinished({
+    ToolFinished.make({
       session: parent,
       callId: "long",
       tool: "read",
@@ -973,14 +976,14 @@ it("shows the Task and the Event in the reader and returns to the same reading p
 });
 
 it("addresses the composer to the parent until a live child is chosen in the outline", async () => {
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("child"),
     parentId: parent.id,
     agent: AgentName.make("reviewer"),
     brain: parent.brain,
   });
   mount(
-    [...events, record(46, new TextOutput({ session: child, text: "Child is reviewing." }))],
+    [...events, record(46, TextOutput.make({ session: child, text: "Child is reviewing." }))],
     runId,
     undefined,
     [liveAttempt],
@@ -1011,21 +1014,21 @@ const resumeCases: ReadonlyArray<{
   {
     worker: "local",
     harness: "claude",
-    access: new LocalWorkerAccess(),
+    access: LocalWorkerAccess.make(),
     facts: ["Worktree /worker/Philippe's repo"],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
   },
   {
     worker: "usine-worker-1",
     harness: "codex",
-    access: new SshWorkerAccess({ destination: usineWorker, port: null }),
+    access: SshWorkerAccess.make({ destination: usineWorker, port: null }),
     facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
     command: String.raw`ssh -t usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && codex resume -- '\''native-session'\'''`,
   },
   {
     worker: "usine-worker-1",
     harness: "codex",
-    access: new SshWorkerAccess({ destination: usineWorker, port: null }),
+    access: SshWorkerAccess.make({ destination: usineWorker, port: null }),
     gateway: { home: "/worker/codex/attempt-1", kind: "subscription" },
     facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
     command: null,
@@ -1033,7 +1036,7 @@ const resumeCases: ReadonlyArray<{
   {
     worker: "usine-worker-1",
     harness: "claude",
-    access: new SshWorkerAccess({ destination: usineWorker, port: SshPort.make(2222) }),
+    access: SshWorkerAccess.make({ destination: usineWorker, port: SshPort.make(2222) }),
     facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
     command: String.raw`ssh -t -p 2222 usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && claude --resume '\''native-session'\'''`,
   },
@@ -1050,7 +1053,7 @@ const resumeCases: ReadonlyArray<{
   {
     worker: "hz-pool",
     harness: "claude",
-    access: Schema.decodeUnknownSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
+    access: Schema.decodeSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
     facts: ["Worktree /worker/Philippe's repo on hz-pool"],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
     notes: ["Run it on the attempt's Hetzner machine, which is deleted with the attempt"],
@@ -1058,7 +1061,7 @@ const resumeCases: ReadonlyArray<{
   {
     worker: "hz-pool",
     harness: "codex",
-    access: Schema.decodeUnknownSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
+    access: Schema.decodeSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
     gateway: { home: "/worker/codex/attempt-1", kind: "subscription" },
     facts: ["Worktree /worker/Philippe's repo on hz-pool"],
     command: null,
@@ -1066,7 +1069,7 @@ const resumeCases: ReadonlyArray<{
   {
     worker: "local",
     harness: "codex",
-    access: new LocalWorkerAccess(),
+    access: LocalWorkerAccess.make(),
     home: "/worker/codex/local-login",
     facts: ["Worktree /worker/Philippe's repo"],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && CODEX_HOME='/worker/codex/local-login' codex resume -- 'native-session'`,
@@ -1084,14 +1087,14 @@ const resumeCases: ReadonlyArray<{
 it.each(resumeCases)(
   "offers resume for a finished $harness child on $worker only with an accessible credential",
   async ({ worker, harness, access, facts, command, notes = [sameLogin], gateway, home }) => {
-    const child = new ChildSession({
+    const child = ChildSession.make({
       id: AgentSessionId.make("saved-child"),
       parentId: parent.id,
       agent: AgentName.make("reviewer"),
-      brain: new BrainSpec({ harness, model: ModelId.make("test-model"), effort: "high" }),
+      brain: BrainSpec.make({ harness, model: ModelId.make("test-model"), effort: "high" }),
       gatewayCredential: gateway === undefined ? Option.none() : Option.some(gateway.kind),
     });
-    const saved = new HarnessSession({
+    const saved = HarnessSession.make({
       id: HarnessSessionId.make("native-session"),
       cwd: "/worker/Philippe's repo",
       home: Option.fromNullishOr(gateway?.home ?? home),
@@ -1102,12 +1105,12 @@ it.each(resumeCases)(
     });
     mount(
       [
-        record(1, new SessionStarted({ session: child, harnessSession: Option.some(saved) })),
-        record(2, new SessionFinished({ session: child })),
+        record(1, SessionStarted.make({ session: child, harnessSession: Option.some(saved) })),
+        record(2, SessionFinished.make({ session: child })),
       ],
       runId,
       undefined,
-      [new AttemptView({ ...liveAttempt, worker: WorkerName.make(worker), workerAccess: access })],
+      [AttemptView.make({ ...liveAttempt, worker: WorkerName.make(worker), workerAccess: access })],
     );
     if (command === null) {
       await expect
@@ -1147,24 +1150,24 @@ it.each(resumeCases)(
   },
 );
 
-const failure = new AgentFailureView({ message: "The first Attempt was blocked." });
-const firstAttempt = new AttemptView({
+const failure = AgentFailureView.make({ message: "The first Attempt was blocked." });
+const firstAttempt = AttemptView.make({
   ...liveAttempt,
   id: AttemptId.make("first"),
-  outcome: new FailedAttemptView({ failure }),
+  outcome: FailedAttemptView.make({ failure }),
   endedAt: new Date(Date.UTC(2026, 8, 6, 11, 50, 0)).toISOString(),
 });
-const retried = new AttemptView({ ...liveAttempt, number: AttemptNumber.make(2) });
+const retried = AttemptView.make({ ...liveAttempt, number: AttemptNumber.make(2) });
 const earlierAttempt = Array.from({ length: 20 }, (_, index) => {
   const event = message(index + 1);
-  return new TranscriptEventView({ ...event, attemptId: firstAttempt.id });
+  return TranscriptEventView.make({ ...event, attemptId: firstAttempt.id });
 });
-const failedEnvelope = new TranscriptEventView({
+const failedEnvelope = TranscriptEventView.make({
   sequence: TranscriptSequence.make(21),
   attemptId: firstAttempt.id,
   receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, 21)).toISOString(),
   direction: "outbound",
-  payload: new FailedTranscriptView({ failure }),
+  payload: FailedTranscriptView.make({ failure }),
 });
 const twoAttempts = [
   ...earlierAttempt,
@@ -1228,16 +1231,16 @@ it("opens a finished Run on a narrow screen at its outcome's own line", async ()
 });
 
 it("shows that a Pi child has no saved harness session to resume", async () => {
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("pi-child"),
     parentId: parent.id,
     agent: AgentName.make("reviewer"),
-    brain: new BrainSpec({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
+    brain: BrainSpec.make({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
   });
   mount(
     [
-      record(1, new SessionStarted({ session: child })),
-      record(2, new SessionFinished({ session: child })),
+      record(1, SessionStarted.make({ session: child })),
+      record(2, SessionFinished.make({ session: child })),
     ],
     runId,
     undefined,
@@ -1253,18 +1256,18 @@ it.each([390, 1280])(
   async (width) => {
     await page.viewport(width, 844);
     host.style.width = "100%";
-    const child = new ChildSession({
+    const child = ChildSession.make({
       id: AgentSessionId.make("prompt-child"),
       parentId: parent.id,
       agent: AgentName.make("reviewer"),
-      brain: new BrainSpec({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
+      brain: BrainSpec.make({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
     });
     const prompt =
       "# Delegated task\n\n  Add `ready-to-merge`.\nDo not wait for CI.\n" + "x".repeat(300);
     mount(
       [
-        record(1, new SessionStarted({ session: child, prompt: Option.some(prompt) })),
-        record(2, new TextOutput({ session: child, text: "Reviewing." })),
+        record(1, SessionStarted.make({ session: child, prompt: Option.some(prompt) })),
+        record(2, TextOutput.make({ session: child, text: "Reviewing." })),
       ],
       runId,
       undefined,

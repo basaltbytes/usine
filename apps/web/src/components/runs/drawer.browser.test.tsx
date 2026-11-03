@@ -72,9 +72,9 @@ const runId = RunId.make("resolution-run");
 const attemptId = AttemptId.make("resolution-attempt");
 const agent = AgentName.make("developer");
 const loop = LoopName.make("implement");
-const failure = new AgentFailureView({ message: "Work was completed separately" });
-const run = new RunView({
-  agentBrain: new BrainSpec({
+const failure = AgentFailureView.make({ message: "Work was completed separately" });
+const run = RunView.make({
+  agentBrain: BrainSpec.make({
     harness: "codex",
     model: ModelId.make("test-model"),
     effort: "high",
@@ -90,17 +90,17 @@ const run = new RunView({
   closedAt: "2026-09-17T00:20:00Z",
   task: "Complete the issue",
   attempts: [
-    new AttemptView({
+    AttemptView.make({
       id: attemptId,
       number: AttemptNumber.make(1),
       worker: WorkerName.make("local"),
-      workerAccess: new LocalWorkerAccess(),
-      brain: new BrainSpec({ harness: "codex", model: ModelId.make("test"), effort: "high" }),
+      workerAccess: LocalWorkerAccess.make(),
+      brain: BrainSpec.make({ harness: "codex", model: ModelId.make("test"), effort: "high" }),
       task: AttemptTask.make("Complete the issue"),
       agent,
       operatorIntervened: false,
       startedAt: "2026-09-17T00:00:00Z",
-      outcome: new FailedAttemptView({ failure }),
+      outcome: FailedAttemptView.make({ failure }),
       endedAt: "2026-09-17T00:20:00Z",
       salvage: null,
     }),
@@ -115,12 +115,12 @@ const run = new RunView({
   canRetry: true,
   canResolveFailure: true,
 });
-const unrelated = new ApprovalNeed({
+const unrelated = ApprovalNeed.make({
   id: "other-approval",
   repository: RepositoryName.make("another/project"),
   runId: RunId.make("other-run"),
   loop,
-  item: new BoardItemLink({
+  item: BoardItemLink.make({
     itemKey: ItemKey.make("github:another/project:7"),
     kind: "issue",
     number: ItemNumber.make(7),
@@ -131,29 +131,29 @@ const unrelated = new ApprovalNeed({
 });
 
 it("resolves a failure from Needs attention while retaining unrelated attention, failed history, and retry, and shows why a retry is refused", async () => {
-  const before = new ReadyOverview({
+  const before = ReadyOverview.make({
     projects: [
-      new ProjectView({
+      ProjectView.make({
         repository,
         status: "needs-you",
         runs: [run],
-        board: new BoardView({ lanes: [], failures: [] }),
+        board: BoardView.make({ lanes: [], failures: [] }),
         labels: [],
         preflightFindings: [],
       }),
     ],
     loops: [],
-    needsYou: [new RunFailureNeed({ id: "failure", repository, runId, loop, failure }), unrelated],
+    needsYou: [RunFailureNeed.make({ id: "failure", repository, runId, loop, failure }), unrelated],
   });
-  const resolvedRun = new RunView({ ...run, canResolveFailure: false });
-  const after = new ReadyOverview({
+  const resolvedRun = RunView.make({ ...run, canResolveFailure: false });
+  const after = ReadyOverview.make({
     ...before,
     needsYou: [unrelated],
-    projects: before.projects.map(
-      (project) => new ProjectView({ ...project, status: "clear", runs: [resolvedRun] }),
+    projects: before.projects.map((project) =>
+      ProjectView.make({ ...project, status: "clear", runs: [resolvedRun] }),
     ),
   });
-  const detail = new RunDetailView({
+  const detail = RunDetailView.make({
     agentDefinitionChanged: false,
     run,
     eventDedupKey: "event",
@@ -167,7 +167,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     JSON.stringify(Schema.encodeSync(FactoryOverview)(after)),
     JSON.stringify(Schema.encodeSync(RunDetailView)(detail)),
     JSON.stringify(
-      Schema.encodeSync(RunDetailView)(new RunDetailView({ ...detail, run: resolvedRun })),
+      Schema.encodeSync(RunDetailView)(RunDetailView.make({ ...detail, run: resolvedRun })),
     ),
     attemptId,
   );
@@ -258,19 +258,19 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
 });
 
 it("marks a closed issue in its drawer and refreshes the agent definition warning after configuration changes", async () => {
-  const onIssue = new RunView({
+  const onIssue = RunView.make({
     ...run,
     itemKey: ItemKey.make('["github","resolution/project",1]'),
   });
   const overview = JSON.stringify(
     Schema.encodeSync(FactoryOverview)(
-      new ReadyOverview({
+      ReadyOverview.make({
         projects: [
-          new ProjectView({
+          ProjectView.make({
             repository,
             status: "needs-you",
             runs: [onIssue],
-            board: new BoardView({ lanes: [], failures: [] }),
+            board: BoardView.make({ lanes: [], failures: [] }),
             labels: [],
             preflightFindings: [],
           }),
@@ -282,7 +282,7 @@ it("marks a closed issue in its drawer and refreshes the agent definition warnin
   );
   const detail = JSON.stringify(
     Schema.encodeSync(RunDetailView)(
-      new RunDetailView({
+      RunDetailView.make({
         agentDefinitionChanged: false,
         run: onIssue,
         eventDedupKey: "event",
@@ -354,8 +354,8 @@ it("marks a closed issue in its drawer and refreshes the agent definition warnin
     await expect.element(warning).not.toBeInTheDocument();
     const changed = JSON.stringify(
       Schema.encodeSync(RunDetailView)(
-        new RunDetailView({
-          ...Schema.decodeUnknownSync(Schema.fromJsonString(RunDetailView))(detail),
+        RunDetailView.make({
+          ...Schema.decodeSync(Schema.fromJsonString(RunDetailView))(detail),
           agentDefinitionChanged: true,
         }),
       ),
@@ -363,7 +363,7 @@ it("marks a closed issue in its drawer and refreshes the agent definition warnin
     await commands.failureResolutionResponses(overview, overview, changed, changed, attemptId);
     await invalidateChanges(
       queryClient,
-      new ChangeNotice({
+      ChangeNotice.make({
         revision: 1,
         reset: false,
         changes: [{ kind: "configuration", id: "instance" }],
@@ -378,7 +378,7 @@ it("marks a closed issue in its drawer and refreshes the agent definition warnin
 });
 
 it("refreshes an open queued run during machine preparation and quota backoff", async () => {
-  const queued = new RunView({
+  const queued = RunView.make({
     ...run,
     state: "Queued",
     closedAt: null,
@@ -386,7 +386,7 @@ it("refreshes an open queued run during machine preparation and quota backoff", 
     canRetry: false,
     canResolveFailure: false,
   });
-  const machine = new MachineView({
+  const machine = MachineView.make({
     worker: WorkerName.make("pool"),
     provider: "hetzner",
     state: "creating",
@@ -395,7 +395,7 @@ it("refreshes an open queued run during machine preparation and quota backoff", 
     attemptId,
     since: "2026-09-17T00:00:00Z",
   });
-  const detail = new RunDetailView({
+  const detail = RunDetailView.make({
     run: queued,
     machine,
     agentDefinitionChanged: false,
@@ -405,13 +405,13 @@ it("refreshes an open queued run during machine preparation and quota backoff", 
     sessionState: [],
     earlierTranscript: [],
   });
-  const overview = new ReadyOverview({
+  const overview = ReadyOverview.make({
     projects: [
-      new ProjectView({
+      ProjectView.make({
         repository,
         status: "clear",
         runs: [queued],
-        board: new BoardView({ lanes: [], failures: [] }),
+        board: BoardView.make({ lanes: [], failures: [] }),
         labels: [],
         preflightFindings: [],
       }),
@@ -439,7 +439,7 @@ it("refreshes an open queued run during machine preparation and quota backoff", 
   const refresh = () =>
     invalidateChanges(
       queryClient,
-      new ChangeNotice({
+      ChangeNotice.make({
         revision: 1,
         reset: false,
         changes: [{ kind: "run", id: runId }],
@@ -457,21 +457,21 @@ it("refreshes an open queued run during machine preparation and quota backoff", 
     );
     const drawer = page.getByRole("dialog");
     await expect.element(drawer.getByText(/^Creating a Hetzner machine,/)).toBeVisible();
-    const preparing = new RunDetailView({
+    const preparing = RunDetailView.make({
       ...detail,
-      machine: new MachineView({ ...machine, state: "preparing" }),
+      machine: MachineView.make({ ...machine, state: "preparing" }),
     });
     await serve(preparing);
     await refresh();
     await expect.element(drawer.getByText(/^Preparing the attempt image,/)).toBeVisible();
     const message = "shared core limit exceeded";
     await serve(
-      new RunDetailView({
+      RunDetailView.make({
         ...detail,
         machine: null,
-        run: new RunView({
+        run: RunView.make({
           ...queued,
-          machineWait: new MachineQuotaWait({ worker: machine.worker, message }),
+          machineWait: MachineQuotaWait.make({ worker: machine.worker, message }),
         }),
       }),
     );
@@ -492,24 +492,24 @@ it("refreshes an open queued run during machine preparation and quota backoff", 
 
 it("shares a direct-link drawer's transcript with the run page and merges earlier pages around a tail refetch", async () => {
   const id = RunId.make("loader-run");
-  const viewed = new RunView({ ...run, id });
-  const parent = new ParentSession({
+  const viewed = RunView.make({ ...run, id });
+  const parent = ParentSession.make({
     id: AgentSessionId.make("loader-parent"),
     agent,
     brain: run.agentBrain,
   });
   const message = (sequence: number) =>
-    new TranscriptEventView({
+    TranscriptEventView.make({
       sequence: TranscriptSequence.make(sequence),
       attemptId,
       receivedAt: "2026-09-17T00:10:00Z",
       direction: "outbound",
-      payload: new SessionEvent({
-        event: new TextOutput({ session: parent, text: `Transcript message ${sequence}` }),
+      payload: SessionEvent.make({
+        event: TextOutput.make({ session: parent, text: `Transcript message ${sequence}` }),
       }),
     });
   const detail = (sequences: ReadonlyArray<number>, before: number | null) =>
-    new RunDetailView({
+    RunDetailView.make({
       run: viewed,
       agentDefinitionChanged: false,
       eventDedupKey: "event",
@@ -519,7 +519,7 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
       earlierTranscript:
         before === null
           ? []
-          : [new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(before) })],
+          : [TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(before) })],
     });
   const encode = (sequences: ReadonlyArray<number>, before: number | null) =>
     JSON.stringify(Schema.encodeSync(RunDetailView)(detail(sequences, before)));
@@ -535,13 +535,13 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
   });
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({
+    ReadyOverview.make({
       projects: [
-        new ProjectView({
+        ProjectView.make({
           repository,
           status: "clear",
           runs: [viewed],
-          board: new BoardView({ lanes: [], failures: [] }),
+          board: BoardView.make({ lanes: [], failures: [] }),
           labels: [],
           preflightFindings: [],
         }),
@@ -552,7 +552,7 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
   );
   queryClient.setQueryData(
     deskQuery().queryKey,
-    new DeskView({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
+    DeskView.make({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
   );
   const options = runDetailQuery(queryClient, id);
   queryClient.setQueryData(sessionQuery().queryKey, { permissions: administratorPermissions });
@@ -641,40 +641,39 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
 it("shows the push refusal on the run page and in Needs attention alongside retained salvage", async () => {
   const message =
     "GitHub refused the push to resolution/project at refs/heads/usine/salvage/resolution-run/1 (HTTP 403). The token is a single-repository installation token. GitHub's message: Permission to resolution/project.git denied to usine-test[bot].";
-  const pushFailure = new GitHubPushFailureView({ message });
-  const retained = new SalvageRetained({
+  const pushFailure = GitHubPushFailureView.make({ message });
+  const retained = SalvageRetained.make({
     path: "/worker/checkout",
     commit: Option.none(),
     message,
   });
-  const failedRun = new RunView({
+  const failedRun = RunView.make({
     ...run,
-    attempts: run.attempts.map(
-      (attempt) =>
-        new AttemptView({
-          ...attempt,
-          outcome: new FailedAttemptView({ failure: pushFailure }),
-          salvage: retained,
-        }),
+    attempts: run.attempts.map((attempt) =>
+      AttemptView.make({
+        ...attempt,
+        outcome: FailedAttemptView.make({ failure: pushFailure }),
+        salvage: retained,
+      }),
     ),
   });
-  const overview = new ReadyOverview({
+  const overview = ReadyOverview.make({
     projects: [
-      new ProjectView({
+      ProjectView.make({
         repository,
         status: "needs-you",
         runs: [failedRun],
-        board: new BoardView({ lanes: [], failures: [] }),
+        board: BoardView.make({ lanes: [], failures: [] }),
         labels: [],
         preflightFindings: [],
       }),
     ],
     loops: [],
     needsYou: [
-      new RunFailureNeed({ id: "push-refused", repository, runId, loop, failure: pushFailure }),
+      RunFailureNeed.make({ id: "push-refused", repository, runId, loop, failure: pushFailure }),
     ],
   });
-  const detail = new RunDetailView({
+  const detail = RunDetailView.make({
     agentDefinitionChanged: false,
     run: failedRun,
     eventDedupKey: "event",

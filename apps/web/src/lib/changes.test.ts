@@ -48,7 +48,7 @@ it("uses each query's declared dependencies even when its cache key changes", as
     configuration: configurationQuery(),
     agents: agentsQuery(),
     entity: entityQuery(
-      new ConfigurationEntityKey({
+      ConfigurationEntityKey.make({
         kind: "agent",
         identifier: ConfigurationEntityId.make("developer"),
       }),
@@ -121,14 +121,14 @@ it("uses each query's declared dependencies even when its cache key changes", as
         });
       await invalidateChanges(
         client,
-        new ChangeNotice({ revision: 1, reset: false, changes: targets }),
+        ChangeNotice.make({ revision: 1, reset: false, changes: targets }),
       );
       const invalidated = entries.flatMap(([name]) =>
         client.getQueryState(["renamed", name])?.isInvalidated ? [name] : [],
       );
       expect(invalidated.sort()).toEqual([...expected].sort());
     }
-    await invalidateChanges(client, new ChangeNotice({ revision: 2, reset: true, changes: [] }));
+    await invalidateChanges(client, ChangeNotice.make({ revision: 2, reset: true, changes: [] }));
     for (const [name] of entries)
       expect(client.getQueryState(["renamed", name])?.isInvalidated).toBe(true);
   } finally {
@@ -154,7 +154,7 @@ it("retains a pending refresh when the ongoing read fails", async () => {
     },
   });
   const unsubscribe = observer.subscribe(() => {});
-  const notice = new ChangeNotice({
+  const notice = ChangeNotice.make({
     revision: 1,
     reset: false,
     changes: [{ kind: "project", id: "one" }],
@@ -197,7 +197,7 @@ it.each([false, true])(
     const refresh = () =>
       invalidateChanges(
         client,
-        new ChangeNotice({
+        ChangeNotice.make({
           revision: current,
           reset,
           changes: [{ kind: "project", id: "one" }],
@@ -239,12 +239,12 @@ it("refreshes task reads in the changed item's repository without refreshing oth
   const other = taskQuery(unrelated.repository, unrelated.number);
   const pending = taskQuery(taskRepository, ItemNumber.make(999));
   const foreignRepository = RepositoryName.make("another/repository");
-  const foreignItem = new TaskItemView({
+  const foreignItem = TaskItemView.make({
     ...unrelated.items[0],
     itemKey: Schema.encodeSync(GitHubItemKey)(["github", foreignRepository, unrelated.number]),
     url: `https://github.com/${foreignRepository}/issues/${unrelated.number}`,
   });
-  const foreignTask = new TaskView({
+  const foreignTask = TaskView.make({
     ...unrelated,
     repository: foreignRepository,
     current: foreignItem.itemKey,
@@ -260,7 +260,7 @@ it("refreshes task reads in the changed item's repository without refreshing oth
       await client.fetchQuery({ ...foreign, queryFn: async () => foreignTask });
       await invalidateChanges(
         client,
-        new ChangeNotice({
+        ChangeNotice.make({
           revision: 1,
           reset: false,
           changes: [{ kind: "item", id: item.itemKey }],
@@ -284,7 +284,7 @@ it("refreshes a PR-only task and its history when an issue outside its cached me
   const issue = combined.items.find(({ kind }) => kind === "issue");
   assert(pullRequest !== undefined);
   assert(issue !== undefined);
-  const standalone = new TaskView({
+  const standalone = TaskView.make({
     ...combined,
     number: pullRequest.number,
     title: pullRequest.title,
@@ -301,7 +301,7 @@ it("refreshes a PR-only task and its history when an issue outside its cached me
     linked = true;
     await invalidateChanges(
       client,
-      new ChangeNotice({
+      ChangeNotice.make({
         revision: 1,
         reset: false,
         changes: [{ kind: "item", id: issue.itemKey }],

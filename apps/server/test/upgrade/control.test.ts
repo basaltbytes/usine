@@ -78,10 +78,10 @@ it("proposes without draining, and an immediate request bypasses the idle wait",
         yield* upgrades.check();
         expect((yield* upgrades.status).available).toBe(target);
         expect((yield* upgrades.status).phase).toBe("idle");
-        yield* upgrades.request(new UpgradeRequest({ timing: "now", version: Option.none() }));
+        yield* upgrades.request(UpgradeRequest.make({ timing: "now", version: Option.none() }));
         expect(yield* Deferred.await(f.launched)).toBe(target);
         const duplicate = yield* upgrades
-          .request(new UpgradeRequest({ timing: "idle", version: Option.none() }))
+          .request(UpgradeRequest.make({ timing: "idle", version: Option.none() }))
           .pipe(Effect.flip);
         expect(duplicate).toBeInstanceOf(UpgradeError);
       }),
@@ -162,7 +162,7 @@ it.each(["idle", "now"] as const)(
           expect((yield* upgrades.status).available).toBe(target);
           yield* Ref.set(channel, "latest");
           const error = yield* upgrades
-            .request(new UpgradeRequest({ timing, version: Option.none() }))
+            .request(UpgradeRequest.make({ timing, version: Option.none() }))
             .pipe(Effect.flip);
           expect(error).toBeInstanceOf(UpgradeError);
           expect(yield* Deferred.isDone(f.launched)).toBe(false);
@@ -173,7 +173,7 @@ it.each(["idle", "now"] as const)(
 
           yield* upgrades.check();
           expect((yield* upgrades.status).available).toBe(stable);
-          yield* upgrades.request(new UpgradeRequest({ timing, version: Option.none() }));
+          yield* upgrades.request(UpgradeRequest.make({ timing, version: Option.none() }));
           yield* Deferred.succeed(f.drained, undefined);
           expect(yield* Deferred.await(f.launched)).toBe(stable);
         }),
@@ -258,13 +258,13 @@ it("refuses a missing helper before closing admission", async () => {
           settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "propose" }),
           platform: Option.some({
             ...f.platform,
-            preflight: Effect.fail(new UpgradeError({ message: "Missing helper unit" })),
+            preflight: Effect.fail(UpgradeError.make({ message: "Missing helper unit" })),
           }),
           drain: () => Ref.set(drainStarted, true),
           resume: Effect.void,
         });
         const error = yield* upgrades
-          .request(new UpgradeRequest({ timing: "idle", version: Option.some(target) }))
+          .request(UpgradeRequest.make({ timing: "idle", version: Option.some(target) }))
           .pipe(Effect.flip);
         expect(error.message).toBe("Missing helper unit");
         expect(yield* Ref.get(drainStarted)).toBe(false);
@@ -287,7 +287,7 @@ it("reports helper failure instead of waiting for a restart that will not happen
           resume: Effect.void,
         });
         yield* upgrades.request(
-          new UpgradeRequest({ timing: "idle", version: Option.some(target) }),
+          UpgradeRequest.make({ timing: "idle", version: Option.some(target) }),
         );
         yield* Deferred.await(f.launched);
         yield* Ref.set(
@@ -328,7 +328,7 @@ it.each(["propose", "automatic"] as const)(
                   Effect.flatMap((value) =>
                     value
                       ? Effect.void
-                      : Effect.fail(new UpgradeError({ message: "Package unavailable" })),
+                      : Effect.fail(UpgradeError.make({ message: "Package unavailable" })),
                   ),
                 ),
             }),
@@ -339,7 +339,7 @@ it.each(["propose", "automatic"] as const)(
           expect((yield* upgrades.status).available).toBeNull();
           for (const timing of ["idle", "now"] as const) {
             const error = yield* upgrades
-              .request(new UpgradeRequest({ timing, version: Option.some(target) }))
+              .request(UpgradeRequest.make({ timing, version: Option.some(target) }))
               .pipe(Effect.flip);
             expect(error.message).toBe("Package unavailable");
             expect((yield* upgrades.status).phase).toBe("idle");
@@ -397,7 +397,7 @@ it("keeps the verified release and install outcome while a newer release is inco
                     yield* Deferred.succeed(checking, undefined);
                     yield* Deferred.await(finishCheck);
                     if (!(yield* Ref.get(ready)))
-                      return yield* new UpgradeError({ message: reason });
+                      return yield* UpgradeError.make({ message: reason });
                   }),
           }),
           drain: () => Deferred.await(f.drained),
@@ -445,7 +445,7 @@ it.each([
       Effect.scoped(
         Effect.gen(function* () {
           const f = yield* fixture;
-          const record = Schema.decodeUnknownSync(UpgradeRecord)(
+          const record = Schema.decodeSync(UpgradeRecord)(
             { previous, target, ...persisted },
             { onExcessProperty: "error" },
           );
@@ -496,7 +496,7 @@ it("cancels a pending upgrade, resumes admission, and suppresses automatic re-re
         yield* upgrades.check();
         expect(yield* Deferred.isDone(f.launched)).toBe(false);
         yield* upgrades.request(
-          new UpgradeRequest({ timing: "now", version: Option.some(target) }),
+          UpgradeRequest.make({ timing: "now", version: Option.some(target) }),
         );
         yield* Deferred.await(f.launched);
         const error = yield* upgrades.cancel.pipe(Effect.flip);

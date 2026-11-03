@@ -208,7 +208,7 @@ describe("Boat SSH connection recovery", () => {
     const providers = fakeProviders();
     providers.boat.provisioningReads = 0;
     providers.boat.sshEndpoint = "203.0.113.10:22001";
-    const second = new CheckoutRequest({
+    const second = CheckoutRequest.make({
       ...request,
       attemptId: AttemptId.make(`${RUN}/execute/2`),
     });

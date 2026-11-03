@@ -70,7 +70,7 @@ const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function*
   const path = yield* Path.Path;
   const secretsPath = path.join(root, GITHUB_APP_SECRETS_PATH);
   const fail = (reason: SecretsFileReason, message: string) =>
-    new SecretsFileError({ path: secretsPath, reason, message });
+    SecretsFileError.make({ path: secretsPath, reason, message });
   const unreadable = () => fail("read", `Could not read GitHub App secrets at ${secretsPath}`);
 
   const info = yield* fileSystem.stat(secretsPath).pipe(Effect.mapError(unreadable));
@@ -103,19 +103,18 @@ export const loadLocalCredentials = Effect.fn("GitHubCredentials.loadLocal")(fun
   root: InstanceDirectory,
 ) {
   const env = yield* environment.pipe(
-    Effect.mapError(
-      () =>
-        new EnvironmentCredentialsError({
-          message:
-            "USINE_GITHUB_APP_ID or USINE_GITHUB_PRIVATE_KEY is invalid. Set USINE_GITHUB_APP_ID to the numeric App ID and USINE_GITHUB_PRIVATE_KEY to the App's PEM private key.",
-        }),
+    Effect.mapError(() =>
+      EnvironmentCredentialsError.make({
+        message:
+          "USINE_GITHUB_APP_ID or USINE_GITHUB_PRIVATE_KEY is invalid. Set USINE_GITHUB_APP_ID to the numeric App ID and USINE_GITHUB_PRIVATE_KEY to the App's PEM private key.",
+      }),
     ),
   );
   if (Option.isSome(env.appId) && Option.isSome(env.privateKey)) {
-    return new AppCredentials({ appId: env.appId.value, privateKey: env.privateKey.value });
+    return AppCredentials.make({ appId: env.appId.value, privateKey: env.privateKey.value });
   }
   const file = yield* readSecretsFile(root);
-  return new AppCredentials({
+  return AppCredentials.make({
     appId: Option.getOrElse(env.appId, () => file.appId),
     privateKey: Option.getOrElse(env.privateKey, () => file.privateKey),
   });
@@ -135,13 +134,12 @@ export const loadLocalSecrets = Effect.fn("GitHubCredentials.loadSecrets")(funct
   const path = yield* Path.Path;
   const target = path.join(root, GITHUB_APP_SECRETS_PATH);
   const exists = yield* fs.exists(target).pipe(
-    Effect.mapError(
-      () =>
-        new SecretsFileError({
-          path: target,
-          reason: "read",
-          message: `Could not read GitHub App secrets at ${target}`,
-        }),
+    Effect.mapError(() =>
+      SecretsFileError.make({
+        path: target,
+        reason: "read",
+        message: `Could not read GitHub App secrets at ${target}`,
+      }),
     ),
   );
   return exists ? Option.some(yield* readSecretsFile(root)) : Option.none();
@@ -178,13 +176,12 @@ export const writeLocalSecrets = Effect.fn("GitHubCredentials.writeSecrets")(fun
       yield* fs.rename(source, target);
     }),
   ).pipe(
-    Effect.mapError(
-      () =>
-        new SecretsFileError({
-          path: target,
-          reason: "write",
-          message: `Could not save GitHub App secrets at ${target}. Check directory permissions and retry setup.`,
-        }),
+    Effect.mapError(() =>
+      SecretsFileError.make({
+        path: target,
+        reason: "write",
+        message: `Could not save GitHub App secrets at ${target}. Check directory permissions and retry setup.`,
+      }),
     ),
   );
   yield* Effect.logInfo("GitHub App credentials saved", { appId: secrets.appId });

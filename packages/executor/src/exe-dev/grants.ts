@@ -67,14 +67,13 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
           );
           yield* restore(
             attach.pipe(
-              Effect.mapError(
-                (cause) =>
-                  new CredentialUnavailableError({
-                    repository,
-                    reason: "unreachable",
-                    message: `Can't attach exe.dev GitHub integration "${integration}"`,
-                    cause,
-                  }),
+              Effect.mapError((cause) =>
+                CredentialUnavailableError.make({
+                  repository,
+                  reason: "unreachable",
+                  message: `Can't attach exe.dev GitHub integration "${integration}"`,
+                  cause,
+                }),
               ),
             ),
           );

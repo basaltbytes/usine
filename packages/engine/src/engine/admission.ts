@@ -150,7 +150,7 @@ export class AttemptAdmission extends Context.Service<
       const waitForUpgrade = Effect.fn("AttemptAdmission.waitForUpgrade")(function* (
         target: ReleaseVersion,
       ) {
-        const wait = new UpgradeWait({ target, since: yield* DateTime.now });
+        const wait = UpgradeWait.make({ target, since: yield* DateTime.now });
         const pause = { wait, empty: yield* Deferred.make<void>() };
         const next = { upgrade: Option.some(pause), changed: yield* Deferred.make<void>() };
         const previous = yield* Ref.modify(gate, (current) => [
@@ -218,7 +218,7 @@ export class AttemptAdmission extends Context.Service<
         upgradeDrain: Effect.gen(function* () {
           const { upgrade } = yield* Ref.get(gate);
           const runIds = [...(yield* Ref.get(waiting))];
-          return Option.map(upgrade, ({ wait }) => new UpgradeDrain({ wait, runIds }));
+          return Option.map(upgrade, ({ wait }) => UpgradeDrain.make({ wait, runIds }));
         }),
       };
     }),

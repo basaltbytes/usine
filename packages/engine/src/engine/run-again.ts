@@ -63,8 +63,8 @@ export const runAgainSubmission = (
   const dedupKey = DedupKey.make(
     JSON.stringify(["operator-run-again", identity.reopening, identity.trigger]),
   );
-  return new Submission({
-    event: new Event({
+  return Submission.make({
+    event: Event.make({
       id: EventId.make(dedupKey),
       dedupKey,
       payload: ran.event.payload,

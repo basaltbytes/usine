@@ -43,7 +43,7 @@ export { SqliteReader, SqliteReaderState } from "./sqlite-reader/status.ts";
 const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
 const startupError = (operation: string, cause: unknown) =>
-  new EnginePersistenceError({ operation, cause });
+  EnginePersistenceError.make({ operation, cause });
 
 const runtimeStorePath = (path: Path.Path, instanceDirectory: InstanceDirectory) =>
   path.join(instanceDirectory, ".usine", "runtime.sqlite");
@@ -194,8 +194,8 @@ export const observationLayer = (
   | RunReader
   | UnconfirmedStops,
   RunEngineError
-> => {
-  return Layer.mergeAll(
+> =>
+  Layer.mergeAll(
     AttentionAcknowledgements.layer,
     CycleBudgets.layer,
     ItemProjectionReader.layer,
@@ -203,7 +203,6 @@ export const observationLayer = (
     RepositoryLabelProjectionReader.layer,
     RunReader.layer,
   ).pipe(Layer.provide(database), Layer.merge(UnconfirmedStops.empty));
-};
 
 const readableRuntimeStore = Effect.fn("LocalSqlite.readableRuntimeStore")(function* (
   filename: string,
@@ -299,7 +298,7 @@ export const backup = Effect.fn("LocalSqlite.backup")(
     const failure =
       (operation: RuntimeStoreBackupError["operation"]) =>
       (cause: PlatformError.PlatformError | SqlError) =>
-        new RuntimeStoreBackupError({
+        RuntimeStoreBackupError.make({
           operation,
           source,
           destination,

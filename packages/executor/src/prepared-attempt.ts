@@ -127,7 +127,7 @@ export const preparedAttemptsFor = (
               yield* Effect.annotateCurrentSpan({ attemptId, worker: prepared.workspace.worker });
               if (yield* Ref.getAndSet(unavailable, true)) {
                 yield* Effect.logWarning("Attempt was already launched or released", { attemptId });
-                return yield* new InfraFailure({
+                return yield* InfraFailure.make({
                   message: `Attempt ${attemptId} was already launched or released`,
                   cause: new Error("prepared attempt is no longer available"),
                 });
@@ -156,10 +156,10 @@ export const preparedAttemptsFor = (
                   warn: (message) =>
                     warnParent(
                       attemptId,
-                      new AttemptChannel.Intervention({
+                      AttemptChannel.Intervention.make({
                         operator: "engine",
-                        target: new AttemptChannel.ParentTarget(),
-                        action: new AttemptChannel.Steer({ message }),
+                        target: AttemptChannel.ParentTarget.make(),
+                        action: AttemptChannel.Steer.make({ message }),
                       }),
                     ),
                   recordUnsupervised: (unsupervised) => recordUnsupervised(attemptId, unsupervised),

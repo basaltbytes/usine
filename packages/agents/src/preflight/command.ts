@@ -12,7 +12,7 @@ export const probeFailed = (
   command: string,
   args: ReadonlyArray<string>,
 ) =>
-  new HarnessUnavailableError({
+  HarnessUnavailableError.make({
     harness,
     capability,
     message: `${command} ${args.join(" ")} failed. Check the ${harness} installation and login on the worker.`,
@@ -33,28 +33,26 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
 ) {
   yield* Effect.annotateCurrentSpan({ harness, capability, host: host._tag });
   return yield* hostOutput(host, { environment, command, args }).pipe(
-    Effect.flatMap((output) =>
-      host._tag === "RemoteShell" && output.exitCode === SSH_FAILURE
-        ? Effect.fail(
-            new SessionOperationError({
-              operation: "launch",
-              sessionId: Option.none(),
-              message: `Can't reach ${host.destination} to run ${command}`,
-              cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
-            }),
-          )
-        : Effect.succeed(output),
+    Effect.filterOrFail(
+      (output) => !(host._tag === "RemoteShell" && output.exitCode === SSH_FAILURE),
+      (output) =>
+        SessionOperationError.make({
+          operation: "launch",
+          sessionId: Option.none(),
+          message: `Can't reach ${host.destination} to run ${command}`,
+          cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
+        }),
     ),
     Effect.timeout("30 seconds"),
     Effect.catchTags({
       PlatformError: () =>
-        new HarnessUnavailableError({
+        HarnessUnavailableError.make({
           harness,
           capability,
           message: `The worker can't run ${command}`,
         }),
       TimeoutError: (cause) =>
-        new SessionOperationError({
+        SessionOperationError.make({
           operation: "launch",
           sessionId: Option.none(),
           message: `${command} readiness check timed out`,

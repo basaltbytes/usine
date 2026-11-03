@@ -40,12 +40,12 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
 });
-const developer = new Agent({
+const developer = Agent.make({
   name: AgentName.make("developer"),
   brain,
   parentModel: Option.none(),
@@ -53,7 +53,7 @@ const developer = new Agent({
   persona: AgentPersona.make("Build it."),
 });
 
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -66,7 +66,7 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
     },
   ],
 });
-const instance = new LoadedInstance({
+const instance = LoadedInstance.make({
   config,
   agents: [],
   invalidAgents: [],
@@ -79,7 +79,7 @@ const at = (iso: string) => DateTime.makeUnsafe(iso);
 const pullUrl = (number: number) => `https://github.com/${repository}/pull/${number}`;
 
 const issue = (number: number, title: string, closingPullRequests: ReadonlyArray<number> = []) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey: gitHubItemKey(repository, number),
     repository,
     source: ItemProjectionSource.make("issue"),
@@ -118,7 +118,7 @@ const pullRequest = (
   title: string,
   state: { readonly merged: boolean; readonly mergeable: string },
 ) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey: gitHubItemKey(repository, number),
     repository,
     source: ItemProjectionSource.make("pr"),
@@ -162,7 +162,7 @@ const attempt = (
   outcome: Attempt["outcome"],
   endedAt: Option.Option<string>,
 ) =>
-  new Attempt({
+  Attempt.make({
     id: AttemptId.make(`${runId}/${number}`),
     runId,
     stepName: StepName.make("run"),
@@ -190,8 +190,8 @@ const summary = (
   runAgain: Option.Option<RunAgain> = Option.none(),
 ) => {
   const runId = RunId.make(id);
-  return new RunSnapshot({
-    event: new Event({
+  return RunSnapshot.make({
+    event: Event.make({
       id: EventId.make(`event-${id}`),
       dedupKey: DedupKey.make(`event/${id}`),
       payload: {},
@@ -201,14 +201,14 @@ const summary = (
     permissions: "write",
     parentModel: Option.none(),
     itemKey: gitHubItemKey(repository, item),
-    run: new Run({
+    run: Run.make({
       id: runId,
       eventId: EventId.make(`event-${id}`),
       loop: LoopName.make(loop),
       state,
       openedAt: at(openedAt),
     }),
-    step: new Step({ runId, name: StepName.make("run"), result }),
+    step: Step.make({ runId, name: StepName.make("run"), result }),
     attempts: attempts(runId),
     resolvedFailureAttemptId: Option.none(),
     closedAt: Option.none(),
@@ -220,7 +220,7 @@ const summary = (
   });
 };
 
-const succeeded = Option.some(new AttemptSucceeded());
+const succeeded = Option.some(AttemptSucceeded.make());
 
 /**
  * Issue #40 with PR #41, linked by the plan Run's result, and PR #42, linked by the issue's closing
@@ -238,7 +238,7 @@ const runs = [
     "run-plan",
     40,
     "plan",
-    new RunState.Succeeded(),
+    RunState.Succeeded.make(),
     "2026-10-02T09:00:00.000Z",
     (runId) => [
       attempt(
@@ -250,11 +250,11 @@ const runs = [
       ),
     ],
     Option.some(
-      new StepResult({
+      StepResult.make({
         message: "Opened the plan.",
         facts: [
-          new PullRequest({ number: 41, url: new URL(pullUrl(41)) }),
-          new Comment({
+          PullRequest.make({ number: 41, url: new URL(pullUrl(41)) }),
+          Comment.make({
             url: new URL(`https://github.com/${repository}/issues/40#issuecomment-1`),
             kind: "issue-comment",
             at: Option.none(),
@@ -267,29 +267,30 @@ const runs = [
     "run-dev",
     40,
     "start-dev",
-    new RunState.Failed(),
+    RunState.Failed.make(),
     "2026-10-03T09:00:00.000Z",
     (runId) => [
       attempt(
         runId,
         1,
         "2026-10-03T09:00:00.000Z",
-        Option.some(new AttemptFailed({ failure: new AgentFailure({ message: "Checks failed" }) })),
+        Option.some(
+          AttemptFailed.make({ failure: AgentFailure.make({ message: "Checks failed" }) }),
+        ),
         Option.some("2026-10-03T09:30:00.000Z"),
       ),
-      new Attempt({
+      Attempt.make({
         ...attempt(
           runId,
           2,
           "2026-10-03T10:00:00.000Z",
           Option.some(
-            new AttemptFailed({ failure: new AgentFailure({ message: "Checks failed" }) }),
+            AttemptFailed.make({ failure: AgentFailure.make({ message: "Checks failed" }) }),
           ),
           Option.some("2026-10-03T10:30:00.000Z"),
         ),
-        // A failed Attempt keeps the comments it posted on the Attempt itself.
         comments: [
-          new Comment({
+          Comment.make({
             url: new URL(`https://github.com/${repository}/issues/40#issuecomment-2`),
             kind: "issue-comment",
             at: Option.some(at("2026-10-03T10:10:00.000Z")),
@@ -302,7 +303,7 @@ const runs = [
     "run-review",
     41,
     "review-pr",
-    new RunState.Succeeded(),
+    RunState.Succeeded.make(),
     "2026-10-04T09:00:00.000Z",
     (runId) => [
       attempt(
@@ -314,15 +315,15 @@ const runs = [
       ),
     ],
     Option.some(
-      new StepResult({
+      StepResult.make({
         message: "Reviewed.",
         facts: [
-          new Comment({
+          Comment.make({
             url: new URL(`${pullUrl(41)}#pullrequestreview-7`),
             kind: "review",
             at: Option.some(DateTime.makeUnsafe("2026-10-04T09:05:00.000Z")),
           }),
-          new Comment({
+          Comment.make({
             url: new URL(`${pullUrl(41)}#discussion_r8`),
             kind: "review-comment",
             at: Option.none(),
@@ -335,14 +336,14 @@ const runs = [
     "run-fix",
     42,
     "fix-ci",
-    new RunState.Canceled({ reason: new RunState.OperatorCanceled() }),
+    RunState.Canceled.make({ reason: RunState.OperatorCanceled.make() }),
     "2026-10-05T09:00:00.000Z",
     (runId) => [
       attempt(
         runId,
         1,
         "2026-10-05T09:00:00.000Z",
-        Option.some(new AttemptCanceled()),
+        Option.some(AttemptCanceled.make()),
         Option.some("2026-10-05T09:05:00.000Z"),
       ),
     ],
@@ -351,12 +352,12 @@ const runs = [
     "run-fix-again",
     42,
     "fix-ci",
-    new RunState.Running(),
+    RunState.Running.make(),
     "2026-10-06T09:00:00.000Z",
     (runId) => [attempt(runId, 1, "2026-10-06T09:01:00.000Z", Option.none(), Option.none())],
     Option.none(),
     Option.some(
-      new RunAgain({
+      RunAgain.make({
         from: RunId.make("run-fix"),
         requestedBy: Option.some(OperatorLogin.make("PhilDL")),
       }),
@@ -366,7 +367,7 @@ const runs = [
     "run-other",
     50,
     "triage",
-    new RunState.Succeeded(),
+    RunState.Succeeded.make(),
     "2026-10-07T09:00:00.000Z",
     () => [],
   ),
@@ -394,7 +395,7 @@ const observation = (
         Effect.as(runs.filter(({ itemKey }) => keys.includes(itemKey)).map(summarizeRun)),
       ),
     events: (runIds) => Effect.succeed(runEvents.filter(({ runId }) => runIds.includes(runId))),
-    revision: () => Effect.succeed(Option.none()),
+    revision: () => Effect.succeedNone,
     transcript: () => Effect.succeed([]),
     attemptsByWorker: () => Effect.succeed([]),
     sightings: () => Effect.die("A Task reads no Loop sightings"),
@@ -412,19 +413,19 @@ const observation = (
     openIssues: () => Effect.die("the Task read does not check open issues"),
   });
   const labels = Layer.succeed(RepositoryLabelProjectionReader)({
-    get: () => Effect.succeed(Option.none()),
+    get: () => Effect.succeedNone,
   });
   const polling = Layer.succeed(PollingTriggers)({
-    lastHint: Effect.succeed(Option.none()),
+    lastHint: Effect.succeedNone,
     hint: () => Effect.die("unused"),
     poll: () => Effect.die("unused"),
     run: () => Effect.never,
-    latest: Effect.succeed(Option.none()),
+    latest: Effect.succeedNone,
   });
   const schedules = Layer.succeed(ScheduleTriggers)({
     tick: () => Effect.die("unused"),
     run: () => Effect.never,
-    latest: Effect.succeed(Option.none()),
+    latest: Effect.succeedNone,
   });
   return OperatorObservation.layer.pipe(
     Layer.provide(configurationLayer),
@@ -548,9 +549,9 @@ describe("Task view", () => {
   it.effect("names the lane the Board places its running Task in", () =>
     Effect.gen(function* () {
       // fix-ci was triggered while #42 had `ready`; it has `ready-for-review` now.
-      const triggered = new RunEvent({
+      const triggered = RunEvent.make({
         runId: RunId.make("run-fix-again"),
-        event: new Event({
+        event: Event.make({
           id: EventId.make("event-run-fix-again"),
           dedupKey: DedupKey.make("event-run-fix-again"),
           payload: { number: 42, labels: { totalCount: 1, nodes: [{ name: "ready" }] } },
@@ -561,9 +562,9 @@ describe("Task view", () => {
       assert.strictEqual(labeled.task.current, gitHubItemKey(repository, 42));
       assert.strictEqual(labeled.task.lane.name, "In review");
       // With no lane for `ready-for-review`, the Task is in the lane its Run was triggered from.
-      const unlaned = new LoadedInstance({
+      const unlaned = LoadedInstance.make({
         ...instance,
-        config: Schema.decodeUnknownSync(UsineConfig)({
+        config: Schema.decodeSync(UsineConfig)({
           version: 1,
           repos: [
             {

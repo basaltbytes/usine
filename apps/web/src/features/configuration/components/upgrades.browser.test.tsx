@@ -24,7 +24,7 @@ declare module "vitest/browser" {
   }
 }
 
-const available = new UpgradeView({
+const available = UpgradeView.make({
   running: "1.0.1-next.41.gabcdef0",
   channel: "next",
   mode: "propose",
@@ -39,7 +39,7 @@ const json = Schema.encodeSync(Schema.fromJsonString(UpgradeView));
 it.each(["idle", "now"] satisfies ReadonlyArray<UpgradeTiming>)(
   "requests the %s upgrade and shows progress on desktop and mobile",
   async (timing) => {
-    const progress = new UpgradeView({
+    const progress = UpgradeView.make({
       ...available,
       phase: timing === "idle" ? "waiting" : "installing",
     });
@@ -95,7 +95,7 @@ it.each(["idle", "now"] satisfies ReadonlyArray<UpgradeTiming>)(
 );
 
 it("keeps the rollback reason visible and explains a refused retry", async () => {
-  const rolledBack = new UpgradeView({
+  const rolledBack = UpgradeView.make({
     ...available,
     outcome: UpgradeRecord.make({
       previous: ReleaseVersion.make(available.running),
@@ -142,7 +142,7 @@ it("keeps the rollback reason visible and explains a refused retry", async () =>
 });
 
 it("cancels a waiting upgrade and reports a cancellation rejected after installation starts", async () => {
-  const waiting = new UpgradeView({ ...available, phase: "waiting", target: available.available });
+  const waiting = UpgradeView.make({ ...available, phase: "waiting", target: available.available });
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);

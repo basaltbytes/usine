@@ -107,10 +107,10 @@ describe("Codex thread tokens", () => {
         cacheWriteInputTokens: 20_000,
         outputTokens: 400,
       }),
-      new TokenBreakdown({
-        input: 30_000,
-        cachedInput: 1_950_000,
-        cacheWrite: 20_000,
+      TokenBreakdown.make({
+        input: 30000,
+        cachedInput: 1950000,
+        cacheWrite: 20000,
         output: 400,
       }),
     );

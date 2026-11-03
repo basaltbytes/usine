@@ -38,7 +38,7 @@ const transactionalStore = Layer.effect(
           Effect.provideService(SqlClient.BeginTransaction, "BEGIN IMMEDIATE"),
           Effect.catchTag("SqlError", (cause) =>
             Effect.fail(
-              new ConfigurationStoreError({
+              ConfigurationStoreError.make({
                 operation: "commit configuration and loop controls",
                 cause,
               }),
@@ -116,19 +116,18 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
     fs.exists(`${directory}/usine.yaml`),
   ).pipe(
     Effect.provide(NodeServices.layer),
-    Effect.mapError(
-      (cause) => new ConfigurationStoreError({ operation: "inspect initial configuration", cause }),
+    Effect.mapError((cause) =>
+      ConfigurationStoreError.make({ operation: "inspect initial configuration", cause }),
     ),
   );
   const imported = hasFiles
     ? yield* folder.load(directory)
-    : new LoadedInstance({
+    : LoadedInstance.make({
         config: yield* (yield* ConfigParser)
           .parseUsineYaml(InstancePath.make("usine.yaml"), "version: 2\nrepos: []\n")
           .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ConfigurationStoreError({ operation: "initialize empty configuration", cause }),
+            Effect.mapError((cause) =>
+              ConfigurationStoreError.make({ operation: "initialize empty configuration", cause }),
             ),
           ),
         agents: [],
@@ -153,7 +152,7 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
     );
   const initialized = yield* store.read;
   if (Option.isNone(initialized.instance))
-    return yield* new ConfigurationStoreError({
+    return yield* ConfigurationStoreError.make({
       operation: "initialize configuration",
       cause: "Configuration is empty after import",
     });

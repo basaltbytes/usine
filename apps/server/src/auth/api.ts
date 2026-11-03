@@ -112,7 +112,7 @@ export const AuthApi = HttpApiGroup.make("authentication")
         id: Schema.String,
         userCode: Schema.String,
         verificationUri: Schema.String,
-        interval: Schema.Number,
+        interval: Schema.Finite,
       }),
       error,
     })
@@ -154,7 +154,7 @@ export const AuthApi = HttpApiGroup.make("authentication")
         "Resolves the GitHub login to a numeric identity and enrolls the member.",
       ),
     HttpApiEndpoint.delete("removeMember", "/api/members/:id", {
-      params: { id: Schema.NumberFromString.pipe(Schema.decodeTo(GitHubUserId)) },
+      params: { id: Schema.FiniteFromString.pipe(Schema.decodeTo(GitHubUserId)) },
       success: acknowledged,
       error,
     })

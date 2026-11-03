@@ -33,13 +33,13 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   approval: ApprovalRequirement,
   /** The decision at event submission, or None for older events. */
   approvalReason: Schema.Option(Schema.NonEmptyString).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** The failed head that caused a CI fix event, independent of label selection. */
   ciFailureHead: Schema.Option(CommitSha).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** Completion actions inherited from the source CI wait. */
   ciOnGreen: CiHandoff.fields.onGreen.pipe(
@@ -48,8 +48,8 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   ),
   /** The loop CI policy captured with this event. */
   ciPolicy: Schema.Option(CiPolicy).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.none())),
-    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
   /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions.pipe(
@@ -58,8 +58,8 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   ),
   /** The cycle limit; schedule triggers set `None`. */
   cycleLimit: Schema.Option(CycleLimit).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),
-    Schema.withConstructorDefault(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),
+    Schema.withDecodingDefaultTypeKey(Effect.succeedSome(DEFAULT_CYCLE_LIMIT)),
+    Schema.withConstructorDefault(Effect.succeedSome(DEFAULT_CYCLE_LIMIT)),
   ),
   /** The Item's cycle generation, read before fetching trigger input. */
   cycleGeneration: CycleGeneration.pipe(
@@ -101,9 +101,9 @@ export const reopeningOf = (
   reopening: number,
 ): Submission => {
   const dedupKey = DedupKey.make(JSON.stringify(["reopened", reopening, original]));
-  return new Submission({
+  return Submission.make({
     ...submission,
-    event: new Event({ ...submission.event, id: EventId.make(dedupKey), dedupKey }),
+    event: Event.make({ ...submission.event, id: EventId.make(dedupKey), dedupKey }),
   });
 };
 

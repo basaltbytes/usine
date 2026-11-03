@@ -185,14 +185,14 @@ export const persistence =
   (operation: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, RunStoreError, R> =>
     Effect.mapError(effect, (error) =>
-      isRunStoreError(error) ? error : new EnginePersistenceError({ operation, cause: error }),
+      isRunStoreError(error) ? error : EnginePersistenceError.make({ operation, cause: error }),
     );
 
 /** The Event columns shared by route rows and Run Event rows. */
 type EventColumns = Pick<EventRouteRow, "eventId" | "dedupKey" | "payload" | "receivedAt">;
 
 export const eventFromRow = (row: EventColumns): Event =>
-  new Event({
+  Event.make({
     id: row.eventId,
     dedupKey: row.dedupKey,
     payload: row.payload,
@@ -200,10 +200,10 @@ export const eventFromRow = (row: EventColumns): Event =>
   });
 
 export const runEventFromRow = (row: typeof RunEventRow.Type): RunEvent =>
-  new RunEvent({ runId: row.runId, event: eventFromRow(row) });
+  RunEvent.make({ runId: row.runId, event: eventFromRow(row) });
 
 export const submissionFromRow = (row: EventRouteRow): Submission =>
-  new Submission({
+  Submission.make({
     event: eventFromRow(row),
     itemKey: row.itemKey,
     loop: row.loop,
@@ -226,7 +226,7 @@ export const submissionFromRow = (row: EventRouteRow): Submission =>
 export const runFromRow = (
   row: Pick<RunRow, "runId" | "eventId" | "loop" | "state" | "openedAt">,
 ): Run =>
-  new Run({
+  Run.make({
     id: row.runId,
     eventId: row.eventId,
     loop: row.loop,
@@ -237,36 +237,31 @@ export const runFromRow = (
 export const approvalFromRow = (
   row: Pick<RunRow, "approvedAt" | "approvalChannel" | "approver">,
 ): Option.Option<RunApproval> =>
-  Option.map(
-    Option.fromNullishOr(row.approvedAt),
-    (approvedAt) =>
-      new RunApproval({
-        approvedAt,
-        source: Option.map(
-          Option.fromNullishOr(row.approvalChannel),
-          (channel) =>
-            new ApprovalSource({ channel, approver: Option.fromNullishOr(row.approver) }),
-        ),
-      }),
+  Option.map(Option.fromNullishOr(row.approvedAt), (approvedAt) =>
+    RunApproval.make({
+      approvedAt,
+      source: Option.map(Option.fromNullishOr(row.approvalChannel), (channel) =>
+        ApprovalSource.make({ channel, approver: Option.fromNullishOr(row.approver) }),
+      ),
+    }),
   );
 
 export const runAgainFromRow = (
   row: Pick<RunRow, "againFrom" | "againRequestedBy">,
 ): Option.Option<RunAgain> =>
-  Option.map(
-    Option.fromNullishOr(row.againFrom),
-    (from) => new RunAgain({ from, requestedBy: Option.fromNullishOr(row.againRequestedBy) }),
+  Option.map(Option.fromNullishOr(row.againFrom), (from) =>
+    RunAgain.make({ from, requestedBy: Option.fromNullishOr(row.againRequestedBy) }),
   );
 
 export const stepFromRow = (row: RunRow): Step =>
-  new Step({
+  Step.make({
     runId: row.runId,
     name: row.stepName,
     result: Option.fromNullishOr(row.result),
   });
 
 const attemptSummaryFromRow = (row: AttemptSummaryRow): AttemptSummary =>
-  new AttemptSummary({
+  AttemptSummary.make({
     id: row.attemptId,
     runId: row.runId,
     stepName: row.stepName,
@@ -290,13 +285,13 @@ const attemptSummaryFromRow = (row: AttemptSummaryRow): AttemptSummary =>
   });
 
 export const attemptFromRow = (row: AttemptRow): Attempt =>
-  new Attempt({ ...attemptSummaryFromRow(row), task: row.task, comments: row.comments ?? [] });
+  Attempt.make({ ...attemptSummaryFromRow(row), task: row.task, comments: row.comments ?? [] });
 
 export const runSummaryFromRow = (
   row: RunSummaryRow,
   storedAttempts: ReadonlyArray<AttemptSummaryRow>,
 ): RunSummary =>
-  new RunSummary({
+  RunSummary.make({
     itemKey: row.itemKey,
     run: runFromRow(row),
     pullRequestUrl: row.pullRequestUrl,
@@ -311,7 +306,7 @@ export const runSummaryFromRow = (
   });
 
 export const transcriptEntryFromRow = (row: TranscriptRow): TranscriptEntry =>
-  new TranscriptEntry({
+  TranscriptEntry.make({
     sequence: row.sequence,
     attemptId: row.attemptId,
     direction: row.direction,

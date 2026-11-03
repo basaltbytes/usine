@@ -18,12 +18,11 @@ export const detectInstaller = Effect.fn("Scaffold.detectInstaller")(function* (
   yield* Effect.annotateCurrentSpan({ directory });
   const userAgent = yield* Config.String("npm_config_user_agent").pipe(Config.withDefault("npm"));
   return yield* Schema.decodeUnknownEffect(Installer)(userAgent.split("/")[0]).pipe(
-    Effect.mapError(
-      () =>
-        new ScaffoldError({
-          directory,
-          message: "Use npm create usine@latest <folder> or pnpm create usine <folder>.",
-        }),
+    Effect.mapError(() =>
+      ScaffoldError.make({
+        directory,
+        message: "Use npm create usine@latest <folder> or pnpm create usine <folder>.",
+      }),
     ),
   );
 });
@@ -39,7 +38,7 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
   if (yield* fs.exists(directory)) {
     if ((yield* fs.readDirectory(directory)).length > 0) {
       yield* Effect.logWarning("Scaffold refused a nonempty folder", { directory });
-      return yield* new ScaffoldError({ directory, message: "Choose a new or empty folder." });
+      return yield* ScaffoldError.make({ directory, message: "Choose a new or empty folder." });
     }
   } else {
     yield* fs.makeDirectory(directory, { recursive: true });
@@ -81,7 +80,7 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
   );
   if (exitCode !== 0) {
     yield* Effect.logError("Scaffold installation failed", { directory, installer, exitCode });
-    return yield* new ScaffoldError({
+    return yield* ScaffoldError.make({
       directory,
       message: `Installation exited with status ${exitCode}. Run ${installCommand} in this folder to retry.`,
     });
@@ -93,7 +92,7 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
       installer,
       lockfile,
     });
-    return yield* new ScaffoldError({
+    return yield* ScaffoldError.make({
       directory,
       message: `Installation did not write ${lockfile}. Enable lockfiles and run ${installCommand} in this folder.`,
     });

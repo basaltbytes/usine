@@ -77,12 +77,12 @@ const repositoryApi = (repository: RepositoryName): string =>
     .join("/")}`;
 
 const makeInstance = (repository: RepositoryName, label: string): LoadedInstance => {
-  const config = Schema.decodeUnknownSync(UsineConfig)({
+  const config = Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: repository, tags: ["integration"] }],
     settings: { poll_interval: 15 },
   });
-  const agent = new AgentFile({
+  const agent = AgentFile.make({
     name: AgentName.make("integration-agent"),
     harness: "codex",
     model: ModelId.make("gpt-5.6-sol"),
@@ -91,14 +91,14 @@ const makeInstance = (repository: RepositoryName, label: string): LoadedInstance
     parentEffort: Option.none(),
     persona: AgentPersona.make("Exercise the polling integration path."),
   });
-  const loop = new LoopFile({
+  const loop = LoopFile.make({
     name: LoopName.make("integration-label"),
-    trigger: new IssueTrigger({
+    trigger: IssueTrigger.make({
       on: "issue",
       if: Source.make(`item.labels.nodes.exists(label, label.name == ${JSON.stringify(label)})`),
     }),
     selector: Option.some(
-      new Selector({
+      Selector.make({
         repos: Option.some([config.repos[0]?.name ?? assert.fail("missing integration repo")]),
         tags: Option.none(),
       }),
@@ -108,7 +108,7 @@ const makeInstance = (repository: RepositoryName, label: string): LoadedInstance
     agent: agent.name,
     body: PromptTemplate.make("Integration test."),
   });
-  return new LoadedInstance({
+  return LoadedInstance.make({
     config,
     agents: [agent],
     invalidAgents: [],
@@ -122,7 +122,7 @@ const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) =
   const executor = Layer.succeed(StepExecutor)({
     workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
-    outcome: () => Effect.succeed(Option.none()),
+    outcome: () => Effect.succeedNone,
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
@@ -156,7 +156,7 @@ const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) =
   );
   return Layer.merge(
     dependencies,
-    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor)).pipe(Layer.provide(dependencies)),
+    PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor), Layer.provide(dependencies)),
   );
 };
 

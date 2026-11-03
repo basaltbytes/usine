@@ -34,7 +34,7 @@ export const sqliteConfigurationLayer = Layer.effect(
     const sql = yield* SqlClient.SqlClient;
     const parser = yield* ConfigParser;
     const failure = (operation: string) => (cause: unknown) =>
-      new ConfigurationStoreError({ operation, cause });
+      ConfigurationStoreError.make({ operation, cause });
     yield* makeMigrator({})({
       table: "usine_configuration_migrations",
       loader: fromRecord(
@@ -53,7 +53,7 @@ export const sqliteConfigurationLayer = Layer.effect(
           yield* sql`SELECT value FROM ${sql(revisionTable)} WHERE number > ${number} ORDER BY number`;
         return yield* Effect.forEach(rows, (row) =>
           Schema.decodeUnknownEffect(Row)(row).pipe(
-            Effect.flatMap(({ value }) => Schema.decodeUnknownEffect(RevisionJson)(value)),
+            Effect.flatMap(({ value }) => Schema.decodeEffect(RevisionJson)(value)),
           ),
         );
       },
@@ -71,11 +71,11 @@ export const sqliteConfigurationLayer = Layer.effect(
       const stored = yield* sql`SELECT value FROM ${sql(entityTable)} ORDER BY position`;
       const entities = yield* Effect.forEach(stored, (entry) =>
         Schema.decodeUnknownEffect(Row)(entry).pipe(
-          Effect.flatMap(({ value }) => Schema.decodeUnknownEffect(EntityJson)(value)),
+          Effect.flatMap(({ value }) => Schema.decodeEffect(EntityJson)(value)),
         ),
       );
       const instance = yield* validateConfiguration(parser, entities);
-      return new Configuration({ number, instance: Option.some(instance) });
+      return Configuration.make({ number, instance: Option.some(instance) });
     });
 
     return ConfigurationStore.of({
@@ -98,7 +98,7 @@ export const sqliteConfigurationLayer = Layer.effect(
           const row = rows[0];
           if (row === undefined) return Option.none();
           const { value } = yield* Schema.decodeUnknownEffect(Row)(row);
-          return Option.some(yield* Schema.decodeUnknownEffect(RevisionJson)(value));
+          return Option.some(yield* Schema.decodeEffect(RevisionJson)(value));
         },
         Effect.mapError(failure("read revision")),
       ),

@@ -206,9 +206,9 @@ describe("ChatGPT login at the gateway", () => {
         const providers = {
           ...NO_PROVIDERS,
           openai: Option.some(
-            new OpenAiProvider({
+            OpenAiProvider.make({
               upstream: UpstreamBase.make(`${standIn.origin}/backend-api/codex`),
-              credential: new ChatGptLogin({
+              credential: ChatGptLogin.make({
                 authFile: HostFilePath.make(authFile),
                 tokenUrl: UpstreamBase.make(`${standIn.origin}/oauth/token`),
               }),
@@ -225,10 +225,10 @@ describe("ChatGPT login at the gateway", () => {
             ),
           });
           const attached = yield* client.attachments.attach({
-            payload: new AttachRequest({
+            payload: AttachRequest.make({
               worker: WORKER,
               repository: REPOSITORY,
-              credential: new AnonymousCredential(),
+              credential: AnonymousCredential.make(),
               expiresAt: DateTime.add(yield* DateTime.now, { minutes: 10 }),
             }),
           });

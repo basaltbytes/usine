@@ -62,7 +62,7 @@ export const queryGraphql = Effect.fn("GitHub.queryGraphql")(
           rateLimitRetryEpoch(response.headers, now),
           () => now + GRAPHQL_RATE_LIMIT_FALLBACK_MS,
         );
-        return yield* new GitHubRateLimitError({
+        return yield* GitHubRateLimitError.make({
           operation,
           retryAt: DateTime.makeUnsafe(retryAt),
           message: "GitHub GraphQL API rate limit exceeded",
@@ -85,7 +85,7 @@ export const queryGraphql = Effect.fn("GitHub.queryGraphql")(
               (error.type === undefined && error.message.startsWith("Something went wrong")),
           )
         ) {
-          return yield* new GraphqlServerError({ failure });
+          return yield* GraphqlServerError.make({ failure });
         }
         return yield* failure;
       }

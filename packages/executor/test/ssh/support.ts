@@ -67,9 +67,13 @@ const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
  */
 export const aloneOnItem = (attemptId: AttemptId = ATTEMPT_ID) =>
   Effect.succeed(
-    new AttemptWindows({
+    AttemptWindows.make({
       own: Option.some(
-        new AttemptWindow({ attemptId, startedAt: DateTime.makeUnsafe(0), endedAt: Option.none() }),
+        AttemptWindow.make({
+          attemptId,
+          startedAt: DateTime.makeUnsafe(0),
+          endedAt: Option.none(),
+        }),
       ),
       overlapping: [],
     }),
@@ -86,9 +90,9 @@ export const CREDENTIALS = `${WORKER_ROOT}/credentials/remote-run_execute_1`;
 export const GIT_DIRECTORY = `${WORKER_ROOT}/repos/acme_demo.git/worktrees/remote-run_execute_1`;
 /** The prefix of every token the fake provider mints, so a substring search finds leaks. */
 export const TOKEN_PREFIX = "ghs_ssh-worker-test-token-";
-export const TEST_AGENT = new Agent({
+export const TEST_AGENT = Agent.make({
   name: AgentName.make("developer"),
-  brain: new BrainSpec({
+  brain: BrainSpec.make({
     harness: "claude",
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
@@ -775,19 +779,15 @@ export const fakeMachine = () => {
     makeDirectory: () => Effect.void,
     makeTempDirectoryScoped: () => Effect.succeed(LOCAL_TEMPORARY_DIRECTORY),
     readFileString: (path) =>
-      Option.match(Option.fromNullishOr(state.localFiles.get(path)), {
-        onNone: () =>
-          Effect.fail(
-            PlatformError.systemError({
-              _tag: "NotFound",
-              module: "FileSystem",
-              method: "readFileString",
-              description: "No such file",
-              pathOrDescriptor: path,
-            }),
-          ),
-        onSome: (content) => Effect.succeed(content),
-      }),
+      Effect.fromOption(Option.fromNullishOr(state.localFiles.get(path)), () =>
+        PlatformError.systemError({
+          _tag: "NotFound",
+          module: "FileSystem",
+          method: "readFileString",
+          description: "No such file",
+          pathOrDescriptor: path,
+        }),
+      ),
     writeFileString: (path, data) =>
       Effect.sync(() => {
         state.localFiles.set(path, data);
@@ -822,7 +822,7 @@ export const mintingProvider = (lifetimeMillis = 3_600_000) => {
         const token = `${TOKEN_PREFIX}${minted.length + 1}`;
         minted.push(token);
         permissions.push(level);
-        return new WorkerCredential({
+        return WorkerCredential.make({
           value: Redacted.make(token),
           expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + lifetimeMillis),
         });
@@ -832,7 +832,7 @@ export const mintingProvider = (lifetimeMillis = 3_600_000) => {
 };
 
 /** The bot account that commits in the fixture Attempts. */
-export const COMMIT_AUTHOR = new BotAccount({
+export const COMMIT_AUTHOR = BotAccount.make({
   login: BotLogin.make("usine-test[bot]"),
   id: BotUserId.make(4242),
 });
@@ -841,7 +841,7 @@ export const COMMIT_AUTHOR = new BotAccount({
 export const BOT_COMMITS =
   "GIT_AUTHOR_NAME='usine-test[bot]' GIT_AUTHOR_EMAIL='4242+usine-test[bot]@users.noreply.github.com' GIT_COMMITTER_NAME='usine-test[bot]' GIT_COMMITTER_EMAIL='4242+usine-test[bot]@users.noreply.github.com'";
 
-export const request = new CheckoutRequest({
+export const request = CheckoutRequest.make({
   attemptId: ATTEMPT_ID,
   worker: WORKER,
   repository: REPOSITORY,
@@ -863,7 +863,7 @@ export const request = new CheckoutRequest({
 
 /** A parent that fails the Attempt like a crash. */
 export const fails: StubParent = () =>
-  Effect.fail(new InfraFailure({ message: "The parent stopped", cause: new Error("crash") }));
+  Effect.fail(InfraFailure.make({ message: "The parent stopped", cause: new Error("crash") }));
 
 /** Whether a remote command line writes an Attempt's token on the machine. */
 export const writesCredential = (line: string) => line.includes("IFS= read -r token");

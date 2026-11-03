@@ -53,12 +53,14 @@ export class SystemctlError extends Schema.TaggedError<SystemctlError>(
 /** Runs `systemctl <args> <unit>` and returns its standard output. */
 export const systemctl = (unit: SystemdUnit, args: ReadonlyArray<string>) =>
   runCommand("systemctl", [...args, unit], "/", SYSTEMCTL_TIMEOUT).pipe(
-    Effect.map(({ stdout }) => stdout),
-    Effect.mapError(({ command, reason }) => new SystemctlError({ command, unit, reason })),
+    Effect.mapBoth({
+      onSuccess: ({ stdout }) => stdout,
+      onFailure: ({ command, reason }) => SystemctlError.make({ command, unit, reason }),
+    }),
   );
 
 const MainPid = Schema.Trim.pipe(
-  Schema.decodeTo(Schema.NumberFromString),
+  Schema.decodeTo(Schema.FiniteFromString),
   Schema.decodeTo(Schema.Int),
 );
 
@@ -72,7 +74,7 @@ export const supervisingUnit = Effect.fn("Instance.supervisingUnit")(function* (
 ) {
   if (Option.isNone(unit)) return Option.none<SystemdUnit>();
   yield* Effect.annotateCurrentSpan({ pid, unit: unit.value });
-  const mainPid = Schema.decodeUnknownOption(MainPid)(
+  const mainPid = Schema.decodeOption(MainPid)(
     yield* systemctl(unit.value, ["show", "--property=MainPID", "--value"]),
   );
   if (Option.contains(mainPid, pid)) return unit;

@@ -555,13 +555,12 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     "FETCH_HEAD",
   ])).trim();
   const baseCommit = yield* decodeCommit(resolved).pipe(
-    Effect.mapError(
-      (cause) =>
-        new ExecutorOperationError({
-          operation: "prepare",
-          message: "Git returned an invalid object ID",
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      ExecutorOperationError.make({
+        operation: "prepare",
+        message: "Git returned an invalid object ID",
+        cause,
+      }),
     ),
   );
   const salvage = yield* fetchSalvage(options, request.resume);
@@ -577,9 +576,9 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
   const gitHooks = yield* installPrePushHook(options);
   const preparedAt = yield* DateTime.now;
   return {
-    workspace: new AttemptWorkspace({
+    workspace: AttemptWorkspace.make({
       worker: request.worker,
-      spec: new AttemptChannel.RunSpec({
+      spec: AttemptChannel.RunSpec.make({
         attemptId: request.attemptId,
         repository: request.repository,
         revision: request.revision,
@@ -637,7 +636,7 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
   ]);
   const gitHooks = yield* installPrePushHook(options);
   return {
-    workspace: new AttemptWorkspace({
+    workspace: AttemptWorkspace.make({
       worker: request.worker,
       spec,
       worktree: WorktreePath.make(layout.worktree),
@@ -786,13 +785,12 @@ const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
       Effect.andThen(ops.git("prepare", ["--git-dir", layout.cache, "rev-parse", "FETCH_HEAD"])),
       Effect.flatMap((output) =>
         decodeCommit(output.trim()).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ExecutorOperationError({
-                operation: "prepare",
-                message: "Git returned an invalid salvage object ID",
-                cause,
-              }),
+          Effect.mapError((cause) =>
+            ExecutorOperationError.make({
+              operation: "prepare",
+              message: "Git returned an invalid salvage object ID",
+              cause,
+            }),
           ),
         ),
       ),
@@ -805,5 +803,5 @@ const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
     });
   }
   yield* Effect.logInfo("Fetched the previous Attempt's salvage", { ...fields, commit: fetched });
-  return Option.some(new SalvagePushed({ ref: resume.value.ref, commit: fetched }));
+  return Option.some(SalvagePushed.make({ ref: resume.value.ref, commit: fetched }));
 });

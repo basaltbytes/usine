@@ -33,23 +33,22 @@ import "~/index.css";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const projectWith = (backlog: ReadonlyArray<BoardTaskView>) =>
-  new ProjectView({
+  ProjectView.make({
     repository,
     status: "clear",
     runs: [],
     labels: [],
     preflightFindings: [],
-    board: new BoardView({
+    board: BoardView.make({
       failures: [],
-      lanes: ["Backlog", "Ready", "Developing", "Review", "Finishing", "Done"].map(
-        (name) =>
-          new ReadOnlyBoardLaneView({
-            id: BoardLaneId.make(name),
-            name: LaneName.make(name),
-            origin: "authored",
-            sources: [],
-            items: name === "Backlog" ? backlog : [],
-          }),
+      lanes: ["Backlog", "Ready", "Developing", "Review", "Finishing", "Done"].map((name) =>
+        ReadOnlyBoardLaneView.make({
+          id: BoardLaneId.make(name),
+          name: LaneName.make(name),
+          origin: "authored",
+          sources: [],
+          items: name === "Backlog" ? backlog : [],
+        }),
       ),
     }),
   });
@@ -64,7 +63,7 @@ const manyTasks = (count: number): ReadonlyArray<BoardTaskView> => {
   return Array.from({ length: count }, (_, index) => {
     const number = ItemNumber.make(1000 + index);
     const itemKey = ItemKey.make(`${repository}:${number}`);
-    const item = new BoardItemLink({
+    const item = BoardItemLink.make({
       itemKey,
       kind: template.kind,
       number,
@@ -72,7 +71,7 @@ const manyTasks = (count: number): ReadonlyArray<BoardTaskView> => {
       url: template.url,
       state: template.state,
     });
-    return new BoardTaskView({
+    return BoardTaskView.make({
       ...template,
       ...item,
       items: [item],
@@ -99,11 +98,11 @@ beforeEach(() => {
   });
   queryClient.setQueryData(
     deskQuery().queryKey,
-    new DeskView({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
+    DeskView.make({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
   );
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({ projects: [project], loops: [], needsYou: [] }),
+    ReadyOverview.make({ projects: [project], loops: [], needsYou: [] }),
   );
 });
 
@@ -192,7 +191,7 @@ it("scrolls every lane inside a narrow viewport without moving the page beneath 
 it("scrolls a long lane on its own and fades the edges that hide cards", async () => {
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({ projects: [projectWith(manyTasks(30))], loops: [], needsYou: [] }),
+    ReadyOverview.make({ projects: [projectWith(manyTasks(30))], loops: [], needsYou: [] }),
   );
   await mountBoard(1024);
   await expect.element(page.getByLabelText("Last updated", { exact: true })).toBeVisible();
@@ -229,7 +228,7 @@ it.each([404, 503])(
     try {
       await invalidateChanges(
         queryClient,
-        new ChangeNotice({
+        ChangeNotice.make({
           revision: 1,
           reset: false,
           changes: [{ kind: "project", id: projectId(project) }],
@@ -254,24 +253,24 @@ it.each([404, 503])(
 
 it("loads every Done card as the virtual lane scrolls", async () => {
   const cards = manyTasks(120);
-  const done = new ReadOnlyBoardLaneView({
+  const done = ReadOnlyBoardLaneView.make({
     id: BoardLaneId.make("Done"),
     name: LaneName.make("Done"),
     origin: "authored",
-    sources: [new StateLaneSource({ state: "issue-closed" })],
+    sources: [StateLaneSource.make({ state: "issue-closed" })],
     items: [],
     totalItems: cards.length,
   });
-  const view = new ProjectView({
+  const view = ProjectView.make({
     ...project,
-    board: new BoardView({
+    board: BoardView.make({
       failures: [],
       lanes: [...project.board.lanes.filter(({ name }) => name !== "Done"), done],
     }),
   });
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({ projects: [view], loops: [], needsYou: [] }),
+    ReadyOverview.make({ projects: [view], loops: [], needsYou: [] }),
   );
   const offsets: number[] = [];
   const originalFetch = respond;

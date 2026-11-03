@@ -16,7 +16,7 @@ export const boardMovesContract = (adapter: PersistenceAdapter) => {
           const moves = yield* BoardMoves;
           const reader = yield* RunReader;
           const revision = yield* reader.revision();
-          const first = new BoardMoveRecord({
+          const first = BoardMoveRecord.make({
             repository: lifecycleSubmission.repository,
             itemKey: lifecycleSubmission.itemKey,
             at: lifecycleSubmission.event.receivedAt,
@@ -25,14 +25,14 @@ export const boardMovesContract = (adapter: PersistenceAdapter) => {
             added: ["review"],
             removed: ["ready"],
           });
-          const second = new BoardMoveRecord({
+          const second = BoardMoveRecord.make({
             ...first,
             fromLane: "Review",
             toLane: "Done",
             added: ["done"],
             removed: ["review"],
           });
-          const earlier = new BoardMoveRecord({
+          const earlier = BoardMoveRecord.make({
             ...first,
             at: DateTime.subtract(first.at, { seconds: 1 }),
           });
@@ -40,7 +40,7 @@ export const boardMovesContract = (adapter: PersistenceAdapter) => {
           yield* moves.record(second);
           yield* moves.record(earlier);
           yield* moves.record(
-            new BoardMoveRecord({ ...first, itemKey: ItemKey.make("other-item") }),
+            BoardMoveRecord.make({ ...first, itemKey: ItemKey.make("other-item") }),
           );
           assert.deepStrictEqual(yield* moves.onItem(first.itemKey, first.at), [first, second]);
           assert.deepStrictEqual(yield* moves.onItem(first.itemKey, earlier.at), [

@@ -19,7 +19,7 @@ export const objectValue = (value: Schema.Json | undefined): Schema.JsonObject =
 export const arrayValue = (value: Schema.Json | undefined): readonly Schema.Json[] =>
   Schema.is(Schema.Array(Schema.Json))(value) ? value : [];
 export const stringValue = (value: Schema.Json | undefined): string =>
-  Schema.is(Schema.String)(value) ? value : Schema.is(Schema.Number)(value) ? String(value) : "";
+  Schema.is(Schema.String)(value) ? value : Schema.is(Schema.Finite)(value) ? String(value) : "";
 
 export const fieldValue = (value: Schema.JsonObject, path: string): Schema.Json | undefined =>
   path

@@ -28,7 +28,7 @@ const capabilityError = (
   capability: WorkerCapability,
   message: string,
   cause: unknown,
-): WorkerCapabilityError => new WorkerCapabilityError({ worker, capability, message, cause });
+): WorkerCapabilityError => WorkerCapabilityError.make({ worker, capability, message, cause });
 
 /**
  * Verifies an SSH Worker's machine: SSH connects, the root is a writable directory, Git runs,

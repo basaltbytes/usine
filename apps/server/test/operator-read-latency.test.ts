@@ -68,12 +68,12 @@ const READS = 3;
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = (number: number) =>
   Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]);
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-6-astra"),
   effort: "medium",
 });
-const developer = new AgentFile({
+const developer = AgentFile.make({
   name: AgentName.make("developer"),
   harness: brain.harness,
   model: brain.model,
@@ -83,25 +83,24 @@ const developer = new AgentFile({
   persona: AgentPersona.make("Implement the issue."),
 });
 const firstLoop = LoopName.make("loop-0");
-const loops = LABELS.map(
-  (label, index) =>
-    new LoopFile({
-      name: LoopName.make(`loop-${index}`),
-      trigger: new IssueTrigger({
-        on: "issue",
-        if: Source.make(
-          `item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "${label}") && !item.labels.nodes.exists(label, label.name == "blocked")`,
-        ),
-      }),
-      selector: Option.none(),
-      approval: "none",
-      step: StepName.make("run"),
-      agent: developer.name,
-      body: PromptTemplate.make("Work on it."),
+const loops = LABELS.map((label, index) =>
+  LoopFile.make({
+    name: LoopName.make(`loop-${index}`),
+    trigger: IssueTrigger.make({
+      on: "issue",
+      if: Source.make(
+        `item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "${label}") && !item.labels.nodes.exists(label, label.name == "blocked")`,
+      ),
     }),
+    selector: Option.none(),
+    approval: "none",
+    step: StepName.make("run"),
+    agent: developer.name,
+    body: PromptTemplate.make("Work on it."),
+  }),
 );
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: repository }],
     workers: [{ name: "worker", kind: "local", max_concurrent_attempts: 2 }],
@@ -118,7 +117,7 @@ const labelOf = (number: number) =>
   number % 10 === 0 ? (LABELS[(number / 10) % LABELS.length] ?? "bug") : "bug";
 
 const issue = (number: number) =>
-  new ItemProjection({
+  ItemProjection.make({
     itemKey: itemKey(number),
     repository,
     source: ItemProjectionSource.make("issue"),
@@ -154,8 +153,8 @@ const issue = (number: number) =>
   });
 
 const started = (number: number) =>
-  new Submission({
-    event: new Event({
+  Submission.make({
+    event: Event.make({
       id: EventId.make(`event-${number}`),
       dedupKey: DedupKey.make(`${firstLoop}/${number}`),
       payload: issue(number).payload,
@@ -168,7 +167,7 @@ const started = (number: number) =>
     repository,
     revision: RepositoryRevision.make("main"),
     task: AttemptTask.make(longTask),
-    agent: new Agent({
+    agent: Agent.make({
       name: developer.name,
       brain,
       parentModel: Option.none(),
@@ -211,7 +210,7 @@ describe("operator read latency", () => {
       const slowWorker = Layer.succeed(StepExecutor)({
         workers: Effect.succeed([WorkerName.make("worker")]),
         isLive: () => Effect.succeed(false),
-        outcome: () => Effect.succeed(Option.none()),
+        outcome: () => Effect.succeedNone,
         recover: () => Effect.void,
         intervene: () => Effect.void,
         interrupt: () => Effect.void,
@@ -269,16 +268,16 @@ describe("operator read latency", () => {
           yield* runs.submit(started(1));
           yield* Deferred.await(preparing);
           for (let number = 2; number <= openRuns; number += 1)
-            yield* runs.submit(new Submission({ ...started(number), approval: "required" }));
+            yield* runs.submit(Submission.make({ ...started(number), approval: "required" }));
           for (let number = 2; history && number <= SIZE_ITEMS; number += 1) {
             const count = number <= 200 ? 3 : 2;
             for (let round = 1; round <= count; round += 1) {
               const submission = started(number);
               const result = yield* runs.submit(
-                new Submission({
+                Submission.make({
                   ...submission,
                   approval: "required",
-                  event: new Event({
+                  event: Event.make({
                     ...submission.event,
                     id: EventId.make(`event-${number}-${round}`),
                     dedupKey: DedupKey.make(`${firstLoop}/${number}/${round}`),
@@ -290,7 +289,7 @@ describe("operator read latency", () => {
             }
             const item = issue(number);
             yield* items.upsert(
-              new ItemProjection({
+              ItemProjection.make({
                 ...item,
                 contentHash: ItemContentHash.make(`issue-${number}-closed`),
                 payload: { ...item.payload, state: "CLOSED", closedAt: "2026-11-02T12:00:00Z" },
@@ -374,23 +373,19 @@ describe("operator read latency", () => {
             .find(({ state }) => state === "Running");
           assert(firstRun !== undefined);
           const detailResponse = yield* read(`/api/runs/${firstRun.id}`);
-          const detail = Schema.decodeUnknownSync(Schema.fromJsonString(RunDetailView))(
+          const detail = Schema.decodeSync(Schema.fromJsonString(RunDetailView))(
             detailResponse.value,
           );
           assert.strictEqual(detail.run.task, longTask);
           assert.strictEqual(detail.run.attempts[0]?.task, longTask);
           assert.deepStrictEqual(detail.eventPayload, issue(1).payload);
           const taskResponse = yield* read(`/api/projects/basaltbytes/usine/tasks/1`);
-          const task = Schema.decodeUnknownSync(Schema.fromJsonString(TaskView))(
-            taskResponse.value,
-          );
+          const task = Schema.decodeSync(Schema.fromJsonString(TaskView))(taskResponse.value);
           assert.strictEqual(task.runs[0]?.task, longTask);
           assert.strictEqual(task.runs[0]?.attempts[0]?.task, longTask);
           if (history) {
             const doneResponse = yield* read("/api/projects/basaltbytes/usine/tasks/2");
-            const doneTask = Schema.decodeUnknownSync(Schema.fromJsonString(TaskView))(
-              doneResponse.value,
-            );
+            const doneTask = Schema.decodeSync(Schema.fromJsonString(TaskView))(doneResponse.value);
             assert.strictEqual(doneTask.runs.length, 3);
             assert(doneTask.runs.every(({ task }) => task === longTask));
             return;
@@ -405,7 +400,7 @@ describe("operator read latency", () => {
           const rounds = [];
           for (let round = 1; round <= READS; round += 1) {
             yield* items.upsert(
-              new ItemProjection({
+              ItemProjection.make({
                 ...issue(1),
                 contentHash: ItemContentHash.make(`issue-1-change-${round}`),
               }),

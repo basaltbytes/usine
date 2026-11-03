@@ -120,7 +120,7 @@ const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan
 const priced = (pool: BillingPool, usd: Option.Option<UsdAmount>): UsageCostView | null =>
   Option.match(usd, {
     onNone: () => null,
-    onSome: (value) => new UsageCostView({ usd: value, estimate: pool !== "apiKeys" }),
+    onSome: (value) => UsageCostView.make({ usd: value, estimate: pool !== "apiKeys" }),
   });
 
 /** Returns the harness's price, or for a Codex session, the OpenAI table's price of its breakdown. */
@@ -160,7 +160,7 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
   }));
   const sessions = latest.map(({ attemptId, report, price }) => {
     const pool = sessionPool(report.session);
-    return new SessionUsageView({
+    return SessionUsageView.make({
       attemptId,
       session: report.session,
       pool,
@@ -182,7 +182,7 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
     if (members.length === 0) return [];
     const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]));
     return [
-      new PoolUsageView({
+      PoolUsageView.make({
         pool,
         tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
         cost: priced(
@@ -195,7 +195,7 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
     ];
   });
   return {
-    view: new RunUsageView({
+    view: RunUsageView.make({
       tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
       pools,
       sessions,
@@ -243,7 +243,7 @@ const taskUsageTotals = (
     if (members.length === 0) return [];
     const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]));
     return [
-      new TaskPoolUsageView({
+      TaskPoolUsageView.make({
         pool,
         tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
         cost: priced(
@@ -257,7 +257,7 @@ const taskUsageTotals = (
     ];
   });
   const costs = pools.flatMap(({ cost }) => (cost === null ? [] : [cost]));
-  return new TaskUsageView({
+  return TaskUsageView.make({
     ...timing,
     durationMillis: Math.round(timing.durationMillis),
     tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
@@ -265,7 +265,7 @@ const taskUsageTotals = (
     cost:
       costs.length === 0
         ? null
-        : new UsageCostView({
+        : UsageCostView.make({
             usd: UsdAmount.make(costs.reduce((sum, { usd }) => sum + usd, 0)),
             estimate: costs.some(({ estimate }) => estimate),
           }),
@@ -289,7 +289,7 @@ export const taskHistoryUsage = (
 
 /** Selects the attempt identities and terminal status needed for token reports. */
 export const runUsageSource = (source: Pick<RunSummary, "run" | "attempts">): RunUsageSource =>
-  new RunUsageSource({
+  RunUsageSource.make({
     run: { id: source.run.id },
     attempts: source.attempts.map(({ id, outcome }) => ({ id, ended: Option.isSome(outcome) })),
   });
@@ -304,7 +304,7 @@ const makeRunUsageReader = Effect.gen(function* () {
   ) {
     const cached = ended.get(attempt.id);
     if (cached !== undefined) return { reports: cached, read: false };
-    const reports = yield* runs.transcript(new TranscriptUsageQuery({ attemptId: attempt.id }));
+    const reports = yield* runs.transcript(TranscriptUsageQuery.make({ attemptId: attempt.id }));
     if (attempt.ended) ended.set(attempt.id, reports);
     return { reports, read: true };
   });

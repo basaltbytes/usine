@@ -121,7 +121,7 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
     script: launch.script,
   });
   const spawnError = (cause: unknown) =>
-    new DetachedSpawnError({ command: [launch.node, ...args].join(" "), reason: reasonOf(cause) });
+    DetachedSpawnError.make({ command: [launch.node, ...args].join(" "), reason: reasonOf(cause) });
   yield* fileSystem
     .makeDirectory(files.folder, { recursive: true })
     .pipe(Effect.mapError(spawnError));
@@ -173,7 +173,7 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
               ? state.pid
               : Option.none();
         if (Option.isSome(pid) && Option.contains(holder, pid.value)) {
-          const started = new StartedInstance({ pid: pid.value, port: launch.port });
+          const started = StartedInstance.make({ pid: pid.value, port: launch.port });
           return { _tag: "Listening", started } satisfies StartOutcome;
         }
       }
@@ -228,7 +228,7 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
     return outcome.started;
   }
   const tail = yield* logTail(files.log, offset);
-  const error = new DetachedStartError({
+  const error = DetachedStartError.make({
     outcome: outcome._tag === "Exited" ? "exited" : "silent",
     pid,
     exit: outcome._tag === "Exited" ? Option.some(outcome.exit) : Option.none(),
@@ -336,7 +336,7 @@ export const startUnit = Effect.fn("Cli.startUnit")(function* (
         state.record.pid !== previous &&
         (yield* answers(state.record.launch.port))
       ) {
-        return new StartedInstance({
+        return StartedInstance.make({
           pid: state.record.pid,
           port: state.record.launch.port,
           unit: Option.some(unit),
@@ -351,7 +351,7 @@ export const startUnit = Effect.fn("Cli.startUnit")(function* (
         });
         // Cancels the restart, so that a start that fails, such as a failed migration, doesn't repeat.
         if (sub === "auto-restart") yield* systemctl(unit, ["stop", "--no-block"]);
-        return yield* new SystemdStartError({ unit, outcome: "failed", state: last, timeout });
+        return yield* SystemdStartError.make({ unit, outcome: "failed", state: last, timeout });
       }
       yield* Effect.sleep(UNIT_POLL_INTERVAL);
     }
@@ -370,7 +370,7 @@ export const startUnit = Effect.fn("Cli.startUnit")(function* (
     state: last,
     timeoutSeconds: Duration.toSeconds(timeout),
   });
-  return yield* new SystemdStartError({ unit, outcome: "silent", state: last, timeout });
+  return yield* SystemdStartError.make({ unit, outcome: "silent", state: last, timeout });
 });
 
 /**
@@ -397,7 +397,7 @@ export const upDetached = Effect.fn("Cli.upDetached")(function* (
 ) {
   const state = yield* probeInstance(directory);
   if (state._tag !== "Stopped") {
-    return yield* new InstanceInUseError({
+    return yield* InstanceInUseError.make({
       directory,
       holder: state._tag === "Running" ? Option.some(state.record.pid) : state.pid,
     });

@@ -10,7 +10,7 @@ import { LoopRuntimeState } from "./model.ts";
 const persistence =
   (operation: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EnginePersistenceError, R> =>
-    effect.pipe(Effect.mapError((cause) => new EnginePersistenceError({ operation, cause })));
+    effect.pipe(Effect.mapError((cause) => EnginePersistenceError.make({ operation, cause })));
 
 const makeLoopControl = Effect.gen(function* () {
   const database = yield* RunDatabase;
@@ -26,8 +26,8 @@ const makeLoopControl = Effect.gen(function* () {
       .execute();
     const stored = rows[0];
     return stored === undefined
-      ? new LoopRuntimeState({ loop, paused: false })
-      : new LoopRuntimeState(stored);
+      ? LoopRuntimeState.make({ loop, paused: false })
+      : LoopRuntimeState.make(stored);
   }, persistence("read loop runtime state"));
 
   const states = Effect.fn("LoopControl.states")(function* () {
@@ -36,7 +36,7 @@ const makeLoopControl = Effect.gen(function* () {
       .from(loopRuntime)
       .orderBy(asc(loopRuntime.loopName))
       .execute();
-    return rows.map((row) => new LoopRuntimeState(row));
+    return rows.map((row) => LoopRuntimeState.make(row));
   }, persistence("list loop runtime states"));
 
   const write = Effect.fn("LoopControl.write")(function* (next: LoopRuntimeState) {
@@ -76,11 +76,11 @@ const makeLoopControl = Effect.gen(function* () {
       return (yield* stateFor(loop)).paused;
     }),
     pause: Effect.fn("LoopControl.pause")((loop: LoopName) =>
-      write(new LoopRuntimeState({ loop, paused: true })),
+      write(LoopRuntimeState.make({ loop, paused: true })),
     ),
     states: states(),
     unpause: Effect.fn("LoopControl.unpause")((loop: LoopName) =>
-      write(new LoopRuntimeState({ loop, paused: false })),
+      write(LoopRuntimeState.make({ loop, paused: false })),
     ),
   } as const;
 });

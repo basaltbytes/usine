@@ -49,7 +49,7 @@ export const harness = (
     const states = yield* Ref.make(new Map<LoopName, LoopRuntimeState>());
     const setPause = (loop: LoopName, paused: boolean) =>
       Ref.modify(states, (previous) => {
-        const state = new LoopRuntimeState({ loop, paused });
+        const state = LoopRuntimeState.make({ loop, paused });
         return [state, new Map(previous).set(loop, state)];
       });
     const controls = LoopControl.of({
@@ -93,7 +93,7 @@ export const harness = (
         ),
     });
     const services = Context.add(base, ConfigurationStore, store);
-    const initial = new LoadedInstance({
+    const initial = LoadedInstance.make({
       config: yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
         "version: 2\noperator: operator\nprojects: [{ id: acme-project, name: Project, repositories: [acme/project] }, { id: acme-other, name: Other, repositories: [acme/other] }]\nrepos:\n  - name: acme/project\n    tags: [app]\n  - name: acme/other\n    tags: [other]\n",
@@ -159,7 +159,7 @@ export const harness = (
                 Effect.andThen(
                   worker === "broken"
                     ? Effect.fail(
-                        new WorkerCapabilityError({
+                        WorkerCapabilityError.make({
                           worker,
                           capability: "memory",
                           message: "Insufficient memory",
@@ -176,7 +176,7 @@ export const harness = (
             installation: unused,
             botAccount: () =>
               Effect.succeed(
-                new BotAccount({ login: BotLogin.make("test[bot]"), id: BotUserId.make(1) }),
+                BotAccount.make({ login: BotLogin.make("test[bot]"), id: BotUserId.make(1) }),
               ),
             repositories: () => Effect.die("unused installation repositories"),
             installationToken: unused,
@@ -213,7 +213,7 @@ export const harness = (
         Layer.provide(Layer.succeedContext(scheduler)),
         Layer.provide(
           Layer.succeed(RepositoryLabelProjectionReader, {
-            get: () => Effect.succeed(Option.none()),
+            get: () => Effect.succeedNone,
           }),
         ),
       ),

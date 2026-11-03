@@ -112,7 +112,7 @@ it.effect("replaces an insecure old file with complete owner-only secrets", () =
         client_secret: "oauth-secret",
         webhook_secret: "hook-secret",
       });
-      const secrets = yield* Schema.decodeUnknownEffect(GitHubAppSecretsFromJson)(source);
+      const secrets = yield* Schema.decodeEffect(GitHubAppSecretsFromJson)(source);
       yield* writeLocalSecrets(root, secrets);
       assert.equal((yield* fs.stat(target)).mode & 0o777, 0o600);
       assert.deepEqual(JSON.parse(yield* fs.readFileString(target)), JSON.parse(source));

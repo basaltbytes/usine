@@ -63,7 +63,7 @@ it.effect(
       yield* Effect.gen(function* () {
         const bus = yield* ChangeBus;
         const store = yield* RunStore;
-        const start = new Submission({
+        const start = Submission.make({
           ...lifecycleSubmission,
           cycleLimit: Option.some(CycleLimit.make(1)),
         });
@@ -109,31 +109,31 @@ it.effect(
         );
         assert(started._tag === "AttemptStarted");
         const attempt = started.execution.attempt;
-        const envelope = new OutboundEnvelope({
+        const envelope = OutboundEnvelope.make({
           version: PROTOCOL_VERSION,
           attemptId: attempt.id,
           sequence: Sequence.make(1),
           sentAt: yield* DateTime.now,
-          payload: new Started({ parentModel: ModelId.make("actual-model") }),
+          payload: Started.make({ parentModel: ModelId.make("actual-model") }),
         });
         yield* expectWrite(store.appendTranscript("outbound", envelope), [
           { kind: "attempt", id: attempt.id },
         ]);
         yield* expectUnchanged(store.appendTranscript("outbound", envelope));
-        const report = new PoolRateLimitsUpdated({
-          session: new ParentSession({
+        const report = PoolRateLimitsUpdated.make({
+          session: ParentSession.make({
             id: AgentSessionId.make("pool-session"),
             agent: attempt.agent,
             brain: attempt.brain,
           }),
           pool: "chatgptPlan",
           login: Option.none(),
-          rateLimits: new RateLimitsSnapshot({
+          rateLimits: RateLimitsSnapshot.make({
             limitId: Option.none(),
             limitName: Option.none(),
             secondary: Option.none(),
             primary: Option.some(
-              new RateLimitWindow({
+              RateLimitWindow.make({
                 usedPercent: 90,
                 windowDurationMinutes: Option.some(60),
                 resetsAt: Option.some(DateTime.add(yield* DateTime.now, { minutes: 1 })),
@@ -144,10 +144,10 @@ it.effect(
         yield* expectWrite(
           store.appendTranscript(
             "outbound",
-            new OutboundEnvelope({
+            OutboundEnvelope.make({
               ...envelope,
               sequence: Sequence.make(2),
-              payload: new SessionEvent({ event: report }),
+              payload: SessionEvent.make({ event: report }),
             }),
           ),
           [{ kind: "attempt", id: attempt.id }],
@@ -161,7 +161,7 @@ it.effect(
         yield* expectWrite(
           store.finishAttempt(
             attempt,
-            Result.succeed(new StepResult({ message: "done", facts: [] })),
+            Result.succeed(StepResult.make({ message: "done", facts: [] })),
           ),
           [
             { kind: "attempt", id: attempt.id },
@@ -169,9 +169,9 @@ it.effect(
           ],
         );
         yield* expectUnchanged(store.beginAttempt(run, WorkerName.make("local"), Option.none()));
-        const next = new Submission({
+        const next = Submission.make({
           ...start,
-          event: new Event({
+          event: Event.make({
             ...start.event,
             id: EventId.make("next-event"),
             dedupKey: DedupKey.make("next-event"),
@@ -184,9 +184,9 @@ it.effect(
         assert(blocked.result._tag === "CycleBlocked");
         yield* expectUnchanged(store.recordAndClaim(next, RunId.make("blocked")));
         const budgets = yield* CycleBudgets;
-        const later = new Submission({
+        const later = Submission.make({
           ...next,
-          event: new Event({
+          event: Event.make({
             ...next.event,
             id: EventId.make("later-event"),
             dedupKey: DedupKey.make("later-event"),
@@ -206,7 +206,7 @@ it.effect(
           { kind: "item", id: start.itemKey },
         ]);
         assert(reopened.result._tag === "CycleBlocked");
-        const answer = new Event({
+        const answer = Event.make({
           ...start.event,
           id: EventId.make("reset"),
           dedupKey: DedupKey.make("reset"),
@@ -216,7 +216,7 @@ it.effect(
           { kind: "item", id: start.itemKey },
         ]);
         yield* expectUnchanged(budgets.reset(reopened.result.ask.id, answer));
-        const item = new ItemProjection({
+        const item = ItemProjection.make({
           itemKey: ItemKey.make("older-linked-pr"),
           repository: start.repository,
           number: ItemNumber.make(41),
@@ -232,7 +232,7 @@ it.effect(
         ] as const)
           yield* expectWrite(
             writer.upsert(
-              new ItemProjection({
+              ItemProjection.make({
                 ...item,
                 contentHash: ItemContentHash.make(contentHash),
                 payload: { ...payload, labels: [...payload.labels] },
@@ -245,7 +245,7 @@ it.effect(
         ]);
         yield* expectUnchanged(writer.markGone(item.itemKey, yield* DateTime.now));
         const acknowledgements = yield* AttentionAcknowledgements;
-        const acknowledgement = new AttentionAcknowledgement({
+        const acknowledgement = AttentionAcknowledgement.make({
           id: "need",
           revision: AttentionRevision.make("revision"),
           dismissedBy: Option.none(),
@@ -255,14 +255,14 @@ it.effect(
           { kind: "attention", id: "instance" },
         ]);
         yield* expectUnchanged(acknowledgements.dismiss(acknowledgement, [audience]));
-        yield* expectWrite(acknowledgements.undo(new AttentionKey(acknowledgement), [audience]), [
+        yield* expectWrite(acknowledgements.undo(AttentionKey.make(acknowledgement), [audience]), [
           { kind: "attention", id: "instance" },
         ]);
         yield* expectUnchanged(
-          acknowledgements.undo(new AttentionKey(acknowledgement), [audience]),
+          acknowledgements.undo(AttentionKey.make(acknowledgement), [audience]),
         );
       }).pipe(Effect.provide(services));
-    }).pipe(Effect.provide(NodeServices.layer), Effect.provide(changeBusLayer), Effect.scoped),
+    }).pipe(Effect.provide([NodeServices.layer, changeBusLayer]), Effect.scoped),
 );
 
 it.effect("restores only the latest future pool reset deadlines after a store restart", () =>
@@ -293,7 +293,7 @@ it.effect("restores only the latest future pool reset deadlines after a store re
         ] as const) {
           const window = (minutes: number) =>
             Option.some(
-              new RateLimitWindow({
+              RateLimitWindow.make({
                 usedPercent: 90,
                 windowDurationMinutes: Option.some(60),
                 resetsAt: Option.some(DateTime.add(now, { minutes })),
@@ -301,21 +301,21 @@ it.effect("restores only the latest future pool reset deadlines after a store re
             );
           yield* store.appendTranscript(
             "outbound",
-            new OutboundEnvelope({
+            OutboundEnvelope.make({
               version: PROTOCOL_VERSION,
               attemptId: attempt.id,
               sequence: Sequence.make(index),
               sentAt: now,
-              payload: new SessionEvent({
-                event: new PoolRateLimitsUpdated({
-                  session: new ParentSession({
+              payload: SessionEvent.make({
+                event: PoolRateLimitsUpdated.make({
+                  session: ParentSession.make({
                     id: AgentSessionId.make("restart-pool-session"),
                     agent: attempt.agent,
                     brain: attempt.brain,
                   }),
                   pool,
                   login: Option.none(),
-                  rateLimits: new RateLimitsSnapshot({
+                  rateLimits: RateLimitsSnapshot.make({
                     limitId: Option.none(),
                     limitName: Option.none(),
                     primary: window(primaryMinutes),
@@ -346,5 +346,5 @@ it.effect("restores only the latest future pool reset deadlines after a store re
         assert.strictEqual((yield* bus.open).revision, beforeRestart + 2);
       }),
     );
-  }).pipe(Effect.provide(NodeServices.layer), Effect.provide(changeBusLayer), Effect.scoped),
+  }).pipe(Effect.provide([NodeServices.layer, changeBusLayer]), Effect.scoped),
 );

@@ -61,13 +61,13 @@ export const upgradeAttentionFor = (
       target: drain.wait.target,
       deferredRuns: drain.runIds.length,
     });
-    const need = new UpgradeDrainNeed({
+    const need = UpgradeDrainNeed.make({
       id: "upgrade-drain",
       wait: drain.wait,
       deferredRuns: drain.runIds.length,
     });
     const { needsYou, dismissedNeeds } = partitionNeeds([need], yield* acknowledgements.list());
-    return new ReadyOverview({
+    return ReadyOverview.make({
       ...overview,
       needsYou: [...overview.needsYou, ...needsYou],
       dismissedNeeds: [...overview.dismissedNeeds, ...dismissedNeeds],

@@ -20,7 +20,7 @@ export const authorized = (credential: Redacted.Redacted<string>) =>
   });
 
 export const transportError = (operation: GitHubOperation, error: HttpClientError) =>
-  new GitHubApiError({
+  GitHubApiError.make({
     operation,
     status: error.response === undefined ? Option.none() : Option.some(error.response.status),
     message:
@@ -46,7 +46,7 @@ export const withGitHubReason = (
       Option.match(decodeErrorBody(body), {
         onNone: () => failure,
         onSome: ({ message }) =>
-          new GitHubApiError({
+          GitHubApiError.make({
             operation: failure.operation,
             status: failure.status,
             message: `${failure.message}: ${message}`,
@@ -62,7 +62,7 @@ export const withGitHubReason = (
   );
 
 export const invalidResponse = (operation: GitHubOperation, detail: string) =>
-  new InvalidGitHubResponseError({
+  InvalidGitHubResponseError.make({
     operation,
     message: "GitHub returned a response in an unexpected format",
     detail,
@@ -117,12 +117,12 @@ export const statusError = (
 ): GitHubApiError | GitHubRateLimitError => {
   const retryAt = Option.flatMap(rateLimitRetryEpoch(response.headers, now), DateTime.make);
   return (response.status === 403 || response.status === 429) && Option.isSome(retryAt)
-    ? new GitHubRateLimitError({
+    ? GitHubRateLimitError.make({
         operation,
         retryAt: retryAt.value,
         message: "GitHub API rate limit exceeded",
       })
-    : new GitHubApiError({
+    : GitHubApiError.make({
         operation,
         status: Option.some(response.status),
         message: `GitHub returned HTTP status ${response.status}`,

@@ -96,11 +96,11 @@ const childReportFailure = ({
   message,
   kind,
 }: NonNullable<AttemptRecord["childBlocker"]>): AttemptFailure => {
-  if (kind === "infra") return new InfraFailure({ message, cause: message });
-  if (kind === "question") return new QuestionFailure({ question: message });
-  if (kind === "capacity") return new ProviderCapacityFailure({ message });
-  if (kind === "failed") return new AgentFailure({ message });
-  return new BlockedFailure({ message });
+  if (kind === "infra") return InfraFailure.make({ message, cause: message });
+  if (kind === "question") return QuestionFailure.make({ question: message });
+  if (kind === "capacity") return ProviderCapacityFailure.make({ message });
+  if (kind === "failed") return AgentFailure.make({ message });
+  return BlockedFailure.make({ message });
 };
 
 const finalAnswer = Effect.fn("AttemptTask.finalAnswer")(function* (
@@ -187,7 +187,7 @@ export const attemptTask = (
         message: resolved.failure.message,
       });
       yield* commit(runtime, context, "record the failed start", () =>
-        failedOutcome(toAttemptFailure(resolved.failure)),
+        resolved.failure.pipe(toAttemptFailure, failedOutcome),
       );
       return;
     }
@@ -245,7 +245,7 @@ export const attemptTask = (
     const hub = yield* services.hubs.hub(spec.attemptId, taskId);
     yield* services.hubs.event(
       hub,
-      lifecycle === "Idle" ? new SessionIdle({ session }) : new SessionResumed({ session }),
+      lifecycle === "Idle" ? SessionIdle.make({ session }) : SessionResumed.make({ session }),
     );
   });
 
@@ -373,7 +373,7 @@ export const attemptTask = (
       // A failed outcome aborts the task's remaining work, including children.
       yield* commit(runtime, context, "record the exceeded budget", () =>
         failedOutcome(
-          new ChildSessionBudgetFailure({
+          ChildSessionBudgetFailure.make({
             attemptedChildren: ChildSessionCount.make(attempted),
             maxChildren: ChildSessionBudget.make(spec.maxChildren),
           }),
@@ -474,7 +474,7 @@ export const attemptTask = (
         Option.match(refusal, {
           onSome: toAttemptFailure,
           onNone: () =>
-            new InfraFailure({
+            InfraFailure.make({
               message: `The Pi parent's turn ended without an answer: ${reason}`,
               cause: settled.status === "unanswered" ? (settled.detail ?? reason) : reason,
             }),
@@ -515,7 +515,7 @@ export const attemptTask = (
           yield* commit(runtime, context, "record the abort", () =>
             Option.match(storageFailure, {
               onNone: (): NextState => ({ status: "terminal", outcome: { status: "aborted" } }),
-              onSome: (message) => failedOutcome(new InfraFailure({ message, cause: message })),
+              onSome: (message) => failedOutcome(InfraFailure.make({ message, cause: message })),
             }),
           );
           yield* Option.match(storageFailure, {

@@ -40,7 +40,7 @@ import { queueParentSteer } from "./steering.ts";
 const PAGE = 64;
 
 const unavailable = () =>
-  new AgentFailure({ message: "This attempt no longer has a live channel" });
+  AgentFailure.make({ message: "This attempt no longer has a live channel" });
 
 /** Returns `value` as an `EntryId`, where 0 sorts before every committed entry. */
 const entryId = (value: number): EntryId =>
@@ -156,7 +156,7 @@ const emit = (
       const pending: Array<string> = [];
       let outbound = progress.outbound;
       for (const payload of payloads) {
-        const envelope = new AttemptChannel.OutboundEnvelope({
+        const envelope = AttemptChannel.OutboundEnvelope.make({
           version: AttemptChannel.PROTOCOL_VERSION,
           attemptId: hub.attemptId,
           sequence: AttemptChannel.Sequence.make(outbound.nextSequence),
@@ -199,7 +199,7 @@ export const appendInbound = (
     Effect.gen(function* () {
       if (Option.isNone(hub.channel)) return yield* unavailable();
       const { io, progress } = hub.channel.value;
-      const envelope = new AttemptChannel.InboundEnvelope({
+      const envelope = AttemptChannel.InboundEnvelope.make({
         version: AttemptChannel.PROTOCOL_VERSION,
         attemptId: hub.attemptId,
         sequence: AttemptChannel.Sequence.make(progress.inbound),
@@ -232,7 +232,7 @@ const deliveredState = (durable: DurableHarness["Service"], hub: AttemptHub) =>
       harness.snapshot(HoldDoc, hub.taskId, context),
     ),
     (hold) =>
-      new AttemptChannel.InterventionState({
+      AttemptChannel.InterventionState.make({
         held: hold?.held.includes(parentSessionId(hub.attemptId)) ?? false,
         paused: hold?.paused ?? false,
       }),
@@ -263,7 +263,7 @@ const childStoppedFirst = (
   emitPayload(
     durable,
     hub,
-    new AttemptChannel.InterventionRejected({
+    AttemptChannel.InterventionRejected.make({
       inputSequence,
       intervention,
       message: "The child stopped before it read this message. Send it again if it still applies.",
@@ -300,7 +300,7 @@ const returnSteerToParent = Effect.fn("AttemptRelay.returnSteerToParent")(functi
   yield* emitPayload(
     durable,
     hub,
-    new AttemptChannel.InterventionApplied({ inputSequence, intervention, state: queued.value }),
+    AttemptChannel.InterventionApplied.make({ inputSequence, intervention, state: queued.value }),
   );
   return true;
 });
@@ -380,7 +380,7 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
       yield* emitPayload(
         durable,
         hub,
-        new AttemptChannel.InterventionApplied({
+        AttemptChannel.InterventionApplied.make({
           inputSequence,
           intervention,
           state: yield* deliveredState(durable, hub),
@@ -394,7 +394,7 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
       yield* emitPayload(
         durable,
         hub,
-        new AttemptChannel.InterventionRejected({
+        AttemptChannel.InterventionRejected.make({
           inputSequence,
           intervention,
           message:
@@ -437,7 +437,7 @@ const relayChildDelivery = Effect.fn("AttemptRelay.childDelivery")(function* (
     yield* emitPayload(
       durable,
       hub,
-      new AttemptChannel.InterventionApplied({
+      AttemptChannel.InterventionApplied.make({
         inputSequence,
         intervention,
         state: delivery.delivered.value,
@@ -540,7 +540,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       yield* emitPayload(
         durable,
         hub,
-        new AttemptChannel.Started({
+        AttemptChannel.Started.make({
           parentModel: started.brain.model,
           conflictingSalvage: spec.conflictingSalvage,
         }),
@@ -548,7 +548,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       yield* emitPayload(
         durable,
         hub,
-        new AttemptChannel.SessionEvent({ event: new SessionStarted({ session: started }) }),
+        AttemptChannel.SessionEvent.make({ event: SessionStarted.make({ session: started }) }),
       );
       yield* Effect.logInfo("Relayed the Attempt's start", { parentModel: started.brain.model });
     }
@@ -584,8 +584,8 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       durable,
       hub,
       [
-        new AttemptChannel.SessionEvent({
-          event: new SessionTokensUpdated({ session: started, ...total }),
+        AttemptChannel.SessionEvent.make({
+          event: SessionTokensUpdated.make({ session: started, ...total }),
         }),
       ],
       (current) => ({ ...cursorOf(current), tokens: total.totalTokens }),
@@ -625,7 +625,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
         yield* emit(
           durable,
           hub,
-          events.map((event) => new AttemptChannel.SessionEvent({ event })),
+          events.map((event) => AttemptChannel.SessionEvent.make({ event })),
           (latest) => ({ ...cursorOf(latest), entry: entry.id }),
         );
       }
@@ -645,7 +645,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
         },
       );
     }
-    yield* emitPayload(durable, hub, new AttemptChannel.SessionEvent({ event }));
+    yield* emitPayload(durable, hub, AttemptChannel.SessionEvent.make({ event }));
   });
 
   const relayNotice = Effect.fn("AttemptRelay.notice")(function* (
@@ -684,22 +684,22 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
         yield* emitPayload(
           durable,
           hub,
-          new AttemptChannel.SessionEvent({
-            event: new SessionFinished({ session: started.value }),
+          AttemptChannel.SessionEvent.make({
+            event: SessionFinished.make({ session: started.value }),
           }),
         );
       }
       yield* emitPayload(
         durable,
         hub,
-        new AttemptChannel.Final({
-          result: new StepResult({ message: settled.success.message, facts: [] }),
+        AttemptChannel.Final.make({
+          result: StepResult.make({ message: settled.success.message, facts: [] }),
         }),
       );
     } else if (task.state.outcome?.status === "aborted" && Option.isSome(started)) {
-      yield* emitPayload(durable, hub, new AttemptChannel.Interrupted());
+      yield* emitPayload(durable, hub, AttemptChannel.Interrupted.make());
     } else {
-      yield* emitPayload(durable, hub, new AttemptChannel.Failed({ failure: settled.failure }));
+      yield* emitPayload(durable, hub, AttemptChannel.Failed.make({ failure: settled.failure }));
     }
     yield* Effect.logInfo("Relayed the Attempt's terminal envelope", {
       outcome: task.state.outcome?.status,

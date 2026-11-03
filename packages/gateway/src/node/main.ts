@@ -7,9 +7,7 @@ import { gatewayFromEnvironment } from "./node.ts";
 const logger = Logger.layer([Logger.consoleJson]);
 
 NodeRuntime.runMain(
-  Layer.launch(gatewayFromEnvironment).pipe(
-    Effect.provide(Layer.mergeAll(NodeServices.layer, logger)),
-  ),
+  Layer.launch(gatewayFromEnvironment).pipe(Effect.provide([NodeServices.layer, logger])),
   {
     // The Gateway runs until a signal interrupts it, so systemd records the stop as a success.
     teardown: (exit, onExit) =>

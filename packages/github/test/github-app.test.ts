@@ -10,7 +10,7 @@ import { InstallationId, RepositoryId } from "../src/installation.ts";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const privatePem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
-const credentials = new AppCredentials({
+const credentials = AppCredentials.make({
   appId: AppId.make(12345),
   privateKey: Redacted.make(PrivateKey.make(privatePem)),
 });
@@ -276,7 +276,7 @@ describe("GitHubApp", () => {
         });
       }),
     );
-    const project = new CoveredProject({
+    const project = CoveredProject.make({
       installationId: InstallationId.make(77),
       repository: RepositoryName.make("basaltbytes/usine"),
       repositoryId: RepositoryId.make(99),
@@ -353,7 +353,7 @@ describe("GitHubApp", () => {
       const app = yield* GitHubApp;
       const failure = yield* app
         .workerToken(
-          new CoveredProject({
+          CoveredProject.make({
             installationId: InstallationId.make(77),
             repository: RepositoryName.make("basaltbytes/usine"),
             repositoryId: RepositoryId.make(99),
@@ -380,7 +380,7 @@ describe("GitHubApp", () => {
       const app = yield* GitHubApp;
       const now = yield* Clock.currentTimeMillis;
       const worker = yield* app.workerToken(
-        new CoveredProject({
+        CoveredProject.make({
           installationId: InstallationId.make(77),
           repository: RepositoryName.make("basaltbytes/usine"),
           repositoryId: RepositoryId.make(99),
@@ -409,7 +409,7 @@ describe("GitHubApp", () => {
       const app = yield* GitHubApp;
       const failure = yield* app
         .workerToken(
-          new CoveredProject({
+          CoveredProject.make({
             installationId: InstallationId.make(77),
             repository: RepositoryName.make("basaltbytes/usine"),
             repositoryId: RepositoryId.make(99),
@@ -445,7 +445,7 @@ describe("GitHubApp", () => {
         return HttpClientResponse.fromWeb(request, answer);
       }),
     );
-    const project = new CoveredProject({
+    const project = CoveredProject.make({
       installationId: InstallationId.make(77),
       repository: RepositoryName.make("basaltbytes/usine"),
       repositoryId: RepositoryId.make(99),

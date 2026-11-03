@@ -183,7 +183,7 @@ const serveExec = (state: FakeWorkerState, sandbox: FakeSandbox, socket: ServerS
       defaultResponse(sandbox, words, stdin),
     );
     const process = ProcessId.make("0123456789abcdef0123456789abcdef");
-    socket.send(encodeServerMessage(new Started({ process })));
+    socket.send(encodeServerMessage(Started.make({ process })));
     if (state.dropOnce.delete(line)) {
       const half = result.stdout.slice(0, Math.floor(result.stdout.length / 2));
       socket.send(outputFrame("stdout", new TextEncoder().encode(half)));
@@ -193,7 +193,7 @@ const serveExec = (state: FakeWorkerState, sandbox: FakeSandbox, socket: ServerS
     }
     socket.send(outputFrame("stdout", new TextEncoder().encode(result.stdout)));
     socket.send(outputFrame("stderr", new TextEncoder().encode(result.stderr ?? "")));
-    socket.send(encodeServerMessage(new Exited({ exitCode: result.exitCode })));
+    socket.send(encodeServerMessage(Exited.make({ exitCode: result.exitCode })));
     socket.close(1000);
   };
   socket.on("message", (data: Buffer, binary: boolean) => {
@@ -316,7 +316,7 @@ export const fakeWorker = Effect.gen(function* () {
       client.send(
         outputFrame("stdout", new TextEncoder().encode(pending.result.stdout.slice(offset))),
       );
-      client.send(encodeServerMessage(new Exited({ exitCode: pending.result.exitCode })));
+      client.send(encodeServerMessage(Exited.make({ exitCode: pending.result.exitCode })));
       client.close(1000);
     });
   });

@@ -57,12 +57,12 @@ export const instanceEnvironment = Effect.fn("Instance.environment")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = join(directory, ENVIRONMENT_FILE);
   const contents = yield* fileSystem.readFileString(path).pipe(
-    Effect.map(Option.some),
+    Effect.asSome,
     Effect.catchIf(
       ({ reason }) => reason._tag === "NotFound",
       () => Effect.succeedNone,
     ),
-    Effect.mapError(({ message }) => new EnvironmentFileError({ path, reason: message })),
+    Effect.mapError(({ message }) => EnvironmentFileError.make({ path, reason: message })),
   );
   yield* Effect.annotateCurrentSpan({ path, found: Option.isSome(contents) });
   if (Option.isNone(contents)) {

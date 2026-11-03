@@ -113,7 +113,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
                 "stream",
                 client,
                 "The remote Codex app-server exited",
-                new RemoteCodexProcessLost({ message: `exit code ${frame.exitCode}` }),
+                RemoteCodexProcessLost.make({ message: `exit code ${frame.exitCode}` }),
               );
           }
           yield* Ref.set(offset, frame.offset);
@@ -162,7 +162,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
           "stream",
           client,
           "The remote Codex supervisor stopped before returning a result",
-          new RemoteCodexProcessLost({ message: `relay exit code ${code}` }),
+          RemoteCodexProcessLost.make({ message: `relay exit code ${code}` }),
         );
       failures += 1;
       const delaySeconds = Math.min(30, 2 ** Math.min(failures - 1, 5));

@@ -32,10 +32,10 @@ it("links a second repository directly to its project and keeps its task identit
   const client = new QueryClient();
   client.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({
+    ReadyOverview.make({
       ...boardOverview(),
       projects: [
-        new ProjectView({
+        ProjectView.make({
           ...original,
           id: ProjectId.make("product"),
           repositories: [original.repository, RepositoryName.make("other/api")],

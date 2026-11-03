@@ -27,11 +27,11 @@ import {
 } from "./support.ts";
 
 const head = CommitSha.make("a".repeat(40));
-const policy = new CiPolicy({ fixLoop: LoopName.make("fix"), timeoutSeconds: 3600 });
-const pushed = new StepResult({
+const policy = CiPolicy.make({ fixLoop: LoopName.make("fix"), timeoutSeconds: 3600 });
+const pushed = StepResult.make({
   message: "Finished the change.",
   facts: [
-    new PullRequest({
+    PullRequest.make({
       number: 815,
       url: new URL("https://github.com/basaltbytes/usine/pull/815"),
       head: Option.some(head),
@@ -39,7 +39,7 @@ const pushed = new StepResult({
   ],
 });
 const required = () =>
-  new Submission({ ...submission({ number: 1 }), ciPolicy: Option.some(policy) });
+  Submission.make({ ...submission({ number: 1 }), ciPolicy: Option.some(policy) });
 
 it.live(
   "a required CI check survives an ordinary success report and restart while releasing its worker slot",
@@ -58,13 +58,13 @@ it.live(
             RunEngine,
           );
           const ciOnGreen = [
-            new CiLabelMutation({
+            CiLabelMutation.make({
               item: ItemNumber.make(811),
               add: ["implemented"],
               remove: ["agent-in-progress"],
             }),
           ];
-          const accepted = yield* first.submit(new Submission({ ...required(), ciOnGreen }));
+          const accepted = yield* first.submit(Submission.make({ ...required(), ciOnGreen }));
           assert(accepted._tag === "Claimed");
           const waiting = yield* waitFor(
             first,
@@ -97,14 +97,15 @@ it.live(
           assert(restored?.run.state._tag === "AwaitingCi");
           assert.deepStrictEqual(restored.run.state.handoff.onGreen, ciOnGreen);
           assert.strictEqual(
-            (yield* second.inspect(accepted.runId)).ciPolicy
-              .pipe(Option.map(({ fixLoop }) => fixLoop))
-              .pipe(Option.getOrNull),
+            (yield* second.inspect(accepted.runId)).ciPolicy.pipe(
+              Option.map(({ fixLoop }) => fixLoop),
+              Option.getOrNull,
+            ),
             policy.fixLoop,
           );
           yield* second.reconcile();
-          yield* second.settleCi(accepted.runId, head, new CiPassed());
-          yield* second.settleCi(accepted.runId, head, new CiFailed({ message: "late red" }));
+          yield* second.settleCi(accepted.runId, head, CiPassed.make());
+          yield* second.settleCi(accepted.runId, head, CiFailed.make({ message: "late red" }));
           const completed = yield* second.inspect(accepted.runId);
           assert.strictEqual(completed.run.state._tag, "Succeeded");
           assert.strictEqual(completed.attempts.length, 1);
@@ -128,9 +129,9 @@ it.live("a newer head cancels its CI wait and rejects a late green result", () =
         yield* engine.settleCi(
           accepted.runId,
           head,
-          new CiSuperseded({ head: CommitSha.make("b".repeat(40)) }),
+          CiSuperseded.make({ head: CommitSha.make("b".repeat(40)) }),
         );
-        yield* engine.settleCi(accepted.runId, head, new CiPassed());
+        yield* engine.settleCi(accepted.runId, head, CiPassed.make());
         assert.strictEqual((yield* engine.inspect(accepted.runId)).run.state._tag, "Canceled");
       }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
     }),
@@ -170,11 +171,14 @@ it.live("operator cancellation settles the ended CI attempt and rejects late com
           ({ run }) => run.state._tag === "AwaitingCi",
         );
         yield* engine.cancel(accepted.runId);
-        yield* engine.settleCi(accepted.runId, head, new CiPassed());
+        yield* engine.settleCi(accepted.runId, head, CiPassed.make());
         const canceled = yield* engine.inspect(accepted.runId);
         assert.strictEqual(canceled.run.state._tag, "Canceled");
         assert.strictEqual(
-          canceled.attempts[0]?.outcome.pipe(Option.map(({ _tag }) => _tag)).pipe(Option.getOrNull),
+          (canceled.attempts[0]?.outcome).pipe(
+            Option.map(({ _tag }) => _tag),
+            Option.getOrNull,
+          ),
           "Canceled",
         );
         assert.deepStrictEqual(canceled.attempts[0]?.endedAt, waiting.attempts[0]?.endedAt);
@@ -194,7 +198,7 @@ it.live.each([1, 2])(
         ]);
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
-          const source = new Submission({
+          const source = Submission.make({
             ...required(),
             loop: policy.fixLoop,
             cycleLimit: Option.some(CycleLimit.make(limit)),
@@ -207,7 +211,7 @@ it.live.each([1, 2])(
             ({ run }) => run.state._tag === "AwaitingCi",
           );
           const fix = yield* engine.submit(
-            new Submission({
+            Submission.make({
               ...submission({ number: 2 }),
               loop: policy.fixLoop,
               cycleLimit: source.cycleLimit,
@@ -220,8 +224,8 @@ it.live.each([1, 2])(
             accepted.runId,
             head,
             fix._tag === "Claimed"
-              ? new CiHandedOff({ reason, fixRunId: fix.runId })
-              : new CiFailed({ message: reason }),
+              ? CiHandedOff.make({ reason, fixRunId: fix.runId })
+              : CiFailed.make({ message: reason }),
           );
           const settled = yield* engine.inspect(accepted.runId);
           assert.deepStrictEqual(settled.attempts[0]?.endedAt, waiting.attempts[0]?.endedAt);
@@ -229,7 +233,7 @@ it.live.each([1, 2])(
           if (fix._tag === "Claimed") {
             assert.deepStrictEqual(
               settled.run.state,
-              new RunState.HandedOff({
+              RunState.HandedOff.make({
                 reason,
                 fixRunId: fix.runId,
                 head,
@@ -247,7 +251,7 @@ it.live.each([1, 2])(
             yield* engine.settleCi(
               accepted.runId,
               head,
-              new CiFailed({ message: "late observation" }),
+              CiFailed.make({ message: "late observation" }),
             );
             assert.strictEqual((yield* engine.inspect(accepted.runId)).run.state._tag, "HandedOff");
             yield* waitFor(engine, fix.runId, ({ run }) => run.state._tag === "Succeeded");

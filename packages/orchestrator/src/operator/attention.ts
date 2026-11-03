@@ -34,7 +34,7 @@ export const attentionKey = (need: NeedView): AttentionKey => {
           ),
         }
       : encodeNeed(need);
-  return new AttentionKey({
+  return AttentionKey.make({
     id: need.id,
     revision: AttentionRevision.make(JSON.stringify(content)),
   });
@@ -82,34 +82,32 @@ export const projectAttention = (
   needsYou: ReadonlyArray<NeedView>,
 ): ReadonlyArray<ProjectView> => {
   const repositories = new Set(needsYou.flatMap(needRepositories));
-  return projects.map(
-    (project) =>
-      new ProjectView({
-        ...project,
-        status: [project.repository, ...project.repositories].some((name) => repositories.has(name))
-          ? "needs-you"
-          : project.runs.some(({ canCancel }) => canCancel)
-            ? "active"
-            : "clear",
-        board: new BoardView({
-          ...project.board,
-          lanes: project.board.lanes.map((lane) => {
-            const items = lane.items.map(
-              (task) =>
-                new BoardTaskView({
-                  ...task,
-                  needsYou: taskNeedsAttention(
-                    { items: task.items, runs: boardTaskRuns(task) },
-                    needsYou,
-                  ),
-                }),
-            );
-            return lane._tag === "WritableBoardLane"
-              ? new WritableBoardLaneView({ ...lane, items })
-              : new ReadOnlyBoardLaneView({ ...lane, items });
-          }),
+  return projects.map((project) =>
+    ProjectView.make({
+      ...project,
+      status: [project.repository, ...project.repositories].some((name) => repositories.has(name))
+        ? "needs-you"
+        : project.runs.some(({ canCancel }) => canCancel)
+          ? "active"
+          : "clear",
+      board: BoardView.make({
+        ...project.board,
+        lanes: project.board.lanes.map((lane) => {
+          const items = lane.items.map((task) =>
+            BoardTaskView.make({
+              ...task,
+              needsYou: taskNeedsAttention(
+                { items: task.items, runs: boardTaskRuns(task) },
+                needsYou,
+              ),
+            }),
+          );
+          return lane._tag === "WritableBoardLane"
+            ? WritableBoardLaneView.make({ ...lane, items })
+            : ReadOnlyBoardLaneView.make({ ...lane, items });
         }),
       }),
+    }),
   );
 };
 
@@ -140,7 +138,7 @@ export const poolLimitNeeds = (
       const { usedPercent, resetsAt } = limit.value;
       if (Option.isNone(resetsAt) || !DateTime.isGreaterThan(resetsAt.value, now)) return [];
       return [
-        new PoolLimitNeed({
+        PoolLimitNeed.make({
           id: `pool-limit:${pool}:${window}`,
           pool,
           login,
@@ -170,7 +168,7 @@ export const poolAttentionFor = (
     });
     if (needs.length === 0) return overview;
     const { needsYou, dismissedNeeds } = partitionNeeds(needs, yield* acknowledgements.list());
-    return new ReadyOverview({
+    return ReadyOverview.make({
       ...overview,
       needsYou: [...overview.needsYou, ...needsYou],
       dismissedNeeds: [...overview.dismissedNeeds, ...dismissedNeeds],
@@ -179,7 +177,7 @@ export const poolAttentionFor = (
 
 /** Uses the validated attention revision to scope dismissal notices like the displayed entry. */
 export const attentionAudiences = (key: AttentionKey): ReadonlyArray<ChangeAudience> => {
-  const need = Schema.decodeUnknownOption(Schema.fromJsonString(NeedView))(key.revision);
+  const need = Schema.decodeOption(Schema.fromJsonString(NeedView))(key.revision);
   if (Option.isNone(need)) return [{ _tag: "Instance" }];
   const repositories = needRepositories(need.value);
   return repositories.length === 0

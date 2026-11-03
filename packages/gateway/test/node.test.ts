@@ -142,15 +142,13 @@ const relayed = (proxy: Listener, url: string) =>
   });
 
 const attachment = (minutes: number) =>
-  Effect.map(
-    DateTime.now,
-    (now) =>
-      new AttachRequest({
-        worker: WORKER,
-        repository: REPOSITORY,
-        credential: new AnonymousCredential(),
-        expiresAt: DateTime.add(now, { minutes }),
-      }),
+  Effect.map(DateTime.now, (now) =>
+    AttachRequest.make({
+      worker: WORKER,
+      repository: REPOSITORY,
+      credential: AnonymousCredential.make(),
+      expiresAt: DateTime.add(now, { minutes }),
+    }),
   );
 
 describe("the Node gateway", () => {

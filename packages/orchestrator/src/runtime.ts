@@ -94,8 +94,8 @@ export const runtimeLayer = (
         instanceDirectory,
         instanceId,
         startup.config,
-        startup.agents.map(
-          ({ harness, model, effort }) => new BrainSpec({ harness, model, effort }),
+        startup.agents.map(({ harness, model, effort }) =>
+          BrainSpec.make({ harness, model, effort }),
         ),
         database,
       );

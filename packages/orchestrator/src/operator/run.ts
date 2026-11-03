@@ -241,13 +241,13 @@ export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestra
     /** Summed attempt wall time and start times of attempts still running. */
     duration: RunDurationView.pipe(
       Schema.withConstructorDefault(
-        Effect.succeed(new RunDurationView({ endedMillis: 0, runningSince: null, unmeasured: 0 })),
+        Effect.succeed(RunDurationView.make({ endedMillis: 0, runningSince: null, unmeasured: 0 })),
       ),
     ),
     /** Reported session tokens and costs across the run attempts. */
     usage: RunUsageView.pipe(
       Schema.withConstructorDefault(
-        Effect.succeed(new RunUsageView({ tokens: TokenCount.make(0), pools: [], sessions: [] })),
+        Effect.succeed(RunUsageView.make({ tokens: TokenCount.make(0), pools: [], sessions: [] })),
       ),
     ),
     /** The unconfirmed stop that keeps the open Run from starting an Attempt, or null. */

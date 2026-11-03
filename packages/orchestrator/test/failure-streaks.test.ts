@@ -4,12 +4,12 @@ import { RepositoryPollFailure } from "../src/polling/cycle.ts";
 import { advance, type RepositoryOutcome } from "../src/polling/failure-streaks.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const githubFailure = new RepositoryPollFailure({
+const githubFailure = RepositoryPollFailure.make({
   repository,
   errorTag: "GitHubApiError",
   message: "502",
 });
-const configFailure = new RepositoryPollFailure({
+const configFailure = RepositoryPollFailure.make({
   repository,
   errorTag: "ConfigFileError",
   message: "Invalid loop",

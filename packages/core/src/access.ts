@@ -32,7 +32,7 @@ export class PermissionGrant extends Schema.Class<PermissionGrant>("PermissionGr
   ),
 ) {}
 export const administratorPermissions = [
-  new PermissionGrant({ permission: "admin", scope: new InstanceScope() }),
+  PermissionGrant.make({ permission: "admin", scope: InstanceScope.make() }),
 ];
 
 export class RoleBinding extends Schema.Class<RoleBinding>("RoleBinding")(
@@ -57,7 +57,7 @@ export class RoleBinding extends Schema.Class<RoleBinding>("RoleBinding")(
           : this.role === "operator"
             ? ["read", "operate"]
             : ["read"];
-    return permissions.map((permission) => new PermissionGrant({ permission, scope: this.scope }));
+    return permissions.map((permission) => PermissionGrant.make({ permission, scope: this.scope }));
   }
 }
 
@@ -109,5 +109,5 @@ export const requirePermission = Effect.fn("Authorization.requirePermission")(fu
   });
   if (permits(yield* RequestPermissions, permission, scope)) return;
   yield* Effect.logWarning("Permission refused", { permission, scope });
-  return yield* new AccessDenied({ permission });
+  return yield* AccessDenied.make({ permission });
 });

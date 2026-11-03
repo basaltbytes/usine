@@ -50,7 +50,7 @@ export const backup = Effect.fn("DurableStorage.backup")(
     const failed =
       <C>(operation: DurableStorageBackupError["operation"], reasonOf: (cause: C) => string) =>
       (cause: C) =>
-        new DurableStorageBackupError({
+        DurableStorageBackupError.make({
           operation,
           source,
           destination,
@@ -65,7 +65,7 @@ export const backup = Effect.fn("DurableStorage.backup")(
       .stat(source)
       .pipe(Effect.mapError(failed("open", platformReason)));
     if (info.type !== "File") {
-      return yield* new DurableStorageBackupError({
+      return yield* DurableStorageBackupError.make({
         operation: "open",
         source,
         destination,

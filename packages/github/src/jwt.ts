@@ -85,7 +85,7 @@ export const appJwtSigner = Effect.fn("AppJwt.import")(function* (credentials: A
         ["sign"],
       ),
     catch: () =>
-      new AppAuthenticationError({
+      AppAuthenticationError.make({
         message: "Could not import the GitHub App private key as an RSA private key",
       }),
   });

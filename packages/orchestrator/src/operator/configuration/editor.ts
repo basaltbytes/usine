@@ -63,8 +63,8 @@ export type ConfigurationEditorError =
 
 const entityKey = (request: ConfigurationEntityRequest) =>
   Schema.decodeUnknownEffect(ConfigurationEntityKey)(request).pipe(
-    Effect.mapError(
-      () => new ConfigurationNotFound({ message: `Unknown configuration kind: ${request.kind}` }),
+    Effect.mapError(() =>
+      ConfigurationNotFound.make({ message: `Unknown configuration kind: ${request.kind}` }),
     ),
   );
 
@@ -160,7 +160,7 @@ export class ConfigurationEditor extends Context.Service<
         yield* Effect.annotateCurrentSpan({ revision: number });
         const found = yield* store.revision(number);
         if (Option.isNone(found))
-          return yield* new ConfigurationNotFound({
+          return yield* ConfigurationNotFound.make({
             message: `Configuration revision ${number} was not found.`,
           });
         for (const { key } of found.value.changes) yield* entityPermission(key, "read");
@@ -168,10 +168,9 @@ export class ConfigurationEditor extends Context.Service<
       });
       const snapshotFor = (expected: ConfigurationRevisionNumber) =>
         store.read.pipe(
-          Effect.flatMap((snapshot) =>
-            snapshot.number === expected
-              ? Effect.succeed(snapshot)
-              : Effect.fail(new StaleRevision({ expected, actual: snapshot.number })),
+          Effect.filterOrFail(
+            (snapshot) => snapshot.number === expected,
+            (snapshot) => StaleRevision.make({ expected, actual: snapshot.number }),
           ),
         );
       const save = (
@@ -183,7 +182,7 @@ export class ConfigurationEditor extends Context.Service<
           const grants = yield* RequestPermissions;
           for (const change of changes) {
             yield* entityPermission(change.key, "maintain");
-            if (change.key.kind !== "project" || permits(grants, "admin", new InstanceScope()))
+            if (change.key.kind !== "project" || permits(grants, "admin", InstanceScope.make()))
               continue;
             // A maintainer edits lanes; project membership and identity require an admin.
             const withoutLanes = (value: Option.Option<Schema.Json>) =>
@@ -195,7 +194,7 @@ export class ConfigurationEditor extends Context.Service<
               Option.isNone(change.after) ||
               !Equal.equals(withoutLanes(change.before), withoutLanes(change.after))
             )
-              return yield* new AccessDenied({ permission: "admin" });
+              return yield* AccessDenied.make({ permission: "admin" });
           }
           return yield* current.commit({
             expected: input.expected,
@@ -205,20 +204,16 @@ export class ConfigurationEditor extends Context.Service<
           });
         });
       const resolveKey = (snapshot: Configuration, key: ConfigurationEntityKey) =>
-        Option.match(resolveConfigurationEntityKey(entitiesOf(snapshot), key), {
-          onSome: Effect.succeed,
-          onNone: () =>
-            Effect.fail(
-              new ConfigurationNotFound({
-                message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
-              }),
-            ),
-        });
+        Effect.fromOption(resolveConfigurationEntityKey(entitiesOf(snapshot), key), () =>
+          ConfigurationNotFound.make({
+            message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
+          }),
+        );
       const findEntity = (snapshot: Configuration, key: ConfigurationEntityKey) => {
         const found = entitiesOf(snapshot).find((entity) => entity.key.key === key.key);
         return found === undefined
           ? Effect.fail(
-              new ConfigurationNotFound({
+              ConfigurationNotFound.make({
                 message: `Configuration entity ${key.key} was not found.`,
               }),
             )
@@ -239,11 +234,10 @@ export class ConfigurationEditor extends Context.Service<
         list: Effect.fn("ConfigurationEditor.list")(function* (query) {
           if (query.kind !== undefined)
             yield* Schema.decodeUnknownEffect(ConfigurationEntityKind)(query.kind).pipe(
-              Effect.mapError(
-                () =>
-                  new ConfigurationNotFound({
-                    message: `Unknown configuration kind: ${query.kind}`,
-                  }),
+              Effect.mapError(() =>
+                ConfigurationNotFound.make({
+                  message: `Unknown configuration kind: ${query.kind}`,
+                }),
               ),
             );
           const identifier =
@@ -273,15 +267,14 @@ export class ConfigurationEditor extends Context.Service<
             )
             .sort((a, b) => b.number - a.number);
           const page = filtered.slice(0, query.limit);
-          return new ConfigurationRevisionPage({
-            revisions: page.map(
-              (entry) =>
-                new ConfigurationRevisionSummary({
-                  ...entry,
-                  actor: Option.getOrNull(entry.actor),
-                  message: Option.getOrNull(entry.message),
-                  entities: entry.changes.map(({ key }) => key),
-                }),
+          return ConfigurationRevisionPage.make({
+            revisions: page.map((entry) =>
+              ConfigurationRevisionSummary.make({
+                ...entry,
+                actor: Option.getOrNull(entry.actor),
+                message: Option.getOrNull(entry.message),
+                entities: entry.changes.map(({ key }) => key),
+              }),
             ),
             nextBefore: filtered.length > query.limit ? (page.at(-1)?.number ?? null) : null,
           });
@@ -292,7 +285,7 @@ export class ConfigurationEditor extends Context.Service<
           yield* Effect.annotateCurrentSpan({ entity: key.key });
           yield* entityPermission(key, "read");
           const entity = repositoryEditorEntity(snapshot, yield* findEntity(snapshot, key));
-          return new ConfigurationEntityView({
+          return ConfigurationEntityView.make({
             ...entity,
             text: yield* formatConfigurationEntity(entity),
             number: snapshot.number,
@@ -306,7 +299,7 @@ export class ConfigurationEditor extends Context.Service<
           const parsed =
             input.text !== undefined
               ? yield* parseConfigurationEntity(parser, key, input.text)
-              : new ConfigurationEntity({ key, value: qualifyLoopValue(key, input.value) });
+              : ConfigurationEntity.make({ key, value: qualifyLoopValue(key, input.value) });
           const { entity, changes } = yield* repositoryEditorChanges(snapshot, parsed);
           const before = entitiesOf(snapshot).find((entry) => entry.key.key === key.key);
           const change = {
@@ -316,7 +309,7 @@ export class ConfigurationEditor extends Context.Service<
           };
           return yield* save(snapshot, input, [
             ...changes,
-            new ConfigurationChange(
+            ConfigurationChange.make(
               input.position === undefined ? change : { ...change, position: input.position },
             ),
           ]);
@@ -327,7 +320,7 @@ export class ConfigurationEditor extends Context.Service<
           yield* Effect.annotateCurrentSpan({ entity: key.key, expectedRevision: input.expected });
           const entity = yield* findEntity(snapshot, key);
           return yield* save(snapshot, input, [
-            new ConfigurationChange({
+            ConfigurationChange.make({
               key,
               before: Option.some(entity.value),
               after: Option.none(),

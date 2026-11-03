@@ -23,7 +23,7 @@ type ResumeLoopProps = {
 export const ResumeLoop = ({ name, pause, close }: ResumeLoopProps) => {
   const entity = useQuery({ ...entityQuery(entityKey("loop", name)), staleTime: 0 });
   const preview = useQuery({
-    ...loopPreviewQuery(new LoopPreviewRequest({ name, value: entity.data?.value ?? null })),
+    ...loopPreviewQuery(LoopPreviewRequest.make({ name, value: entity.data?.value ?? null })),
     enabled: entity.isSuccess && !entity.isFetching,
   });
   const ready = entity.isSuccess && !entity.isFetching && preview.isSuccess && !preview.isFetching;

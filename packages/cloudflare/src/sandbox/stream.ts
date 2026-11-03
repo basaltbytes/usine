@@ -35,7 +35,7 @@ const decoder = new TextDecoder();
 /** Sends `message` as a stream failure and closes the socket. */
 const refuse = (socket: StreamSocket, message: string) =>
   socket
-    .send(encodeServerMessage(new StreamFailed({ message })))
+    .send(encodeServerMessage(StreamFailed.make({ message })))
     .pipe(Effect.andThen(socket.close(1011, "stream failed")));
 
 /** Sends `bytes` of `channel` in messages of at most `FRAME_BYTES`. */
@@ -58,7 +58,7 @@ const pump = (
     : Stream.fromReadableStream({
         evaluate: () => stream,
         onError: (cause) =>
-          new ContainerFailure({
+          ContainerFailure.make({
             operation: "exec",
             message: cause instanceof Error ? cause.message : String(cause),
           }),
@@ -138,7 +138,7 @@ export const execStream = Effect.fn("Sandbox.execStream")(function* (
     return yield* refuse(socket, "The container didn't start the command");
   }
   const handle = started.value;
-  yield* socket.send(encodeServerMessage(new Started({ process })));
+  yield* socket.send(encodeServerMessage(Started.make({ process })));
   yield* Effect.logInfo("Started a command in the sandbox", {
     ...fields,
     commandBytes: command.length,
@@ -153,7 +153,7 @@ export const execStream = Effect.fn("Sandbox.execStream")(function* (
       Effect.tryPromise({
         try: () => handle.exitCode,
         catch: (cause) =>
-          new ContainerFailure({
+          ContainerFailure.make({
             operation: "exec",
             message: cause instanceof Error ? cause.message : String(cause),
           }),
@@ -171,7 +171,7 @@ export const execStream = Effect.fn("Sandbox.execStream")(function* (
     });
     return yield* socket.close(1011, "container stream failed");
   }
-  yield* socket.send(encodeServerMessage(new Exited({ exitCode: exitCode.success })));
+  yield* socket.send(encodeServerMessage(Exited.make({ exitCode: exitCode.success })));
   yield* socket.close(1000, "exited");
   yield* Effect.logInfo("The sandbox's command exited", { ...fields, exitCode: exitCode.success });
 });
@@ -225,7 +225,7 @@ export const attachStream = Effect.fn("Sandbox.attachStream")(function* (
   });
   const disconnected = Stream.fromQueue(socket.messages).pipe(Stream.runDrain);
   const outcome = yield* Effect.raceFirst(
-    follow.pipe(Effect.map(Option.some)),
+    follow.pipe(Effect.asSome),
     disconnected.pipe(Effect.as(Option.none<number>())),
   ).pipe(Effect.option);
   const exitCode = Option.flatten(outcome);
@@ -237,7 +237,7 @@ export const attachStream = Effect.fn("Sandbox.attachStream")(function* (
     yield* Effect.logInfo("The client left the attach stream", fields);
     return;
   }
-  yield* socket.send(encodeServerMessage(new Exited({ exitCode: exitCode.value })));
+  yield* socket.send(encodeServerMessage(Exited.make({ exitCode: exitCode.value })));
   yield* socket.close(1000, "exited");
   yield* Effect.logInfo("The attached command exited", { ...fields, exitCode: exitCode.value });
 });

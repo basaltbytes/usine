@@ -59,7 +59,7 @@ describe("Worker scheduler startup", () => {
         const bus = yield* ChangeBus;
         const entered = yield* Deferred.make<void>();
         let initial = true;
-        const config = Schema.decodeUnknownSync(UsineConfig)({
+        const config = Schema.decodeSync(UsineConfig)({
           version: 1,
           repos: [],
           workers: [{ name: "local", kind: "local" }],
@@ -134,7 +134,7 @@ describe("Worker scheduler startup", () => {
         outcome: unused,
         preflight: () =>
           Effect.fail(
-            new ExecutorOperationError({
+            ExecutorOperationError.make({
               operation: "preflight",
               message: "The harness probe timed out",
               cause: new Error("timeout"),
@@ -145,7 +145,7 @@ describe("Worker scheduler startup", () => {
         intervene: unused,
         sweep: Effect.void,
       });
-      const config = Schema.decodeUnknownSync(UsineConfig)({
+      const config = Schema.decodeSync(UsineConfig)({
         version: 1,
         repos: [],
         workers: [
@@ -467,7 +467,7 @@ const recordingExecutor = (
           `${worker} x${maxConcurrentAttempts}: ${brains.map(({ model }) => model).join(",")}`,
         );
         if (options.failing?.includes(worker) === true)
-          return yield* new WorkerCapabilityError({
+          return yield* WorkerCapabilityError.make({
             worker,
             capability: "memory",
             message: "The machine has 2 GiB of memory, less than 1.5 GiB per Attempt.",
@@ -489,8 +489,8 @@ const submission = (
   loop = "start-dev",
   labels?: ReadonlyArray<string>,
 ) =>
-  new Submission({
-    event: new Event({
+  Submission.make({
+    event: Event.make({
       id: EventId.make(`event-${second}`),
       dedupKey: DedupKey.make(`dedup-${second}`),
       payload:
@@ -1547,11 +1547,11 @@ describe("Worker status", () => {
             preflight: (worker, brains) =>
               brains.some(({ harness }) => harness === "claude")
                 ? Effect.fail(
-                    new WorkerCapabilityError({
+                    WorkerCapabilityError.make({
                       worker,
                       capability: "harness-login",
                       message: "Claude Code is not logged in",
-                      cause: new HarnessUnavailableError({
+                      cause: HarnessUnavailableError.make({
                         harness: "claude",
                         capability: "login",
                         message: "Claude Code is not logged in",
@@ -1642,7 +1642,7 @@ const cloudflareScheduler = Effect.gen(function* () {
                 yield* Deferred.await(slow.proceed);
               }
               if (["typo.example", "slow.example"].includes(address.workerUrl.hostname))
-                return yield* new WorkerCapabilityError({
+                return yield* WorkerCapabilityError.make({
                   worker,
                   capability: "machine",
                   message: "The Worker URL doesn't answer",

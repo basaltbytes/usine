@@ -52,10 +52,10 @@ it("answers the version while recovering 400 finished attempts without per-attem
         Effect.gen(function* () {
           for (let index = 0; index < 400; index += 1) {
             const runId = RunId.make(`finished-${index}`);
-            const value = new Submission({
+            const value = Submission.make({
               ...template,
               itemKey: ItemKey.make(`item-${index}`),
-              event: new Event({
+              event: Event.make({
                 ...template.event,
                 id: EventId.make(`event-${index}`),
                 dedupKey: DedupKey.make(`event-${index}`),
@@ -66,7 +66,7 @@ it("answers the version while recovering 400 finished attempts without per-attem
             assert(started._tag === "AttemptStarted");
             yield* store.finishAttempt(
               started.execution.attempt,
-              Result.succeed(new StepResult({ message: "done", facts: [] })),
+              Result.succeed(StepResult.make({ message: "done", facts: [] })),
             );
           }
         }),
@@ -75,7 +75,7 @@ it("answers the version while recovering 400 finished attempts without per-attem
       const connectionWrites: Array<string> = [];
       const executor = executorLayer(machine, mintingProvider(), ADDRESS, undefined, undefined, {
         attemptConnections: {
-          read: () => Effect.succeed(Option.none()),
+          read: () => Effect.succeedNone,
           write: (id) => Effect.sync(() => void connectionWrites.push(id)),
           remove: () => Effect.void,
         },
@@ -97,9 +97,8 @@ it("answers the version while recovering 400 finished attempts without per-attem
                 yield* remote
                   .recover(attempt, sink, Effect.succeed(COMMIT_AUTHOR))
                   .pipe(
-                    Effect.catchIf(
-                      Schema.is(ExecutorError),
-                      (error) => new InfraFailure({ message: error.message, cause: error }),
+                    Effect.catchIf(Schema.is(ExecutorError), (error) =>
+                      InfraFailure.make({ message: error.message, cause: error }),
                     ),
                   );
                 recovered += 1;
@@ -171,10 +170,6 @@ it("answers the version while recovering 400 finished attempts without per-attem
         "runtime routes replace startup responses on the same listener",
       );
       assert.strictEqual(ready.headers["x-frame-options"], "DENY");
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(NodeHttpServer.layerTest),
-      Effect.provide(NodeServices.layer),
-    ),
+    }).pipe(Effect.scoped, Effect.provide([NodeHttpServer.layerTest, NodeServices.layer])),
   );
 }, 30_000);

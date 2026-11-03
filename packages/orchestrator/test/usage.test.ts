@@ -29,26 +29,26 @@ const now = DateTime.makeUnsafe("2026-10-26T09:00:00.000Z");
 const runId = RunId.make("run");
 const attemptId = AttemptId.make("run/1");
 const brain = (harness: Harness, model: string) =>
-  new BrainSpec({ harness, model: ModelId.make(model), effort: "high" });
+  BrainSpec.make({ harness, model: ModelId.make(model), effort: "high" });
 const child = (id: string, harness: Harness, model: string, apiKey = false) =>
-  new ChildSession({
+  ChildSession.make({
     id: AgentSessionId.make(id),
     parentId: AgentSessionId.make("parent"),
     agent: AgentName.make("reviewer"),
     brain: brain(harness, model),
     gatewayCredential: apiKey ? Option.some("api-key") : Option.none(),
   });
-const planParent = new ParentSession({
+const planParent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
   brain: brain("pi", "openai-codex/gpt-5.6-terra"),
 });
 // 3K uncached input, 200K cache reads, 1K cache writes, and 1K output: 5K tokens.
-const breakdown = new TokenBreakdown({
-  input: 3_000,
-  cachedInput: 200_000,
-  cacheWrite: 1_000,
-  output: 1_000,
+const breakdown = TokenBreakdown.make({
+  input: 3000,
+  cachedInput: 200000,
+  cacheWrite: 1000,
+  output: 1000,
 });
 // The same tokens at gpt-5.6-terra's rates per million: $2, $0.20, $2.50, and $12.
 const terraPrice = (3_000 * 2 + 200_000 * 0.2 + 1_000 * 2.5 + 1_000 * 12) / 1_000_000;
@@ -59,19 +59,19 @@ const report = (
   usd: number | null,
   tokens: Option.Option<TokenBreakdown>,
 ) =>
-  new TranscriptEntry({
+  TranscriptEntry.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId,
     direction: "outbound",
-    envelope: new AttemptChannel.OutboundEnvelope({
+    envelope: AttemptChannel.OutboundEnvelope.make({
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId,
       sequence: AttemptChannel.Sequence.make(sequence),
       sentAt: now,
-      payload: new AttemptChannel.SessionEvent({
-        event: new SessionTokensUpdated({
+      payload: AttemptChannel.SessionEvent.make({
+        event: SessionTokensUpdated.make({
           session,
-          totalTokens: TokenCount.make(5_000),
+          totalTokens: TokenCount.make(5000),
           costUsd: usd === null ? Option.none() : Option.some(UsdAmount.make(usd)),
           breakdown: tokens,
         }),
@@ -81,15 +81,15 @@ const report = (
   });
 
 const source = {
-  run: new Run({
+  run: Run.make({
     id: runId,
     eventId: EventId.make("event"),
     loop: LoopName.make("review-pr"),
-    state: new RunState.Succeeded(),
+    state: RunState.Succeeded.make(),
     openedAt: now,
   }),
   attempts: [
-    new Attempt({
+    Attempt.make({
       id: attemptId,
       runId,
       stepName: StepName.make("run"),
@@ -101,10 +101,10 @@ const source = {
       operatorIntervened: false,
       parentModel: Option.none(),
       startedAt: now,
-      outcome: Option.some(new AttemptSucceeded()),
+      outcome: Option.some(AttemptSucceeded.make()),
       endedAt: Option.some(now),
       salvage: Option.none(),
-      start: Option.some(new StartedByEvent()),
+      start: Option.some(StartedByEvent.make()),
     }),
   ],
 };
@@ -194,14 +194,13 @@ describe("RunUsageReader", () => {
       assert.strictEqual(warnings.length, 1);
       assert.include(warnings[0], "gpt-7-nova");
     }).pipe(
-      Effect.provide(
+      Effect.provide([
         readerOf([
           report(1, child("unknown", "codex", "gpt-7-nova"), null, Option.some(breakdown)),
-          // Recorded before Codex reports had a breakdown: unpriced, but its model has rates.
           report(2, child("older", "codex", "gpt-5.6-terra"), null, Option.none()),
         ]),
-      ),
-      Effect.provide(Logger.layer([logger])),
+        Logger.layer([logger]),
+      ]),
     );
   });
 });

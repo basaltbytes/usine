@@ -68,8 +68,8 @@ export const triggerConditionLayer: Layer.Layer<
       const [, , number] = item.value;
       const changed =
         loop.trigger.on === "pr"
-          ? new ChangedPullRequest({ number, updatedAt: submission.event.receivedAt })
-          : new ChangedIssue({ number, updatedAt: submission.event.receivedAt });
+          ? ChangedPullRequest.make({ number, updatedAt: submission.event.receivedAt })
+          : ChangedIssue.make({ number, updatedAt: submission.event.receivedAt });
       const snapshot = yield* github.snapshot(repository.name, changed);
       if (Option.isSome(submission.ciFailureHead)) {
         if (!(snapshot instanceof PullRequestSnapshot)) {

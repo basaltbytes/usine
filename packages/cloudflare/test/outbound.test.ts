@@ -11,13 +11,13 @@ import {
 
 const issuedAt = DateTime.makeUnsafe("2026-10-26T08:00:00.000Z");
 
-const credentials = new SandboxCredentials({
+const credentials = SandboxCredentials.make({
   issuedAt,
   github: Option.some(Redacted.make("ghs_installation-token")),
   providers: [
-    new ProviderGrant({
+    ProviderGrant.make({
       provider: "anthropic",
-      credential: new ApiKeyCredential({ key: Redacted.make("sk-ant-key") }),
+      credential: ApiKeyCredential.make({ key: Redacted.make("sk-ant-key") }),
     }),
   ],
 });
@@ -40,7 +40,7 @@ describe("sandbox outbound handlers", () => {
 
   it("denies every GitHub and provider host once the credentials are revoked", () => {
     const revoked = interceptionsFor(
-      new SandboxCredentials({ issuedAt, github: Option.none(), providers: [] }),
+      SandboxCredentials.make({ issuedAt, github: Option.none(), providers: [] }),
       [],
     );
 
@@ -86,7 +86,7 @@ describe("sandbox outbound handlers", () => {
           body: '{"model":"claude"}',
         }),
         "anthropic",
-        new ApiKeyCredential({ key: Redacted.make("sk-ant-key") }),
+        ApiKeyCredential.make({ key: Redacted.make("sk-ant-key") }),
       ),
     );
     const openai = Option.getOrThrow(
@@ -96,7 +96,7 @@ describe("sandbox outbound handlers", () => {
           headers: { authorization: "Bearer usine-placeholder" },
         }),
         "openai",
-        new ApiKeyCredential({ key: Redacted.make("sk-openai-key") }),
+        ApiKeyCredential.make({ key: Redacted.make("sk-openai-key") }),
       ),
     );
 
@@ -110,7 +110,7 @@ describe("sandbox outbound handlers", () => {
   });
 
   it("adds the API key only to the routes Claude Code and Codex call", () => {
-    const key = new ApiKeyCredential({ key: Redacted.make("sk-key") });
+    const key = ApiKeyCredential.make({ key: Redacted.make("sk-key") });
     const forward = (provider: "anthropic" | "openai", method: string, path: string) =>
       Option.map(
         providerRequest(

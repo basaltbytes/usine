@@ -15,10 +15,10 @@ const now = DateTime.makeUnsafe("2026-10-25T12:00:00Z");
 const repository = RepositoryName.make("acme/project");
 const summary = (id: string, item: string, loop: string, state: RunState.RunState) => {
   const runId = RunId.make(id);
-  return new RunSummary({
+  return RunSummary.make({
     itemKey: ItemKey.make(item),
     repository,
-    run: new Run({
+    run: Run.make({
       id: runId,
       eventId: EventId.make(id),
       loop: LoopName.make(loop),
@@ -31,10 +31,9 @@ const summary = (id: string, item: string, loop: string, state: RunState.RunStat
     approval: Option.none(),
     resolvedFailureAttemptId: Option.none(),
     runAgain: Option.none(),
-
-    agent: new Agent({
+    agent: Agent.make({
       name: AgentName.make("developer"),
-      brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
+      brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
       persona: AgentPersona.make("Work."),
       parentModel: Option.none(),
       parentEffort: Option.none(),
@@ -43,10 +42,10 @@ const summary = (id: string, item: string, loop: string, state: RunState.RunStat
 };
 
 it.each([
-  ["rebase-pr", "pr-1", new RunState.Succeeded(), 0],
-  ["review-pr", "pr-1", new RunState.Succeeded(), 1],
-  ["rebase-pr", "pr-2", new RunState.Succeeded(), 1],
-  ["rebase-pr", "pr-1", new RunState.Failed(), 1],
+  ["rebase-pr", "pr-1", RunState.Succeeded.make(), 0],
+  ["review-pr", "pr-1", RunState.Succeeded.make(), 1],
+  ["rebase-pr", "pr-2", RunState.Succeeded.make(), 1],
+  ["rebase-pr", "pr-1", RunState.Failed.make(), 1],
 ] as const)(
   "counts successful rounds by loop and item: %s %s %j",
   (loop, item, state, expected) => {
@@ -61,7 +60,7 @@ it.each([
           mergedAt: now,
           budgetResets: 0,
           runs: [
-            summary("first", "pr-1", "rebase-pr", new RunState.Succeeded()),
+            summary("first", "pr-1", "rebase-pr", RunState.Succeeded.make()),
             summary("second", item, loop, state),
           ],
         },

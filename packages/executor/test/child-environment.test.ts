@@ -3,7 +3,7 @@ import { BotAccount, BotLogin, BotUserId } from "@usine/core/worker";
 import { Option } from "effect";
 import { childEnvironment } from "../src/child-environment.ts";
 
-const author = new BotAccount({
+const author = BotAccount.make({
   login: BotLogin.make("usine-phildl[bot]"),
   id: BotUserId.make(323694641),
 });

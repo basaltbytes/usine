@@ -29,7 +29,7 @@ describe("pending parent stops", () => {
           const worker = yield* slottedExecutor(
             [
               Deferred.await(fail).pipe(
-                Effect.andThen(new InfraFailure({ message: "Lost parent", cause: "offline" })),
+                Effect.andThen(InfraFailure.make({ message: "Lost parent", cause: "offline" })),
               ),
               Effect.succeed(stepResult("other item")),
               Effect.succeed(stepResult("after stop")),
@@ -67,7 +67,7 @@ describe("pending parent stops", () => {
             yield* Deferred.await(entered);
             assert.lengthOf(yield* stops.list, 1);
             const sameItem = yield* engine.submit(
-              new Submission({
+              Submission.make({
                 ...submission({ number: 2, item: "same-item" }),
                 loop: LoopName.make("another-loop"),
               }),

@@ -14,8 +14,8 @@ type AudienceScope = AccessScope | Extract<ChangeAudience, { readonly _tag: "Rea
 const decodeProject = Schema.decodeUnknownOption(ProjectId);
 const projectScope = (project: Option.Option<ProjectId>): AccessScope =>
   Option.match(project, {
-    onNone: () => new InstanceScope(),
-    onSome: (project) => new ProjectScope({ project }),
+    onNone: () => InstanceScope.make(),
+    onSome: (project) => ProjectScope.make({ project }),
   });
 
 export const audienceScope = (

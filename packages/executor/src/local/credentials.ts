@@ -55,7 +55,7 @@ export const localCredentialsFor = Effect.gen(function* () {
       effect.pipe(
         Effect.catchTag("PlatformError", (cause) =>
           Effect.fail(
-            new ExecutorOperationError({
+            ExecutorOperationError.make({
               operation: "prepare",
               message: "Can't write the attempt's credential files",
               cause,

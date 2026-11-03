@@ -10,13 +10,13 @@ import { LabelReconciler } from "../src/label-reconciler.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const declaration = (name: string, color?: string, description?: string) =>
-  new DeclaredLabel({
+  DeclaredLabel.make({
     name: GitHubLabelName.make(name),
     color: color === undefined ? Option.none() : Option.some(GitHubLabelColor.make(color)),
     description: Option.fromNullishOr(description),
   });
 const createdLabel = (name: string, color = "ededed", description?: string) =>
-  new RepositoryLabel({
+  RepositoryLabel.make({
     name: RepositoryLabelName.make(name),
     color: RepositoryLabelColor.make(color),
     description: Option.fromNullishOr(description),
@@ -74,7 +74,7 @@ describe("LabelReconciler", () => {
           message: Array.isArray(message) ? message.map(String).join(" ") : String(message),
         });
       });
-      const existing = new StoredRepositoryLabel({
+      const existing = StoredRepositoryLabel.make({
         name: "ready",
         color: Option.some("000000"),
         description: Option.some("Existing definition"),
@@ -138,7 +138,7 @@ describe("LabelReconciler", () => {
           create: (_repository, label) =>
             label.name === "ready"
               ? Effect.fail(
-                  new GitHubApiError({
+                  GitHubApiError.make({
                     operation: "create-repository-label",
                     status: Option.some(500),
                     message: "GitHub returned HTTP status 500",
@@ -173,7 +173,7 @@ describe("LabelReconciler", () => {
           create: (_repository, label) => {
             attempted.push(label.name);
             return Effect.fail(
-              new GitHubRateLimitError({
+              GitHubRateLimitError.make({
                 operation: "create-repository-label",
                 retryAt,
                 message: "GitHub rate limit reached",

@@ -11,9 +11,9 @@ import { failureMessage } from "../src/failure-message.ts";
 describe("CLI failure messages", () => {
   it("names the file, stage, and key of an invalid usine.yaml", () => {
     const message = failureMessage(
-      new ConfigurationInvalid({
+      ConfigurationInvalid.make({
         problems: [
-          new ConfigFileError({
+          ConfigFileError.make({
             expression: Option.none(),
             file: InstancePath.make("usine.yaml"),
             stage: "schema",
@@ -29,9 +29,9 @@ describe("CLI failure messages", () => {
 
   it("names a folder the instance load could not read", () => {
     const message = failureMessage(
-      new ConfigurationInvalid({
+      ConfigurationInvalid.make({
         problems: [
-          new ConfigFileError({
+          ConfigFileError.make({
             expression: Option.none(),
             file: InstancePath.make("loops"),
             stage: "read",
@@ -46,7 +46,7 @@ describe("CLI failure messages", () => {
 
   it("names the Worker, the failed check, and the cause of a preflight refusal", () => {
     const message = failureMessage(
-      new WorkerCapabilityError({
+      WorkerCapabilityError.make({
         worker: WorkerName.make("eu-one"),
         capability: "machine",
         message: 'Can\'t connect to SSH worker "eu-one" at usine@10.0.0.2',
@@ -62,7 +62,7 @@ describe("CLI failure messages", () => {
   it("does not repeat a cause the message already states", () => {
     const reason = "Claude Code is not logged in. Run claude login on the worker.";
     const message = failureMessage(
-      new WorkerCapabilityError({
+      WorkerCapabilityError.make({
         worker: WorkerName.make("local"),
         capability: "harness-login",
         message: reason,
@@ -78,7 +78,7 @@ describe("CLI failure messages", () => {
   it("keeps the Worker named by the scheduler for an operation failure", () => {
     assert.strictEqual(
       failureMessage(
-        new ExecutorOperationError({
+        ExecutorOperationError.make({
           operation: "preflight",
           message: 'worker "local": The harness probe timed out',
           cause: new Error("timeout"),
@@ -91,7 +91,7 @@ describe("CLI failure messages", () => {
   it("names the runtime store operation and its cause", () => {
     assert.strictEqual(
       failureMessage(
-        new EnginePersistenceError({
+        EnginePersistenceError.make({
           operation: "initialize local database",
           cause: new Error("SQLITE_CANTOPEN: unable to open database file"),
         }),
@@ -103,7 +103,7 @@ describe("CLI failure messages", () => {
   it("refuses to start with the storage error that failed the durable harness", () => {
     assert.strictEqual(
       failureMessage(
-        new DurableHarnessError({
+        DurableHarnessError.make({
           operation: "resume the durable tasks",
           message: "SQLITE_IOERR: disk I/O error",
           cause: new Error("SQLITE_IOERR: disk I/O error"),

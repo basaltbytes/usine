@@ -21,7 +21,7 @@ export const Port = Schema.Int.check(
 ).pipe(Schema.brand("ServerPort"));
 export type Port = typeof Port.Type;
 
-const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
+const PortFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(Port));
 
 /** The minimum level of the lines `usine up` logs. */
 export const UpLogLevel = Schema.Literals(["Trace", "Debug", "Info", "Warn", "Error"]);
@@ -214,13 +214,13 @@ export const CliCommand = Schema.Union([
 ]);
 export type CliCommand = typeof CliCommand.Type;
 
-const usageError = (message = CLI_USAGE) => new CliUsageError({ message });
+const usageError = (message = CLI_USAGE) => CliUsageError.make({ message });
 
 const decodePort = (
   source: "--port" | "USINE_PORT",
   value: string,
 ): Effect.Effect<Port, CliUsageError> =>
-  Schema.decodeUnknownEffect(PortFromString)(value).pipe(
+  Schema.decodeEffect(PortFromString)(value).pipe(
     Effect.mapError(() =>
       usageError(`${source} must be a whole number between 1 and 65535.\n\n${CLI_USAGE}`),
     ),
@@ -238,7 +238,7 @@ const decodeUiOrigin = (
   source: "--origin" | "USINE_ORIGIN",
   value: string,
 ): Effect.Effect<UiOrigin, CliUsageError> =>
-  Schema.decodeUnknownEffect(UiOrigin)(originOf(value)).pipe(
+  Schema.decodeEffect(UiOrigin)(originOf(value)).pipe(
     Effect.mapError(() =>
       usageError(
         `${source} must be the http or https URL of the UI without a path, such as https://orchestrator.example.ts.net.\n\n${CLI_USAGE}`,
@@ -252,10 +252,11 @@ const decodeLogLevel = (
   value: string,
 ): Effect.Effect<UpLogLevel, CliUsageError> =>
   Schema.decodeUnknownEffect(LogLevelName)(value.toLowerCase()).pipe(
-    Effect.map((name) => LOG_LEVEL_NAMES[name]),
-    Effect.mapError(() =>
-      usageError(`${source} must be trace, debug, info, warn, or error.\n\n${CLI_USAGE}`),
-    ),
+    Effect.mapBoth({
+      onSuccess: (name) => LOG_LEVEL_NAMES[name],
+      onFailure: () =>
+        usageError(`${source} must be trace, debug, info, warn, or error.\n\n${CLI_USAGE}`),
+    }),
   );
 
 const ALLOW_VOLATILE_FLAG = "--allow-volatile-instance";
@@ -268,7 +269,7 @@ const exportRunCommand = (args: ReadonlyArray<string>) => {
     !(args.length === 1 || (args.length === 3 && (flag === "--output" || flag === "-o")))
   )
     return Effect.fail(usageError());
-  return Schema.decodeUnknownEffect(ExportRunCommand)({
+  return Schema.decodeEffect(ExportRunCommand)({
     _tag: "ExportRunCommand",
     runId,
     output: Option.fromUndefinedOr(output),
@@ -279,7 +280,7 @@ const backupCommand = (args: ReadonlyArray<string>) => {
   const [output] = args;
   if (args.length !== 1 || output === undefined || output.startsWith("-"))
     return Effect.fail(usageError());
-  return Schema.decodeUnknownEffect(BackupCommand)({ _tag: "BackupCommand", output }).pipe(
+  return Schema.decodeEffect(BackupCommand)({ _tag: "BackupCommand", output }).pipe(
     Effect.mapError(() => usageError()),
   );
 };
@@ -349,7 +350,7 @@ const upCommand = (
         }),
       onSome: (value) => decodeLogLevel("--log-level", value),
     });
-    return new UpCommand({
+    return UpCommand.make({
       port: resolvedPort,
       origin: resolvedOrigin,
       logLevel: resolvedLogLevel,
@@ -361,7 +362,7 @@ const upCommand = (
 /** Returns the settings of a `usine up` without flags: those of the environment, or the defaults. */
 export const environmentUp = (environment: CliEnvironment) => upCommand([], environment);
 
-const SecondsFromString = Schema.NumberFromString.pipe(
+const SecondsFromString = Schema.FiniteFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThan(0))),
 );
 
@@ -408,14 +409,14 @@ const lifecycleArguments = (
     const seconds = yield* Option.match(timeout, {
       onNone: () => Effect.succeed(DEFAULT_LIFECYCLE_TIMEOUT_SECONDS),
       onSome: (value) =>
-        Schema.decodeUnknownEffect(SecondsFromString)(value).pipe(
+        Schema.decodeEffect(SecondsFromString)(value).pipe(
           Effect.mapError(() =>
             usageError(`--timeout must be a whole number of seconds above 0.\n\n${CLI_USAGE}`),
           ),
         ),
     });
     return {
-      options: new LifecycleOptions({ timeout: Duration.seconds(seconds), force }),
+      options: LifecycleOptions.make({ timeout: Duration.seconds(seconds), force }),
       check,
       operands,
     };
@@ -425,7 +426,7 @@ const stopOrRestartCommand = (command: "stop" | "restart", args: ReadonlyArray<s
   Effect.flatMap(lifecycleArguments(args, false), ({ options, operands }) => {
     if (operands.length > 0) return Effect.fail(usageError());
     return Effect.succeed(
-      command === "stop" ? new StopCommand({ options }) : new RestartCommand({ options }),
+      command === "stop" ? StopCommand.make({ options }) : RestartCommand.make({ options }),
     );
   });
 
@@ -434,7 +435,7 @@ const upgradeCommand = (args: ReadonlyArray<string>) =>
     const [version, ...rest] = operands;
     if (rest.length > 0) return Effect.fail(usageError());
     return Effect.succeed(
-      new UpgradeCommand({ version: Option.fromUndefinedOr(version), check, options }),
+      UpgradeCommand.make({ version: Option.fromUndefinedOr(version), check, options }),
     );
   });
 
@@ -459,10 +460,10 @@ export const parseCli = Effect.fn("Cli.parse")((
     (args.length === 1 && (command === "--help" || command === "-h")) ||
     (args.length === 2 && SUBCOMMANDS.has(command) && (rest[0] === "--help" || rest[0] === "-h"))
   ) {
-    return Effect.succeed(new HelpCommand());
+    return Effect.succeed(HelpCommand.make());
   }
   if (args.length === 1 && (command === "--version" || command === "-v")) {
-    return Effect.succeed(new VersionCommand());
+    return Effect.succeed(VersionCommand.make());
   }
   switch (command) {
     case "sign-in":
@@ -474,7 +475,7 @@ export const parseCli = Effect.fn("Cli.parse")((
           "--origin",
           rest[0] ?? Option.getOrElse(options.origin, () => `http://127.0.0.1:${options.port}`),
         );
-        return new SignInCommand({ action: command === "sign-in" ? "device" : "link", origin });
+        return SignInCommand.make({ action: command === "sign-in" ? "device" : "link", origin });
       });
     case "config":
       return parseConfigCommand(rest).pipe(Effect.mapError(({ message }) => usageError(message)));
@@ -485,7 +486,7 @@ export const parseCli = Effect.fn("Cli.parse")((
     case "up":
       return upCommand(rest, environment);
     case "status":
-      return rest.length === 0 ? Effect.succeed(new StatusCommand()) : Effect.fail(usageError());
+      return rest.length === 0 ? Effect.succeed(StatusCommand.make()) : Effect.fail(usageError());
     case "stop":
     case "restart":
       return stopOrRestartCommand(command, rest);
@@ -533,9 +534,9 @@ export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
   const packagePath = fileURLToPath(new URL("../package.json", import.meta.url));
   const source = yield* fileSystem
     .readFileString(packagePath)
-    .pipe(Effect.mapError((cause) => new CliVersionError({ cause })));
-  const metadata = yield* Schema.decodeUnknownEffect(PackageMetadataFromJson)(source).pipe(
-    Effect.mapError((cause) => new CliVersionError({ cause })),
+    .pipe(Effect.mapError((cause) => CliVersionError.make({ cause })));
+  const metadata = yield* Schema.decodeEffect(PackageMetadataFromJson)(source).pipe(
+    Effect.mapError((cause) => CliVersionError.make({ cause })),
   );
   return metadata.version;
 });
@@ -545,10 +546,10 @@ const AddressInUse = Schema.Struct({ code: Schema.Literal("EADDRINUSE") });
 /** Returns `PortInUseError` for `EADDRINUSE`, otherwise `ServerStartError`. */
 export const serverStartError = (port: Port, error: ServeError) =>
   Schema.is(AddressInUse)(error.cause)
-    ? new PortInUseError({ port, holder: Option.none() })
-    : new ServerStartError({ port, cause: error.cause });
+    ? PortInUseError.make({ port, holder: Option.none() })
+    : ServerStartError.make({ port, cause: error.cause });
 
-const ProcessIdFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Schema.Int));
+const ProcessIdFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(Schema.Int));
 
 /**
  * Returns the PID listening on `port` from lsof, or `None` if lsof is missing or can't see the
@@ -570,9 +571,7 @@ const portHolder = Effect.fn("Cli.portHolder")(function* (port: Port) {
       ),
       Effect.orElseSucceed((): ReadonlyArray<string> => []),
     );
-  return Arr.findFirst(lines, (line) =>
-    Schema.decodeUnknownOption(ProcessIdFromString)(line.trim()),
-  );
+  return Arr.findFirst(lines, (line) => Schema.decodeOption(ProcessIdFromString)(line.trim()));
 });
 
 /** Fails with `PortInUseError`, with the listening PID if found. */
@@ -582,7 +581,7 @@ export const portInUse = Effect.fn("Cli.portInUse")(function* (port: Port) {
     port,
     holder: Option.getOrUndefined(holder),
   });
-  return yield* new PortInUseError({ port, holder });
+  return yield* PortInUseError.make({ port, holder });
 });
 
 const portTaken = (port: Port) =>
@@ -592,7 +591,7 @@ const portTaken = (port: Port) =>
       resume(
         Schema.is(AddressInUse)(cause)
           ? Effect.succeed(true)
-          : Effect.fail(new ServerStartError({ port, cause })),
+          : Effect.fail(ServerStartError.make({ port, cause })),
       ),
     );
     server.listen({ host: SERVER_HOST, port }, () =>
@@ -634,10 +633,12 @@ export const openBrowser = Effect.fn("Cli.openBrowser")(function* (
         stderr: "ignore",
       }),
     )
-    .pipe(Effect.timeout(timeout))
-    .pipe(Effect.mapError((cause) => new BrowserOpenError({ command, cause })));
+    .pipe(
+      Effect.timeout(timeout),
+      Effect.mapError((cause) => BrowserOpenError.make({ command, cause })),
+    );
   if (Number(exitCode) !== 0) {
-    return yield* new BrowserOpenError({
+    return yield* BrowserOpenError.make({
       command,
       cause: new Error(`${command} exited with code ${String(exitCode)}`),
     });

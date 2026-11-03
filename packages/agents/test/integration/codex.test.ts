@@ -7,7 +7,7 @@ import { codexAppServerLive } from "../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../src/pi/codex/codex.ts";
 import { interruptionContract, localHost, shimHost, steeringContract } from "./contract.ts";
 
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: Schema.decodeUnknownSync(ModelId)(process.env.USINE_CODEX_INTEGRATION_MODEL),
   effort: "low",
@@ -17,9 +17,7 @@ const live = <A, E>(
   effect: Effect.Effect<A, E, CodexChildBackend | FileSystem.FileSystem | Path.Path>,
 ) =>
   effect.pipe(
-    Effect.provide(codexChildBackendLayer),
-    Effect.provide(codexAppServerLive),
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(codexChildBackendLayer, codexAppServerLive, NodeServices.layer)),
   );
 
 describe("Codex child live contract", () => {

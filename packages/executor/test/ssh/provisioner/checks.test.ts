@@ -91,9 +91,9 @@ it.effect("keeps the same machine when a missing image pull succeeds on retry", 
     yield* machines.release(grant.hold);
   }).pipe(
     Effect.scoped,
-    Effect.provide(runtimeOf(machine, providers, imagePullAddress)),
-    Effect.provide(changeBusLayer),
-    Effect.provide(logs.layer),
+    Effect.provide(
+      Layer.mergeAll(runtimeOf(machine, providers, imagePullAddress), changeBusLayer, logs.layer),
+    ),
   );
 });
 
@@ -150,8 +150,7 @@ it.effect("fails preflight after three image pulls and logs the bounded last std
     );
   }).pipe(
     Effect.scoped,
-    Effect.provide(runtimeOf(machine, providers, imagePullAddress)),
-    Effect.provide(logs.layer),
+    Effect.provide(Layer.mergeAll(runtimeOf(machine, providers, imagePullAddress), logs.layer)),
   );
 });
 
@@ -165,7 +164,7 @@ it.live("uses the configured SSH wait and deletes the unreachable machine on tim
     machine: {
       _tag: "Provisioned" as const,
       provisioner: hetznerSettings({
-        timings: new ProvisionerTimings({ sshWait: ProvisionerSeconds.make(2) }),
+        timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(2) }),
       }),
     },
   };
@@ -310,7 +309,7 @@ for (const replacementDocker of ["absent", "running"] as const) {
         yield* machines.release(original.hold);
         assert.strictEqual(providers.hetzner.servers.size, 0);
 
-        const next = new CheckoutRequest({
+        const next = CheckoutRequest.make({
           ...request,
           attemptId: AttemptId.make("fixed-attempt"),
         });
@@ -403,8 +402,7 @@ for (const [provider, address] of [
         yield* machines.release(grant.hold);
       }).pipe(
         Effect.scoped,
-        Effect.provide(runtimeOf(machine, providers, address)),
-        Effect.provide(logs.layer),
+        Effect.provide(Layer.mergeAll(runtimeOf(machine, providers, address), logs.layer)),
       );
     },
   );

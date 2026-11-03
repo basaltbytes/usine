@@ -14,7 +14,7 @@ import { recordPreflight, unchecked, type WorkerPreflight } from "../src/worker-
 
 const worker = WorkerName.make("local");
 const brain = (harness: Harness, model: string) =>
-  new BrainSpec({ harness, model: ModelId.make(model), effort: "high" });
+  BrainSpec.make({ harness, model: ModelId.make(model), effort: "high" });
 const codex = brain("codex", "gpt-5.6-sol");
 const claude = brain("claude", "claude-opus-4-1");
 const pi = brain("pi", "gpt-5.6-sol");
@@ -32,11 +32,11 @@ const summary = (preflight: WorkerPreflight) => ({
 });
 
 const notLoggedIn = (harness: Harness) =>
-  new WorkerCapabilityError({
+  WorkerCapabilityError.make({
     worker,
     capability: "harness-login",
     message: `${harness} is not logged in`,
-    cause: new HarnessUnavailableError({ harness, capability: "login", message: "not logged in" }),
+    cause: HarnessUnavailableError.make({ harness, capability: "login", message: "not logged in" }),
   });
 
 describe("Worker preflight record", () => {
@@ -76,7 +76,7 @@ describe("Worker preflight record", () => {
   });
 
   it("keeps the container limits of the last machine check through a preflight without a machine", () => {
-    const limits = new ContainerLimits({
+    const limits = ContainerLimits.make({
       cpus: ContainerCpus.make(3.5),
       memoryMib: ContainerMemoryMib.make(7168),
       pids: ContainerPids.make(60976),
@@ -141,7 +141,7 @@ describe("Worker preflight record", () => {
       [codex, claude],
       at(9),
       Result.fail(
-        new WorkerCapabilityError({
+        WorkerCapabilityError.make({
           worker,
           capability: "memory",
           message: "The machine has 2 GiB of memory, less than 1.5 GiB per Attempt.",
@@ -158,7 +158,7 @@ describe("Worker preflight record", () => {
       [codex],
       at(10),
       Result.fail(
-        new ExecutorOperationError({
+        ExecutorOperationError.make({
           operation: "preflight",
           message: "The harness probe timed out",
           cause: new Error("timeout"),

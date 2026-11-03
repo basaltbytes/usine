@@ -79,16 +79,15 @@ for (const existing of [true, false])
           expected: current.number,
           actor: Option.some(localActor),
           message: Option.none(),
-          changes: bindings.map(
-            (binding) =>
-              new ConfigurationChange({
-                key: new ConfigurationEntityKey({
-                  kind: "binding",
-                  identifier: ConfigurationEntityId.make(binding.name),
-                }),
-                before: Option.some(Schema.encodeSync(RoleBinding)(binding)),
-                after: Option.none(),
+          changes: bindings.map((binding) =>
+            ConfigurationChange.make({
+              key: ConfigurationEntityKey.make({
+                kind: "binding",
+                identifier: ConfigurationEntityId.make(binding.name),
               }),
+              before: Option.some(Schema.encodeSync(RoleBinding)(binding)),
+              after: Option.none(),
+            }),
           ),
         });
         yield* build();

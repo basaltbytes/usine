@@ -14,13 +14,13 @@ import { AgentBlockedError, AgentQuestionError, type OnDelivery } from "../../sr
 import { sessionChannel } from "../../src/pi/session.ts";
 import { sessionConversation } from "../../src/pi/conversation.ts";
 
-const parent = new ParentSession({
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
-  brain: new BrainSpec({ harness: "pi", model: ModelId.make("openai/model"), effort: "medium" }),
+  brain: BrainSpec.make({ harness: "pi", model: ModelId.make("openai/model"), effort: "medium" }),
 });
 const child = (id: string) =>
-  new ChildSession({
+  ChildSession.make({
     id: AgentSessionId.make(id),
     parentId: parent.id,
     agent: parent.agent,
@@ -79,7 +79,7 @@ describe("session supervision", () => {
         yield* session.emitted;
         const delivery = deliveries();
         const state = yield* session.intervene(
-          new OperatorMessage({ message: "Use pnpm, not npm." }),
+          OperatorMessage.make({ message: "Use pnpm, not npm." }),
           delivery.onDelivery,
         );
         assert.deepStrictEqual([state.held, state.paused, state.queued], [true, false, true]);
@@ -96,7 +96,7 @@ describe("session supervision", () => {
     Effect.gen(function* () {
       const session = yield* conversation(child("turn-end"));
       const delivery = deliveries();
-      yield* session.intervene(new Steer({ message: "Check the lockfile." }), delivery.onDelivery);
+      yield* session.intervene(Steer.make({ message: "Check the lockfile." }), delivery.onDelivery);
       yield* session.finish("Checked.");
       assert.deepStrictEqual(delivery.seen(), ["read"]);
       assert.strictEqual((yield* Fiber.join(session.result)).message, "Checked.");
@@ -108,7 +108,7 @@ describe("session supervision", () => {
       const scope = yield* Scope.make();
       const session = yield* conversation(child("stopped")).pipe(Scope.provide(scope));
       const delivery = deliveries();
-      yield* session.intervene(new Steer({ message: "Stop after this." }), delivery.onDelivery);
+      yield* session.intervene(Steer.make({ message: "Stop after this." }), delivery.onDelivery);
       yield* Scope.close(scope, Exit.void);
       assert.deepStrictEqual(delivery.seen(), ["unread"]);
     }),
@@ -117,12 +117,15 @@ describe("session supervision", () => {
   it.effect("reports that an idle held child resumed and read a message at once", () =>
     Effect.gen(function* () {
       const session = yield* conversation(child("idle"));
-      yield* session.intervene(new OperatorMessage({ message: "Wait for my review." }), noDelivery);
+      yield* session.intervene(
+        OperatorMessage.make({ message: "Wait for my review." }),
+        noDelivery,
+      );
       yield* session.finish("Ready for review.");
       yield* session.emitted;
       const delivery = deliveries();
       const state = yield* session.intervene(
-        new OperatorMessage({ message: "Rename the flag." }),
+        OperatorMessage.make({ message: "Rename the flag." }),
         delivery.onDelivery,
       );
       assert.isFalse(state.queued);
@@ -135,12 +138,12 @@ describe("session supervision", () => {
     Effect.gen(function* () {
       const session = yield* conversation(child("blocked"));
       yield* session.intervene(
-        new OperatorMessage({ message: "Investigate permissions" }),
+        OperatorMessage.make({ message: "Investigate permissions" }),
         noDelivery,
       );
       yield* session.finish("[usine:blocked]\r\nPublishing permission denied.");
       assert.strictEqual(session.result.pollUnsafe(), undefined);
-      yield* session.intervene(new Release(), noDelivery);
+      yield* session.intervene(Release.make(), noDelivery);
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
       assert(error instanceof AgentBlockedError);
       assert.strictEqual(error.message, "Publishing permission denied.");
@@ -151,16 +154,16 @@ describe("session supervision", () => {
     Effect.gen(function* () {
       const session = yield* conversation(child("resolved"));
       yield* session.intervene(
-        new OperatorMessage({ message: "Investigate permissions" }),
+        OperatorMessage.make({ message: "Investigate permissions" }),
         noDelivery,
       );
       yield* session.finish("[usine:blocked]\nPermission denied.");
       yield* session.intervene(
-        new OperatorMessage({ message: "Permission granted; finish publishing" }),
+        OperatorMessage.make({ message: "Permission granted; finish publishing" }),
         noDelivery,
       );
       yield* session.finish("Published. The earlier [usine:blocked] outcome is resolved.");
-      yield* session.intervene(new Release(), noDelivery);
+      yield* session.intervene(Release.make(), noDelivery);
       assert.strictEqual(
         (yield* Fiber.join(session.result)).message,
         "Published. The earlier [usine:blocked] outcome is resolved.",
@@ -210,25 +213,25 @@ describe("session supervision", () => {
         const coordinator = yield* conversation(child("coordinator"));
         const first = yield* conversation(child("first"));
         const second = yield* conversation(child("second"));
-        yield* coordinator.intervene(new Interrupt(), noDelivery);
+        yield* coordinator.intervene(Interrupt.make(), noDelivery);
         const boundary = yield* coordinator.awaitUnpaused.pipe(Effect.forkChild);
-        yield* first.intervene(new OperatorMessage({ message: "Check this" }), noDelivery);
-        yield* second.intervene(new OperatorMessage({ message: "Check that" }), noDelivery);
+        yield* first.intervene(OperatorMessage.make({ message: "Check this" }), noDelivery);
+        yield* second.intervene(OperatorMessage.make({ message: "Check that" }), noDelivery);
         yield* first.finish("First result");
         yield* second.finish("Second result");
         assert.strictEqual(first.result.pollUnsafe(), undefined);
         assert.strictEqual(second.result.pollUnsafe(), undefined);
-        yield* first.intervene(new Release(), noDelivery);
+        yield* first.intervene(Release.make(), noDelivery);
         assert.strictEqual((yield* Fiber.join(first.result)).message, "First result");
         assert.strictEqual(second.result.pollUnsafe(), undefined);
         assert.strictEqual(boundary.pollUnsafe(), undefined);
-        yield* second.intervene(new OperatorMessage({ message: "Revise it" }), noDelivery);
+        yield* second.intervene(OperatorMessage.make({ message: "Revise it" }), noDelivery);
         assert.deepStrictEqual(second.turns.at(-1), { message: "Revise it", activity: "idle" });
         yield* second.finish("Revised result");
-        yield* second.intervene(new Release(), noDelivery);
+        yield* second.intervene(Release.make(), noDelivery);
         assert.strictEqual((yield* Fiber.join(second.result)).message, "Revised result");
         const resumed = yield* coordinator.intervene(
-          new Steer({ message: "Continue" }),
+          Steer.make({ message: "Continue" }),
           noDelivery,
         );
         assert.deepStrictEqual([resumed.held, resumed.paused], [false, false]);
@@ -241,10 +244,10 @@ describe("session supervision", () => {
   it.effect("resumes a paused child with one-shot steering without creating a takeover Hold", () =>
     Effect.gen(function* () {
       const session = yield* conversation(child("steered"));
-      yield* session.intervene(new Interrupt(), noDelivery);
+      yield* session.intervene(Interrupt.make(), noDelivery);
       yield* session.finish("Paused turn");
       const state = yield* session.intervene(
-        new Steer({ message: "Continue with the correction" }),
+        Steer.make({ message: "Continue with the correction" }),
         noDelivery,
       );
       assert.deepStrictEqual([state.held, state.paused], [false, false]);

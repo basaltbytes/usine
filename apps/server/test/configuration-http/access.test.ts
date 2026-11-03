@@ -8,11 +8,11 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
   it(`${role} can only read and edit its authorized configuration`, () =>
     Effect.runPromise(
       Effect.gen(function* () {
-        const grants = new RoleBinding({
+        const grants = RoleBinding.make({
           name: role,
           member: GitHubUserId.make(1),
           role,
-          scope: new ProjectScope({ project: ProjectId.make("acme-project") }),
+          scope: ProjectScope.make({ project: ProjectId.make("acme-project") }),
         }).permissions;
         const { request } = yield* harness(Layer.succeed(RequestPermissions, grants));
         expect(yield* request("GET", "")).toMatchObject({
@@ -78,11 +78,11 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
   it(`${role} cannot read another project's nested agent loop references`, () =>
     Effect.runPromise(
       Effect.gen(function* () {
-        const grants = new RoleBinding({
+        const grants = RoleBinding.make({
           name: role,
           member: GitHubUserId.make(1),
           role,
-          scope: new ProjectScope({ project: ProjectId.make("acme-other") }),
+          scope: ProjectScope.make({ project: ProjectId.make("acme-other") }),
         }).permissions;
         const { request } = yield* harness(Layer.succeed(RequestPermissions, grants));
         expect(yield* request("GET", "")).toMatchObject({

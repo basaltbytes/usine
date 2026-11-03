@@ -142,16 +142,15 @@ export const boardHistoryQueries = (database: RunDatabaseClient) => {
           const loopsByItem = EffectArray.groupBy(loops, ({ itemKey }) => itemKey);
           const usageByItem = EffectArray.groupBy(usage, ({ itemKey }) => itemKey);
           const linksByItem = EffectArray.groupBy(links, ({ itemKey }) => itemKey);
-          return totals.map(
-            (total) =>
-              new ItemRunHistory({
-                ...total,
-                loops: loopsByItem[total.itemKey] ?? [],
-                pullRequestUrls: (linksByItem[total.itemKey] ?? []).map(({ url }) => url),
-                usageSources: (usageByItem[total.itemKey] ?? []).map(
-                  ({ runId, attempts }) => new RunUsageSource({ run: { id: runId }, attempts }),
-                ),
-              }),
+          return totals.map((total) =>
+            ItemRunHistory.make({
+              ...total,
+              loops: loopsByItem[total.itemKey] ?? [],
+              pullRequestUrls: (linksByItem[total.itemKey] ?? []).map(({ url }) => url),
+              usageSources: (usageByItem[total.itemKey] ?? []).map(({ runId, attempts }) =>
+                RunUsageSource.make({ run: { id: runId }, attempts }),
+              ),
+            }),
           );
         }),
     );

@@ -21,6 +21,8 @@ const report: Array<object> = [];
 await Effect.runPromise(
   Effect.scoped(
     Effect.gen(function* () {
+      const effectContext = yield* Effect.context<never>();
+
       const database = yield* Layer.build(localSqliteLayer(directory));
       const sql = Context.get(database, SqlClient.SqlClient);
       const count = yield* sql`SELECT count(*) AS count FROM usine_attempt_transcripts`;
@@ -38,7 +40,7 @@ await Effect.runPromise(
       yield* Effect.promise(
         () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
       );
-      const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Number }))(
+      const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(
         server.address(),
       );
       const health = `http://127.0.0.1:${address.port}/health`;
@@ -54,7 +56,9 @@ await Effect.runPromise(
           const reading = read();
           const writing = (async () => {
             await setTimeout(20);
-            await Effect.runPromise(sql`INSERT INTO event_loop_appends VALUES ('progress')`);
+            await Effect.runPromiseWith(effectContext)(
+              sql`INSERT INTO event_loop_appends VALUES ('progress')`,
+            );
             await (await fetch(health)).text();
             appendAndHealthMillis.push(performance.now() - started);
           })();
@@ -74,8 +78,12 @@ await Effect.runPromise(
       };
       yield* Effect.promise(async () => {
         try {
-          await measure("main node:sqlite (before)", () => Effect.runPromise(before.unsafe(query)));
-          await measure("read worker (after)", () => Effect.runPromise(sql.unsafe(query)));
+          await measure("main node:sqlite (before)", () =>
+            Effect.runPromiseWith(effectContext)(before.unsafe(query)),
+          );
+          await measure("read worker (after)", () =>
+            Effect.runPromiseWith(effectContext)(sql.unsafe(query)),
+          );
           if (process.argv[3] !== undefined) {
             const { connect } = await import(pathToFileURL(process.argv[3]).href);
             const turso = await connect(`${directory}/.usine/runtime.sqlite`, {
@@ -121,7 +129,7 @@ await Effect.runPromise(
               bytes: (await stat(`${directory}/.usine/runtime.sqlite`)).size,
               query,
               rows: (
-                await Effect.runPromise(
+                await Effect.runPromiseWith(effectContext)(
                   sql`SELECT count(*) AS count FROM usine_attempt_transcripts`,
                 )
               )[0],

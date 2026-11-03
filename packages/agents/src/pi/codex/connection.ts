@@ -73,7 +73,7 @@ export const operationError = (
   message: string,
   cause: unknown,
 ): SessionOperationError =>
-  new SessionOperationError({
+  SessionOperationError.make({
     operation,
     sessionId: request.sessionId,
     message,

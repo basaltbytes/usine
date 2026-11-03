@@ -27,12 +27,12 @@ const loop = LoopName.make("review");
 const operator = OperatorLogin.make("operator");
 
 const request = (fields: Partial<ConstructorParameters<typeof RunAgainRequest>[0]> = {}) =>
-  new RunAgainRequest({
+  RunAgainRequest.make({
     step: StepName.make("run"),
     approval: "none",
     cycleLimit: Option.some(DEFAULT_CYCLE_LIMIT),
     permissions: "write",
-    context: new AttemptContext({
+    context: AttemptContext.make({
       task: AttemptTask.make("Finish the review"),
       agent: testAgent,
       parentModel: Option.none(),
@@ -151,7 +151,7 @@ describe("Run again", () => {
           const engine = yield* RunEngine;
           const limit = Option.some(CycleLimit.make(1));
           const first = yield* engine.submit(
-            new Submission({
+            Submission.make({
               ...submission({ number: 3, item: "budget-item" }),
               cycleLimit: limit,
             }),
@@ -176,7 +176,7 @@ describe("Run again", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.fail(new AgentFailure({ message: "Needs the operator" })),
+          Effect.fail(AgentFailure.make({ message: "Needs the operator" })),
           Effect.succeed(stepResult("Reviewed")),
         ]);
         yield* Effect.gen(function* () {

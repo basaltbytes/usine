@@ -14,7 +14,7 @@ export const latestPoolRateLimits = Effect.fn("RunReader.latestPoolRateLimits")(
       })
       .from(poolRateLimits)
       .execute();
-    const events = yield* Schema.decodeUnknownEffect(
+    const events = yield* Schema.decodeEffect(
       Schema.Array(
         Schema.Struct({
           event: Schema.fromJsonString(PoolRateLimitsUpdated),
@@ -27,7 +27,7 @@ export const latestPoolRateLimits = Effect.fn("RunReader.latestPoolRateLimits")(
     });
     return events.map(({ event }) => event);
   },
-  Effect.mapError(
-    (cause) => new EnginePersistenceError({ operation: "read latest pool rate limits", cause }),
+  Effect.mapError((cause) =>
+    EnginePersistenceError.make({ operation: "read latest pool rate limits", cause }),
   ),
 );

@@ -257,7 +257,7 @@ const environmentFile = (
   const multiline = entries.find(([, value]) => value.includes("\n"));
   if (multiline !== undefined)
     return Effect.fail(
-      new ExecutorOperationError({
+      ExecutorOperationError.make({
         operation,
         message: `Can't set ${multiline[0]} in a container: its value has a line break`,
         cause: new Error(`${multiline[0]} has a line break`),
@@ -288,7 +288,7 @@ const containerShell = (
   runtime: ContainerRuntime,
 ): RemoteShell => {
   const container: ShellContainer = { runtime, name };
-  return new RemoteShell({
+  return RemoteShell.make({
     ssh: shell.ssh,
     sshEnvironment: shell.sshEnvironment,
     destination: shell.destination,
@@ -332,7 +332,7 @@ export const containersFor = (commands: RemoteCommands) => {
           durationMillis: Duration.toMillis(duration),
           exitCode: prepared.exitCode,
         });
-        return yield* new ExecutorOperationError({
+        return yield* ExecutorOperationError.make({
           operation,
           message,
           cause: new Error(prepared.stderr),
@@ -405,7 +405,7 @@ export const containersFor = (commands: RemoteCommands) => {
       ...logins.map(({ file }) => file),
     ])).split("\n");
     if (!home.startsWith("/"))
-      return yield* new ExecutorOperationError({
+      return yield* ExecutorOperationError.make({
         operation,
         message: "The SSH user's home on the machine isn't an absolute path",
         cause: new Error(home),
@@ -599,18 +599,17 @@ export const containersFor = (commands: RemoteCommands) => {
       spec.name,
     ]);
     const container = yield* decodeContainerId(CONTAINER_LINE.exec(events)?.[1]).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ExecutorOperationError({
-            operation,
-            message: "The container runtime didn't print the container's ID",
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        ExecutorOperationError.make({
+          operation,
+          message: "The container runtime didn't print the container's ID",
+          cause,
+        }),
       ),
     );
     const count = OOM_KILL_LINE.exec(events)?.[1];
     if (count === undefined)
-      return yield* new ExecutorOperationError({
+      return yield* ExecutorOperationError.make({
         operation,
         message: "The container runtime returned no OOM counter",
         cause: new Error("missing oom_kill"),
@@ -654,7 +653,7 @@ export const containersFor = (commands: RemoteCommands) => {
         const kills = counted + (yield* Ref.get(killedInits));
         if (kills === 0) return;
         yield* record.value(
-          new ContainerOutOfMemoryKills({
+          ContainerOutOfMemoryKills.make({
             container,
             kills,
             memoryMib: spec.settings.limits.memoryMib,
@@ -746,7 +745,7 @@ export const containersFor = (commands: RemoteCommands) => {
     const inspected = yield* commands.inspect(operation, shell, "test", ["-f", marker]);
     if (inspected.exitCode === 0) return true;
     if (inspected.exitCode === 1) return false;
-    return yield* new ExecutorOperationError({
+    return yield* ExecutorOperationError.make({
       operation,
       message: "Can't inspect whether a container had the checkout",
       cause: new Error(inspected.stderr.trim() || `test exited with code ${inspected.exitCode}`),

@@ -77,7 +77,7 @@ const observe = (
     return {
       liveness: { _tag: "Answering", lastAnsweredAt: now, confirmed: new Set(watching) },
       report: reportTo(
-        new WorkerResponsive({
+        WorkerResponsive.make({
           worker,
           lastAnsweredAt: liveness._tag === "Silent" ? liveness.lastAnsweredAt : now,
           recovered: liveness._tag === "Silent",
@@ -100,7 +100,7 @@ const observe = (
       told: new Set(watching),
     },
     report: reportTo(
-      new WorkerUnresponsive({
+      WorkerUnresponsive.make({
         worker,
         lastAnsweredAt: liveness.lastAnsweredAt,
         reason: probe.reason,
@@ -123,7 +123,7 @@ const joinSilent = (worker: WorkerName, liveness: Liveness, attemptId: AttemptId
     : {
         liveness: { ...liveness, told: new Set([...liveness.told, attemptId]) },
         report: reportTo(
-          new WorkerUnresponsive({
+          WorkerUnresponsive.make({
             worker,
             lastAnsweredAt: liveness.lastAnsweredAt,
             reason: liveness.reason,
@@ -183,7 +183,7 @@ const watchWorker = (
   Effect.gen(function* () {
     const host = machineShell.destination;
     const probe = (machineShell: RemoteShell): Effect.Effect<Probe> => {
-      const shell = new RemoteShell({
+      const shell = RemoteShell.make({
         ssh: {
           command: machineShell.ssh.command,
           args: [...machineShell.ssh.args, "-o", `ConnectTimeout=${CONNECT_TIMEOUT_SECONDS}`],

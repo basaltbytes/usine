@@ -128,7 +128,7 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
           dismissed_at: Schema.String,
         }),
       )(row);
-      const decoded = Schema.decodeUnknownOption(Json)(saved.revision);
+      const decoded = Schema.decodeOption(Json)(saved.revision);
       if (Option.isNone(decoded)) {
         yield* Effect.logDebug("Preserved opaque attention revision during project migration", {
           id: saved.id,
@@ -157,7 +157,7 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
         let updated = qualifyJson(value, project, namespaces);
         let id = saved.id;
         if (id.startsWith("schedule-failure:")) {
-          const parts = yield* Schema.decodeUnknownEffect(
+          const parts = yield* Schema.decodeEffect(
             Schema.fromJsonString(Schema.Array(Schema.Json)),
           )(id.slice("schedule-failure:".length));
           if (Predicate.isString(parts[0]) && !parts[0].includes("/")) {
@@ -177,7 +177,7 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
       repositories: projects.length,
     });
   },
-  Effect.mapError(
-    (cause) => new EnginePersistenceError({ operation: "migrate project loop identities", cause }),
+  Effect.mapError((cause) =>
+    EnginePersistenceError.make({ operation: "migrate project loop identities", cause }),
   ),
 );

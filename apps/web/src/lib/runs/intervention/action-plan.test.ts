@@ -21,12 +21,12 @@ import { actionLabel, actionPlan, type RunAction } from "~/lib/runs/intervention
 
 const attemptId = AttemptId.make("attempt-1");
 const attempt = (outcome: AttemptView["outcome"]) =>
-  new AttemptView({
+  AttemptView.make({
     id: attemptId,
     number: AttemptNumber.make(1),
     worker: WorkerName.make("local"),
-    workerAccess: new LocalWorkerAccess(),
-    brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
+    workerAccess: LocalWorkerAccess.make(),
+    brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
     task: AttemptTask.make("Fix issue 33."),
     agent: AgentName.make("developer"),
     operatorIntervened: false,
@@ -36,8 +36,8 @@ const attempt = (outcome: AttemptView["outcome"]) =>
     salvage: null,
   });
 const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
-  new RunView({
-    agentBrain: new BrainSpec({
+  RunView.make({
+    agentBrain: BrainSpec.make({
       harness: "codex",
       model: ModelId.make("test-model"),
       effort: "high",
@@ -67,7 +67,7 @@ const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
 const failed = (failure: FailedAttemptView["failure"], canResolveFailure = true) =>
   run({
     state: "Failed",
-    attempts: [attempt(new FailedAttemptView({ failure }))],
+    attempts: [attempt(FailedAttemptView.make({ failure }))],
     canRetry: true,
     canResolveFailure,
   });
@@ -102,7 +102,7 @@ describe("contextual run actions", () => {
   });
 
   it("leads with Mark answered when the agent asked a question", () => {
-    const view = failed(new QuestionFailureView({ question: "Merge or rebase?" }));
+    const view = failed(QuestionFailureView.make({ question: "Merge or rebase?" }));
     assert.deepStrictEqual(labels(view), {
       primary: "Mark answered",
       secondary: "Edit and retry",
@@ -116,7 +116,7 @@ describe("contextual run actions", () => {
   });
 
   it("leads with Mark resolved when the agent was blocked", () => {
-    assert.deepStrictEqual(labels(failed(new BlockedFailureView({ message: "Gate is red." }))), {
+    assert.deepStrictEqual(labels(failed(BlockedFailureView.make({ message: "Gate is red." }))), {
       primary: "Mark resolved",
       secondary: "Edit and retry",
       more: ["Retry"],
@@ -124,7 +124,7 @@ describe("contextual run actions", () => {
   });
 
   it("leads with Retry on another failure and keeps Mark resolved in the menu", () => {
-    assert.deepStrictEqual(labels(failed(new AgentFailureView({ message: "Tests failed." }))), {
+    assert.deepStrictEqual(labels(failed(AgentFailureView.make({ message: "Tests failed." }))), {
       primary: "Retry",
       secondary: "Edit and retry",
       more: ["Mark resolved"],
@@ -133,14 +133,14 @@ describe("contextual run actions", () => {
 
   it("leads with Retry on a question that no longer needs an answer", () => {
     assert.deepStrictEqual(
-      labels(failed(new QuestionFailureView({ question: "Merge or rebase?" }), false)),
+      labels(failed(QuestionFailureView.make({ question: "Merge or rebase?" }), false)),
       { primary: "Retry", secondary: "Edit and retry", more: [] },
     );
   });
 
   it("leads with Mark resolved on a failure that can't be retried", () => {
-    const view = new RunView({
-      ...failed(new AgentFailureView({ message: "Tests failed." })),
+    const view = RunView.make({
+      ...failed(AgentFailureView.make({ message: "Tests failed." })),
       canRetry: false,
     });
     assert.deepStrictEqual(labels(view), { primary: "Mark resolved", secondary: null, more: [] });
@@ -149,14 +149,14 @@ describe("contextual run actions", () => {
   it("offers Run again as the secondary action on a closed run", () => {
     for (const state of ["Succeeded", "Canceled"] as const)
       assert.deepStrictEqual(
-        labels(run({ state, attempts: [attempt(new SucceededAttemptView())], canRunAgain: true })),
+        labels(run({ state, attempts: [attempt(SucceededAttemptView.make())], canRunAgain: true })),
         { primary: null, secondary: "Run again", more: ["Edit and run again"] },
       );
   });
 
   it("puts every other allowed action in the menu", () => {
-    const view = new RunView({
-      ...failed(new AgentFailureView({ message: "Tests failed." })),
+    const view = RunView.make({
+      ...failed(AgentFailureView.make({ message: "Tests failed." })),
       canCancel: true,
     });
     assert.deepStrictEqual(labels(view), {

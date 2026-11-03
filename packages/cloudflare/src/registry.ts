@@ -81,7 +81,7 @@ const list = Effect.fn("SandboxRegistry.list")(function* (owner: SandboxOwner) {
     sandboxes: sandboxes.length,
     running: sandboxes.filter(({ running }) => running).length,
   });
-  return new SandboxList({ sandboxes });
+  return SandboxList.make({ sandboxes });
 });
 
 const RegistryServedApi = HttpApi.make("SandboxApi").add(registryGroup);

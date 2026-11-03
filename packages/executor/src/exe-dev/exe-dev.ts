@@ -65,7 +65,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const grantFor = Effect.fn("ExeDevExecutor.grantFor")(function* (repository: RepositoryName) {
       const integration = integrations.get(repository);
       if (integration === undefined)
-        return yield* new CredentialUnavailableError({
+        return yield* CredentialUnavailableError.make({
           repository,
           reason: "refused",
           message: `No exe.dev GitHub integration is configured for ${repository}`,

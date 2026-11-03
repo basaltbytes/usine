@@ -23,10 +23,10 @@ import { StepExecutor } from "../src/step-executor.ts";
 import { RunStore } from "../src/store/store.ts";
 import { TriggerCondition, type TriggerRecheck } from "../src/trigger-condition.ts";
 
-export const stepResult = (message: string) => new StepResult({ message, facts: [] });
-export const testAgent = new Agent({
+export const stepResult = (message: string) => StepResult.make({ message, facts: [] });
+export const testAgent = Agent.make({
   name: AgentName.make("developer"),
-  brain: new BrainSpec({
+  brain: BrainSpec.make({
     harness: "claude",
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
@@ -56,7 +56,7 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
   Layer.succeed(StepExecutor)({
     workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
-    outcome: () => Effect.succeed(Option.none()),
+    outcome: () => Effect.succeedNone,
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
@@ -94,14 +94,14 @@ export const slottedExecutor = Effect.fn("test.slottedExecutor")(function* (
   const executor = Layer.succeed(StepExecutor)({
     workers: Effect.succeed([local]),
     isLive: () => Effect.succeed(false),
-    outcome: () => Effect.succeed(Option.none()),
+    outcome: () => Effect.succeedNone,
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: (attemptId, reason) =>
       Effect.gen(function* () {
         yield* Ref.update(stops, (seen) => [...seen, [attemptId, reason] as const]);
         if (yield* Ref.get(unstoppable))
-          return yield* new InfraFailure({
+          return yield* InfraFailure.make({
             message: "Could not cancel the parent task",
             cause: "storage unavailable",
           });
@@ -136,8 +136,8 @@ export const submission = (options: {
   readonly approval?: "none" | "required";
 }) => {
   const second = String(options.number).padStart(2, "0");
-  return new Submission({
-    event: new Event({
+  return Submission.make({
+    event: Event.make({
       id: EventId.make(`event-${options.number}`),
       dedupKey: DedupKey.make(`loop/item/revision-${options.number}`),
       payload: { revision: options.number },
@@ -156,14 +156,14 @@ export const submission = (options: {
 };
 
 /** A web UI approval by the operator login from `usine.yaml`. */
-export const uiApproval = new ApprovalSource({
+export const uiApproval = ApprovalSource.make({
   channel: "ui",
   approver: Option.some(OperatorLogin.make("operator")),
 });
 
 export const approvalEvent = (number: number) => {
   const second = String(number).padStart(2, "0");
-  return new Event({
+  return Event.make({
     id: EventId.make(`approval-${number}`),
     dedupKey: DedupKey.make(`approval/run-${number}`),
     payload: { approved: true },

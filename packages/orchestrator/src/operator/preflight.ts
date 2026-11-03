@@ -14,11 +14,11 @@ export class WorkerPreflightView extends Schema.Class<WorkerPreflightView>(
 }) {}
 
 export const workerPreflightView = (preflight: WorkerPreflight): WorkerPreflightView =>
-  new WorkerPreflightView({
+  WorkerPreflightView.make({
     worker: preflight.worker,
     prerequisites: Option.getOrNull(Option.map(preflight.prerequisites, checkView)),
-    harnesses: preflight.harnesses.map(
-      ({ harness, check }) => new HarnessPreflightView({ harness, check: checkView(check) }),
+    harnesses: preflight.harnesses.map(({ harness, check }) =>
+      HarnessPreflightView.make({ harness, check: checkView(check) }),
     ),
     containerLimits: Option.getOrNull(preflight.containerLimits),
   });

@@ -16,7 +16,7 @@ import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
 import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 
-const policy = new ProvisionerReuse({
+const policy = ProvisionerReuse.make({
   attempts: MachineAttemptLimit.make(2),
   maxAge: MachineMaxAge.make("2h"),
 });

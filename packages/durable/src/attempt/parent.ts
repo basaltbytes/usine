@@ -32,14 +32,14 @@ export const parentSessionId = (attemptId: AttemptId): AgentSessionId =>
 
 /** Returns the parent session with the rostered Agent and the resolved model. */
 export const parentSession = (spec: RunSpec, model: ModelId): ParentSession =>
-  new ParentSession({
+  ParentSession.make({
     id: parentSessionId(spec.attemptId),
     agent: spec.agent.name,
-    brain: new BrainSpec({ harness: "pi", model, effort: spec.parentEffort }),
+    brain: BrainSpec.make({ harness: "pi", model, effort: spec.parentEffort }),
   });
 
 const launchError = (spec: RunSpec, message: string, cause: unknown) =>
-  new SessionOperationError({
+  SessionOperationError.make({
     operation: "launch",
     sessionId: Option.some(parentSessionId(spec.attemptId)),
     message,
@@ -58,7 +58,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
     );
     if (Option.isNone(found)) {
       yield* Effect.logError("Pi parent rejected an unknown model", { model: named });
-      return yield* new UnknownModelError({
+      return yield* UnknownModelError.make({
         harness: "pi",
         model: named,
         message: `Pi has no model "${named}"`,
@@ -82,7 +82,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
   if (first === undefined) {
     const model = ModelId.make("unknown");
     yield* Effect.logError("Pi parent has no model with a configured credential");
-    return yield* new UnknownModelError({
+    return yield* UnknownModelError.make({
       harness: "pi",
       model,
       message: "Pi has no model with a configured credential for the parent",
@@ -116,7 +116,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       model,
       supported,
     });
-    return yield* new UnsupportedEffortError({
+    return yield* UnsupportedEffortError.make({
       harness: "pi",
       model,
       effort: spec.parentEffort,
@@ -140,7 +140,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
         : "Pi parent model has unsupported OAuth authentication",
       { model, requiredPool: required, authentication: authentication?._tag },
     );
-    return yield* new PoolUnavailableError({
+    return yield* PoolUnavailableError.make({
       harness: "pi",
       model,
       pool: required,

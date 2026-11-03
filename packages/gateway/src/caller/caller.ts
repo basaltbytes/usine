@@ -123,7 +123,7 @@ export class CallerTokens extends Context.Service<
           Option.flatMap((value) => Result.getSuccess(Base64Url.decode(value))),
         );
         if (payload === undefined || Option.isNone(mac))
-          return yield* new CallerTokenRejected({ reason: "malformed" });
+          return yield* CallerTokenRejected.make({ reason: "malformed" });
         const authentic = yield* Effect.promise(() =>
           crypto.subtle.verify(
             "HMAC",
@@ -132,11 +132,11 @@ export class CallerTokens extends Context.Service<
             toArrayBuffer(encoder.encode(`ugw1.${payload}`)),
           ),
         );
-        if (!authentic) return yield* new CallerTokenRejected({ reason: "bad-signature" });
+        if (!authentic) return yield* CallerTokenRejected.make({ reason: "bad-signature" });
         const claims = Result.getSuccess(Base64Url.decodeString(payload)).pipe(
           Option.flatMap(decodeClaims),
         );
-        if (Option.isNone(claims)) return yield* new CallerTokenRejected({ reason: "malformed" });
+        if (Option.isNone(claims)) return yield* CallerTokenRejected.make({ reason: "malformed" });
         yield* Effect.annotateCurrentSpan({
           attachment: claims.value.attachment,
           worker: claims.value.worker,

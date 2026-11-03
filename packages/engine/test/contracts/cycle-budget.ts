@@ -21,7 +21,7 @@ export const cycleBudgetContract = (adapter: PersistenceAdapter) => {
         Effect.gen(function* () {
           const store = yield* RunStore;
           const budgets = yield* CycleBudgets;
-          const first = new Submission({
+          const first = Submission.make({
             ...lifecycleSubmission,
             cycleLimit: Option.some(CycleLimit.make(1)),
           });
@@ -31,22 +31,22 @@ export const cycleBudgetContract = (adapter: PersistenceAdapter) => {
           assert(started._tag === "AttemptStarted");
           yield* store.finishAttempt(
             started.execution.attempt,
-            Result.succeed(new StepResult({ message: "Done", facts: [] })),
+            Result.succeed(StepResult.make({ message: "Done", facts: [] })),
           );
-          const event = new Event({
+          const event = Event.make({
             ...first.event,
             id: EventId.make("budget-next"),
             dedupKey: DedupKey.make("budget-next"),
           });
           const blocked = yield* store.recordAndClaim(
-            new Submission({ ...first, event }),
+            Submission.make({ ...first, event }),
             RunId.make("budget-blocked"),
           );
           assert(blocked.result._tag === "CycleBlocked");
           const ask = blocked.result.ask;
           assert.deepStrictEqual(yield* budgets.asks(), [ask]);
           assert.strictEqual(yield* budgets.generation(first.itemKey), 0);
-          const answer = new Event({
+          const answer = Event.make({
             ...event,
             id: EventId.make("budget-answer"),
             dedupKey: DedupKey.make("budget-answer"),
@@ -59,7 +59,7 @@ export const cycleBudgetContract = (adapter: PersistenceAdapter) => {
           const [reset] = yield* budgets.pendingResets();
           assert(reset !== undefined);
           yield* budgets.acknowledgeReset(
-            new CycleBudgetReset({ ...reset, generation: CycleGeneration.make(0) }),
+            CycleBudgetReset.make({ ...reset, generation: CycleGeneration.make(0) }),
           );
           assert.deepStrictEqual(yield* budgets.pendingResets(), [reset]);
           yield* budgets.acknowledgeReset(reset);

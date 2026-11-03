@@ -64,10 +64,10 @@ export const entryEvents = (
       onSome: (message) => {
         const events: Array<AgentSessionEvent> = [];
         const text = assistantText(entry);
-        if (Option.isSome(text)) events.push(new TextOutput({ session, text: text.value }));
+        if (Option.isSome(text)) events.push(TextOutput.make({ session, text: text.value }));
         for (const block of message.content.filter(isToolCallBlock)) {
           events.push(
-            new ToolStarted({
+            ToolStarted.make({
               session,
               callId: block.id,
               tool: block.name,
@@ -88,7 +88,7 @@ export const entryEvents = (
             ? { content: result.content }
             : { content: result.content, details: result.details };
         return [
-          new ToolFinished({
+          ToolFinished.make({
             session,
             callId: result.toolCallId,
             tool: result.toolName,

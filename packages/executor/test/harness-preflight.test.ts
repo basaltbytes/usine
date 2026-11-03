@@ -15,8 +15,8 @@ import {
   verifyHarnessReadiness,
 } from "../src/harness-preflight.ts";
 
-const claude = new BrainSpec({ harness: "claude", model: ModelId.make("sonnet"), effort: "low" });
-const host = new RemoteShell({
+const claude = BrainSpec.make({ harness: "claude", model: ModelId.make("sonnet"), effort: "low" });
+const host = RemoteShell.make({
   ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
   sshEnvironment: { PATH: "/usr/bin:/bin", SSH_AUTH_SOCK: "/tmp/agent.sock" },
   destination: "remote-one.exe.xyz",
@@ -124,7 +124,7 @@ describe("harness readiness on a Worker", () => {
           const check: HarnessProbe = () =>
             Deferred.succeed(entered, undefined).pipe(
               Effect.andThen(Deferred.await(release)),
-              Effect.as(new HarnessReady({ harness: "claude" })),
+              Effect.as(HarnessReady.make({ harness: "claude" })),
             );
           return { entered, release, check };
         });

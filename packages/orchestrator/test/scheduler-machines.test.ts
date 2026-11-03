@@ -44,7 +44,7 @@ const POOL = WorkerName.make("pool");
 const unused = () => Effect.die("unused");
 
 const configWithTimings = (timings: Record<string, number>, slots = 1) =>
-  Schema.decodeUnknownSync(UsineConfig)({
+  Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [{ name: "acme/demo" }],
     workers: [
@@ -90,7 +90,7 @@ const fakeMachines = () =>
           const failure = failures.shift();
           if (failure !== undefined) return yield* failure;
           next += 1;
-          return new MachineGrant({
+          return MachineGrant.make({
             hold: MachineHold.make(`hold-${String(next)}`),
             id: MachineId.make(String(100 + next)),
             worker,
@@ -107,7 +107,7 @@ const fakeMachines = () =>
       sweep: Effect.sync(() => void calls.push("sweep")),
       starts: Effect.succeed([]),
       machines: Effect.succeed([
-        new MachineStatus({
+        MachineStatus.make({
           worker: POOL,
           provider: "hetzner",
           state: "creating",
@@ -135,7 +135,7 @@ const executor = Layer.succeed(Executor)({
     Effect.sync(() => prepared.push(request.attemptId)).pipe(
       Effect.andThen(
         Effect.fail(
-          new ExecutorOperationError({
+          ExecutorOperationError.make({
             operation: "prepare",
             message: "The test stops at preparation",
             cause: new Error("stop"),
@@ -172,8 +172,8 @@ const scheduler = (
 
 const executionOf = (runId: RunId, attemptId: AttemptId, reattach = false) => {
   const selected = submission(1);
-  return new StepExecution({
-    attempt: new Attempt({
+  return StepExecution.make({
+    attempt: Attempt.make({
       task: selected.task,
       agent: selected.agent.name,
       operatorIntervened: false,
@@ -190,14 +190,14 @@ const executionOf = (runId: RunId, attemptId: AttemptId, reattach = false) => {
       salvage: Option.none(),
     }),
     event: selected.event,
-    run: new Run({
+    run: Run.make({
       id: runId,
       eventId: selected.event.id,
       loop: selected.loop,
-      state: RunState.start(new RunState.Pending()),
+      state: RunState.start(RunState.Pending.make()),
       openedAt: selected.event.receivedAt,
     }),
-    step: new Step({ runId, name: selected.step, result: Option.none() }),
+    step: Step.make({ runId, name: selected.step, result: Option.none() }),
     repository: selected.repository,
     revision: selected.revision,
     task: selected.task,
@@ -230,13 +230,13 @@ describe("Worker scheduler on a provisioned Worker", () => {
     () =>
       Effect.gen(function* () {
         const fake = yield* fakeMachines();
-        const limits = new ContainerLimits({
+        const limits = ContainerLimits.make({
           cpus: ContainerCpus.make(3.5),
           memoryMib: ContainerMemoryMib.make(7168),
           pids: ContainerPids.make(60976),
         });
         fake.checks.push(
-          new MachineCheck({ brains: [testAgent.brain], containerLimits: Option.some(limits) }),
+          MachineCheck.make({ brains: [testAgent.brain], containerLimits: Option.some(limits) }),
         );
         const context = yield* scheduler(fake.machines);
         const steps = Context.get(context, StepExecutor);
@@ -273,7 +273,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
       Effect.gen(function* () {
         const fake = yield* fakeMachines();
         fake.failures.push(
-          new MachineUnavailableError({
+          MachineUnavailableError.make({
             worker: POOL,
             provider: "hetzner",
             reason,
@@ -331,7 +331,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
           const creating = yield* Deferred.make<void>();
           if (transition === "creation") yield* Ref.set(fake.gate, Option.some(creating));
           fake.failures.push(
-            new MachineUnavailableError({
+            MachineUnavailableError.make({
               worker: POOL,
               provider: "hetzner",
               reason: "quota",
@@ -362,9 +362,9 @@ describe("Worker scheduler on a provisioned Worker", () => {
           else assert.isTrue((yield* status.provisioning)[0]?.blocked);
           yield* Ref.set(fake.provisioned, false);
           if (transition === "revision") {
-            const changed = new LoadedInstance({
+            const changed = LoadedInstance.make({
               ...initial,
-              config: Schema.decodeUnknownSync(UsineConfig)({
+              config: Schema.decodeSync(UsineConfig)({
                 version: 1,
                 repos: [{ name: "acme/demo" }],
                 workers: [
@@ -405,9 +405,9 @@ describe("Worker scheduler on a provisioned Worker", () => {
             yield* Ref.set(fake.provisioned, true);
             const reload = yield* Deferred.await(registered);
             const apply = yield* reload(
-              new LoadedInstance({
+              LoadedInstance.make({
                 ...initial,
-                config: Schema.decodeUnknownSync(UsineConfig)({
+                config: Schema.decodeSync(UsineConfig)({
                   version: 1,
                   repos: [{ name: "acme/demo" }],
                   workers: [
@@ -424,7 +424,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
             );
             yield* apply;
             fake.failures.push(
-              new MachineUnavailableError({
+              MachineUnavailableError.make({
                 worker: POOL,
                 provider: "hetzner",
                 reason: "quota",
@@ -462,7 +462,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
     Effect.gen(function* () {
       const fake = yield* fakeMachines();
       fake.failures.push(
-        new MachineUnavailableError({
+        MachineUnavailableError.make({
           worker: POOL,
           provider: "hetzner",
           reason: "quota",
@@ -487,7 +487,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
           Effect.gen(function* () {
             if (worker.kind !== "ssh" || Option.isSome(worker.provisioner)) return;
             if (!(yield* Ref.get(available)))
-              return yield* new ExecutorOperationError({
+              return yield* ExecutorOperationError.make({
                 operation: "preflight",
                 message: "Gateway credential variable is unset",
                 cause: new Error("missing credential"),
@@ -505,9 +505,9 @@ describe("Worker scheduler on a provisioned Worker", () => {
         steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip),
       );
       yield* settle;
-      const changed = new LoadedInstance({
+      const changed = LoadedInstance.make({
         ...initial,
-        config: Schema.decodeUnknownSync(UsineConfig)({
+        config: Schema.decodeSync(UsineConfig)({
           version: 1,
           repos: [{ name: "acme/demo" }],
           workers: [
@@ -556,13 +556,13 @@ describe("Worker scheduler on a provisioned Worker", () => {
           .execute(executionOf(readyRun, AttemptId.make("ready-run/execute/1")), sink)
           .pipe(Effect.flip);
         fake.failures.push(
-          new MachineUnavailableError({
+          MachineUnavailableError.make({
             worker: POOL,
             provider: "hetzner",
             reason: "quota",
             message,
           }),
-          new MachineUnavailableError({
+          MachineUnavailableError.make({
             worker: POOL,
             provider: "hetzner",
             reason: "unreachable",
@@ -575,7 +575,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
           { list: () => Effect.succeed([]) },
           status,
         );
-        const overview = new ReadyOverview({ projects: [], loops: [], needsYou: [] });
+        const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });
         const runId = RunId.make("run-1");
         const lease = yield* steps.reserve(runId, submission(1), Option.none());
         const waiting = yield* Effect.forkChild(
@@ -595,7 +595,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
           assert.strictEqual(needs[0]?._tag, "WorkerQuotaNeed");
           assert.deepStrictEqual(
             quotaWaits(yield* status.provisioning).get(runId),
-            new MachineQuotaWait({
+            MachineQuotaWait.make({
               worker: POOL,
               message,
             }),
@@ -657,7 +657,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
     Effect.gen(function* () {
       const fake = yield* fakeMachines();
       fake.failures.push(
-        new MachineUnavailableError({
+        MachineUnavailableError.make({
           worker: POOL,
           provider: "hetzner",
           reason: "quota",
@@ -708,7 +708,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
   it.effect("uses the configured backoff minimum and caps repeated failures at its maximum", () =>
     Effect.gen(function* () {
       const fake = yield* fakeMachines();
-      const quota = new MachineUnavailableError({
+      const quota = MachineUnavailableError.make({
         worker: POOL,
         provider: "hetzner",
         reason: "quota",

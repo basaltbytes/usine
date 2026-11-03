@@ -386,7 +386,7 @@ export class ScheduleTriggers extends Context.Service<
               message: String(computed.failure),
             });
             cronFailures.push(
-              new ScheduleCronFailure({
+              ScheduleCronFailure.make({
                 loop: schedule.loop.name,
                 cron: schedule.trigger.cron,
                 tz: schedule.trigger.tz,
@@ -417,7 +417,7 @@ export class ScheduleTriggers extends Context.Service<
               message: error.message,
             });
             agentFailures.push(
-              new ScheduleAgentFailure({
+              ScheduleAgentFailure.make({
                 loop: error.loop,
                 agent: error.agent,
                 message: error.message,
@@ -483,7 +483,7 @@ export class ScheduleTriggers extends Context.Service<
             ...scheduleFailureLogFields(error),
           });
           tickFailures.push(
-            new ScheduleTickFailure({
+            ScheduleTickFailure.make({
               loop: candidate.loop.name,
               repository: candidate.repository.name,
               scheduledAt: candidate.scheduledAt,
@@ -506,7 +506,7 @@ export class ScheduleTriggers extends Context.Service<
           return { ...memory, ticks: next };
         });
 
-        const cycle = new ScheduleCycle({
+        const cycle = ScheduleCycle.make({
           loops: schedules.length,
           fanout: due.length,
           submissions,

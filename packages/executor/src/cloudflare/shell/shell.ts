@@ -97,7 +97,7 @@ else {
   process.stdin.on("end", () => {
     stdinOpen = false;
     if (stdinTarget._tag === "Streaming")
-      stdinTarget.socket.send(encodeClientMessage(new StdinEnd()));
+      stdinTarget.socket.send(encodeClientMessage(StdinEnd.make()));
   });
 
   /** Opens one exec or attach stream and resolves when it ends. */
@@ -125,11 +125,11 @@ else {
         Option.match(start, {
           onNone: () => undefined,
           onSome: (line) => {
-            socket.send(encodeClientMessage(new ExecStart({ command: line })));
+            socket.send(encodeClientMessage(ExecStart.make({ command: line })));
             if (stdinTarget._tag === "Buffering")
               for (const chunk of stdinTarget.chunks) socket.send(chunk);
             stdinTarget = { _tag: "Streaming", socket };
-            if (!stdinOpen) socket.send(encodeClientMessage(new StdinEnd()));
+            if (!stdinOpen) socket.send(encodeClientMessage(StdinEnd.make()));
           },
         });
       });

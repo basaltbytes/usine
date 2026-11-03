@@ -125,13 +125,12 @@ const askGitHub = <A, E, D>(
   run("gh", args).pipe(
     Effect.flatMap((lines) =>
       decode(lines.join("\n")).pipe(
-        Effect.mapError(
-          (cause) =>
-            new HarvestError({
-              stage: "github",
-              message: `GitHub returned invalid ${what}`,
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          HarvestError.make({
+            stage: "github",
+            message: `GitHub returned invalid ${what}`,
+            cause,
+          }),
         ),
       ),
     ),
@@ -154,20 +153,19 @@ const harvestCommits = Effect.fn("StepResult.harvestCommits")(function* <E>(
     Effect.gen(function* () {
       const separator = line.indexOf(" ");
       const sha = yield* decodeCommit(separator < 0 ? line : line.slice(0, separator)).pipe(
-        Effect.mapError(
-          (cause) =>
-            new HarvestError({ stage: "git", message: "Git returned an invalid commit ID", cause }),
+        Effect.mapError((cause) =>
+          HarvestError.make({ stage: "git", message: "Git returned an invalid commit ID", cause }),
         ),
       );
       const summary = separator < 0 ? "" : line.slice(separator + 1).trim();
       if (summary.length === 0) {
-        return yield* new HarvestError({
+        return yield* HarvestError.make({
           stage: "git",
           message: `Commit ${sha} has no summary`,
           cause: new Error("empty commit summary"),
         });
       }
-      return new Commit({ sha, summary });
+      return Commit.make({ sha, summary });
     }),
   );
 });
@@ -179,9 +177,8 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
   const head = yield* decodeCommit((yield* run("git", ["rev-parse", "HEAD"])).join("")).pipe(
-    Effect.mapError(
-      (cause) =>
-        new HarvestError({ stage: "git", message: "Git returned an invalid final HEAD", cause }),
+    Effect.mapError((cause) =>
+      HarvestError.make({ stage: "git", message: "Git returned an invalid final HEAD", cause }),
     ),
   );
   const branch = (yield* run("git", ["branch", "--show-current"])).join("");
@@ -221,7 +218,7 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
     if (pr.head.sha === head)
       facts.set(
         pr.number,
-        new PullRequest({ number: pr.number, url: pr.url, head: Option.some(head) }),
+        PullRequest.make({ number: pr.number, url: pr.url, head: Option.some(head) }),
       );
   }
   yield* Effect.logInfo("Collected Attempt pull request results", {
@@ -368,7 +365,7 @@ const listComments = Effect.fn("StepResult.listComments")(function* <E>(
             {
               body,
               at: createdAt,
-              fact: new Comment({ url, kind: "issue-comment", at: Option.some(createdAt) }),
+              fact: Comment.make({ url, kind: "issue-comment", at: Option.some(createdAt) }),
             },
           ]
         : [],
@@ -383,7 +380,7 @@ const listComments = Effect.fn("StepResult.listComments")(function* <E>(
             {
               body,
               at: submittedAt,
-              fact: new Comment({ url, kind: "review", at: Option.some(submittedAt) }),
+              fact: Comment.make({ url, kind: "review", at: Option.some(submittedAt) }),
             },
           ]
         : [],
@@ -394,7 +391,7 @@ const listComments = Effect.fn("StepResult.listComments")(function* <E>(
             {
               body,
               at: createdAt,
-              fact: new Comment({ url, kind: "review-comment", at: Option.some(createdAt) }),
+              fact: Comment.make({ url, kind: "review-comment", at: Option.some(createdAt) }),
             },
           ]
         : [],
@@ -447,16 +444,15 @@ const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W
   // Read after the listing so the result includes every Attempt that could have posted a comment.
   const { own, overlapping } =
     listing.signed.length === 0
-      ? new AttemptWindows({ own: Option.none(), overlapping: [] })
+      ? AttemptWindows.make({ own: Option.none(), overlapping: [] })
       : yield* windows.pipe(
-          Effect.mapError(
-            (cause) =>
-              new HarvestError({
-                stage: "windows",
-                message:
-                  "Can't read the windows of this attempt and of the agent's other attempts on the item",
-                cause,
-              }),
+          Effect.mapError((cause) =>
+            HarvestError.make({
+              stage: "windows",
+              message:
+                "Can't read the windows of this attempt and of the agent's other attempts on the item",
+              cause,
+            }),
           ),
         );
   const placed = listing.signed.map(({ at, fact }) => ({

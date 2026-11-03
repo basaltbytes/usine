@@ -23,24 +23,24 @@ import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { RunStore } from "../src/store/store.ts";
 
-const agent = new Agent({
+const agent = Agent.make({
   name: AgentName.make("reviewer"),
   persona: AgentPersona.make("Review the PR."),
-  brain: new BrainSpec({ harness: "codex", model: ModelId.make("test-model"), effort: "high" }),
+  brain: BrainSpec.make({ harness: "codex", model: ModelId.make("test-model"), effort: "high" }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
 });
 const worker = WorkerName.make("test-worker");
-const success = Result.succeed(new StepResult({ message: "Round complete", facts: [] }));
+const success = Result.succeed(StepResult.make({ message: "Round complete", facts: [] }));
 const event = (key: string) =>
-  new Event({
+  Event.make({
     id: EventId.make(key),
     dedupKey: DedupKey.make(key),
     receivedAt: DateTime.makeUnsafe("2026-09-05T00:00:00Z"),
     payload: { key },
   });
 const submission = (loop: string, round: number, item = "pr-72") =>
-  new Submission({
+  Submission.make({
     event: event(`${item}/${loop}/${round}`),
     itemKey: ItemKey.make(item),
     loop: LoopName.make(loop),
@@ -53,10 +53,10 @@ const submission = (loop: string, round: number, item = "pr-72") =>
     parentModel: Option.none(),
   });
 const afterReset = (value: Submission) =>
-  new Submission({
+  Submission.make({
     ...value,
     cycleGeneration: CycleGeneration.make(1),
-    event: new Event({
+    event: Event.make({
       ...value.event,
       id: EventId.make(`${value.event.id}/generation-1`),
       dedupKey: DedupKey.make(`${value.event.dedupKey}/generation-1`),
@@ -68,7 +68,10 @@ const inDatabase = <A, E>(
   directory: InstanceDirectory,
   work: Effect.Effect<A, E, RunStore | CycleBudgets>,
 ) =>
-  work.pipe(Effect.provide(services), Effect.provide(localSqliteLayer(directory)), Effect.scoped);
+  work.pipe(
+    Effect.provide(Layer.mergeAll(services).pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+    Effect.scoped,
+  );
 const withDirectory = <A, E, R>(work: (directory: InstanceDirectory) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -120,9 +123,9 @@ describe("Item cycle budgets", () => {
           const started = yield* store.beginAttempt(idFor(running), worker, Option.none());
           assert(started._tag === "AttemptStarted");
           const older = submission("fix", 2);
-          const newer = new Submission({
+          const newer = Submission.make({
             ...submission("fix", 3),
-            event: new Event({
+            event: Event.make({
               ...event("newer-stale-event"),
               receivedAt: DateTime.makeUnsafe("2026-09-05T01:00:00Z"),
             }),
@@ -158,9 +161,9 @@ describe("Item cycle budgets", () => {
       withDirectory((directory) =>
         Effect.gen(function* () {
           const legacy = (round: number) =>
-            new Submission({ ...submission("review", round), cycleLimit: Option.none() });
+            Submission.make({ ...submission("review", round), cycleLimit: Option.none() });
           const third = legacy(3);
-          const scheduled = new Submission({
+          const scheduled = Submission.make({
             ...submission("schedule", 1, JSON.stringify(["github", "basaltbytes/usine"])),
             cycleLimit: Option.none(),
           });
@@ -177,7 +180,7 @@ describe("Item cycle budgets", () => {
               yield* store.finishAttempt(started.execution.attempt, success);
               yield* store.recordAndClaim(scheduled, idFor(scheduled));
               yield* store.beginAttempt(idFor(scheduled), worker, Option.none());
-              const nextTick = new Submission({ ...scheduled, event: event("legacy-next-tick") });
+              const nextTick = Submission.make({ ...scheduled, event: event("legacy-next-tick") });
               yield* store.recordAndClaim(nextTick, idFor(nextTick));
             }),
           );
@@ -466,7 +469,7 @@ describe("Item cycle budgets", () => {
             yield* store.finishAttempt(
               started.execution.attempt,
               Result.fail(
-                new InfraFailure({ message: "transport failed", cause: new Error("test") }),
+                InfraFailure.make({ message: "transport failed", cause: new Error("test") }),
               ),
             );
             const retried = yield* store.beginAttempt(idFor(second), worker, Option.none());
@@ -490,14 +493,17 @@ describe("Item cycle budgets", () => {
         directory,
         Effect.gen(function* () {
           const store = yield* RunStore;
-          const first = new Submission({
+          const first = Submission.make({
             ...submission("review", 1),
             cycleLimit: Option.some(CycleLimit.make(1)),
           });
           yield* store.recordAndClaim(first, idFor(first));
           const started = yield* store.beginAttempt(idFor(first), worker, Option.none());
           assert(started._tag === "AttemptStarted");
-          const next = new Submission({ ...submission("review", 2), cycleLimit: first.cycleLimit });
+          const next = Submission.make({
+            ...submission("review", 2),
+            cycleLimit: first.cycleLimit,
+          });
           assert.strictEqual(
             (yield* store.recordAndClaim(next, idFor(next))).result._tag,
             "Queued",
@@ -507,7 +513,7 @@ describe("Item cycle budgets", () => {
           assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
           for (let tick = 1; tick <= 5; tick += 1)
             yield* complete(
-              new Submission({
+              Submission.make({
                 ...submission("schedule", tick, "repository-schedule"),
                 cycleLimit: Option.none(),
               }),

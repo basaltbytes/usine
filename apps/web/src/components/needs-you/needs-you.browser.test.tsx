@@ -62,8 +62,8 @@ const runId = RunId.make("approval-run");
 const loop = LoopName.make("start-dev");
 const approvalReason =
   "Approval required: condition evaluated to true. Label ready-for-agent was set by usine-phildl (Bot)";
-const waiting = new RunView({
-  agentBrain: new BrainSpec({
+const waiting = RunView.make({
+  agentBrain: BrainSpec.make({
     harness: "codex",
     model: ModelId.make("test-model"),
     effort: "high",
@@ -90,15 +90,15 @@ const waiting = new RunView({
   canRetry: false,
   canResolveFailure: false,
 });
-const running = new RunView({ ...waiting, state: "Running", canApprove: false });
+const running = RunView.make({ ...waiting, state: "Running", canApprove: false });
 const approvalOf = (id: RunId, number: number, title: string) =>
-  new ApprovalNeed({
+  ApprovalNeed.make({
     id: `approval-${id}`,
     repository,
     runId: id,
     approvalReason,
     loop,
-    item: new BoardItemLink({
+    item: BoardItemLink.make({
       itemKey: ItemKey.make(`github:approval/project:${number}`),
       kind: "issue",
       number: ItemNumber.make(number),
@@ -114,13 +114,13 @@ const unrelated = approvalOf(RunId.make("other-run"), 12, "Wait for the operator
 const overview = (needsYou: ReadonlyArray<NeedView>, runs: ReadonlyArray<RunView> = []) =>
   JSON.stringify(
     Schema.encodeSync(FactoryOverview)(
-      new ReadyOverview({
+      ReadyOverview.make({
         projects: [
-          new ProjectView({
+          ProjectView.make({
             repository,
             status: "needs-you",
             runs,
-            board: new BoardView({ lanes: [], failures: [] }),
+            board: BoardView.make({ lanes: [], failures: [] }),
             labels: [],
             preflightFindings: [],
           }),
@@ -133,7 +133,7 @@ const overview = (needsYou: ReadonlyArray<NeedView>, runs: ReadonlyArray<RunView
 const detail = (run: RunView) =>
   JSON.stringify(
     Schema.encodeSync(RunDetailView)(
-      new RunDetailView({
+      RunDetailView.make({
         agentDefinitionChanged: false,
         run,
         eventDedupKey: "event",
@@ -268,7 +268,7 @@ it("explains in the drawer an approve refused because the Run was approved elsew
 });
 
 it("shows a silent worker's last answer and opens an affected run", async () => {
-  const need = new UnresponsiveWorkerNeed({
+  const need = UnresponsiveWorkerNeed.make({
     id: "worker:remote",
     worker: WorkerName.make("remote"),
     lastAnsweredAt: "2026-10-28T14:35:00.000Z",
@@ -328,23 +328,23 @@ it.each([1280, 390])(
   "opens cycle-budget loop counts from Overview and the tray without hover at %ipx",
   async (width) => {
     await page.viewport(width, 844);
-    const need = new CycleBudgetNeed({
+    const need = CycleBudgetNeed.make({
       id: "cycle-budget:exhausted",
       itemLabel: "approval/project#367",
       itemUrl: "https://github.com/approval/project/issues/367",
-      ask: new CycleBudgetAsk({
+      ask: CycleBudgetAsk.make({
         id: CycleBudgetAskId.make("exhausted"),
         itemKey: waiting.itemKey,
         repository,
         loop,
         limit: CycleLimit.make(3),
         counts: [
-          new LoopCycleCount({
+          LoopCycleCount.make({
             loop,
             admitted: CycleCount.make(3),
             completed: CycleCount.make(2),
           }),
-          new LoopCycleCount({
+          LoopCycleCount.make({
             loop: LoopName.make("review-pr"),
             admitted: CycleCount.make(1),
             completed: CycleCount.make(1),
@@ -408,7 +408,7 @@ it.each([
     await page.viewport(width, 844);
     const worker = WorkerName.make("usine-worker-2");
     await replaceNeeds([
-      new UnconfiguredWorkerNeed({
+      UnconfiguredWorkerNeed.make({
         id: "unconfigured-worker:usine-worker-2",
         worker,
         attempts: 3,
@@ -567,7 +567,7 @@ const eightNeeds = [
     "Update loop settings",
     "Fix repository polling",
   ].map((title, index) => approvalOf(RunId.make(`approval-${index}`), 368 + index, title)),
-  new WorkerPreflightNeed({
+  WorkerPreflightNeed.make({
     id: "preflight-remote",
     worker: WorkerName.make("remote"),
     message: "SSH connection refused",
@@ -581,7 +581,7 @@ it.each(["dark", "light"])(
     await replaceNeeds(
       eightNeeds,
       eightNeeds.flatMap((need) =>
-        need._tag === "ApprovalNeed" ? [new RunView({ ...waiting, id: need.runId })] : [],
+        need._tag === "ApprovalNeed" ? [RunView.make({ ...waiting, id: need.runId })] : [],
       ),
     );
     await page.getByRole("link", { name: "Board", exact: true }).click();

@@ -28,19 +28,19 @@ export const IMAGE = CloudflareImageName.make("usine");
 export const ISSUED_AT = "2026-10-26T08:00:00.000Z";
 
 const credentials = (token = "ghs_first") =>
-  new SandboxCredentials({
+  SandboxCredentials.make({
     issuedAt: DateTime.makeUnsafe(ISSUED_AT),
     github: Option.some(Redacted.make(token)),
     providers: [
-      new ProviderGrant({
+      ProviderGrant.make({
         provider: "anthropic",
-        credential: new ApiKeyCredential({ key: Redacted.make("sk-ant-key") }),
+        credential: ApiKeyCredential.make({ key: Redacted.make("sk-ant-key") }),
       }),
     ],
   });
 
 export const storedSandbox = (leaseUntil: DateTime.Utc, held = false) =>
-  new StoredSandbox({
+  StoredSandbox.make({
     name: NAME,
     owner: OWNER,
     attempt: ATTEMPT,

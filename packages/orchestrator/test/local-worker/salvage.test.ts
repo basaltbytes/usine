@@ -70,7 +70,7 @@ describe("local worker salvage", () => {
           }).pipe(
             Effect.provide(NodeServices.layer),
             Effect.orDie,
-            Effect.andThen(new AgentFailure({ message: "The agent could not finish" })),
+            Effect.andThen(AgentFailure.make({ message: "The agent could not finish" })),
           ),
         );
         yield* withLocalEngine({ attemptRuntime: parent }, ({ engine }) =>
@@ -198,7 +198,7 @@ describe("local worker salvage", () => {
         );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
-          const request = new CheckoutRequest({
+          const request = CheckoutRequest.make({
             attemptId: AttemptId.make("r/run/2"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
@@ -214,7 +214,7 @@ describe("local worker salvage", () => {
             maxAttemptTokens: Option.none(),
             parentEffort: "high",
             salvageRef: SalvageRef.make("usine/salvage/r/2"),
-            resume: Option.some(new SalvagePushed({ ref, commit: salvageCommit })),
+            resume: Option.some(SalvagePushed.make({ ref, commit: salvageCommit })),
             commitAuthor: testBotAccount,
           });
           yield* Effect.scoped(
@@ -223,7 +223,7 @@ describe("local worker salvage", () => {
               assert.strictEqual(prepared.workspace.spec.baseCommit, base);
               assert.deepStrictEqual(
                 prepared.workspace.spec.resume,
-                Option.some(new SalvagePushed({ ref, commit: salvageCommit })),
+                Option.some(SalvagePushed.make({ ref, commit: salvageCommit })),
               );
               assert.strictEqual(
                 (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
@@ -231,7 +231,7 @@ describe("local worker salvage", () => {
               );
             }),
           );
-          const failedRecordRequest = new CheckoutRequest({
+          const failedRecordRequest = CheckoutRequest.make({
             ...request,
             attemptId: AttemptId.make("r/run/4"),
           });
@@ -247,7 +247,7 @@ describe("local worker salvage", () => {
                 prepared.launch({
                   append: () =>
                     Effect.fail(
-                      new InfraFailure({ message: "channel unavailable", cause: "outage" }),
+                      InfraFailure.make({ message: "channel unavailable", cause: "outage" }),
                     ),
                   comments: () => Effect.void,
                   outOfMemory: () => Effect.void,
@@ -256,7 +256,7 @@ describe("local worker salvage", () => {
                   salvage: () =>
                     Effect.gen(function* () {
                       assert(yield* fileSystem.exists(worktree).pipe(Effect.orDie));
-                      return yield* new InfraFailure({
+                      return yield* InfraFailure.make({
                         message: "salvage database unavailable",
                         cause: "outage",
                       });
@@ -309,11 +309,11 @@ describe("local worker salvage", () => {
           yield* Effect.scoped(
             Effect.gen(function* () {
               const prepared = yield* executor.prepare(
-                new CheckoutRequest({
+                CheckoutRequest.make({
                   ...request,
                   attemptId: AttemptId.make("r/run/3"),
                   resume: Option.some(
-                    new SalvagePushed({
+                    SalvagePushed.make({
                       ref: SalvageRef.make("usine/salvage/r/deleted"),
                       commit: salvageCommit,
                     }),
@@ -361,7 +361,7 @@ describe("local worker salvage", () => {
           Effect.gen(function* () {
             const ref = SalvageRef.make(`usine/salvage/r/${number}`);
             yield* git(["push", "origin", `${commit}:refs/heads/${ref}`]);
-            return new SalvagePushed({ ref, commit });
+            return SalvagePushed.make({ ref, commit });
           });
         const firstBase = yield* head(seed);
         yield* git(["checkout", "-b", "attempt-1"]);
@@ -398,7 +398,7 @@ describe("local worker salvage", () => {
           Layer.provide(claudeLoginLockLayer),
         );
         const request = (number: number, resume: SalvagePushed) =>
-          new CheckoutRequest({
+          CheckoutRequest.make({
             attemptId: AttemptId.make(`r/run/${number}`),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),

@@ -57,7 +57,7 @@ for (const [name, layer] of [
           if (first === undefined) return;
           assert.equal((yield* store.remove(first.id).pipe(Effect.flip)).status, 409);
           assert.lengthOf(yield* store.members, 1);
-        }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+        }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
       ));
     it("changes only owned token scopes and preserves them when recording use", async () =>
       Effect.runPromise(
@@ -65,7 +65,7 @@ for (const [name, layer] of [
           const store = yield* AuthStore;
           yield* store.add(alice, true);
           yield* store.add(bob, false);
-          const token = new InstanceToken({
+          const token = InstanceToken.make({
             id: TokenId.make("scoped"),
             memberId: alice.id,
             name: TokenName.make("Scoped"),
@@ -77,9 +77,9 @@ for (const [name, layer] of [
           });
           yield* store.issue(token);
           const scopes = [
-            new PermissionGrant({
+            PermissionGrant.make({
               permission: "read",
-              scope: new ProjectScope({ project: ProjectId.make("alpha") }),
+              scope: ProjectScope.make({ project: ProjectId.make("alpha") }),
             }),
           ];
           assert.equal(
@@ -90,7 +90,7 @@ for (const [name, layer] of [
           const access = yield* store.authenticate(token.hash, 61000);
           assert.deepEqual(Option.getOrNull(access)?.token.scopes, scopes);
           assert.deepEqual((yield* store.tokens(alice.id))[0]?.scopes, scopes);
-        }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+        }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
       ));
     it("revokes every credential when a member is removed", async () =>
       Effect.runPromise(
@@ -98,7 +98,7 @@ for (const [name, layer] of [
           const store = yield* AuthStore;
           yield* store.add(alice, true);
           yield* store.add(bob, false);
-          const token = new InstanceToken({
+          const token = InstanceToken.make({
             id: TokenId.make("alice-device"),
             memberId: alice.id,
             name: TokenName.make("Phone"),
@@ -117,11 +117,11 @@ for (const [name, layer] of [
           yield* store.revoke(bob.id, token.id);
           assert.isTrue(Option.isSome(yield* store.authenticate(token.hash, 6)));
           const renamed = yield* store.rename(
-            new GitHubIdentity({ id: alice.id, login: OperatorLogin.make("alice-renamed") }),
+            GitHubIdentity.make({ id: alice.id, login: OperatorLogin.make("alice-renamed") }),
           );
           assert.deepEqual(
             renamed,
-            new Member({ ...alice, login: OperatorLogin.make("alice-renamed") }),
+            Member.make({ ...alice, login: OperatorLogin.make("alice-renamed") }),
           );
           assert.equal(
             Option.getOrNull(yield* store.authenticate(token.hash, 6))?.member.login,
@@ -129,21 +129,21 @@ for (const [name, layer] of [
           );
           assert.equal(
             (yield* store
-              .rename(new GitHubIdentity({ id: alice.id, login: bob.login }))
+              .rename(GitHubIdentity.make({ id: alice.id, login: bob.login }))
               .pipe(Effect.flip)).status,
             409,
           );
-          yield* store.add(new Member({ ...alice, id: GitHubUserId.make(3) }), false);
+          yield* store.add(Member.make({ ...alice, id: GitHubUserId.make(3) }), false);
           yield* store.remove(alice.id);
           assert.equal(
             (yield* store
-              .rename(new GitHubIdentity({ id: alice.id, login: renamed.login }))
+              .rename(GitHubIdentity.make({ id: alice.id, login: renamed.login }))
               .pipe(Effect.flip)).status,
             403,
           );
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 7)));
           assert.deepEqual(yield* store.tokens(alice.id), []);
-        }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+        }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
       ));
     it("rejects duplicate logins regardless of case and revokes a member's own token", async () =>
       Effect.runPromise(
@@ -151,7 +151,7 @@ for (const [name, layer] of [
           const store = yield* AuthStore;
           yield* store.add(alice, true);
           assert.equal((yield* store.add(alice, false).pipe(Effect.flip)).status, 409);
-          const token = new InstanceToken({
+          const token = InstanceToken.make({
             id: TokenId.make("session"),
             memberId: alice.id,
             name: TokenName.make("Browser"),
@@ -164,7 +164,7 @@ for (const [name, layer] of [
           yield* store.issue(token);
           yield* store.revoke(alice.id, token.id);
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 2)));
-        }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+        }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
       ));
   });
 
@@ -178,7 +178,7 @@ for (const [name, layer] of [
         const store = yield* AuthStore;
         yield* store.add(alice, true);
         yield* store.add(bob, false);
-        const token = new InstanceToken({
+        const token = InstanceToken.make({
           id: TokenId.make("active"),
           memberId: alice.id,
           name: TokenName.make("Browser"),
@@ -186,24 +186,24 @@ for (const [name, layer] of [
           kind: "session",
           createdAt: 0,
           lastUsedAt: 0,
-          expiresAt: 120_000,
+          expiresAt: 120000,
         });
         yield* store.issue(token);
         yield* store.issue(
-          new InstanceToken({
+          InstanceToken.make({
             ...token,
             id: TokenId.make("expired"),
             hash: secretHash("expired"),
-            expiresAt: 60_000,
+            expiresAt: 60000,
           }),
         );
         yield* store.issue(
-          new InstanceToken({
+          InstanceToken.make({
             ...token,
             id: TokenId.make("other-member"),
             memberId: bob.id,
             hash: secretHash("other-member"),
-            expiresAt: 60_000,
+            expiresAt: 60000,
           }),
         );
         for (const now of [1, 59_999]) {
@@ -229,7 +229,7 @@ for (const [name, layer] of [
         assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("expired"), 1)));
         assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("other-member"), 1)));
         assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 120_000)));
-      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped),
+      }).pipe(Effect.provide([layer, TestClock.layer()]), Effect.scoped),
     ));
 
 it("authenticates recently used SQLite tokens while another connection has the write lock", async () =>
@@ -245,7 +245,7 @@ it("authenticates recently used SQLite tokens while another connection has the w
       yield* Effect.gen(function* () {
         const store = yield* AuthStore;
         yield* store.add(alice, true);
-        const token = new InstanceToken({
+        const token = InstanceToken.make({
           id: TokenId.make("read-only"),
           memberId: alice.id,
           name: TokenName.make("Browser"),
@@ -253,7 +253,7 @@ it("authenticates recently used SQLite tokens while another connection has the w
           kind: "session",
           createdAt: 0,
           lastUsedAt: 0,
-          expiresAt: 120_000,
+          expiresAt: 120000,
         });
         yield* store.issue(token);
         const writer = yield* Effect.acquireRelease(

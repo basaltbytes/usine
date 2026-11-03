@@ -138,16 +138,16 @@ const delayedPiStart = () => {
 };
 
 describe("Pi child backend", () => {
-  const childRequest = new ChildRequest({
+  const childRequest = ChildRequest.make({
     worker: WorkerName.make("worker-1"),
     machine: Option.none(),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
-    host: new LocalProcess(),
-    session: new ChildSession({
+    host: LocalProcess.make(),
+    session: ChildSession.make({
       id: AgentSessionId.make("pi-child-1"),
       parentId: AgentSessionId.make("parent-1"),
       agent: AgentName.make("developer"),
-      brain: new BrainSpec({
+      brain: BrainSpec.make({
         harness: "pi",
         model: ModelId.make("openai/gpt-5.6-terra"),
         effort: "medium",
@@ -198,7 +198,7 @@ describe("Pi child backend", () => {
         );
         const first = yield* Queue.take(turns);
         const state = yield* running.intervene(
-          new AttemptChannel.OperatorMessage({ message: "Wait for my review" }),
+          AttemptChannel.OperatorMessage.make({ message: "Wait for my review" }),
           noDelivery,
         );
         assert.strictEqual(state.held, true);
@@ -206,7 +206,7 @@ describe("Pi child backend", () => {
         yield* Queue.take(idle);
         assert.strictEqual(result.pollUnsafe(), undefined);
         yield* running.intervene(
-          new AttemptChannel.OperatorMessage({ message: "Now fix the edge case" }),
+          AttemptChannel.OperatorMessage.make({ message: "Now fix the edge case" }),
           noDelivery,
         );
         const second = yield* Queue.take(turns);
@@ -214,10 +214,10 @@ describe("Pi child backend", () => {
         second.complete();
         yield* Queue.take(idle);
         assert.strictEqual(result.pollUnsafe(), undefined);
-        yield* running.intervene(new AttemptChannel.Release(), noDelivery);
+        yield* running.intervene(AttemptChannel.Release.make(), noDelivery);
         assert.strictEqual((yield* Fiber.join(result)).message, "Pi session completed");
         assert.strictEqual(opens, 1);
-      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
 
@@ -252,7 +252,7 @@ describe("Pi child backend", () => {
         const running = yield* (yield* PiChildBackend).launch(childRequest);
         const reads: Array<Option.Option<AttemptChannel.InterventionState>> = [];
         const state = yield* running.intervene(
-          new AttemptChannel.OperatorMessage({ message: "Use pnpm, not npm." }),
+          AttemptChannel.OperatorMessage.make({ message: "Use pnpm, not npm." }),
           (delivered) =>
             Effect.sync(() => {
               reads.push(delivered);
@@ -277,7 +277,7 @@ describe("Pi child backend", () => {
         const [read] = reads;
         assert(read !== undefined && Option.isSome(read));
         assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
 
@@ -356,7 +356,7 @@ describe("Pi child backend", () => {
           events.map((event) => event._tag),
           ["SessionStarted", "SessionTokensUpdated", "TextOutput", "SessionFinished"],
         );
-      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -441,9 +441,9 @@ describe("Pi child backend", () => {
         const retries = warnings.filter((line) => line.includes("cannot reach its provider"));
         assert.lengthOf(retries, 3, "one warning per provider retry");
       }).pipe(
-        Effect.provide(piChildBackendLayer),
-        Effect.provide(sdk),
-        Effect.provide(Logger.layer([logger])),
+        Effect.provide(
+          Layer.mergeAll(piChildBackendLayer, Logger.layer([logger])).pipe(Layer.provideMerge(sdk)),
+        ),
       ),
     );
   });
@@ -460,9 +460,9 @@ describe("Pi child backend", () => {
       Effect.gen(function* () {
         const error = yield* Effect.flip(
           (yield* PiChildBackend).launch(
-            new ChildRequest({
+            ChildRequest.make({
               ...childRequest,
-              host: new RemoteShell({
+              host: RemoteShell.make({
                 ssh: { command: "ssh", args: [] },
                 sshEnvironment: {},
                 destination: "worker.exe.xyz",
@@ -474,7 +474,7 @@ describe("Pi child backend", () => {
         assert.match(error.message, /^Pi children run only on local workers/u);
         assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
         assert.strictEqual(started, false);
-      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -488,7 +488,7 @@ describe("Pi child backend", () => {
         const error = yield* Effect.flip(backend.launch(childRequest));
         assert(error instanceof UnknownModelError);
         assert.strictEqual(error.harness, "pi");
-      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -523,7 +523,7 @@ describe("Pi child backend", () => {
         assert.strictEqual(error.pool, "apiKeys");
         assert.strictEqual(error.model, model);
         assert.strictEqual(disposed, true);
-      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -609,7 +609,7 @@ describe("Pi child backend", () => {
         yield* Effect.promise(() => delayed.disposed);
         yield* Fiber.join(interruptFiber);
         assert.strictEqual(delayed.disposeCount(), 1);
-      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -623,7 +623,7 @@ describe("Pi child backend", () => {
         const error = yield* Effect.flip(backend.launch(childRequest));
         assert(error instanceof SessionOperationError);
         assert.strictEqual(error.operation, "launch");
-      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -717,7 +717,7 @@ describe("Pi child backend", () => {
             faux.state.callCount,
             scenario.responses + (scenario.outcome === "success" ? 1 : 0),
           );
-        }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
+        }).pipe(Effect.provide(Layer.mergeAll(piChildBackendLayer).pipe(Layer.provideMerge(sdk))));
       }).pipe(Effect.scoped),
     );
   }

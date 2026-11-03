@@ -21,7 +21,7 @@ export type FileStage = typeof FileStage.Type;
 /** A field-level diagnostic with an optional CEL expression and character offset. */
 export const ConfigProblem = Schema.Struct({
   /** The field path, using property names and zero-based array indexes. */
-  path: Schema.Array(Schema.Union([Schema.String, Schema.Number])),
+  path: Schema.Array(Schema.Union([Schema.String, Schema.Finite])),
   /** The validation message for this field. */
   message: Schema.String,
   /** The CEL source associated with the problem, when available. */
@@ -66,7 +66,7 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
         message,
       }),
     );
-    return new ConfigFileError({
+    return ConfigFileError.make({
       file,
       stage: "schema",
       expression: Option.none(),

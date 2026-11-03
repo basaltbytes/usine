@@ -24,16 +24,16 @@ import { IssuePayload, PullRequestPayload } from "../src/polling/payload.ts";
 import { GitHubPolling } from "../src/polling/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const token = new InstallationToken({
+const token = InstallationToken.make({
   value: Redacted.make("polling-token"),
   expiresAt: DateTime.makeUnsafe("2026-08-30T22:00:00Z"),
-  scope: new InstallationWide(),
+  scope: InstallationWide.make(),
 });
 
 const appLayer = Layer.succeed(GitHubApp)({
   installation: () =>
     Effect.succeed(
-      new Installation({
+      Installation.make({
         id: InstallationId.make(77),
         accountLogin: "basaltbytes",
         appSlug: AppSlug.make("usine-basaltbytes"),
@@ -469,7 +469,7 @@ describe("GitHubPolling", () => {
       const polling = yield* GitHubPolling;
       const snapshot = yield* polling.snapshot(
         repository,
-        new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+        ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
       );
       assert.strictEqual(snapshot._tag, "IssueSnapshot");
       if (snapshot._tag !== "IssueSnapshot") return;
@@ -506,7 +506,7 @@ describe("GitHubPolling", () => {
       const failure = yield* polling
         .snapshot(
           repository,
-          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+          ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
         )
         .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "GitHubRateLimitError");
@@ -528,7 +528,7 @@ describe("GitHubPolling", () => {
       const pending = yield* polling
         .snapshot(
           repository,
-          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+          ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
         )
         .pipe(Effect.flip, Effect.forkChild);
       yield* TestClock.adjust("10 seconds");
@@ -558,7 +558,7 @@ describe("GitHubPolling", () => {
           const pending = yield* polling
             .snapshot(
               repository,
-              new ChangedPullRequest({
+              ChangedPullRequest.make({
                 number: 12,
                 updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
               }),
@@ -588,7 +588,7 @@ describe("GitHubPolling", () => {
       const limited = yield* polling
         .snapshot(
           repository,
-          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+          ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
         )
         .pipe(Effect.flip);
       assert.strictEqual(limited._tag, "GitHubRateLimitError");
@@ -619,7 +619,7 @@ describe("GitHubPolling", () => {
       const fetch = polling
         .snapshot(
           repository,
-          new ChangedPullRequest({
+          ChangedPullRequest.make({
             number: 51,
             updatedAt: DateTime.makeUnsafe("2026-08-30T19:00:00Z"),
           }),
@@ -774,7 +774,7 @@ describe("GitHubPolling", () => {
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      const changed = new ChangedIssue({
+      const changed = ChangedIssue.make({
         number: 28,
         updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
       });
@@ -808,7 +808,7 @@ describe("GitHubPolling", () => {
       const polling = yield* GitHubPolling;
       const snapshot = yield* polling.snapshot(
         repository,
-        new ChangedPullRequest({
+        ChangedPullRequest.make({
           number: 51,
           updatedAt: DateTime.makeUnsafe("2026-08-30T19:00:00Z"),
         }),
@@ -862,7 +862,7 @@ describe("GitHubPolling", () => {
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      const changed = new ChangedPullRequest({
+      const changed = ChangedPullRequest.make({
         number: 51,
         updatedAt: DateTime.makeUnsafe("2026-08-30T19:00:00Z"),
       });
@@ -929,14 +929,14 @@ describe("GitHubPolling", () => {
       });
       return Effect.gen(function* () {
         const polling = yield* GitHubPolling;
-        assert.deepStrictEqual(Schema.decodeUnknownSync(IssuePayload)(base).labelEvents, {});
+        assert.deepStrictEqual(Schema.decodeSync(IssuePayload)(base).labelEvents, {});
         assert.deepStrictEqual(
-          Schema.decodeUnknownSync(PullRequestPayload)(pullRequestPayload).labelEvents,
+          Schema.decodeSync(PullRequestPayload)(pullRequestPayload).labelEvents,
           {},
         );
         for (const item of [
-          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe(newTime) }),
-          new ChangedPullRequest({ number: 51, updatedAt: DateTime.makeUnsafe(newTime) }),
+          ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe(newTime) }),
+          ChangedPullRequest.make({ number: 51, updatedAt: DateTime.makeUnsafe(newTime) }),
         ]) {
           actor = bot;
           time = oldTime;
@@ -1012,7 +1012,7 @@ describe("GitHubPolling", () => {
         const polling = yield* GitHubPolling;
         const result = yield* polling.snapshot(
           repository,
-          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe(createdAt) }),
+          ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe(createdAt) }),
         );
         assert.deepStrictEqual(result.payload.labelEvents, {
           ready: { actor: recent.actor, createdAt },
@@ -1070,7 +1070,7 @@ describe("GitHubPolling", () => {
           const polling = yield* GitHubPolling;
           const snapshot = polling.snapshot(
             repository,
-            new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe(createdAt) }),
+            ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe(createdAt) }),
           );
           if (startCursor === null) {
             const failure = yield* Effect.flip(snapshot);

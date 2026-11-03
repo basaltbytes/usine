@@ -174,15 +174,15 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
 `,
           );
           const running = yield* (yield* CodexChildBackend).launch(
-            new ChildRequest({
+            ChildRequest.make({
               worker: WorkerName.make("boat"),
               machine: Option.none(),
               cwd: WorkingDirectory.make(directory),
-              session: new ChildSession({
+              session: ChildSession.make({
                 id: AgentSessionId.make("parent:drop:child:1"),
                 parentId: AgentSessionId.make("parent:drop"),
                 agent: AgentName.make("developer"),
-                brain: new BrainSpec({
+                brain: BrainSpec.make({
                   harness: "codex",
                   model: ModelId.make("test-model"),
                   effort: "off",
@@ -193,7 +193,7 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
                 PATH: `${directory}:/usr/local/bin:/usr/bin:/bin`,
                 CODEX_HOME: directory,
               },
-              host: new RemoteShell({
+              host: RemoteShell.make({
                 ssh: { command: execPath, args: [`${directory}/ssh`] },
                 sshEnvironment: {},
                 destination: "worker",

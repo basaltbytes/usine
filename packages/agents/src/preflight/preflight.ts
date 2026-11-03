@@ -33,7 +33,7 @@ export const unsupportedCodexVersion = (version: string): Option.Option<HarnessU
   supportedCodexVersions.some((supported) => version === `codex-cli ${supported}`)
     ? Option.none()
     : Option.some(
-        new HarnessUnavailableError({
+        HarnessUnavailableError.make({
           harness: "codex",
           capability: "version",
           message: `The worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Install a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
@@ -63,7 +63,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       host: host._tag,
     });
     const loginError = (message: string) =>
-      new HarnessUnavailableError({
+      HarnessUnavailableError.make({
         harness: brain.harness,
         capability: "login",
         message,
@@ -124,7 +124,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       }
       case "pi": {
         if (host._tag === "RemoteShell")
-          return yield* new HarnessUnavailableError({
+          return yield* HarnessUnavailableError.make({
             harness: "pi",
             capability: "binary",
             message: "Pi children run only on local workers",
@@ -142,7 +142,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
               thinkingLevel: brain.effort,
             }),
           (cause) =>
-            new SessionOperationError({
+            SessionOperationError.make({
               operation: "launch",
               sessionId: Option.none(),
               message: `Can't check Pi authentication for "${brain.model}"`,
@@ -166,20 +166,18 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       model: brain.model,
       host: host._tag,
     });
-    return new HarnessReady({ harness: brain.harness });
+    return HarnessReady.make({ harness: brain.harness });
   },
   (effect, brain) =>
     effect.pipe(
       Effect.timeout("60 seconds"),
-      Effect.catchTag(
-        "TimeoutError",
-        (cause) =>
-          new SessionOperationError({
-            operation: "launch",
-            sessionId: Option.none(),
-            message: `${brain.harness} readiness check timed out`,
-            cause,
-          }),
+      Effect.catchTag("TimeoutError", (cause) =>
+        SessionOperationError.make({
+          operation: "launch",
+          sessionId: Option.none(),
+          message: `${brain.harness} readiness check timed out`,
+          cause,
+        }),
       ),
       Effect.tapError((error) =>
         Effect.logError("Worker harness preflight failed", {
@@ -199,6 +197,5 @@ export const preflight = (
   environment: Readonly<Record<string, string>>,
 ) =>
   verifyHarness(brain, host, environment).pipe(
-    Effect.provide(codexAppServerLive),
-    Effect.provide(piSdkLive),
+    Effect.provide(Layer.mergeAll(codexAppServerLive, piSdkLive)),
   );

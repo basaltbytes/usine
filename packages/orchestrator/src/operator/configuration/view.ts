@@ -476,13 +476,13 @@ const fileStem = (file: InstancePath): string => {
 /** Returns the operator API view of a preflight check. */
 export const checkView = (check: PreflightCheck): PreflightCheckView =>
   Match.valueTags(check, {
-    Passed: ({ checkedAt }) => new PassedCheckView({ checkedAt: DateTime.formatIso(checkedAt) }),
+    Passed: ({ checkedAt }) => PassedCheckView.make({ checkedAt: DateTime.formatIso(checkedAt) }),
     Degraded: ({ checkedAt, message }) =>
-      new DegradedCheckView({ checkedAt: DateTime.formatIso(checkedAt), message }),
+      DegradedCheckView.make({ checkedAt: DateTime.formatIso(checkedAt), message }),
     Deferred: ({ checkedAt, message }) =>
-      new DeferredCheckView({ checkedAt: DateTime.formatIso(checkedAt), message }),
+      DeferredCheckView.make({ checkedAt: DateTime.formatIso(checkedAt), message }),
     Failed: ({ checkedAt, capability, message }) =>
-      new FailedCheckView({
+      FailedCheckView.make({
         checkedAt: DateTime.formatIso(checkedAt),
         capability: Option.getOrNull(capability),
         message,
@@ -500,7 +500,7 @@ const workerConnection = (worker: Worker) =>
         gateway: Option.match(worker.gateway, {
           onNone: () => null,
           onSome: (gateway) =>
-            new GatewayView({
+            GatewayView.make({
               domain: gateway.domain,
               destination: gateway.destination,
               adminPort: gateway.adminPort,
@@ -508,7 +508,7 @@ const workerConnection = (worker: Worker) =>
               llmProviders: gateway.llmProviders,
             }),
         }),
-        container: new ContainerView({
+        container: ContainerView.make({
           image: Option.getOrNull(worker.container.image),
           cpus: Option.getOrNull(worker.container.cpus),
           memoryMib: Option.getOrNull(worker.container.memoryMib),
@@ -550,7 +550,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       const key = canonicalLabelName(name);
       const found = Option.flatMap(catalog, (labels) => Option.fromNullishOr(labels.get(key)));
       const authored = declared.get(key);
-      return new LabelStateView({
+      return LabelStateView.make({
         name,
         onGitHub: Option.match(catalog, { onNone: () => null, onSome: () => Option.isSome(found) }),
         color: Option.getOrNull(
@@ -573,21 +573,20 @@ const makeOperatorConfiguration = Effect.gen(function* () {
           ) ?? null,
       });
     };
-    return new RepositoryConfigurationView({
+    return RepositoryConfigurationView.make({
       name: repository.name,
       tags: repository.tags,
       lanes: (
         boardRepositories(instance.config).find(({ name }) => name === repository.name)?.lanes ?? []
-      ).map(
-        (lane) =>
-          new LaneConfigurationView({
-            name: lane.name,
-            sources: lane.sources.map((source) =>
-              "label" in source
-                ? new LabelLaneSourceView({ label: labelState(source.label) })
-                : new StateLaneSourceView({ state: source.state }),
-            ),
-          }),
+      ).map((lane) =>
+        LaneConfigurationView.make({
+          name: lane.name,
+          sources: lane.sources.map((source) =>
+            "label" in source
+              ? LabelLaneSourceView.make({ label: labelState(source.label) })
+              : StateLaneSourceView.make({ state: source.state }),
+          ),
+        }),
       ),
       declaredLabels: instance.config.labels.map(({ name }) => labelState(name)),
       loops: instance.loops
@@ -626,54 +625,52 @@ const makeOperatorConfiguration = Effect.gen(function* () {
           ? [warning.label]
           : [],
       );
-    const loops = instance.loops.map(
-      (loop) =>
-        new LoopFileView({
-          name: loop.name,
-          file: loopPath(loop.name),
-          stream: loop.trigger.on,
-          condition: loop.trigger.if,
-          cron: loop.trigger.on === "schedule" ? loop.trigger.cron : null,
-          timeZone: loop.trigger.on === "schedule" ? loop.trigger.tz : null,
-          selector: Option.match(loop.selector, {
-            onNone: () => null,
-            onSome: ({ repos, tags }) =>
-              new LoopSelectorView({
-                repos: Option.getOrNull(repos),
-                tags: Option.getOrNull(tags),
-              }),
-          }),
-          repositories: config.repos
-            .filter((repository) => matchesLoop(instance.config, loop, repository))
-            .map(({ name }) => name),
-          approval: loop.approval,
-          maxCycles: loop.maxCycles,
-          permissions: loop.permissions,
-          priority: Option.getOrNull(loop.priority),
-          step: loop.step,
-          agent: loop.agent,
-          prompt: loop.body,
-          paused: paused.has(loop.name),
-          undeclaredLabels: undeclared(loop.name),
+    const loops = instance.loops.map((loop) =>
+      LoopFileView.make({
+        name: loop.name,
+        file: loopPath(loop.name),
+        stream: loop.trigger.on,
+        condition: loop.trigger.if,
+        cron: loop.trigger.on === "schedule" ? loop.trigger.cron : null,
+        timeZone: loop.trigger.on === "schedule" ? loop.trigger.tz : null,
+        selector: Option.match(loop.selector, {
+          onNone: () => null,
+          onSome: ({ repos, tags }) =>
+            LoopSelectorView.make({
+              repos: Option.getOrNull(repos),
+              tags: Option.getOrNull(tags),
+            }),
         }),
+        repositories: config.repos
+          .filter((repository) => matchesLoop(instance.config, loop, repository))
+          .map(({ name }) => name),
+        approval: loop.approval,
+        maxCycles: loop.maxCycles,
+        permissions: loop.permissions,
+        priority: Option.getOrNull(loop.priority),
+        step: loop.step,
+        agent: loop.agent,
+        prompt: loop.body,
+        paused: paused.has(loop.name),
+        undeclaredLabels: undeclared(loop.name),
+      }),
     );
-    const agents = instance.agents.map(
-      (file) =>
-        new AgentFileView({
-          name: file.name,
-          file: InstancePath.make(`agents/${file.name}.md`),
-          harness: file.harness,
-          model: file.model,
-          effort: file.effort,
-          parentModel: Option.getOrNull(file.parentModel),
-          parentEffort: Option.getOrNull(file.parentEffort),
-          resolvedParentModel: Option.getOrNull(
-            resolveParentModel(file.agent, config.settings.parentModel),
-          ),
-          resolvedParentEffort: resolveParentEffort(file.agent, config.settings.parentEffort),
-          persona: file.persona,
-          loops: instance.loops.filter(({ agent }) => agent === file.name).map(({ name }) => name),
-        }),
+    const agents = instance.agents.map((file) =>
+      AgentFileView.make({
+        name: file.name,
+        file: InstancePath.make(`agents/${file.name}.md`),
+        harness: file.harness,
+        model: file.model,
+        effort: file.effort,
+        parentModel: Option.getOrNull(file.parentModel),
+        parentEffort: Option.getOrNull(file.parentEffort),
+        resolvedParentModel: Option.getOrNull(
+          resolveParentModel(file.agent, config.settings.parentModel),
+        ),
+        resolvedParentEffort: resolveParentEffort(file.agent, config.settings.parentEffort),
+        persona: file.persona,
+        loops: instance.loops.filter(({ agent }) => agent === file.name).map(({ name }) => name),
+      }),
     );
     const slotsBy = new Map(slots.map((slot) => [slot.worker, slot]));
     const preflightBy = new Map(preflights.map((preflight) => [preflight.worker, preflight]));
@@ -681,7 +678,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
     const workers = config.workers.map((worker) => {
       const slot = slotsBy.get(worker.name);
       const preflight = preflightBy.get(worker.name);
-      return new WorkerConfigurationView({
+      return WorkerConfigurationView.make({
         name: worker.name,
         preflightRunning: checking.has(worker.name),
         kind: worker.kind,
@@ -690,13 +687,13 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         slots:
           slot === undefined
             ? null
-            : new WorkerSlotsView({ capacity: slot.capacity, leased: slot.leased }),
+            : WorkerSlotsView.make({ capacity: slot.capacity, leased: slot.leased }),
         prerequisites:
           preflight === undefined
             ? null
             : Option.getOrNull(Option.map(preflight.prerequisites, checkView)),
-        harnesses: (preflight?.harnesses ?? []).map(
-          ({ harness, check }) => new HarnessPreflightView({ harness, check: checkView(check) }),
+        harnesses: (preflight?.harnesses ?? []).map(({ harness, check }) =>
+          HarnessPreflightView.make({ harness, check: checkView(check) }),
         ),
         containerLimits:
           preflight === undefined ? null : Option.getOrNull(preflight.containerLimits),
@@ -710,24 +707,24 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       });
     });
     const { settings, webhooks, tracing } = config;
-    const configuration = new ConfigurationView({
+    const configuration = ConfigurationView.make({
       bindings: config.bindings,
       projects: config.projects,
       labels: instance.config.labels,
       loops,
-      quarantinedLoops: instance.quarantinedLoops.map(
-        ({ file, error }) => new QuarantinedLoopView({ name: fileStem(file), file, error }),
+      quarantinedLoops: instance.quarantinedLoops.map(({ file, error }) =>
+        QuarantinedLoopView.make({ name: fileStem(file), file, error }),
       ),
       agents,
-      invalidAgents: instance.invalidAgents.map(
-        ({ file, error }) => new InvalidAgentView({ name: fileStem(file), file, error }),
+      invalidAgents: instance.invalidAgents.map(({ file, error }) =>
+        InvalidAgentView.make({ name: fileStem(file), file, error }),
       ),
       workers,
       removedWorkers: slots
         .filter(({ worker, leased }) => !declaredWorkers.has(worker) && leased > 0)
-        .map(({ worker, leased }) => new RemovedWorkerView({ name: worker, running: leased })),
+        .map(({ worker, leased }) => RemovedWorkerView.make({ name: worker, running: leased })),
       repositories,
-      settings: new SettingsView({
+      settings: SettingsView.make({
         pollInterval: settings.pollInterval,
         maxChildren: settings.maxChildren,
         maxAttemptMinutes: Option.getOrNull(settings.maxAttemptMinutes),
@@ -754,8 +751,8 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       repositories: repositories.length,
     });
     const grants = yield* RequestPermissions;
-    if (permits(grants, "admin", new InstanceScope())) return configuration;
-    return new ConfigurationView({
+    if (permits(grants, "admin", InstanceScope.make())) return configuration;
+    return ConfigurationView.make({
       ...configuration,
       bindings: [],
       workers: [],
@@ -764,18 +761,17 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       quarantinedLoops: [],
       labels: [],
       projects: configuration.projects.filter(({ id }) =>
-        permits(grants, "read", new ProjectScope({ project: id })),
+        permits(grants, "read", ProjectScope.make({ project: id })),
       ),
       repositories: configuration.repositories.filter(({ name }) =>
         visibleRepository(instance, grants, name),
       ),
       loops: configuration.loops.filter(({ name }) => visibleLoop(grants, name)),
-      agents: configuration.agents.map(
-        (agent) =>
-          new AgentFileView({
-            ...agent,
-            loops: agent.loops.filter((name) => visibleLoop(grants, name)),
-          }),
+      agents: configuration.agents.map((agent) =>
+        AgentFileView.make({
+          ...agent,
+          loops: agent.loops.filter((name) => visibleLoop(grants, name)),
+        }),
       ),
     });
   });

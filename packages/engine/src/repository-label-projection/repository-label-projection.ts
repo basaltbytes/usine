@@ -18,8 +18,8 @@ const storedLabels = (
   labels: (typeof RepositoryLabelProjectionRow.Type)["labels"],
 ): ReadonlyArray<RepositoryLabel> =>
   isLegacyLabelNames(labels)
-    ? labels.map(
-        (name) => new RepositoryLabel({ name, color: Option.none(), description: Option.none() }),
+    ? labels.map((name) =>
+        RepositoryLabel.make({ name, color: Option.none(), description: Option.none() }),
       )
     : labels;
 
@@ -29,7 +29,7 @@ const encodeLabels = Schema.encodeSync(RepositoryLabelProjection.fields.labels);
 const persistence =
   (operation: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EnginePersistenceError, R> =>
-    Effect.mapError(effect, (cause) => new EnginePersistenceError({ operation, cause }));
+    Effect.mapError(effect, (cause) => EnginePersistenceError.make({ operation, cause }));
 
 const makeReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
@@ -49,7 +49,7 @@ const makeReader = Effect.gen(function* () {
       return row === undefined
         ? Option.none<RepositoryLabelProjection>()
         : Option.some(
-            new RepositoryLabelProjection({
+            RepositoryLabelProjection.make({
               repository: row.repository,
               labels: storedLabels(row.labels),
             }),

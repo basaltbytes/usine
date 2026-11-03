@@ -119,7 +119,7 @@ export interface DurableSessionOptions {
 }
 
 const cancelError = (attemptId: AttemptId, cause: unknown) =>
-  new ExecutorOperationError({
+  ExecutorOperationError.make({
     operation: "cancel",
     message: `Can't cancel attempt ${attemptId}`,
     cause,
@@ -346,7 +346,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       });
       const running = yield* runtime
         .execute(
-          new AttemptRequest({
+          AttemptRequest.make({
             spec,
             worker: prepared.worker,
             cwd: prepared.worktree,
@@ -362,9 +362,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       const executed = yield* Fiber.await(running);
       const stop = yield* Ref.get(stopping);
       if (Option.isSome(stop) && stop.value._tag === "Runaway")
-        return yield* new RunawayFailure({ ceiling: stop.value.ceiling });
+        return yield* RunawayFailure.make({ ceiling: stop.value.ceiling });
       if (Option.isSome(stop) && stop.value._tag === "Drain")
-        return yield* new InfraFailure({
+        return yield* InfraFailure.make({
           message: stop.value.message,
           cause: new Error(stop.value.message),
         });
@@ -373,7 +373,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         Exit.isFailure(executed) &&
         Cause.hasInterruptsOnly(executed.cause)
       )
-        return yield* new AgentFailure({ message: "The attempt's parent task was canceled" });
+        return yield* AgentFailure.make({ message: "The attempt's parent task was canceled" });
       const report = yield* executed;
       // Reads the windows after GitHub lists the comments, because a later Attempt of the same Agent
       // can overlap this one and a cancel can close this window first (#429). A failed read fails
@@ -554,7 +554,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       (yield* Deferred.isDone(active.settled)) ||
       Option.isSome(yield* Ref.get(active.stopping))
     )
-      return yield* new AgentFailure({
+      return yield* AgentFailure.make({
         message: "This attempt has no live session in this orchestrator",
       });
     yield* runtime.intervene(attemptId, intervention).pipe(
@@ -609,7 +609,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
             yield* stopTask(attemptId, `its runaway guard cannot read the Attempt's ${part}`).pipe(
               Effect.ignore,
             );
-            return yield* new InfraFailure({
+            return yield* InfraFailure.make({
               message: `Can't read the ${part} of the reattached attempt, which the runaway guard needs to resume`,
               cause: error,
             });
@@ -871,17 +871,16 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   const storedRequest = Effect.fn("DurableSession.storedRequest")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
     const stored = yield* runtime.request(attemptId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ExecutorOperationError({
-            operation: "prepare",
-            message: "Can't read the durable request of the reattached attempt",
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        ExecutorOperationError.make({
+          operation: "prepare",
+          message: "Can't read the durable request of the reattached attempt",
+          cause,
+        }),
       ),
     );
     if (Option.isNone(stored))
-      return yield* new ExecutorOperationError({
+      return yield* ExecutorOperationError.make({
         operation: "prepare",
         message: "The reattached attempt has no durable request",
         cause: new Error(attemptId),

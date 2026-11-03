@@ -61,25 +61,25 @@ const TAIL_TRANSCRIPT_LIMIT = 500;
 
 export const failureView = (failure: AttemptFailure): FailureView =>
   Match.valueTags(failure, {
-    GitHubPushFailure: ({ message }) => new GitHubPushFailureView({ message }),
-    InfraFailure: ({ message }) => new InfraFailureView({ message }),
-    ProviderCapacityFailure: ({ message }) => new ProviderCapacityFailureView({ message }),
-    DefectFailure: ({ message }) => new DefectFailureView({ message }),
-    AgentFailure: ({ message }) => new AgentFailureView({ message }),
-    BlockedFailure: ({ message }) => new BlockedFailureView({ message }),
-    QuestionFailure: ({ question }) => new QuestionFailureView({ question }),
-    RunawayFailure: ({ ceiling }) => new RunawayFailureView({ ceiling }),
+    GitHubPushFailure: ({ message }) => GitHubPushFailureView.make({ message }),
+    InfraFailure: ({ message }) => InfraFailureView.make({ message }),
+    ProviderCapacityFailure: ({ message }) => ProviderCapacityFailureView.make({ message }),
+    DefectFailure: ({ message }) => DefectFailureView.make({ message }),
+    AgentFailure: ({ message }) => AgentFailureView.make({ message }),
+    BlockedFailure: ({ message }) => BlockedFailureView.make({ message }),
+    QuestionFailure: ({ question }) => QuestionFailureView.make({ question }),
+    RunawayFailure: ({ ceiling }) => RunawayFailureView.make({ ceiling }),
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
-      new ChildSessionBudgetFailureView({ attemptedChildren, maxChildren }),
+      ChildSessionBudgetFailureView.make({ attemptedChildren, maxChildren }),
   });
 
 const attemptOutcomeView = (outcome: AttemptOutcome) =>
   Match.valueTags(outcome, {
-    Succeeded: () => new SucceededAttemptView(),
-    AwaitingCi: () => new AwaitingCiAttemptView(),
-    HandedOff: () => new HandedOffAttemptView(),
-    Failed: ({ failure }) => new FailedAttemptView({ failure: failureView(failure) }),
-    Canceled: () => new CanceledAttemptView(),
+    Succeeded: () => SucceededAttemptView.make(),
+    AwaitingCi: () => AwaitingCiAttemptView.make(),
+    HandedOff: () => HandedOffAttemptView.make(),
+    Failed: ({ failure }) => FailedAttemptView.make({ failure: failureView(failure) }),
+    Canceled: () => CanceledAttemptView.make(),
   });
 
 /** How the operator accesses each Worker declared in `usine.yaml`, by name. */
@@ -88,13 +88,13 @@ export type WorkerAccesses = ReadonlyMap<WorkerName, WorkerAccess>;
 const workerAccess = (worker: ConfigWorker): WorkerAccess => {
   switch (worker.kind) {
     case "local":
-      return new LocalWorkerAccess();
+      return LocalWorkerAccess.make();
     case "ssh":
       // `usine.yaml` sets a destination for every SSH Worker without a provisioner.
       return Option.match(worker.provisioner, {
-        onSome: ({ provider }) => new ProvisionedWorkerAccess({ provider }),
+        onSome: ({ provider }) => ProvisionedWorkerAccess.make({ provider }),
         onNone: () =>
-          new SshWorkerAccess({
+          SshWorkerAccess.make({
             destination: Option.getOrElse(worker.destination, () =>
               SshDestination.make(worker.name),
             ),
@@ -104,12 +104,12 @@ const workerAccess = (worker: ConfigWorker): WorkerAccess => {
     case "exe.dev":
       // exe.dev names the VM after the Worker and serves it at `<vm>.exe.xyz` on the default port;
       // `usine.yaml` has no address for it.
-      return new SshWorkerAccess({
+      return SshWorkerAccess.make({
         destination: SshDestination.make(`${worker.name}.exe.xyz`),
         port: null,
       });
     case "cloudflare":
-      return new SandboxWorkerAccess();
+      return SandboxWorkerAccess.make();
   }
 };
 
@@ -120,8 +120,8 @@ export const workerAccesses = (workers: ReadonlyArray<ConfigWorker>): WorkerAcce
 const attemptSummaryView = (
   attempt: RunSummary["attempts"][number],
   workers: WorkerAccesses,
-): AttemptSummaryView => {
-  return new AttemptSummaryView({
+): AttemptSummaryView =>
+  AttemptSummaryView.make({
     id: attempt.id,
     number: attempt.number,
     worker: attempt.worker,
@@ -143,7 +143,6 @@ const attemptSummaryView = (
     }),
     outOfMemory: Option.getOrNull(attempt.outOfMemory),
   });
-};
 
 /**
  * Returns the time a Run's Attempts worked, with the open Attempt's start in `runningSince`. An
@@ -176,7 +175,7 @@ export const runDuration = (
       },
     );
   }
-  return new RunDurationView({ endedMillis, runningSince, unmeasured });
+  return RunDurationView.make({ endedMillis, runningSince, unmeasured });
 };
 
 /** Reads the newest transcript row time of each closed Attempt with no recorded end. */
@@ -192,7 +191,7 @@ export const readUnrecordedEnds = Effect.fn("Operator.readUnrecordedEnds")(funct
     (attempt) =>
       runs
         .transcript(
-          new TranscriptPageQuery({ attemptId: attempt.id, before: Option.none(), limit: 1 }),
+          TranscriptPageQuery.make({ attemptId: attempt.id, before: Option.none(), limit: 1 }),
         )
         .pipe(Effect.map((rows) => [attempt.id, rows.at(-1)?.receivedAt] as const)),
     { concurrency: 4 },
@@ -230,7 +229,7 @@ export const runSummaryView = (
   upgrade: UpgradeDrain | null = null,
 ): RunSummaryView => {
   const actions = RunState.operatorActions(snapshot.run.state);
-  return new RunSummaryView({
+  return RunSummaryView.make({
     id: snapshot.run.id,
     itemKey: snapshot.itemKey,
     loop: snapshot.run.loop,
@@ -252,7 +251,7 @@ export const runSummaryView = (
     approval: Option.match(snapshot.approval, {
       onNone: () => null,
       onSome: ({ approvedAt, source }) =>
-        new ApprovalView({
+        ApprovalView.make({
           approvedAt: DateTime.formatIso(approvedAt),
           source: Option.getOrNull(source),
         }),
@@ -274,19 +273,18 @@ export const runView = (
   waits: ReadonlyMap<RunId, MachineQuotaWait> = new Map(),
   upgrade: UpgradeDrain | null = null,
 ): RunView =>
-  new RunView({
+  RunView.make({
     ...runSummaryView(summarizeRun(snapshot), pausedLoops, workers, waits, upgrade),
     task: snapshot.task,
     resultMessage: Option.match(snapshot.step.result, {
       onNone: () => null,
       onSome: ({ message }) => message,
     }),
-    attempts: snapshot.attempts.map(
-      (attempt) =>
-        new AttemptView({
-          ...attemptSummaryView(attempt, workers),
-          task: attempt.task,
-        }),
+    attempts: snapshot.attempts.map((attempt) =>
+      AttemptView.make({
+        ...attemptSummaryView(attempt, workers),
+        task: attempt.task,
+      }),
     ),
   });
 
@@ -297,7 +295,7 @@ const transcriptPayload = (
     Started: (value) => value,
     SessionEvent: (value) => value,
     Final: (value) => value,
-    Failed: ({ failure }) => new FailedTranscriptView({ failure: failureView(failure) }),
+    Failed: ({ failure }) => FailedTranscriptView.make({ failure: failureView(failure) }),
     Interrupted: (value) => value,
     Steer: (value) => value,
     Interrupt: (value) => value,
@@ -320,13 +318,13 @@ export const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView => 
     payload: transcriptPayload(entry.envelope.payload),
   };
   if (entry.envelope._tag === "InboundEnvelope" && "target" in entry.envelope) {
-    return new TranscriptEventView({
+    return TranscriptEventView.make({
       ...fields,
       target: entry.envelope.target,
       operator: entry.envelope.operator,
     });
   }
-  return new TranscriptEventView(fields);
+  return TranscriptEventView.make(fields);
 };
 
 interface TranscriptRead {
@@ -349,7 +347,7 @@ const readPage = Effect.fn("Operator.readTranscriptPage")(function* (
     before: Option.getOrNull(before),
   });
   const entries = yield* runs.transcript(
-    new TranscriptPageQuery({
+    TranscriptPageQuery.make({
       attemptId,
       before,
       limit: COLD_TRANSCRIPT_LIMIT + 1,
@@ -368,7 +366,7 @@ const readPage = Effect.fn("Operator.readTranscriptPage")(function* (
     events: sortedEvents(visible),
     earlier:
       hasEarlier && first !== undefined
-        ? [new TranscriptPageCursor({ attemptId, before: first.sequence })]
+        ? [TranscriptPageCursor.make({ attemptId, before: first.sequence })]
         : [],
   };
 });
@@ -398,7 +396,7 @@ export const readTranscript: (
         snapshot.attempts,
         (attempt) =>
           runs.transcript(
-            new TranscriptTailQuery({
+            TranscriptTailQuery.make({
               attemptId: attempt.id,
               after,
               limit: TAIL_TRANSCRIPT_LIMIT,
@@ -413,7 +411,7 @@ export const readTranscript: (
       ),
     EarlierTranscriptRequest: ({ attemptId, before }) => {
       if (!snapshot.attempts.some((attempt) => attempt.id === attemptId)) {
-        return new TranscriptAttemptNotFoundError({ runId: snapshot.run.id, attemptId });
+        return TranscriptAttemptNotFoundError.make({ runId: snapshot.run.id, attemptId });
       }
       return readPage(runs, attemptId, Option.some(before));
     },

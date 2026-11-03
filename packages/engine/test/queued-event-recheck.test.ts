@@ -111,7 +111,7 @@ describe("queued Event trigger re-check", () => {
             const engine = yield* RunEngine;
             const projections = yield* ItemProjectionReader;
             yield* (yield* ItemProjectionWriter).upsert(
-              new ItemProjection({
+              ItemProjection.make({
                 itemKey: ItemKey.make("item-1"),
                 repository,
                 source: ItemProjectionSource.make("issue"),

@@ -31,31 +31,31 @@ import {
 
 describe("agent runtime contract", () => {
   it("round-trips one explicitly first-level child request", () => {
-    const parent = new ParentSession({
+    const parent = ParentSession.make({
       id: AgentSessionId.make("parent-1"),
       agent: AgentName.make("developer"),
-      brain: new BrainSpec({
+      brain: BrainSpec.make({
         harness: "pi",
         model: ModelId.make("anthropic/claude-opus-4-6"),
         effort: "high",
       }),
     });
-    const request = new ChildRequest({
+    const request = ChildRequest.make({
       worker: WorkerName.make("worker-1"),
       machine: Option.none(),
       environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
-      session: new ChildSession({
+      session: ChildSession.make({
         id: AgentSessionId.make("child-1"),
         parentId: parent.id,
         agent: parent.agent,
-        brain: new BrainSpec({
+        brain: BrainSpec.make({
           harness: "claude",
           model: ModelId.make("claude-sonnet-4-6"),
           effort: "high",
         }),
       }),
       cwd: WorkingDirectory.make("/workspace/repo"),
-      host: new RemoteShell({
+      host: RemoteShell.make({
         ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
         sshEnvironment: { HOME: "/home/orchestrator" },
         destination: "worker.exe.xyz",
@@ -64,7 +64,7 @@ describe("agent runtime contract", () => {
     });
 
     assert.deepStrictEqual(
-      Schema.decodeUnknownSync(ChildRequest)(Schema.encodeSync(ChildRequest)(request)),
+      Schema.decodeSync(ChildRequest)(Schema.encodeSync(ChildRequest)(request)),
       request,
     );
   });
@@ -72,7 +72,7 @@ describe("agent runtime contract", () => {
   it("retries SDK trouble as infrastructure and parks everything else on the operator", () => {
     const sessionId = Option.some(AgentSessionId.make("child-1"));
     const infra = toAttemptFailure(
-      new SessionOperationError({
+      SessionOperationError.make({
         operation: "stream",
         sessionId,
         message: "Claude output stream failed",
@@ -82,31 +82,31 @@ describe("agent runtime contract", () => {
     assert.strictEqual(infra._tag, "InfraFailure");
 
     const terminal = [
-      new UnknownModelError({
+      UnknownModelError.make({
         harness: "claude",
         model: ModelId.make("claude-never-existed"),
         message: 'Claude has no model "claude-never-existed"',
       }),
-      new PoolUnavailableError({
+      PoolUnavailableError.make({
         harness: "pi",
         model: ModelId.make("github-copilot/gpt-5.6-sol"),
         pool: "apiKeys",
         message: "Pi model github-copilot/gpt-5.6-sol must use an API key",
       }),
-      new UnsupportedEffortError({
+      UnsupportedEffortError.make({
         harness: "codex",
         model: ModelId.make("gpt-5.6-terra"),
         effort: "max",
         message: 'Codex model "gpt-5.6-terra" doesn\'t support effort max',
       }),
-      new AgentResultError({ sessionId, message: "ran out of turns" }),
+      AgentResultError.make({ sessionId, message: "ran out of turns" }),
     ];
     for (const error of terminal) {
       assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
     }
 
     const blocked = toAttemptFailure(
-      new AgentBlockedError({ sessionId, message: "The baseline gate fails on main." }),
+      AgentBlockedError.make({ sessionId, message: "The baseline gate fails on main." }),
     );
     assert.strictEqual(blocked._tag, "BlockedFailure");
     if (blocked._tag === "BlockedFailure") {
@@ -114,7 +114,7 @@ describe("agent runtime contract", () => {
     }
 
     const asked = toAttemptFailure(
-      new AgentQuestionError({ sessionId, message: "Which transport should egress use?" }),
+      AgentQuestionError.make({ sessionId, message: "Which transport should egress use?" }),
     );
     assert.strictEqual(asked._tag, "QuestionFailure");
     if (asked._tag === "QuestionFailure") {
@@ -122,7 +122,7 @@ describe("agent runtime contract", () => {
     }
 
     const budget = toAttemptFailure(
-      new ChildSessionBudgetExceededError({
+      ChildSessionBudgetExceededError.make({
         maxChildren: ChildSessionBudget.make(4),
         attemptedChildren: ChildSessionCount.make(5),
         message: "Attempt tried to spawn child 5 after reaching its 4-child budget",

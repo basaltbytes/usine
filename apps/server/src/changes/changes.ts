@@ -57,7 +57,7 @@ const makeChanges = Effect.gen(function* () {
             reset: gap,
             targets: changes.length,
           });
-          return frame(new ChangeNotice({ revision: notice.revision, reset: gap, changes }));
+          return frame(ChangeNotice.make({ revision: notice.revision, reset: gap, changes }));
         });
         const initial = reset
           ? Effect.gen(function* () {
@@ -68,7 +68,7 @@ const makeChanges = Effect.gen(function* () {
                 resume: supplied ?? "initial",
               });
               return (
-                frame(new ChangeNotice({ revision, reset: true, changes: [] })) + ": heartbeat\n\n"
+                frame(ChangeNotice.make({ revision, reset: true, changes: [] })) + ": heartbeat\n\n"
               );
             })
           : Effect.forEach(

@@ -39,7 +39,7 @@ export class ConfigCommandError extends Schema.TaggedError<ConfigCommandError>(
 )("ConfigCommandError", { message: Schema.String }) {}
 
 const usage = () =>
-  new ConfigCommandError({
+  ConfigCommandError.make({
     message:
       "Use usine config export <folder>, import <folder> [--message <text>], edit <kind> <name>, or log [<kind> <name>]. Kinds: settings, worker, repository, project, label, loop, agent, binding. Settings use the name instance.",
   });
@@ -53,7 +53,7 @@ export const parseConfigCommand = (
       case "export":
         if (args.length !== 2 || first === undefined || first === "" || first.startsWith("-"))
           return yield* usage();
-        return new ConfigExportCommand({ folder: first });
+        return ConfigExportCommand.make({ folder: first });
       case "import":
         if (
           first === undefined ||
@@ -62,19 +62,19 @@ export const parseConfigCommand = (
           !(args.length === 2 || (args.length === 4 && second === "--message"))
         )
           return yield* usage();
-        return new ConfigImportCommand({ folder: first, message: Option.fromUndefinedOr(third) });
+        return ConfigImportCommand.make({ folder: first, message: Option.fromUndefinedOr(third) });
       case "log":
       case "edit": {
         if (command === "log" && args.length === 1)
-          return new ConfigLogCommand({ entity: Option.none() });
+          return ConfigLogCommand.make({ entity: Option.none() });
         if (args.length !== 3) return yield* usage();
         const entity = yield* Schema.decodeUnknownEffect(ConfigurationEntityKey)({
           kind: first,
           identifier: second,
         }).pipe(Effect.mapError(usage));
         return command === "edit"
-          ? new ConfigEditCommand({ entity })
-          : new ConfigLogCommand({ entity: Option.some(entity) });
+          ? ConfigEditCommand.make({ entity })
+          : ConfigLogCommand.make({ entity: Option.some(entity) });
       }
       default:
         return yield* usage();

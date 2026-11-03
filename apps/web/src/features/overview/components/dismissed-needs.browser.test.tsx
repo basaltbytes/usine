@@ -44,7 +44,7 @@ const Attention = () => {
 it.each([
   {
     kind: "approval",
-    need: new ApprovalNeed({
+    need: ApprovalNeed.make({
       id: "approval:run",
       runId: RunId.make("run"),
       repository: RepositoryName.make("test/project"),
@@ -54,7 +54,7 @@ it.each([
   },
   {
     kind: "pool warning",
-    need: new PoolLimitNeed({
+    need: PoolLimitNeed.make({
       id: "pool-limit:chatgptPlan:primary",
       pool: "chatgptPlan",
       login: Option.some(PoolLogin.make("operator@example.com")),
@@ -64,8 +64,8 @@ it.each([
     }),
   },
 ])("dismisses a $kind across refreshes and restores it with Undo", async ({ need }) => {
-  const before = new ReadyOverview({ projects: [], loops: [], needsYou: [need] });
-  const after = new ReadyOverview({
+  const before = ReadyOverview.make({ projects: [], loops: [], needsYou: [need] });
+  const after = ReadyOverview.make({
     ...before,
     projects: projectAttention(before.projects, []),
     needsYou: [],

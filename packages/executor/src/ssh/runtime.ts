@@ -78,7 +78,7 @@ const PodmanInfo = Schema.Struct({
 }).pipe(Schema.fromJsonString);
 
 const gap = (worker: WorkerName, message: string, cause: unknown) =>
-  new WorkerCapabilityError({ worker, capability: "container", message, cause });
+  WorkerCapabilityError.make({ worker, capability: "container", message, cause });
 
 export const detectRuntime = Effect.fn("SshExecutor.detectContainerRuntime")(function* (
   commands: RemoteCommands,
@@ -124,7 +124,7 @@ export const detectRuntime = Effect.fn("SshExecutor.detectContainerRuntime")(fun
     ),
   );
   if (runtime === "podman") {
-    const info = yield* Schema.decodeUnknownEffect(PodmanInfo)(details.join("\n")).pipe(
+    const info = yield* Schema.decodeEffect(PodmanInfo)(details.join("\n")).pipe(
       Effect.mapError((cause) =>
         gap(
           fields.worker,

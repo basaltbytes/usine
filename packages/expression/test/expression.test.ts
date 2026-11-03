@@ -13,54 +13,54 @@ import {
 const typeReference = Schema.decodeUnknownSync(TypeReference);
 const source = Schema.decodeUnknownSync(Source);
 
-const issueEnvironment = new Environment({
+const issueEnvironment = Environment.make({
   types: [
-    new ObjectType({
+    ObjectType.make({
       name: "Label",
-      fields: [new ObjectField({ name: "name", type: typeReference("string") })],
+      fields: [ObjectField.make({ name: "name", type: typeReference("string") })],
     }),
-    new ObjectType({
+    ObjectType.make({
       name: "Labels",
       fields: [
-        new ObjectField({ name: "totalCount", type: typeReference("int") }),
-        new ObjectField({ name: "nodes", type: typeReference("list<Label>") }),
+        ObjectField.make({ name: "totalCount", type: typeReference("int") }),
+        ObjectField.make({ name: "nodes", type: typeReference("list<Label>") }),
       ],
     }),
-    new ObjectType({
+    ObjectType.make({
       name: "Issue",
       fields: [
-        new ObjectField({ name: "state", type: typeReference("string") }),
-        new ObjectField({ name: "labels", type: typeReference("Labels") }),
+        ObjectField.make({ name: "state", type: typeReference("string") }),
+        ObjectField.make({ name: "labels", type: typeReference("Labels") }),
       ],
     }),
   ],
-  variables: [new Variable({ name: "item", type: typeReference("Issue") })],
+  variables: [Variable.make({ name: "item", type: typeReference("Issue") })],
 });
 
-const nullableEnvironment = new Environment({
+const nullableEnvironment = Environment.make({
   types: [
-    new ObjectType({
+    ObjectType.make({
       name: "Milestone",
-      fields: [new ObjectField({ name: "title", type: typeReference("string") })],
+      fields: [ObjectField.make({ name: "title", type: typeReference("string") })],
     }),
-    new ObjectType({
+    ObjectType.make({
       name: "Reviewer",
-      fields: [new ObjectField({ name: "login", type: typeReference("string"), nullable: true })],
+      fields: [ObjectField.make({ name: "login", type: typeReference("string"), nullable: true })],
     }),
-    new ObjectType({
+    ObjectType.make({
       name: "PullRequest",
       fields: [
-        new ObjectField({ name: "number", type: typeReference("int") }),
-        new ObjectField({ name: "reviewDecision", type: typeReference("string"), nullable: true }),
-        new ObjectField({ name: "milestone", type: typeReference("Milestone"), nullable: true }),
-        new ObjectField({ name: "reviewers", type: typeReference("list<Reviewer>") }),
-        new ObjectField({ name: "annotations", type: typeReference("map<string,string>") }),
-        new ObjectField({ name: "reviewersByRole", type: typeReference("map<string,Reviewer>") }),
-        new ObjectField({ name: "counts", type: typeReference("map<string,int>") }),
+        ObjectField.make({ name: "number", type: typeReference("int") }),
+        ObjectField.make({ name: "reviewDecision", type: typeReference("string"), nullable: true }),
+        ObjectField.make({ name: "milestone", type: typeReference("Milestone"), nullable: true }),
+        ObjectField.make({ name: "reviewers", type: typeReference("list<Reviewer>") }),
+        ObjectField.make({ name: "annotations", type: typeReference("map<string,string>") }),
+        ObjectField.make({ name: "reviewersByRole", type: typeReference("map<string,Reviewer>") }),
+        ObjectField.make({ name: "counts", type: typeReference("map<string,int>") }),
       ],
     }),
   ],
-  variables: [new Variable({ name: "item", type: typeReference("PullRequest") })],
+  variables: [Variable.make({ name: "item", type: typeReference("PullRequest") })],
 });
 
 const withNulls = {

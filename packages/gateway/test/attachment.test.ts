@@ -20,11 +20,11 @@ import {
 const START = DateTime.makeUnsafe("2026-10-13T10:00:00Z");
 
 const attachment = (id: AttachmentId, token: string, minutes: number) =>
-  new Attachment({
+  Attachment.make({
     id,
     worker: WORKER,
     repository: REPOSITORY,
-    credential: new InstallationCredential({ token: secret(token) }),
+    credential: InstallationCredential.make({ token: secret(token) }),
     expiresAt: DateTime.add(START, { minutes }),
   });
 
@@ -83,7 +83,7 @@ describe("Attachments", () => {
       Effect.gen(function* () {
         const attachments = yield* Attachments;
         yield* attachments.attach(
-          new Attachment({
+          Attachment.make({
             ...attachment(ATTACHMENT, "ghs_token", 60),
             expiresAt: DateTime.add(START, { minutes: 60, seconds: 30 }),
           }),
@@ -121,14 +121,14 @@ describe("Attachments", () => {
         const attachments = yield* Attachments;
         yield* attachments.attach(attachment(ATTACHMENT, "ghs_token", 60));
         yield* attachments.attach(
-          new Attachment({
+          Attachment.make({
             ...attachment(ATTACHMENT, "ghs_renewed", 60),
             repository: RepositoryName.make("ACME/Demo"),
           }),
         );
         const error = yield* Effect.flip(
           attachments.attach(
-            new Attachment({
+            Attachment.make({
               ...attachment(ATTACHMENT, "ghs_moved", 60),
               repository: OTHER_REPOSITORY,
             }),

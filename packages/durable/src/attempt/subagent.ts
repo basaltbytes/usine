@@ -143,7 +143,7 @@ export const subagentTool = (services: ExtensionServices) => {
         parentSessionId: parentId,
         taskExcerpt: excerpt,
       });
-      return yield* new ChildSessionBudgetExceededError({
+      return yield* ChildSessionBudgetExceededError.make({
         attemptedChildren,
         maxChildren: ChildSessionBudget.make(spec.maxChildren),
         message: `Attempt tried to spawn child ${attemptedChildren} after reaching its ${spec.maxChildren}-child budget`,
@@ -169,14 +169,14 @@ export const subagentTool = (services: ExtensionServices) => {
       ),
     );
     // Read when each child starts, so a preflight that ran after the Attempt launched applies.
-    const session = new ChildSession({
+    const session = ChildSession.make({
       id: sessionId,
       parentId,
       agent: spec.agent.name,
       brain: spec.agent.brain,
       gatewayCredential: yield* request.gatewayCredential,
     });
-    const childRequest = new ChildRequest({
+    const childRequest = ChildRequest.make({
       session,
       cwd: WorkingDirectory.make(request.cwd),
       environment: request.environment,
@@ -212,14 +212,13 @@ export const subagentTool = (services: ExtensionServices) => {
                 record.childBlocker = { sessionId, message: error.message, kind: "infra" };
             }, context),
           ).pipe(
-            Effect.mapError(
-              (cause) =>
-                new SessionOperationError({
-                  operation: "stream",
-                  sessionId: Option.some(sessionId),
-                  message: cause.message,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              SessionOperationError.make({
+                operation: "stream",
+                sessionId: Option.some(sessionId),
+                message: cause.message,
+                cause,
+              }),
             ),
             Effect.andThen(
               Effect.logWarning("Child infrastructure failure requires an automatic retry", {
@@ -252,7 +251,7 @@ export const subagentTool = (services: ExtensionServices) => {
             sessionId: session.id,
           }).pipe(
             Effect.andThen(
-              services.hubs.event(hub, new SessionFinished({ session: child.session })),
+              services.hubs.event(hub, SessionFinished.make({ session: child.session })),
             ),
           )
         : Effect.void,
@@ -263,7 +262,7 @@ export const subagentTool = (services: ExtensionServices) => {
     const forward = (event: AgentSessionEvent) => {
       const recorded =
         event._tag === "SessionStarted"
-          ? new SessionStarted({ ...event, prompt: Option.some(childRequest.prompt) })
+          ? SessionStarted.make({ ...event, prompt: Option.some(childRequest.prompt) })
           : event;
       return services.hubs.event(hub, recorded).pipe(
         Effect.andThen(
@@ -342,7 +341,7 @@ export const subagentTool = (services: ExtensionServices) => {
               sessionId: session.id,
             });
           }
-          yield* services.hubs.event(hub, new SessionFinished({ session: child.session }));
+          yield* services.hubs.event(hub, SessionFinished.make({ session: child.session }));
           return reportText(report);
         }),
       onSuccess: (result) =>

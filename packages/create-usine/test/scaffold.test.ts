@@ -135,7 +135,7 @@ it.each(["npm", "pnpm"])(
     onTestFinished(() => new Promise<void>((resolve) => registry.close(() => resolve())));
     registry.listen(0, "127.0.0.1");
     await once(registry, "listening");
-    const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+    const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
       registry.address(),
     );
     await writeFile(
@@ -207,7 +207,7 @@ const freePort = () =>
     const listener = createServer();
     listener.on("error", reject);
     listener.listen(0, "127.0.0.1", () => {
-      const address = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+      const address = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
         listener.address(),
       );
       listener.close(() => resolve(address.port));

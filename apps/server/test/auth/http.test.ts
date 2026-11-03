@@ -336,7 +336,7 @@ it("keeps valid sign-ins available after invalid challenges exhaust their limits
 it("persists a GitHub login rename through web and device sign-in", async () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const renamed = new Member({ ...alice, login: OperatorLogin.make("alice-renamed") });
+      const renamed = Member.make({ ...alice, login: OperatorLogin.make("alice-renamed") });
       for (const flow of ["web", "device"] as const) {
         const { authentication: auth, store } = yield* authFixture([alice], renamed);
         const signIn =
@@ -357,7 +357,7 @@ it("persists a GitHub login rename through web and device sign-in", async () =>
         const access = yield* auth.authenticate(Redacted.value(session.secret));
         assert.equal(Option.getOrNull(access.member)?.login, renamed.login);
         assert.deepEqual(yield* store.members, [renamed]);
-        yield* store.add(new Member({ ...bob, login: alice.login }), false);
+        yield* store.add(Member.make({ ...bob, login: alice.login }), false);
       }
     }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
   ));

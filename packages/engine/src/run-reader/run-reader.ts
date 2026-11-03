@@ -40,9 +40,7 @@ const makeRunReader = Effect.gen(function* () {
       .innerJoin(runs, eq(runs.eventId, storedEvents.eventId))
       .where(eq(storedEvents.dedupKey, dedupKey))
       .execute();
-    const decoded = yield* Schema.decodeUnknownEffect(
-      Schema.Array(Schema.Struct({ runId: RunId })),
-    )(rows);
+    const decoded = yield* Schema.decodeEffect(Schema.Array(Schema.Struct({ runId: RunId })))(rows);
     const run = Option.fromNullishOr(decoded[0]);
     yield* Effect.logDebug("Read the run admitted for an event", { dedupKey, run });
     return Option.map(run, ({ runId }) => runId);
@@ -55,9 +53,9 @@ const makeRunReader = Effect.gen(function* () {
         Effect.gen(function* () {
           const snapshot = yield* queries.snapshot(runId);
           const transcripts = yield* Effect.forEach(snapshot.attempts, ({ id }) =>
-            queries.transcript(new TranscriptAllQuery({ attemptId: id })),
+            queries.transcript(TranscriptAllQuery.make({ attemptId: id })),
           );
-          return new RunEvidence({
+          return RunEvidence.make({
             snapshot,
             transcript: transcripts.flat().sort((left, right) => left.sequence - right.sequence),
           });

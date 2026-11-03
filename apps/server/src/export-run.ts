@@ -39,9 +39,8 @@ const writeRunEvidence = Effect.fn("RunEvidence.write")(function* (
     exportedAt: yield* DateTime.now,
     ...evidence,
   }).pipe(
-    Effect.mapError(
-      (cause) =>
-        new RunExportError({ runId, operation: "encode", path: output, reason: cause._tag, cause }),
+    Effect.mapError((cause) =>
+      RunExportError.make({ runId, operation: "encode", path: output, reason: cause._tag, cause }),
     ),
   );
   const fileSystem = yield* FileSystem.FileSystem;
@@ -58,15 +57,14 @@ const writeRunEvidence = Effect.fn("RunEvidence.write")(function* (
       yield* fileSystem.link(staged, output);
     }),
   ).pipe(
-    Effect.mapError(
-      (cause) =>
-        new RunExportError({
-          runId,
-          operation: "write",
-          path: output,
-          reason: cause.reason._tag,
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      RunExportError.make({
+        runId,
+        operation: "write",
+        path: output,
+        reason: cause.reason._tag,
+        cause,
+      }),
     ),
   );
   yield* Effect.logInfo("Run evidence exported", {
@@ -93,7 +91,7 @@ export const exportRun = Effect.fn("Cli.exportRun")(
       Effect.mapError((cause) =>
         cause._tag === "RunNotFoundError"
           ? cause
-          : new RunExportError({
+          : RunExportError.make({
               runId,
               operation: "read",
               path: databasePath,

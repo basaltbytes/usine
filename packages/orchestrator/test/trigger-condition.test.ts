@@ -25,12 +25,12 @@ import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
 import { unmovedBaseRefHead } from "./support/polling.ts";
 
-const config = Schema.decodeUnknownSync(UsineConfig)({
+const config = Schema.decodeSync(UsineConfig)({
   version: 1,
   repos: [{ name: "basaltbytes/usine" }],
 });
 
-const agent = new AgentFile({
+const agent = AgentFile.make({
   name: AgentName.make("developer"),
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
@@ -40,9 +40,9 @@ const agent = new AgentFile({
   persona: AgentPersona.make("Implement the issue."),
 });
 
-const issueLoop = new LoopFile({
+const issueLoop = LoopFile.make({
   name: LoopName.make("start-dev"),
-  trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
+  trigger: IssueTrigger.make({ on: "issue", if: Source.make('item.state == "OPEN"') }),
   selector: Option.none(),
   approval: "none",
   step: StepName.make("run"),
@@ -50,18 +50,18 @@ const issueLoop = new LoopFile({
   body: PromptTemplate.make("Implement issue {{ item.number }}."),
 });
 
-const scheduleLoop = new LoopFile({
+const scheduleLoop = LoopFile.make({
   ...issueLoop,
   name: LoopName.make("nightly"),
-  trigger: new ScheduleTrigger({
+  trigger: ScheduleTrigger.make({
     on: "schedule",
     if: Source.make("true"),
-    cron: Schema.decodeUnknownSync(Cron)("0 3 * * *"),
-    tz: Schema.decodeUnknownSync(TimeZone)("UTC"),
+    cron: Schema.decodeSync(Cron)("0 3 * * *"),
+    tz: Schema.decodeSync(TimeZone)("UTC"),
   }),
 });
 
-const instance = new LoadedInstance({
+const instance = LoadedInstance.make({
   config,
   agents: [agent],
   invalidAgents: [],
@@ -71,8 +71,8 @@ const instance = new LoadedInstance({
 });
 
 const submissionFor = (loop: LoopName, itemKey: string) =>
-  new Submission({
-    event: new Event({
+  Submission.make({
+    event: Event.make({
       id: EventId.make(`event-${loop}`),
       dedupKey: DedupKey.make(`dedup-${loop}`),
       payload: {},
@@ -106,7 +106,7 @@ const failingGitHub: GitHubPolling["Service"] = {
   labels: () => Effect.die("unused"),
   snapshot: () =>
     Effect.fail(
-      new GitHubApiError({
+      GitHubApiError.make({
         operation: "fetch-issue-snapshot",
         status: Option.some(502),
         message: "GitHub returned HTTP status 502",
@@ -138,7 +138,7 @@ describe("TriggerCondition", () => {
           ...failingGitHub,
           snapshot: (repository, item) =>
             Effect.fail(
-              new GitHubItemNotFoundError({
+              GitHubItemNotFoundError.make({
                 operation: "fetch-issue-snapshot",
                 item: item.number,
                 message: `GitHub has no issue ${item.number} in ${repository}`,
@@ -205,7 +205,7 @@ describe("TriggerCondition", () => {
           assert.strictEqual(yield* condition.recheck(submission), "matches");
           yield* SubscriptionRef.set(
             current,
-            new LoadedInstance({ ...instance, loops: [issueLoop] }),
+            LoadedInstance.make({ ...instance, loops: [issueLoop] }),
           );
           assert.strictEqual(yield* condition.recheck(submission), "no-longer-matches");
         }).pipe(Effect.provide(layerWith(failingGitHub, reloadable)));

@@ -26,8 +26,8 @@ import { authFixture } from "./auth/fixture.ts";
 const secret = "webhook-test-secret";
 const repository = RepositoryName.make("test/repo");
 const instance = (mode: "off" | "deliveries" | "endpoint") =>
-  new LoadedInstance({
-    config: Schema.decodeUnknownSync(UsineConfig)({
+  LoadedInstance.make({
+    config: Schema.decodeSync(UsineConfig)({
       version: 1,
       repos: [{ name: repository }],
       webhooks:
@@ -143,19 +143,16 @@ it("verifies the raw body outside operator authentication and hints only current
         assert.equal((yield* send(web.handler, payload, signature(payload), event)).status, 204);
       }
       assert.equal(hints.length, 2);
-      yield* Ref.update(
-        current,
-        (loaded) =>
-          new LoadedInstance({
-            ...loaded,
-            config: new UsineConfig({ ...loaded.config, repos: [] }),
-          }),
+      yield* Ref.update(current, (loaded) =>
+        LoadedInstance.make({
+          ...loaded,
+          config: UsineConfig.make({ ...loaded.config, repos: [] }),
+        }),
       );
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.equal(hints.length, 2);
     }).pipe(
-      Effect.provide(WebhookHealth.layer),
-      Effect.provide(TestClock.layer()),
+      Effect.provide([WebhookHealth.layer, TestClock.layer()]),
       Effect.provideService(ConfigProvider.ConfigProvider, configured),
       Effect.scoped,
     ),
@@ -179,7 +176,7 @@ it("requires a nonempty secret only in endpoint mode and keeps the endpoint avai
       const app = {
         configureWebhook: () =>
           Effect.fail(
-            new GitHubApiError({
+            GitHubApiError.make({
               operation: "configure-webhook",
               status: Option.some(403),
               message: "Forbidden",
@@ -208,8 +205,7 @@ it("requires a nonempty secret only in endpoint mode and keeps the endpoint avai
       yield* Effect.addFinalizer(() => Effect.promise(() => web.dispose()));
       assert.equal((yield* send(web.handler, "{}", signature("{}"), "ping")).status, 204);
     }).pipe(
-      Effect.provide(WebhookHealth.layer),
-      Effect.provide(TestClock.layer()),
+      Effect.provide([WebhookHealth.layer, TestClock.layer()]),
       Effect.provideService(ConfigProvider.ConfigProvider, configured),
       Effect.scoped,
     ),
@@ -248,8 +244,7 @@ it("bounds startup hook configuration and request bodies on the Node HTTP server
         }
       }).pipe(Effect.provide(server));
     }).pipe(
-      Effect.provide(WebhookHealth.layer),
-      Effect.provide(TestClock.layer()),
+      Effect.provide([WebhookHealth.layer, TestClock.layer()]),
       Effect.provideService(ConfigProvider.ConfigProvider, configured),
       Effect.scoped,
     ),
@@ -288,19 +283,17 @@ it("switches a running endpoint between modes and public URLs without rebuilding
       assert.isFalse(yield* health.silent);
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.deepEqual(hints, [repository]);
-      yield* SubscriptionRef.update(
-        current,
-        (loaded) =>
-          new LoadedInstance({
-            ...loaded,
-            config: new UsineConfig({
-              ...loaded.config,
-              webhooks: {
-                mode: "endpoint",
-                publicUrl: new URL("https://new.example/webhooks/github"),
-              },
-            }),
+      yield* SubscriptionRef.update(current, (loaded) =>
+        LoadedInstance.make({
+          ...loaded,
+          config: UsineConfig.make({
+            ...loaded.config,
+            webhooks: {
+              mode: "endpoint",
+              publicUrl: new URL("https://new.example/webhooks/github"),
+            },
           }),
+        }),
       );
       yield* TestClock.adjust("1 millis");
       assert.deepEqual(urls, [
@@ -314,8 +307,7 @@ it("switches a running endpoint between modes and public URLs without rebuilding
       }
       assert.deepEqual(hints, [repository]);
     }).pipe(
-      Effect.provide(WebhookHealth.layer),
-      Effect.provide(TestClock.layer()),
+      Effect.provide([WebhookHealth.layer, TestClock.layer()]),
       Effect.provideService(ConfigProvider.ConfigProvider, configured),
       Effect.scoped,
     ),

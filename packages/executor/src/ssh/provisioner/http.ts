@@ -130,7 +130,7 @@ export const providerApiFor = (
       (
         response: ProviderResponse,
       ): Effect.Effect<S["Type"], ProviderUnanswered, S["DecodingServices"]> =>
-        Schema.decodeUnknownEffect(schema)(response.body).pipe(
+        Schema.decodeEffect(schema)(response.body).pipe(
           Effect.mapError(
             () =>
               new ProviderUnanswered({

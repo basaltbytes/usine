@@ -134,7 +134,7 @@ export const codexThreadTokens = (total: CodexTokenUsage["tokenUsage"]["total"])
 
 /** Returns a Codex thread's tokens per billing rate. */
 export const codexTokenBreakdown = (total: CodexTokenUsage["tokenUsage"]["total"]) =>
-  new TokenBreakdown({
+  TokenBreakdown.make({
     input: Math.max(0, total.inputTokens - total.cachedInputTokens - total.cacheWriteInputTokens),
     cachedInput: total.cachedInputTokens,
     cacheWrite: total.cacheWriteInputTokens,

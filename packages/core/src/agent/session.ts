@@ -94,7 +94,7 @@ export class SessionStarted extends Schema.TaggedClass<SessionStarted>("Agent/Se
     ),
     /** `None` for older transcripts and for harnesses without a saved conversation. */
     harnessSession: Schema.OptionFromOptionalKey(HarnessSession).pipe(
-      Schema.withConstructorDefault(Effect.succeed(Option.none())),
+      Schema.withConstructorDefault(Effect.succeedNone),
     ),
   },
 ) {}
@@ -244,9 +244,9 @@ export const sessionPool = (session: AgentSession): BillingPool =>
 /** One provider-reported allowance window, including usage outside usine. */
 export class RateLimitWindow extends Schema.Class<RateLimitWindow>("Agent/RateLimitWindow")({
   /** The percentage of the allowance used, including usage outside this Attempt. */
-  usedPercent: Schema.Number,
+  usedPercent: Schema.Finite,
   /** The length of this allowance window in minutes, or `None` if unreported. */
-  windowDurationMinutes: Schema.OptionFromNullOr(Schema.Number),
+  windowDurationMinutes: Schema.OptionFromNullOr(Schema.Finite),
   /** The provider-reported reset time, or `None` if unreported. */
   resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {}

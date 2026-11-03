@@ -54,7 +54,7 @@ const unstoppableRuntime = (
           Effect.gen(function* () {
             yield* Ref.update(cancels, (count) => count + 1);
             if (yield* Ref.get(unstoppable))
-              return yield* new InfraFailure({
+              return yield* InfraFailure.make({
                 message: "Could not cancel the parent task",
                 cause: "storage unavailable",
               });
@@ -116,7 +116,7 @@ describe("local worker checkout after an unconfirmed stop", () => {
             yield* Effect.sync(() =>
               writeFileSync(join(context.request.cwd, "progress.md"), "half done\n"),
             );
-            return yield* new InfraFailure({ message: "Lost the parent task", cause: "offline" });
+            return yield* InfraFailure.make({ message: "Lost the parent task", cause: "offline" });
           });
         yield* withLocalEngine(
           { attemptRuntime: unstoppableRuntime(parent, unstoppable, cancels) },
@@ -195,7 +195,7 @@ describe("local worker checkout after an unconfirmed stop", () => {
                 }),
               )
               .pipe(Effect.orDie);
-            return yield* new InfraFailure({
+            return yield* InfraFailure.make({
               message: "Lost parent after posting",
               cause: "offline",
             });
@@ -225,9 +225,9 @@ describe("local worker checkout after an unconfirmed stop", () => {
           const engine = yield* RunEngine;
           const selected = submission(4);
           const accepted = yield* engine.submit(
-            new Submission({
+            Submission.make({
               ...selected,
-              event: new Event({
+              event: Event.make({
                 ...selected.event,
                 payload: { number: 71, url: "https://github.com/acme/demo/pull/71" },
               }),
@@ -295,7 +295,7 @@ describe("local worker checkout after an unconfirmed stop", () => {
                   context.request.cwd,
                 ).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
               }
-              return yield* new InfraFailure({ message: "Lost parent", cause: "offline" });
+              return yield* InfraFailure.make({ message: "Lost parent", cause: "offline" });
             });
           yield* withLocalEngine(
             { attemptRuntime: unstoppableRuntime(parent, unstoppable, cancels) },

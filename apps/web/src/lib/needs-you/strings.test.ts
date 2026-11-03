@@ -25,12 +25,12 @@ import { needCopy } from "~/lib/needs-you/strings";
 describe("operator question copy in Needs attention", () => {
   it("names the asking Loop and shows the Agent's question", () => {
     const copy = needCopy(
-      new RunFailureNeed({
+      RunFailureNeed.make({
         id: "run-failure:asked",
         repository: RepositoryName.make("basaltbytes/usine"),
         runId: RunId.make("asked"),
         loop: LoopName.make("act-on-findings"),
-        failure: new QuestionFailureView({ question: "HTTP CONNECT or SOCKS for egress?" }),
+        failure: QuestionFailureView.make({ question: "HTTP CONNECT or SOCKS for egress?" }),
       }),
     );
     assert.strictEqual(copy.title, "Question from act-on-findings");
@@ -42,12 +42,12 @@ describe("operator question copy in Needs attention", () => {
 describe("blocker copy in Needs attention", () => {
   it("names the blocked Loop and shows the Agent's blocker", () => {
     const copy = needCopy(
-      new RunFailureNeed({
+      RunFailureNeed.make({
         id: "run-failure:blocked",
         repository: RepositoryName.make("basaltbytes/usine"),
         runId: RunId.make("blocked"),
         loop: LoopName.make("start-dev"),
-        failure: new BlockedFailureView({
+        failure: BlockedFailureView.make({
           message: "The baseline gate fails on main before any change.",
         }),
       }),
@@ -60,7 +60,7 @@ describe("blocker copy in Needs attention", () => {
 
 describe("config file copy in Needs attention", () => {
   const need = (kind: "loop" | "agent", file: string, message: string) =>
-    Schema.decodeUnknownSync(ConfigFileNeed)({
+    Schema.decodeSync(ConfigFileNeed)({
       _tag: "ConfigFileNeed",
       id: `config-file:${file}`,
       kind,
@@ -93,7 +93,7 @@ describe("config file copy in Needs attention", () => {
 
 describe("unconfigured Worker copy in Needs attention", () => {
   const need = (attempts: number, running = 0) =>
-    new UnconfiguredWorkerNeed({
+    UnconfiguredWorkerNeed.make({
       id: "unconfigured-worker:local",
       worker: WorkerName.make("local"),
       attempts,
@@ -122,7 +122,7 @@ describe("unconfigured Worker copy in Needs attention", () => {
 describe("unconfirmed stop copy in Needs attention", () => {
   it("names the Loop, the Attempt, and the Worker it still ends on, and links the Run", () => {
     const copy = needCopy(
-      new UnconfirmedStopNeed({
+      UnconfirmedStopNeed.make({
         id: "unconfirmed-stop:attempt",
         repository: RepositoryName.make("basaltbytes/usine"),
         runId: RunId.make("canceled"),
@@ -147,7 +147,7 @@ it("counts a worker alert once for each affected project", () => {
     RepositoryName.make("test/one"),
     RepositoryName.make("test/two"),
   ];
-  const need = new UnresponsiveWorkerNeed({
+  const need = UnresponsiveWorkerNeed.make({
     id: "worker:remote",
     worker: WorkerName.make("remote"),
     lastAnsweredAt: "2026-10-28T14:35:00Z",
@@ -159,21 +159,20 @@ it("counts a worker alert once for each affected project", () => {
       attemptNumber: AttemptNumber.make(1),
     })),
   });
-  const projects = boardOverview().projects.map(
-    (project) =>
-      new ProjectView({
-        ...project,
-        id: ProjectId.make("combined"),
-        repository: RepositoryName.make("test/one"),
-        repositories: [RepositoryName.make("test/one"), RepositoryName.make("test/two")],
-      }),
+  const projects = boardOverview().projects.map((project) =>
+    ProjectView.make({
+      ...project,
+      id: ProjectId.make("combined"),
+      repository: RepositoryName.make("test/one"),
+      repositories: [RepositoryName.make("test/one"), RepositoryName.make("test/two")],
+    }),
   );
   assert.deepStrictEqual([...needsYouByProject([need], projects)], [["combined", 1]]);
   assert.include(needCopy(need).detail, "3 attempts are still running");
 });
 
 it("identifies an unrecorded pool login without assigning its warning to a project", () => {
-  const need = new PoolLimitNeed({
+  const need = PoolLimitNeed.make({
     id: "pool-limit:chatgptPlan:secondary",
     pool: "chatgptPlan",
     login: Option.none(),
@@ -187,7 +186,7 @@ it("identifies an unrecorded pool login without assigning its warning to a proje
 
 it("explains quota recovery and automatic retries with the provider message", () => {
   const copy = needCopy(
-    new WorkerQuotaNeed({
+    WorkerQuotaNeed.make({
       id: "worker-quota:pool",
       worker: WorkerName.make("pool"),
       message: "shared core limit exceeded",

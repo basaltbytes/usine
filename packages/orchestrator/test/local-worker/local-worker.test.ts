@@ -91,7 +91,7 @@ const REVIEW_URL = "https://github.com/acme/demo/pull/71#pullrequestreview-81";
 
 const harnessUnavailable: HarnessProbe = (brain) =>
   Effect.succeed(
-    new HarnessUnavailableError({
+    HarnessUnavailableError.make({
       harness: brain.harness,
       capability: "login",
       message: "Worker login expired",
@@ -103,7 +103,7 @@ const failingCredentials = (reason: CredentialUnavailableReason, message: string
   Layer.succeed(CredentialProvider)({
     issue: (repository) =>
       Effect.fail(
-        new CredentialUnavailableError({ repository, reason, message, cause: new Error(message) }),
+        CredentialUnavailableError.make({ repository, reason, message, cause: new Error(message) }),
       ),
   });
 
@@ -173,7 +173,7 @@ const reviewedParent: StubParent = ({ request }) =>
         submitted_at: DateTime.formatIso(yield* DateTime.now),
       }),
     );
-    return new AttemptReport({
+    return AttemptReport.make({
       message: "Posted the review on pull request 71.",
       answeredOperator: true,
     });
@@ -359,7 +359,7 @@ describe("local worker", () => {
           const initial = submission(1);
           const request =
             operation === "update"
-              ? new Submission({
+              ? Submission.make({
                   ...initial,
                   revision: RepositoryRevision.make(
                     (yield* output("git", ["--git-dir", remote, "rev-parse", "main"])).trim(),
@@ -430,9 +430,9 @@ describe("local worker", () => {
           Layer.provide(claudeLoginLockLayer),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
-        const budgetConfig = new UsineConfig({
+        const budgetConfig = UsineConfig.make({
           ...config,
-          settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
+          settings: Settings.make({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
         });
         const runtime = stepExecutorLayer(budgetConfig, []).pipe(
           Layer.provide(MarcbachmannCelLayer),
@@ -444,8 +444,8 @@ describe("local worker", () => {
           const scheduler = yield* StepExecutor;
           const selected = submission(7);
           const runId = RunId.make("cleanup-budget-run");
-          const execution = new StepExecution({
-            attempt: new Attempt({
+          const execution = StepExecution.make({
+            attempt: Attempt.make({
               task: selected.task,
               agent: selected.agent.name,
               operatorIntervened: false,
@@ -462,14 +462,14 @@ describe("local worker", () => {
               salvage: Option.none(),
             }),
             event: selected.event,
-            run: new Run({
+            run: Run.make({
               id: runId,
               eventId: selected.event.id,
               loop: selected.loop,
-              state: RunState.start(new RunState.Pending()),
+              state: RunState.start(RunState.Pending.make()),
               openedAt: selected.event.receivedAt,
             }),
-            step: new Step({ runId, name: selected.step, result: Option.none() }),
+            step: Step.make({ runId, name: selected.step, result: Option.none() }),
             repository: selected.repository,
             revision: selected.revision,
             task: selected.task,
@@ -569,7 +569,7 @@ describe("local worker", () => {
           yield* Effect.gen(function* () {
             const executor = yield* Executor;
             const preparing = executor.prepare(
-              new CheckoutRequest({
+              CheckoutRequest.make({
                 attemptId: AttemptId.make(`prepare-${phase}/run/1`),
                 worker: WorkerName.make("local"),
                 repository: RepositoryName.make("acme/demo"),
@@ -648,7 +648,7 @@ describe("local worker", () => {
         );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
-          const request = new CheckoutRequest({
+          const request = CheckoutRequest.make({
             attemptId: AttemptId.make("unlaunched/run/1"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
@@ -689,7 +689,7 @@ describe("local worker", () => {
           assert(!registration.includes(prepared.workspace.worktree));
           const error = yield* executor
             .prepare(
-              new CheckoutRequest({
+              CheckoutRequest.make({
                 ...request,
                 attemptId: AttemptId.make("unlaunched/run/2"),
                 revision: RepositoryRevision.make("missing-revision"),
@@ -775,11 +775,8 @@ describe("local worker", () => {
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(testAppLayer),
         );
-        yield* Effect.gen(function* () {
-          yield* RunEngine;
-        }).pipe(
-          Effect.provide(runtime),
-          Effect.provide(Logger.layer([logger])),
+        yield* Effect.asVoid(RunEngine).pipe(
+          Effect.provide([runtime, Logger.layer([logger])]),
           Effect.provideService(References.MinimumLogLevel, "Debug"),
         );
 
@@ -901,7 +898,7 @@ describe("local worker", () => {
         {
           attemptRuntime: stubAttemptRuntime(new StubStorage(), () =>
             Effect.succeed(
-              new AttemptReport({
+              AttemptReport.make({
                 message: "The delegated attempt returned no technical failure details.",
                 answeredOperator: true,
               }),
@@ -930,7 +927,7 @@ describe("local worker", () => {
     "commits as the App's bot on every Worker kind, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
     () =>
       Effect.gen(function* () {
-        const missing = new InstallationDiscoveryError({
+        const missing = InstallationDiscoveryError.make({
           reason: "missing",
           message:
             "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
@@ -965,7 +962,7 @@ describe("local worker", () => {
             prepare: (request) => {
               requested.push(request);
               return Effect.fail(
-                new ExecutorOperationError({
+                ExecutorOperationError.make({
                   operation: "prepare",
                   message: "The test stops after the request",
                   cause: new Error("stop"),
@@ -976,7 +973,7 @@ describe("local worker", () => {
             intervene: () => Effect.die("unused"),
             sweep: Effect.void,
           });
-          const single = Schema.decodeUnknownSync(UsineConfig)({
+          const single = Schema.decodeSync(UsineConfig)({
             version: 1,
             repos: [{ name: "acme/demo" }],
             workers: [{ name: "worker", kind, max_concurrent_attempts: 1 }],
@@ -986,8 +983,8 @@ describe("local worker", () => {
             const runId = RunId.make(`bot-login-${kind}`);
             return yield* (yield* StepExecutor)
               .execute(
-                new StepExecution({
-                  attempt: new Attempt({
+                StepExecution.make({
+                  attempt: Attempt.make({
                     task: selected.task,
                     agent: selected.agent.name,
                     operatorIntervened: false,
@@ -1004,14 +1001,14 @@ describe("local worker", () => {
                     salvage: Option.none(),
                   }),
                   event: selected.event,
-                  run: new Run({
+                  run: Run.make({
                     id: runId,
                     eventId: selected.event.id,
                     loop: selected.loop,
-                    state: RunState.start(new RunState.Pending()),
+                    state: RunState.start(RunState.Pending.make()),
                     openedAt: selected.event.receivedAt,
                   }),
-                  step: new Step({ runId, name: selected.step, result: Option.none() }),
+                  step: Step.make({ runId, name: selected.step, result: Option.none() }),
                   repository: selected.repository,
                   revision: selected.revision,
                   task: selected.task,
@@ -1065,9 +1062,9 @@ describe("local worker", () => {
         Effect.gen(function* () {
           const initial = submission(1);
           const accepted = yield* engine.submit(
-            new Submission({
+            Submission.make({
               ...initial,
-              event: new Event({
+              event: Event.make({
                 ...initial.event,
                 payload: { number: 71, url: "https://github.com/acme/demo/pull/71" },
               }),
@@ -1112,7 +1109,7 @@ describe("local worker", () => {
           );
 
           const transcript = yield* engine.transcript(
-            new TranscriptAllQuery({ attemptId: attempt.id }),
+            TranscriptAllQuery.make({ attemptId: attempt.id }),
           );
           assert.deepStrictEqual(
             transcript.map(({ direction, envelope }) => [
@@ -1131,7 +1128,7 @@ describe("local worker", () => {
           const firstTranscriptEntry = transcript[0];
           assert(firstTranscriptEntry !== undefined);
           const tail = yield* engine.transcript(
-            new TranscriptTailQuery({
+            TranscriptTailQuery.make({
               attemptId: attempt.id,
               after: firstTranscriptEntry.sequence,
               limit: 100,
@@ -1187,7 +1184,7 @@ describe("local worker", () => {
             assert(next._tag === "Claimed");
             yield* waitFor(engine, next.runId, "Succeeded");
             assert.deepStrictEqual(
-              yield* engine.transcript(new TranscriptAllQuery({ attemptId: attempt.id })),
+              yield* engine.transcript(TranscriptAllQuery.make({ attemptId: attempt.id })),
               [],
             );
           }),
@@ -1214,10 +1211,10 @@ describe("local worker", () => {
             yield* engine.intervene(
               accepted.runId,
               attempt.id,
-              new AttemptChannel.Intervention({
+              AttemptChannel.Intervention.make({
                 operator: "Philippe",
-                target: new AttemptChannel.ParentTarget(),
-                action: new AttemptChannel.Steer({ message: "Use pnpm" }),
+                target: AttemptChannel.ParentTarget.make(),
+                action: AttemptChannel.Steer.make({ message: "Use pnpm" }),
               }),
             );
             yield* engine.cancel(accepted.runId);
@@ -1228,7 +1225,7 @@ describe("local worker", () => {
             assert.strictEqual(storage.tasks.get(attempt.id)?.state._tag, "canceled");
 
             const transcript = yield* engine.transcript(
-              new TranscriptAllQuery({ attemptId: attempt.id }),
+              TranscriptAllQuery.make({ attemptId: attempt.id }),
             );
             assert(
               transcript.some(
@@ -1290,7 +1287,7 @@ describe("local worker", () => {
         {
           attemptRuntime: stubAttemptRuntime(new StubStorage(), () =>
             Effect.fail(
-              new InfraFailure({ message: "model provider unreachable", cause: "outage" }),
+              InfraFailure.make({ message: "model provider unreachable", cause: "outage" }),
             ),
           ),
         },

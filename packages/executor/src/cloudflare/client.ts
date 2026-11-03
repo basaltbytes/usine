@@ -138,14 +138,13 @@ export const sandboxClientFor = Effect.fn("CloudflareExecutor.sandboxClientFor")
   ) =>
     effect.pipe(
       Effect.timeout(REQUEST_TIMEOUT),
-      Effect.mapError(
-        (failure) =>
-          new SandboxRequestError({
-            worker,
-            operation,
-            refused: refusedToken(failure),
-            message: `Can't ${ACTIONS[operation]} for cloudflare worker "${worker}": ${reason(failure)}`,
-          }),
+      Effect.mapError((failure) =>
+        SandboxRequestError.make({
+          worker,
+          operation,
+          refused: refusedToken(failure),
+          message: `Can't ${ACTIONS[operation]} for cloudflare worker "${worker}": ${reason(failure)}`,
+        }),
       ),
       Effect.tapError((error) =>
         Effect.logWarning("Cloudflare Worker request failed", {
@@ -167,7 +166,7 @@ export const sandboxClientFor = Effect.fn("CloudflareExecutor.sandboxClientFor")
       request(
         "get",
         client.sandbox.get({ params: { name } }).pipe(
-          Effect.map(Option.some),
+          Effect.asSome,
           Effect.catchTag("SandboxNotFound", () => Effect.succeedNone),
         ),
         { sandbox: name },

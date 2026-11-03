@@ -102,7 +102,7 @@ const run = <A, E>(
   effect: Effect.Effect<A, E, NodeServices.NodeServices | HttpClient.HttpClient>,
 ) => Effect.runPromise(effect.pipe(Effect.provide(services)));
 
-const options = new LifecycleOptions({ timeout: Duration.seconds(20), force: false });
+const options = LifecycleOptions.make({ timeout: Duration.seconds(20), force: false });
 
 const git = (directory: string, ...args: ReadonlyArray<string>) =>
   spawnSync("git", args, { cwd: directory, encoding: "utf8" }).stdout.trim();
@@ -132,7 +132,7 @@ const pinnedInstance = async () => {
     join(engine, "main.mjs"),
     `import ${JSON.stringify(pathToFileURL(FIXTURE).href)};\n`,
   );
-  const launch = new InstanceLaunch({
+  const launch = InstanceLaunch.make({
     node: process.execPath,
     nodeOptions: ["--experimental-strip-types", "--no-warnings"],
     script: join(engine, "main.mjs"),
@@ -145,7 +145,7 @@ const pinnedInstance = async () => {
   return { directory, pid };
 };
 
-const latest = new UpgradeCommand({ version: Option.none(), check: false, options });
+const latest = UpgradeCommand.make({ version: Option.none(), check: false, options });
 
 describe("usine upgrade", { timeout: SCENARIO_TIMEOUT_MS }, () => {
   it("backs up the stores, moves and commits the pin, installs, and restarts the instance", async () => {
@@ -196,7 +196,7 @@ describe("usine upgrade", { timeout: SCENARIO_TIMEOUT_MS }, () => {
       mkdtempSync(join(sqliteTempDirectory(), "usine-upgrade-")),
     );
     folders.push(directory);
-    const launch = new InstanceLaunch({
+    const launch = InstanceLaunch.make({
       node: process.execPath,
       nodeOptions: ["--experimental-strip-types", "--no-warnings"],
       script: FIXTURE,
@@ -269,11 +269,11 @@ it("authenticates system upgrade checks and requests with the local admin-token 
   });
   await run(
     Effect.gen(function* () {
-      const record = new InstanceRecord({
+      const record = InstanceRecord.make({
         pid: ProcessId.make(process.pid),
         version: "1.0.0",
         startedAt: yield* DateTime.now,
-        launch: new InstanceLaunch({
+        launch: InstanceLaunch.make({
           node: process.execPath,
           nodeOptions: [],
           script: FIXTURE,
@@ -285,7 +285,7 @@ it("authenticates system upgrade checks and requests with the local admin-token 
       yield* requestSystemUpgrade(
         directory,
         record,
-        new UpgradeCommand({ ...latest, check: true }),
+        UpgradeCommand.make({ ...latest, check: true }),
       );
       assert.deepEqual(requests, ["GET /api/upgrade"]);
       yield* requestSystemUpgrade(directory, record, latest);

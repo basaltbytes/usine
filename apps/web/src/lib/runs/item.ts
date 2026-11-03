@@ -17,7 +17,7 @@ export interface RunItem {
 
 /** The issue or pull request snapshot in an Item trigger's Event payload; other fields are ignored. */
 const ItemSnapshot = Schema.Struct({
-  number: Schema.Number,
+  number: Schema.Finite,
   title: Schema.String,
   url: Schema.String,
   state: Schema.String,

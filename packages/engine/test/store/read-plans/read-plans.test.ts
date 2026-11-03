@@ -66,8 +66,7 @@ it.live(
           }),
       });
       const database = yield* SQLiteDrizzle.make().pipe(
-        Effect.provide(logger),
-        Effect.provide(SQLiteDrizzle.DefaultServices),
+        Effect.provide([logger, SQLiteDrizzle.DefaultServices]),
         Effect.provideContext(context),
       );
       yield* Effect.gen(function* () {
@@ -112,26 +111,26 @@ it.live(
         yield* capture(
           "run transcript page",
           reader.transcript(
-            new TranscriptPageQuery({ attemptId, before: Option.none(), limit: 50 }),
+            TranscriptPageQuery.make({ attemptId, before: Option.none(), limit: 50 }),
           ),
         );
         yield* capture(
           "run session state",
-          reader.transcript(new TranscriptSessionsQuery({ attemptId })),
+          reader.transcript(TranscriptSessionsQuery.make({ attemptId })),
         );
         yield* capture(
           "run worker state",
-          reader.transcript(new TranscriptWorkerQuery({ attemptId })),
+          reader.transcript(TranscriptWorkerQuery.make({ attemptId })),
         );
         yield* capture(
           "usage per attempt",
-          reader.transcript(new TranscriptUsageQuery({ attemptId })),
+          reader.transcript(TranscriptUsageQuery.make({ attemptId })),
         );
         yield* capture(
           "usage across all runs",
           Effect.forEach(
             Array.from({ length: 1000 }, (_, i) => AttemptId.make(`attempt-${i}`)),
-            (attemptId) => reader.transcript(new TranscriptUsageQuery({ attemptId })),
+            (attemptId) => reader.transcript(TranscriptUsageQuery.make({ attemptId })),
             { discard: true },
           ),
         );
@@ -145,8 +144,11 @@ it.live(
         yield* capture("polling next queued", query.nextQueued(runId));
         yield* capture("reconciliation runs to drive", query.runIdsToDrive());
       }).pipe(
-        Effect.provide(Layer.merge(RunReader.layer, RunStore.layer)),
-        Effect.provide(RunDatabase.layer(database)),
+        Effect.provide(
+          Layer.mergeAll(Layer.merge(RunReader.layer, RunStore.layer)).pipe(
+            Layer.provideMerge(RunDatabase.layer(database)),
+          ),
+        ),
       );
       const unique = [
         ...new Map(

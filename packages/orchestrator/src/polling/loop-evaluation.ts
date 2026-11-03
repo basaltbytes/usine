@@ -121,13 +121,12 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     item.source === "pr"
       ? RepositoryRevision.make(
           yield* Schema.decodeUnknownEffect(CommitSha)(payload.headRefOid).pipe(
-            Effect.mapError(
-              () =>
-                new InvalidGitHubResponseError({
-                  operation: "fetch-pull-request-snapshot",
-                  message: "The pull request payload has no valid head commit",
-                  detail: `pull request #${item.number} has no full headRefOid`,
-                }),
+            Effect.mapError(() =>
+              InvalidGitHubResponseError.make({
+                operation: "fetch-pull-request-snapshot",
+                message: "The pull request payload has no valid head commit",
+                detail: `pull request #${item.number} has no full headRefOid`,
+              }),
             ),
           ),
         )
@@ -140,7 +139,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     // A failed `if:` gives no answer about the match, so the Item's queued Runs stay as they are.
     if (Result.isFailure(matches)) {
       failures.push(
-        new LoopEvaluationFailure({
+        LoopEvaluationFailure.make({
           loop: loop.name,
           stage: "if",
           expression: Option.some(matches.failure.source),
@@ -176,7 +175,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     const rendered = yield* Effect.result(config.renderPrompt(loop, context));
     if (Result.isFailure(rendered)) {
       failures.push(
-        new LoopEvaluationFailure({
+        LoopEvaluationFailure.make({
           loop: loop.name,
           stage: "prompt",
           expression: rendered.failure.expression,

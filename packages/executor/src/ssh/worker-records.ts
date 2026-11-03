@@ -57,7 +57,7 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
     const file = fileOf(worker);
     yield* Effect.gen(function* () {
       const text = yield* Schema.encodeEffect(SshWorkerRecordJson)(
-        new SshWorkerRecord({
+        SshWorkerRecord.make({
           name: worker,
           destination,
           port: address.port,
@@ -95,7 +95,7 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
         return Option.none<SshWorkerRecord>();
       }
       const text = yield* fs.readFileString(file);
-      return Option.some(yield* Schema.decodeUnknownEffect(SshWorkerRecordJson)(text));
+      return Option.some(yield* Schema.decodeEffect(SshWorkerRecordJson)(text));
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning(

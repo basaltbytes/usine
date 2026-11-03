@@ -125,7 +125,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 const containerFailure = (operation: ContainerOperation) => (cause: unknown) =>
-  new ContainerFailure({
+  ContainerFailure.make({
     operation,
     message: cause instanceof Error ? cause.message : String(cause),
   });
@@ -168,11 +168,11 @@ const containerOf = (
         // Keeps the bytes as they are: the attach stream counts them to resume at an offset.
         Effect.flatMap((process) => collectBytes(process)),
         Effect.flatMap(({ stdout, exitCode, stderr }) => {
-          if (exitCode === 0) return Effect.succeed(Option.some(stdout));
+          if (exitCode === 0) return Effect.succeedSome(stdout);
           const message = new TextDecoder().decode(stderr).trim();
           return message.includes("No such file")
             ? Effect.succeedNone
-            : Effect.fail(new ContainerFailure({ operation: "read", message }));
+            : Effect.fail(ContainerFailure.make({ operation: "read", message }));
         }),
       ),
     size: (path) =>
@@ -404,7 +404,7 @@ export class SandboxRegistry extends DurableObject<Env> {
     };
     const lookup: SandboxLookup["Service"] = {
       get: (name) => {
-        const failed = (reason: string) => new SandboxLookupFailed({ name, reason });
+        const failed = (reason: string) => SandboxLookupFailed.make({ name, reason });
         return Effect.tryPromise({
           try: () =>
             env.SANDBOX.getByName(name).fetch(`https://sandbox.internal/v1/sandboxes/${name}`),
@@ -422,7 +422,7 @@ export class SandboxRegistry extends DurableObject<Env> {
               Effect.flatMap((body) =>
                 Option.match(decodeSummary(body), {
                   onNone: () => Effect.fail(failed("the response isn't a sandbox summary")),
-                  onSome: (summary) => Effect.succeed(Option.some(summary)),
+                  onSome: (summary) => Effect.succeedSome(summary),
                 }),
               ),
             );
@@ -484,7 +484,7 @@ const logForwarded = (handler: string, request: Request, response: Response) =>
 /** Adds the Attempt's installation token to the sandbox's requests for GitHub. */
 export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    const props = Schema.decodeUnknownSync(GitHubProps)(this.ctx.props);
+    const props = Schema.decodeSync(GitHubProps)(this.ctx.props);
     const response = await fetch(gitHubRequest(request, props.host, Redacted.make(props.token)));
     await logForwarded("github", request, response);
     return response;
@@ -497,7 +497,7 @@ export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Enc
  */
 export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    const props = Schema.decodeUnknownSync(ProviderProps)(this.ctx.props);
+    const props = Schema.decodeSync(ProviderProps)(this.ctx.props);
     const forwarded = providerRequest(request, props.provider, props.credential);
     if (Option.isNone(forwarded)) {
       await run(

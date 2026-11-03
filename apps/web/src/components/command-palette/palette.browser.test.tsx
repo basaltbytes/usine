@@ -46,27 +46,26 @@ beforeEach(async () => {
   const overview = boardOverview();
   client.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({
+    ReadyOverview.make({
       ...overview,
-      projects: overview.projects.map(
-        (project) =>
-          new ProjectView({
-            ...project,
-            id: ProjectId.make("product"),
-            name: "Product",
-            repository: RepositoryName.make("board-test/primary"),
-            repositories: [RepositoryName.make("board-test/primary"), project.repository],
-            runs: [
-              boardPlanRun(),
-              ...project.board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
-            ],
-          }),
+      projects: overview.projects.map((project) =>
+        ProjectView.make({
+          ...project,
+          id: ProjectId.make("product"),
+          name: "Product",
+          repository: RepositoryName.make("board-test/primary"),
+          repositories: [RepositoryName.make("board-test/primary"), project.repository],
+          runs: [
+            boardPlanRun(),
+            ...project.board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
+          ],
+        }),
       ),
     }),
   );
   client.setQueryData(
     deskQuery().queryKey,
-    new DeskView({
+    DeskView.make({
       running: [],
       notMoving: boardStalled(),
       lastOutcomes: [],
@@ -258,14 +257,13 @@ it("uses drawer actions while open and restores the underlying page commands aft
   if (run === undefined) throw new Error("Missing waiting run fixture");
   client.setQueryData(
     runDetailQuery(client, run.id).queryKey,
-    new RunDetailView({
-      run: new RunView({
+    RunDetailView.make({
+      run: RunView.make({
         ...run,
         task: "Implement the issue.",
         resultMessage: null,
-        attempts: run.attempts.map(
-          (attempt) =>
-            new AttemptView({ ...attempt, task: AttemptTask.make("Implement the issue.") }),
+        attempts: run.attempts.map((attempt) =>
+          AttemptView.make({ ...attempt, task: AttemptTask.make("Implement the issue.") }),
         ),
       }),
       agentDefinitionChanged: false,

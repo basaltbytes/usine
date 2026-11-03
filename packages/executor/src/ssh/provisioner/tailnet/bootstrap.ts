@@ -128,7 +128,7 @@ export const boatTailnetsFor = Effect.fn("SshExecutor.boatTailnetsFor")(function
         `http://git.${domain}/`,
       ]);
       if (!/^x-usine-gateway-refusal:\s*missing-caller-token\s*$/imu.test(response))
-        return yield* new WorkerCapabilityError({
+        return yield* WorkerCapabilityError.make({
           worker,
           capability: "gateway",
           message: `Boat worker "${worker}" cannot reach the gateway over the tailnet`,
@@ -141,7 +141,7 @@ export const boatTailnetsFor = Effect.fn("SshExecutor.boatTailnetsFor")(function
     }).pipe(
       Effect.catchTag("ExecutorOperationError", () =>
         Effect.fail(
-          new WorkerCapabilityError({
+          WorkerCapabilityError.make({
             worker,
             capability: "gateway",
             message: `Boat worker "${worker}" could not join the tailnet or configure the gateway. Check the snapshot's Tailscale service and tailnet policy.`,

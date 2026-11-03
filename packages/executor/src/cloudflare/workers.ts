@@ -48,7 +48,7 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
       );
       if (existing !== undefined) return existing;
       const owner = yield* Option.match(
-        Schema.decodeUnknownOption(SandboxOwner)(`${options.instance}.${address.name}`),
+        Schema.decodeOption(SandboxOwner)(`${options.instance}.${address.name}`),
         {
           onNone: () =>
             Effect.die(
@@ -79,7 +79,7 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
         owner,
         client,
         providers: Arr.dedupe(address.providers.map(({ provider }) => provider)),
-        shellFor: (name) => new RemoteShell({ ssh: shell, sshEnvironment, destination: name }),
+        shellFor: (name) => RemoteShell.make({ ssh: shell, sshEnvironment, destination: name }),
       };
       connections.set(address, worker);
       yield* Effect.logInfo("Cloudflare worker added to the executor", { worker: address.name });
@@ -112,17 +112,13 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
       operation: ExecutorOperation,
       name: WorkerName,
     ): Effect.Effect<CloudflareWorker, ExecutorOperationError> =>
-      Option.match(Option.fromNullishOr(workers.get(name)), {
-        onNone: () =>
-          Effect.fail(
-            new ExecutorOperationError({
-              operation,
-              message: `No cloudflare worker named "${name}" is configured`,
-              cause: new Error(name),
-            }),
-          ),
-        onSome: Effect.succeed,
-      });
+      Effect.fromOption(Option.fromNullishOr(workers.get(name)), () =>
+        ExecutorOperationError.make({
+          operation,
+          message: `No cloudflare worker named "${name}" is configured`,
+          cause: new Error(name),
+        }),
+      );
 
     const attemptWorkerFor = (
       operation: ExecutorOperation,

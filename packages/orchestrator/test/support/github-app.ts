@@ -12,7 +12,7 @@ import {
 import { Effect, Layer, Redacted } from "effect";
 
 /** The bot account of the test App `usine-test`. */
-export const testBotAccount = new BotAccount({
+export const testBotAccount = BotAccount.make({
   login: BotLogin.make("usine-test[bot]"),
   id: BotUserId.make(4242),
 });
@@ -24,7 +24,7 @@ export const testBotAccount = new BotAccount({
 export const testAppLayer = Layer.succeed(GitHubApp)({
   installation: () =>
     Effect.succeed(
-      new Installation({
+      Installation.make({
         id: InstallationId.make(1),
         accountLogin: "acme",
         appSlug: AppSlug.make("usine-test"),
@@ -43,7 +43,7 @@ export const testAppLayer = Layer.succeed(GitHubApp)({
 /** The credentials of the test App, whose key signs nothing. */
 export const testCredentialsLayer = Layer.succeed(
   GitHubCredentials,
-  new AppCredentials({
+  AppCredentials.make({
     appId: AppId.make(4242),
     privateKey: Redacted.make(
       PrivateKey.make("-----BEGIN PRIVATE KEY-----\nunused\n-----END PRIVATE KEY-----\n"),

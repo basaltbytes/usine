@@ -183,13 +183,12 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
       call: (client: AdminClient) => Effect.Effect<A, E>,
     ): Effect.Effect<A, GatewayAdminError> =>
       exchange(operation, call).pipe(
-        Effect.mapError(
-          (failure) =>
-            new GatewayAdminError({
-              worker,
-              operation,
-              message: `Can't ${ACTIONS[operation]} on the admin API of gateway ${forward.gateway} for worker "${worker}": ${reason(failure)}`,
-            }),
+        Effect.mapError((failure) =>
+          GatewayAdminError.make({
+            worker,
+            operation,
+            message: `Can't ${ACTIONS[operation]} on the admin API of gateway ${forward.gateway} for worker "${worker}": ${reason(failure)}`,
+          }),
         ),
       );
   return {
@@ -201,7 +200,7 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
     list: bounded("list")((client) => client.attachments.list()),
     providers: bounded("providers")((client) =>
       client.llm.providers().pipe(
-        Effect.map(Option.some),
+        Effect.asSome,
         Effect.catchIf(unknownRoute, () => Effect.succeedNone),
       ),
     ),

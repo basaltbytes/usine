@@ -53,8 +53,8 @@ import {
   TranscriptDisclosureProvider,
 } from "~/components/runs/transcript/grouping/disclosure";
 
-const brain = new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
-const parent = new ParentSession({
+const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
   brain,
@@ -62,12 +62,12 @@ const parent = new ParentSession({
 const attempt = AttemptId.make("first-attempt");
 
 const record = (sequence: number, event: AgentSessionEvent, attemptId = attempt) =>
-  new TranscriptEventView({
+  TranscriptEventView.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId,
     receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
     direction: "outbound",
-    payload: new SessionEvent({ event }),
+    payload: SessionEvent.make({ event }),
   });
 
 const finished = (
@@ -79,13 +79,13 @@ const finished = (
 ) =>
   record(
     sequence,
-    new ToolFinished({ session, callId, tool, output: "Done", isError: false }),
+    ToolFinished.make({ session, callId, tool, output: "Done", isError: false }),
     attemptId,
   );
 const started = (sequence: number, callId: string) =>
   record(
     sequence,
-    new ToolStarted({ session: parent, callId, tool: "read", input: { path: "src/index.ts" } }),
+    ToolStarted.make({ session: parent, callId, tool: "read", input: { path: "src/index.ts" } }),
   );
 const document = (events: ReadonlyArray<TranscriptEventView>) =>
   readerDocument(projectTranscript(events, []), [], events);
@@ -111,10 +111,10 @@ const completed = (
 ) => {
   const callId = `call-${sequence}`;
   return [
-    record(sequence, new ToolStarted({ session: parent, callId, tool, input })),
+    record(sequence, ToolStarted.make({ session: parent, callId, tool, input })),
     record(
       sequence + 1,
-      new ToolFinished({ session: parent, callId, tool, output, isError: false }),
+      ToolFinished.make({ session: parent, callId, tool, output, isError: false }),
     ),
   ];
 };
@@ -135,7 +135,7 @@ it("folds the calls between two messages into one line that says what ran", () =
       edits: [{ oldText: "before", newText: "after" }],
     }),
     ...completed(3, "Bash", { command: "pnpm test" }, [{ type: "text", text: "One test failed" }]),
-    record(5, new TextOutput({ session: parent, text: "The checks need attention." })),
+    record(5, TextOutput.make({ session: parent, text: "The checks need attention." })),
     finished(6, "after-message", "shell"),
   ];
   const html = render(events);
@@ -160,11 +160,11 @@ it("times a burst from its first start to its last result and counts failed and 
     ...completed(1, "Bash", { command: "pnpm lint" }),
     record(
       3,
-      new ToolStarted({ session: parent, callId: "gate", tool: "Bash", input: { command: "x" } }),
+      ToolStarted.make({ session: parent, callId: "gate", tool: "Bash", input: { command: "x" } }),
     ),
     record(
       28,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "gate",
         tool: "Bash",
@@ -174,7 +174,7 @@ it("times a burst from its first start to its last result and counts failed and 
     ),
     record(
       29,
-      new ToolStarted({ session: parent, callId: "live", tool: "Bash", input: { command: "y" } }),
+      ToolStarted.make({ session: parent, callId: "live", tool: "Bash", input: { command: "y" } }),
     ),
   ];
   const html = render(events);
@@ -191,7 +191,7 @@ it("does not join calls across a message", () => {
   const events = [
     finished(1, "a"),
     finished(2, "b"),
-    record(3, new TextOutput({ session: parent, text: "A new step." })),
+    record(3, TextOutput.make({ session: parent, text: "A new step." })),
     finished(4, "c"),
     finished(5, "d"),
   ];
@@ -202,12 +202,12 @@ it("does not join calls across a message", () => {
 });
 
 it("keeps completed calls within their parent session, child session and Attempt", () => {
-  const secondParent = new ParentSession({
+  const secondParent = ParentSession.make({
     id: AgentSessionId.make("other-parent"),
     agent: parent.agent,
     brain,
   });
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("child"),
     parentId: parent.id,
     agent: AgentName.make("reviewer"),
@@ -242,7 +242,7 @@ it("groups failed commands with the adjacent completed commands and preserves th
     finished(1, "before", "shell"),
     record(
       2,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "failed",
         tool: "shell",
@@ -275,7 +275,7 @@ it.each(["Running", "Stopped"] as const)(
       finished(4, "c"),
       finished(5, "d"),
     ];
-    if (state === "Stopped") events.push(record(6, new SessionFinished({ session: parent })));
+    if (state === "Stopped") events.push(record(6, SessionFinished.make({ session: parent })));
     const bursts = groups(events);
 
     assert.deepEqual(
@@ -348,7 +348,7 @@ it("uses Codex result evidence for multiple changed files and commands before th
   const events = [
     record(
       3,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "files",
         tool: "file_change",
@@ -365,7 +365,7 @@ it("uses Codex result evidence for multiple changed files and commands before th
     ),
     record(
       4,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "command",
         tool: "command",
@@ -392,7 +392,7 @@ it("enriches summaries when older starts arrive without changing tool identities
     finished(3, "read"),
     record(
       4,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "test",
         tool: "bash",
@@ -409,7 +409,7 @@ it("enriches summaries when older starts arrive without changing tool identities
   const earlier = [
     record(
       1,
-      new ToolStarted({
+      ToolStarted.make({
         session: parent,
         callId: "read",
         tool: "read",
@@ -418,7 +418,7 @@ it("enriches summaries when older starts arrive without changing tool identities
     ),
     record(
       2,
-      new ToolStarted({
+      ToolStarted.make({
         session: parent,
         callId: "test",
         tool: "bash",
@@ -551,41 +551,41 @@ it("uses a file count when deeply nested colliding paths cannot be distinguished
 });
 
 it("attaches paged input to its child using unpaged session identity without replaying history", () => {
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("held-child"),
     parentId: parent.id,
     agent: parent.agent,
     brain,
   });
-  const intervention = new Intervention({
+  const intervention = Intervention.make({
     operator: "Philippe",
-    target: new ChildTarget({ sessionId: child.id }),
-    action: new OperatorMessage({ message: "Keep this correction" }),
+    target: ChildTarget.make({ sessionId: child.id }),
+    action: OperatorMessage.make({ message: "Keep this correction" }),
   });
-  const receipt = new TranscriptEventView({
+  const receipt = TranscriptEventView.make({
     sequence: TranscriptSequence.make(9),
     attemptId: attempt,
     receivedAt: "2026-09-12",
     direction: "outbound",
-    payload: new InterventionRejected({
+    payload: InterventionRejected.make({
       inputSequence: Sequence.make(2),
       intervention,
       message: "Harness unavailable",
     }),
   });
-  const held = new TranscriptEventView({
+  const held = TranscriptEventView.make({
     ...receipt,
     sequence: TranscriptSequence.make(7),
-    payload: new InterventionApplied({
+    payload: InterventionApplied.make({
       inputSequence: Sequence.make(1),
       intervention,
-      state: new InterventionState({ held: true, paused: false }),
+      state: InterventionState.make({ held: true, paused: false }),
     }),
   });
   const projection = projectTranscript(
     [receipt],
     [],
-    [held, record(8, new SessionIdle({ session: child }))],
+    [held, record(8, SessionIdle.make({ session: child }))],
   );
   assert.strictEqual(projection.items.length, 1);
   const session = projection.sessions[0];
@@ -604,33 +604,33 @@ it("attaches paged input to its child using unpaged session identity without rep
 });
 
 it("renders a held child from session state when its activity is outside the loaded page", () => {
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("off-page-child"),
     parentId: parent.id,
     agent: parent.agent,
     brain,
   });
-  const held = new TranscriptEventView({
+  const held = TranscriptEventView.make({
     sequence: TranscriptSequence.make(3),
     attemptId: attempt,
     receivedAt: "2026-09-12",
     direction: "outbound",
-    payload: new InterventionApplied({
+    payload: InterventionApplied.make({
       inputSequence: Sequence.make(1),
-      intervention: new Intervention({
+      intervention: Intervention.make({
         operator: "Philippe",
-        target: new ChildTarget({ sessionId: child.id }),
-        action: new OperatorMessage({ message: "Review this with me" }),
+        target: ChildTarget.make({ sessionId: child.id }),
+        action: OperatorMessage.make({ message: "Review this with me" }),
       }),
-      state: new InterventionState({ held: true, paused: false }),
+      state: InterventionState.make({ held: true, paused: false }),
     }),
   });
-  const page = [record(20, new TextOutput({ session: parent, text: "Waiting on the child." }))];
-  const running = new AttemptView({
+  const page = [record(20, TextOutput.make({ session: parent, text: "Waiting on the child." }))];
+  const running = AttemptView.make({
     id: attempt,
     number: AttemptNumber.make(1),
     worker: WorkerName.make("local"),
-    workerAccess: new LocalWorkerAccess(),
+    workerAccess: LocalWorkerAccess.make(),
     brain,
     task: AttemptTask.make("Task"),
     agent: parent.agent,
@@ -640,7 +640,7 @@ it("renders a held child from session state when its activity is outside the loa
     endedAt: null,
     salvage: null,
   });
-  const run = new RunView({
+  const run = RunView.make({
     agentBrain: brain,
     id: RunId.make("run-31"),
     itemKey: ItemKey.make("item"),
@@ -678,7 +678,7 @@ it("renders a held child from session state when its activity is outside the loa
       />,
     );
 
-  const reachable = outline([held, record(4, new SessionIdle({ session: child }))]);
+  const reachable = outline([held, record(4, SessionIdle.make({ session: child }))]);
   assert.include(reachable, "Held, waiting for input");
   assert.include(reachable, 'aria-label="Resume details for developer"');
   assert.notInclude(outline([]), "Held, waiting for input");
@@ -686,13 +686,13 @@ it("renders a held child from session state when its activity is outside the loa
 });
 
 it("shows an operator message to a delegating parent once, queued until the parent reads it or stops", () => {
-  const intervention = new Intervention({
+  const intervention = Intervention.make({
     operator: "Philippe",
-    target: new ParentTarget(),
-    action: new OperatorMessage({ message: "What failed earlier?" }),
+    target: ParentTarget.make(),
+    action: OperatorMessage.make({ message: "What failed earlier?" }),
   });
   const receipt = (sequence: number, payload: InterventionApplied | InterventionRejected) =>
-    new TranscriptEventView({
+    TranscriptEventView.make({
       sequence: TranscriptSequence.make(sequence),
       attemptId: attempt,
       receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
@@ -702,14 +702,14 @@ it("shows an operator message to a delegating parent once, queued until the pare
   const applied = (sequence: number, queued: boolean) =>
     receipt(
       sequence,
-      new InterventionApplied({
+      InterventionApplied.make({
         inputSequence: Sequence.make(1),
         intervention,
-        state: new InterventionState({ held: true, paused: false, queued }),
+        state: InterventionState.make({ held: true, paused: false, queued }),
       }),
     );
   const delegating = [
-    record(1, new TextOutput({ session: parent, text: "Delegating the fix." })),
+    record(1, TextOutput.make({ session: parent, text: "Delegating the fix." })),
     applied(2, true),
   ];
   const operatorRows = (events: ReadonlyArray<TranscriptEventView>) =>
@@ -725,7 +725,7 @@ it("shows an operator message to a delegating parent once, queued until the pare
   assert.deepStrictEqual(operatorRows([...delegating, applied(5, false)]), [[2, null, false]]);
   const stopped = receipt(
     5,
-    new InterventionRejected({
+    InterventionRejected.make({
       inputSequence: Sequence.make(1),
       intervention,
       message: "The parent stopped before it read this message.",
@@ -735,31 +735,31 @@ it("shows an operator message to a delegating parent once, queued until the pare
 });
 
 it("shows the latest parent steer's delivery once without confusing parent and child holds", () => {
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("steered-child"),
     parentId: parent.id,
     agent: parent.agent,
     brain,
   });
-  const intervention = new Intervention({
+  const intervention = Intervention.make({
     operator: "Philippe",
-    target: new ParentTarget(),
-    action: new Steer({ message: "Fix the third finding." }),
+    target: ParentTarget.make(),
+    action: Steer.make({ message: "Fix the third finding." }),
   });
   const receipt = (sequence: number, state: InterventionState) =>
-    new TranscriptEventView({
+    TranscriptEventView.make({
       sequence: TranscriptSequence.make(sequence),
       attemptId: attempt,
       receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
       direction: "outbound",
-      payload: new InterventionApplied({ inputSequence: Sequence.make(1), intervention, state }),
+      payload: InterventionApplied.make({ inputSequence: Sequence.make(1), intervention, state }),
     });
   const initial = [
-    record(1, new SessionStarted({ session: parent })),
-    record(2, new SessionStarted({ session: child })),
+    record(1, SessionStarted.make({ session: parent })),
+    record(2, SessionStarted.make({ session: child })),
     receipt(
       3,
-      new InterventionState({
+      InterventionState.make({
         held: true,
         paused: false,
         queued: true,
@@ -777,7 +777,7 @@ it("shows the latest parent steer's delivery once without confusing parent and c
     ...initial,
     receipt(
       4,
-      new InterventionState({
+      InterventionState.make({
         held: true,
         paused: false,
         forwardedTo: Option.some(child.id),
@@ -788,23 +788,23 @@ it("shows the latest parent steer's delivery once without confusing parent and c
   assert.notInclude(render(delivered), "Queued until");
   const returned = [
     ...initial,
-    receipt(4, new InterventionState({ held: false, paused: false, queued: true })),
+    receipt(4, InterventionState.make({ held: false, paused: false, queued: true })),
   ];
   assert.notInclude(render(returned), "Forwarded to child");
   assert.include(render(returned), "Queued until the delegated task ends");
   const parentRead = [
     ...returned,
-    receipt(5, new InterventionState({ held: false, paused: false })),
+    receipt(5, InterventionState.make({ held: false, paused: false })),
   ];
   assert.include(render(parentRead), "Delivered to parent");
   const rejected = [
     ...initial,
-    new TranscriptEventView({
+    TranscriptEventView.make({
       sequence: TranscriptSequence.make(5),
       attemptId: attempt,
       receivedAt: "2026-09-06T12:00:05Z",
       direction: "outbound",
-      payload: new InterventionRejected({
+      payload: InterventionRejected.make({
         inputSequence: Sequence.make(1),
         intervention,
         message: "The attempt was interrupted.",
@@ -822,32 +822,32 @@ it("shows the latest parent steer's delivery once without confusing parent and c
 });
 
 it("shows a message to a working child queued in the child's section until the child reads it", () => {
-  const child = new ChildSession({
+  const child = ChildSession.make({
     id: AgentSessionId.make("working-child"),
     parentId: parent.id,
     agent: parent.agent,
     brain,
   });
-  const intervention = new Intervention({
+  const intervention = Intervention.make({
     operator: "Philippe",
-    target: new ChildTarget({ sessionId: child.id }),
-    action: new OperatorMessage({ message: "Use pnpm, not npm." }),
+    target: ChildTarget.make({ sessionId: child.id }),
+    action: OperatorMessage.make({ message: "Use pnpm, not npm." }),
   });
   const applied = (sequence: number, queued: boolean) =>
-    new TranscriptEventView({
+    TranscriptEventView.make({
       sequence: TranscriptSequence.make(sequence),
       attemptId: attempt,
       receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
       direction: "outbound",
-      payload: new InterventionApplied({
+      payload: InterventionApplied.make({
         inputSequence: Sequence.make(1),
         intervention,
-        state: new InterventionState({ held: true, paused: false, queued }),
+        state: InterventionState.make({ held: true, paused: false, queued }),
       }),
     });
   const working = [
-    record(1, new SessionStarted({ session: child })),
-    record(2, new TextOutput({ session: child, text: "Running the tests." })),
+    record(1, SessionStarted.make({ session: child })),
+    record(2, TextOutput.make({ session: child, text: "Running the tests." })),
     applied(3, true),
   ];
   const queuedOf = (events: ReadonlyArray<TranscriptEventView>) => {

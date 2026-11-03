@@ -24,7 +24,7 @@ export const workerConnectionsFor = <A extends { readonly name: WorkerName }>(
     const addresses = new Map<string, A>();
     for (const { worker, address } of initial) configurations.set(address, worker);
     const failure = (attemptId: AttemptId, cause: unknown) =>
-      new ExecutorOperationError({
+      ExecutorOperationError.make({
         operation: "prepare",
         message: `Can't read or record the worker connection for attempt ${attemptId}`,
         cause,
@@ -46,7 +46,7 @@ export const workerConnectionsFor = <A extends { readonly name: WorkerName }>(
       const worker = yield* Effect.gen(function* () {
         if (!(yield* fs.exists(file))) return Option.none<Worker>();
         return Option.some(
-          yield* Schema.decodeUnknownEffect(WorkerJson)(yield* fs.readFileString(file), {
+          yield* Schema.decodeEffect(WorkerJson)(yield* fs.readFileString(file), {
             onExcessProperty: "error",
           }),
         );

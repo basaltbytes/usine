@@ -5,7 +5,7 @@ import { runUsageSource, taskUsage } from "../../src/operator/usage.ts";
 
 /** Supplies aggregate history for operator tests that inject saved runs. */
 export const boardHistory = (runs: ReadonlyArray<RunSummary>): BoardRunHistory =>
-  new BoardRunHistory({
+  BoardRunHistory.make({
     runs,
     items: Object.values(EffectArray.groupBy(runs, ({ itemKey }) => itemKey)).flatMap((history) => {
       const first = history[0];
@@ -13,7 +13,7 @@ export const boardHistory = (runs: ReadonlyArray<RunSummary>): BoardRunHistory =
       const views = history.map((run) => runSummaryView(run, new Set(), new Map()));
       const { durationMillis, runningSince, unmeasured } = taskUsage(views, new Map());
       return [
-        new ItemRunHistory({
+        ItemRunHistory.make({
           itemKey: first.itemKey,
           runCount: history.length,
           attemptCount: history.reduce((sum, run) => sum + run.attempts.length, 0),

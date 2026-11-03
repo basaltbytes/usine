@@ -165,7 +165,7 @@ const fixture = Effect.gen(function* () {
   };
 });
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(emptyEnvironment));
+  effect.pipe(Effect.scoped, Effect.provide([NodeServices.layer, emptyEnvironment]));
 
 it("resumes all setup states, exchanges the redirect once, and saves complete owner-only secrets", () =>
   Effect.runPromise(

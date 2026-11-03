@@ -44,7 +44,7 @@ export const validateConfigurationForm = (
 ) => {
   if (!isFormKind(key.kind))
     return Effect.fail(
-      new ConfigFileError({
+      ConfigFileError.make({
         file: InstancePath.make(key.key),
         stage: "schema",
         expression: Option.none(),
@@ -52,7 +52,7 @@ export const validateConfigurationForm = (
       }),
     );
   const schema = formSchemas[key.kind];
-  return Schema.decodeUnknownEffect(schema)(value, {
+  return Schema.decodeEffect(schema)(value, {
     onExcessProperty: "error",
     errors: "all",
   }).pipe(

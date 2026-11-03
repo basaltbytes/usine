@@ -13,7 +13,7 @@ import {
   sshArguments,
 } from "../src/child-host/child-host.ts";
 
-const host = new RemoteShell({
+const host = RemoteShell.make({
   ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
   sshEnvironment: {},
   destination: "worker.exe.xyz",
@@ -118,7 +118,7 @@ describe("remote shell commands", () => {
       '#!/bin/sh\n[ "$1" = exec ] && [ "$2" = -i ] && [ "$3" = usine-attempt ] || exit 99\nshift 3\nexec "$@"\n',
       { mode: 0o755 },
     );
-    const contained = new RemoteShell({ ...host, container: { runtime, name: "usine-attempt" } });
+    const contained = RemoteShell.make({ ...host, container: { runtime, name: "usine-attempt" } });
     const pidFile = childPidFile(worktree, AgentSessionId.make("parent:attempt/1:child:2"));
     const [, , , , line] = sshArguments(contained, {
       cwd: worktree,

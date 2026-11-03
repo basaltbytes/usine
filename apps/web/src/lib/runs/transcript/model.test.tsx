@@ -76,32 +76,32 @@ import { presentTool, type ToolSection } from "~/lib/runs/transcript/tool/presen
 import { fetchRunDetail } from "~/lib/runs/transcript/fetch";
 
 const attemptId = AttemptId.make("attempt-31");
-const brain = new BrainSpec({
+const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-5"),
   effort: "high",
 });
 
-const liveAttempt = new AttemptView({
+const liveAttempt = AttemptView.make({
   task: AttemptTask.make("Review the task"),
   agent: AgentName.make("developer"),
   operatorIntervened: false,
   id: attemptId,
   number: AttemptNumber.make(1),
   worker: WorkerName.make("local"),
-  workerAccess: new LocalWorkerAccess(),
+  workerAccess: LocalWorkerAccess.make(),
   brain,
   startedAt: "2026-09-01T12:00:00.000Z",
   outcome: null,
   endedAt: null,
   salvage: null,
 });
-const parent = new ParentSession({
+const parent = ParentSession.make({
   id: AgentSessionId.make("parent-session"),
   agent: AgentName.make("developer"),
   brain,
 });
-const child = new ChildSession({
+const child = ChildSession.make({
   id: AgentSessionId.make("child-session"),
   parentId: parent.id,
   agent: AgentName.make("reviewer"),
@@ -109,7 +109,7 @@ const child = new ChildSession({
 });
 
 const record = (sequence: number, payload: TranscriptEventView["payload"], attempt = attemptId) =>
-  new TranscriptEventView({
+  TranscriptEventView.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId: attempt,
     receivedAt: new Date(Date.parse(liveAttempt.startedAt) + sequence * 1000).toISOString(),
@@ -118,7 +118,7 @@ const record = (sequence: number, payload: TranscriptEventView["payload"], attem
   });
 
 const sessionEvent = (sequence: number, event: AgentSessionEvent, attempt = attemptId) =>
-  record(sequence, new AttemptChannel.SessionEvent({ event }), attempt);
+  record(sequence, AttemptChannel.SessionEvent.make({ event }), attempt);
 
 const tools = (
   events: ReadonlyArray<TranscriptEventView>,
@@ -137,52 +137,52 @@ const event = (
   const agent = AgentName.make(scope === "child" ? `agent-${session}` : "developer");
   const sessionView =
     scope === "child"
-      ? new ChildSession({
+      ? ChildSession.make({
           id: AgentSessionId.make(session),
           parentId: AgentSessionId.make("parent-session"),
           agent,
           brain,
         })
-      : new ParentSession({
+      : ParentSession.make({
           id: AgentSessionId.make(session),
           agent,
           brain,
         });
-  return new TranscriptEventView({
+  return TranscriptEventView.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId,
     receivedAt: "2026-09-01T12:00:00.000Z",
     direction: "outbound",
     payload:
       scope === "channel"
-        ? new AttemptChannel.Started({
+        ? AttemptChannel.Started.make({
             parentModel: ModelId.make("gpt-5"),
           })
-        : new AttemptChannel.SessionEvent({
-            event: new TextOutput({ session: sessionView, text }),
+        : AttemptChannel.SessionEvent.make({
+            event: TextOutput.make({ session: sessionView, text }),
           }),
   });
 };
 
 const rateLimits = (sequence: number, usedPercent: number) =>
-  new TranscriptEventView({
+  TranscriptEventView.make({
     sequence: TranscriptSequence.make(sequence),
     attemptId,
     receivedAt: "2026-09-01T12:00:00.000Z",
     direction: "outbound",
-    payload: new AttemptChannel.SessionEvent({
-      event: new PoolRateLimitsUpdated({
-        session: new ParentSession({
+    payload: AttemptChannel.SessionEvent.make({
+      event: PoolRateLimitsUpdated.make({
+        session: ParentSession.make({
           id: AgentSessionId.make("parent-session"),
           agent: AgentName.make("developer"),
           brain,
         }),
         pool: "chatgptPlan",
-        rateLimits: new RateLimitsSnapshot({
+        rateLimits: RateLimitsSnapshot.make({
           limitId: Option.none(),
           limitName: Option.none(),
           primary: Option.some(
-            new RateLimitWindow({
+            RateLimitWindow.make({
               usedPercent,
               windowDurationMinutes: Option.none(),
               resetsAt: Option.none(),
@@ -236,7 +236,7 @@ describe("run transcript", () => {
   it("shows an Agent's GitHub change as one line, labels in their GitHub colors and the comment linked, and the operator's Board move as theirs", () => {
     const events = [event(1, "Removing the claim and handing over for review.")];
     const label = (name: string, color: string) =>
-      new LabelView({ name: GitHubLabelName.make(name), color, description: null });
+      LabelView.make({ name: GitHubLabelName.make(name), color, description: null });
     const comment = "https://github.com/basaltbytes/usine/issues/247#issuecomment-6216970836";
     const document = withGitHubChanges(
       readerDocument(projectTranscript(events, [liveAttempt]), [liveAttempt], events),
@@ -244,20 +244,20 @@ describe("run transcript", () => {
         [
           attemptId,
           [
-            new LabelRemovedView({
+            LabelRemovedView.make({
               at: "2026-09-01T12:00:02.000Z",
               label: label("agent-in-progress", "fbca04"),
             }),
-            new LabelAddedView({
+            LabelAddedView.make({
               at: "2026-09-01T12:00:02.000Z",
               label: label("ready-for-review", "0e8a16"),
             }),
-            new BoardMovedView({
+            BoardMovedView.make({
               at: "2026-09-01T12:00:04.250Z",
               fromLane: LaneName.make("Review"),
               toLane: LaneName.make("Findings"),
             }),
-            new CommentedView({ at: "2026-09-01T12:00:07.000Z", url: comment }),
+            CommentedView.make({ at: "2026-09-01T12:00:07.000Z", url: comment }),
           ],
         ],
       ]),
@@ -283,15 +283,15 @@ describe("run transcript", () => {
     const ended = (outOfMemory: OutOfMemoryKills | null) =>
       reader(
         [event(1, "Running the test gate.")],
-        [new AttemptView({ ...liveAttempt, outcome: new CanceledAttemptView(), outOfMemory })],
+        [AttemptView.make({ ...liveAttempt, outcome: CanceledAttemptView.make(), outOfMemory })],
       ).replace(/<[^>]+>/gu, "");
     const total = totalOutOfMemoryKills([
-      new ContainerOutOfMemoryKills({
+      ContainerOutOfMemoryKills.make({
         container: ContainerId.make("a".repeat(64)),
         kills: 2,
         memoryMib: ContainerMemoryMib.make(4096),
       }),
-      new ContainerOutOfMemoryKills({
+      ContainerOutOfMemoryKills.make({
         container: ContainerId.make("b".repeat(64)),
         kills: 1,
         memoryMib: ContainerMemoryMib.make(7168),
@@ -302,26 +302,26 @@ describe("run transcript", () => {
       "Warning: The kernel killed 3 processes for memory across containers in this attempt. The last container with recorded kills had a 7168 MiB memory limit",
     );
     assert.include(
-      ended(new OutOfMemoryKills({ kills: 1, memoryMib: ContainerMemoryMib.make(4096) })),
+      ended(OutOfMemoryKills.make({ kills: 1, memoryMib: ContainerMemoryMib.make(4096) })),
       "Warning: The kernel killed 1 process for memory across containers in this attempt. The last container with recorded kills had a 4096 MiB memory limit",
     );
     assert.notInclude(ended(null), "The kernel killed");
   });
 
   it("keeps a finished child's handoff when its launch is outside the loaded page", () => {
-    const saved = new HarnessSession({
+    const saved = HarnessSession.make({
       id: HarnessSessionId.make("vendor-thread"),
       cwd: "/worker/repo",
     });
     const started = sessionEvent(
       1,
-      new SessionStarted({
+      SessionStarted.make({
         session: child,
         harnessSession: Option.some(saved),
         prompt: Option.some("Exact child prompt\n  unchanged"),
       }),
     );
-    const finished = sessionEvent(2, new SessionFinished({ session: child }));
+    const finished = sessionEvent(2, SessionFinished.make({ session: child }));
     const projection = projectTranscript([finished], [liveAttempt], [started, finished]);
     const session = projection.sessions[0];
     assert(session !== undefined);
@@ -330,7 +330,7 @@ describe("run transcript", () => {
     assert.deepStrictEqual(session.prompt, Option.some("Exact child prompt\n  unchanged"));
     assert.strictEqual(session.entries.length, 1);
     const legacy = projectTranscript(
-      [sessionEvent(1, new SessionStarted({ session: child }))],
+      [sessionEvent(1, SessionStarted.make({ session: child }))],
       [liveAttempt],
     );
     const legacySession = legacy.sessions[0];
@@ -347,7 +347,7 @@ describe("run transcript", () => {
         event(3, "Another child update", "child"),
         event(4, "Channel notice", "channel"),
       ],
-      [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
+      [AttemptView.make({ ...liveAttempt, outcome: SucceededAttemptView.make() })],
     );
     assert.include(markup, "<strong>Parent update</strong>");
     assert.ok(markup.indexOf("Parent update") < markup.indexOf("Child update"));
@@ -383,11 +383,11 @@ describe("run transcript", () => {
     const output = { text: "All tests passed", details: "y".repeat(200) };
     const started = sessionEvent(
       1,
-      new ToolStarted({ session: parent, callId: "call-1", tool: "shell", input }),
+      ToolStarted.make({ session: parent, callId: "call-1", tool: "shell", input }),
     );
     const finished = sessionEvent(
       3,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "call-1",
         tool: "shell",
@@ -419,7 +419,7 @@ describe("run transcript", () => {
     const output = { message: "Permission denied" };
     const finished = sessionEvent(
       3,
-      new ToolFinished({ session: parent, callId: "call-1", tool: "read", output, isError: true }),
+      ToolFinished.make({ session: parent, callId: "call-1", tool: "read", output, isError: true }),
     );
     const call = tools([finished])[0];
     assert(call !== undefined && call.state._tag === "Error");
@@ -430,13 +430,13 @@ describe("run transcript", () => {
   });
 
   it("scopes repeated session and tool identities to their own Attempt", () => {
-    const retried = new AttemptView({
+    const retried = AttemptView.make({
       ...liveAttempt,
       id: AttemptId.make("attempt-32"),
       number: AttemptNumber.make(2),
     });
-    const failed = new AttemptView({ ...liveAttempt, outcome: new CanceledAttemptView() });
-    const start = new ToolStarted({
+    const failed = AttemptView.make({ ...liveAttempt, outcome: CanceledAttemptView.make() });
+    const start = ToolStarted.make({
       session: child,
       callId: "same-call",
       tool: "read",
@@ -468,16 +468,16 @@ describe("run transcript", () => {
   });
 
   it.each([
-    new AttemptChannel.Final({ result: new StepResult({ message: "Done", facts: [] }) }),
-    new FailedTranscriptView({ failure: new AgentFailureView({ message: "Failed" }) }),
-    new AttemptChannel.Interrupted(),
+    AttemptChannel.Final.make({ result: StepResult.make({ message: "Done", facts: [] }) }),
+    FailedTranscriptView.make({ failure: AgentFailureView.make({ message: "Failed" }) }),
+    AttemptChannel.Interrupted.make(),
   ])(
     "stops unfinished session activity when $_tag reaches the transcript before Run metadata",
     (terminal) => {
       const events = [
         sessionEvent(
           1,
-          new ToolStarted({
+          ToolStarted.make({
             session: child,
             callId: "call-1",
             tool: "shell",
@@ -500,9 +500,9 @@ describe("run transcript", () => {
     const events = [
       sessionEvent(
         1,
-        new ToolStarted({ session: child, callId: "call-1", tool: "read", input: null }),
+        ToolStarted.make({ session: child, callId: "call-1", tool: "read", input: null }),
       ),
-      sessionEvent(2, new SessionFinished({ session: child })),
+      sessionEvent(2, SessionFinished.make({ session: child })),
     ];
     const projection = projectTranscript(events, [liveAttempt]);
     assert.strictEqual(projection.sessions[0]?.status, "Finished");
@@ -514,18 +514,18 @@ describe("run transcript", () => {
 
   it("names the Attempt's models in its metadata line instead of a start row, and keeps every session's prose", () => {
     const events = [
-      record(1, new AttemptChannel.Started({ parentModel: brain.model })),
-      sessionEvent(2, new TextOutput({ session: parent, text: "A useful explanation" })),
+      record(1, AttemptChannel.Started.make({ parentModel: brain.model })),
+      sessionEvent(2, TextOutput.make({ session: parent, text: "A useful explanation" })),
       sessionEvent(
         3,
-        new ToolStarted({
+        ToolStarted.make({
           session: parent,
           callId: "call-1",
           tool: "read",
           input: { path: "README.md" },
         }),
       ),
-      sessionEvent(4, new TextOutput({ session: child, text: "Child explanation" })),
+      sessionEvent(4, TextOutput.make({ session: child, text: "Child explanation" })),
     ];
     const markup = reader(events);
     assert.include(markup, "A useful explanation");
@@ -564,17 +564,17 @@ describe("run transcript", () => {
     const firstAttempt = AttemptId.make("attempt-1");
     const secondAttempt = AttemptId.make("attempt-2");
     const cursors = [
-      new TranscriptPageCursor({
+      TranscriptPageCursor.make({
         attemptId: firstAttempt,
         before: TranscriptSequence.make(100),
       }),
-      new TranscriptPageCursor({
+      TranscriptPageCursor.make({
         attemptId: secondAttempt,
         before: TranscriptSequence.make(200),
       }),
     ];
     const replaced = replaceEarlierCursor(cursors, secondAttempt, [
-      new TranscriptPageCursor({
+      TranscriptPageCursor.make({
         attemptId: secondAttempt,
         before: TranscriptSequence.make(50),
       }),
@@ -597,7 +597,7 @@ describe("run transcript", () => {
     });
     queryClient.setQueryData(key, {
       earlierTranscript: [
-        new TranscriptPageCursor({
+        TranscriptPageCursor.make({
           attemptId,
           before: TranscriptSequence.make(300),
         }),
@@ -609,7 +609,7 @@ describe("run transcript", () => {
         key,
         (previous) => ({
           earlierTranscript: replaceEarlierCursor(previous?.earlierTranscript ?? [], attemptId, [
-            new TranscriptPageCursor({
+            TranscriptPageCursor.make({
               attemptId,
               before: TranscriptSequence.make(before),
             }),
@@ -637,11 +637,11 @@ describe("run transcript", () => {
   });
 
   it("adds an earlier page without replacing a newer Run outcome or available actions", () => {
-    const cursor = new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(2) });
-    const stale = new RunDetailView({
+    const cursor = TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(2) });
+    const stale = RunDetailView.make({
       agentDefinitionChanged: false,
       sessionState: [],
-      run: new RunView({
+      run: RunView.make({
         agentBrain: brain,
         id: RunId.make("run-31"),
         itemKey: ItemKey.make("github:basaltbytes/usine:31"),
@@ -669,12 +669,12 @@ describe("run transcript", () => {
       transcript: [event(1, "Earlier message")],
       earlierTranscript: [],
     });
-    const current = new RunDetailView({
+    const current = RunDetailView.make({
       ...stale,
-      run: new RunView({
+      run: RunView.make({
         ...stale.run,
         state: "Succeeded",
-        attempts: [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
+        attempts: [AttemptView.make({ ...liveAttempt, outcome: SucceededAttemptView.make() })],
         approval: null,
         resultMessage: "Delivered",
         canCancel: false,
@@ -694,15 +694,15 @@ describe("run transcript", () => {
       event(12, "Second page"),
       record(
         13,
-        new AttemptChannel.Final({
-          result: new StepResult({ message: "All work complete", facts: [] }),
+        AttemptChannel.Final.make({
+          result: StepResult.make({ message: "All work complete", facts: [] }),
         }),
       ),
     ];
-    const detail = new RunDetailView({
+    const detail = RunDetailView.make({
       agentDefinitionChanged: false,
       sessionState: [],
-      run: new RunView({
+      run: RunView.make({
         agentBrain: brain,
         id: RunId.make("run-31"),
         itemKey: ItemKey.make("github:basaltbytes/usine:31"),
@@ -714,7 +714,7 @@ describe("run transcript", () => {
         openedAt: liveAttempt.startedAt,
         closedAt: liveAttempt.startedAt,
         task: "Build it",
-        attempts: [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
+        attempts: [AttemptView.make({ ...liveAttempt, outcome: SucceededAttemptView.make() })],
         approval: null,
         runAgain: null,
         resultMessage: "All work complete",
@@ -734,21 +734,21 @@ describe("run transcript", () => {
     // assuming a page size.
     const read = async (request: ColdTranscriptRequest | TailTranscriptRequest) => {
       const after = request._tag === "TailTranscriptRequest" ? request.after : 0;
-      return new RunDetailView({
+      return RunDetailView.make({
         ...detail,
         transcript: transcript.filter(({ sequence }) => sequence > after).slice(0, 1),
       });
     };
     const loaded = await fetchRunDetail(
-      new TailTranscriptRequest({ after: TranscriptSequence.make(10) }),
+      TailTranscriptRequest.make({ after: TranscriptSequence.make(10) }),
       read,
     );
     assert.deepStrictEqual(loaded.transcript, transcript);
     assert.strictEqual(loaded.run.resultMessage, "All work complete");
 
-    const running = new RunDetailView({
+    const running = RunDetailView.make({
       ...detail,
-      run: new RunView({
+      run: RunView.make({
         ...detail.run,
         state: "Running",
         attempts: [liveAttempt],
@@ -758,9 +758,9 @@ describe("run transcript", () => {
       }),
     });
     const onePoll = await fetchRunDetail(
-      new TailTranscriptRequest({ after: TranscriptSequence.make(10) }),
+      TailTranscriptRequest.make({ after: TranscriptSequence.make(10) }),
       async (request) =>
-        new RunDetailView({
+        RunDetailView.make({
           ...running,
           transcript: (await read(request)).transcript,
         }),
@@ -768,14 +768,14 @@ describe("run transcript", () => {
     assert.deepStrictEqual(onePoll.transcript, transcript.slice(0, 1));
     assert.strictEqual(onePoll.run.canCancel, true);
 
-    const cold = new RunDetailView({
+    const cold = RunDetailView.make({
       ...detail,
       transcript: transcript.slice(-1),
       earlierTranscript: [
-        new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(13) }),
+        TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(13) }),
       ],
     });
-    const initial = await fetchRunDetail(new ColdTranscriptRequest(), async (request) =>
+    const initial = await fetchRunDetail(ColdTranscriptRequest.make(), async (request) =>
       request._tag === "ColdTranscriptRequest" ? cold : read(request),
     );
     assert.deepStrictEqual(initial, cold);
@@ -784,10 +784,10 @@ describe("run transcript", () => {
 
 const completedTool = (name: string, input: Schema.Json, output: Schema.Json) => {
   const call = tools([
-    sessionEvent(1, new ToolStarted({ session: parent, callId: "presented", tool: name, input })),
+    sessionEvent(1, ToolStarted.make({ session: parent, callId: "presented", tool: name, input })),
     sessionEvent(
       2,
-      new ToolFinished({
+      ToolFinished.make({
         session: parent,
         callId: "presented",
         tool: name,
@@ -890,7 +890,7 @@ describe("tool presentation", () => {
     const call = tools([
       sessionEvent(
         2,
-        new ToolFinished({
+        ToolFinished.make({
           session: parent,
           callId: "changes",
           tool: "file_change",
@@ -915,7 +915,7 @@ describe("tool presentation", () => {
     const call = tools([
       sessionEvent(
         1,
-        new ToolStarted({
+        ToolStarted.make({
           session: parent,
           callId: "pending-edit",
           tool: "file_change",

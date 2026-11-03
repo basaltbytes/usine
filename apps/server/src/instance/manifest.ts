@@ -68,28 +68,30 @@ export const parseManifest = (
   text: string,
   lockfiles: ReadonlyArray<string>,
 ): Effect.Effect<InstanceManifest, InstanceManifestError> =>
-  Schema.decodeUnknownEffect(PackageJson)(text).pipe(
-    Effect.mapError((error) => new InstanceManifestError({ path, reason: error.message })),
-    Effect.map((manifest) => {
-      const dependencies = [
-        ...Object.entries(manifest.dependencies ?? {}),
-        ...Object.entries(manifest.devDependencies ?? {}),
-        ...Object.entries(manifest.optionalDependencies ?? {}),
-      ].filter(([name]) => name.startsWith("@usine/"));
-      const server = dependencies.find(([name]) => name === SERVER_PACKAGE);
-      return new InstanceManifest({
-        path,
-        text,
-        pins: dependencies
-          .filter(([, spec]) => spec !== "" && !LOCAL_SPEC.test(spec))
-          .map(([name, spec]) => new EnginePin({ name, spec })),
-        linkedServer:
-          server !== undefined && LOCAL_SPEC.test(server[1])
-            ? Option.some(server[1])
-            : Option.none(),
-        packageManager: packageManagerOf(manifest.packageManager, lockfiles),
-        lockfiles,
-      });
+  Schema.decodeEffect(PackageJson)(text).pipe(
+    Effect.mapBoth({
+      onFailure: (error) => InstanceManifestError.make({ path, reason: error.message }),
+      onSuccess: (manifest) => {
+        const dependencies = [
+          ...Object.entries(manifest.dependencies ?? {}),
+          ...Object.entries(manifest.devDependencies ?? {}),
+          ...Object.entries(manifest.optionalDependencies ?? {}),
+        ].filter(([name]) => name.startsWith("@usine/"));
+        const server = dependencies.find(([name]) => name === SERVER_PACKAGE);
+        return InstanceManifest.make({
+          path,
+          text,
+          pins: dependencies
+            .filter(([, spec]) => spec !== "" && !LOCAL_SPEC.test(spec))
+            .map(([name, spec]) => EnginePin.make({ name, spec })),
+          linkedServer:
+            server !== undefined && LOCAL_SPEC.test(server[1])
+              ? Option.some(server[1])
+              : Option.none(),
+          packageManager: packageManagerOf(manifest.packageManager, lockfiles),
+          lockfiles,
+        });
+      },
     }),
   );
 
@@ -98,7 +100,7 @@ export const readManifest = Effect.fn("Instance.readManifest")(function* (direct
   const fileSystem = yield* FileSystem.FileSystem;
   const path = join(directory, "package.json");
   const failure = (error: { readonly message: string }) =>
-    new InstanceManifestError({ path, reason: error.message });
+    InstanceManifestError.make({ path, reason: error.message });
   if (!(yield* fileSystem.exists(path).pipe(Effect.mapError(failure)))) {
     return Option.none<InstanceManifest>();
   }

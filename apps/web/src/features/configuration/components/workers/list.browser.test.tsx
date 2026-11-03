@@ -39,7 +39,7 @@ beforeEach(() => {
   });
   queryClient.setQueryData(
     overviewQuery().queryKey,
-    new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
+    ReadyOverview.make({ projects: [], loops: [], needsYou: [] }),
   );
   queryClient.setQueryData(configurationQuery().queryKey, configuration);
   queryClient.setQueryData(workersQuery().queryKey, configuration);
@@ -189,7 +189,7 @@ it("fetches current workers on a first visit after cached configuration is inval
   await commands.workerPreflightResponses(encodeConfiguration(updated));
   await invalidateChanges(
     queryClient,
-    new ChangeNotice({
+    ChangeNotice.make({
       revision: 1,
       reset: false,
       changes: [{ kind: "worker", id: "eu-1" }],
@@ -214,11 +214,11 @@ declare module "vitest/browser" {
 
 const encodeConfiguration = Schema.encodeSync(Schema.fromJsonString(ConfigurationView));
 const withPreflight = (check: WorkerConfigurationView["prerequisites"]) =>
-  new ConfigurationView({
+  ConfigurationView.make({
     ...configuration,
     workers: configuration.workers.map((worker) =>
       worker.name === "eu-1"
-        ? new WorkerConfigurationView({ ...worker, prerequisites: check })
+        ? WorkerConfigurationView.make({ ...worker, prerequisites: check })
         : worker,
     ),
   });
@@ -243,11 +243,11 @@ it("disables preflight for a busy worker and shows the reason", async () => {
     .toBeEnabled();
   queryClient.setQueryData(
     workersQuery().queryKey,
-    new ConfigurationView({
+    ConfigurationView.make({
       ...configuration,
       workers: configuration.workers.map((worker) =>
         worker.name === "eu-1"
-          ? new WorkerConfigurationView({ ...worker, preflightRunning: true })
+          ? WorkerConfigurationView.make({ ...worker, preflightRunning: true })
           : worker,
       ),
     }),

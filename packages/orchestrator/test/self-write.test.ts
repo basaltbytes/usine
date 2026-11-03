@@ -65,7 +65,7 @@ import {
 } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const agent = new AgentFile({
+const agent = AgentFile.make({
   name: AgentName.make("developer"),
   harness: "codex",
   model: ModelId.make("gpt-6-astra"),
@@ -74,8 +74,8 @@ const agent = new AgentFile({
   parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
-const instance = new LoadedInstance({
-  config: Schema.decodeUnknownSync(UsineConfig)({
+const instance = LoadedInstance.make({
+  config: Schema.decodeSync(UsineConfig)({
     version: 1,
     repos: [
       {
@@ -93,9 +93,9 @@ const instance = new LoadedInstance({
   quarantinedLoops: [],
   warnings: [],
   loops: [
-    new LoopFile({
+    LoopFile.make({
       name: LoopName.make("start-dev"),
-      trigger: new IssueTrigger({
+      trigger: IssueTrigger.make({
         on: "issue",
         if: Source.make('item.labels.nodes.exists(label, label.name == "ready")'),
       }),
@@ -156,15 +156,15 @@ describe("Board self-writes", () => {
               Effect.gen(function* () {
                 changeRequests += 1;
                 const now = yield* Clock.currentTimeMillis;
-                return new RepositoryChanges({
+                return RepositoryChanges.make({
                   cursor,
-                  items: [new ChangedIssue({ number: 74, updatedAt: DateTime.makeUnsafe(now) })],
+                  items: [ChangedIssue.make({ number: 74, updatedAt: DateTime.makeUnsafe(now) })],
                   backlog: false,
-                  nextPollAt: Option.some(DateTime.makeUnsafe(now + 60_000)),
+                  nextPollAt: Option.some(DateTime.makeUnsafe(now + 60000)),
                 });
               }),
             labels: () =>
-              Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+              Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
             snapshot: () =>
               Effect.gen(function* () {
                 if (
@@ -177,7 +177,7 @@ describe("Board self-writes", () => {
                     "a writer rate limit prevents an early reconciliation snapshot",
                   );
                 }
-                return new IssueSnapshot({
+                return IssueSnapshot.make({
                   payload: payload(labels),
                   contentHash: ContentHash.make((labels.includes("ready") ? "b" : "a").repeat(64)),
                 });
@@ -190,12 +190,12 @@ describe("Board self-writes", () => {
                 if (outcome !== "success") {
                   const error =
                     outcome === "rate limit"
-                      ? new GitHubRateLimitError({
+                      ? GitHubRateLimitError.make({
                           operation: "update-item-labels",
                           retryAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 300),
                           message: "Wait before removing the source label",
                         })
-                      : new GitHubApiError({
+                      : GitHubApiError.make({
                           operation: "update-item-labels",
                           status: Option.some(503),
                           message: "Destination added; source deletion failed",
@@ -210,7 +210,7 @@ describe("Board self-writes", () => {
           const executor = Layer.succeed(StepExecutor)({
             workers: Effect.succeed([WorkerName.make("local")]),
             isLive: () => Effect.succeed(false),
-            outcome: () => Effect.succeed(Option.none()),
+            outcome: () => Effect.succeedNone,
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
@@ -237,14 +237,15 @@ describe("Board self-writes", () => {
               appChanges: () => Effect.die("Board moves read no Item history"),
             }),
             Layer.succeed(ScheduleTriggers)({
-              latest: Effect.succeed(Option.none()),
+              latest: Effect.succeedNone,
               run: () => Effect.never,
               tick: () => Effect.die("unused"),
             }),
           );
-          const pollingLayer = PollingTriggers.layer
-            .pipe(Layer.provide(idleCiMonitor))
-            .pipe(Layer.provideMerge(dependencies));
+          const pollingLayer = PollingTriggers.layer.pipe(
+            Layer.provide(idleCiMonitor),
+            Layer.provideMerge(dependencies),
+          );
           const layer = Operator.layer.pipe(
             Layer.provide(configurationLayer),
             Layer.provideMerge(pollingLayer),
@@ -256,7 +257,7 @@ describe("Board self-writes", () => {
             const fiber = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
             yield* awaitCondition(polling.latest, Option.isSome);
             assert.strictEqual(changeRequests, 1);
-            const move = new BoardMove({
+            const move = BoardMove.make({
               repository,
               item: ItemNumber.make(74),
               toLane: BoardLaneId.make("authored:Ready"),

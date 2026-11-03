@@ -12,11 +12,11 @@ import { githubDownloadClient } from "../src/github/download.ts";
 import { GITHUB_ORIGINS, githubRoute, type GitHubHost } from "../src/github/github.ts";
 import { ATTACHMENT, REPOSITORY, WORKER } from "./fixtures.ts";
 
-const attachment = new Attachment({
+const attachment = Attachment.make({
   id: ATTACHMENT,
   worker: WORKER,
   repository: REPOSITORY,
-  credential: new AnonymousCredential(),
+  credential: AnonymousCredential.make(),
   expiresAt: DateTime.makeUnsafe("2026-10-30T00:00:00Z"),
 });
 const BLOB = "https://productionresultssa18.blob.core.windows.net/logs/job?sig=secret";

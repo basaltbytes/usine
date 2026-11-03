@@ -107,9 +107,9 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
 /** The default Gateway LLM providers: an Anthropic API key, matching `gatewayAddress`. */
 const GATEWAY_PROVIDERS: LlmProviders = {
   anthropic: Option.some(
-    new AnthropicProvider({
+    AnthropicProvider.make({
       upstream: UpstreamBase.make("https://api.anthropic.com"),
-      credential: new AnthropicApiKey({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
+      credential: AnthropicApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
     }),
   ),
   openai: Option.none(),
