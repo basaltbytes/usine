@@ -45,7 +45,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             const canceled = yield* store.snapshot(runId);
             assert.deepStrictEqual(canceled.attempts[0]?.salvage, Option.some(pushed));
             assert.strictEqual(
-              (canceled.attempts[0]?.outcome).pipe(
+              canceled.attempts[0]?.outcome.pipe(
                 Option.map((o) => o._tag),
                 Option.getOrNull,
               ),
@@ -118,7 +118,7 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             assert(fresh._tag === "AttemptStarted");
             assert.deepStrictEqual(fresh.execution.resume, Option.some(pushed));
             assert.strictEqual(
-              ((yield* store.snapshot(retriedRun)).attempts[1]?.salvage).pipe(
+              (yield* store.snapshot(retriedRun)).attempts[1]?.salvage.pipe(
                 Option.map((s) => s._tag),
                 Option.getOrNull,
               ),

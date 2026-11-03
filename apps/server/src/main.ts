@@ -2,7 +2,7 @@
 import type { ConfigCommand } from "./configuration/command.ts";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Config, ConfigProvider, Console, Effect, Layer, Match } from "effect";
+import { Config, ConfigProvider, Console, Effect, Match } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { CLI_USAGE, type CliEnvironment, packageVersion, parseCli } from "./cli.ts";
 import { failureMessage } from "./failure-message.ts";

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Option, Redacted, Schema } from "effect";
+import { Effect, Option, Redacted, Schema, Layer } from "effect";
 import { Base64, Base64Url } from "effect/encoding";
 import { Headers } from "effect/http";
 import {
@@ -21,7 +21,7 @@ import {
 } from "./fixtures.ts";
 
 const tokens = <A, E>(effect: Effect.Effect<A, E, CallerTokens>) =>
-  effect.pipe(Effect.provide(Layer.mergeAll(CallerTokens.layer, settingsLayer(NO_PROVIDERS))));
+  effect.pipe(Effect.provide(CallerTokens.layer.pipe(Layer.provide(settingsLayer(NO_PROVIDERS)))));
 
 const claims = CallerClaims.make({
   attachment: ATTACHMENT,
@@ -85,9 +85,8 @@ describe("CallerTokens", () => {
     Effect.gen(function* () {
       const foreign = yield* Effect.flatMap(CallerTokens, (callers) => callers.issue(claims)).pipe(
         Effect.provide(
-          Layer.mergeAll(
-            CallerTokens.layer,
-            settingsLayer(NO_PROVIDERS, "another-gateway-key-0123456789abcdef"),
+          CallerTokens.layer.pipe(
+            Layer.provide(settingsLayer(NO_PROVIDERS, "another-gateway-key-0123456789abcdef")),
           ),
         ),
       );

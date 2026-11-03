@@ -1,5 +1,5 @@
 import { GitHubAppSecretsFromJson } from "@usine/github/local-secrets";
-import { ConfigProvider, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { ConfigProvider, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { assert, it } from "vitest";
 import { GitHubSignIn, githubSignInLayer } from "../../src/auth/github.ts";

@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { CommitSha } from "../repository.ts";
 
 /** A commit between the workspace base and the final HEAD. */

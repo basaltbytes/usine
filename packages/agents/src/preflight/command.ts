@@ -32,17 +32,23 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   args: ReadonlyArray<string>,
 ) {
   yield* Effect.annotateCurrentSpan({ harness, capability, host: host._tag });
-  return yield* hostOutput(host, { environment, command, args }).pipe(
-    Effect.filterOrFail(
-      (output) => !(host._tag === "RemoteShell" && output.exitCode === SSH_FAILURE),
-      (output) =>
-        SessionOperationError.make({
-          operation: "launch",
-          sessionId: Option.none(),
-          message: `Can't reach ${host.destination} to run ${command}`,
-          cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
-        }),
-    ),
+  const output = hostOutput(host, { environment, command, args });
+  const reachable =
+    host._tag === "RemoteShell"
+      ? output.pipe(
+          Effect.filterOrFail(
+            (result) => result.exitCode !== SSH_FAILURE,
+            () =>
+              SessionOperationError.make({
+                operation: "launch",
+                sessionId: Option.none(),
+                message: `Can't reach ${host.destination} to run ${command}`,
+                cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
+              }),
+          ),
+        )
+      : output;
+  return yield* reachable.pipe(
     Effect.timeout("30 seconds"),
     Effect.catchTags({
       PlatformError: () =>

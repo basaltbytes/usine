@@ -175,7 +175,7 @@ it.live("operator cancellation settles the ended CI attempt and rejects late com
         const canceled = yield* engine.inspect(accepted.runId);
         assert.strictEqual(canceled.run.state._tag, "Canceled");
         assert.strictEqual(
-          (canceled.attempts[0]?.outcome).pipe(
+          canceled.attempts[0]?.outcome.pipe(
             Option.map(({ _tag }) => _tag),
             Option.getOrNull,
           ),

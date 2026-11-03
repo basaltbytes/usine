@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Layer } from "effect";
 import { PiChildBackend } from "../../src/runtime.ts";
 import { piChildBackendLayer, piSdkLive } from "../../src/pi/pi.ts";
 import { steeringContract, interruptionContract } from "./contract.ts";

@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { Effect, type FileSystem, type Path, Schema } from "effect";
+import { Effect, type FileSystem, type Path, Schema, Layer } from "effect";
 import { CodexChildBackend } from "../../src/runtime.ts";
 import { codexAppServerLive } from "../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../src/pi/codex/codex.ts";

@@ -98,7 +98,8 @@ const socketForwarder = (path: string, proxy: Listener) =>
     Effect.callback<ReturnType<typeof createServer>>((resume) => {
       const server = createServer((client) => {
         const upstream = connect(proxy.port, proxy.host);
-        client.pipe(upstream, client);
+        client.pipe(upstream);
+        upstream.pipe(client);
         client.on("error", () => upstream.destroy());
         upstream.on("error", () => client.destroy());
       });

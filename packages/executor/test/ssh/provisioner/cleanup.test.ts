@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Option, Redacted } from "effect";
+import { Effect, Option, Redacted, Layer } from "effect";
 import { WorkerMachines } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";

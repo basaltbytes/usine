@@ -41,7 +41,7 @@ const unreachableCloudflare = {
   image: "usine",
 } as const;
 
-const startupFailure = (workers: (typeof UsineConfig.Encoded)["workers"]) =>
+const startupFailure = (workers: NonNullable<(typeof UsineConfig.Encoded)["workers"]>) =>
   Effect.gen(function* () {
     const directory = InstanceDirectory.make(
       yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({ prefix: "usine-engine-" }),

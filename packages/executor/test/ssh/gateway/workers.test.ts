@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { SshDestination, WorkerName } from "@usine/core/worker";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import {

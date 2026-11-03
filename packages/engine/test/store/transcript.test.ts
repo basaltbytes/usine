@@ -20,7 +20,7 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { eq, sql } from "drizzle-orm";
-import { DateTime, Effect, FileSystem, Logger, Option, References, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Logger, Option, References, Schema, Layer } from "effect";
 
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { RunDatabase } from "../../src/database/database.ts";

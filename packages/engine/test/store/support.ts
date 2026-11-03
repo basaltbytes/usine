@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
