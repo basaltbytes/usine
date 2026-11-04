@@ -25,8 +25,6 @@ In your output (issue titles, refactor proposals, hypotheses, test names), name 
 
 If the concept isn't in the glossary, either you're inventing language the project doesn't use (reconsider) or the glossary has a gap (note it for `/domain-modeling`).
 
-## Flag ADR conflicts
+## Amend ADRs that a change contradicts
 
-If your output contradicts an ADR, say so instead of overriding it silently:
-
-> _Contradicts ADR-0007 (...) — but worth reopening because…_
+An ADR records why a decision was taken, not a limit on later work. If your change contradicts one, make the change and amend the ADR in the same pull request: add a dated section with the new reason, and name the ADR in the pull request body.
