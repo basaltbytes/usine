@@ -56,6 +56,8 @@ usine logout chatgpt --target usine-gateway
 
 Local preflight and attempt children use the same credential directories. If one gateway is unavailable, Settings shows its error while other gateways remain usable. `--target` can select a healthy gateway independently.
 
+Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration. Connect replaces `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default), and disconnect removes it. Keyring credentials remain available to Codex commands run outside usine. To sign in directly for usine, run `codex -c 'cli_auth_credentials_store="file"' login --device-auth`.
+
 Subscription sign-in uses the installed Claude Code `setup-token` command or Codex `login --device-auth` command in a private temporary directory. Claude requires `script` and a code from its authorization page. Codex displays a device code for authorization in another browser. `--api-key` reads a masked key from the terminal. Ctrl+C cancels subscription sign-in. Failed or cancelled authorization preserves the previous login.
 
 Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions. Logout disables the managed provider and removes its routing from workers.

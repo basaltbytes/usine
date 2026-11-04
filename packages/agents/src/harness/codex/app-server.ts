@@ -110,7 +110,10 @@ export const codexAppServerCommand = (
         Option.map(client.sessionId, (sessionId) => childPidFile(client.cwd, sessionId)),
       ),
       command: "codex",
-      args: appServerArgs(client.cwd),
+      args: [
+        ...appServerArgs(client.cwd),
+        ...(client.host._tag === "LocalProcess" ? ["-c", 'cli_auth_credentials_store="file"'] : []),
+      ],
     },
     stdin === undefined ? lifetime : { ...lifetime, stdin },
   );

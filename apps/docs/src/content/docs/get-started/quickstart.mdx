@@ -123,7 +123,9 @@ Expected: the terminal reports `usine is running at http://127.0.0.1:7331`, and 
 
 Local preflight checks and harness children use the same `CODEX_HOME` and `CLAUDE_CONFIG_DIR` as the orchestrator. Set these variables before starting `usine up` when you use custom credential directories.
 
-For a headless host, run `usine login chatgpt` from the instance folder in a second terminal. Configuration > Settings provides the same connect, replace, and disconnect actions. `usine logout chatgpt` disconnects the local harness. `codex login --device-auth` remains available when you need to sign in directly with Codex.
+Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration. Disconnect removes the managed `auth.json`; usine's local Codex launches ignore keyring credentials.
+
+For a headless host, run `usine login chatgpt` from the instance folder in a second terminal. Configuration > Settings provides the same connect, replace, and disconnect actions. `usine logout chatgpt` disconnects the local harness. To sign in directly for usine, run `codex -c 'cli_auth_credentials_store="file"' login --device-auth`.
 
 Setup can resume at `/setup` if interrupted. See [Sign in to an instance](/guides/sign-in/) for existing App credentials and member access.
 
