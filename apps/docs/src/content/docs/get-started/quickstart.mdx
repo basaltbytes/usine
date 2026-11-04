@@ -98,6 +98,8 @@ The terminal also prints a one-time sign-in link, and the browser opens setup. O
 
 ## 6. Connect a GitHub App
 
+The App requires **Contents**, **Issues**, **Pull requests**, and **Workflows** read and write, with **Checks** and **Metadata** read-only. Write-access attempts can push changes under `.github/workflows/`; read-access tokens omit Workflows and cannot push code. For an existing App, enable **Workflows: read and write** in its repository permissions and accept the permission update on its installation. Installation checks report `workflows:write` until the installation grants it.
+
 In the setup screen:
 
 1. Enter a unique App name, then select **Create App on GitHub** and confirm on GitHub. The instance supplies the required permissions and callback URLs.
