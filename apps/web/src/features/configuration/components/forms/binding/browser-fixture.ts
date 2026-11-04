@@ -1,6 +1,3 @@
-import { RoleBinding } from "@usine/core/access";
-import { ConfigurationView } from "@usine/orchestrator/operator";
-import { writeYaml } from "@usine/config/yaml/writer";
 import { Schema } from "effect";
 import type { Page } from "playwright";
 
@@ -8,6 +5,9 @@ export const bindingEditorResponses = async (
   { page }: { readonly page: Page },
   configuration: string,
 ) => {
+  const { RoleBinding } = await import("@usine/core/access");
+  const { ConfigurationView } = await import("@usine/orchestrator/operator");
+  const { writeYaml } = await import("@usine/config/yaml/writer");
   const initial = Schema.decodeUnknownSync(ConfigurationView)(JSON.parse(configuration));
   const bindings = new Map(initial.bindings.map((binding) => [binding.name, binding]));
   const revisions: Schema.JsonObject[] = [];
