@@ -1,6 +1,6 @@
 ---
-harness: pi
-model: anthropic/claude-sonnet-4-6
+harness: codex
+model: gpt-6-astra
 effort: medium
 ---
 

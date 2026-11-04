@@ -5,7 +5,7 @@ import { ConfigurationFolder } from "@usine/config/folder-codec";
 import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, FileSystem, Layer, Option } from "effect";
 
 const bootstrap = InstanceDirectory.make(fileURLToPath(new URL("../quickstart", import.meta.url)));
 const folderLayer = ConfigurationFolder.layer.pipe(
@@ -21,7 +21,24 @@ it.effect("loads the published quickstart with one runnable loop on the local wo
     expect(instance.config.workers.map(({ name, kind }) => ({ name, kind }))).toEqual([
       { name: "local", kind: "local" },
     ]);
-    expect(instance.agents.map(({ name }) => name)).toEqual(["developer"]);
+    expect(
+      instance.agents.map(({ name, harness, model, effort, parentModel }) => ({
+        name,
+        harness,
+        model,
+        effort,
+        parentModel,
+      })),
+    ).toEqual([
+      {
+        name: "developer",
+        harness: "codex",
+        model: "gpt-6-astra",
+        effort: "medium",
+        parentModel: Option.none(),
+      },
+    ]);
+    expect(instance.config.settings.parentModel).toEqual(Option.some("openai-codex/gpt-6-astra"));
     expect(instance.loops.map(({ name, agent, approval }) => ({ name, agent, approval }))).toEqual([
       { name: "scratch/first-pr", agent: "developer", approval: "required" },
     ]);
