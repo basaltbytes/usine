@@ -38,7 +38,7 @@ import {
   type OnDelivery,
 } from "../../src/runtime.ts";
 import { LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
-import { piChildBackendLayer } from "../../src/pi/pi.ts";
+import { piChildBackendLayer } from "../../src/harness/pi/pi.ts";
 import {
   environmentBashTool,
   piChildTools,
@@ -47,8 +47,8 @@ import {
   type PiSessionEvent,
   type PiStartOptions,
   type PiStartResult,
-} from "../../src/pi/sdk.ts";
-import { resolvePiPool } from "../../src/pi/authentication.ts";
+} from "../../src/harness/pi/sdk.ts";
+import { resolvePiPool } from "../../src/harness/pi/authentication.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
 const childTools = ["read", "bash", "edit", "write"];

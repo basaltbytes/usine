@@ -15,8 +15,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
-import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server.ts";
-import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/pi/sdk.ts";
+import { CodexAppServer, type CodexConnection } from "../src/harness/codex/app-server.ts";
+import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/harness/pi/sdk.ts";
 import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
 

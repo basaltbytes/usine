@@ -22,7 +22,8 @@
   "scripts": {
     "build": "tsc -b && node scripts/copy-web.mjs",
     "check": "effect-tsgo tsc -p tsconfig.check.json",
-    "test": "vitest run"
+    "test": "vitest run --project=server",
+    "test:latency": "vitest run --project=latency"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",

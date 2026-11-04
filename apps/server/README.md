@@ -263,6 +263,6 @@ Run `pnpm --filter @usine/server check` after building dependencies to check Typ
 
 ## Tests
 
-`pnpm turbo run test --filter=@usine/server` builds the server and runs both Vitest projects. Select `-- --project=server` for functional tests or `-- --project=latency` for the 500 ms concurrent overview and desk read budget. CI runs the functional project on pull requests and `main`, and the latency project in a separate job on `main`.
+`pnpm turbo run test --filter=@usine/server` builds the server and runs the functional Vitest project. `pnpm --filter @usine/server test:latency` runs the latency project, the 500 ms concurrent overview and desk read budget; its result depends on the machine, so it isn't part of the local gate. CI runs the functional project on pull requests and `main`, and the latency project in a separate job on `main`.
 
 Provider connections are available in setup and Configuration > Settings. `usine login claude` and `usine login chatgpt` authorize subscription logins; `--api-key` reads a masked API key. `usine logout <provider>` disconnects them. Run these commands from the instance folder while the server runs. The server sends completed logins to configured gateways over their authenticated admin APIs, or writes the local harness credential files when no gateway is configured.

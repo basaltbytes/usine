@@ -148,4 +148,6 @@ Remote Codex children run under a detached Node supervisor. Preflight checks tha
 
 Session records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Codex request serialization is pure over validated parameters. Child backends decode responses inside Effects and report invalid responses through session operation errors.
 
+The harness implementations are grouped under `src/harness/claude/`, `src/harness/codex/`, and `src/harness/pi/`. Shared dispatch, conversation, session-channel, and usage helpers are in `src/harness/`. Consumers use the published subpaths shown above.
+
 Run `pnpm --filter @usine/agents check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
