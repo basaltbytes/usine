@@ -10,6 +10,7 @@ import {
   ChildSession,
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
+  sessionPool,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import {
@@ -158,6 +159,7 @@ const scripted = (
 ): ClaudeQuery => ({
   close: () => undefined,
   interrupt: () => Promise.resolve(),
+  usesApiKey: () => Promise.resolve(false),
   supportedModels: () => Promise.resolve(models),
   async *[Symbol.asyncIterator]() {
     yield { type: "system", subtype: "init", session_id: sessionId };
@@ -389,7 +391,13 @@ describe("Claude child backend", () => {
           const reports = events.filter(Schema.is(PoolRateLimitsUpdated));
           for (const report of reports) {
             assert.strictEqual(report.pool, "claudePlan");
-            assert.deepStrictEqual(report.session, childRequest.session);
+            assert.deepStrictEqual(
+              report.session,
+              ChildSession.make({
+                ...childRequest.session,
+                billingPool: Option.some("claudePlan"),
+              }),
+            );
             assert.isTrue(Option.isNone(report.login));
           }
           const primary = {
@@ -484,41 +492,62 @@ describe("Claude child backend", () => {
     }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
   });
 
-  it.effect("keeps API-key sessions out of the Claude plan rate windows", () => {
-    const sdk = Layer.succeed(ClaudeSdk)({
-      open: () =>
-        scripted([
-          {
-            type: "rate_limit_event",
-            rate_limit_info: {
-              status: "allowed_warning",
-              rateLimitType: "five_hour",
-              utilization: 0.9,
-              resetsAt: 1_793_836_800,
-            },
-          },
-          { type: "result", subtype: "success", result: "Done" },
-        ]),
-    });
-    return Effect.gen(function* () {
-      const original = request();
-      const session = yield* (yield* ChildBackend).launch(
-        ChildRequest.make({
-          ...original,
-          session: ChildSession.make({
-            ...original.session,
-            gatewayCredential: Option.some("api-key"),
+  for (const gatewayCredential of [Option.none(), Option.some("api-key" as const)]) {
+    it.effect(
+      `attributes ${Option.isSome(gatewayCredential) ? "gateway" : "local"} API-key usage to the API keys pool`,
+      () => {
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: () => ({
+            ...scripted([
+              {
+                type: "rate_limit_event",
+                rate_limit_info: {
+                  status: "allowed_warning",
+                  rateLimitType: "five_hour",
+                  utilization: 0.9,
+                  resetsAt: 1_793_836_800,
+                },
+              },
+              {
+                type: "result",
+                modelUsage: {
+                  "claude-sonnet-4-6": {
+                    inputTokens: 5,
+                    outputTokens: 10,
+                    cacheCreationInputTokens: 0,
+                    costUSD: 0.01,
+                  },
+                },
+                subtype: "success",
+                result: "Done",
+              },
+            ]),
+            usesApiKey: () => Promise.resolve(true),
           }),
-        }),
-      );
-      const [events, result] = yield* Effect.all([
-        Stream.runCollect(session.events),
-        session.result,
-      ]);
-      assert.strictEqual(result.message, "Done");
-      assert.lengthOf(events.filter(Schema.is(PoolRateLimitsUpdated)), 0);
-    }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
-  });
+        });
+        return Effect.gen(function* () {
+          const original = request();
+          const session = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({
+              ...original,
+              session: ChildSession.make({
+                ...original.session,
+                gatewayCredential,
+              }),
+            }),
+          );
+          const [events, result] = yield* Effect.all([
+            Stream.runCollect(session.events),
+            session.result,
+          ]);
+          assert.strictEqual(result.message, "Done");
+          assert(events.some((event) => event._tag === "SessionTokensUpdated"));
+          for (const event of events) assert.strictEqual(sessionPool(event.session), "apiKeys");
+          assert.lengthOf(events.filter(Schema.is(PoolRateLimitsUpdated)), 0);
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
+      },
+    );
+  }
 
   it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>
     Effect.gen(function* () {
@@ -618,6 +647,7 @@ describe("Claude child backend", () => {
                 Effect.runForkWith(context)(Queue.end(messages));
               },
               interrupt: () => Promise.resolve(),
+              usesApiKey: () => Promise.resolve(false),
               supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
               [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
             };
@@ -804,6 +834,7 @@ describe("Claude child backend", () => {
             Effect.runForkWith(context)(Queue.end(messages));
           },
           interrupt: () => Promise.resolve(),
+          usesApiKey: () => Promise.resolve(false),
           supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
           [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
         }),
@@ -860,6 +891,7 @@ describe("Claude child backend", () => {
               Effect.runForkWith(context)(Queue.end(messages));
             },
             interrupt: () => Promise.resolve(),
+            usesApiKey: () => Promise.resolve(false),
             supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
             [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
           };
@@ -960,6 +992,7 @@ describe("Claude child backend", () => {
               Effect.runForkWith(context)(Queue.end(messages));
             },
             interrupt: () => Promise.resolve(),
+            usesApiKey: () => Promise.resolve(false),
             supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
             [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
           };

@@ -58,6 +58,8 @@ Both commands read connection status from the running instance and authenticate 
 
 Local preflight and attempt children use the same credential directories. If one gateway is unavailable, Settings shows its error while other gateways remain usable. `--target` can select a healthy gateway independently.
 
+Local preflight and children accept subscription credentials and API keys. Claude setup tokens count as subscription credentials. Children report API-key usage in the API keys pool and subscription usage in the matching plan pool.
+
 Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration. Connect replaces `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default), and disconnect removes it. Keyring credentials remain available to Codex commands run outside usine. To sign in directly for usine, run `codex -c 'cli_auth_credentials_store="file"' login --device-auth`.
 
 Subscription sign-in uses the installed Claude Code `setup-token` command or Codex `login --device-auth` command in a private temporary directory. Claude requires `script` and a code from its authorization page. Codex displays a device code for authorization in another browser. `--api-key` reads a masked key from the terminal. Ctrl+C cancels subscription sign-in. Failed or cancelled authorization preserves the previous login.

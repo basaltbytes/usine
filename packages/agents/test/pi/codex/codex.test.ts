@@ -1,7 +1,13 @@
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession, PoolLogin, TokenBreakdown } from "@usine/core/agent/session";
+import {
+  AgentSessionId,
+  ChildSession,
+  PoolLogin,
+  TokenBreakdown,
+  sessionPool,
+} from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import {
   Cause,
@@ -995,12 +1001,56 @@ describe("Codex child backend", () => {
     );
   });
 
-  for (const account of [
-    null,
-    { type: "apiKey" },
-    { type: "amazonBedrock" },
-    { type: "unknown" },
-  ]) {
+  it.effect("starts local API-key children and records their usage in the API keys pool", () => {
+    const server = connectionLayer(
+      {
+        ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        "account/read": { account: { type: "apiKey" }, requiresOpenaiAuth: true },
+      },
+      [
+        { method: "account/updated", params: { authMode: "apikey" } },
+        {
+          method: "thread/tokenUsage/updated",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            tokenUsage: {
+              total: {
+                totalTokens: 15,
+                inputTokens: 5,
+                cachedInputTokens: 0,
+                cacheWriteInputTokens: 0,
+                outputTokens: 10,
+                reasoningOutputTokens: 0,
+              },
+              last: {
+                totalTokens: 15,
+                inputTokens: 5,
+                cachedInputTokens: 0,
+                cacheWriteInputTokens: 0,
+                outputTokens: 10,
+                reasoningOutputTokens: 0,
+              },
+            },
+          },
+        },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "completed", error: null } },
+        },
+      ],
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* CodexChildBackend).launch(request());
+        const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
+        assert(events.some((event) => event._tag === "SessionTokensUpdated"));
+        for (const event of events) assert.strictEqual(sessionPool(event.session), "apiKeys");
+      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+    );
+  });
+
+  for (const account of [null, { type: "amazonBedrock" }, { type: "unknown" }]) {
     it.effect(
       `refuses ${account?.type ?? "logged-out"} authentication before starting a turn`,
       () => {

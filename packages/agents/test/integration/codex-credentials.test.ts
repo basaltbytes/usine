@@ -1,9 +1,11 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
+import { preflight } from "../../src/preflight/preflight.ts";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { Config, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
-import { initializeCodex } from "../../src/harness/codex/account.ts";
+import { initializeCodex, verifyCodexAccount } from "../../src/harness/codex/account.ts";
 import { CodexAppServer, codexAppServerLive } from "../../src/harness/codex/app-server.ts";
 import { WorkingDirectory } from "../../src/runtime.ts";
 import { AccountResponse } from "../../src/protocol/codex.ts";
@@ -34,9 +36,17 @@ it.live(
                 host: LocalProcess.make(),
               });
               yield* initializeCodex(connection);
-              return yield* connection
+              const auth = yield* connection
                 .request("launch", "account/read", { refreshToken: false })
                 .pipe(Effect.flatMap(Schema.decodeUnknownEffect(AccountResponse)));
+              if (auth.account !== null) {
+                const billing = yield* verifyCodexAccount(
+                  connection,
+                  ModelId.make("gpt-5.6-terra"),
+                );
+                assert.equal(billing.pool, "apiKeys");
+              }
+              return auth;
             }),
           );
         for (const sessionId of [
@@ -46,12 +56,32 @@ it.live(
           yield* fs.writeFileString(authFile, '{"OPENAI_API_KEY":"fixture-key-not-a-credential"}', {
             mode: 0o600,
           });
+          const ready = yield* preflight(
+            BrainSpec.make({
+              harness: Harness.make("codex"),
+              model: ModelId.make("gpt-5.6-terra"),
+              effort: "low",
+            }),
+            LocalProcess.make(),
+            { HOME: home, CODEX_HOME: codexHome, PATH: path },
+          );
+          assert.equal(ready.harness, "codex");
           const connected = yield* account(sessionId);
           assert.deepEqual(connected, {
             account: { type: "apiKey" },
             requiresOpenaiAuth: true,
           });
           yield* fs.remove(authFile);
+          const unavailable = yield* preflight(
+            BrainSpec.make({
+              harness: Harness.make("codex"),
+              model: ModelId.make("gpt-5.6-terra"),
+              effort: "low",
+            }),
+            LocalProcess.make(),
+            { HOME: home, CODEX_HOME: codexHome, PATH: path },
+          ).pipe(Effect.flip);
+          assert.equal(unavailable._tag, "HarnessUnavailableError");
           const disconnected = yield* account(sessionId);
           assert.deepEqual(disconnected, {
             account: null,

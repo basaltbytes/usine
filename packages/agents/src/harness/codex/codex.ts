@@ -197,6 +197,7 @@ const makeCodexChild = Effect.gen(function* () {
           effort: request.session.brain.effort,
         }),
         gatewayCredential: request.session.gatewayCredential,
+        billingPool: Option.some(billing.pool),
       });
       const channel = yield* sessionChannel({
         label: "Codex child session",
@@ -579,7 +580,10 @@ const makeCodexChild = Effect.gen(function* () {
               const account = yield* Schema.decodeUnknownEffect(AccountUpdated)(params).pipe(
                 Effect.mapError(() => codexPoolUnavailable(request.session.brain.model)),
               );
-              if (account.authMode !== "chatgpt" && account.authMode !== "chatgptAuthTokens") {
+              if (
+                account.authMode !== (billing.pool === "apiKeys" ? "apikey" : "chatgpt") &&
+                !(billing.pool === "chatgptPlan" && account.authMode === "chatgptAuthTokens")
+              ) {
                 yield* Effect.logError("Codex authentication changed during the session", {
                   sessionId: session.id,
                   authentication: account.authMode ?? "logged-out",

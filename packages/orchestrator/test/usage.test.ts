@@ -23,7 +23,7 @@ import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { RunReader } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
-import { DateTime, Effect, Layer, Logger, Option } from "effect";
+import { DateTime, Effect, Layer, Logger, Option, Schema } from "effect";
 import { RunUsageReader, runUsageSource } from "../src/operator/usage.ts";
 
 const now = DateTime.makeUnsafe("2026-10-26T09:00:00.000Z");
@@ -138,6 +138,31 @@ const costs = (
 ) => sessions.map(({ cost }) => (cost === null ? null : { ...cost }));
 
 describe("RunUsageReader", () => {
+  for (const harness of [Harness.make("claude"), Harness.make("codex")]) {
+    it.effect(`prices recorded local ${harness} API-key usage without a plan estimate`, () =>
+      Effect.gen(function* () {
+        const session = ChildSession.make({
+          ...child("local-key", harness, "gpt-5.6-terra"),
+          billingPool: Option.some("apiKeys"),
+        });
+        const entry = report(1, session, harness === "claude" ? 1.5 : null, Option.some(breakdown));
+        const codec = Schema.fromJsonString(Schema.toCodecJson(TranscriptEntry));
+        const stored = yield* Schema.encodeEffect(codec)(entry);
+        const restored = yield* Schema.decodeEffect(codec)(stored);
+        const usage = yield* Effect.gen(function* () {
+          return yield* (yield* RunUsageReader).read(runUsageSource(source));
+        }).pipe(Effect.provide(readerOf([restored])));
+        assert.deepStrictEqual(
+          usage.sessions.map(({ pool }) => pool),
+          ["apiKeys"],
+        );
+        assert.deepStrictEqual(costs(usage.sessions), [
+          { usd: harness === "claude" ? 1.5 : terraPrice, estimate: false },
+        ]);
+      }),
+    );
+  }
+
   it.effect(
     "prices Codex sessions from the OpenAI table, marked an estimate only in the ChatGPT plan",
     () =>

@@ -75,3 +75,10 @@ A remote Claude Code child whose SSH client exits with 255 no longer fails. Its 
 The Agent SDK exposes Claude Code's subscription allowance through `rate_limit_event`, so the Claude plan can use the existing pool-health projection without querying the undocumented OAuth usage endpoint. The adapter records five-hour usage as the primary window and the latest reported seven-day usage, including model-specific allowances, as the secondary window. Each event includes only the reported window. The pool-health projection merges these partial observations atomically, so a child cannot overwrite a newer observation from another child with a cached window. Unreported windows retain their reset notifications.
 
 The adapter converts utilization fractions to percentages and epoch-second reset timestamps to UTC. Missing utilization does not imply zero usage or exhaustion, and a missing reset time remains unknown. API-key sessions do not update Claude plan windows. The reports drive the existing display and warnings; scheduling continues to ignore pool health.
+
+
+## Amendment (2026-11-04, #960): local credentials determine the billing pool
+
+Provider connections support local subscription credentials and API keys for Claude Code and Codex. Subscription-only readiness checks reject credentials that the connection controls save successfully, so local readiness and child authentication accept both kinds. Claude setup tokens use the Claude plan pool.
+
+Each child records its verified billing pool at launch. Claude Code reports its authentication source through the Agent SDK, and Codex reports its account type through the app server. Local API-key children use the API keys pool, including their usage prices, and do not update Claude plan allowance windows. Gateway credentials retain precedence. Older transcripts without a verified pool retain the previous harness and gateway inference.

@@ -1,7 +1,11 @@
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
+import { preflight } from "@usine/agents/preflight";
+import { LocalProcess } from "@usine/agents/child-host";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import {
+  Config,
   ConfigProvider,
   Context,
   Effect,
@@ -289,7 +293,45 @@ ${["missing-token", "unreachable", "outdated"]
         assert.equal(env.env.CLAUDE_CODE_OAUTH_TOKEN, "private-claude-token");
         assert.include(nativeAuth, "private-openai-key");
         assert.equal((yield* fs.stat(`${directory}/custom codex/auth.json`)).mode & 0o777, 0o600);
+        const nativeSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const claudeStatus = ChildProcessSpawner.make((command) => {
+          if (command._tag !== "StandardCommand" || command.command !== "claude")
+            return nativeSpawner.spawn(command);
+          // Read the saved settings in a subprocess, with the harness's complete environment.
+          return nativeSpawner.spawn(
+            ChildProcess.make(
+              "node",
+              [
+                "-e",
+                `
+            const fs = require("node:fs");
+            const settings = JSON.parse(fs.readFileSync(process.env.CLAUDE_CONFIG_DIR + "/settings.json", "utf8"));
+            const authMethod = settings.env.CLAUDE_CODE_OAUTH_TOKEN ? "oauth_token" : settings.env.ANTHROPIC_API_KEY ? "api_key" : "none";
+            console.log(JSON.stringify({ loggedIn: authMethod !== "none", authMethod, apiProvider: "firstParty" }));
+          `,
+              ],
+              command.options,
+            ),
+          );
+        });
+        const path = yield* Config.String("PATH");
+        const verifyLocalClaude = preflight(
+          BrainSpec.make({
+            harness: Harness.make("claude"),
+            model: ModelId.make("claude-sonnet-4-6"),
+            effort: "low",
+          }),
+          LocalProcess.make(),
+          { HOME: directory, CLAUDE_CONFIG_DIR: `${directory}/custom claude`, PATH: path },
+        ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, claudeStatus));
+        assert.equal((yield* verifyLocalClaude).harness, "claude");
+        yield* local.replace("local", {
+          kind: "anthropic-api-key",
+          secret: Redacted.make("fixture-api-key"),
+        });
+        assert.equal((yield* verifyLocalClaude).harness, "claude");
         yield* local.disconnect("local", "anthropic");
+        assert.equal((yield* verifyLocalClaude.pipe(Effect.flip))._tag, "HarnessUnavailableError");
         yield* local.disconnect("local", "openai");
         const empty = yield* local.list;
         assert.deepEqual(

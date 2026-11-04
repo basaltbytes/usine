@@ -121,6 +121,8 @@ In the setup screen:
 
 Expected: the terminal reports `usine is running at http://127.0.0.1:7331`, and the web UI lists **Scratch**. The App credentials are saved in `.usine/github-app.json`. Open **Configuration > Loops** and confirm that `scratch/first-pr` is running; select **Resume** if it is paused.
 
+Local workers accept Claude subscription logins, Claude setup tokens, and API keys for both Claude and Codex. API-key children report usage in the API keys pool; subscription children use the matching plan pool.
+
 Local preflight checks and harness children use the same `CODEX_HOME` and `CLAUDE_CONFIG_DIR` as the orchestrator. Set these variables before starting `usine up` when you use custom credential directories.
 
 Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration. Disconnect removes the managed `auth.json`; usine's local Codex launches ignore keyring credentials.

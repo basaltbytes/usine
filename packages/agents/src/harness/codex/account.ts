@@ -1,5 +1,5 @@
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { brainPool, PoolLogin } from "@usine/core/agent/session";
+import { brainPool, PoolLogin, type BillingPool } from "@usine/core/agent/session";
 import type { GatewayCredentialKind } from "@usine/core/worker";
 import { Effect, Option, Schema } from "effect";
 import { PoolUnavailableError } from "../../runtime.ts";
@@ -22,16 +22,17 @@ export const initializeCodex = Effect.fn("Codex.initialize")(function* (
   yield* connection.notify("launch", "initialized", {});
 });
 
-/** Returns the error for when Codex cannot confirm that it uses the ChatGPT pool. */
+/** Returns the error for when Codex cannot confirm a supported billing pool. */
 export const codexPoolUnavailable = (model: ModelId) =>
   PoolUnavailableError.make({
     harness: Harness.make("codex"),
     model,
     pool: "chatgptPlan",
-    message: "Codex children need a ChatGPT login. Run codex login on the worker.",
+    message:
+      "Codex children need a ChatGPT login or API key. Connect ChatGPT in usine or run codex login on the worker.",
   });
 
-/** Verifies the Codex account before any model request. Fails with `PoolUnavailableError` for unknown, missing, or API-key authentication (ADR 0013). */
+/** Verifies the Codex account before any model request. Fails with `PoolUnavailableError` for unknown or missing authentication (ADR 0013). */
 export const verifyCodexAccount = Effect.fn("Codex.verifyAccount")(function* (
   connection: CodexConnection,
   model: ModelId,
@@ -46,24 +47,27 @@ export const verifyCodexAccount = Effect.fn("Codex.verifyAccount")(function* (
     // An auth response that does not decode is treated as an unsupported billing pool.
     Effect.mapError(() => codexPoolUnavailable(model)),
   );
-  if (account.account?.type !== "chatgpt" || !account.requiresOpenaiAuth) {
+  if (
+    (account.account?.type !== "chatgpt" && account.account?.type !== "apiKey") ||
+    !account.requiresOpenaiAuth
+  ) {
     yield* Effect.logError("Codex rejected an unavailable billing pool", {
       model,
-      requiredPool: "chatgptPlan",
       authentication: account.account?.type ?? "logged-out",
     });
     return yield* codexPoolUnavailable(model);
   }
+  const pool: BillingPool = account.account.type === "apiKey" ? "apiKeys" : "chatgptPlan";
   yield* Effect.logInfo("Codex billing pool verified", {
     model,
     authentication: account.account.type,
-    pool: "chatgptPlan",
+    pool,
   });
   return {
-    pool: "chatgptPlan" as const,
-    login: Option.fromNullishOr(account.account.email).pipe(
-      Option.flatMap(Schema.decodeUnknownOption(PoolLogin)),
-    ),
+    pool,
+    login: Option.fromNullishOr(
+      account.account.type === "chatgpt" ? account.account.email : null,
+    ).pipe(Option.flatMap(Schema.decodeUnknownOption(PoolLogin))),
   };
 });
 

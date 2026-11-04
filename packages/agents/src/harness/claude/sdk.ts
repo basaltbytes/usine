@@ -63,6 +63,8 @@ export interface ClaudeQuery extends AsyncIterable<Schema.Json> {
   readonly interrupt: () => Promise<void>;
   /** Lists the models available to this query for validating the requested brain spec. */
   readonly supportedModels: () => Promise<ReadonlyArray<ClaudeModelInfo>>;
+  /** Reports whether this query uses an API key instead of a subscription token. */
+  readonly usesApiKey: () => Promise<boolean>;
 }
 
 /** The service that opens Claude Code sessions. */
@@ -98,6 +100,14 @@ export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
         await query.interrupt();
       },
       supportedModels: () => query.supportedModels(),
+      usesApiKey: async () => {
+        const account = await query.accountInfo();
+        return (
+          account.apiKeySource !== undefined &&
+          account.apiKeySource !== "none" &&
+          account.apiKeySource !== "oauth"
+        );
+      },
       async *[Symbol.asyncIterator]() {
         for await (const message of query) yield vendorMessageJson(message);
       },

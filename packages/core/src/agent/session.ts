@@ -36,6 +36,10 @@ export class ParentSession extends Schema.TaggedClass<
   brain: BrainSpec,
 }) {}
 
+/** The billing source for a session's model requests: API keys, a Claude plan, or a ChatGPT plan (ADR 0013). */
+export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
+export type BillingPool = typeof BillingPool.Type;
+
 /** A session spawned by the parent session; a child can't spawn children. */
 export class ChildSession extends Schema.TaggedClass<
   ChildSession,
@@ -49,6 +53,10 @@ export class ChildSession extends Schema.TaggedClass<
   agent: AgentName,
   /** The harness, model, and effort selected for this child. */
   brain: BrainSpec,
+  /** The pool verified by the harness at launch; `None` for older transcripts. */
+  billingPool: Schema.OptionFromOptionalKey(BillingPool).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<BillingPool>())),
+  ),
   /**
    * The credential kind the Gateway (ADR 0027) or a Cloudflare Worker's outbound handler used
    * for the child's model requests, or `None` if the child used its harness's own login or the
@@ -218,10 +226,6 @@ export class SessionTokensUpdated extends Schema.TaggedClass<
   ),
 }) {}
 
-/** The billing source for a session's model requests: API keys, a Claude plan, or a ChatGPT plan (ADR 0013). */
-export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
-export type BillingPool = typeof BillingPool.Type;
-
 /**
  * Returns the billing pool of a session with `brain` and the kind of the credential that a
  * Gateway or a Cloudflare Worker's outbound handler injects, if any.
@@ -250,7 +254,8 @@ export const brainPool = (
 export const sessionPool = (session: AgentSession): BillingPool =>
   Match.valueTags(session, {
     ParentSession: ({ brain }) => brainPool(brain, Option.none()),
-    ChildSession: ({ brain, gatewayCredential }) => brainPool(brain, gatewayCredential),
+    ChildSession: ({ brain, gatewayCredential, billingPool }) =>
+      Option.getOrElse(billingPool, () => brainPool(brain, gatewayCredential)),
   });
 
 /** One provider-reported allowance window, including usage outside usine. */

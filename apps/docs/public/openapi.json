@@ -46699,6 +46699,14 @@
           "brain": {
             "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
           },
+          "billingPool": {
+            "type": "string",
+            "enum": [
+              "apiKeys",
+              "claudePlan",
+              "chatgptPlan"
+            ]
+          },
           "gatewayCredential": {
             "type": "string",
             "enum": [
