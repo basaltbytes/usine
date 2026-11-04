@@ -1,3 +1,8 @@
+import {
+  ProviderCredential,
+  ProviderCredentialError,
+  ProviderConnections,
+} from "../credentials/model.ts";
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { type Brand, Option, Schema } from "effect";
@@ -185,6 +190,22 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
     .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
     .middleware(AdminAuthorization),
   HttpApiGroup.make("llm")
-    .add(HttpApiEndpoint.get("providers", "/v1/providers", { success: LlmProviderList }))
+    .add(
+      HttpApiEndpoint.get("providers", "/v1/providers", { success: LlmProviderList }),
+      HttpApiEndpoint.get("connections", "/v1/provider-credentials", {
+        success: ProviderConnections,
+        error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+      }),
+      HttpApiEndpoint.put("connect", "/v1/provider-credentials", {
+        payload: ProviderCredential,
+        success: Schema.Struct({ ok: Schema.Boolean }),
+        error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+      }),
+      HttpApiEndpoint.delete("disconnect", "/v1/provider-credentials/:provider", {
+        params: { provider: LlmProviderName },
+        success: Schema.Struct({ ok: Schema.Boolean }),
+        error: ProviderCredentialError.annotate({ httpApiStatus: 503 }),
+      }),
+    )
     .middleware(AdminAuthorization),
 );

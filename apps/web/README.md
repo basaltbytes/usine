@@ -401,3 +401,5 @@ Operator records use nominal Schema brands. Construct summaries explicitly with
 Decode JSON at the query or browser boundary. Synchronous callbacks use synchronous codecs.
 
 Run `pnpm --filter @usine/web check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+**Provider connections** in setup and Configuration > Settings displays Claude and ChatGPT credential kinds, reported expiry, and last refresh for each gateway or local harness. Connect opens the provider authorization flow; replace preserves the saved credential until authorization succeeds. API keys use masked inputs. Cancel ends an unfinished sign-in. Disconnect removes the credential and the gateway provider routing. Only instance admins and setup sessions can access these controls.

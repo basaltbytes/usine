@@ -1,3 +1,4 @@
+import { ProviderApi } from "../providers/api.ts";
 import { jsonKey } from "@usine/core/json-key";
 import type { SqliteReader } from "@usine/engine/local-sqlite";
 import { ChangeAccess } from "../changes/access.ts";
@@ -305,8 +306,12 @@ export const authenticatedRoutes = (services: AuthServices) => {
       const setupEndpoint = Object.values(SetupApi.endpoints).find(
         (endpoint) => endpoint.method === route.method && endpoint.path === route.path,
       );
-      const requirement =
-        authEndpoint === undefined
+      const providerEndpoint = Object.values(ProviderApi.endpoints).some(
+        (endpoint) => endpoint.method === route.method && endpoint.path === route.path,
+      );
+      const requirement = providerEndpoint
+        ? "setup"
+        : authEndpoint === undefined
           ? setupEndpoint === undefined
             ? undefined
             : setupPermissions[setupEndpoint.identifier]

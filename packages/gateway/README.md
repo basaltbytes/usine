@@ -122,6 +122,14 @@ The gateway checks the followed request like any other. An attachment learns the
 
 `credential` is `api-key` for `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, and `subscription` for `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` and `USINE_GATEWAY_CHATGPT_AUTH_FILE`. Providers without a credential are absent. The list follows a [reload](#reload). The executor reads it when it checks a worker whose `llm_providers` lists a provider, so usage counts Claude Code and Codex children on the gateway's API key in the API keys pool, and on a subscription in the Claude or ChatGPT plan pool ([ADR 0013](../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)). Gateways released before this endpoint answer 404.
 
+## Managed provider connections
+
+Instance admins connect, replace, and disconnect Claude and ChatGPT from usine setup, Configuration > Settings, or `usine login` and `usine logout`. The orchestrator invokes the installed provider CLI in a private temporary directory and transfers the result through the gateway admin API over SSH. The gateway needs `curl` for this transfer.
+
+`PUT /v1/provider-credentials` accepts one credential kind (`claude-subscription`, `anthropic-api-key`, `chatgpt-subscription`, or `openai-api-key`) and a `secret`. A ChatGPT subscription secret is the dedicated Codex auth-file JSON. `DELETE /v1/provider-credentials/:provider` disconnects `anthropic` or `openai`. Both operations require the admin bearer token. `GET /v1/provider-credentials` returns both providers with credential kind, reported expiry, and last refresh, excluding secrets. Failed writes return 503.
+
+The gateway command saves managed configuration in `STATE_DIRECTORY/provider-credentials.json`, with dedicated `codex-<id>.json` files for refreshable ChatGPT logins. Files have mode `0600`; snapshot replacement is atomic. Managed connections override environment credentials across reloads and restarts. A disconnect remains disabled even when the environment contains an older credential. Embedded gateways enable persistence with the third `gatewayLayer` argument, the credential directory. The `@usine/gateway/credentials` capability exports the connection schemas and `ProviderCredentials` service.
+
 ## Worker environment
 
 `infra/hetzner/gateway/worker-cloud-init.yaml` sets up the machine. For each attempt, the executor adds the caller token and sends each variable that contains it over the SSH connection, not the command line; the worker's sshd accepts them with `AcceptEnv`. The Claude Code row applies if the gateway has the Anthropic credential, and the Codex row if it has the OpenAI credential; otherwise the harness uses its login on the worker and `HTTPS_PROXY`.

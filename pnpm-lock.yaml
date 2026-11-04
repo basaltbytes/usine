@@ -190,6 +190,9 @@ importers:
       '@usine/expression':
         specifier: workspace:*
         version: link:../../packages/expression
+      '@usine/gateway':
+        specifier: workspace:*
+        version: link:../../packages/gateway
       '@usine/github':
         specifier: workspace:*
         version: link:../../packages/github
@@ -275,6 +278,9 @@ importers:
       '@usine/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@usine/gateway':
+        specifier: workspace:*
+        version: link:../../packages/gateway
       '@usine/github':
         specifier: workspace:*
         version: link:../../packages/github

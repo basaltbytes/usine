@@ -1,3 +1,5 @@
+import { providerRoutes } from "./providers/http.ts";
+import type { ProviderLogins } from "./providers/control.ts";
 import { TaskView } from "@usine/orchestrator/operator";
 import { shellOverview, pagedBoard, attentionOverview } from "./changes/reads.ts";
 import { Changes } from "./changes/changes.ts";
@@ -563,7 +565,7 @@ export const serverLayer = (
   port: Port,
   auth: AuthServices,
   services:
-    | Layer.Layer<ServerUpgrades | ConfigurationEditor | GitHubApp | GitHubPolling>
+    | Layer.Layer<ServerUpgrades | ConfigurationEditor | GitHubApp | GitHubPolling | ProviderLogins>
     | Layer.Layer<never> = Layer.empty,
   webhooks: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.empty,
   setup?: Setup["Service"],
@@ -576,6 +578,7 @@ export const serverLayer = (
     setupHttp?.protected.pipe(Layer.provide(authenticated.guard.layer)) ?? Layer.empty,
     setupHttp?.callback ?? Layer.empty,
     apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
+    providerRoutes.pipe(Layer.provide(authenticated.guard.layer)),
     staticRoutes(webRoot),
     authenticated.routes,
     webhooks,

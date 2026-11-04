@@ -1,3 +1,4 @@
+import { ProviderApi } from "./providers/api.ts";
 import { SetupApi } from "./setup/api.ts";
 import { CrossSiteRequestError } from "./security.ts";
 import { OperatorApi } from "@usine/orchestrator/operator/http";
@@ -50,7 +51,9 @@ const addForbiddenResponse = (
 };
 
 export const operatorOpenApi = () => {
-  const document = OpenApi.fromApi(OperatorApi.add(AuthApi, SetupApi, DocumentationApi));
+  const document = OpenApi.fromApi(
+    OperatorApi.add(AuthApi, SetupApi, ProviderApi, DocumentationApi),
+  );
   const authenticationError = Schema.toJsonSchemaDocument(AuthenticationError).schema;
   document.components.securitySchemes = {
     bearer: {

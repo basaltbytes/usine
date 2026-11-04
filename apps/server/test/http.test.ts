@@ -11,6 +11,8 @@ import {
   GitHubUserId,
 } from "@usine/core/access";
 import { operatorPermissions } from "@usine/orchestrator/operator/http";
+import { ProviderApi } from "../src/providers/api.ts";
+import { providerRoutes } from "../src/providers/http.ts";
 import { SetupApi } from "../src/setup/api.ts";
 import { setupRoutes } from "../src/setup/http.ts";
 import { securityMiddleware } from "../src/security.ts";
@@ -470,6 +472,7 @@ it.live(
           apiRoutes.pipe(Layer.provide(auth.guard.layer)),
           auth.routes,
           setup.protected.pipe(Layer.provide(auth.guard.layer)),
+          providerRoutes.pipe(Layer.provide(auth.guard.layer)),
           setup.callback,
           securityMiddleware(services.authentication),
         ).pipe(HttpRouter.provideRequest(fixtureBackend)),
@@ -521,6 +524,7 @@ it.live(
         ...auth.endpoints,
         ...Object.values(DocumentationApi.endpoints),
         ...Object.values(SetupApi.endpoints),
+        ...Object.values(ProviderApi.endpoints),
       ];
       const response = yield* Effect.promise(() =>
         secured.handler(new Request("http://127.0.0.1/api/openapi.json")),

@@ -29,6 +29,10 @@
     "./node": {
       "types": "./dist/node/node.d.ts",
       "default": "./dist/node/node.js"
+    },
+    "./credentials": {
+      "types": "./dist/credentials/credentials.d.ts",
+      "default": "./dist/credentials/credentials.js"
     }
   },
   "publishConfig": {

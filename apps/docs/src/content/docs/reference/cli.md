@@ -40,6 +40,26 @@ A detached start retains the selected Node binary, options, entry point, and lau
 
 Lifecycle commands verify that the recorded unit owns the process. They use `systemctl stop --no-block` and `systemctl start` to preserve service management. Service starts use the service environment and the instance `.env`. The service user needs authorization to manage the unit. See [server deployment](/guides/host-usine-on-linux/).
 
+## usine login and usine logout
+
+Connect Claude or ChatGPT while `usine up` runs, from the instance folder:
+
+```sh
+usine login claude
+usine login chatgpt
+usine login chatgpt --api-key
+usine logout claude
+usine logout chatgpt --target usine-gateway
+```
+
+`--target <SSH destination>` selects one gateway when several are configured. With one gateway, usine selects it automatically. With none, it stores credentials where the local Claude Code and Codex harnesses read them, honoring `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
+
+Subscription sign-in uses the installed Claude Code `setup-token` command or Codex `login --device-auth` command in a private temporary directory. Claude requires `script` and a code from its authorization page. Codex displays a device code for authorization in another browser. `--api-key` reads a masked key from the terminal. Ctrl+C cancels subscription sign-in. Failed or cancelled authorization preserves the previous login.
+
+Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions. Logout disables the managed provider and removes its routing from workers.
+
+Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values; opaque Claude setup tokens report neither. Pi parent authentication remains a separate Pi login.
+
 ## usine status
 
 | Argument | Type | Default | Description |
