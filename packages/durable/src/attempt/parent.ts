@@ -13,7 +13,7 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
 } from "@usine/agents/runtime";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ParentSession } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
@@ -35,7 +35,7 @@ export const parentSession = (spec: RunSpec, model: ModelId): ParentSession =>
   ParentSession.make({
     id: parentSessionId(spec.attemptId),
     agent: spec.agent.name,
-    brain: BrainSpec.make({ harness: "pi", model, effort: spec.parentEffort }),
+    brain: BrainSpec.make({ harness: Harness.make("pi"), model, effort: spec.parentEffort }),
   });
 
 const launchError = (spec: RunSpec, message: string, cause: unknown) =>
@@ -59,7 +59,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
     if (Option.isNone(found)) {
       yield* Effect.logError("Pi parent rejected an unknown model", { model: named });
       return yield* UnknownModelError.make({
-        harness: "pi",
+        harness: Harness.make("pi"),
         model: named,
         message: `Pi has no model "${named}"`,
       });
@@ -83,7 +83,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
     const model = ModelId.make("unknown");
     yield* Effect.logError("Pi parent has no model with a configured credential");
     return yield* UnknownModelError.make({
-      harness: "pi",
+      harness: Harness.make("pi"),
       model,
       message: "Pi has no model with a configured credential for the parent",
     });
@@ -117,7 +117,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       supported,
     });
     return yield* UnsupportedEffortError.make({
-      harness: "pi",
+      harness: Harness.make("pi"),
       model,
       effort: spec.parentEffort,
       message: `Pi model "${model}" doesn't support effort ${spec.parentEffort}. Supported efforts: ${supported.join(", ")}`,
@@ -141,7 +141,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       { model, requiredPool: required, authentication: authentication?._tag },
     );
     return yield* PoolUnavailableError.make({
-      harness: "pi",
+      harness: Harness.make("pi"),
       model,
       pool: required,
       message: `Pi parent model "${model}" requires a credential from the ${required} pool`,

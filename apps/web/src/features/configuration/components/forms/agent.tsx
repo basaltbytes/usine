@@ -4,7 +4,7 @@ import { Button } from "~/components/ui/button";
 import { ErrorAlert } from "~/components/error-alert";
 import { Markdown } from "~/components/markdown";
 import { type FormFieldsProps, stringValue } from "~/features/configuration/lib/forms";
-import { capabilitiesQuery } from "~/features/configuration/queries";
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { formCopy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { Fields, FormField } from "./fields";

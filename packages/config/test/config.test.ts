@@ -833,6 +833,15 @@ describe("ConfigParser", () => {
         .pipe(Effect.flip);
       expect(badAgent.stage).toBe("schema");
       expect(badAgent.message).toContain("parent_effort");
+
+      const unknownHarness = yield* parser
+        .parseAgentFile(
+          InstancePath.make("agents/developer.md"),
+          "---\nharness: new-harness\nmodel: model\neffort: high\n---\nPersona body.",
+        )
+        .pipe(Effect.flip);
+      expect(unknownHarness.stage).toBe("schema");
+      expect(unknownHarness.message).toContain('Unknown harness "new-harness"');
     }).pipe(Effect.provide(parserLayer)),
   );
 

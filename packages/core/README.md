@@ -4,6 +4,8 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 
 0.x APIs change without notice. Supply the peer dependency `effect` at the pinned version.
 
+`Harness` is a branded, kebab-case string. It validates ID syntax without fixing the set of harnesses; configuration validates membership through `@usine/agents/harness`.
+
 ## Subpaths
 
 | Subpath | Exports |

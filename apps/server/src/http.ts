@@ -1,3 +1,4 @@
+import { catalog, harnessPresentations } from "@usine/agents/harness";
 import { TaskView } from "@usine/orchestrator/operator";
 import { shellOverview, pagedBoard, attentionOverview } from "./changes/reads.ts";
 import { Changes } from "./changes/changes.ts";
@@ -11,7 +12,7 @@ import { securityMiddleware } from "./security.ts";
 import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { authenticatedRoutes, type AuthServices } from "./auth/http.ts";
-import { HARNESSES, EFFORTS } from "@usine/core/agent/brain";
+import { EFFORTS } from "@usine/core/agent/brain";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubPolling } from "@usine/github/polling";
 import { configurationRepositories, configurationLabels } from "./configuration/catalog.ts";
@@ -426,7 +427,11 @@ const handlers = HttpApiBuilder.group(
         fromConfiguration((editor) => editor.head).pipe(Effect.map((number) => ({ number }))),
       )
       .handle("configurationCapabilities", () =>
-        Effect.succeed({ harnesses: HARNESSES, efforts: EFFORTS }),
+        Effect.succeed({
+          harnesses: catalog.ids,
+          harnessDetails: harnessPresentations,
+          efforts: EFFORTS,
+        }),
       )
       .handle("configurationRepositories", () => configurationRepositories())
       .handle("configurationLabels", ({ params }) =>

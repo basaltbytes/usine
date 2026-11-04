@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -36,7 +36,7 @@ describe("agent runtime contract", () => {
         id: AgentSessionId.make("parent-1"),
         agent: AgentName.make("developer"),
         brain: BrainSpec.make({
-          harness: "pi",
+          harness: Harness.make("pi"),
           model: ModelId.make("anthropic/claude-opus-4-6"),
           effort: "high",
         }),
@@ -50,7 +50,7 @@ describe("agent runtime contract", () => {
           parentId: parent.id,
           agent: parent.agent,
           brain: BrainSpec.make({
-            harness: "claude",
+            harness: Harness.make("claude"),
             model: ModelId.make("claude-sonnet-4-6"),
             effort: "high",
           }),
@@ -84,18 +84,18 @@ describe("agent runtime contract", () => {
 
     const terminal = [
       UnknownModelError.make({
-        harness: "claude",
+        harness: Harness.make("claude"),
         model: ModelId.make("claude-never-existed"),
         message: 'Claude has no model "claude-never-existed"',
       }),
       PoolUnavailableError.make({
-        harness: "pi",
+        harness: Harness.make("pi"),
         model: ModelId.make("github-copilot/gpt-5.6-sol"),
         pool: "apiKeys",
         message: "Pi model github-copilot/gpt-5.6-sol must use an API key",
       }),
       UnsupportedEffortError.make({
-        harness: "codex",
+        harness: Harness.make("codex"),
         model: ModelId.make("gpt-5.6-terra"),
         effort: "max",
         message: 'Codex model "gpt-5.6-terra" doesn\'t support effort max',

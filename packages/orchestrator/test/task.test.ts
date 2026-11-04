@@ -5,7 +5,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
@@ -41,7 +41,7 @@ import { noCycleBudgets } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const brain = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
 });

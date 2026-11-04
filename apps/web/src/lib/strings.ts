@@ -79,9 +79,6 @@ export const tokensLabel = (tokens: number): string =>
 export const usdLabel = (usd: number): string =>
   usd > 0 && usd < 0.005 ? "under $0.01" : `$${usd.toFixed(2)}`;
 
-export const harnessLabel = (harness: BrainSpec["harness"]): string =>
-  ({ claude: "Claude Code", codex: "Codex", pi: "Pi" })[harness];
-
 export const poolLabel = (pool: BillingPool): string =>
   ({ apiKeys: "API keys", claudePlan: "Claude plan", chatgptPlan: "ChatGPT plan" })[pool];
 

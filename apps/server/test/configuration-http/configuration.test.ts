@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { jsonKey } from "@usine/core/json-key";
 import { LoopFile } from "@usine/config/loop";
 import { ManagedRepo } from "@usine/config/factory";
@@ -75,7 +76,11 @@ it("creates, reads, replaces and deletes entities with paginated and filtered re
       const response = yield* request("GET", "/entities/agent/developer");
       expect(response).toMatchObject({
         status: 200,
-        body: { number: 1, value: { name: "developer", harness: "codex" }, text: agentText },
+        body: {
+          number: 1,
+          value: { name: "developer", harness: Harness.make("codex") },
+          text: agentText,
+        },
       });
       const currentResponse = yield* request("PUT", "/entities/label/ready", {
         expected: 1,
@@ -671,6 +676,19 @@ it("serves installation repositories, live labels and supported harnesses, and r
         status: 200,
         body: {
           harnesses: expect.arrayContaining(["codex"]),
+          harnessDetails: expect.arrayContaining([
+            {
+              id: "claude",
+              label: "Claude Code",
+              handoff: { command: "claude --resume", homeVariable: null, gateway: true },
+            },
+            {
+              id: "codex",
+              label: "Codex",
+              handoff: { command: "codex resume --", homeVariable: "CODEX_HOME", gateway: false },
+            },
+            { id: "pi", label: "Pi", handoff: null },
+          ]),
           efforts: expect.arrayContaining(["high"]),
         },
       });

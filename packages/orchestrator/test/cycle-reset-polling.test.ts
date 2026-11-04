@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { jsonKey } from "@usine/core/json-key";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
@@ -375,7 +376,7 @@ it.live(
       const loop = yield* makeLoop("Original task {{ item.number }}.", "none");
       const agent = yield* Schema.decodeEffect(AgentFile)({
         name: "reviewer",
-        harness: "codex",
+        harness: Harness.make("codex"),
         model: "test-model",
         effort: "high",
         parentModel: Option.none(),

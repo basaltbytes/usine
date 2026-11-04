@@ -1,4 +1,4 @@
-import type { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { brainPool, PoolLogin } from "@usine/core/agent/session";
 import type { GatewayCredentialKind } from "@usine/core/worker";
 import { Effect, Option, Schema } from "effect";
@@ -25,7 +25,7 @@ export const initializeCodex = Effect.fn("Codex.initialize")(function* (
 /** Returns the error for when Codex cannot confirm that it uses the ChatGPT pool. */
 export const codexPoolUnavailable = (model: ModelId) =>
   PoolUnavailableError.make({
-    harness: "codex",
+    harness: Harness.make("codex"),
     model,
     pool: "chatgptPlan",
     message: "Codex children need a ChatGPT login. Run codex login on the worker.",
@@ -36,7 +36,7 @@ export const verifyCodexAccount = Effect.fn("Codex.verifyAccount")(function* (
   connection: CodexConnection,
   model: ModelId,
 ) {
-  yield* Effect.annotateCurrentSpan({ harness: "codex", model });
+  yield* Effect.annotateCurrentSpan({ harness: Harness.make("codex"), model });
   const params = { refreshToken: false } satisfies GetAccountParams;
   const response = yield* connection.request("launch", "account/read", params);
   const account = yield* Schema.decodeUnknownEffect(AccountResponse)(response).pipe(

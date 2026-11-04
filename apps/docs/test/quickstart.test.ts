@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
@@ -32,7 +33,7 @@ it.effect("loads the published quickstart with one runnable loop on the local wo
     ).toEqual([
       {
         name: "developer",
-        harness: "codex",
+        harness: Harness.make("codex"),
         model: "gpt-6-astra",
         effort: "medium",
         parentModel: Option.none(),

@@ -15,7 +15,7 @@ import { LoopName } from "@usine/core/loop";
 import { Selector } from "@usine/config/selector";
 import { UsineConfig } from "@usine/config/factory";
 import { ConfigParser } from "@usine/config/parser";
-import { ModelId } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunEngine } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
@@ -145,7 +145,7 @@ const makeInstance = (options: {
     });
     const agent = AgentFile.make({
       name: AgentName.make("live-contract-agent"),
-      harness: "claude",
+      harness: Harness.make("claude"),
       model: options.childModel,
       effort: "low",
       parentModel: Option.none(),

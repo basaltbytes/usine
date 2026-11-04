@@ -1,4 +1,8 @@
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import type { ReactNode } from "react";
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
+import { capabilitiesFixture } from "~/lib/configuration/fixture";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentName } from "@usine/core/agent";
 import {
   AgentSessionId,
@@ -53,7 +57,17 @@ import {
   TranscriptDisclosureProvider,
 } from "~/components/runs/transcript/grouping/disclosure";
 
-const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
+const renderMarkup = (element: ReactNode): string => {
+  const client = new QueryClient();
+  client.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
+  return renderToStaticMarkup(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
+};
+
+const brain = BrainSpec.make({
+  harness: Harness.make("codex"),
+  model: ModelId.make("gpt-5"),
+  effort: "high",
+});
 const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
@@ -96,7 +110,7 @@ const groups = (events: ReadonlyArray<TranscriptEventView>): ReadonlyArray<Burst
 const keys = (group: Burst) => group.tools.map((tool) => tool.key);
 const history = { cursors: [], loading: false, error: null, load: () => {} };
 const render = (events: ReadonlyArray<TranscriptEventView>) =>
-  renderToStaticMarkup(
+  renderMarkup(
     <TranscriptDisclosureProvider>
       <MessageScrollerProvider>
         <Transcript document={document(events)} runTask="Task" history={history} />
@@ -664,7 +678,7 @@ it("renders a held child from session state when its activity is outside the loa
     canRunAgain: false,
   });
   const outline = (sessionState: ReadonlyArray<TranscriptEventView>) =>
-    renderToStaticMarkup(
+    renderMarkup(
       <Outline
         run={run}
         eventPreview="Event"

@@ -1,6 +1,5 @@
 import type { LoopApproval } from "@usine/config/loop";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
-import type { Harness } from "@usine/core/agent/brain";
 import type { LoopPermissions } from "@usine/core/loop";
 import { CONTAINER_LIMITS, type ContainerLimit, type WorkerKind } from "@usine/core/worker";
 import type {
@@ -12,12 +11,6 @@ import type {
 
 export const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
-
-export const harnessLabel = {
-  claude: "Claude Code",
-  codex: "Codex",
-  pi: "Pi",
-} satisfies Record<Harness, string>;
 
 export const workerKindLabel = {
   local: "Local",

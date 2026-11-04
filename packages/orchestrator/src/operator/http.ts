@@ -1,3 +1,4 @@
+import { HarnessPresentation } from "@usine/agents/harness";
 import {
   repositoryPart,
   changesRead,
@@ -793,6 +794,7 @@ export const OperatorApi = operatorApi.add(
       HttpApiEndpoint.get("configurationCapabilities", "/api/configuration/capabilities", {
         success: Schema.Struct({
           harnesses: Schema.Array(Harness),
+          harnessDetails: Schema.Array(HarnessPresentation),
           efforts: Schema.Array(Effort),
         }),
       })

@@ -22541,11 +22541,13 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": [
-                          "claude",
-                          "codex",
-                          "pi"
-                        ]
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                      }
+                    },
+                    "harnessDetails": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/_usine_agents_HarnessPresentationEncoded"
                       }
                     },
                     "efforts": {
@@ -22566,6 +22568,7 @@
                   },
                   "required": [
                     "harnesses",
+                    "harnessDetails",
                     "efforts"
                   ],
                   "additionalProperties": false
@@ -37313,11 +37316,7 @@
         "properties": {
           "harness": {
             "type": "string",
-            "enum": [
-              "claude",
-              "codex",
-              "pi"
-            ]
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
           },
           "model": {
             "type": "string",
@@ -40950,11 +40949,7 @@
         "properties": {
           "harness": {
             "type": "string",
-            "enum": [
-              "claude",
-              "codex",
-              "pi"
-            ]
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
           },
           "check": {
             "anyOf": [
@@ -41390,11 +41385,7 @@
           },
           "harness": {
             "type": "string",
-            "enum": [
-              "claude",
-              "codex",
-              "pi"
-            ]
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
           },
           "model": {
             "type": "string",
@@ -42383,6 +42374,64 @@
           "name",
           "color",
           "description"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_agents_HarnessPresentationEncoded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "handoff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_agents_ResumeCommandEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "handoff"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_agents_ResumeCommandEncoded": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "homeVariable": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gateway": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "command",
+          "homeVariable",
+          "gateway"
         ],
         "additionalProperties": false
       },

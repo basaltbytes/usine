@@ -2,7 +2,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { githubSignature } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -910,7 +910,7 @@ describe("exe.dev launch", () => {
           WORKER,
           [
             BrainSpec.make({
-              harness: "pi",
+              harness: Harness.make("pi"),
               model: ModelId.make("anthropic/claude"),
               effort: "low",
             }),

@@ -1,5 +1,6 @@
+import { catalog } from "@usine/agents/harness";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { type Brand, Schema } from "effect";
 import { InstancePath, ConfigFileError } from "./file.ts";
 
@@ -11,7 +12,7 @@ export class AgentFile extends Schema.Class<
   /** The agent name derived from its Markdown filename. */
   name: AgentName,
   /** The CLI used to run the agent as a child session. */
-  harness: Harness,
+  harness: catalog.harness,
   /** The child model identifier passed to the harness. */
   model: ModelId,
   /** The reasoning effort requested for the child model. */

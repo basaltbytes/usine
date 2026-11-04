@@ -1,8 +1,9 @@
+import { catalog } from "../src/harness/catalog.ts";
 import { jsonKey } from "@usine/core/json-key";
 // Fetch and agent SDK interfaces require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { assert, describe, it } from "@effect/vitest";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import { Deferred, Effect, Fiber, Layer, Option, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
@@ -32,7 +33,7 @@ const claudeVersion = Schema.decodeEffect(
 
 const brain = (harness: BrainSpec["harness"]) =>
   BrainSpec.make({ harness, model: ModelId.make("provider/model"), effort: "low" });
-const coder = brain("codex");
+const coder = brain(Harness.make("codex"));
 const local = LocalProcess.make();
 const remote = RemoteShell.make({
   ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
@@ -145,6 +146,12 @@ describe("worker harness readiness", () => {
   it("pins the Codex conformance baseline in the Hetzner worker image", () => {
     const pins = cloudInitPins(/@openai\/codex@(\S+)/gu);
     assert.deepStrictEqual(pins, [CODEX_CLI_VERSION]);
+    assert.deepStrictEqual(
+      catalog.descriptors.flatMap(({ worker }) =>
+        worker.install.filter(({ name }) => name === "@openai/codex").map(({ version }) => version),
+      ),
+      pins,
+    );
   });
 
   it.effect("pins the Claude Agent SDK's Claude Code version in the Hetzner worker image", () =>
@@ -152,6 +159,14 @@ describe("worker harness readiness", () => {
       assert.deepStrictEqual(cloudInitPins(/@anthropic-ai\/claude-code@(\S+)/gu), [
         (yield* claudeVersion).claudeCodeVersion,
       ]);
+      assert.deepStrictEqual(
+        catalog.descriptors.flatMap(({ worker }) =>
+          worker.install
+            .filter(({ name }) => name === "@anthropic-ai/claude-code")
+            .map(({ version }) => version),
+        ),
+        [(yield* claudeVersion).claudeCodeVersion],
+      );
     }),
   );
 
@@ -232,7 +247,10 @@ describe("worker harness readiness", () => {
           return Effect.gen(function* () {
             if (auth.type === "chatgpt") {
               const available = yield* verifyHarness(coder, local, workerEnvironment);
-              assert.deepStrictEqual(available, HarnessReady.make({ harness: "codex" }));
+              assert.deepStrictEqual(
+                available,
+                HarnessReady.make({ harness: Harness.make("codex") }),
+              );
             } else {
               const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
               const matchesError = Schema.is(HarnessUnavailableError)(error);
@@ -301,12 +319,21 @@ describe("worker harness readiness", () => {
         const server = account(Effect.succeed(null));
         return Effect.gen(function* () {
           if (status.auth.authMethod === "claude.ai") {
-            const available = yield* verifyHarness(brain("claude"), local, workerEnvironment);
-            assert.deepStrictEqual(available, HarnessReady.make({ harness: "claude" }));
-          } else {
-            const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
-              Effect.flip,
+            const available = yield* verifyHarness(
+              brain(Harness.make("claude")),
+              local,
+              workerEnvironment,
             );
+            assert.deepStrictEqual(
+              available,
+              HarnessReady.make({ harness: Harness.make("claude") }),
+            );
+          } else {
+            const error = yield* verifyHarness(
+              brain(Harness.make("claude")),
+              local,
+              workerEnvironment,
+            ).pipe(Effect.flip);
             const matchesError = Schema.is(HarnessUnavailableError)(error);
             assert(matchesError);
             assert.strictEqual(error.capability, "login");
@@ -339,9 +366,11 @@ describe("worker harness readiness", () => {
       `reports a Claude login check exiting ${status.exitCode} with ${status.stdout === "" ? "no output" : "unexpected output"} as a failed command`,
       () =>
         Effect.gen(function* () {
-          const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
-            Effect.flip,
-          );
+          const error = yield* verifyHarness(
+            brain(Harness.make("claude")),
+            local,
+            workerEnvironment,
+          ).pipe(Effect.flip);
           const matchesError = Schema.is(HarnessUnavailableError)(error);
           assert(matchesError);
           assert.strictEqual(error.capability, "login");
@@ -366,7 +395,7 @@ describe("worker harness readiness", () => {
       let disposed = 0;
       let options: PiStartOptions | undefined;
       const piBrain = BrainSpec.make({
-        ...brain("pi"),
+        ...brain(Harness.make("pi")),
         model: ModelId.make(
           pool === "chatgptPlan" ? "openai-codex/gpt-5.6-sol" : "openai/gpt-5.6-sol",
         ),
@@ -391,7 +420,7 @@ describe("worker harness readiness", () => {
       };
       return Effect.gen(function* () {
         const available = yield* verifyHarness(piBrain, local, workerEnvironment);
-        assert.deepStrictEqual(available, HarnessReady.make({ harness: "pi" }));
+        assert.deepStrictEqual(available, HarnessReady.make({ harness: Harness.make("pi") }));
         assert.strictEqual(disposed, 1);
         assert.strictEqual(options?.model, piBrain.model);
         // The session's bash tool would run with the worker's environment, not this process's.
@@ -417,7 +446,7 @@ describe("worker harness readiness", () => {
   it.effect("refuses a Pi OAuth provider without a billing pool", () =>
     Effect.gen(function* () {
       const piBrain = BrainSpec.make({
-        ...brain("pi"),
+        ...brain(Harness.make("pi")),
         model: ModelId.make("github-copilot/gpt-5.6-sol"),
       });
       const error = yield* verifyHarness(piBrain, local, workerEnvironment).pipe(Effect.flip);
@@ -460,8 +489,8 @@ describe("worker harness readiness", () => {
   it.effect("checks Claude on a remote host through one SSH command per probe", () =>
     Effect.gen(function* () {
       return yield* Effect.gen(function* () {
-        const available = yield* verifyHarness(brain("claude"), remote, {});
-        assert.deepStrictEqual(available, HarnessReady.make({ harness: "claude" }));
+        const available = yield* verifyHarness(brain(Harness.make("claude")), remote, {});
+        assert.deepStrictEqual(available, HarnessReady.make({ harness: Harness.make("claude") }));
       }).pipe(
         Effect.provide(
           commands({
@@ -490,7 +519,9 @@ describe("worker harness readiness", () => {
     "reports an unreachable remote host as an incomplete check, not a missing harness",
     () =>
       Effect.gen(function* () {
-        const error = yield* verifyHarness(brain("claude"), remote, {}).pipe(Effect.flip);
+        const error = yield* verifyHarness(brain(Harness.make("claude")), remote, {}).pipe(
+          Effect.flip,
+        );
         assert.strictEqual(error._tag, "SessionOperationError");
       }).pipe(
         Effect.provide(
@@ -504,7 +535,7 @@ describe("worker harness readiness", () => {
 
   it.effect("refuses Pi on a remote host without starting the SDK", () =>
     Effect.gen(function* () {
-      const error = yield* verifyHarness(brain("pi"), remote, {}).pipe(Effect.flip);
+      const error = yield* verifyHarness(brain(Harness.make("pi")), remote, {}).pipe(Effect.flip);
       const matchesError = Schema.is(HarnessUnavailableError)(error);
       assert(matchesError);
       assert.strictEqual(error.message, "Pi children run only on local workers");

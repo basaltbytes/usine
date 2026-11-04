@@ -12,7 +12,7 @@ import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { IssueTrigger } from "@usine/config/trigger";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -74,7 +74,7 @@ import { CycleBudgets } from "@usine/engine/cycle-budget";
 const time = (clock: string) => DateTime.makeUnsafe(`2026-10-20T${clock}.000Z`);
 const repository = RepositoryName.make("basaltbytes/usine");
 const brain = BrainSpec.make({
-  harness: "claude",
+  harness: Harness.make("claude"),
   model: ModelId.make("claude-opus"),
   effort: "high",
 });
@@ -466,9 +466,9 @@ const deskLayer = (
         worker: WorkerName.make("local"),
         prerequisites: Option.some(passed("05:00:00")),
         harnesses: [
-          { harness: "claude", check: passed("06:30:00") },
+          { harness: Harness.make("claude"), check: passed("06:30:00") },
           {
-            harness: "codex",
+            harness: Harness.make("codex"),
             check: {
               _tag: "Failed",
               checkedAt: time("06:00:00"),
@@ -482,7 +482,7 @@ const deskLayer = (
       {
         worker: WorkerName.make("spare"),
         prerequisites: Option.some(passed("05:00:00")),
-        harnesses: [{ harness: "claude", check: passed("05:30:00") }],
+        harnesses: [{ harness: Harness.make("claude"), check: passed("05:30:00") }],
         containerLimits: Option.none(),
       },
     ]),

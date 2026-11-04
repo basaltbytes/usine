@@ -3,7 +3,7 @@ import { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/config/label";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
@@ -222,7 +222,7 @@ const claudeLoggedOut = WorkerCapabilityError.make({
   capability: "harness-login",
   message: "Claude Code is not logged in on Worker local",
   cause: HarnessUnavailableError.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     capability: "login",
     message: "Claude Code is not logged in",
   }),
@@ -242,12 +242,12 @@ const workers = Layer.succeed(WorkerStatus)({
   provisioning: Effect.succeed([]),
   preflights: Effect.sync(() => {
     const codex = BrainSpec.make({
-      harness: "codex",
+      harness: Harness.make("codex"),
       model: ModelId.make("gpt-5.6-sol"),
       effort: "high",
     });
     const claude = BrainSpec.make({
-      harness: "claude",
+      harness: Harness.make("claude"),
       model: ModelId.make("claude-opus-4-1"),
       effort: "xhigh",
     });

@@ -1,7 +1,7 @@
 import { Crypto, Config, Effect, type FileSystem, Layer, type Path, Schema } from "effect";
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 
 import { ClaudeChildBackend, ClaudeLoginLock } from "../../src/runtime.ts";
 import { claudeChildBackendLayer, claudeSdkLive } from "../../src/harness/claude/claude.ts";
@@ -11,7 +11,7 @@ const brain = Effect.gen(function* () {
   const decodedValue2 = yield* Config.String("USINE_CLAUDE_INTEGRATION_MODEL");
   const decodedValue1 = yield* Schema.decodeEffect(ModelId)(decodedValue2);
   return BrainSpec.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     model: decodedValue1,
     effort: "low",
   });

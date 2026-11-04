@@ -5,7 +5,7 @@ import { remoteCommandsFor } from "../../../src/remote/commands.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { RunId } from "@usine/core/run";
 import {
   BoatSnapshotName,
@@ -326,7 +326,7 @@ describe("Boat tailnet", () => {
         const agent = Agent.make({
           ...TEST_AGENT,
           brain: BrainSpec.make({
-            harness,
+            harness: Harness.make(harness),
             model: ModelId.make(harness === "codex" ? "gpt-5.6-sol" : "claude-sonnet-4-6"),
             effort: "high",
           }),

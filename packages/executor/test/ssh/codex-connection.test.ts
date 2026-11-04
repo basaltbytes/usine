@@ -5,7 +5,7 @@ import { RemoteShell } from "@usine/agents/child-host";
 import { CodexAppServer, codexChildBackendLayer, codexAppServerLive } from "@usine/agents/codex";
 import { ChildRequest, CodexChildBackend, WorkingDirectory } from "@usine/agents/runtime";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { WorkerName } from "@usine/core/worker";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { Effect, FileSystem, Layer, Option, Result, Stream } from "effect";
@@ -184,7 +184,7 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
                 parentId: AgentSessionId.make("parent:drop"),
                 agent: AgentName.make("developer"),
                 brain: BrainSpec.make({
-                  harness: "codex",
+                  harness: Harness.make("codex"),
                   model: ModelId.make("test-model"),
                   effort: "off",
                 }),

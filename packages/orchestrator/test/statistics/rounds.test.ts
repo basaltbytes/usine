@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { EventId } from "@usine/core/event";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -33,7 +33,11 @@ const summary = (id: string, item: string, loop: string, state: RunState.RunStat
     runAgain: Option.none(),
     agent: Agent.make({
       name: AgentName.make("developer"),
-      brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
+      brain: BrainSpec.make({
+        harness: Harness.make("codex"),
+        model: ModelId.make("gpt-5"),
+        effort: "high",
+      }),
       persona: AgentPersona.make("Work."),
       parentModel: Option.none(),
       parentEffort: Option.none(),

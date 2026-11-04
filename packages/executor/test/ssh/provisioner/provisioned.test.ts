@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import {
@@ -59,7 +59,11 @@ import {
 
 const codexAgent = Agent.make({
   name: AgentName.make("reviewer"),
-  brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5.6-sol"), effort: "high" }),
+  brain: BrainSpec.make({
+    harness: Harness.make("codex"),
+    model: ModelId.make("gpt-5.6-sol"),
+    effort: "high",
+  }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
   persona: AgentPersona.make("Review the change."),
@@ -810,7 +814,7 @@ describe("Provisioned SSH Worker", () => {
             WORKER,
             [
               BrainSpec.make({
-                harness: "pi",
+                harness: Harness.make("pi"),
                 model: ModelId.make("anthropic/claude-sonnet-5"),
                 effort: "high",
               }),

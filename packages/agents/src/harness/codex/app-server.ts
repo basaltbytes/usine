@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import {
   Cause,
   Deferred,
@@ -130,7 +131,7 @@ const makeCodexAppServer = Effect.gen(function* () {
   const open: CodexAppServer["Service"]["open"] = Effect.fn("CodexAppServer.open")(
     function* (request) {
       yield* Effect.annotateCurrentSpan({
-        harness: "codex",
+        harness: Harness.make("codex"),
         sessionId: Option.getOrUndefined(request.sessionId),
       });
       const input = yield* Queue.make<Uint8Array, Cause.Done>();

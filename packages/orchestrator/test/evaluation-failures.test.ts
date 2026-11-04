@@ -9,7 +9,7 @@ import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
 import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
 import { AgentName, AgentPersona } from "@usine/core/agent";
-import { ModelId } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -60,7 +60,7 @@ const config = Schema.decodeEffect(UsineConfig)({
 });
 const agent = AgentFile.make({
   name: AgentName.make("developer"),
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
   parentModel: Option.none(),

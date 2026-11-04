@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { CycleBudgetAsk, CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
@@ -29,7 +29,11 @@ import { RunStore } from "../src/store/store.ts";
 const agent = Agent.make({
   name: AgentName.make("reviewer"),
   persona: AgentPersona.make("Review the PR."),
-  brain: BrainSpec.make({ harness: "codex", model: ModelId.make("test-model"), effort: "high" }),
+  brain: BrainSpec.make({
+    harness: Harness.make("codex"),
+    model: ModelId.make("test-model"),
+    effort: "high",
+  }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
 });

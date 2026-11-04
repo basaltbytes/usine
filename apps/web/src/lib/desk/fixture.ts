@@ -1,5 +1,5 @@
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ProviderRetries, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import {
@@ -86,7 +86,7 @@ import { Schema } from "effect";
 const deskRepository = RepositoryName.make("basaltbytes/usine");
 
 const brain = BrainSpec.make({
-  harness: "claude",
+  harness: Harness.make("claude"),
   model: ModelId.make("claude-opus-4-7"),
   effort: "high",
 });

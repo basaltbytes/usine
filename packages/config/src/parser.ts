@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { CiPolicy } from "@usine/core/ci";
 import { boardRepositories } from "./project/operations.ts";
 import { StepName } from "@usine/core/step";
@@ -36,7 +37,7 @@ import { AgentPersona, AgentName } from "@usine/core/agent";
 import { IssueTrigger, PullRequestTrigger, ScheduleTrigger, Stream } from "./trigger.ts";
 import { UsineConfig } from "./factory.ts";
 import { ValidSelector } from "./selector.ts";
-import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
+import { Effort, ModelId } from "@usine/core/agent/brain";
 import { environmentFor } from "./payload-slices.ts";
 import { parseYamlDocument } from "./yaml/document.ts";
 import { writeYaml } from "./yaml/writer.ts";
@@ -93,7 +94,7 @@ class AgentFrontmatter extends Schema.Class<
   AgentFrontmatter,
   Brand.Brand<"@usine/config/parser/AgentFrontmatter">
 >("@usine/config/AgentFrontmatter")({
-  harness: Harness,
+  harness: catalog.harness,
   model: ModelId,
   effort: Effort,
   parentModel: Schema.OptionFromOptionalKey(ModelId),

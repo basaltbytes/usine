@@ -1,4 +1,5 @@
-import type { BrainSpec } from "@usine/core/agent/brain";
+import { codex } from "../harness/codex/descriptor.ts";
+import { Harness, BrainSpec } from "@usine/core/agent/brain";
 import {
   type HarnessCapability,
   HarnessReady,
@@ -17,20 +18,10 @@ import { initializeCodex, verifyCodexAccount } from "../harness/codex/account.ts
 import { PiSdk, piSdkLive, usePiStart } from "../harness/pi/sdk.ts";
 import { probeCommand, probeFailed, probeOutput } from "./command.ts";
 
-/** The Codex CLI version of the pinned app-server protocol package used by the conformance check. */
-export const CODEX_CLI_VERSION = "0.164.0";
+export { CODEX_CLI_VERSION } from "../harness/codex/descriptor.ts";
 
-/**
- * The Codex CLI versions that preflight accepts, the conformance baseline first. Adding a version
- * needs a review of its generated protocol types and a run of the live contracts.
- */
-export const supportedCodexVersions: ReadonlyArray<string> = [
-  CODEX_CLI_VERSION,
-  "0.159.0",
-  "0.159.1",
-  "0.159.2",
-  "0.159.3",
-];
+/** The accepted Codex CLI versions, with the protocol baseline first. */
+export const supportedCodexVersions = codex.worker.versions;
 
 /** Returns the error for `codex --version` output that names no supported Codex CLI version. */
 export const unsupportedCodexVersion = (version: string): Option.Option<HarnessUnavailableError> =>
@@ -38,7 +29,7 @@ export const unsupportedCodexVersion = (version: string): Option.Option<HarnessU
     ? Option.none()
     : Option.some(
         HarnessUnavailableError.make({
-          harness: "codex",
+          harness: Harness.make("codex"),
           capability: "version",
           message: `The worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Install a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
         }),
@@ -100,7 +91,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
         const status = yield* probeOutput(
           host,
           environment,
-          "claude",
+          brain.harness,
           "login",
           "claude",
           CLAUDE_AUTH_STATUS,
@@ -113,7 +104,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
         if (Option.isNone(auth))
           return yield* status.exitCode === 0
             ? loginError("Claude returned an unrecognized login status")
-            : probeFailed("claude", "login", "claude", CLAUDE_AUTH_STATUS);
+            : probeFailed(brain.harness, "login", "claude", CLAUDE_AUTH_STATUS);
         const { loggedIn, authMethod, apiProvider } = auth.value;
         if (
           status.exitCode !== 0 ||
@@ -129,7 +120,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       case "pi": {
         if (host._tag === "RemoteShell")
           return yield* HarnessUnavailableError.make({
-            harness: "pi",
+            harness: Harness.make("pi"),
             capability: "binary",
             message: "Pi children run only on local workers",
           });
@@ -164,6 +155,12 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
         );
         break;
       }
+      default:
+        return yield* HarnessUnavailableError.make({
+          harness: brain.harness,
+          capability: "binary",
+          message: `No preflight runtime for harness "${brain.harness}"`,
+        });
     }
     yield* Effect.logInfo("Worker harness verified", {
       harness: brain.harness,

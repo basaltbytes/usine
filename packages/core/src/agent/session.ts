@@ -241,6 +241,8 @@ export const brainPool = (
       return Option.contains(gatewayCredential, "api-key") ? "apiKeys" : "chatgptPlan";
     case "pi":
       return brain.model.startsWith("openai-codex/") ? "chatgptPlan" : "apiKeys";
+    default:
+      throw new Error(`No legacy billing pool for harness "${brain.harness}"`);
   }
 };
 

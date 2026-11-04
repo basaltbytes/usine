@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { projectQuery } from "~/features/projects/queries";
 import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
@@ -616,7 +617,7 @@ it("uses supported harnesses, accepts a custom model, and previews the edited Ma
   await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
   expect((await commands.configurationEditorRequests())[0]?.payload).toMatchObject({
     value: {
-      harness: "claude",
+      harness: Harness.make("claude"),
       model: "new-provider-model",
       persona: "## Review changes\n\nRun the checks.",
     },

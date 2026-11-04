@@ -1,3 +1,5 @@
+import { catalog, harnessPresentations } from "@usine/agents/harness";
+import { EFFORTS, Harness } from "@usine/core/agent/brain";
 import { ConfigurationView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 
@@ -123,7 +125,7 @@ export const configurationJson = {
     {
       name: "developer",
       file: "agents/developer.md",
-      harness: "codex",
+      harness: Harness.make("codex"),
       model: "gpt-5.6-sol",
       effort: "high",
       parentModel: null,
@@ -136,7 +138,7 @@ export const configurationJson = {
     {
       name: "reviewer",
       file: "agents/reviewer.md",
-      harness: "claude",
+      harness: Harness.make("claude"),
       model: "claude-opus-4-1",
       effort: "xhigh",
       parentModel: null,
@@ -175,7 +177,7 @@ export const configurationJson = {
       prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
       harnesses: [
         {
-          harness: "claude",
+          harness: Harness.make("claude"),
           check: {
             _tag: "Failed",
             checkedAt: "2026-10-20T09:15:00.000Z",
@@ -183,7 +185,10 @@ export const configurationJson = {
             message: "Claude Code needs a subscription login. Run claude auth login on the worker.",
           },
         },
-        { harness: "codex", check: { _tag: "Passed", checkedAt: "2026-10-20T09:15:00.000Z" } },
+        {
+          harness: Harness.make("codex"),
+          check: { _tag: "Passed", checkedAt: "2026-10-20T09:15:00.000Z" },
+        },
       ],
     },
     {
@@ -242,7 +247,10 @@ export const configurationJson = {
           "Docker isn't installed, so attempts run as the SSH user and can read each other's credentials. Install Docker to run each attempt in its own container.",
       },
       harnesses: [
-        { harness: "claude", check: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" } },
+        {
+          harness: Harness.make("claude"),
+          check: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
+        },
       ],
     },
     {
@@ -427,3 +435,9 @@ export const emptyConfiguration = (): ConfigurationView =>
     removedWorkers: [],
     repositories: [],
   });
+
+export const capabilitiesFixture = () => ({
+  harnesses: catalog.ids,
+  efforts: EFFORTS,
+  harnessDetails: harnessPresentations,
+});

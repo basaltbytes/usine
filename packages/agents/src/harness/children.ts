@@ -1,5 +1,11 @@
-import { Effect, Layer } from "effect";
-import { ChildBackend, ClaudeChildBackend, CodexChildBackend, PiChildBackend } from "../runtime.ts";
+import { Effect, Layer, Option } from "effect";
+import {
+  SessionOperationError,
+  ChildBackend,
+  ClaudeChildBackend,
+  CodexChildBackend,
+  PiChildBackend,
+} from "../runtime.ts";
 
 const makeChildDispatcher = Effect.gen(function* () {
   const claude = yield* ClaudeChildBackend;
@@ -8,6 +14,10 @@ const makeChildDispatcher = Effect.gen(function* () {
 
   return ChildBackend.of({
     launch: Effect.fn("ChildBackend.launch")(function* (request) {
+      yield* Effect.annotateCurrentSpan({
+        sessionId: request.session.id,
+        harness: request.session.brain.harness,
+      });
       yield* Effect.logDebug("Dispatching child session", {
         harness: request.session.brain.harness,
         sessionId: request.session.id,
@@ -19,6 +29,13 @@ const makeChildDispatcher = Effect.gen(function* () {
           return yield* codex.launch(request);
         case "pi":
           return yield* pi.launch(request);
+        default:
+          return yield* SessionOperationError.make({
+            operation: "launch",
+            sessionId: Option.some(request.session.id),
+            message: `No child runtime for harness "${request.session.brain.harness}"`,
+            cause: new Error("Unknown harness runtime"),
+          });
       }
     }),
   });

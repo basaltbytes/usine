@@ -1,3 +1,5 @@
+import { HarnessPresentation } from "@usine/agents/harness";
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { PassedCheckView, FailedCheckView } from "@usine/orchestrator/operator";
 import { projectQuery } from "~/features/projects/queries";
 import { projectTasksQuery } from "~/features/tasks/queries";
@@ -20,7 +22,7 @@ import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { creationFailuresLine, nextCreationLine } from "~/lib/workers/strings";
 import { routeTree } from "~/route-tree.gen";
-import { configurationFixture } from "~/lib/configuration/fixture";
+import { configurationFixture, capabilitiesFixture } from "~/lib/configuration/fixture";
 import "~/index.css";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { invalidateChanges } from "~/lib/changes";
@@ -38,6 +40,7 @@ beforeEach(() => {
   queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
   });
+  queryClient.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
   queryClient.setQueryData(
     overviewQuery().queryKey,
     ReadyOverview.make({ projects: [], loops: [], needsYou: [] }),
@@ -146,12 +149,22 @@ it("folds what each machine is for under its ID on a phone, without scrolling si
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
 });
 
-it("shows deferred harness checks with the configured interval", async () => {
+it("shows deferred harness checks with catalog labels and the configured interval", async () => {
+  const capabilities = capabilitiesFixture();
+  queryClient.setQueryData(capabilitiesQuery().queryKey, {
+    ...capabilities,
+    harnessDetails: capabilities.harnessDetails.map((descriptor) =>
+      HarnessPresentation.make({
+        ...descriptor,
+        label: descriptor.id === "claude" ? "Claude from catalog" : descriptor.label,
+      }),
+    ),
+  });
   await mount("/configuration/workers/hz-pool");
   await expect
     .element(page.getByText(/configured interval since the last successful check/u))
     .toBeVisible();
-  const claude = row(/Claude Code/u);
+  const claude = row(/Claude from catalog/u);
   await expect.element(claude.getByText("Deferred", { exact: true })).toBeVisible();
   await expect
     .element(

@@ -2,6 +2,8 @@
 
 The usine web UI, served by `@usine/server`. Internal; never published.
 
+Harness labels and saved-session resume commands load from `GET /api/configuration/capabilities` through the shared configuration capabilities query. The UI uses each command’s home variable and gateway availability metadata when rendering resume details.
+
 ## Issues and pull requests
 
 A task is named after its originating item: the earliest issue, or else, for a task with no issue such as a Dependabot pull request, the earliest pull request. Every page titles a task or run with that item's mark and title, so a pull request number is in a title only for a task without an issue. The task's other pull requests appear as marks beside it, never in the title.

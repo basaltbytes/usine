@@ -1,6 +1,6 @@
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
-import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession, PoolLogin, TokenBreakdown } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import {
@@ -63,7 +63,7 @@ const request = (
       parentId: AgentSessionId.make("parent-1"),
       agent: AgentName.make("developer"),
       brain: BrainSpec.make({
-        harness: "codex",
+        harness: Harness.make("codex"),
         model: ModelId.make(model),
         effort,
       }),

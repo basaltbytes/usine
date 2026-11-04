@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { migrateProjects } from "../src/project/operations.ts";
 import { NodeServices } from "@effect/platform-node";
@@ -511,7 +512,7 @@ for (const [name, layer] of adapters)
             before: agent.after,
             after: Option.map(agentValue, (value) => ({
               ...value,
-              harness: "claude",
+              harness: Harness.make("claude"),
               model: "claude-sonnet-4-6",
             })),
           });

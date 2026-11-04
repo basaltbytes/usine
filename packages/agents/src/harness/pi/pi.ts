@@ -1,4 +1,4 @@
-import { BrainSpec } from "@usine/core/agent/brain";
+import { Harness, BrainSpec } from "@usine/core/agent/brain";
 import { ChildSession, SessionStarted } from "@usine/core/agent/session";
 import { Deferred, Effect, Layer, Option, Stream } from "effect";
 import {
@@ -47,7 +47,7 @@ const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
     supported: started.supported,
   });
   return yield* UnsupportedEffortError.make({
-    harness: "pi",
+    harness: Harness.make("pi"),
     model: started.model,
     effort: started.effort,
     message: `Pi model "${started.model}" doesn't support effort ${started.effort}. Supported efforts: ${started.supported.join(", ")}`,
@@ -98,7 +98,7 @@ const makePiChild = Effect.gen(function* () {
                 model: request.session.brain.model,
               });
               return yield* UnknownModelError.make({
-                harness: "pi",
+                harness: Harness.make("pi"),
                 model: request.session.brain.model,
                 message: `Pi has no model "${request.session.brain.model}"`,
               });
@@ -118,7 +118,7 @@ const makePiChild = Effect.gen(function* () {
                 { model: started.model, requiredPool: required },
               );
               return yield* PoolUnavailableError.make({
-                harness: "pi",
+                harness: Harness.make("pi"),
                 model: started.model,
                 pool: required,
                 message: `Pi child model "${started.model}" requires a credential from the ${required} pool`,
@@ -134,7 +134,7 @@ const makePiChild = Effect.gen(function* () {
               parentId: request.session.parentId,
               agent: request.session.agent,
               brain: BrainSpec.make({
-                harness: "pi",
+                harness: Harness.make("pi"),
                 model: started.model,
                 effort: request.session.brain.effort,
               }),

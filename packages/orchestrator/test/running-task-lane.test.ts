@@ -1,4 +1,4 @@
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
@@ -117,7 +117,7 @@ const isOpen = (state: RunStateTag) =>
 const run = (item: ItemProjection, loop: string, state: RunStateTag) =>
   RunSummaryView.make({
     agentBrain: BrainSpec.make({
-      harness: "codex",
+      harness: Harness.make("codex"),
       model: ModelId.make("test-model"),
       effort: "high",
     }),

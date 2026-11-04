@@ -16,7 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { NodeServices, NodeFileSystem } from "@effect/platform-node";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
 import { AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -43,7 +43,7 @@ import { RunEvidenceFromJson } from "../src/export-run.ts";
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const now = DateTime.makeUnsafe("2026-09-06T00:00:00Z");
 const brain = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("test-model"),
   effort: "high",
 });

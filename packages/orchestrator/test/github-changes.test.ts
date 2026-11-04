@@ -3,7 +3,7 @@ import { LocalWorker, ExeDevWorker } from "@usine/config/factory";
 import { testAppLayer } from "./support/github-app.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
 import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -51,7 +51,7 @@ const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = gitHubItemKey(repository, 247);
 const runId = RunId.make("d4ca1525f463fad8df76328db85a7611");
 const brain = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-6-astra"),
   effort: "medium",
 });

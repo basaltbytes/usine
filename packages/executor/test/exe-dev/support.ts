@@ -2,7 +2,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
@@ -73,7 +73,7 @@ export const WORKTREE = "/home/exedev/.usine/workers/remote-one/attempts/remote-
 export const TEST_AGENT = Agent.make({
   name: AgentName.make("developer"),
   brain: BrainSpec.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),

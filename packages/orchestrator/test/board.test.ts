@@ -8,7 +8,7 @@ import { GitHubLabelName } from "@usine/config/label";
 import { LabelLaneSource, LaneName } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   type BillingPool,
@@ -136,7 +136,7 @@ const mergedPullRequest = ItemProjection.make({
 const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succeeded") =>
   RunSummaryView.make({
     agentBrain: BrainSpec.make({
-      harness: "codex",
+      harness: Harness.make("codex"),
       model: ModelId.make("test-model"),
       effort: "high",
     }),
@@ -686,7 +686,7 @@ describe("Task usage", () => {
         id: AgentSessionId.make(`${attempt}-${pool}`),
         agent: AgentName.make("developer"),
         brain: BrainSpec.make({
-          harness: harnesses[pool],
+          harness: Harness.make(harnesses[pool]),
           model: ModelId.make("model"),
           effort: "high",
         }),

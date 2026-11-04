@@ -51,7 +51,8 @@ export const configurationEditorResponses = async (
   rejections: readonly { readonly status: number; readonly body: string }[],
   configuration: string,
 ) => {
-  const { HARNESSES, EFFORTS } = await import("@usine/core/agent/brain");
+  const { EFFORTS } = await import("@usine/core/agent/brain");
+  const { catalog, harnessPresentations } = await import("@usine/agents/harness");
   await page.route("**/api/overview", (route) =>
     route.fulfill({
       contentType: "application/json",
@@ -161,7 +162,11 @@ export const configurationEditorResponses = async (
     if (last === "capabilities") {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({ harnesses: HARNESSES, efforts: EFFORTS }),
+        body: JSON.stringify({
+          harnesses: catalog.ids,
+          harnessDetails: harnessPresentations,
+          efforts: EFFORTS,
+        }),
       });
       return;
     }
