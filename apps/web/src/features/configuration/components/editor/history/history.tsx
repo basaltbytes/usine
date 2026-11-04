@@ -20,7 +20,7 @@ import {
   useConfigurationWrite,
 } from "~/features/configuration/queries";
 import { editorCopy } from "~/features/configuration/strings";
-import { WriteFailure } from "./failure";
+import { WriteFailure } from "~/features/configuration/components/editor/failure";
 
 type RevisionDetailProps = {
   readonly number: ConfigurationRevisionNumber;
@@ -80,7 +80,7 @@ const RevisionDetail = ({ number, entity }: RevisionDetailProps) => {
           className="flex flex-col gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            if (current.data === undefined) return;
+            if (write.isPending || current.data === undefined) return;
             write.mutate(
               { action: "revert", number, payload: { expected: current.data.number, message } },
               { onSuccess: () => setConfirm(false) },
@@ -126,7 +126,6 @@ export const ConfigurationHistory = ({ entity }: ConfigurationHistoryProps) => {
   const revisions = history.data?.pages.flatMap((page) => page.revisions) ?? [];
   return (
     <section className="flex min-w-0 flex-col gap-3" aria-label={editorCopy.history}>
-      <h2 className="text-md font-semibold">{editorCopy.history}</h2>
       {history.isPending && <p role="status">{editorCopy.loading}</p>}
       {history.isError && <ErrorAlert message={history.error.message} />}
       {history.isSuccess && revisions.length === 0 && (
@@ -135,9 +134,10 @@ export const ConfigurationHistory = ({ entity }: ConfigurationHistoryProps) => {
       <ul className="min-w-0 divide-y border-y">
         {revisions.map((revision) => (
           <li key={revision.number} className="min-w-0 py-3">
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <Button
                 variant="ghost"
+                className="-ml-2.5 font-mono text-xs"
                 aria-expanded={selected === revision.number}
                 onClick={() => setSelected(selected === revision.number ? null : revision.number)}
               >
@@ -147,15 +147,15 @@ export const ConfigurationHistory = ({ entity }: ConfigurationHistoryProps) => {
                 {revision.actor ?? editorCopy.localOperator}
               </span>
               <time
-                className="text-xs text-muted-foreground"
+                className="text-xs text-muted-foreground tabular-nums"
                 dateTime={DateTime.formatIso(revision.time)}
               >
                 {DateTime.toDateUtc(revision.time).toLocaleString()}
               </time>
-              {revision.message !== null && (
-                <span className="min-w-0 wrap-anywhere">{revision.message}</span>
-              )}
             </div>
+            {revision.message !== null && revision.message !== "" && (
+              <p className="pt-1 font-medium wrap-anywhere">{revision.message}</p>
+            )}
             {entity === undefined && (
               <ul className="flex flex-wrap gap-x-4 gap-y-1 py-2">
                 {revision.entities.map((key) => (
