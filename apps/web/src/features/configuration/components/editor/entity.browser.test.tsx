@@ -116,7 +116,9 @@ const editText = async () => {
 };
 
 it("shows entity history as export-format diffs, reverts with a message, and loads older revisions", async () => {
-  await mount();
+  const router = await mount();
+  await page.getByRole("link", { name: "View history for worker:local", exact: true }).click();
+  expect(router.state.location.search).toMatchObject({ kind: "worker", identifier: "local" });
   await button("Revision 2").click();
   await expect
     .element(page.getByText("-max_concurrent_attempts: 1", { exact: false }))
@@ -150,6 +152,7 @@ it("refreshes the head after a stale revert and after a successful write", async
       }),
     },
   ]);
+  await page.getByRole("link", { name: "View history for worker:local", exact: true }).click();
   await button("Revision 2").click();
   await button("Revert").click();
   await button("Confirm revert").click();
@@ -313,7 +316,7 @@ it.each([
   await mount(path);
   await editText();
   await page.getByRole("textbox", { name: "Configuration text" }).fill("changed text");
-  await button("Save").click();
+  await userEvent.keyboard("{Control>}{Enter}{/Control}");
   await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
   expect((await commands.configurationEditorRequests())[0]).toMatchObject({
     method: "PUT",

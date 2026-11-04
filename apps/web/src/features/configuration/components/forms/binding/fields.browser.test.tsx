@@ -114,7 +114,7 @@ it.each([1440, 390])(
       await button("Edit as form").click();
       await expect.element(select("Role")).toHaveValue("operator");
       await button("Save").click();
-      await expect.element(button("Revision 2")).toBeVisible();
+      await expect.element(button("Edit")).toBeEnabled();
       await expect
         .poll(() => client.getQueryData(configurationQuery().queryKey)?.bindings)
         .toContainEqual(
@@ -132,7 +132,7 @@ it.each([1440, 390])(
       await select("Role").selectOptions("maintainer");
       await capture("project-binding");
       await button("Save").click();
-      await expect.element(button("Revision 3")).toBeVisible();
+      await expect.element(button("Edit")).toBeEnabled();
       await button("Edit").click();
       await select("Scope").selectOptions("instance");
       await expect.element(select("Role")).toHaveValue("admin");
@@ -141,7 +141,7 @@ it.each([1440, 390])(
       await select("Scope").selectOptions("instance");
       await capture("instance-binding");
       await button("Save").click();
-      await expect.element(button("Revision 4")).toBeVisible();
+      await expect.element(button("Edit")).toBeEnabled();
       await expect
         .poll(() => client.getQueryData(configurationQuery().queryKey)?.bindings)
         .toContainEqual(
@@ -153,6 +153,9 @@ it.each([1440, 390])(
         );
       await button("Delete").click();
       await button("Confirm delete").click();
+      await page
+        .getByRole("link", { name: "View history for binding:olivia-project", exact: true })
+        .click();
       await expect.element(button("Revision 5")).toBeVisible();
       const actors = page
         .getByRole("region", { name: "History" })
