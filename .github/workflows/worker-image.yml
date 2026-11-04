@@ -5,7 +5,7 @@ name: Worker image
 # of that architecture, and prints the version of each tool in it. On main, each
 # build pushes its image by digest, and the publish job tags both digests as one
 # multi-platform image. The tag names the Claude Code and Codex versions that
-# the Dockerfile pins, which is the tag of the SSH executor's default image
+# the harness descriptors specify, which is the tag of the SSH executor's default image
 # (ATTEMPT_IMAGE in packages/executor/src/ssh/container.ts). A pull request only
 # builds and checks both images.
 
@@ -14,10 +14,16 @@ on:
     branches: [main]
     paths:
       - "infra/worker-image/**"
+      - "packages/agents/src/harness/**/descriptor.ts"
+      - "packages/agents/src/harness/catalog.ts"
+      - "scripts/worker-image/**"
       - ".github/workflows/worker-image.yml"
   pull_request:
     paths:
       - "infra/worker-image/**"
+      - "packages/agents/src/harness/**/descriptor.ts"
+      - "packages/agents/src/harness/catalog.ts"
+      - "scripts/worker-image/**"
       - ".github/workflows/worker-image.yml"
   workflow_dispatch:
 
@@ -52,9 +58,8 @@ jobs:
       - name: Read the harness versions
         id: pins
         run: |
-          pin() { sed -n "s/^ARG $1=//p" infra/worker-image/Dockerfile; }
-          tag="claude-$(pin CLAUDE_CODE_VERSION)-codex-$(pin CODEX_VERSION)"
-          [[ "$tag" =~ ^claude-[0-9.]+-codex-[0-9.]+$ ]] || { echo "Unexpected tag: $tag" >&2; exit 1; }
+          tag=$(cat infra/worker-image/tag.txt)
+          [[ "$tag" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "Unexpected tag: $tag" >&2; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build

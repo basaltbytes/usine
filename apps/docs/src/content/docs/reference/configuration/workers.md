@@ -52,6 +52,8 @@ Set exactly one of `destination` or `provisioner`. SSH runs in batch mode and re
 
 Fields belong to `container` on an SSH worker.
 
+The default worker image tag and install packages come from the harness descriptors. The SSH attempt image, Hetzner cloud-init, and Cloudflare sandbox image use the same worker package versions. When building usine from source, run `pnpm worker-image:generate` after changing a descriptor's installation requirements; `pnpm check` checks the generated inputs. Preflight accepts any installed Claude Code version and checks Codex against its accepted versions.
+
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `image` | image reference | release's worker image | Container image with Git, gh, Node.js, and the child harnesses. |

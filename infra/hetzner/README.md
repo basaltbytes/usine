@@ -6,7 +6,7 @@ An `ssh` worker is any Linux machine that the orchestrator reaches over SSH. The
 - `render-cloud-init.sh` prints that file with the public keys to authorize for `usine` and the Node.js major version of the attempt image, `NODE_MAJOR` in `../worker-image/Dockerfile`, which the scripts here send as the server's user data.
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a Hetzner firewall that allows SSH only from the orchestrator's address.
 - `snapshot.sh` builds the snapshot from which a [provisioned worker](#provisioned-workers) creates a server for each attempt.
-- `../worker-image/Dockerfile` is the image of each attempt's container. CI builds it and pushes it to `ghcr.io/basaltbytes/usine-worker`, tagged with its Claude Code and Codex versions.
+- `../worker-image/Dockerfile` is the image of each attempt's container. CI builds it and pushes it to `ghcr.io/basaltbytes/usine-worker`, tagged with the generated `../worker-image/tag.txt`.
 - `orchestrator-cloud-init.yaml` and `orchestrator-nftables.conf` build a server for the orchestrator itself, in the network of [`gateway/`](gateway/README.md#run-the-orchestrator-in-the-gateways-network). `gateway/gateway.sh orchestrator` creates it.
 
 ## Attempt containers
@@ -91,7 +91,9 @@ Without `TURBO_CACHE_DIR` and a `cacheDir`, Turborepo 2.10 puts a linked worktre
 
 ## Upgrade the harnesses
 
-The attempt image has the Claude Code and Codex versions that the usine release supports, and its tag names them. A usine release with new versions names a new tag, which preflight pulls at the next `usine up` or reload that preflights the worker; nothing changes on the machine. A worker with `container.image` in `usine.yaml` gets new versions when you change that tag. CI pushes an image for every change to `infra/worker-image/`. A change that keeps the versions overwrites their tag, and workers get it at their next preflight. A change to `NODE_MAJOR` in the Dockerfile is one: the image gets the new Node.js at once, and the worker machines get it with servers created or snapshots built after it.
+The attempt image installs the worker packages from the harness descriptors in `@usine/agents/harness`, and its tag names their versions. Run `pnpm worker-image:generate` from the repository root after changing the descriptors. It updates the Dockerfile arguments, the cloud-init install line, the Cloudflare image arguments, and `../worker-image/tag.txt`; `pnpm check` checks these generated inputs. Claude Code preflight accepts any installed version.
+
+A usine release with new install versions names a new tag, which preflight pulls at the next `usine up` or reload that preflights the worker; nothing changes on the machine. A worker with `container.image` in `usine.yaml` gets new versions when you change that tag. CI pushes an image for changes to the worker image, harness descriptors, or generator. A change that keeps the versions overwrites their tag, and workers get it at their next preflight. A change to `NODE_MAJOR` in the Dockerfile is one: the image gets the new Node.js at once, and the worker machines get it with servers created or snapshots built after it.
 
 The first image pushed to GHCR is private. Make the `usine-worker` package public in its package settings on GitHub, or authenticate as `usine` with the selected runtime. For private Podman images, set `REGISTRY_AUTH_FILE` to a protected file outside `/run` and attempt mounts, and use `podman login --password-stdin`.
 
@@ -135,8 +137,8 @@ The script:
 
 1. Creates a temporary server `usine-snapshot-<time>`, labeled `usine=snapshot-build`, from `cloud-init.yaml` with the key authorized for `usine` and a public IPv4 address, or with `NETWORK` from `gateway/gateway.sh worker-user-data` in that network, with no public address.
 2. Waits until it accepts SSH as `usine` and cloud-init finishes, through the gateway with `-J` if it's behind it, and fails if that takes more than 20 minutes from the server's creation. Each run generates an Ed25519 host key, sends it in cloud-init user data, and pins it in a known-hosts file before connecting with `StrictHostKeyChecking=yes`. cloud-init loads the server's nftables rules at the end of its run, which can drop the connection that waits for it without closing it. ssh gives up on a connection that doesn't answer for about a minute, and the script then reconnects.
-3. Checks that the selected runtime answers `usine`, and pulls the attempt image: `ATTEMPT_IMAGE` in `packages/executor/src/ssh/container.ts`, or the `ATTEMPT_IMAGE` variable.
-4. Shuts the server down and saves it as a snapshot labeled `usine=snapshot`, with the description `usine-worker-<runtime>-<image tag>` (using the harness versions pinned in `../worker-image/Dockerfile`), or `DESCRIPTION`.
+3. Checks that the selected runtime answers `usine`, and pulls the attempt image: `ghcr.io/basaltbytes/usine-worker` with the generated `../worker-image/tag.txt`, or the `ATTEMPT_IMAGE` variable.
+4. Shuts the server down and saves it as a snapshot labeled `usine=snapshot`, with the description `usine-worker-<runtime>-<image tag>`, or `DESCRIPTION`.
 5. Deletes the server, also after a failure, and prints the snapshot's ID and description for `provisioner.image`.
 
 `LOCATION` (default `fsn1`), `SERVER_TYPE` (default `cx23`), `IMAGE` (default `debian-13`), and `SERVER_NAME` set the temporary server. A server created from the snapshot needs a disk at least as large as `SERVER_TYPE`'s, so build it on the smallest type you use; `cx33` and `cpx32` have more than `cx23`. `SERVER_TYPE` must be available in `LOCATION`, and Hetzner's Cost-Optimized types, such as `cx23` and `cx33`, often aren't: on 2026-10-26 neither was in `fsn1`, `nbg1`, or `hel1`. If the type isn't available, `hcloud server create` fails and the script stops; set another type or location. A snapshot built on a `cpx12` in `hel1` runs `cpx32` workers. Behind the gateway, `gateway.sh` reads `GATEWAY_IP`, `DOMAIN`, and `NETWORK_CIDR` as for `create`, and the snapshot works only in that gateway's network.

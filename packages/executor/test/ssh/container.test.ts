@@ -120,18 +120,12 @@ const assertInOrder = (steps: ReadonlyArray<readonly [string, number]>) =>
   });
 
 describe("SSH Worker with Docker", () => {
-  // turbo.json lists the Dockerfile as an input of this package's tests.
-  it("defaults to the image that CI tags with the Dockerfile's harness versions", () => {
-    const dockerfile = readFileSync(
-      new URL("../../../../infra/worker-image/Dockerfile", import.meta.url),
+  it("defaults to the generated image tag that CI publishes", () => {
+    const tag = readFileSync(
+      new URL("../../../../infra/worker-image/tag.txt", import.meta.url),
       "utf8",
-    );
-    const argument = (name: string) =>
-      new RegExp(`^ARG ${name}=(\\S+)$`, "mu").exec(dockerfile)?.[1];
-    assert.strictEqual(
-      ATTEMPT_IMAGE,
-      `ghcr.io/basaltbytes/usine-worker:claude-${argument("CLAUDE_CODE_VERSION")}-codex-${argument("CODEX_VERSION")}`,
-    );
+    ).trim();
+    assert.strictEqual(ATTEMPT_IMAGE, `ghcr.io/basaltbytes/usine-worker:${tag}`);
   });
 
   it.effect.each([

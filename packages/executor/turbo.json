@@ -6,7 +6,8 @@
       "inputs": [
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/infra/hetzner/cloud-init.yaml",
-        "$TURBO_ROOT$/infra/worker-image/Dockerfile"
+        "$TURBO_ROOT$/infra/worker-image/Dockerfile",
+        "$TURBO_ROOT$/infra/worker-image/tag.txt"
       ]
     }
   }

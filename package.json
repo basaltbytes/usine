@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "check": "node scripts/docs/check.mjs && turbo run check && pnpm --filter @usine/docs openapi:check && git diff --exit-code -- apps/docs/public/openapi.json",
+    "worker-image:generate": "turbo run build --filter=@usine/agents && node scripts/worker-image/generate.mjs",
+    "check": "node scripts/docs/check.mjs && turbo run check && node scripts/worker-image/generate.mjs --check && pnpm --filter @usine/docs openapi:check && git diff --exit-code -- apps/docs/public/openapi.json",
     "effect:fix": "node scripts/effect-diagnostics/fix.mjs",
     "check:packed-install": "node scripts/check-packed-install.mjs",
     "test": "pnpm test:scripts && turbo run test --concurrency=1",
