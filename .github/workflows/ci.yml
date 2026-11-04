@@ -12,13 +12,13 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   NODE_VERSION: ${{ github.event_name == 'pull_request' && '22' || '24' }}
 
 jobs:
-  ci:
+  static:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,19 +32,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           check-latest: true
           cache: pnpm
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: turbo
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-ci-node${{ env.NODE_VERSION }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-ci-static-node${{ env.NODE_VERSION }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-ci-node${{ env.NODE_VERSION }}-
-            turbo-${{ runner.os }}-
-      # The browser download is keyed by the lockfile, which pins the Playwright version.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: playwright
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+            turbo-${{ runner.os }}-ci-static-node${{ env.NODE_VERSION }}-
       - run: pnpm install --frozen-lockfile
       - name: Validate changesets
         if: github.event_name == 'pull_request' && hashFiles('.changeset/*.md') != ''
@@ -64,8 +58,96 @@ jobs:
       - run: pnpm knip
       - run: pnpm build
       - run: pnpm check
-      - if: steps.playwright.outputs.cache-hit != 'true'
+      - run: pnpm test:scripts
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: .turbo
+          key: ${{ steps.turbo.outputs.cache-primary-key }}
+
+  test:
+    name: test (${{ matrix.leg }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: web
+            filters: --filter=@usine/web
+          - leg: server
+            filters: --filter=@usine/server
+            args: -- --project=server
+          - leg: engine
+            filters: --filter=@usine/engine --filter=@usine/orchestrator --filter=@usine/durable
+          - leg: rest
+            filters: --filter='!@usine/web' --filter='!@usine/server' --filter='!@usine/engine' --filter='!@usine/orchestrator' --filter='!@usine/durable'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+          cache: pnpm
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: turbo
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: matrix.leg == 'web'
+        id: playwright
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - if: matrix.leg == 'web' && steps.playwright.outputs.cache-hit != 'true'
         run: pnpm --filter @usine/web exec playwright install --with-deps chromium
-      - if: steps.playwright.outputs.cache-hit == 'true'
+      - if: matrix.leg == 'web' && steps.playwright.outputs.cache-hit == 'true'
         run: pnpm --filter @usine/web exec playwright install-deps chromium
-      - run: pnpm test
+      - run: pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: .turbo
+          key: ${{ steps.turbo.outputs.cache-primary-key }}
+
+  latency:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          check-latest: true
+          cache: pnpm
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: turbo
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-ci-latency-node${{ env.NODE_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-ci-latency-node${{ env.NODE_VERSION }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run build --filter=@usine/server
+      - run: pnpm --filter @usine/server exec vitest run --project=latency
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: .turbo
+          key: ${{ steps.turbo.outputs.cache-primary-key }}
+
+  ci:
+    if: always()
+    needs: [static, test, latency]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")'

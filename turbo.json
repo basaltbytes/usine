@@ -3,7 +3,17 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!README.md",
+        "!CHANGELOG.md",
+        "!test/**",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!vitest.config.ts",
+        "!tsconfig.check.json",
+        "!effect-baseline.json"
+      ],
       "outputs": ["dist/**"]
     },
     "check": {
