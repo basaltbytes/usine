@@ -11,8 +11,8 @@ import {
 } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Scope, Schema } from "effect";
 import { AgentBlockedError, AgentQuestionError, type OnDelivery } from "../../src/runtime.ts";
-import { sessionChannel } from "../../src/pi/session.ts";
-import { sessionConversation } from "../../src/pi/conversation.ts";
+import { sessionChannel } from "../../src/harness/session.ts";
+import { sessionConversation } from "../../src/harness/conversation.ts";
 
 const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),

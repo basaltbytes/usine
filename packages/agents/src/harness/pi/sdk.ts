@@ -151,7 +151,7 @@ export class PiSdk extends Context.Service<
      */
     readonly start: (options: PiStartOptions) => Promise<PiStartResult>;
   }
->()("@usine/agents/pi/sdk/PiSdk") {}
+>()("@usine/agents/harness/pi/sdk/PiSdk") {}
 
 /** Provides Pi sessions using the installed SDK and worker-user settings. Project extensions, skills, prompt templates, and themes are disabled; sessions are kept in memory. */
 export const piSdkLive = Layer.succeed(PiSdk)({

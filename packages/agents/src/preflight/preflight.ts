@@ -8,9 +8,13 @@ import { Effect, Option, Schema, Layer } from "effect";
 import { homedir } from "node:os";
 import type { ChildHost } from "../child-host/child-host.ts";
 import { SessionOperationError, WorkingDirectory } from "../runtime.ts";
-import { CodexAppServer, codexAppServerLive, codexConfigArgs } from "../pi/codex/app-server.ts";
-import { initializeCodex, verifyCodexAccount } from "../pi/codex/account.ts";
-import { PiSdk, piSdkLive, usePiStart } from "../pi/sdk.ts";
+import {
+  CodexAppServer,
+  codexAppServerLive,
+  codexConfigArgs,
+} from "../harness/codex/app-server.ts";
+import { initializeCodex, verifyCodexAccount } from "../harness/codex/account.ts";
+import { PiSdk, piSdkLive, usePiStart } from "../harness/pi/sdk.ts";
 import { probeCommand, probeFailed, probeOutput } from "./command.ts";
 
 /** The Codex CLI version of the pinned app-server protocol package used by the conformance check. */

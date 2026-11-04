@@ -4,8 +4,8 @@ import { describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 
 import { CodexChildBackend } from "../../src/runtime.ts";
-import { codexAppServerLive } from "../../src/pi/codex/app-server.ts";
-import { codexChildBackendLayer } from "../../src/pi/codex/codex.ts";
+import { codexAppServerLive } from "../../src/harness/codex/app-server.ts";
+import { codexChildBackendLayer } from "../../src/harness/codex/codex.ts";
 import { interruptionContract, localHost, shimHost, steeringContract } from "./contract.ts";
 
 const brain = Effect.gen(function* () {

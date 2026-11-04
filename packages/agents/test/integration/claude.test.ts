@@ -4,7 +4,7 @@ import { describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 
 import { ClaudeChildBackend, ClaudeLoginLock } from "../../src/runtime.ts";
-import { claudeChildBackendLayer, claudeSdkLive } from "../../src/pi/claude/claude.ts";
+import { claudeChildBackendLayer, claudeSdkLive } from "../../src/harness/claude/claude.ts";
 import { interruptionContract, localHost, shimHost, steeringContract } from "./contract.ts";
 
 const brain = Effect.gen(function* () {
