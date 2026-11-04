@@ -258,3 +258,7 @@ Read `GET /api/health` to check `sqliteReader`: `worker` means standalone reads 
 ## Schema contracts
 
 Operator request and response records use nominal Schema brands. TypeScript integrations construct records with their schema’s `make` method or decode JSON with `Schema.decodeUnknownEffect`. HTTP request and response formats remain unchanged.
+
+## Tests
+
+`pnpm turbo run test --filter=@usine/server` builds the server and runs both Vitest projects. Select `-- --project=server` for functional tests or `-- --project=latency` for the 500 ms concurrent overview and desk read budget. CI runs the functional project on pull requests and `main`, and the latency project in a separate job on `main`.

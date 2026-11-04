@@ -197,8 +197,7 @@
     "asyncFunction": 1,
     "globalDate": 2
   },
-  "test/operator-read-latency.test.ts": {
-    "asyncFunction": 1,
+  "test/operator-reads/fixture.ts": {
     "globalJson": 2
   },
   "test/reload-signal.test.ts": {
