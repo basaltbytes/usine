@@ -114,22 +114,50 @@ export class GitHubChecks extends Context.Service<
           actionsRunAttempt: steps.run_attempt,
         });
         const path = `${prefix}/actions/runs/${steps.run_id}/attempts/${steps.run_attempt}/logs`;
-        let archive = archives.get(path);
-        if (archive === undefined) {
-          const response = yield* get(path);
-          const buffer = yield* response.arrayBuffer.pipe(
-            Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-          );
-          archive = new Uint8Array(buffer);
-          archives.set(path, archive);
-        }
-        const bytes = archive;
-        const output = yield* Effect.try({
-          try: () => failedStepsExcerpt(steps, bytes),
-          catch: () => invalidResponse("read-ci-checks", "Invalid Actions log archive"),
-        });
-        if (output.length === 0)
-          return yield* invalidResponse("read-ci-checks", "No failed step logs are available");
+        const output = yield* Effect.gen(function* () {
+          let archive = archives.get(path);
+          if (archive === undefined) {
+            const response = yield* get(path);
+            const buffer = yield* response.arrayBuffer.pipe(
+              Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+            );
+            archive = new Uint8Array(buffer);
+            archives.set(path, archive);
+          }
+          const bytes = archive;
+          const output = yield* Effect.try({
+            try: () => failedStepsExcerpt(steps, { format: "archive", bytes }),
+            catch: () => invalidResponse("read-ci-checks", "Invalid Actions log archive"),
+          });
+          if (output.length === 0)
+            return yield* invalidResponse("read-ci-checks", "No failed step logs are available");
+          return output;
+        }).pipe(
+          Effect.catchIf(
+            (error) => error._tag !== "GitHubRateLimitError",
+            (error) =>
+              Effect.gen(function* () {
+                yield* Effect.logWarning("CI run archive unavailable; reading completed job log", {
+                  job,
+                  errorTag: error._tag,
+                });
+                const response = yield* get(`${prefix}/actions/jobs/${job}/logs`);
+                const buffer = yield* response.arrayBuffer.pipe(
+                  Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+                );
+                const output = failedStepsExcerpt(steps, {
+                  format: "job",
+                  bytes: new Uint8Array(buffer),
+                });
+                if (output.length === 0)
+                  return yield* invalidResponse(
+                    "read-ci-checks",
+                    "No failed step logs are available",
+                  );
+                return output;
+              }),
+          ),
+        );
         yield* Effect.logInfo("Read failed CI step logs", {
           job,
           steps: steps.steps

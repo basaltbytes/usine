@@ -154,8 +154,11 @@ const combinedStepLogs = (job: typeof ActionsJob.Type, file: Uint8Array) => {
   return logs;
 };
 
-/** Extracts failed steps from numbered files or a combined job log. Invalid ZIP data throws. */
-export const failedStepsExcerpt = (job: typeof ActionsJob.Type, archive: Uint8Array): string => {
+/** Extracts failed steps from an archive or a plain job log. Invalid ZIP data throws. */
+export const failedStepsExcerpt = (
+  job: typeof ActionsJob.Type,
+  log: { readonly format: "archive" | "job"; readonly bytes: Uint8Array },
+): string => {
   const failed = job.steps.filter(
     ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
   );
@@ -171,13 +174,17 @@ export const failedStepsExcerpt = (job: typeof ActionsJob.Type, archive: Uint8Ar
     if (directory !== folder || file === undefined || extra !== undefined) return undefined;
     return file.match(/^(\d+)_.*\.txt$/u)?.[1];
   };
-  const files = unzipSync(archive, {
-    filter: ({ name }) =>
-      failed.some(({ number }) => stepNumber(name) === String(number)) ||
-      (/^\d+_/u.test(name) && name.replace(/^\d+_/u, "") === `${folder}.txt`),
-  });
+  const files =
+    log.format === "job"
+      ? {}
+      : unzipSync(log.bytes, {
+          filter: ({ name }) =>
+            failed.some(({ number }) => stepNumber(name) === String(number)) ||
+            (/^\d+_/u.test(name) && name.replace(/^\d+_/u, "") === `${folder}.txt`),
+        });
   const combined = Object.entries(files).filter(([path]) => !path.includes("/"));
-  const combinedFile = combined.length === 1 ? combined[0]?.[1] : undefined;
+  const combinedFile =
+    log.format === "job" ? log.bytes : combined.length === 1 ? combined[0]?.[1] : undefined;
   const fallback =
     combinedFile === undefined
       ? new Map<number, ReadonlyArray<string>>()

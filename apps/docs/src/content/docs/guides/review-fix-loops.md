@@ -42,6 +42,8 @@ Instance admin access, a project, `reviewer` and `developer` agents, repository 
 
 A finding starts the fix loop. After its push, the agent session ends and frees its worker slot while the run shows **Waiting for CI**. Green checks on the recorded head apply the completion labels and start review again. Failed checks start the configured fix loop with bounded evidence; inherited completion actions continue through subsequent fixes.
 
+For failed GitHub Actions checks, the fix attempt receives the failed job names and a bounded excerpt of failed-step logs. If the run archive is unavailable while other jobs are running, usine reads the completed job's log. If those logs are unavailable, it uses the check output.
+
 ## CI outcomes
 
 The handoff must match the harvested pull request and pushed head. The stored policy determines the timeout and fix loop. A plain success from a loop with a CI policy also waits, with no additional label actions. A newer push cancels the old wait. Restarts resume stored CI waits without an agent.

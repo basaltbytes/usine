@@ -161,6 +161,77 @@ for (const stepName of ["Run pnpm test", "Tests"]) {
   );
 }
 
+for (const unavailable of ["not ready", "missing step", "corrupt archive"]) {
+  it.effect(
+    `keeps the failed matrix step while sibling jobs run and the archive is ${unavailable}`,
+    () =>
+      Effect.gen(function* () {
+        const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+        assert.deepStrictEqual(evidence.jobs, ["test (server)"]);
+        assert.include(evidence.excerpt, "Tests\n");
+        assert.include(evidence.excerpt, "expected 2 to equal 1");
+        assert.notInclude(evidence.excerpt, "successful setup");
+        assert.notInclude(evidence.excerpt, "Post job cleanup");
+      }).pipe(
+        Effect.provide(
+          withClient((url) => {
+            if (url.includes("/attempts/")) {
+              if (unavailable === "not ready") return new Response("not ready", { status: 404 });
+              if (unavailable === "missing step") return archiveResponse({});
+              return new Response("invalid ZIP");
+            }
+            if (url.endsWith("/actions/jobs/2/logs"))
+              return new Response(
+                [
+                  "2026-11-02T10:00:00.0000000Z ##[group]Setup",
+                  "2026-11-02T10:00:00.1000000Z successful setup",
+                  "2026-11-02T10:00:01.0000000Z ##[group]Tests",
+                  "2026-11-02T10:00:01.1000000Z FAIL expected 2 to equal 1",
+                  "2026-11-02T10:00:02.0000000Z Post job cleanup.",
+                ].join("\n"),
+              );
+            if (url.endsWith("/actions/jobs/2"))
+              return json({
+                name: "test (server)",
+                run_id: 1,
+                run_attempt: 2,
+                steps: [
+                  {
+                    name: "Setup",
+                    conclusion: "success",
+                    number: 1,
+                    started_at: "2026-11-02T10:00:00Z",
+                    completed_at: "2026-11-02T10:00:00Z",
+                  },
+                  {
+                    name: "Tests",
+                    conclusion: "failure",
+                    number: 2,
+                    started_at: "2026-11-02T10:00:01Z",
+                    completed_at: "2026-11-02T10:00:01Z",
+                  },
+                  {
+                    name: "Post checkout",
+                    conclusion: "success",
+                    number: 3,
+                    started_at: "2026-11-02T10:00:02Z",
+                    completed_at: "2026-11-02T10:00:02Z",
+                  },
+                ],
+              });
+            return json({
+              total_count: 2,
+              check_runs: [
+                { ...failedCheckRun, name: "test (server)" },
+                { ...failedCheckRun, name: "test (web)", conclusion: null },
+              ],
+            });
+          }),
+        ),
+      ),
+  );
+}
+
 it.effect("keeps failure-marker context and tails from each failed step within the limit", () =>
   Effect.gen(function* () {
     const evidence = yield* (yield* GitHubChecks).failures(repository, head);
@@ -516,7 +587,7 @@ it.effect("reports legacy status contexts when no check run failed", () =>
   ),
 );
 
-for (const endpoint of ["metadata", "logs"]) {
+for (const endpoint of ["metadata", "logs", "completed job logs"]) {
   it.effect(`propagates rate limits from Actions ${endpoint} for the polling backoff`, () =>
     Effect.gen(function* () {
       const error = yield* (yield* GitHubChecks).failures(repository, head).pipe(Effect.flip);
@@ -525,6 +596,8 @@ for (const endpoint of ["metadata", "logs"]) {
       Effect.provide(
         withClient((url) => {
           if (url.includes("/actions/")) {
+            if (endpoint === "completed job logs" && url.includes("/attempts/"))
+              return new Response("not ready", { status: 404 });
             if ((endpoint === "metadata" && url.includes("/jobs/")) || url.includes("/logs"))
               return new Response("rate limited", {
                 status: 429,

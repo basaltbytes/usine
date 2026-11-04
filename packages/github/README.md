@@ -138,3 +138,7 @@ Enable the App webhook to record deliveries. A delivery with a failed HTTP statu
 ## Schema contracts
 
 GitHub response records and errors use nominal Schema brands. Use their schema constructors for typed values, and decode external responses with `Schema.decodeUnknownEffect`.
+
+## CI failure evidence
+
+`GitHubChecks` reads the pull request head and aggregate check state. For failed Actions jobs, it extracts bounded failed-step logs from the run-attempt archive. If the archive is unavailable or lacks the failed step, it reads the completed job's plain log, including when other matrix jobs are running. Rate limits defer polling; unavailable job logs use the check output.
