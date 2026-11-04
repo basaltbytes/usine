@@ -3,7 +3,7 @@ import { safeSegment } from "@usine/core/repository";
 import type { AttemptId } from "@usine/core/attempt";
 import { attemptConnectionsFor } from "../attempt-connections.ts";
 import type { RemoteShell } from "@usine/agents/child-host";
-import { HostLoginLock } from "@usine/agents/runtime";
+import { Harnesses } from "@usine/agents/harness/node";
 import type { Harness } from "@usine/core/agent/brain";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
@@ -41,8 +41,7 @@ import { sshMachinesFor, SshWorkers } from "./workers.ts";
 
 const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const logins = yield* HostLoginLock;
+    const harnesses = yield* Harnesses;
     const remoteCommands = yield* remoteCommandsFor;
     const reset = machineResetFor(remoteCommands, options.instance, options.instanceId);
     const { commands } = reset;
@@ -95,10 +94,9 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     // Probes with no extra environment; the harness login is on the machine or at its Gateway,
     // or a provisioned machine's Attempts get an API key.
     const harnessProbe = (machine: SshMachine, shell: RemoteShell): HarnessProbe => {
-      const own =
-        options.harnessReadiness?.(machine) ?? agentsHarnessProbe(spawner, shell, {}, logins);
+      const own = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(harnesses, shell, {});
       const keyed = (harness: Harness) => Option.isSome(provisionedApiKey(machine, harness));
-      const external = agentsHarnessProbe(spawner, shell, {}, logins, "api-key");
+      const external = agentsHarnessProbe(harnesses, shell, {}, "api-key");
       const probe: HarnessProbe = (brain, login) =>
         keyed(brain.harness) ? external(brain, login) : own(brain, login);
       return Option.match(machine.gateway, {
@@ -111,7 +109,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
             probe,
             shell,
             keyed,
-            agentsHarnessProbe(spawner, shell, {}, logins, "gateway"),
+            agentsHarnessProbe(harnesses, shell, {}, "gateway"),
           ),
       });
     };
@@ -374,7 +372,7 @@ export const layer = (
   Executor | SshWorkers | WorkerMachines,
   never,
   | AttemptRuntime
-  | HostLoginLock
+  | Harnesses
   | CredentialProvider
   | Crypto.Crypto
   | ChildProcessSpawner.ChildProcessSpawner

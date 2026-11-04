@@ -1,12 +1,10 @@
 import type { ChildHost } from "@usine/agents/child-host";
-import { ProbeTarget } from "@usine/agents/harness/node";
+import { Harnesses, ProbeTarget } from "@usine/agents/harness/node";
 import { preflight } from "@usine/agents/preflight";
-import { HostLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { HarnessReadiness } from "@usine/core/agent/capability";
 import type { MachineId, WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Option } from "effect";
-import { ChildProcessSpawner } from "effect/process";
 import { logPreflightFailure, ExecutorOperationError, WorkerCapabilityError } from "./executor.ts";
 
 /**
@@ -60,10 +58,9 @@ export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness
  */
 export const agentsHarnessProbe =
   (
-    spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+    harnesses: Harnesses["Service"],
     host: ChildHost,
     environment: Readonly<Record<string, string>>,
-    logins: HostLoginLock["Service"],
     credential: ProbeTarget["credential"] = "host-login",
   ): HarnessProbe =>
   (brain, { worker, machine }) =>
@@ -75,6 +72,5 @@ export const agentsHarnessProbe =
           cause,
         }),
       ),
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.provideService(HostLoginLock, logins),
+      Effect.provideService(Harnesses, harnesses),
     );

@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -212,6 +213,7 @@ const withGitHubEngine = <A, E, R>(
       repositoryUrl: () => remote,
       harnessReadiness: harnessReady,
     }).pipe(
+      Layer.provide(harnessesLive),
       Layer.provide(credentialLayer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
       Layer.provide(hostLoginLockLayer),
@@ -249,6 +251,7 @@ describe("local worker", () => {
         const runtime = localLayer(instance, configDecoded1, [testAgent.brain], {
           harnessReadiness: harnessUnavailable,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
@@ -426,6 +429,7 @@ describe("local worker", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(
             Layer.succeed(CredentialProvider)({
               issue: () => Effect.succeed(workerCredential(credential)),
@@ -560,6 +564,7 @@ describe("local worker", () => {
                 ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
                 : harnessReady(brain, login),
           }).pipe(
+            Layer.provide(harnessesLive),
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(CredentialProvider)({
@@ -657,6 +662,7 @@ describe("local worker", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(credentials),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(hostLoginLockLayer),
@@ -788,6 +794,7 @@ describe("local worker", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),

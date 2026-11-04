@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -236,6 +237,7 @@ export const localRuntime = (
         ),
         Layer.provide(options.credentials ?? credentialLayer),
         Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
+        Layer.provide(harnessesLive.pipe(Layer.provide(options.platform ?? NodeServices.layer))),
         Layer.provide(hostLoginLockLayer),
         Layer.provide(alwaysHoldsLayer),
       ),

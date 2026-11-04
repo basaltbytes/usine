@@ -1,3 +1,5 @@
+import { HarnessRegistrationError } from "@usine/agents/harness/node";
+import { Harness } from "@usine/core/agent/brain";
 import { ConfigurationInvalid } from "@usine/config/configuration";
 import { Option } from "effect";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
@@ -9,6 +11,19 @@ import { assert, describe, it } from "vitest";
 import { failureMessage } from "../src/failure-message.ts";
 
 describe("CLI failure messages", () => {
+  it("reports an incomplete harness registry as a startup refusal", () => {
+    const message = failureMessage(
+      HarnessRegistrationError.make({
+        harness: Harness.make("codex"),
+        message: 'No runtime for harness descriptor "codex"',
+      }),
+    );
+    assert.strictEqual(
+      message,
+      'usine up did not start: No runtime for harness descriptor "codex". Check the registered harness descriptors and runtimes.',
+    );
+  });
+
   it("names the file, stage, and key of an invalid usine.yaml", () => {
     const message = failureMessage(
       ConfigurationInvalid.make({

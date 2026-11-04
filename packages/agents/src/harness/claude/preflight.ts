@@ -2,7 +2,8 @@ import { BrainSpec } from "@usine/core/agent/brain";
 import { Effect, Option, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { checkedPreflight, loginUnavailable, type ProbeTarget } from "../runtime.ts";
-import { probeCommand, probeFailed, probeOutput } from "../../preflight/command.ts";
+import { probeBinary, probeFailed, probeOutput } from "../../preflight/command.ts";
+import { claude } from "./descriptor.ts";
 import { HostLoginLock } from "../../runtime.ts";
 const ClaudeAuthentication = Schema.Struct({
   loggedIn: Schema.Boolean,
@@ -21,7 +22,7 @@ const check = Effect.fn("ClaudeRuntime.check")(function* (brain: BrainSpec, targ
     model: brain.model,
     worker: target.worker,
   });
-  yield* probeCommand(host, environment, brain.harness, "binary", "claude", ["--version"]);
+  yield* probeBinary(claude, target, "claude", ["--version"]);
   if (target.credential !== "host-login") {
     yield* Effect.logInfo("Harness uses an external credential; skipped the host login check", {
       harness: brain.harness,

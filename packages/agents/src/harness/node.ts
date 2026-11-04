@@ -16,7 +16,7 @@ export const harnessesLayer = Layer.unwrap(
   Effect.map(Effect.all([claudeRuntime, codexRuntime, piRuntime]), (runtimes) =>
     Harnesses.layerFrom(catalog, runtimes),
   ),
-).pipe(Layer.orDie);
+);
 
 /** Provides the registered runtimes with the production SDKs. */
 export const harnessesLive = harnessesLayer.pipe(

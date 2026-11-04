@@ -1,6 +1,6 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import { catalog } from "@usine/agents/harness";
-import { HostLoginLock } from "@usine/agents/runtime";
+import { Harnesses } from "@usine/agents/harness/node";
 import {
   ApiKeyCredential,
   CreateSandbox,
@@ -170,9 +170,8 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const commands = yield* remoteCommandsFor;
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const credentialProvider = yield* CredentialProvider;
-    const logins = yield* HostLoginLock;
+    const harnesses = yield* Harnesses;
     const session = yield* durableSessionFor({
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
@@ -772,7 +771,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               workerName,
               Option.none(),
               distinct,
-              agentsHarnessProbe(spawner, worker.shellFor(name), {}, logins, "api-key"),
+              agentsHarnessProbe(harnesses, worker.shellFor(name), {}, "sandbox-api-key"),
             );
           }),
         );
@@ -898,7 +897,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             request.worker,
             Option.none(),
             [request.agent.brain],
-            agentsHarnessProbe(spawner, shell, {}, logins, "api-key"),
+            agentsHarnessProbe(harnesses, shell, {}, "sandbox-api-key"),
           );
         }
         const access = yield* acquireSandbox(
@@ -1150,7 +1149,7 @@ export const layer = (
   Executor | CloudflareWorkers,
   never,
   | AttemptRuntime
-  | HostLoginLock
+  | Harnesses
   | ChildProcessSpawner.ChildProcessSpawner
   | CredentialProvider
   | Crypto.Crypto

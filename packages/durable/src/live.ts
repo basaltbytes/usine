@@ -2,8 +2,9 @@ import { NodeServices } from "@effect/platform-node";
 import { getAgentDir, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import type { Harnesses } from "@usine/agents/harness/node";
+import type { ChildBackend } from "@usine/agents/runtime";
 import { childDispatcherLayer } from "@usine/agents/children";
-import { harnessesLive } from "@usine/agents/harness/node";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
@@ -64,7 +65,7 @@ export const harnessLayer = (instanceDirectory: InstanceDirectory) =>
   );
 
 /** Provides child sessions through the registered harness runtimes. */
-export const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(harnessesLive));
+export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = childDispatcherLayer;
 
 /**
  * Provides the Node `AttemptRuntime` with the real child backends. Building it resumes every

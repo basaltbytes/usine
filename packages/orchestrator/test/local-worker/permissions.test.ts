@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -95,6 +96,7 @@ describe("local worker Loop permissions", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(credentials),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
           Layer.provide(hostLoginLockLayer),

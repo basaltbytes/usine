@@ -153,6 +153,8 @@ const account = (response: Effect.Effect<Schema.Json>) => {
   });
   return { layer, opened: () => opened, closed: () => closed };
 };
+const unusedAccount = account(Effect.die("the probe must not inspect an account")).layer;
+
 const unusedPi = Layer.succeed(PiSdk)({
   start: async () => {
     throw new Error("Pi must not start for another harness");
@@ -503,6 +505,53 @@ describe("worker harness readiness", () => {
       ),
     ),
   );
+
+  for (const credential of ["host-login", "gateway", "api-key", "sandbox-api-key"] as const) {
+    it.effect(`reports the Claude Code installation for the ${credential} route`, () =>
+      Effect.gen(function* () {
+        const error = yield* verifyHarness(
+          brain(Harness.make("claude")),
+          local,
+          workerEnvironment,
+          credential,
+        ).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "HarnessUnavailableError");
+        assert.strictEqual(
+          error.message,
+          credential === "sandbox-api-key"
+            ? "claude --version failed in the sandbox image. Check the Claude Code installation in the sandbox image."
+            : `claude --version failed. Check the Claude Code installation${credential === "host-login" ? " and login" : ""} on the worker.`,
+        );
+      }).pipe(
+        Effect.provide(
+          commands({ "claude --version": { stdout: "", exitCode: 127 } }).pipe(
+            Layer.provideMerge(unusedAccount),
+            Layer.provideMerge(unusedPi),
+          ),
+        ),
+      ),
+    );
+    if (credential === "host-login") continue;
+    it.effect(`reports the Node.js requirement for the ${credential} route`, () =>
+      Effect.gen(function* () {
+        const error = yield* verifyHarness(coder, remote, {}, credential).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "HarnessUnavailableError");
+        assert.strictEqual(
+          error.message,
+          credential === "sandbox-api-key"
+            ? "node --version failed in the sandbox image. Check the Codex installation in the sandbox image."
+            : "Remote Codex children require Node.js on the worker's command path.",
+        );
+      }).pipe(
+        Effect.provide(
+          commands({ [overSsh("exec 'node' '--version'")]: { stdout: "", exitCode: 127 } }).pipe(
+            Layer.provideMerge(unusedAccount),
+            Layer.provideMerge(unusedPi),
+          ),
+        ),
+      ),
+    );
+  }
 
   for (const credential of ["gateway", "api-key"] as const) {
     for (const harness of ["claude", "codex"] as const) {

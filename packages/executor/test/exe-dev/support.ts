@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -372,6 +373,7 @@ export const runtime = (
     // The cancellation tests advance the TestClock by exactly this much.
     interruptGrace: "2 seconds",
   }).pipe(
+    Layer.provide(harnessesLive),
     Layer.provide(sshLayer),
     Layer.provide(NodeCrypto.layer),
     Layer.provide(wrap(stubAttemptRuntime(storage, parent))),

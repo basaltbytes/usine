@@ -8,6 +8,7 @@ import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { preflight } from "../../src/preflight/preflight.ts";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Layer, Option, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
@@ -73,13 +74,11 @@ describe("harness runtime registration", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const dispatcher = yield* ChildBackend;
-          const harnesses = yield* Harnesses;
           for (const harness of extended.ids) {
             const child = request(harness);
             const running = yield* dispatcher.launch(child);
             assert.strictEqual((yield* running.result).message, harness);
-            const runtime = yield* harnesses.runtime(harness);
-            const readiness = yield* runtime.preflight(
+            const readiness = yield* preflight(
               child.session.brain,
               ProbeTarget.make({
                 host: child.host,

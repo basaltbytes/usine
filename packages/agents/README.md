@@ -10,7 +10,7 @@ The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the
 
 ## Compose the child backends
 
-`/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `/harness/node` provides `Harnesses`, whose runtimes each own preflight and scoped launch. Registration rejects missing runtimes, missing descriptors, and duplicate runtime IDs. `childDispatcherLayer` (`/children`) selects a registered runtime from the agent's harness. `@usine/durable/live` composes the production SDKs:
+`/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `/harness/node` provides `Harnesses`, whose runtimes each own preflight and scoped launch. Registration rejects missing runtimes, missing descriptors, and duplicate runtime IDs. `childDispatcherLayer` (`/children`) selects a registered runtime from the agent's harness. The application composes the production SDKs:
 
 ```ts
 import { Layer } from "effect";
@@ -20,9 +20,9 @@ import { harnessesLive } from "@usine/agents/harness/node";
 const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(harnessesLive));
 ```
 
-`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. A `HarnessRuntime` has an ID, `preflight(brain, target)`, and `launch(request)`. `ProbeTarget` names the host, environment, worker, optional provisioned machine, and credential route (`host-login`, `gateway`, or `api-key`). Preflight reports capability gaps as `HarnessUnavailableError` values; transport failures and timeouts fail with `SessionOperationError`.
+`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. A `HarnessRuntime` has an ID, `preflight(brain, target)`, and `launch(request)`. `ProbeTarget` names the host, environment, worker, optional provisioned machine, and credential route (`host-login`, `gateway`, `api-key`, or `sandbox-api-key`). Preflight reports capability gaps as `HarnessUnavailableError` values; transport failures and timeouts fail with `SessionOperationError`.
 
-The Node composition requires `ChildProcessSpawner` and `HostLoginLock` (`/runtime`). The lock is keyed by harness, worker, and provisioned machine. Build `hostLoginLockLayer` from `@usine/executor` once and share it between the executor and the attempt runtime. Claude's runtime takes the lock during host-login preflight and while a child starts. `/claude`, `/codex`, and `/pi` also export single-harness `ChildBackend` layers and their SDK contracts.
+The Node composition requires `ChildProcessSpawner` and `HostLoginLock` (`/runtime`). The lock is keyed by harness, worker, and provisioned machine. Build `harnessesLive` with `hostLoginLockLayer` from `@usine/executor` once at the application root. Provide that registry to both the executor and the attempt runtime. Claude's runtime takes the lock during host-login preflight and while a child starts. `/claude`, `/codex`, and `/pi` also export single-harness `ChildBackend` layers and their SDK contracts.
 
 Child prompts include the rendered loop task unchanged, including edit-and-retry amendments. Parent-written text appears separately as supplemental context and cannot replace the task instructions.
 
@@ -110,7 +110,7 @@ Claude children save sessions, and Codex threads aren't ephemeral. `SessionStart
 
 ## Preflight
 
-`preflight(brain, host, environment)` (`/preflight`, Node) checks a worker without a prompt, using a `ChildProcessSpawner` layer. Each check sees `environment` as a child does. On a `RemoteShell` host, checks run over SSH, an SSH failure (exit 255) is an incomplete check rather than a missing harness, and a Pi brain is unavailable.
+`preflight(brain, target)` (`/preflight`, Node) checks a worker without a prompt through the injected `Harnesses` service. Each runtime uses the process spawner and login lock captured when the registry was built. Each check sees the target environment as a child does. On a `RemoteShell` host, checks run over SSH, an SSH failure (exit 255) is an incomplete check rather than a missing harness, and a Pi brain is unavailable.
 
 It accepts Codex CLI **0.164.0 (or 0.159.0 through 0.159.3 for one release)** (`supportedCodexVersions`; `unsupportedCodexVersion` returns the error for other `codex --version` output) with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key or `openai-codex` ChatGPT login through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
 

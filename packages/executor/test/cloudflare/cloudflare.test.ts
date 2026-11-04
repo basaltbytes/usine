@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import type { AttemptConnections } from "../../src/executor.ts";
 import type { CloudflareWorkerAddress } from "../../src/cloudflare/model.ts";
@@ -137,6 +138,7 @@ const executor = (
     interruptGrace: "2 seconds",
     drainPollInterval: "100 millis",
   }).pipe(
+    Layer.provide(harnessesLive),
     Layer.provide(credentials.layer),
     Layer.provide(runtime),
     Layer.provide(hostLoginLockLayer),

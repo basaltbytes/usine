@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { Attachments } from "@usine/gateway";
 import { fakeGateway } from "../gateway/support.ts";
 import { LoopName } from "@usine/core/loop";
@@ -98,6 +99,7 @@ export const runtimeOf = (
     providerEndpoints: { hetzner: HETZNER_TEST_API, boat: BOAT_TEST_API },
     machinePollInterval: "1 millis",
   }).pipe(
+    Layer.provide(harnessesLive),
     Layer.provide(machine.layer),
     Layer.provide(mintingProvider().layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),
@@ -130,6 +132,7 @@ export const gatewayRuntimeOf = (
       machinePollInterval: "1 millis",
       machineReadyTimeout: "1 second",
     }).pipe(
+      Layer.provide(harnessesLive),
       Layer.provide(machine.layer),
       Layer.provide(mintingProvider().layer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),

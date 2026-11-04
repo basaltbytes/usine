@@ -6,6 +6,7 @@ import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { BrainSpec } from "@usine/core/agent/brain";
+import { harnessesLive } from "@usine/agents/harness/node";
 import { NodeServices } from "@effect/platform-node";
 import { ConfigParser } from "@usine/config/parser";
 import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
@@ -89,6 +90,7 @@ export const runtimeLayer = (
   // One Claude login lock per Worker, or per machine of a provisioned Worker, shared by the
   // executor's preflight and the Attempts' Claude children.
   const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
+    Layer.provideMerge(harnessesLive),
     Layer.provideMerge(hostLoginLockLayer),
     Layer.provide(NodeServices.layer),
   );

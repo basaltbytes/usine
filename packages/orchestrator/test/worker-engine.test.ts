@@ -1,5 +1,6 @@
 // Fetch and agent SDK interfaces require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
+import { harnessesLive } from "@usine/agents/harness/node";
 import { configurationLayer } from "./support/configuration.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -57,6 +58,7 @@ const startupFailure = (workers: NonNullable<(typeof UsineConfig.Encoded)["worke
         config,
         [],
       ).pipe(
+        Layer.provide(harnessesLive),
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(credentialLayer),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
@@ -155,6 +157,7 @@ const productionObservation = (
   environment: Record<string, string>,
 ) => {
   const engine = workerEngineLayer(directory, instanceId, config, []).pipe(
+    Layer.provide(harnessesLive),
     Layer.provide(MarcbachmannCelLayer),
     Layer.provide(credentialLayer),
     Layer.provide(stubAttemptRuntime(new StubStorage())),

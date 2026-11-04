@@ -7,6 +7,8 @@ Manage agents in **Configuration > Agents**, or edit an existing agent with `usi
 
 Harness IDs use kebab case and must match an entry in the server’s harness catalog. The catalog contains `claude`, `codex`, and `pi`. An unregistered ID fails agent schema validation.
 
+The server builds one harness runtime registry at startup and shares it between worker preflight and child sessions. An incomplete registration fails startup. Preflight errors identify the harness installation to check: host-login routes include login guidance, gateway and API-key routes refer to the worker installation, and Cloudflare routes refer to the sandbox image. Successful binary probes log the installed version.
+
 ## Agent
 
 | Field | Type | Default | Description |

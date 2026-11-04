@@ -15,8 +15,8 @@ Brain specifications use the branded `Harness` ID from `@usine/core/agent/brain`
 ```ts
 import { layer as durableLayer } from "@usine/durable/live";
 
-// Provides AttemptRuntime and DurableHarness; requires ChildProcessSpawner and HostLoginLock,
-// the Claude login lock the executor's preflight shares (hostLoginLockLayer from @usine/executor).
+// Provides AttemptRuntime and DurableHarness; requires the Harnesses registry
+// shared with the executor.
 const attempts = durableLayer(instanceDirectory);
 ```
 

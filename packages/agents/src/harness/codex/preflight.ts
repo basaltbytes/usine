@@ -4,7 +4,7 @@ import { Effect, Option } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
 import { checkedPreflight, loginUnavailable, type ProbeTarget } from "../runtime.ts";
-import { probeCommand } from "../../preflight/command.ts";
+import { probeBinary } from "../../preflight/command.ts";
 import { WorkingDirectory } from "../../runtime.ts";
 import { CodexAppServer, codexConfigArgs } from "./app-server.ts";
 import { initializeCodex, verifyCodexAccount } from "./account.ts";
@@ -31,10 +31,10 @@ const check = Effect.fn("CodexRuntime.check")(function* (brain: BrainSpec, targe
     model: brain.model,
     worker: target.worker,
   });
-  const probe = (capability: "binary", command: string, args: ReadonlyArray<string>) =>
-    probeCommand(host, environment, brain.harness, capability, command, args);
-  if (host._tag === "RemoteShell") yield* probe("binary", "node", ["--version"]);
-  const version = yield* probe("binary", "codex", [...codexConfigArgs, "--version"]);
+  const probe = (command: string, args: ReadonlyArray<string>) =>
+    probeBinary(codex, target, command, args);
+  if (host._tag === "RemoteShell") yield* probe("node", ["--version"]);
+  const version = yield* probe("codex", [...codexConfigArgs, "--version"]);
   const unsupported = unsupportedCodexVersion(version);
   if (Option.isSome(unsupported)) return yield* unsupported.value;
   if (target.credential !== "host-login") {

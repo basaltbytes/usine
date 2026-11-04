@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -105,6 +106,7 @@ describe("local worker runaway guard", () => {
             interruptGrace: "100 millis",
             harnessReadiness: harnessReady,
           }).pipe(
+            Layer.provide(harnessesLive),
             Layer.provide(MarcbachmannCelLayer),
             Layer.provide(credentialLayer),
             Layer.provide(stubAttemptRuntime(storage, spender)),
@@ -146,6 +148,7 @@ describe("local worker runaway guard", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(storage, idle)),
           Layer.provide(hostLoginLockLayer),

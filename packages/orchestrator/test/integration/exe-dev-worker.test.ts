@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -110,6 +111,7 @@ describe("live exe.dev Worker", () => {
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(durableAttemptRuntimeLayer(instanceDirectory)),
+        Layer.provide(harnessesLive),
         Layer.provide(hostLoginLockLayer),
         Layer.provide(fixedConfigLayer(config)),
         Layer.provide(testAppLayer),

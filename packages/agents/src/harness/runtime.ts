@@ -16,7 +16,7 @@ export class ProbeTarget extends Schema.Class<
 >("@usine/agents/ProbeTarget")({
   host: ChildHost,
   environment: Schema.Record(Schema.String, Schema.String),
-  credential: Schema.Literals(["host-login", "gateway", "api-key"]),
+  credential: Schema.Literals(["host-login", "gateway", "api-key", "sandbox-api-key"]),
   worker: WorkerName,
   machine: Schema.Option(MachineId),
 }) {}

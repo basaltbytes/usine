@@ -2,7 +2,7 @@ import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
-import { HostLoginLock } from "@usine/agents/runtime";
+import { Harnesses } from "@usine/agents/harness/node";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -108,11 +108,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fetches = yield* keyedLockFor<RepositoryName>();
-    const logins = yield* HostLoginLock;
+    const harnesses = yield* Harnesses;
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const harnessReadiness =
       options.harnessReadiness ??
-      agentsHarnessProbe(spawner, LocalProcess.make(), baseEnvironment, logins);
+      agentsHarnessProbe(harnesses, LocalProcess.make(), baseEnvironment);
     const repositoryUrl =
       options.repositoryUrl ??
       ((repository: RepositoryName): string => `https://github.com/${repository}.git`);
@@ -653,7 +653,7 @@ export const layer = (
   Executor,
   never,
   | AttemptRuntime
-  | HostLoginLock
+  | Harnesses
   | CredentialProvider
   | Crypto.Crypto
   | FileSystem.FileSystem

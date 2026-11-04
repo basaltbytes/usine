@@ -1,10 +1,19 @@
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
+import { catalog } from "@usine/agents/harness";
+import { HarnessReady } from "@usine/core/agent/capability";
+import {
+  Harnesses,
+  harnessesLive,
+  type HarnessRuntime,
+  type ProbeTarget,
+} from "@usine/agents/harness/node";
+import type { ChildHost } from "@usine/agents/child-host";
 import { HostLoginLock } from "@usine/agents/runtime";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { MachineId, WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Option, Sink, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Sink, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { hostLoginLockLayer } from "../src/executor.ts";
@@ -41,10 +50,67 @@ const exited = (exitCode: number) =>
   });
 
 const noLock = HostLoginLock.of({ withLock: () => (effect) => effect });
+const probeHarness =
+  (
+    spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+    target: ChildHost,
+    environment: Readonly<Record<string, string>>,
+    logins: HostLoginLock["Service"],
+  ): HarnessProbe =>
+  (brain, login) =>
+    Effect.gen(function* () {
+      const harnesses = yield* Harnesses;
+      return yield* agentsHarnessProbe(harnesses, target, environment)(brain, login);
+    }).pipe(
+      Effect.provide(
+        harnessesLive.pipe(
+          Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+          Layer.provide(Layer.succeed(HostLoginLock, logins)),
+          Layer.orDie,
+        ),
+      ),
+    );
+
 const login = {
   worker: WorkerName.make("test-worker"),
   machine: Option.none(),
 };
+
+describe("injected harness registry", () => {
+  it.effect("reuses the app registry for repeated executor probes", () => {
+    let registrations = 0;
+    const targets: Array<ProbeTarget> = [];
+    const registry = Layer.suspend(() => {
+      registrations += 1;
+      return Harnesses.layerFrom(
+        catalog,
+        catalog.ids.map((id): HarnessRuntime => ({
+          id,
+          launch: () => Effect.die("preflight must not launch a child"),
+          preflight: (brain, target) =>
+            Effect.sync(() => {
+              targets.push(target);
+              return HarnessReady.make({ harness: brain.harness });
+            }),
+        })),
+      );
+    });
+    return Effect.gen(function* () {
+      const harnesses = yield* Harnesses;
+      const probe = agentsHarnessProbe(harnesses, host, { PATH: "/worker/bin" }, "gateway");
+      yield* verifyHarnessReadiness(login.worker, login.machine, [claude], probe);
+      yield* verifyHarnessReadiness(login.worker, login.machine, [claude], probe);
+      assert.strictEqual(registrations, 1);
+      assert.strictEqual(targets.length, 2);
+      for (const target of targets) {
+        assert.strictEqual(target.worker, login.worker);
+        assert.strictEqual(target.host, host);
+        assert.strictEqual(target.credential, "gateway");
+        assert.deepStrictEqual(target.environment, { PATH: "/worker/bin" });
+      }
+    }).pipe(Effect.provide(registry));
+  });
+});
 
 describe("harness probe on a remote host", () => {
   it.effect("runs each check as one SSH command with exactly the SSH client's environment", () =>
@@ -56,7 +122,7 @@ describe("harness probe on a remote host", () => {
           return exited(255);
         }),
       );
-      yield* agentsHarnessProbe(spawner, host, {}, noLock)(claude, login).pipe(Effect.flip);
+      yield* probeHarness(spawner, host, {}, noLock)(claude, login).pipe(Effect.flip);
       const first = spawned[0];
       assert(first !== undefined);
       assert.strictEqual(first.command, "ssh");
@@ -75,12 +141,7 @@ describe("harness probe on a remote host", () => {
   it.effect("keeps an unreachable Worker's failure retryable instead of a capability gap", () =>
     Effect.gen(function* () {
       const spawner = ChildProcessSpawner.make(() => Effect.succeed(exited(255)));
-      const error = yield* agentsHarnessProbe(
-        spawner,
-        host,
-        {},
-        noLock,
-      )(claude, login).pipe(Effect.flip);
+      const error = yield* probeHarness(spawner, host, {}, noLock)(claude, login).pipe(Effect.flip);
       assert.strictEqual(error._tag, "ExecutorOperationError");
     }),
   );
@@ -113,7 +174,7 @@ describe("harness probe on a remote host", () => {
           ),
         ),
       );
-      const pending = yield* agentsHarnessProbe(
+      const pending = yield* probeHarness(
         spawner,
         host,
         {},
@@ -155,7 +216,7 @@ describe("harness readiness on a Worker", () => {
         worker,
         Option.none(),
         [claude],
-        agentsHarnessProbe(spawner, host, {}, logins),
+        probeHarness(spawner, host, {}, logins),
       ).pipe(Effect.forkChild);
       yield* TestClock.adjust("61 seconds");
       yield* Deferred.succeed(release, undefined);
@@ -190,7 +251,7 @@ describe("harness readiness on a Worker", () => {
                   Effect.andThen(ready),
                 );
           });
-          const check: HarnessProbe = agentsHarnessProbe(spawner, host, {}, logins);
+          const check: HarnessProbe = probeHarness(spawner, host, {}, logins);
           return { entered, release, check };
         });
         const [first, second, elsewhere, onOneMachine, onOtherMachine] = yield* Effect.all([

@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -288,6 +289,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           harnessReadiness: () => (brain) =>
             Effect.succeed(HarnessReady.make({ harness: brain.harness })),
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
@@ -419,6 +421,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           instanceId: INSTANCE_ID,
           ssh: sshFor(values),
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(hostLoginLockLayer),
@@ -675,6 +678,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           harnessReadiness: () => (brain) =>
             Effect.succeed(HarnessReady.make({ harness: brain.harness })),
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
@@ -773,6 +777,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           instanceId: INSTANCE_ID,
           ssh: gatewaySshFor(values),
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(hostLoginLockLayer),

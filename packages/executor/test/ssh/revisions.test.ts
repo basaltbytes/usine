@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -80,6 +81,7 @@ for (const transition of ["unchanged", "live", "restart"] as const) {
                 remove: (id) => Effect.sync(() => void records.delete(id)),
               },
             }).pipe(
+              Layer.provide(harnessesLive),
               Layer.provide(Layer.merge(original.layer, remoteHosts)),
               Layer.provide(credentials.layer),
               Layer.provide(

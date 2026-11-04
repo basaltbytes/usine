@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -86,6 +87,7 @@ it.effect(
         repositoryUrl: () => remote,
         harnessReadiness: harnessReady,
       }).pipe(
+        Layer.provide(harnessesLive),
         Layer.provide(credentials),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
         Layer.provide(hostLoginLockLayer),

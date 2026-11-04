@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { MACHINE_RUN } from "./fixtures.ts";
 import { AttemptId } from "@usine/core/attempt";
@@ -174,6 +175,7 @@ describe("Boat tailnet", () => {
       instanceId: INSTANCE_ID,
       providerEndpoints: { boat: BOAT_TEST_API },
     }).pipe(
+      Layer.provide(harnessesLive),
       Layer.provide(machine.layer),
       Layer.provide(mintingProvider().layer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
@@ -286,6 +288,7 @@ describe("Boat tailnet", () => {
         machinePollInterval: "1 millis",
         machineReadyTimeout: "5 seconds",
       }).pipe(
+        Layer.provide(harnessesLive),
         Layer.provide(machine.layer),
         Layer.provide(mintingProvider().layer),
         Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
@@ -358,6 +361,7 @@ describe("Boat tailnet", () => {
           machinePollInterval: "1 millis",
           machineReadyTimeout: "5 seconds",
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(machine.layer),
           Layer.provide(mintingProvider().layer),
           Layer.provide(runtime),

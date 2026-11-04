@@ -73,7 +73,7 @@ Custom `HarnessProbe` callbacks receive the brain and a second argument with the
 
 `prepare` repeats the assigned brain's probe before acquiring credentials or a checkout, to catch roster changes and logouts. A capability gap returns `WorkerCapabilityError`, which needs the operator. Transport failures, such as an SSH client that can't reach the VM, and probe timeouts are retryable infrastructure failures.
 
-Claude's host-login preflight holds its `HostLoginLock` (`@usine/agents/runtime`) until the check returns, so two preparing attempts, or a preparing attempt and a starting Claude child, never refresh the login at once. On a provisioned worker, each harness and machine has its own login and lock, so attempts on different machines don't wait for each other. The local, exe.dev, and SSH layers need that service: build `hostLoginLockLayer` from the root once and give it to the executor and the attempt runtime.
+Claude's host-login preflight holds its `HostLoginLock` (`@usine/agents/runtime`) until the check returns, so two preparing attempts, or a preparing attempt and a starting Claude child, never refresh the login at once. On a provisioned worker, each harness and machine has its own login and lock, so attempts on different machines don't wait for each other. Build `harnessesLive` with `hostLoginLockLayer` once at the application root, then share the resulting `Harnesses` registry with the executor and the attempt runtime.
 
 It replaces exe.dev's `HarnessLoginCheck` and `harnessLoginChecks` options.
 
@@ -299,7 +299,7 @@ While an attempt runs, the executor asks the Worker every 30 seconds (`Cloudflar
 
 Preflight calls `GET /v1/health`, checks that the Worker has the image, that the worker has an API key for each harness in the roster (`anthropic` for Claude Code, `openai` for Codex; Pi can't run), and runs `claude --version` and `codex --version` in a preflight sandbox that it destroys afterwards. A refused token is a `credentials` capability error, a missing image a `toolchain` one, and a missing key a `harness-login` one. Each child's `gatewayCredential` is `api-key` when the worker holds its harness's key, so usage counts it in the API keys pool.
 
-The Cloudflare layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, a `HostLoginLock`, and an `HttpClient` for the sandbox API.
+The Cloudflare layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, a `Harnesses` registry, and an `HttpClient` for the sandbox API.
 
 ```ts
 import { CloudflareImageName, WorkerName } from "@usine/core/worker"
