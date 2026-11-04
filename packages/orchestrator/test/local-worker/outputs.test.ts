@@ -6,7 +6,7 @@ import { MAX_STEP_OUTPUT_BYTES, StepOutputName, StepOutputType } from "@usine/co
 import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { StepOutputStore } from "@usine/engine/step-outputs";
 import { Effect, FileSystem, Option } from "effect";
-import { output, run, submission, waitFor, withLocalEngine } from "./support.ts";
+import { output, run, submission, TOKEN, waitFor, withLocalEngine } from "./support.ts";
 
 const content = { title: "Walkthrough é", text: "first line\nsecond line" };
 
@@ -126,6 +126,49 @@ describe("local step outputs", () => {
           const document = yield* store.read(ref.attemptId, StepOutputName.make("walkthrough"));
           assert(Option.isSome(document));
           assert.deepStrictEqual(document.value.content, content);
+        }),
+    );
+  });
+
+  it.live("stores size and SHA-256 for the content after credential scrubbing", () => {
+    const parent: StubParent = ({ request }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.writeFileString(
+          `${request.cwd}/.usine/outputs/diagnostic.json`,
+          jsonKey({
+            type: "example.diagnostic",
+            content: { message: `é\nAuthorization: Bearer ${TOKEN}`, nested: [TOKEN] },
+          }),
+        );
+        return "Completed with a diagnostic output";
+      }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+    return withLocalEngine(
+      { attemptRuntime: stubAttemptRuntime(new StubStorage(), parent) },
+      ({ engine }) =>
+        Effect.gen(function* () {
+          const accepted = yield* engine.submit(submission(7));
+          assert(accepted._tag === "Claimed");
+          const finished = yield* waitFor(engine, accepted.runId, "Succeeded");
+          assert(Option.isSome(finished.step.result));
+          const ref = finished.step.result.value.outputs[0];
+          const attempt = finished.attempts[0];
+          assert(ref !== undefined && attempt !== undefined);
+          const store = yield* StepOutputStore;
+          const document = yield* store.read(attempt.id, ref.name);
+          assert(Option.isSome(document));
+          assert.deepStrictEqual(document.value.content, {
+            message: "é\nAuthorization: Bearer [REDACTED]",
+            nested: ["[REDACTED]"],
+          });
+          const body = jsonKey(document.value.content);
+          assert.strictEqual(ref.size, new TextEncoder().encode(body).byteLength);
+          assert.strictEqual(
+            ref.sha256,
+            "8e801b9c8bf6c44132bb0249af25d12f440294599b3821eb220014a3e02dbcc9",
+          );
+          assert.strictEqual(document.value.size, ref.size);
+          assert.strictEqual(document.value.sha256, ref.sha256);
         }),
     );
   });

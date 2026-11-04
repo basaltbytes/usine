@@ -32,6 +32,7 @@ import {
   Array as Arr,
   Cache,
   Context,
+  Crypto,
   DateTime,
   Deferred,
   Effect,
@@ -226,6 +227,7 @@ const versionProbe =
 
 const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
   Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
     const commands = yield* remoteCommandsFor;
     const credentialProvider = yield* CredentialProvider;
     const logins = yield* ClaudeLoginLock;
@@ -1106,6 +1108,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           readOutputs: readOutputs(
             prepared.spec,
             checkoutCommand("launch", worker, name, prepared.worktree, access),
+            crypto,
           ),
           harvest: (windows) =>
             harvestFacts(
@@ -1207,6 +1210,7 @@ export const layer = (
   | ClaudeLoginLock
   | ChildProcessSpawner.ChildProcessSpawner
   | CredentialProvider
+  | Crypto.Crypto
   | HttpClient.HttpClient
 > => Layer.effectContext(makeCloudflareExecutor(options));
 

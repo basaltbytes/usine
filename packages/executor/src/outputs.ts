@@ -6,9 +6,11 @@ import {
   MAX_STEP_OUTPUTS,
   StepOutput,
   StepOutputName,
+  StepOutputSha256,
   StepOutputType,
 } from "@usine/core/step/output";
-import { Effect, Option, Schema } from "effect";
+import { type Crypto, Effect, Option, Schema } from "effect";
+import { Hex } from "effect/encoding";
 
 type OutputCommand<E> = (command: string, args: ReadonlyArray<string>) => Effect.Effect<string, E>;
 
@@ -26,7 +28,6 @@ fs.mkdirSync('.usine/outputs', { recursive: true });
 // A whole JSON response preserves embedded newlines and bounds reads before transferring bodies.
 const readScript = `
 const fs = require('node:fs');
-const crypto = require('node:crypto');
 const root = '.usine/outputs/';
 const reject = (file, reason) => { process.stdout.write(JSON.stringify({ error: { file, reason } })); };
 const collect = () => {
@@ -48,7 +49,7 @@ const collect = () => {
     catch { return reject(location, 'invalid JSON'); }
     const content = JSON.stringify(envelope?.content);
     if (content === undefined) return reject(location, 'content is required');
-    outputs.push({ file, envelope, size: Buffer.byteLength(content), sha256: crypto.createHash('sha256').update(content).digest('hex') });
+    outputs.push({ file, envelope });
   }
   process.stdout.write(JSON.stringify({ outputs }));
 };
@@ -67,8 +68,6 @@ const Collection = Schema.Union([
       Schema.Struct({
         file: Schema.String,
         envelope: Schema.Unknown,
-        size: StepOutput.fields.size,
-        sha256: StepOutput.fields.sha256,
       }),
     ),
   }),
@@ -86,6 +85,7 @@ export const prepareOutputs = Effect.fn("Executor.prepareOutputs")(function* <E>
 export const readOutputs = Effect.fn("Executor.readOutputs")(function* <E>(
   spec: Pick<RunSpec, "attemptId" | "baseCommit">,
   run: OutputCommand<E>,
+  crypto: Crypto.Crypto,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, baseCommit: spec.baseCommit });
   const collected = yield* run("node", ["-e", readScript]).pipe(
@@ -120,7 +120,27 @@ export const readOutputs = Effect.fn("Executor.readOutputs")(function* <E>(
         return yield* AgentFailure.make({
           message: `${file}: commit must equal ${spec.baseCommit}`,
         });
-      return StepOutput.make({ name, ...envelope, size: entry.size, sha256: entry.sha256 });
+      const content = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(
+        envelope.content,
+      ).pipe(
+        Effect.mapError((cause) =>
+          InfraFailure.make({ message: "Can't encode step output content", cause }),
+        ),
+      );
+      const bytes = new TextEncoder().encode(content);
+      const digest = yield* crypto
+        .digest("SHA-256", bytes)
+        .pipe(
+          Effect.mapError((cause) =>
+            InfraFailure.make({ message: "Can't hash step output content", cause }),
+          ),
+        );
+      return StepOutput.make({
+        name,
+        ...envelope,
+        size: bytes.byteLength,
+        sha256: StepOutputSha256.make(Hex.encode(digest)),
+      });
     }),
   );
   yield* Effect.logInfo("Collected step outputs", {

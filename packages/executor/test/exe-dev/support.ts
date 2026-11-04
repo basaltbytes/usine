@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -372,6 +373,7 @@ export const runtime = (
     interruptGrace: "2 seconds",
   }).pipe(
     Layer.provide(sshLayer),
+    Layer.provide(NodeCrypto.layer),
     Layer.provide(wrap(stubAttemptRuntime(storage, parent))),
     Layer.provide(claudeLoginLockLayer),
   );

@@ -17,6 +17,7 @@ import {
 } from "@usine/core/step/harvest";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
+  Crypto,
   Effect,
   FileSystem,
   Layer,
@@ -101,6 +102,7 @@ const executorError = (
 
 const makeLocalExecutor = (options: LocalExecutorOptions) =>
   Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
     const credentials = yield* localCredentialsFor;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -593,6 +595,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             readOutputs: readOutputs(
               prepared.workspace.spec,
               checkoutCommand("launch", worktree, credential, environment),
+              crypto,
             ),
             harvestComments: (windows) =>
               harvestPostedComments(
@@ -645,6 +648,7 @@ export const layer = (
   | AttemptRuntime
   | ClaudeLoginLock
   | CredentialProvider
+  | Crypto.Crypto
   | FileSystem.FileSystem
   | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner

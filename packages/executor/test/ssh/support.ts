@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
@@ -812,6 +813,7 @@ export const fakeMachine = () => {
   return {
     state,
     layer: Layer.mergeAll(
+      NodeCrypto.layer,
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service),
       fileSystem,
       Path.layer,

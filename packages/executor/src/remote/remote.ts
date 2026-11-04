@@ -14,7 +14,7 @@ import {
   harvestPostedComments,
 } from "@usine/core/step/harvest";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Deferred, Effect, Exit, Option, Schema, Scope, SynchronizedRef } from "effect";
+import { Crypto, Deferred, Effect, Exit, Option, Schema, Scope, SynchronizedRef } from "effect";
 import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";
 import {
   type AttemptWorkspace,
@@ -107,6 +107,7 @@ interface CheckoutHost {
  */
 export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<M>) =>
   Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
     const { commands, label } = worker;
     const span = (name: string) => `${worker.spanPrefix}.${name}`;
     const fetches = yield* keyedLockFor<RepositoryName>();
@@ -1015,6 +1016,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 readOutputs: readOutputs(
                   prepared.spec,
                   checkoutCommand("launch", worktree, access, shell),
+                  crypto,
                 ),
                 harvestComments: (windows) =>
                   harvestPostedComments(

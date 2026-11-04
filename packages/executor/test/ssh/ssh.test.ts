@@ -108,8 +108,6 @@ describe("SSH Worker", () => {
         {
           file: "walkthrough.json",
           envelope: { type: "balade.walkthrough", content },
-          size: jsonKey(content).length,
-          sha256: "a".repeat(64),
         },
       ],
     });
