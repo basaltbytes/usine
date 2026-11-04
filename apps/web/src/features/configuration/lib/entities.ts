@@ -65,7 +65,7 @@ export const entityTemplate = (
 ): string => {
   switch (kind) {
     case "binding":
-      return `name: ${JSON.stringify(identifier)}\nmember: 1\nrole: viewer\nscope:\n  _tag: Project\n  project: example\n`;
+      return `name: ${JSON.stringify(identifier)}\nrole: viewer\n`;
     case "agent":
       return "---\nharness: codex\nmodel: gpt-6-astra\neffort: medium\n---\n\nComplete one repository task at a time. Follow the repository instructions, run the required checks, and record any blocker on the issue or pull request.\n";
     case "loop":

@@ -17,15 +17,21 @@ import { Label } from "~/components/ui/label";
 import { entityHref, entityKey, entityTemplate } from "~/features/configuration/lib/entities";
 import { entityQuery, configurationHeadQuery } from "~/features/configuration/queries";
 import { editorCopy } from "~/features/configuration/strings";
+import { membersQuery } from "~/lib/members/queries";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { rejectionMessage } from "~/lib/api";
 import { ConfigurationEditorForm } from "./form";
 
-type CreateEntityProps = { readonly kind: ConfigurationEntityKind };
+type CreateEntityProps = {
+  readonly kind: ConfigurationEntityKind;
+  readonly initialMember?: string | undefined;
+};
 
 type CreationFormProps = CreateEntityProps & { readonly cancel: () => void };
 
-const CreationForm = ({ kind, cancel }: CreationFormProps) => {
+const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps) => {
+  const members = useQuery({ ...membersQuery(), enabled: kind === "binding" });
+  const selectedMember = members.data?.find(({ login }) => login === initialMember);
   const grants = usePermissions();
   const [project, setProject] = useState("");
   const [name, setName] = useState("");
@@ -36,6 +42,8 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
   const navigate = useNavigate();
   const current = useQuery(configurationHeadQuery());
   const configuration = useQuery(configurationQuery());
+  let bindingDraft: Schema.JsonObject = { name: editing ?? "", role: "viewer" };
+  if (selectedMember !== undefined) bindingDraft = { ...bindingDraft, member: selectedMember.id };
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <h2 className="text-md font-semibold">{editorCopy.create(kind)}</h2>
@@ -146,6 +154,7 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
                 configuration.data?.agents[0]?.name ?? "developer",
               ),
             }}
+            initialValue={kind === "binding" ? bindingDraft : undefined}
             cancel={cancel}
             onSaved={() => {
               void navigate({ to: entityHref(entityKey(kind, editing)) });
@@ -157,14 +166,14 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
   );
 };
 
-export const CreateEntity = ({ kind }: CreateEntityProps) => {
+export const CreateEntity = ({ kind, initialMember }: CreateEntityProps) => {
   const admin = useCan("admin");
   const grants = usePermissions();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialMember !== undefined);
   if (!admin && !(kind === "loop" && grants.some(({ permission }) => permission === "maintain")))
     return null;
   return open ? (
-    <CreationForm kind={kind} cancel={() => setOpen(false)} />
+    <CreationForm kind={kind} initialMember={initialMember} cancel={() => setOpen(false)} />
   ) : (
     <div>
       <CommandButton command={editorCopy.new} onClick={() => setOpen(true)}>

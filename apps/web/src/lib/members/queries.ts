@@ -1,8 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
+import { GitHubUserId } from "@usine/core/access";
 import { Schema } from "effect";
 import { authRequest } from "~/lib/auth";
 const Member = Schema.Struct({
-  id: Schema.Finite,
+  id: GitHubUserId,
   login: Schema.String,
   addedAt: Schema.Finite,
   addedBy: Schema.String,

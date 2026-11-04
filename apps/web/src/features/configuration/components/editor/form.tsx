@@ -38,6 +38,7 @@ const initialDraft = (entity: ConfigurationEntityKey, text: string): Draft => {
 type ConfigurationEditorFormProps = {
   readonly entity: ConfigurationEntityKey;
   readonly initial: { readonly text: string; readonly number: ConfigurationRevisionNumber };
+  readonly initialValue?: Schema.JsonObject | undefined;
   readonly onSaved: () => void;
   readonly cancel: () => void;
 };
@@ -45,11 +46,16 @@ type ConfigurationEditorFormProps = {
 export const ConfigurationEditorForm = ({
   entity,
   initial,
+  initialValue,
   onSaved,
   cancel,
 }: ConfigurationEditorFormProps) => {
   const [base, setBase] = useState(initial);
-  const [editor, setEditor] = useState(() => initialDraft(entity, initial.text));
+  const [editor, setEditor] = useState<Draft>(() =>
+    initialValue === undefined
+      ? initialDraft(entity, initial.text)
+      : { mode: "form", value: initialValue },
+  );
   const [draft, setDraft] = useState<string | null>(null);
   const [problems, setProblems] = useState<readonly FormProblem[]>([]);
   const [message, setMessage] = useState("");
