@@ -80,7 +80,7 @@ The entry identifies the most recently blocked loop, including a loop blocked by
 
 ## Permissions
 
-`read` gives the attempt token `contents: read` while retaining issue and pull request writes for reviews, comments, and labels. GitHub refuses code pushes with that token. A pre-push hook also explains the restriction. Failed read-only attempts create no salvage branch. `write` permits code pushes and pull request updates.
+`read` gives the attempt token `contents: read` and omits `workflows` while retaining issue and pull request writes for reviews, comments, and labels. GitHub refuses code pushes with that token. A pre-push hook also explains the restriction. Failed read-only attempts create no salvage branch. `write` gives the token `contents: write` and `workflows: write`, permitting code pushes, changes under `.github/workflows/`, and pull request updates. The App and its installation must grant **Workflows: read and write**.
 
 The setting limits the attempt's token. Local children run as the orchestrator's Unix user and can access that user's other credentials. SSH attempt containers mount only their checkout and credential directory. See [Workers](/reference/configuration/workers/).
 

@@ -15,6 +15,8 @@ export const REQUIRED_REPOSITORY_PERMISSIONS = {
   metadata: "read",
   /** Allows pull request creation, reviews, and updates. */
   pull_requests: "write",
+  /** Allows agent-authored changes to GitHub workflow files. */
+  workflows: "write",
 } as const;
 
 /** A repository permission that the App installation must grant at the required level. */
@@ -40,6 +42,8 @@ export const WORKER_TOKEN_PERMISSIONS = {
     metadata: "read",
     /** Allows pull request comments, reviews, and updates. */
     pull_requests: "write",
+    /** Allows pushes that create or update GitHub workflow files. */
+    workflows: "write",
   },
   /** Allows code reads and item writes, including reviews and comments; code pushes require write access. */
   read: {
@@ -56,7 +60,7 @@ export const WORKER_TOKEN_PERMISSIONS = {
   },
 } as const satisfies Record<
   LoopPermissions,
-  Readonly<Record<RequiredRepositoryPermission, "read" | "write">>
+  Readonly<Partial<Record<RequiredRepositoryPermission, "read" | "write">>>
 >;
 
 const grants = (actual: string | undefined, required: "read" | "write"): boolean =>

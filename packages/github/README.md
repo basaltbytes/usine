@@ -13,9 +13,9 @@ The 0.x APIs can change between minor releases.
 
 ## Set up the App
 
-[Quickstart](https://docs.usine.dev/get-started/quickstart/) gives the steps under Connect a GitHub App: an App installable only on your account, with an active webhook for deliveries mode, with Contents, Issues, and Pull requests read and write, Checks and Metadata read-only, optionally Actions read-only for CI job logs, and **No access** for everything else, including Workflows, Administration, and all organization and account permissions.
+[Quickstart](https://docs.usine.dev/get-started/quickstart/) gives the steps under Connect a GitHub App: an App installable only on your account, with an active webhook for deliveries mode, with Contents, Issues, Pull requests, and Workflows read and write, Checks and Metadata read-only, optionally Actions read-only for CI job logs, and **No access** for everything else, including Administration and all organization and account permissions.
 
-GitHub grants Metadata read access automatically. Contents lets installation tokens use Git over HTTPS; with Workflows off, worker tokens can't edit `.github/workflows/`. User authorization isn't required. Install the App once, on the account that owns the managed repos, for every repo in `usine.yaml`; a factory expects one installation. GitHub's references are [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app) and [Choosing permissions for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app).
+GitHub grants Metadata read access automatically. Contents lets installation tokens use Git over HTTPS; Workflows lets write-access attempts push changes under `.github/workflows/`. For an existing App, enable **Workflows: read and write** in its repository permissions and accept the permission update on its installation. Installation checks report `workflows:write` when that grant is missing. User authorization isn't required. Install the App once, on the account that owns the managed repos, for every repo in `usine.yaml`; a factory expects one installation. GitHub's references are [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app) and [Choosing permissions for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app).
 
 Store the App ID and private key in `<instance>/.usine/github-app.json` with mode `0600`, and keep `.usine/` in the instance repo's `.gitignore`:
 
@@ -62,7 +62,7 @@ Operations without arguments are Effect values: use `yield* app.installation`, `
 
 Call `GitHubApp.projectAccess(registry)` before scheduling. Each result is a `CoveredProject`, with the repo ID for scoped minting, or a `ProjectNotInstalledError`. A missing repo doesn't block covered ones.
 
-Pass a `CoveredProject` and the attempt's loop permission level to `GitHubApp.workerToken`. If GitHub's response doesn't confirm that the token covers exactly that repo ID, it fails with `InvalidGitHubResponseError`. `WORKER_TOKEN_PERMISSIONS` lists each level's permissions: a `read` token has `contents: read`, so it can't push, and keeps `pull_requests: write` and `issues: write` for reviews and comments.
+Pass a `CoveredProject` and the attempt's loop permission level to `GitHubApp.workerToken`. If GitHub's response doesn't confirm that the token covers exactly that repo ID, it fails with `InvalidGitHubResponseError`. `WORKER_TOKEN_PERMISSIONS` lists each level's permissions: a `write` token includes `contents: write` and `workflows: write`, so it can push code and workflow files. A `read` token has `contents: read` and omits `workflows`, so it can't push, and keeps `pull_requests: write` and `issues: write` for reviews and comments.
 
 ## Poll repository changes
 

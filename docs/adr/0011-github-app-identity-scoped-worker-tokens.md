@@ -1,5 +1,11 @@
 # One GitHub App is the instance's identity; worker credentials are per-attempt, single-repo, short-lived
 
+## Amendment (2026-11-04, #934): write-access attempts can push workflow files
+
+The App requires `workflows: write`, and write-access attempt tokens request it so agents can push changes under `.github/workflows/`. Read-access tokens omit `workflows` and retain `contents: read`. The setup manifest requests the permission for new Apps; operators of existing Apps enable it and accept the installation update. Installation validation reports `workflows:write` when the grant is absent or read-only. This amendment supersedes the workflow-permission exclusion below.
+
+## Original decision
+
 The instance authenticates to GitHub as one operator-owned **GitHub App**, created by the manifest flow at bootstrap and installed on the managed repos. All usine GitHub actions (polling, label writes, pushes, PRs, comments) use it (`<app>[bot]`); agents share it, named in content signatures and the run record. The default manifest requests only what the acceptance loops need (`metadata:read`, `contents:read+write`, `issues:read+write`, `pull_requests:read+write`, `checks:read`) and deliberately **excludes `workflows:write`** and admin scopes. Branch protection, not a missing permission, limits merging.
 
 Only the orchestrator has the App private key (a 0600 secrets file in the gitignored `.usine/`; environment variables override). It mints tokens of at most 1 hour: installation-wide for polling and UI writes, and **per attempt, scoped to its single repo** for workers. Attachment is adapter-internal (ADR 0006): the local executor puts the token in the run host's environment, and exe.dev uses its **native GitHub integration** (per-repo grants attached `--for` the attempt's window, injected at exe.dev's edge, never on the VM). The installation must cover the registry; drift shows as a per-project needs-you error while covered repos keep running. Loop gates (approval, CEL over the payload's `authorAssociation`) limit untrusted content, not an engine trust mechanism.

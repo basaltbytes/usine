@@ -208,7 +208,7 @@ describe("GitHubApp", () => {
         for (const request of tokenRequests) {
           const body = yield* requestJson(request);
           assert.deepStrictEqual(body.permissions, REQUIRED_REPOSITORY_PERMISSIONS);
-          assert(!("workflows" in body.permissions));
+          assert.strictEqual(body.permissions.workflows, "write");
         }
         const workerRequest = tokenRequests.at(-1);
         assert(workerRequest !== undefined);
@@ -292,7 +292,7 @@ describe("GitHubApp", () => {
     }).pipe(Effect.provide(appLayer(client)));
   });
 
-  it.live("mints a worker token that can push only for a write Loop", () => {
+  it.live("mints workflow push permission only for a write loop", () => {
     const expiresAt = DateTime.formatIso(
       DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 50 * 60 * 1_000),
     );
@@ -328,7 +328,6 @@ describe("GitHubApp", () => {
       assert(read.scope._tag === "SingleRepository" && write.scope._tag === "SingleRepository");
       assert.strictEqual(read.scope.permissions, "read");
       assert.strictEqual(write.scope.permissions, "write");
-      // A read Loop still posts reviews and comments, so only contents drops to read.
       assert.deepStrictEqual(
         bodies.map(({ permissions }) => permissions),
         [
@@ -345,6 +344,7 @@ describe("GitHubApp", () => {
             issues: "write",
             metadata: "read",
             pull_requests: "write",
+            workflows: "write",
           },
         ],
       );
@@ -543,13 +543,22 @@ describe("GitHubApp", () => {
     }).pipe(Effect.provide(appLayer(client)));
   });
 
-  it.live("reports installation permission drift before minting a token", () => {
+  it.live.each([
+    { granted: { ...permissions, contents: "read" }, missing: ["contents:write"] },
+    {
+      granted: Object.fromEntries(
+        Object.entries(permissions).filter(([permission]) => permission !== "workflows"),
+      ),
+      missing: ["workflows:write"],
+    },
+    { granted: { ...permissions, workflows: "read" }, missing: ["workflows:write"] },
+  ])("reports missing $missing before minting a token", ({ granted, missing }) => {
     const client = HttpClient.make((request) =>
       Effect.succeed(
         jsonResponse(request, [
           {
             ...installation,
-            permissions: { ...permissions, contents: "read" },
+            permissions: granted,
           },
         ]),
       ),
@@ -560,7 +569,7 @@ describe("GitHubApp", () => {
       const failure = yield* app.installation.pipe(Effect.flip);
       assert.strictEqual(failure._tag, "AppPermissionError");
       if (failure._tag === "AppPermissionError") {
-        assert.deepStrictEqual(failure.missing, ["contents:write"]);
+        assert.deepStrictEqual(failure.missing, missing);
       }
       assert.isTrue(isRefusal(failure));
     }).pipe(Effect.provide(appLayer(client)));
