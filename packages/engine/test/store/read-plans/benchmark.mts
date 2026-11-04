@@ -146,7 +146,7 @@ await Effect.runPromise(
       const rows = yield* sql`SELECT count(*) AS count FROM usine_attempt_transcripts`;
       const json = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown, { space: 2 }))({
         node: process.version,
-        bytes: file.size,
+        bytes: Number(file.size),
         query,
         rows: rows[0],
         report,

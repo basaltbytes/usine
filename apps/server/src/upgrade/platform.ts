@@ -1,11 +1,7 @@
 import { ChildProcessSpawner } from "effect/process";
-// Synchronous Node path callbacks retain the host platform’s path semantics.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { ReleaseVersion, UpgradeRecord } from "@usine/core/upgrade";
-import { Effect, FileSystem, Option, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { runCommand } from "../command.ts";
 import { realPathOrSelf, SERVER_PACKAGE } from "../instance/manifest.ts";
 import type { InstanceRecord } from "../instance/record.ts";
@@ -22,6 +18,7 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   record: InstanceRecord,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const path = yield* Path.Path;
   const provideSpawner = Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner);
   const unit = yield* supervisingUnit(record.pid, record.systemdUnit).pipe(
     Effect.mapError(failure),
@@ -36,8 +33,8 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     Effect.mapError(failure),
   );
   const fs = yield* FileSystem.FileSystem;
-  const folder = join(directory, ".usine", "upgrade");
-  const resultPath = join(folder, "result.json");
+  const folder = path.join(directory, ".usine", "upgrade");
+  const resultPath = path.join(folder, "result.json");
   const checkDependencies = Effect.fn("Server.checkUpgradeDependencies")(
     function* (target: ReleaseVersion) {
       yield* Effect.annotateCurrentSpan({ previous, target });
@@ -122,7 +119,8 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   const launch = Effect.fn("Server.launchUpgradeHelper")(function* (target: ReleaseVersion) {
     yield* Effect.annotateCurrentSpan({ previous, target, unit: service, prefix });
     yield* fs.makeDirectory(folder, { recursive: true, mode: 0o700 });
-    const helper = yield* fs.readFileString(fileURLToPath(new URL("./helper.sh", import.meta.url)));
+    const helperPath = yield* path.fromFileUrl(new URL("./helper.sh", import.meta.url));
+    const helper = yield* fs.readFileString(helperPath);
     const variables = Object.entries({
       folder,
       previous,
@@ -133,7 +131,9 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     })
       .map(([key, value]) => `${key}=${quote(value)}`)
       .join("\n");
-    yield* fs.writeFileString(join(folder, "run.sh"), `${variables}\n${helper}`, { mode: 0o700 });
+    yield* fs.writeFileString(path.join(folder, "run.sh"), `${variables}\n${helper}`, {
+      mode: 0o700,
+    });
     const serializedRecord = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
       UpgradeRecord.make({ previous, target, status: "installing" }),
     ).pipe(Effect.orDie);

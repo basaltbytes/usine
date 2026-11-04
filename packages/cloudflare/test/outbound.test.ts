@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 import { DateTime, Option, Redacted, Effect } from "effect";
+import { FetchHttpClient } from "effect/http";
 import { ApiKeyCredential, ProviderGrant, SandboxCredentials } from "../src/api/api.ts";
 import { harnessEnvironment, PROVIDER_HOSTS } from "../src/api/harness.ts";
 import {
   allowedHostsOf,
+  forwardRequest,
   gitHubRequest,
   interceptionsFor,
   providerRequest,
@@ -23,6 +25,33 @@ const credentials = SandboxCredentials.make({
 });
 
 describe("sandbox outbound handlers", () => {
+  it.effect("forwards an allowlisted WebSocket upgrade and preserves its native response", () =>
+    Effect.gen(function* () {
+      const request = new Request("https://allowed.example/socket?session=private", {
+        headers: { upgrade: "websocket", connection: "Upgrade" },
+        redirect: "manual",
+      });
+      class UpgradeResponse extends Response {
+        override get status() {
+          return 101;
+        }
+      }
+      const upstream = new UpgradeResponse(null, { headers: { upgrade: "websocket" } });
+      const received: Array<Parameters<typeof fetch>[0]> = [];
+      const response = yield* forwardRequest("allowed", request).pipe(
+        Effect.provideService(FetchHttpClient.Fetch, (input) => {
+          received.push(input);
+          return Promise.resolve(upstream);
+        }),
+      );
+
+      expect(received[0]).toBe(request);
+      expect(response).toBe(upstream);
+      expect(response.status).toBe(101);
+      expect(response.headers.get("upgrade")).toBe("websocket");
+    }),
+  );
+
   it("never lets an allowlisted host bypass the GitHub and provider credentials", () => {
     const interceptions = interceptionsFor(
       credentials,

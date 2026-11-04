@@ -16,19 +16,18 @@ import {
   Redacted,
   Schema,
 } from "effect";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-  HttpRouter,
-} from "effect/http";
+import { HttpRouter } from "effect/http";
 import { type AccessToken, accessGranted } from "./access.ts";
 import { ProcessId, ProviderCredential, SandboxName, SandboxSummary } from "./api/api.ts";
 import { GITHUB_HOSTS } from "./api/harness.ts";
 import { AttachOffsets } from "./api/stream.ts";
 import { registryRoutes, RegistryStorage, SandboxLookup, SandboxLookupFailed } from "./registry.ts";
-import { allowedHostsOf, gitHubRequest, providerRequest } from "./sandbox/outbound.ts";
+import {
+  allowedHostsOf,
+  forwardRequest,
+  gitHubRequest,
+  providerRequest,
+} from "./sandbox/outbound.ts";
 import {
   ContainerFailure,
   type ContainerOperation,
@@ -76,8 +75,8 @@ const settingsOf = (env: Env): Option.Option<WorkerSettings> =>
 const logger = Logger.layer([Logger.consoleJson]);
 
 /** Runs `effect` with the Worker's JSON logger. */
-const run = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(logger, FetchHttpClient.layer))));
+const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(logger)));
 
 /** The name of the Durable Object that answers `/v1/health`. It never starts a container. */
 const HEALTH_SANDBOX = "usine-health";
@@ -504,39 +503,18 @@ const ProviderProps = Schema.Struct({
   credential: ProviderCredential,
 });
 
-/** Forwards one request and logs its route without credentials or query parameters. */
-const forward = (handler: string, request: Request, forwarded: Request = request) =>
-  run(
-    Effect.gen(function* () {
-      const response = yield* HttpClient.execute(HttpClientRequest.fromWeb(forwarded)).pipe(
-        Effect.provideService(FetchHttpClient.RequestInit, { redirect: forwarded.redirect }),
-        Effect.provideService(HttpClient.TracerPropagationEnabled, false),
-      );
-      const native = yield* Option.match(HttpClientResponse.toWeb(response), {
-        onSome: Effect.succeed,
-        onNone: () => Effect.die(new Error("FetchHttpClient returned no native response")),
-      });
-      yield* Effect.logInfo("Forwarded a sandbox request", {
-        handler,
-        method: request.method,
-        host: new URL(request.url).host,
-        path: new URL(request.url).pathname,
-        status: native.status,
-      });
-      return native;
-    }).pipe(Effect.orDie),
-  );
-
 /** Adds the Attempt's installation token to the sandbox's requests for GitHub. */
 export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
     // Cloudflare calls this handler outside the Effect runtime.
     // @effect-diagnostics-next-line schemaSync:off
     const props = Schema.decodeSync(GitHubProps)(this.ctx.props);
-    return forward(
-      "github",
-      request,
-      gitHubRequest(request, props.host, Redacted.make(props.token)),
+    return run(
+      forwardRequest(
+        "github",
+        request,
+        gitHubRequest(request, props.host, Redacted.make(props.token)),
+      ),
     );
   }
 }
@@ -565,14 +543,14 @@ export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps
         `usine forwards only the routes Claude Code and Codex call to ${props.provider}.\n`,
       );
     }
-    return forward(props.provider, request, forwarded.value);
+    return run(forwardRequest(props.provider, request, forwarded.value));
   }
 }
 
 /** Forwards the sandbox's requests for an allowlisted host unchanged. */
 export class AllowedOutbound extends WorkerEntrypoint<Env, Record<string, never>> {
   override async fetch(request: Request): Promise<Response> {
-    return forward("allowed", request);
+    return run(forwardRequest("allowed", request));
   }
 }
 
