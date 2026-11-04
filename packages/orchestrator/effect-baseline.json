@@ -69,9 +69,12 @@
   "src/polling/loop-evaluation.ts": {
     "globalJson": 1
   },
+  "src/polling/poll-all.ts": {
+    "globalJson": 1
+  },
   "src/polling/polling.ts": {
     "deterministicKeys": 1,
-    "globalJson": 2
+    "globalJson": 1
   },
   "src/schedule-triggers.ts": {
     "deterministicKeys": 1,

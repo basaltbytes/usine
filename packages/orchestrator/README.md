@@ -108,6 +108,8 @@ The generated client takes `Operator.detail`'s `ColdTranscriptRequest`, `TailTra
 
 `PollingTriggers.poll(instance)` runs one cycle. `PollingTriggers.run(instances)` repeats them every `poll_interval`, longer under rate-limit pressure, reading `instances.get` before each cycle and hint. A reload on `instances.changes` starts the next cycle at once, or when GitHub asked, if later. Repo failures are isolated and reported on the cycle.
 
+The service delegates cycle settlement to `src/polling/poll-all.ts`. The cycle combines repository and CI outcomes, retains each repository's last completed poll, and publishes attention changes from the updated findings.
+
 `PollingTriggers.hint(repository, item)` queues a bounded, coalesced self-write nudge, serialized with cycles through the same projection and dedup path. Hints leave REST cursors, the poll cadence, and the last full cycle's findings unchanged, and polling repairs dropped or failed ones. GitHub backoff, including a failed writer's deadline, delays hints too. The write's own outcome still reaches its caller.
 
 Each cycle first refreshes every repo's label catalog, which supplies lane colors, and creates labels declared in `usine.yaml` that are missing. It never touches existing labels, and logs color or description drift. Creation failures become preflight findings, and the cycle continues.
