@@ -398,6 +398,19 @@ Grouped for asking two or three at a time. Each has a recommendation.
 
 10. Where does the supervisor run: on a worker behind the gateway, like children, or on the orchestrator host with its own login? Recommendation: on a worker behind the gateway, so subscription credentials stay on the gateway and the role's placement check is the same as a coding agent's.
 
+## Decisions (owner, 2026-11-04)
+
+1. Harness IDs are an open set validated by the registry.
+2. The coordinator requires `durable-coordination`, which only Pi declares today. The journaled decorator (step 11) waits until a vendor-harness coordinator is worth its cost.
+3. Keep `parent_model` and `parent_effort`; add `parent_harness` only with a second adapter that declares `durable-coordination`.
+4. OpenAI-compatible endpoints and local models use the `apiKeys` pool, with the endpoint name recorded on the session.
+5. OpenCode may use a ChatGPT login from the start, against the recommendation above.
+6. Gateway slots are keyed by wire protocol, in step 8.
+7. OpenCode targets 2.x, pinned exactly.
+8. Claude Code versions stay unpinned: preflight accepts any installed version, against the recommendation above. Step 6 generates image inputs from descriptors without adding a Claude Code version check.
+9. Pi children get persistent sessions after #941.
+10. The supervisor runs on a worker behind the gateway.
+
 ## Rough edges found
 
 - [`packages/cloudflare/README.md:59`](../../packages/cloudflare/README.md) says the sandbox image installs Claude Code 2.1.308; its Dockerfile installs 2.1.311.
