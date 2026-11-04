@@ -14,6 +14,7 @@ import {
 import { sessionChannel, subscribePiSession } from "./session.ts";
 import { PiSdk, type PiStartResult, usePiStart } from "./sdk.ts";
 import { piPauseGate, piTurns } from "./turns.ts";
+import { requiredPiPool, splitPiModel } from "./authentication.ts";
 
 export {
   PiSdk,
@@ -105,45 +106,25 @@ const makePiChild = Effect.gen(function* () {
             if (started._tag === "UnsupportedEffort") {
               return yield* unsupportedEffort(started);
             }
-            if (started._tag === "AuthenticationUnavailable") {
-              yield* Effect.logError("Pi child has no credential for its model", {
-                model: started.model,
-                requiredPool: "apiKeys",
-              });
+            if (
+              started._tag === "AuthenticationUnavailable" ||
+              started._tag === "UnsupportedAuthentication"
+            ) {
+              const required = requiredPiPool(splitPiModel(started.model)?.provider ?? "");
+              yield* Effect.logError(
+                started._tag === "AuthenticationUnavailable"
+                  ? "Pi child has no credential for its model"
+                  : "Pi child model has unsupported OAuth authentication",
+                { model: started.model, requiredPool: required },
+              );
               return yield* PoolUnavailableError.make({
                 harness: "pi",
                 model: started.model,
-                pool: "apiKeys",
-                message: `Pi child model "${started.model}" must use an API key`,
+                pool: required,
+                message: `Pi child model "${started.model}" requires a credential from the ${required} pool`,
               });
             }
-            if (started._tag === "UnsupportedAuthentication") {
-              yield* Effect.logError("Pi child model has unsupported OAuth authentication", {
-                model: started.model,
-                requiredPool: "apiKeys",
-                subscription: started.authentication.subscription,
-              });
-              return yield* PoolUnavailableError.make({
-                harness: "pi",
-                model: started.model,
-                pool: "apiKeys",
-                message: `Pi child model "${started.model}" must use an API key`,
-              });
-            }
-            if (started.pool !== "apiKeys") {
-              yield* Effect.logError("Pi child resolved to an unsupported billing pool", {
-                model: started.model,
-                requiredPool: "apiKeys",
-                resolvedPool: started.pool,
-              });
-              return yield* PoolUnavailableError.make({
-                harness: "pi",
-                model: started.model,
-                pool: "apiKeys",
-                message: `Pi child model "${started.model}" must use an API key`,
-              });
-            }
-            yield* Effect.logDebug("Pi child session started", {
+            yield* Effect.logInfo("Pi child session started", {
               model: started.model,
               pool: started.pool,
               tools: started.tools,
@@ -193,5 +174,5 @@ const makePiChild = Effect.gen(function* () {
   return PiChildBackend.of({ launch });
 });
 
-/** Provides `PiChildBackend` for local child sessions using API keys. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
+/** Provides `PiChildBackend` for local child sessions using API keys or a ChatGPT subscription. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
 export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);
