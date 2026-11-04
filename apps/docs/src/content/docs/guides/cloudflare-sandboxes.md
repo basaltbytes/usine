@@ -37,6 +37,8 @@ Instance admin access, a Cloudflare Workers Paid account with Zero Trust access,
 
 Preflight checks the Access token, image, provider keys, and harness versions in a temporary sandbox. A test attempt uses its own sandbox and reports API-key usage. Its container has placeholder credentials; the Worker’s outbound handlers inject the real tokens.
 
+Cloudflare accepts the same Codex CLI versions and reports the same version errors as local and SSH workers. If a Codex version check fails, update the pin in `packages/cloudflare/image/Dockerfile` to a supported version from the error message, then redeploy the Worker.
+
 A sandbox can reach GitHub, configured providers, and the allowed package hosts. It has no interactive terminal. A dropped command stream can reattach to stored output. On a platform stop, usine attempts to salvage the checkout and retries through an infrastructure failure.
 
 The command shell returns exit code 255 if its command stream fails, including during startup. Unexpected failures produce a generic error message that excludes Access credentials.

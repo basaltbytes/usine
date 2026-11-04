@@ -1,6 +1,6 @@
 import type { RemoteShell, SshCommand } from "@usine/agents/child-host";
 import { codexConfigArgs } from "@usine/agents/codex";
-import { supportedCodexVersions } from "@usine/agents/preflight";
+import { unsupportedCodexVersion } from "@usine/agents/preflight";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import {
   ApiKeyCredential,
@@ -206,15 +206,9 @@ const versionProbe =
           capability: "binary",
           message: `${command} --version failed in the sandbox image`,
         });
-      if (
-        brain.harness === "codex" &&
-        !supportedCodexVersions.some((supported) => version === `codex-cli ${supported}`)
-      )
-        return HarnessUnavailableError.make({
-          harness: "codex",
-          capability: "version",
-          message: `The sandbox image has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Rebuild it with a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
-        });
+      const unsupported =
+        brain.harness === "codex" ? unsupportedCodexVersion(version) : Option.none();
+      if (Option.isSome(unsupported)) return unsupported.value;
       yield* Effect.logInfo("Checked a harness in the sandbox image", {
         sandbox: shell.destination,
         harness: brain.harness,

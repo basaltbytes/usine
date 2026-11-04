@@ -6,6 +6,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell, sshArguments } from "@usine/agents/child-host";
 import { codexConfigArgs } from "@usine/agents/codex";
+import { unsupportedCodexVersion } from "@usine/agents/preflight";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Agent } from "@usine/core/agent";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
@@ -625,7 +626,10 @@ describe("cloudflare Worker", () => {
       const matchesRefused = Schema.is(WorkerCapabilityError)(refused);
       assert(matchesRefused);
       assert.strictEqual(refused.capability, "toolchain");
-      assert.include(refused.message, "codex-cli 0.150.0");
+      const unsupported = unsupportedCodexVersion("codex-cli 0.150.0");
+      assert(Option.isSome(unsupported));
+      assert.strictEqual(refused.message, unsupported.value.message);
+      assert.deepStrictEqual(refused.cause, unsupported.value);
       assert.deepStrictEqual(probes, [
         { sandbox: `${OWNER}.preflight`, words: ["codex", ...codexConfigArgs, "--version"] },
         { sandbox: SANDBOX, words: ["codex", ...codexConfigArgs, "--version"] },
