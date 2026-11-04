@@ -22,7 +22,8 @@ it("applies the credential and role matrix to every auth and setup endpoint", as
               : ProjectScope.make({ project: ProjectId.make("alpha") }),
         }).permissions;
         const services = yield* authFixture([alice], alice, () => grants);
-        const link = new URL(yield* services.authentication.link);
+        const currentLink = yield* services.authentication.link;
+        const link = new URL(currentLink);
         const issued = yield* services.authentication.consumeLink(
           new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
         );

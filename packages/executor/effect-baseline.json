@@ -2,9 +2,6 @@
   "src/cloudflare/client.ts": {
     "schemaClassMissingBrand": 1
   },
-  "src/cloudflare/cloudflare.ts": {
-    "yieldInCallArgument": 3
-  },
   "src/cloudflare/shell/shell.ts": {
     "asyncFunction": 1,
     "globalTimers": 2,
@@ -18,9 +15,6 @@
   "src/credential-environment.ts": {
     "globalJson": 2
   },
-  "src/durable-session.ts": {
-    "yieldInCallArgument": 3
-  },
   "src/exe-dev/model.ts": {
     "schemaClassMissingBrand": 1
   },
@@ -28,74 +22,26 @@
     "deterministicKeys": 3,
     "schemaClassMissingBrand": 11
   },
-  "src/guard.ts": {
-    "yieldInCallArgument": 4
-  },
   "src/memory-preflight.ts": {
     "schemaClassMissingBrand": 1
   },
-  "src/prepared-attempt.ts": {
-    "yieldInCallArgument": 1
-  },
-  "src/remote/leftovers.ts": {
-    "yieldInCallArgument": 1
-  },
   "src/remote/liveness.ts": {
-    "globalJson": 1,
-    "yieldInCallArgument": 1
-  },
-  "src/remote/remote.ts": {
-    "yieldInCallArgument": 8
-  },
-  "src/salvage.ts": {
-    "yieldInCallArgument": 1
-  },
-  "src/ssh/container.ts": {
-    "yieldInCallArgument": 1
+    "globalJson": 1
   },
   "src/ssh/gateway/admin.ts": {
     "schemaClassMissingBrand": 1
   },
   "src/ssh/gateway/forward.ts": {
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 2
+    "schemaClassMissingBrand": 1
   },
   "src/ssh/limits.ts": {
     "schemaClassMissingBrand": 1
   },
-  "src/ssh/provisioner/boat.ts": {
-    "yieldInCallArgument": 1
-  },
-  "src/ssh/provisioner/checks.ts": {
-    "yieldInCallArgument": 2
-  },
-  "src/ssh/provisioner/drivers.ts": {
-    "yieldInCallArgument": 1
-  },
-  "src/ssh/provisioner/hetzner.ts": {
-    "yieldInCallArgument": 1
-  },
-  "src/ssh/provisioner/host-key.ts": {
-    "yieldInCallArgument": 2
-  },
-  "src/ssh/provisioner/machines.ts": {
-    "yieldInCallArgument": 4
-  },
   "src/ssh/provisioner/model.ts": {
     "schemaClassMissingBrand": 1
   },
-  "src/ssh/provisioner/reuse.ts": {
-    "yieldInCallArgument": 3
-  },
-  "src/ssh/provisioner/starts.ts": {
-    "yieldInCallArgument": 2
-  },
-  "src/ssh/ssh.ts": {
-    "yieldInCallArgument": 1
-  },
   "src/ssh/worker-records.ts": {
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 1
   },
   "src/ssh/workers.ts": {
     "deterministicKeys": 1
@@ -104,8 +50,7 @@
     "nodeBuiltinImport": 1
   },
   "test/cloudflare/cloudflare.test.ts": {
-    "globalJsonInEffect": 3,
-    "yieldInCallArgument": 4
+    "globalJsonInEffect": 3
   },
   "test/cloudflare/fake-worker.ts": {
     "asyncFunction": 1,
@@ -115,35 +60,22 @@
     "schemaSync": 2,
     "strictBooleanExpressions": 1
   },
-  "test/durable-session.test.ts": {
-    "yieldInCallArgument": 8
-  },
   "test/exe-dev/launch.test.ts": {
     "globalJson": 1,
-    "globalJsonInEffect": 1,
-    "yieldInCallArgument": 14
+    "globalJsonInEffect": 1
   },
   "test/exe-dev/preparation.test.ts": {
-    "globalJsonInEffect": 3,
-    "yieldInCallArgument": 1
+    "globalJsonInEffect": 3
   },
   "test/exe-dev/support.ts": {
     "globalJsonInEffect": 2,
     "preferBarrelImport": 1
   },
-  "test/guard.test.ts": {
-    "yieldInCallArgument": 1
-  },
   "test/harness-preflight.test.ts": {
-    "preferBarrelImport": 1,
-    "yieldInCallArgument": 1
-  },
-  "test/salvage.test.ts": {
-    "yieldInCallArgument": 2
+    "preferBarrelImport": 1
   },
   "test/ssh/codex-connection.test.ts": {
-    "globalJsonInEffect": 1,
-    "yieldInCallArgument": 9
+    "globalJsonInEffect": 1
   },
   "test/ssh/container.test.ts": {
     "globalJsonInEffect": 7,
@@ -153,8 +85,7 @@
     "globalJson": 2
   },
   "test/ssh/gateway/gateway.test.ts": {
-    "globalJsonInEffect": 4,
-    "yieldInCallArgument": 11
+    "globalJsonInEffect": 4
   },
   "test/ssh/gateway/gh.test.ts": {
     "asyncFunction": 1,
@@ -170,9 +101,6 @@
     "schemaStructWithTag": 1,
     "schemaSync": 2
   },
-  "test/ssh/gateway/workers.test.ts": {
-    "yieldInCallArgument": 1
-  },
   "test/ssh/podman.test.ts": {
     "globalJson": 2,
     "globalJsonInEffect": 1
@@ -181,44 +109,30 @@
     "globalJson": 2,
     "globalJsonInEffect": 2
   },
-  "test/ssh/provisioner/cleanup.test.ts": {
-    "yieldInCallArgument": 7
-  },
   "test/ssh/provisioner/drivers.test.ts": {
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 2
+    "schemaSyncInEffect": 1
   },
   "test/ssh/provisioner/fake-providers.ts": {
     "globalJson": 1,
     "schemaSync": 4
   },
-  "test/ssh/provisioner/gateway-reuse.test.ts": {
-    "yieldInCallArgument": 1
-  },
-  "test/ssh/provisioner/host-key.test.ts": {
-    "yieldInCallArgument": 1
-  },
   "test/ssh/provisioner/provisioned.test.ts": {
     "globalDate": 1,
     "globalDateInEffect": 1,
-    "schemaSync": 1,
-    "yieldInCallArgument": 9
+    "schemaSync": 1
   },
   "test/ssh/provisioner/recovery.test.ts": {
-    "globalDateInEffect": 1,
-    "yieldInCallArgument": 1
+    "globalDateInEffect": 1
   },
   "test/ssh/provisioner/reuse.test.ts": {
     "globalJson": 1,
-    "globalJsonInEffect": 1,
-    "yieldInCallArgument": 2
+    "globalJsonInEffect": 1
   },
   "test/ssh/provisioner/tailnet.test.ts": {
     "globalJsonInEffect": 2,
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 1
+    "schemaSyncInEffect": 1
   },
   "test/ssh/runtime.test.ts": {
     "asyncFunction": 3,
@@ -234,8 +148,7 @@
     "processEnv": 1
   },
   "test/ssh/ssh.test.ts": {
-    "globalJsonInEffect": 2,
-    "yieldInCallArgument": 3
+    "globalJsonInEffect": 2
   },
   "test/ssh/support.ts": {
     "globalJson": 2,

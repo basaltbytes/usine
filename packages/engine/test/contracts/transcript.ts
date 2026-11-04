@@ -145,7 +145,8 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           yield* Effect.gen(function* () {
             const store = yield* RunStore;
             const reader = yield* RunReader;
-            assert.deepStrictEqual(yield* reader.latestPoolRateLimits, []);
+            const currentLatestPoolRateLimits = yield* reader.latestPoolRateLimits;
+            assert.deepStrictEqual(currentLatestPoolRateLimits, []);
             const at = DateTime.makeUnsafe("2026-10-29T00:00:00Z");
             const session = ParentSession.make({
               id: AgentSessionId.make("pool-session"),
@@ -245,10 +246,8 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                   payload: AttemptChannel.SessionEvent.make({ event: index === 0 ? low : high }),
                 }),
               );
-              assert.deepStrictEqual(
-                new Set(yield* reader.latestPoolRateLimits),
-                new Set([report, other]),
-              );
+              const nextLatestPoolRateLimits = yield* reader.latestPoolRateLimits;
+              assert.deepStrictEqual(new Set(nextLatestPoolRateLimits), new Set([report, other]));
             }
             assert.deepStrictEqual(new Set(logLevels), new Set(["Debug"]));
           }).pipe(Effect.provide(fixture.open));
@@ -284,7 +283,8 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 }),
               );
             const query = TranscriptWorkerQuery.make({ attemptId });
-            assert.deepStrictEqual(yield* store.transcript(query), []);
+            const currentTranscript = yield* store.transcript(query);
+            assert.deepStrictEqual(currentTranscript, []);
             const silent = AttemptChannel.WorkerUnresponsive.make({
               worker: WorkerName.make("remote"),
               lastAnsweredAt: at,

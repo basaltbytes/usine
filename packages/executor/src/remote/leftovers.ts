@@ -34,14 +34,13 @@ export const listMachineLeftovers = Effect.fn("RemoteExecutor.listMachineLeftove
 >(commands: RemoteCommands, worker: WorkerName, machine: M) {
   const host = machine.shell.destination;
   yield* Effect.annotateCurrentSpan({ worker, host });
-  const checkouts = new Set(
-    yield* attemptPathsOn(
-      commands,
-      "cleanup",
-      machine.shell,
-      `${machine.workerDirectory}/attempts`,
-    ),
+  const attemptPaths = yield* attemptPathsOn(
+    commands,
+    "cleanup",
+    machine.shell,
+    `${machine.workerDirectory}/attempts`,
   );
+  const checkouts = new Set(attemptPaths);
   yield* Effect.logInfo("Listed remote checkouts left for reconciliation", {
     worker,
     host,

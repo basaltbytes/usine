@@ -34,7 +34,8 @@ for (const file of ["usine.yaml", "agents/developer.md", "projects/scratch/loops
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const folder = yield* ConfigurationFolder;
-      const root = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
+      const directory = yield* fs.makeTempDirectoryScoped();
+      const root = InstanceDirectory.make(directory);
       yield* fs.copy(bootstrap, root);
       yield* fs.writeFileString(`${root}/${file}`, "invalid: true\n");
       const failure = yield* folder.load(root).pipe(Effect.flip);

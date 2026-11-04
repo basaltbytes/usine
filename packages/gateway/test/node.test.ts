@@ -303,14 +303,16 @@ describe("the Node gateway", () => {
         const intruder = yield* admin("not-the-admin-token-0123456789abcdef");
         const refused = yield* Effect.flip(intruder.attachments.list());
         assert.strictEqual(refused._tag, "Unauthorized");
-        assert.include(yield* refusalLogged("bad-admin-token"), '"endpoint":"list"');
+        const refusalMessages = yield* refusalLogged("bad-admin-token");
+        assert.include(refusalMessages, '"endpoint":"list"');
         const client = yield* admin(ADMIN_TOKEN_VALUE);
         const expired = yield* Effect.flip(
           client.attachments.attach({ payload: yield* attachment(-1) }),
         );
         assert.strictEqual(expired._tag, "AttachmentAlreadyExpired");
         const { admin: address } = yield* GatewayAddresses;
-        const body = yield* Schema.encodeEffect(AttachRequest)(yield* attachment(5));
+        const attached = yield* attachment(5);
+        const body = yield* Schema.encodeEffect(AttachRequest)(attached);
         const attach = (json: string) =>
           HttpClient.execute(
             HttpClientRequest.post(`http://${address.host}:${address.port}/v1/attachments`).pipe(
@@ -328,19 +330,23 @@ describe("the Node gateway", () => {
     () =>
       Effect.gen(function* () {
         const { egress } = yield* GatewayAddresses;
-        assert.deepStrictEqual(yield* connect(egress, "example.com:443"), {
+        const connectionResponse = yield* connect(egress, "example.com:443");
+        assert.deepStrictEqual(connectionResponse, {
           status: 403,
           reason: "host-not-allowed",
         });
-        assert.deepStrictEqual(yield* connect(egress, "registry.npmjs.org:80"), {
+        const currentConnectionResponse = yield* connect(egress, "registry.npmjs.org:80");
+        assert.deepStrictEqual(currentConnectionResponse, {
           status: 403,
           reason: "port-not-allowed",
         });
-        assert.deepStrictEqual(yield* connect(egress, "127.0.0.1:443"), {
+        const nextConnectionResponse = yield* connect(egress, "127.0.0.1:443");
+        assert.deepStrictEqual(nextConnectionResponse, {
           status: 403,
           reason: "address-literal",
         });
-        assert.deepStrictEqual(yield* relayed(egress, "http://example.com/"), {
+        const relayedResponse = yield* relayed(egress, "http://example.com/");
+        assert.deepStrictEqual(relayedResponse, {
           status: 403,
           reason: "host-not-allowed",
         });
@@ -352,32 +358,36 @@ describe("the Node gateway", () => {
       gatewayLines.length = 0;
       const { egress } = yield* GatewayAddresses;
       // An allowed CONNECT host, then a ClientHello for another tenant of its CDN address.
-      assert.strictEqual(
-        yield* tlsThroughTunnel(egress, "registry.npmjs.org:443", Option.some("example.com")),
-        "refused",
+      const tunnelResponse = yield* tlsThroughTunnel(
+        egress,
+        "registry.npmjs.org:443",
+        Option.some("example.com"),
       );
+      assert.strictEqual(tunnelResponse, "refused");
       const mismatch = yield* refusalLogged("server-name-mismatch");
       assert.include(mismatch, '"host":"registry.npmjs.org"');
       assert.include(mismatch, '"serverName":"example.com"');
-      assert.strictEqual(
-        yield* tlsThroughTunnel(egress, "registry.npmjs.org:443", Option.none()),
-        "refused",
+      const currentTunnelResponse = yield* tlsThroughTunnel(
+        egress,
+        "registry.npmjs.org:443",
+        Option.none(),
       );
+      assert.strictEqual(currentTunnelResponse, "refused");
       yield* refusalLogged("server-name-missing");
-      assert.strictEqual(
-        yield* rawThroughTunnel(
-          egress,
-          "registry.npmjs.org:443",
-          "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
-        ),
-        "closed",
+      const nextTunnelResponse = yield* rawThroughTunnel(
+        egress,
+        "registry.npmjs.org:443",
+        "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
       );
+      assert.strictEqual(nextTunnelResponse, "closed");
       yield* refusalLogged("not-tls");
       // A listed name that resolves to loopback is refused once its ClientHello has been checked.
-      assert.strictEqual(
-        yield* tlsThroughTunnel(egress, "localhost:443", Option.some("localhost")),
-        "refused",
+      const updatedTunnelResponse = yield* tlsThroughTunnel(
+        egress,
+        "localhost:443",
+        Option.some("localhost"),
       );
+      assert.strictEqual(updatedTunnelResponse, "refused");
       yield* refusalLogged("private-address");
     }).pipe(Effect.provide(gatewayRecordingLogs)),
   );
@@ -386,7 +396,8 @@ describe("the Node gateway", () => {
     Effect.gen(function* () {
       gatewayLines.length = 0;
       const { egress } = yield* GatewayAddresses;
-      assert.strictEqual(yield* abandonedTunnel(egress, "registry.npmjs.org:443"), "closed");
+      const tunnelResponse = yield* abandonedTunnel(egress, "registry.npmjs.org:443");
+      assert.strictEqual(tunnelResponse, "closed");
       const abandoned = yield* logged(gatewayLines, "The client abandoned a tunnel");
       assert.include(abandoned, '"level":"Info"');
       assert.include(abandoned, '"host":"registry.npmjs.org"');
@@ -460,10 +471,8 @@ describe("the Node gateway", () => {
         outgoing.end();
       });
       yield* Deferred.await(upstreamClosed).pipe(Effect.timeout("2 seconds"));
-      assert.include(
-        yield* logged(messages, "The client abandoned a relayed request"),
-        '"status":200',
-      );
+      const loggedMessages = yield* logged(messages, "The client abandoned a relayed request");
+      assert.include(loggedMessages, '"status":200');
     }).pipe(Effect.scoped, Effect.provide(egressServices)),
   );
 
@@ -493,11 +502,12 @@ describe("the Node gateway", () => {
       });
       yield* Deferred.await(arrived).pipe(Effect.timeout("2 seconds"));
       yield* Effect.sync(() => outgoing.destroy());
-      assert.isFalse(yield* Deferred.await(upstreamComplete).pipe(Effect.timeout("2 seconds")));
-      assert.include(
-        yield* logged(messages, "The client abandoned a relayed request"),
-        '"status":"none"',
+      const upstreamCompleteResult = yield* Deferred.await(upstreamComplete).pipe(
+        Effect.timeout("2 seconds"),
       );
+      assert.isFalse(upstreamCompleteResult);
+      const loggedMessages = yield* logged(messages, "The client abandoned a relayed request");
+      assert.include(loggedMessages, '"status":"none"');
     }).pipe(Effect.scoped, Effect.provide(egressServices)),
   );
 
@@ -506,18 +516,20 @@ describe("the Node gateway", () => {
     (host) =>
       Effect.gen(function* () {
         const { egress } = yield* GatewayAddresses;
-        assert.deepStrictEqual(yield* connect(egress, "llm.gw.test:80"), {
+        const connectionResponse = yield* connect(egress, "llm.gw.test:80");
+        assert.deepStrictEqual(connectionResponse, {
           status: 200,
           reason: undefined,
         });
         // The reverse proxy responded, which shows the request arrived; it has no caller token.
-        assert.deepStrictEqual(
-          yield* relayed(egress, "http://git.gw.test/acme/demo.git/info/refs"),
-          {
-            status: 401,
-            reason: "missing-caller-token",
-          },
+        const relayedResponse = yield* relayed(
+          egress,
+          "http://git.gw.test/acme/demo.git/info/refs",
         );
+        assert.deepStrictEqual(relayedResponse, {
+          status: 401,
+          reason: "missing-caller-token",
+        });
       }).pipe(
         Effect.provide(
           gatewayLayer({ proxy: { host, port: 0 }, egress: LOOPBACK, admin: LOOPBACK }).pipe(

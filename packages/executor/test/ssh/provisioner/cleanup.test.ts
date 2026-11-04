@@ -38,8 +38,10 @@ for (const address of [hetznerAddress, boatAddress]) {
         const workers = yield* SshWorkers;
         const machines = yield* WorkerMachines;
         yield* workers.removeWorker(WORKER);
-        assert.lengthOf(yield* api.list(INSTANCE, Option.some(WORKER)), 0);
-        assert.isFalse(yield* machines.provisions(WORKER));
+        const entries = yield* api.list(INSTANCE, Option.some(WORKER));
+        assert.lengthOf(entries, 0);
+        const currentProvisions = yield* machines.provisions(WORKER);
+        assert.isFalse(currentProvisions);
         providers[settings.provider].token = "rotated-token";
         yield* workers.addWorker({
           ...address,
@@ -53,7 +55,8 @@ for (const address of [hetznerAddress, boatAddress]) {
         ]);
         assert.isTrue(Option.isSome(grant.checked));
         yield* machines.release(grant.hold);
-        assert.lengthOf(yield* machines.machines, 0);
+        const currentMachines = yield* machines.machines;
+        assert.lengthOf(currentMachines, 0);
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -85,8 +88,10 @@ for (const address of [hetznerAddress, boatAddress]) {
         assert.lengthOf(warnings, 1);
         assert.include(warnings[0] ?? "", removed.id);
         assert.include(warnings[0] ?? "", "removed-worker");
-        assert.lengthOf(yield* api.list(INSTANCE, Option.none()), 1);
-        assert.lengthOf(yield* api.list("another-instance", Option.none()), 1);
+        const entries = yield* api.list(INSTANCE, Option.none());
+        assert.lengthOf(entries, 1);
+        const currentEntries = yield* api.list("another-instance", Option.none());
+        assert.lengthOf(currentEntries, 1);
         assert.isFalse(logs.lines.some((line) => line.includes(Redacted.value(settings.token))));
       }).pipe(
         Effect.scoped,
@@ -114,13 +119,11 @@ it.live("reports a failed final deletion and still removes the worker configurat
     providers.hetzner.deleteFails = { status: 500, code: "server_error", message: "down" };
     yield* machines.release(grant.hold);
     yield* workers.removeWorker(WORKER);
-    assert.isFalse(yield* machines.provisions(WORKER));
+    const currentProvisions = yield* machines.provisions(WORKER);
+    assert.isFalse(currentProvisions);
     assert.strictEqual(providers.hetzner.servers.size, 1);
-    assert.lengthOf(
-      yield* machines.machines,
-      0,
-      "removed worker records do not retain its credentials",
-    );
+    const currentMachines = yield* machines.machines;
+    assert.lengthOf(currentMachines, 0, "removed worker records do not retain its credentials");
     assert.isTrue(
       logs.lines.some(
         (line) =>

@@ -37,22 +37,20 @@ for (const stream of ["issue", "pr"] as const) {
           [{ login: "your-app-slug", type: "User" }, false],
           [null, false],
         ] as const) {
-          expect(
-            yield* engine.evaluateBoolean(appSetLabel, environment, {
-              item: {
-                state: "OPEN",
-                labelEvents: {
-                  "ready-for-agent": { actor, createdAt: "2026-10-28T12:00:00Z" },
-                },
+          const matches = yield* engine.evaluateBoolean(appSetLabel, environment, {
+            item: {
+              state: "OPEN",
+              labelEvents: {
+                "ready-for-agent": { actor, createdAt: "2026-10-28T12:00:00Z" },
               },
-            }),
-          ).toBe(expected);
+            },
+          });
+          expect(matches).toBe(expected);
         }
-        expect(
-          yield* engine.evaluateBoolean(appSetLabel, environment, {
-            item: { state: "OPEN", labelEvents: {} },
-          }),
-        ).toBe(false);
+        const currentMatches = yield* engine.evaluateBoolean(appSetLabel, environment, {
+          item: { state: "OPEN", labelEvents: {} },
+        });
+        expect(currentMatches).toBe(false);
         yield* engine.checkBoolean(
           Source.make(
             'timestamp(item.labelEvents["ready-for-agent"].createdAt) > timestamp("2026-01-01T00:00:00Z")',

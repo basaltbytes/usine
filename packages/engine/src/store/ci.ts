@@ -81,7 +81,8 @@ export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBu
           CiSuperseded: () => AttemptCanceled.make(),
         });
         yield* queries.settleCiAttempt(runId, outcome);
-        yield* queries.updateState(runId, state, yield* DateTime.now);
+        const observedAt = yield* DateTime.now;
+        yield* queries.updateState(runId, state, observedAt);
         yield* Effect.logInfo("CI wait settled", {
           runId,
           head,

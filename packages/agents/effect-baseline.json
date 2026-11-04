@@ -4,8 +4,7 @@
   },
   "src/pi/claude/claude.ts": {
     "asyncFunction": 1,
-    "nodeBuiltinImport": 1,
-    "yieldInCallArgument": 1
+    "nodeBuiltinImport": 1
   },
   "src/pi/claude/sdk.ts": {
     "asyncFunction": 2,
@@ -30,8 +29,7 @@
   },
   "src/pi/codex/remote.ts": {
     "globalJsonInEffect": 1,
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 2
+    "schemaClassMissingBrand": 1
   },
   "src/pi/codex/supervisor.ts": {
     "globalJson": 1
@@ -62,22 +60,18 @@
   },
   "test/integration/claude.test.ts": {
     "processEnv": 1,
-    "schemaSync": 1,
-    "yieldInCallArgument": 2
+    "schemaSync": 1
   },
   "test/integration/codex.test.ts": {
     "processEnv": 1,
-    "schemaSync": 1,
-    "yieldInCallArgument": 2
+    "schemaSync": 1
   },
   "test/integration/contract.ts": {
-    "cryptoRandomUUIDInEffect": 1,
-    "yieldInCallArgument": 5
+    "cryptoRandomUUIDInEffect": 1
   },
   "test/integration/pi.test.ts": {
     "processEnv": 1,
-    "schemaSync": 1,
-    "yieldInCallArgument": 2
+    "schemaSync": 1
   },
   "test/pi/claude.test.ts": {
     "asyncFunction": 4,
@@ -85,20 +79,15 @@
     "newPromise": 2,
     "nodeBuiltinImport": 2,
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 3
+    "schemaSyncInEffect": 1
   },
   "test/pi/codex/app-server.test.ts": {
     "globalJson": 1,
-    "globalJsonInEffect": 2,
-    "yieldInCallArgument": 4
+    "globalJsonInEffect": 2
   },
   "test/pi/codex/codex.test.ts": {
     "globalJson": 1,
     "globalJsonInEffect": 4
-  },
-  "test/pi/conversation.test.ts": {
-    "yieldInCallArgument": 2
   },
   "test/pi/pi.test.ts": {
     "globalJson": 1,
@@ -114,8 +103,7 @@
     "globalJson": 3,
     "globalJsonInEffect": 1,
     "nodeBuiltinImport": 2,
-    "schemaSync": 1,
-    "yieldInCallArgument": 4
+    "schemaSync": 1
   },
   "test/provider-capacity.test.ts": {
     "schemaSync": 1

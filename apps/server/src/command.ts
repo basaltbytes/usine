@@ -43,7 +43,8 @@ export const runCommand = Effect.fn("Cli.runCommand")(function* (
         Stream.mkString,
         Effect.forkChild,
       );
-      const exitCode = Number(yield* handle.exitCode);
+      const processExitCode = yield* handle.exitCode;
+      const exitCode = Number(processExitCode);
       const [out, err] = yield* Effect.all([Fiber.join(stdout), Fiber.join(stderr)]);
       return { exitCode, stdout: out, stderr: err } satisfies CommandResult;
     }),

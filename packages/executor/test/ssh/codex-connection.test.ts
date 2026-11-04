@@ -203,36 +203,43 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
           if (failure === "resume-exit" || failure === "resume-zero-exit") {
             const error = yield* running.result.pipe(Effect.flip);
             assert.strictEqual(error._tag, "SessionOperationError");
-            assert.strictEqual(yield* fs.readFileString(`${directory}/resumed`), "thread-one\n");
-            assert.strictEqual(yield* fs.readFileString(`${directory}/threads`), "thread-one\n");
+            const contents = yield* fs.readFileString(`${directory}/resumed`);
+            assert.strictEqual(contents, "thread-one\n");
+            const currentContents = yield* fs.readFileString(`${directory}/threads`);
+            assert.strictEqual(currentContents, "thread-one\n");
             return;
           }
           assert.strictEqual((yield* running.result).message, "Completed on original thread");
           const events = yield* Stream.runCollect(running.events);
           assert.strictEqual(events.filter((event) => event._tag === "SessionStarted").length, 1);
           assert.strictEqual(events.filter((event) => event._tag === "TextOutput").length, 1);
-          assert.strictEqual(yield* fs.readFileString(`${directory}/threads`), "thread-one\n");
+          const nextContents = yield* fs.readFileString(`${directory}/threads`);
+          assert.strictEqual(nextContents, "thread-one\n");
+          const updatedContents = yield* fs.readFileString(`${directory}/turn-started`);
           assert.strictEqual(
-            yield* fs.readFileString(`${directory}/turn-started`),
+            updatedContents,
             failure.startsWith("ssh-") || failure === "before-initial-turn-exit"
               ? "yes\n"
               : "yes\nyes\n",
           );
           if (failure.startsWith("ssh-input-")) {
-            assert.isTrue(yield* fs.exists(`${directory}/dropped`), "the SSH input was truncated");
-            assert.isFalse(
-              yield* fs.exists(`${directory}/resumed`),
-              "the original app-server survives the drop",
-            );
+            const currentExists = yield* fs.exists(`${directory}/dropped`);
+            assert.isTrue(currentExists, "the SSH input was truncated");
+            const nextExists = yield* fs.exists(`${directory}/resumed`);
+            assert.isFalse(nextExists, "the original app-server survives the drop");
           }
-          if (failure.startsWith("ssh-frame-"))
+          if (failure.startsWith("ssh-frame-")) {
+            const latestContents = yield* fs.readFileString(`${directory}/cursors`);
             assert.strictEqual(
-              yield* fs.readFileString(`${directory}/cursors`),
+              latestContents,
               `0\n${yield* fs.readFileString(`${directory}/dropped`)}\n`,
               "reconnect replays from the last complete frame",
             );
-          if (!failure.startsWith("ssh-"))
-            assert.strictEqual(yield* fs.readFileString(`${directory}/resumed`), "thread-one\n");
+          }
+          if (!failure.startsWith("ssh-")) {
+            const secondContents = yield* fs.readFileString(`${directory}/resumed`);
+            assert.strictEqual(secondContents, "thread-one\n");
+          }
           const saved = (yield* fs.readFileString(`${directory}/saved-inputs`)).trim().split("\n");
           const originalInput = JSON.stringify([
             { type: "text", text: "Finish this attempt.", text_elements: [] },
@@ -243,8 +250,10 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
             "the saved thread contains the original task",
           );
           assert.strictEqual(saved.filter((input) => input === originalInput).length, 1);
-          if (failure === "supervisor-exit" || failure === "app-server-zero-exit")
-            assert.strictEqual(yield* fs.readFileString(`${directory}/original-stopped`), "yes");
+          if (failure === "supervisor-exit" || failure === "app-server-zero-exit") {
+            const thirdContents = yield* fs.readFileString(`${directory}/original-stopped`);
+            assert.strictEqual(thirdContents, "yes");
+          }
         }),
       ).pipe(
         Effect.provide(

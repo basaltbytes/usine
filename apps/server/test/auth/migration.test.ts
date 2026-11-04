@@ -21,14 +21,16 @@ it("enrolls the existing operator once without looking up GitHub on later starts
           Effect.provideService(GitHubSignIn, services.github),
         );
       yield* seed(undefined);
-      assert.deepEqual(yield* services.store.members, []);
+      const currentMembers = yield* services.store.members;
+      assert.deepEqual(currentMembers, []);
       yield* seed(alice.login);
       const members = yield* services.store.members;
       assert.equal(members.length, 1);
       assert.equal(members[0]?.id, alice.id);
       assert.equal(members[0]?.addedBy, alice.login);
       yield* seed(bob.login);
-      assert.deepEqual(yield* services.store.members, members);
+      const nextMembers = yield* services.store.members;
+      assert.deepEqual(nextMembers, members);
       assert.deepEqual(services.seen, ["https://api.github.com/users/alice"]);
     }).pipe(Effect.scoped),
   ));

@@ -151,19 +151,18 @@ export const openPullRequestRefresh = Effect.fn("PollingTriggers.openPullRequest
       numbers.push(number);
       byBaseRef.set(baseRefName.value, numbers);
     }
-    const reads = new Map(
-      yield* Effect.forEach(
-        byBaseRef,
-        ([baseRefName, pullRequests]) =>
-          readBaseRef(
-            repository,
-            baseRefName,
-            Option.fromNullishOr(recordedHeads.find((head) => head.baseRefName === baseRefName)),
-            pullRequests,
-          ).pipe(Effect.map((read) => [baseRefName, read] as const)),
-        { concurrency: BASE_REF_CONCURRENCY },
-      ),
+    const baseRefReads = yield* Effect.forEach(
+      byBaseRef,
+      ([baseRefName, pullRequests]) =>
+        readBaseRef(
+          repository,
+          baseRefName,
+          Option.fromNullishOr(recordedHeads.find((head) => head.baseRefName === baseRefName)),
+          pullRequests,
+        ).pipe(Effect.map((read) => [baseRefName, read] as const)),
+      { concurrency: BASE_REF_CONCURRENCY },
     );
+    const reads = new Map(baseRefReads);
     const notFetched = openPullRequests.filter(({ number }) => !fetched.has(number));
     const refreshed = notFetched.flatMap((pullRequest) =>
       Option.toArray(

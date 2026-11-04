@@ -137,7 +137,8 @@ export class AttemptAdmission extends Context.Service<
                     );
                     if (Option.isNone(prepared)) return Option.none<B>();
                     yield* removeWaiting;
-                    return Option.some(yield* attempt(prepared.value));
+                    const attemptResult = yield* attempt(prepared.value);
+                    return Option.some(attemptResult);
                   }),
                 );
                 if (Option.isSome(result)) return result.value;

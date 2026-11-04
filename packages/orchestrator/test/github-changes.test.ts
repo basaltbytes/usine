@@ -314,28 +314,26 @@ describe("RunGitHubChanges", () => {
       yield* TestClock.setTime(DateTime.toEpochMillis(time("2026-10-16T13:10:00Z")));
       yield* Effect.gen(function* () {
         const changes = yield* RunGitHubChanges;
-        assert.deepStrictEqual(summary(yield* changes.read([exeWorker], runId)), [[]]);
+        const snapshot = yield* changes.read([exeWorker], runId);
+        assert.deepStrictEqual(summary(snapshot), [[]]);
         const known = yield* changes.read(workers, runId);
         assert.deepStrictEqual(summary(known), [
           ["2026-10-16T13:05:08.000Z Commented issuecomment-51"],
         ]);
         const fetched = yield* Ref.get(requests);
-        assert.deepStrictEqual(
-          summary(yield* changes.read([exeWorker, localWorker], runId)),
-          summary(known),
+        const currentSnapshot = yield* changes.read([exeWorker, localWorker], runId);
+        assert.deepStrictEqual(summary(currentSnapshot), summary(known));
+        const requestsState = yield* Ref.get(requests);
+        assert.deepStrictEqual(requestsState, fetched);
+        const nextSnapshot = yield* changes.read([exeWorker], runId);
+        assert.deepStrictEqual(summary(nextSnapshot), [[]]);
+        const updatedSnapshot = yield* changes.read(
+          [exeWorker, ExeDevWorker.make({ ...localWorker, kind: "exe.dev" })],
+          runId,
         );
-        assert.deepStrictEqual(yield* Ref.get(requests), fetched);
-        assert.deepStrictEqual(summary(yield* changes.read([exeWorker], runId)), [[]]);
-        assert.deepStrictEqual(
-          summary(
-            yield* changes.read(
-              [exeWorker, ExeDevWorker.make({ ...localWorker, kind: "exe.dev" })],
-              runId,
-            ),
-          ),
-          [[]],
-        );
-        assert.deepStrictEqual(summary(yield* changes.read(workers, runId)), summary(known));
+        assert.deepStrictEqual(summary(updatedSnapshot), [[]]);
+        const latestSnapshot = yield* changes.read(workers, runId);
+        assert.deepStrictEqual(summary(latestSnapshot), summary(known));
       }).pipe(
         Effect.provide(
           testLayer(
@@ -389,7 +387,8 @@ describe("RunGitHubChanges", () => {
               "2026-10-16T13:05:10.000Z Reviewed pullrequestreview-52",
             ],
           ]);
-          assert.deepStrictEqual(summary(yield* changes.read(workers, runId)), summary(read));
+          const snapshot = yield* changes.read(workers, runId);
+          assert.deepStrictEqual(summary(snapshot), summary(read));
           const removed = yield* changes.read([localWorker], runId);
           assert.deepStrictEqual(summary(removed).slice(1), [
             ["2026-10-16T09:47:10.250Z BoardMoved In progress -> Review"],
@@ -448,10 +447,12 @@ describe("RunGitHubChanges", () => {
             ],
             ["2026-10-16T13:03:00.000Z Commented issuecomment-2"],
           ]);
-          assert.deepStrictEqual(yield* Ref.get(requests), ["2026-10-15T19:30:39.000Z"]);
+          const requestsState = yield* Ref.get(requests);
+          assert.deepStrictEqual(requestsState, ["2026-10-15T19:30:39.000Z"]);
 
           // Ended Attempts come from the cache; GitHub is asked only about the live one.
-          assert.deepStrictEqual(summary(yield* changes.read(workers, runId)), summary(read));
+          const currentSnapshot = yield* changes.read(workers, runId);
+          assert.deepStrictEqual(summary(currentSnapshot), summary(read));
           assert.deepStrictEqual((yield* Ref.get(requests)).slice(1), ["2026-10-16T13:02:00.000Z"]);
 
           // A recently ended Attempt is read again until GitHub's record is final.

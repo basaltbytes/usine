@@ -22,7 +22,8 @@ const question = QuestionFailure.make({
 /** Returns whether no Run exists yet for the submission's Event. */
 const hasNoRun = (engine: RunEngine["Service"], sighting: ReturnType<typeof submission>) =>
   Effect.gen(function* () {
-    const missing = yield* Effect.flip(engine.inspect(yield* runIdFor(sighting)));
+    const runId = yield* runIdFor(sighting);
+    const missing = yield* Effect.flip(engine.inspect(runId));
     return missing._tag === "RunNotFoundError";
   });
 
@@ -55,7 +56,8 @@ describe("Attempts that end with an operator question", () => {
             assert(suppressed._tag === "Suppressed");
             assert.strictEqual(suppressed.runId, asked.runId);
           }
-          assert(yield* hasNoRun(engine, posted));
+          const noRun = yield* hasNoRun(engine, posted);
+          assert(noRun);
 
           // The operator pushes a fix, a change the question did not make.
           const fixed = submission({ number: 3, item: "asking-item" });
@@ -89,10 +91,12 @@ describe("Attempts that end with an operator question", () => {
           yield* Deferred.succeed(asking, undefined);
           yield* waitFor(engine, asked.runId, ({ run }) => run.state._tag === "Failed");
           yield* engine.reconcile;
-          assert(yield* hasNoRun(engine, posted));
+          const noRun = yield* hasNoRun(engine, posted);
+          assert(noRun);
           // Polling sees the question's own comment again, which is the suppressed state.
           assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");
-          assert(yield* hasNoRun(engine, posted));
+          const currentNoRun = yield* hasNoRun(engine, posted);
+          assert(currentNoRun);
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),
@@ -119,11 +123,8 @@ describe("Attempts that end with an operator question", () => {
           const attempt = failed.attempts[0];
           assert(attempt !== undefined);
           yield* engine.resolveFailure(asked.runId, attempt.id, Option.none());
-          yield* waitFor(
-            engine,
-            yield* runIdFor(posted),
-            ({ run }) => run.state._tag === "Succeeded",
-          );
+          const currentRunId = yield* runIdFor(posted);
+          yield* waitFor(engine, currentRunId, ({ run }) => run.state._tag === "Succeeded");
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),

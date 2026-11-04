@@ -111,7 +111,8 @@ export const readManifest = Effect.fn("Instance.readManifest")(function* (direct
       lockfiles.push(file);
     }
   }
-  return Option.some(yield* parseManifest(path, text, lockfiles));
+  const manifest = yield* parseManifest(path, text, lockfiles);
+  return Option.some(manifest);
 });
 
 /** The pin of `@usine/server`, if the manifest pins it to a registry version. */

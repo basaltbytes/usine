@@ -65,12 +65,14 @@ describe("encrypted attachments", () => {
           assert.isTrue(found.serves(RepositoryName.make("acme/renamed")));
           assert(found.attachment.credential._tag === "InstallationCredential");
           assert.strictEqual(Redacted.value(found.attachment.credential.token), `${TOKEN}-renewed`);
-          assert.isTrue(yield* store.detach(ATTACHMENT));
+          const detached = yield* store.detach(ATTACHMENT);
+          assert.isTrue(detached);
         }).pipe(Effect.provide(persisted(path)));
         yield* TestClock.adjust("3 minutes");
         yield* Effect.gen(function* () {
           const store = yield* Attachments;
-          assert.deepStrictEqual(yield* store.list, []);
+          const currentList = yield* store.list;
+          assert.deepStrictEqual(currentList, []);
           assert.strictEqual((yield* store.find(ATTACHMENT))._tag, "MissingAttachment");
           assert.strictEqual((yield* store.find(OTHER_ATTACHMENT))._tag, "MissingAttachment");
         }).pipe(Effect.provide(persisted(path)));
@@ -134,7 +136,8 @@ describe("encrypted attachments", () => {
         );
         const error = yield* Effect.void.pipe(Effect.provide(wrongKey), Effect.flip);
         assert.strictEqual(error._tag, "AttachmentPersistenceError");
-        assert.deepStrictEqual(yield* Effect.promise(() => readFile(snapshot)), original);
+        const responseBody = yield* Effect.promise(() => readFile(snapshot));
+        assert.deepStrictEqual(responseBody, original);
         for (const bytes of [
           Buffer.alloc(0),
           Buffer.from("invalid snapshot"),
@@ -143,7 +146,8 @@ describe("encrypted attachments", () => {
           yield* Effect.promise(() => writeFile(snapshot, bytes));
           const corrupt = yield* Effect.void.pipe(Effect.provide(persisted(path)), Effect.flip);
           assert.strictEqual(corrupt._tag, "AttachmentPersistenceError");
-          assert.deepStrictEqual(yield* Effect.promise(() => readFile(snapshot)), bytes);
+          const currentResponseBody = yield* Effect.promise(() => readFile(snapshot));
+          assert.deepStrictEqual(currentResponseBody, bytes);
         }
       }).pipe(Effect.scoped),
   );

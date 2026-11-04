@@ -38,9 +38,8 @@ const emptyEnvironment = ConfigProvider.layer(ConfigProvider.fromUnknown({}));
 
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const directory = InstanceDirectory.make(
-    yield* fs.makeTempDirectoryScoped({ prefix: "usine-setup-" }),
-  );
+  const currentDirectory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-setup-" });
+  const directory = InstanceDirectory.make(currentDirectory);
   const auth = yield* authFixture([]);
   let installed = false;
   let registered = false;
@@ -135,9 +134,10 @@ const fixture = Effect.gen(function* () {
       },
     );
     assert.equal(response.status, 200);
+    const responseBody = yield* Effect.promise(() => response.json());
     const result = Schema.decodeUnknownSync(
       Schema.Struct({ action: Schema.String, manifest: Schema.String }),
-    )(yield* Effect.promise(() => response.json()));
+    )(responseBody);
     const state = new URL(result.action).searchParams.get("state");
     assert.ok(state);
     return { ...result, state, cookie: `usine_app_state=${state}` };
@@ -175,9 +175,11 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
     run(
       Effect.gen(function* () {
         const f = yield* fixture;
-        assert.deepEqual(yield* f.setup.status, { _tag: "NoApp" });
+        const currentStatus = yield* f.setup.status;
+        assert.deepEqual(currentStatus, { _tag: "NoApp" });
         assert.equal((yield* f.request("/api/setup/activate", {})).status, 409);
-        assert.equal(yield* f.github.available, false);
+        const currentAvailable = yield* f.github.available;
+        assert.equal(currentAvailable, false);
         const begun = yield* f.begin;
         const manifest = JSON.parse(begun.manifest);
         assert.deepEqual(manifest.default_permissions, REQUIRED_REPOSITORY_PERMISSIONS);
@@ -199,18 +201,21 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
         assert.match(response.headers.get("set-cookie") ?? "", /Max-Age=0/);
         const target = `${f.directory}/${GITHUB_APP_SECRETS_PATH}`;
         assert.equal((yield* f.fs.stat(target)).mode & 0o777, 0o600);
-        assert.deepEqual(JSON.parse(yield* f.fs.readFileString(target)), {
+        const contents = yield* f.fs.readFileString(target);
+        assert.deepEqual(JSON.parse(contents), {
           app_id: 123,
           private_key: pem,
           client_id: conversion.client_id,
           client_secret: conversion.client_secret,
           webhook_secret: conversion.webhook_secret,
         });
-        assert.equal(yield* f.github.available, true);
-        assert.match(
-          yield* f.github.authorizeUrl("state", "https://usine.example/api/auth/callback"),
-          /client_id=Iv1.created/,
+        const nextAvailable = yield* f.github.available;
+        assert.equal(nextAvailable, true);
+        const authorizationUrl = yield* f.github.authorizeUrl(
+          "state",
+          "https://usine.example/api/auth/callback",
         );
+        assert.match(authorizationUrl, /client_id=Iv1.created/);
         assert.equal(
           (yield* f.github.web("user-code", "https://usine.example/api/auth/callback")).login,
           alice.login,
@@ -223,19 +228,22 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
         if (installation._tag === "NeedsInstallation")
           assert.equal(installation.url, "https://github.com/apps/created-app/installations/new");
         f.install();
-        assert.deepEqual(yield* f.setup.status, {
+        const nextStatus = yield* f.setup.status;
+        assert.deepEqual(nextStatus, {
           _tag: "Repositories",
           signIn: true,
           github: true,
         });
         yield* f.auth.store.add(alice, true);
-        assert.deepEqual(yield* f.setup.status, {
+        const updatedStatus = yield* f.setup.status;
+        assert.deepEqual(updatedStatus, {
           _tag: "Repositories",
           signIn: false,
           github: true,
         });
         f.register();
-        assert.deepEqual(yield* f.setup.status, { _tag: "Ready" });
+        const latestStatus = yield* f.setup.status;
+        assert.deepEqual(latestStatus, { _tag: "Ready" });
         assert.equal((yield* f.request("/api/setup/manifest", { name: "overwrite" })).status, 409);
       }),
     ),
@@ -257,11 +265,11 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
         );
         assert.equal(crossSite.status, 403);
         assert.isNull(crossSite.headers.get("access-control-allow-origin"));
-        assert.deepEqual(yield* f.setup.status, { _tag: "NoApp" });
+        const currentStatus = yield* f.setup.status;
+        assert.deepEqual(currentStatus, { _tag: "NoApp" });
+        const currentLink = yield* f.auth.authentication.link;
         const session = yield* f.auth.authentication.consumeLink(
-          new URLSearchParams(new URL(yield* f.auth.authentication.link).hash.slice(1)).get(
-            "link",
-          ) ?? "",
+          new URLSearchParams(new URL(currentLink).hash.slice(1)).get("link") ?? "",
         );
         assert.equal(
           (yield* f.request(
@@ -279,7 +287,8 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
           { cookie: begun.cookie },
         );
         assert.match(response.headers.get("location") ?? "", /GitHub%20could%20not/);
-        assert.equal(yield* f.fs.exists(`${f.directory}/${GITHUB_APP_SECRETS_PATH}`), false);
+        const currentExists = yield* f.fs.exists(`${f.directory}/${GITHUB_APP_SECRETS_PATH}`);
+        assert.equal(currentExists, false);
         assert.equal((yield* (yield* f.resume).status)._tag, "MissingKey");
         const restored = yield* f.request("/api/setup/restore", {
           credentials: JSON.stringify({ app_id: 123, private_key: pem }),
@@ -298,10 +307,8 @@ it("drains the activation response before closing setup HTTP and preserves its a
     run(
       Effect.gen(function* () {
         const f = yield* fixture;
-        const token =
-          new URLSearchParams(new URL(yield* f.auth.authentication.link).hash.slice(1)).get(
-            "link",
-          ) ?? "";
+        const currentLink = yield* f.auth.authentication.link;
+        const token = new URLSearchParams(new URL(currentLink).hash.slice(1)).get("link") ?? "";
         const session = yield* f.auth.authentication.consumeLink(token);
         const ready = yield* Deferred.make<HttpClient.HttpClient>();
         yield* f.setup.restore(JSON.stringify({ app_id: 123, private_key: pem }));
@@ -309,7 +316,8 @@ it("drains the activation response before closing setup HTTP and preserves its a
           Layer.provideMerge(NodeHttpServer.layerTest),
         );
         const serving = Effect.gen(function* () {
-          yield* Deferred.succeed(ready, yield* HttpClient.HttpClient);
+          const httpClient = yield* HttpClient.HttpClient;
+          yield* Deferred.succeed(ready, httpClient);
           return yield* Effect.never;
         }).pipe(Effect.provide(server), Effect.raceFirst(f.setup.changed));
         const running = yield* serving.pipe(Effect.forkScoped);
@@ -320,7 +328,8 @@ it("drains the activation response before closing setup HTTP and preserves its a
           ),
         );
         assert.equal(response.status, 200);
-        assert.deepEqual(yield* response.json, { ok: true });
+        const currentJson = yield* response.json;
+        assert.deepEqual(currentJson, { ok: true });
         yield* Fiber.join(running);
         const access = yield* f.auth.authentication.authenticate(Redacted.value(session.secret));
         assert.equal(access.credential, "bootstrap");

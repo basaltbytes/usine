@@ -213,7 +213,8 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
           machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "",
           'base_url = "http://llm.gw.test/openai/v1"',
         );
-        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("subscription"));
+        const currentGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
         yield* machines.release(grant.hold);
       }).pipe(
         Effect.scoped,
@@ -297,7 +298,8 @@ describe("Provisioned SSH Worker", () => {
       return Effect.gen(function* () {
         const executor = yield* Executor;
         const machines = yield* WorkerMachines;
-        assert.isTrue(yield* machines.provisions(WORKER));
+        const currentProvisions = yield* machines.provisions(WORKER);
+        assert.isTrue(currentProvisions);
 
         const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
           TEST_AGENT.brain,
@@ -355,7 +357,8 @@ describe("Provisioned SSH Worker", () => {
 
         yield* machines.release(grant.hold);
         assert.strictEqual(providers.hetzner.servers.size, 0);
-        assert.lengthOf(yield* machines.machines, 0);
+        const currentMachines = yield* machines.machines;
+        assert.lengthOf(currentMachines, 0);
         assert.isFalse(machine.state.localFiles.has(knownHosts));
         assert.include(logs.lines.join("\n"), "Deleted the machine");
       }).pipe(
@@ -466,7 +469,8 @@ describe("Provisioned SSH Worker", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const machines = yield* WorkerMachines;
-          assert.isTrue(yield* executor.isLive(request.attemptId));
+          const live = yield* executor.isLive(request.attemptId);
+          assert.isTrue(live);
           const hold = yield* machines.adopt(WORKER, request.attemptId);
           assert.isTrue(Option.isSome(hold));
           assert.strictEqual((yield* machines.machines)[0]?.attempts, 2);
@@ -599,7 +603,8 @@ describe("Provisioned SSH Worker", () => {
           .pipe(Effect.flip);
         assert(quota._tag === "MachineUnavailableError");
         assert.strictEqual(quota.reason, "quota");
-        assert.lengthOf(yield* machines.machines, 0);
+        const currentMachines = yield* machines.machines;
+        assert.lengthOf(currentMachines, 0);
 
         providers.hetzner.createFails = undefined;
         machine.state.reachable = false;
@@ -609,7 +614,8 @@ describe("Provisioned SSH Worker", () => {
         assert(silent._tag === "MachineUnavailableError");
         assert.strictEqual(silent.reason, "timeout");
         assert.strictEqual(providers.hetzner.servers.size, 0, "the silent machine was deleted");
-        assert.lengthOf(yield* machines.machines, 0);
+        const nextMachines = yield* machines.machines;
+        assert.lengthOf(nextMachines, 0);
 
         machine.state.reachable = true;
         machine.state.memoryGib = 1;
@@ -709,7 +715,8 @@ describe("Provisioned SSH Worker", () => {
         providers.hetzner.deleteFails = undefined;
         yield* machines.sweep;
         assert.strictEqual(providers.hetzner.servers.size, 0);
-        assert.lengthOf(yield* machines.machines, 0);
+        const currentMachines = yield* machines.machines;
+        assert.lengthOf(currentMachines, 0);
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
     },
   );
@@ -862,7 +869,8 @@ describe("Provisioned SSH Worker", () => {
           machine.state.calls.some(({ line }) => line.includes(OPENAI_KEY)),
           "the key is in no command line",
         );
-        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("api-key"));
+        const currentGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(currentGatewayCredential, Option.some("api-key"));
         assert.isTrue(
           machine.state.calls.some(({ line }) => line === `exec 'rm' '-rf' '${CODEX_HOME}'`),
           "the Attempt's Codex home is removed",
@@ -943,7 +951,8 @@ describe("Provisioned SSH Worker", () => {
         assert.include(refused.message, "doesn't trust the host key of a first connection");
         assert.lengthOf(machine.state.calls, 0, "nothing connected to the sandbox");
         assert.strictEqual(providers.boat.sandboxes.size, 0, "the sandbox was deleted");
-        assert.lengthOf(yield* machines.machines, 0);
+        const currentMachines = yield* machines.machines;
+        assert.lengthOf(currentMachines, 0);
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boatAddress)));
     },
   );

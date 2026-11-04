@@ -89,16 +89,15 @@ describe("ExpressionEngine", () => {
           counts: { reviews: 2 },
         },
       };
-      expect(
-        yield* engine.evaluateBoolean(
-          source(
-            'item.reviewersByRole["__proto__"].login == null && ' +
-              'item.reviewersByRole["owner"].login == "octocat" && item.counts["reviews"] + 1 == 3',
-          ),
-          nullableEnvironment,
-          context,
+      const matches = yield* engine.evaluateBoolean(
+        source(
+          'item.reviewersByRole["__proto__"].login == null && ' +
+            'item.reviewersByRole["owner"].login == "octocat" && item.counts["reviews"] + 1 == 3',
         ),
-      ).toBe(true);
+        nullableEnvironment,
+        context,
+      );
+      expect(matches).toBe(true);
       const typo = yield* Effect.flip(
         engine.checkBoolean(
           source('item.reviewersByRole["owner"].logni == "octocat"'),
@@ -158,10 +157,14 @@ describe("ExpressionEngine", () => {
       const engine = yield* ExpressionEngine;
       yield* engine.checkScalar(source("null"), nullableEnvironment);
       const decision = source("item.reviewDecision");
-      expect(yield* engine.evaluateScalar(decision, nullableEnvironment, withNulls)).toBeNull();
-      expect(yield* engine.evaluateScalar(decision, nullableEnvironment, withValues)).toBe(
-        "APPROVED",
+      const evaluated = yield* engine.evaluateScalar(decision, nullableEnvironment, withNulls);
+      expect(evaluated).toBeNull();
+      const currentEvaluated = yield* engine.evaluateScalar(
+        decision,
+        nullableEnvironment,
+        withValues,
       );
+      expect(currentEvaluated).toBe("APPROVED");
       const object = yield* engine
         .checkScalar(source("item.milestone"), nullableEnvironment)
         .pipe(Effect.flip);
@@ -178,12 +181,10 @@ describe("ExpressionEngine", () => {
         ['item.annotations.?team.orValue("none")', "none", "core"],
       ] as const;
       for (const [expression, missing, present] of cases) {
-        expect(
-          yield* Effect.forEach([withNulls, withoutKeys, withValues], (context) =>
-            engine.evaluateScalar(source(expression), nullableEnvironment, context),
-          ),
-          expression,
-        ).toEqual([missing, missing, present]);
+        const collected = yield* Effect.forEach([withNulls, withoutKeys, withValues], (context) =>
+          engine.evaluateScalar(source(expression), nullableEnvironment, context),
+        );
+        expect(collected, expression).toEqual([missing, missing, present]);
       }
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
@@ -385,10 +386,14 @@ describe("ExpressionEngine", () => {
 it.effect("checks integer result types and preserves signed integer evaluation", () =>
   Effect.gen(function* () {
     const engine = yield* ExpressionEngine;
-    expect(yield* engine.evaluateInteger(source("-1"), issueEnvironment, {})).toBe(-1n);
-    expect(yield* engine.evaluateInteger(source("9007199254740992"), issueEnvironment, {})).toBe(
-      9007199254740992n,
+    const evaluatedInteger = yield* engine.evaluateInteger(source("-1"), issueEnvironment, {});
+    expect(evaluatedInteger).toBe(-1n);
+    const currentEvaluatedInteger = yield* engine.evaluateInteger(
+      source("9007199254740992"),
+      issueEnvironment,
+      {},
     );
+    expect(currentEvaluatedInteger).toBe(9007199254740992n);
     for (const value of ["true", "1.0", "1u", '"1"', "[]"])
       expect(
         (yield* engine.checkInteger(source(value), issueEnvironment).pipe(Effect.flip)).code,

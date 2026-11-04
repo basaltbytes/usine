@@ -186,7 +186,8 @@ const echoingParent =
           },
         ),
       );
-      output.push(yield* handle.stdout.pipe(Stream.decodeText(), Stream.mkString));
+      const currentStdout = yield* handle.stdout.pipe(Stream.decodeText(), Stream.mkString);
+      output.push(currentStdout);
       return yield* completes(context);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.orDie);
 
@@ -254,7 +255,8 @@ describe("cloudflare Worker", () => {
           given.environment["SSL_CERT_FILE"],
           "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
         );
-        assert.isTrue(Option.contains(yield* given.gatewayCredential, "api-key"));
+        const currentGatewayCredential = yield* given.gatewayCredential;
+        assert.isTrue(Option.contains(currentGatewayCredential, "api-key"));
         assert.notInclude(JSON.stringify(given.environment), TOKEN_PREFIX);
         assert.notInclude(JSON.stringify(given.environment), "sk-ant-test-key");
         assert.notInclude(JSON.stringify([...worker.state.sandboxes.values()]), "sk-ant");
@@ -317,7 +319,8 @@ describe("cloudflare Worker", () => {
 
         yield* Effect.gen(function* () {
           const cloudflare = yield* Executor;
-          assert.isTrue(yield* cloudflare.isLive(request.attemptId));
+          const live = yield* cloudflare.isLive(request.attemptId);
+          assert.isTrue(live);
           const prepared = yield* cloudflare.prepare(
             CheckoutRequest.make({ ...request, reattach: true }),
           );
@@ -830,7 +833,8 @@ for (const origin of ["startup", "replacement"] as const) {
           const kept = original.state.sandboxes.get(SANDBOX);
           assert(kept !== undefined);
           assert.isTrue(kept.held);
-          assert.isTrue(yield* service.isLive(request.attemptId));
+          const live = yield* service.isLive(request.attemptId);
+          assert.isTrue(live);
           let committed = false;
           original.state.respond = (_sandbox, words) => {
             if (words[0] !== "git") return Option.none();

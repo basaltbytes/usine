@@ -70,18 +70,17 @@ const updateLine = Effect.fn("Cli.statusUpdate")(function* (
     Effect.orElseSucceed(() => Option.none()),
   );
   if (Option.isNone(Option.flatMap(manifest, serverPin))) return Option.none<string>();
-  return Option.some(
-    yield* resolveVersion(directory, SERVER_PACKAGE, "latest").pipe(
-      Effect.map((latest) =>
-        compareVersions(latest, record.version) > 0
-          ? field("update", `@usine/server ${latest} is available. Run usine upgrade.`)
-          : field("update", `none, ${record.version} is the latest release`),
-      ),
-      Effect.catchTag("PackageLookupError", (error) =>
-        Effect.succeed(field("update", `unknown: ${error.reason}`)),
-      ),
+  const updateStatusLine = yield* resolveVersion(directory, SERVER_PACKAGE, "latest").pipe(
+    Effect.map((latest) =>
+      compareVersions(latest, record.version) > 0
+        ? field("update", `@usine/server ${latest} is available. Run usine upgrade.`)
+        : field("update", `none, ${record.version} is the latest release`),
+    ),
+    Effect.catchTag("PackageLookupError", (error) =>
+      Effect.succeed(field("update", `unknown: ${error.reason}`)),
     ),
   );
+  return Option.some(updateStatusLine);
 });
 
 const runningLines = Effect.fn("Cli.statusRunning")(function* (
@@ -93,10 +92,10 @@ const runningLines = Effect.fn("Cli.statusRunning")(function* (
     Effect.map(openRuns),
     Effect.catchTag("OperatorApiError", (error) => Effect.succeed(`unavailable: ${error.reason}`)),
   );
-  const installed = installedInInstance(
-    yield* realPathOrSelf(directory),
-    yield* realPathOrSelf(record.launch.script),
-  );
+  const instancePath = yield* realPathOrSelf(directory);
+  const scriptPath = yield* realPathOrSelf(record.launch.script);
+  const installed = installedInInstance(instancePath, scriptPath);
+  const serviceStatus = yield* serviceLine(record);
   const lines = [
     record.stoppingSince === undefined
       ? `usine is running in ${directory}.`
@@ -109,7 +108,7 @@ const runningLines = Effect.fn("Cli.statusRunning")(function* (
       `${SERVER_PACKAGE} ${record.version}, ${installed ? "installed in the instance" : `from ${record.launch.script}`}`,
     ),
     field("started", `${DateTime.formatIso(record.startedAt)} (${ago(record.startedAt, now)})`),
-    ...Option.toArray(yield* serviceLine(record)),
+    ...Option.toArray(serviceStatus),
     field("runs", runs),
   ];
   // The same entry point at another version means that the install changed after the start.
@@ -121,7 +120,8 @@ const runningLines = Effect.fn("Cli.statusRunning")(function* (
       );
     }
   }
-  lines.push(...Option.toArray(yield* updateLine(directory, record, installed)));
+  const updateStatus = yield* updateLine(directory, record, installed);
+  lines.push(...Option.toArray(updateStatus));
   return lines;
 });
 
@@ -167,6 +167,7 @@ const reportOf = Effect.fn("Cli.statusReport")(function* (
  * for an engine installed from a pin, one `npm view`.
  */
 export const status = Effect.fn("Cli.status")(function* (directory: InstanceDirectory) {
-  const report: StatusReport = yield* reportOf(directory, yield* probeInstance(directory));
+  const instanceProbe = yield* probeInstance(directory);
+  const report: StatusReport = yield* reportOf(directory, instanceProbe);
   return report;
 });

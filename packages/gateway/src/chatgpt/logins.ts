@@ -302,7 +302,8 @@ export class ChatGptLogins extends Context.Service<
         state: LoginState,
         error: string,
       ) {
-        yield* store(login.authFile, { ...state, failedAt: Option.some(yield* DateTime.now) });
+        const observedAt = yield* DateTime.now;
+        yield* store(login.authFile, { ...state, failedAt: Option.some(observedAt) });
         yield* Effect.logError("Could not refresh the ChatGPT login; a later request tries again", {
           authFile: login.authFile,
           error,
@@ -420,7 +421,8 @@ export class ChatGptLogins extends Context.Service<
           reason: state.refused ? "refused-by-upstream" : "expiring",
           expiresAt: expiryField(state.tokens),
         });
-        return accessOf(yield* refresh(login, state));
+        const refreshedLogin = yield* refresh(login, state);
+        return accessOf(refreshedLogin);
       });
 
       /** Returns the login's refresh in progress, or starts one in the service's scope. */
@@ -446,9 +448,12 @@ export class ChatGptLogins extends Context.Service<
       const access = Effect.fn("ChatGptLogins.access")(function* (login: ChatGptLogin) {
         yield* Effect.annotateCurrentSpan({ authFile: login.authFile });
         const current = yield* stateOf(login.authFile);
-        if (Option.isSome(current) && usable(current.value, yield* DateTime.now))
-          return accessOf(current.value.tokens);
-        return yield* Fiber.join(yield* refreshing(login));
+        if (Option.isSome(current)) {
+          const now = yield* DateTime.now;
+          if (usable(current.value, now)) return accessOf(current.value.tokens);
+        }
+        const refreshFiber = yield* refreshing(login);
+        return yield* Fiber.join(refreshFiber);
       });
 
       const refused = Effect.fn("ChatGptLogins.refused")(function* (

@@ -44,10 +44,8 @@ export const updateFrontmatter = Effect.fn("YamlWriter.updateFrontmatter")(
     Effect.gen(function* () {
       const markdown = yield* splitMarkdown(file, source);
       // Takes the newline style from the whole file, because one-line frontmatter has no newline.
-      const updated = restoreNewlines(
-        yield* updateYaml(file, markdown.yaml, edit),
-        markdown.newline,
-      );
+      const updatedYaml = yield* updateYaml(file, markdown.yaml, edit);
+      const updated = restoreNewlines(updatedYaml, markdown.newline);
       const yaml = updated.endsWith(markdown.newline)
         ? updated.slice(0, -markdown.newline.length)
         : updated;

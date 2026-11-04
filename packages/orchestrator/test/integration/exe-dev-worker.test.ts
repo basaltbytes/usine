@@ -46,7 +46,8 @@ const exitCode = Effect.fn("ExeDevIntegration.exitCode")(function* (
   args: ReadonlyArray<string>,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  return Number(yield* spawner.exitCode(ChildProcess.make(command, args)));
+  const currentExitCode = yield* spawner.exitCode(ChildProcess.make(command, args));
+  return Number(currentExitCode);
 });
 
 const waitForSuccess = Effect.fn("ExeDevIntegration.waitForSuccess")(function* (
@@ -94,9 +95,10 @@ describe("live exe.dev Worker", () => {
         workers: [{ name: worker, kind: "exe.dev", max_concurrent_attempts: 1 }],
       });
       const fileSystem = yield* FileSystem.FileSystem;
-      const instanceDirectory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-exe-dev-integration-" }),
-      );
+      const directory = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "usine-exe-dev-integration-",
+      });
+      const instanceDirectory = InstanceDirectory.make(directory);
       const runtime = exeDevLayer(instanceDirectory, config, [agent.brain], {
         githubIntegrations: [
           GitHubIntegration.make({
@@ -170,11 +172,17 @@ describe("live exe.dev Worker", () => {
         const root = `${home}/.usine/workers/${safeSegment(worker)}`;
         const cache = `${root}/repos/${safeSegment(repository)}.git`;
         const worktree = `${root}/attempts/${safeSegment(attempt.id)}`;
-        assert.strictEqual(yield* exitCode("ssh", [vm.ssh_dest, "--", "test", "-d", cache]), 0);
-        assert.strictEqual(
-          yield* exitCode("ssh", [vm.ssh_dest, "--", "test", "!", "-e", worktree]),
-          0,
-        );
+        const commandExitCode = yield* exitCode("ssh", [vm.ssh_dest, "--", "test", "-d", cache]);
+        assert.strictEqual(commandExitCode, 0);
+        const currentCommandExitCode = yield* exitCode("ssh", [
+          vm.ssh_dest,
+          "--",
+          "test",
+          "!",
+          "-e",
+          worktree,
+        ]);
+        assert.strictEqual(currentCommandExitCode, 0);
       }).pipe(Effect.provide(runtime));
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );

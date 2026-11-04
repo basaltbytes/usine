@@ -41,8 +41,7 @@ export const readApprovalItems = Effect.fn("Operator.readApprovalItems")(functio
       ),
     );
   });
-  const storedItems = EffectArray.getSomes(
-    yield* Effect.forEach(missing, read, { concurrency: 4 }),
-  );
+  const missingItems = yield* Effect.forEach(missing, read, { concurrency: 4 });
+  const storedItems = EffectArray.getSomes(missingItems);
   return new Map([...cardedItems, ...storedItems.map((item) => [item.itemKey, item] as const)]);
 });

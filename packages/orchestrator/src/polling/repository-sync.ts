@@ -244,5 +244,6 @@ export const markItemGone = Effect.fn("PollingTriggers.markItemGone")(function* 
 ) {
   yield* Effect.annotateCurrentSpan({ repository, item: number });
   const items = yield* ItemProjectionWriter;
-  return yield* items.markGone(gitHubItemKey(repository, number), yield* DateTime.now);
+  const observedAt = yield* DateTime.now;
+  return yield* items.markGone(gitHubItemKey(repository, number), observedAt);
 });

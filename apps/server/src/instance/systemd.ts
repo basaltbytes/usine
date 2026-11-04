@@ -74,9 +74,8 @@ export const supervisingUnit = Effect.fn("Instance.supervisingUnit")(function* (
 ) {
   if (Option.isNone(unit)) return Option.none<SystemdUnit>();
   yield* Effect.annotateCurrentSpan({ pid, unit: unit.value });
-  const mainPid = Schema.decodeOption(MainPid)(
-    yield* systemctl(unit.value, ["show", "--property=MainPID", "--value"]),
-  );
+  const serviceOutput = yield* systemctl(unit.value, ["show", "--property=MainPID", "--value"]);
+  const mainPid = Schema.decodeOption(MainPid)(serviceOutput);
   if (Option.contains(mainPid, pid)) return unit;
   yield* Effect.logInfo(
     "The instance process isn't the main process of its systemd service; usine signals it directly",

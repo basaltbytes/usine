@@ -315,9 +315,10 @@ describe("live agent loop", () => {
           repository,
         });
         const fileSystem = yield* FileSystem.FileSystem;
-        const runtimeDirectory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-live-agent-" }),
-        );
+        const directory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "usine-live-agent-",
+        });
+        const runtimeDirectory = InstanceDirectory.make(directory);
         const credentialsDirectory = InstanceDirectory.make(settings.credentialsDirectory);
         const scope = yield* Scope.make();
         yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));

@@ -608,8 +608,9 @@ export class PollingTriggers extends Context.Service<
               }),
             });
           }
+          const failureStreaksState = yield* Ref.get(failureStreaks);
           const reported = advance(
-            yield* Ref.get(failureStreaks),
+            failureStreaksState,
             [
               ...watched.map(({ repository }) => repository.name),
               ...ciCycle.outcomes.map(({ repository }) => repository),
@@ -774,7 +775,8 @@ export class PollingTriggers extends Context.Service<
             ]);
             if (wake._tag === "Due") return;
             if (wake._tag === "Hint") {
-              yield* refreshHint(yield* instances.get, wake.hint);
+              const currentInstance = yield* instances.get;
+              yield* refreshHint(currentInstance, wake.hint);
               continue;
             }
             seen = wake.instance;

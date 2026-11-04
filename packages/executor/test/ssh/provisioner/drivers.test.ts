@@ -95,10 +95,11 @@ describe("Hetzner Cloud driver", () => {
           listing?.query.label_selector,
           "usine-instance=github-app-4242,usine-worker=hetzner-pool",
         );
-        assert.lengthOf(
-          yield* driver.list("github-app-4242", Option.some(WorkerName.make("other"))),
-          0,
+        const entries = yield* driver.list(
+          "github-app-4242",
+          Option.some(WorkerName.make("other")),
         );
+        assert.lengthOf(entries, 0);
 
         yield* driver.remove(id);
         assert.strictEqual(providers.hetzner.servers.size, 0);
@@ -311,7 +312,8 @@ describe("Boat driver", () => {
         listed.map(({ id }) => id),
         [ours],
       );
-      assert.lengthOf(yield* driver.list("github-app-4242", Option.none()), 2);
+      const entries = yield* driver.list("github-app-4242", Option.none());
+      assert.lengthOf(entries, 2);
       assert.strictEqual(listed[0]?.tags.run, tagValue(RUN, 24));
       assert.strictEqual(listed[0]?.attempts, 1);
       assert.deepStrictEqual(listed[0]?.tags.attempt, Option.some(attemptTag(ATTEMPT)));

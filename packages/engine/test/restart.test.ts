@@ -54,10 +54,11 @@ const deliverOneAttempt = (directory: InstanceDirectory, number: number) =>
       Effect.succeed(stepResult("delivered before the restart")),
     ]);
     const scope = yield* Scope.make();
-    const engine = Context.get(
-      yield* Scope.provide(Layer.build(engineLayer(directory, executorLayer(plans))), scope),
-      RunEngine,
+    const services = yield* Scope.provide(
+      Layer.build(engineLayer(directory, executorLayer(plans))),
+      scope,
     );
+    const engine = Context.get(services, RunEngine);
     const accepted = yield* engine.submit(submission({ number }));
     assert(accepted._tag === "Claimed");
     const delivered = yield* waitFor(
@@ -100,10 +101,11 @@ const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyA
   Effect.gen(function* () {
     const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>(submissions.map(() => Effect.never));
     const scope = yield* Scope.make();
-    const engine = Context.get(
-      yield* Scope.provide(Layer.build(engineLayer(directory, executorLayer(plans))), scope),
-      RunEngine,
+    const services = yield* Scope.provide(
+      Layer.build(engineLayer(directory, executorLayer(plans))),
+      scope,
     );
+    const engine = Context.get(services, RunEngine);
     const running = yield* Effect.forEach(submissions, (pending) =>
       Effect.gen(function* () {
         const accepted = yield* engine.submit(pending);
@@ -342,13 +344,11 @@ describe("engine restart", () => {
         Effect.gen(function* () {
           const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([Effect.never]);
           const firstScope = yield* Scope.make();
-          const first = Context.get(
-            yield* Scope.provide(
-              Layer.build(engineLayer(directory, executorLayer(plans))),
-              firstScope,
-            ),
-            RunEngine,
+          const services = yield* Scope.provide(
+            Layer.build(engineLayer(directory, executorLayer(plans))),
+            firstScope,
           );
+          const first = Context.get(services, RunEngine);
           const accepted = yield* first.submit(submission({ number: 12 }));
           assert(accepted._tag === "Claimed");
           yield* waitFor(first, accepted.runId, ({ run }) => run.state._tag === "Running");
@@ -359,7 +359,8 @@ describe("engine restart", () => {
           const scripted = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
             Effect.succeed(stepResult("after the restart")),
           ]);
-          const base = Context.get(yield* Layer.build(executorLayer(scripted)), StepExecutor);
+          const currentServices = yield* Layer.build(executorLayer(scripted));
+          const base = Context.get(currentServices, StepExecutor);
           const restarted = Layer.succeed(StepExecutor)({
             ...base,
             recover: (attempt) => recorded(`recover ${attempt.attemptId}`),
@@ -412,10 +413,8 @@ describe("engine restart", () => {
         const runtime = engineLayer(directory, executor);
 
         const firstScope = yield* Scope.make();
-        const firstEngine = Context.get(
-          yield* Scope.provide(Layer.build(runtime), firstScope),
-          RunEngine,
-        );
+        const services = yield* Scope.provide(Layer.build(runtime), firstScope);
+        const firstEngine = Context.get(services, RunEngine);
         const accepted = yield* firstEngine.submit(submission({ number: 10 }));
         assert(accepted._tag === "Claimed");
         // The first execution never returns: the parent task is live when the runtime closes.
@@ -426,10 +425,8 @@ describe("engine restart", () => {
         yield* Scope.close(firstScope, Exit.void);
 
         const secondScope = yield* Scope.make();
-        const secondEngine = Context.get(
-          yield* Scope.provide(Layer.build(runtime), secondScope),
-          RunEngine,
-        );
+        const currentServices = yield* Scope.provide(Layer.build(runtime), secondScope);
+        const secondEngine = Context.get(currentServices, RunEngine);
         const finished = yield* waitFor(
           secondEngine,
           accepted.runId,
@@ -442,7 +439,8 @@ describe("engine restart", () => {
           Option.some("Event"),
         );
         assert(Option.isSome(started.reattachedAt));
-        assert.deepStrictEqual(yield* Ref.get(executions), [
+        const executionsState = yield* Ref.get(executions);
+        assert.deepStrictEqual(executionsState, [
           [started.id, false],
           [started.id, true],
         ]);
@@ -463,34 +461,32 @@ describe("engine restart", () => {
           const third = submission({ number: 32, item: "after-the-restart" });
           // Before the restart, each Run's first Attempt starts on its own Worker and keeps running.
           const firstScope = yield* Scope.make();
-          const firstEngine = Context.get(
-            yield* Scope.provide(
-              Layer.build(
-                engineLayer(
-                  directory,
-                  Layer.succeed(StepExecutor)({
-                    workers: Effect.succeed([local, spare]),
-                    isLive: () => Effect.succeed(false),
-                    outcome: () => Effect.succeedNone,
-                    recover: () => Effect.void,
-                    intervene: () => Effect.void,
-                    interrupt: () => Effect.void,
-                    occupy: () => Effect.die("no open Attempt survives into the first runtime"),
-                    sweep: Effect.void,
-                    discard: () => Effect.void,
-                    reserve: (_, { itemKey }) =>
-                      Effect.succeed({
-                        worker: itemKey === onLocal.itemKey ? local : spare,
-                        release: Effect.void,
-                      }),
-                    execute: () => Effect.never,
-                  }),
-                ),
+          const services = yield* Scope.provide(
+            Layer.build(
+              engineLayer(
+                directory,
+                Layer.succeed(StepExecutor)({
+                  workers: Effect.succeed([local, spare]),
+                  isLive: () => Effect.succeed(false),
+                  outcome: () => Effect.succeedNone,
+                  recover: () => Effect.void,
+                  intervene: () => Effect.void,
+                  interrupt: () => Effect.void,
+                  occupy: () => Effect.die("no open Attempt survives into the first runtime"),
+                  sweep: Effect.void,
+                  discard: () => Effect.void,
+                  reserve: (_, { itemKey }) =>
+                    Effect.succeed({
+                      worker: itemKey === onLocal.itemKey ? local : spare,
+                      release: Effect.void,
+                    }),
+                  execute: () => Effect.never,
+                }),
               ),
-              firstScope,
             ),
-            RunEngine,
+            firstScope,
           );
+          const firstEngine = Context.get(services, RunEngine);
           const live = yield* Effect.forEach([onLocal, onSpare], (pending) =>
             Effect.gen(function* () {
               const accepted = yield* firstEngine.submit(pending);
@@ -576,13 +572,15 @@ describe("engine restart", () => {
               }),
           });
           const secondScope = yield* Scope.make();
-          const secondEngine = Context.get(
-            yield* Scope.provide(Layer.build(engineLayer(directory, restarted)), secondScope),
-            RunEngine,
+          const currentServices = yield* Scope.provide(
+            Layer.build(engineLayer(directory, restarted)),
+            secondScope,
           );
+          const secondEngine = Context.get(currentServices, RunEngine);
           // Neither Run has read its Attempt yet, and each Attempt occupies a slot on its own Worker.
+          const leasedState = yield* TxRef.get(leased);
           assert.deepStrictEqual(
-            yield* TxRef.get(leased),
+            leasedState,
             new Map([
               [local, 1],
               [spare, 1],
@@ -614,7 +612,8 @@ describe("engine restart", () => {
             until: (ids) => ids.length === 1,
             schedule: Schedule.spaced("10 millis"),
           });
-          assert.deepStrictEqual(yield* Ref.get(reattached), [liveOnLocal.id]);
+          const reattachedState = yield* Ref.get(reattached);
+          assert.deepStrictEqual(reattachedState, [liveOnLocal.id]);
           assert.strictEqual((yield* TxRef.get(leased)).get(local), 1);
           yield* Deferred.succeed(finish, undefined);
           const [attempt, ...later] = (yield* waitFor(
@@ -629,8 +628,9 @@ describe("engine restart", () => {
           assert.strictEqual(canceled.run.state._tag, "Canceled");
           assert.lengthOf(canceled.attempts, 1);
           yield* Scope.close(secondScope, Exit.void);
+          const currentLeasedState = yield* TxRef.get(leased);
           assert.deepStrictEqual(
-            yield* TxRef.get(leased),
+            currentLeasedState,
             new Map([
               [local, 0],
               [spare, 0],
@@ -700,10 +700,8 @@ describe("engine restart", () => {
           const runtime = engineLayer(directory, executor);
 
           const firstScope = yield* Scope.make();
-          const firstEngine = Context.get(
-            yield* Scope.provide(Layer.build(runtime), firstScope),
-            RunEngine,
-          );
+          const services = yield* Scope.provide(Layer.build(runtime), firstScope);
+          const firstEngine = Context.get(services, RunEngine);
           const succeeded = yield* firstEngine.submit(succeeding);
           const failed = yield* firstEngine.submit(failing);
           assert(succeeded._tag === "Claimed" && failed._tag === "Claimed");
@@ -714,10 +712,8 @@ describe("engine restart", () => {
           yield* Scope.close(firstScope, Exit.void);
 
           const secondScope = yield* Scope.make();
-          const secondEngine = Context.get(
-            yield* Scope.provide(Layer.build(runtime), secondScope),
-            RunEngine,
-          );
+          const currentServices = yield* Scope.provide(Layer.build(runtime), secondScope);
+          const secondEngine = Context.get(currentServices, RunEngine);
           const success = yield* waitFor(
             secondEngine,
             succeeded.runId,
@@ -742,7 +738,8 @@ describe("engine restart", () => {
             [POSTED_COMMENT],
           );
           assert.deepStrictEqual(success.attempts[0]?.comments, []);
-          assert.strictEqual(yield* Ref.get(executions), 2);
+          const executionsState = yield* Ref.get(executions);
+          assert.strictEqual(executionsState, 2);
           yield* Scope.close(secondScope, Exit.void);
         }),
       ),
@@ -767,13 +764,13 @@ describe("engine restart", () => {
           );
           const worker = yield* restartedExecutor([gone, failed, unread, unprepared]);
           const scope = yield* Scope.make();
-          const engine = Context.get(
-            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope).pipe(
-              Effect.provideService(ReconcileInterval, "50 millis"),
-            ),
-            RunEngine,
-          );
-          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+          const services = yield* Scope.provide(
+            Layer.build(engineLayer(directory, worker.executor)),
+            scope,
+          ).pipe(Effect.provideService(ReconcileInterval, "50 millis"));
+          const engine = Context.get(services, RunEngine);
+          const reconciledState = yield* Ref.get(worker.reconciled);
+          assert.deepStrictEqual(reconciledState, []);
 
           // Before the Runs read their Attempts, one parent task is gone and
           // another failed. The third still runs, but its Run cannot read that, and
@@ -856,11 +853,13 @@ describe("engine restart", () => {
           // Until `gate` opens, the restarted Runs don't read their Attempts, which wait to be reattached.
           const worker = yield* restartedExecutor([waiting, preparing]);
           const scope = yield* Scope.make();
-          const engine = Context.get(
-            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope),
-            RunEngine,
+          const services = yield* Scope.provide(
+            Layer.build(engineLayer(directory, worker.executor)),
+            scope,
           );
-          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+          const engine = Context.get(services, RunEngine);
+          const reconciledState = yield* Ref.get(worker.reconciled);
+          assert.deepStrictEqual(reconciledState, []);
           const canceledWithSalvage = (runId: RunId) =>
             Effect.gen(function* () {
               yield* engine.cancel(runId);
@@ -913,13 +912,13 @@ describe("engine restart", () => {
           // `local` has three slots, and startup occupies one for each surviving Attempt.
           const worker = yield* restartedExecutor([unread, unprepared, canceled]);
           const scope = yield* Scope.make();
-          const engine = Context.get(
-            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope).pipe(
-              Effect.provideService(ReconcileInterval, "50 millis"),
-            ),
-            RunEngine,
-          );
-          assert.strictEqual(yield* TxRef.get(worker.leased), 3);
+          const services = yield* Scope.provide(
+            Layer.build(engineLayer(directory, worker.executor)),
+            scope,
+          ).pipe(Effect.provideService(ReconcileInterval, "50 millis"));
+          const engine = Context.get(services, RunEngine);
+          const leasedState = yield* TxRef.get(worker.leased);
+          assert.strictEqual(leasedState, 3);
           const fresh = yield* engine.submit(submission({ number: 29, item: "after-the-restart" }));
           assert(fresh._tag === "Claimed");
 
@@ -948,8 +947,10 @@ describe("engine restart", () => {
           // reconciles that try each stop again, so the new Run waits.
           yield* Effect.sleep("150 millis");
           assert.deepStrictEqual((yield* engine.inspect(fresh.runId)).attempts, []);
-          assert.strictEqual(yield* TxRef.get(worker.leased), 3);
-          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+          const currentLeasedState = yield* TxRef.get(worker.leased);
+          assert.strictEqual(currentLeasedState, 3);
+          const reconciledState = yield* Ref.get(worker.reconciled);
+          assert.deepStrictEqual(reconciledState, []);
 
           // Once the stops are confirmed, each slot is released after its
           // checkout is reconciled, and every Run gets its turn.
@@ -1002,13 +1003,15 @@ describe("engine restart", () => {
           const first = yield* restartedExecutor([canceled]);
           yield* Ref.set(first.unstoppable, new Set([canceled.id]));
           const firstScope = yield* Scope.make();
-          const firstEngine = Context.get(
-            yield* Scope.provide(Layer.build(engineLayer(directory, first.executor)), firstScope),
-            RunEngine,
+          const services = yield* Scope.provide(
+            Layer.build(engineLayer(directory, first.executor)),
+            firstScope,
           );
+          const firstEngine = Context.get(services, RunEngine);
           const refusal = yield* Effect.flip(firstEngine.cancel(canceled.runId));
           assert.strictEqual(refusal._tag, "AttemptCancellationError");
-          assert.strictEqual(yield* TxRef.get(first.leased), 1);
+          const leasedState = yield* TxRef.get(first.leased);
+          assert.strictEqual(leasedState, 1);
           yield* Scope.close(firstScope, Exit.void);
 
           // The orchestrator restarts again. The parent task still runs on
@@ -1016,13 +1019,13 @@ describe("engine restart", () => {
           const second = yield* restartedExecutor([canceled]);
           yield* Ref.set(second.unstoppable, new Set([canceled.id]));
           const scope = yield* Scope.make();
-          const engine = Context.get(
-            yield* Scope.provide(Layer.build(engineLayer(directory, second.executor)), scope).pipe(
-              Effect.provideService(ReconcileInterval, "50 millis"),
-            ),
-            RunEngine,
-          );
-          assert.strictEqual(yield* TxRef.get(second.leased), 1);
+          const currentServices = yield* Scope.provide(
+            Layer.build(engineLayer(directory, second.executor)),
+            scope,
+          ).pipe(Effect.provideService(ReconcileInterval, "50 millis"));
+          const engine = Context.get(currentServices, RunEngine);
+          const currentLeasedState = yield* TxRef.get(second.leased);
+          assert.strictEqual(currentLeasedState, 1);
           const fresh = yield* engine.submit(
             submission({ number: 36, item: "after-the-second-restart" }),
           );
@@ -1036,8 +1039,10 @@ describe("engine restart", () => {
             schedule: Schedule.spaced("10 millis"),
           });
           assert.deepStrictEqual((yield* engine.inspect(fresh.runId)).attempts, []);
-          assert.strictEqual(yield* TxRef.get(second.leased), 1);
-          assert.deepStrictEqual(yield* Ref.get(second.reconciled), []);
+          const nextLeasedState = yield* TxRef.get(second.leased);
+          assert.strictEqual(nextLeasedState, 1);
+          const reconciledState = yield* Ref.get(second.reconciled);
+          assert.deepStrictEqual(reconciledState, []);
 
           // Once the stop is confirmed, a reconcile salvages the checkout and
           // releases the slot, and the new Run takes it.
@@ -1121,8 +1126,10 @@ describe("engine restart", () => {
             },
           );
           assert.deepStrictEqual(waiting.attempts, []);
-          assert.strictEqual(yield* TxRef.get(first.leased), 1);
-          assert.deepStrictEqual(yield* before.stops.list, unconfirmed("cancel"));
+          const leasedState = yield* TxRef.get(first.leased);
+          assert.strictEqual(leasedState, 1);
+          const currentList = yield* before.stops.list;
+          assert.deepStrictEqual(currentList, unconfirmed("cancel"));
           yield* Scope.close(firstScope, Exit.void);
 
           // The orchestrator restarts again. The parent task still runs and still can't be
@@ -1131,8 +1138,10 @@ describe("engine restart", () => {
           yield* Ref.set(second.unstoppable, new Set([canceled.id]));
           const secondScope = yield* Scope.make();
           const after = yield* started(second.executor, secondScope);
-          assert.strictEqual(yield* TxRef.get(second.leased), 1);
-          assert.deepStrictEqual(yield* after.stops.list, unconfirmed("startup"));
+          const currentLeasedState = yield* TxRef.get(second.leased);
+          assert.strictEqual(currentLeasedState, 1);
+          const nextList = yield* after.stops.list;
+          assert.deepStrictEqual(nextList, unconfirmed("startup"));
           yield* Deferred.succeed(second.gate, undefined);
           const [, stillWaiting] = yield* Effect.repeat(
             Effect.all([Ref.get(second.refused), after.engine.inspect(fresh.runId)]),
@@ -1142,8 +1151,10 @@ describe("engine restart", () => {
             },
           );
           assert.deepStrictEqual(stillWaiting.attempts, []);
-          assert.strictEqual(yield* TxRef.get(second.leased), 1);
-          assert.deepStrictEqual(yield* Ref.get(second.reconciled), []);
+          const nextLeasedState = yield* TxRef.get(second.leased);
+          assert.strictEqual(nextLeasedState, 1);
+          const reconciledState = yield* Ref.get(second.reconciled);
+          assert.deepStrictEqual(reconciledState, []);
 
           // Once a retry stops the parent task, the checkout is salvaged, the slot is released,
           // and the new Run takes it.
@@ -1161,7 +1172,8 @@ describe("engine restart", () => {
             ]),
             [[Option.some("Canceled"), Option.some("Pushed")]],
           );
-          assert.deepStrictEqual(yield* after.stops.list, []);
+          const updatedList = yield* after.stops.list;
+          assert.deepStrictEqual(updatedList, []);
           yield* Effect.repeat(TxRef.get(second.leased), {
             until: (count) => count === 0,
             schedule: Schedule.spaced("10 millis"),
@@ -1219,7 +1231,8 @@ describe("engine restart", () => {
           ];
           assert.lengthOf(attempts, 1);
           assert.deepStrictEqual(listed, unconfirmed("failed"));
-          assert.strictEqual(yield* TxRef.get(first.leased), 1);
+          const leasedState = yield* TxRef.get(first.leased);
+          assert.strictEqual(leasedState, 1);
           yield* Scope.close(firstScope, Exit.void);
 
           // After the restart, the parent task still can't be stopped, so startup occupies a
@@ -1231,8 +1244,10 @@ describe("engine restart", () => {
           yield* Ref.set(second.unstoppable, true);
           const secondScope = yield* Scope.make();
           const after = yield* started(second.executor, secondScope);
-          assert.strictEqual(yield* TxRef.get(second.leased), 1);
-          assert.deepStrictEqual(yield* after.stops.list, unconfirmed("startup"));
+          const currentLeasedState = yield* TxRef.get(second.leased);
+          assert.strictEqual(currentLeasedState, 1);
+          const currentList = yield* after.stops.list;
+          assert.deepStrictEqual(currentList, unconfirmed("startup"));
           const [stops, waiting] = yield* Effect.repeat(
             Effect.all([Ref.get(second.stops), after.engine.inspect(accepted.runId)]),
             {
@@ -1242,7 +1257,8 @@ describe("engine restart", () => {
           );
           assert.lengthOf(waiting.attempts, 1);
           assert.deepStrictEqual(new Set(stops.map(([, reason]) => reason)), new Set(["startup"]));
-          assert.strictEqual(yield* TxRef.get(second.leased), 1);
+          const nextLeasedState = yield* TxRef.get(second.leased);
+          assert.strictEqual(nextLeasedState, 1);
 
           // Once a retry stops the parent task, the slot is released and the retry takes it.
           yield* Ref.set(second.unstoppable, false);
@@ -1252,7 +1268,8 @@ describe("engine restart", () => {
             ({ run }) => run.state._tag === "Succeeded",
           );
           assert.lengthOf(delivered.attempts, 2);
-          assert.deepStrictEqual(yield* after.stops.list, []);
+          const nextList = yield* after.stops.list;
+          assert.deepStrictEqual(nextList, []);
           yield* Effect.repeat(TxRef.get(second.leased), {
             until: (count) => count === 0,
             schedule: Schedule.spaced("10 millis"),
@@ -1273,8 +1290,9 @@ describe("engine restart", () => {
           Layer.effectDiscard(Effect.asVoid(RunEngine)).pipe(Layer.provide(engine));
         const scope = yield* Scope.make();
         yield* Scope.provide(Layer.build(Layer.mergeAll(engine, consumer(), consumer())), scope);
+        const recoveredState = yield* Ref.get(recovered);
         assert.deepStrictEqual(
-          yield* Ref.get(recovered),
+          recoveredState,
           delivered.attempts.map(({ id }) => id),
         );
         yield* Scope.close(scope, Exit.void);
@@ -1306,7 +1324,8 @@ describe("engine restart", () => {
           const context = yield* Scope.provide(Layer.build(switched), firstScope).pipe(
             Effect.provide(Logger.layer([logger])),
           );
-          assert.deepStrictEqual(yield* Ref.get(recovered), []);
+          const recoveredState = yield* Ref.get(recovered);
+          assert.deepStrictEqual(recoveredState, []);
           assert.strictEqual(warnings.length, 1);
           assert.match(warnings[0] ?? "", /"attempts":1,"workers":"local"/u);
           const engine = Context.get(context, RunEngine);
@@ -1320,18 +1339,25 @@ describe("engine restart", () => {
             [["local", 1, 0]],
           );
           // A configured Worker's Attempts stay reconciled at every start.
+          const failure = yield* Effect.flip(
+            engine.discardLeftovers(WorkerName.make("usine-worker-1")),
+          );
           assert.deepStrictEqual(
-            yield* Effect.flip(engine.discardLeftovers(WorkerName.make("usine-worker-1"))),
+            failure,
             LeftoversDiscardRejectedError.make({
               worker: WorkerName.make("usine-worker-1"),
               running: 0,
             }),
           );
-          assert.deepStrictEqual(yield* Ref.get(discarded), []);
-          assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("local")), 1);
-          assert.deepStrictEqual(yield* reader.attemptsByWorker, []);
+          const discardedState = yield* Ref.get(discarded);
+          assert.deepStrictEqual(discardedState, []);
+          const currentDiscarded = yield* engine.discardLeftovers(WorkerName.make("local"));
+          assert.strictEqual(currentDiscarded, 1);
+          const currentAttemptsByWorker = yield* reader.attemptsByWorker;
+          assert.deepStrictEqual(currentAttemptsByWorker, []);
           // The executor removes what the discarded Attempts left outside their checkouts.
-          assert.deepStrictEqual(yield* Ref.get(discarded), [
+          const currentDiscardedState = yield* Ref.get(discarded);
+          assert.deepStrictEqual(currentDiscardedState, [
             [WorkerName.make("local"), delivered.attempts.map(({ id }) => id)],
           ]);
           yield* Scope.close(firstScope, Exit.void);
@@ -1342,7 +1368,8 @@ describe("engine restart", () => {
             Layer.build(engineLayer(directory, recordingExecutor(["local"], recovered))),
             secondScope,
           );
-          assert.deepStrictEqual(yield* Ref.get(recovered), []);
+          const currentRecoveredState = yield* Ref.get(recovered);
+          assert.deepStrictEqual(currentRecoveredState, []);
           yield* Scope.close(secondScope, Exit.void);
         }),
       ),

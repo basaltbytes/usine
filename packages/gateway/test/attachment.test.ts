@@ -69,10 +69,13 @@ describe("Attachments", () => {
         const attachments = yield* Attachments;
         yield* attachments.attach(attachment(ATTACHMENT, "ghs_first", 60));
         yield* attachments.attach(attachment(OTHER_ATTACHMENT, "ghs_second", 60));
-        assert.isTrue(yield* attachments.detach(ATTACHMENT));
-        assert.isFalse(yield* attachments.detach(ATTACHMENT));
+        const detached = yield* attachments.detach(ATTACHMENT);
+        assert.isTrue(detached);
+        const currentDetached = yield* attachments.detach(ATTACHMENT);
+        assert.isFalse(currentDetached);
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "MissingAttachment");
-        assert.strictEqual(tokenOf(yield* attachments.find(OTHER_ATTACHMENT)), "ghs_second");
+        const currentAttachment = yield* attachments.find(OTHER_ATTACHMENT);
+        assert.strictEqual(tokenOf(currentAttachment), "ghs_second");
       }),
     ),
   );
@@ -92,7 +95,8 @@ describe("Attachments", () => {
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "LiveAttachment");
         yield* TestClock.adjust("45 seconds");
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "ExpiredAttachment");
-        assert.deepStrictEqual(yield* attachments.list, []);
+        const currentList = yield* attachments.list;
+        assert.deepStrictEqual(currentList, []);
         // The sweep at the next whole minute removes it.
         yield* TestClock.adjust("15 seconds");
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "MissingAttachment");
@@ -135,7 +139,8 @@ describe("Attachments", () => {
           ),
         );
         assert.strictEqual(error._tag, "AttachmentConflict");
-        assert.strictEqual(tokenOf(yield* attachments.find(ATTACHMENT)), "ghs_renewed");
+        const currentAttachment = yield* attachments.find(ATTACHMENT);
+        assert.strictEqual(tokenOf(currentAttachment), "ghs_renewed");
       }),
     ),
   );

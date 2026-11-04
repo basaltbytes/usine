@@ -97,15 +97,14 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
             message: "The upgrade helper failed. Restart the service to resume attempt admission.",
           }
         : current;
+    const availableVersion =
+      settings.upgradeMode === "off" ? Option.none() : yield* availableFor(settings.upgradeChannel);
     return UpgradeView.make({
       running: options.running,
       channel: settings.upgradeChannel,
       mode: settings.upgradeMode,
       supported: Option.isSome(options.platform),
-      available:
-        settings.upgradeMode === "off"
-          ? null
-          : Option.getOrNull(yield* availableFor(settings.upgradeChannel)),
+      available: Option.getOrNull(availableVersion),
       phase: Option.exists(result, (record) => record.status === "installing")
         ? "installing"
         : state.phase,
@@ -266,28 +265,33 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
             (record.status === "rolled-back" && record.failureStage !== "install"))),
     );
     const currentSettings = yield* options.settings;
+    if (!newer) return;
     if (
-      newer &&
       currentSettings.upgradeMode === "automatic" &&
       (yield* Ref.get(progress)).phase === "idle" &&
-      !blocked &&
-      !Option.contains(yield* Ref.get(canceled), target)
+      !blocked
     ) {
-      yield* Effect.logInfo("Automatic server upgrade requested", {
-        previous: options.running,
-        target,
-        outcome: result,
-      });
-      yield* request(UpgradeRequest.make({ timing: "idle", version: Option.none() }));
-    } else if (newer && Option.contains(yield* Ref.get(canceled), target)) {
+      const canceledVersion = yield* Ref.get(canceled);
+      if (!Option.contains(canceledVersion, target)) {
+        yield* Effect.logInfo("Automatic server upgrade requested", {
+          previous: options.running,
+          target,
+          outcome: result,
+        });
+        yield* request(UpgradeRequest.make({ timing: "idle", version: Option.none() }));
+        return;
+      }
+    }
+    const canceledVersion = yield* Ref.get(canceled);
+    if (Option.contains(canceledVersion, target)) {
       yield* Effect.logInfo("Automatic upgrade skipped after operator cancellation", { target });
-    } else if (newer && blocked) {
+    } else if (blocked) {
       yield* Effect.logInfo("Automatic upgrade skipped after an unfinished or failed upgrade", {
         previous: options.running,
         target,
         outcome: result,
       });
-    } else if (newer && currentSettings.upgradeMode !== "automatic") {
+    } else if (currentSettings.upgradeMode !== "automatic") {
       yield* Effect.logInfo("Automatic upgrade skipped for the current mode", {
         previous: options.running,
         target,

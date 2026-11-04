@@ -82,11 +82,8 @@ export class GitHubItemWriter extends Context.Service<
                 ),
               );
               if (addResponse.status < 200 || addResponse.status >= 300) {
-                return yield* statusError(
-                  "update-item-labels",
-                  addResponse,
-                  yield* Clock.currentTimeMillis,
-                );
+                const now = yield* Clock.currentTimeMillis;
+                return yield* statusError("update-item-labels", addResponse, now);
               }
               applied = yield* decode(addResponse);
             }
@@ -105,11 +102,8 @@ export class GitHubItemWriter extends Context.Service<
                 continue;
               }
               if (removeResponse.status < 200 || removeResponse.status >= 300) {
-                return yield* statusError(
-                  "update-item-labels",
-                  removeResponse,
-                  yield* Clock.currentTimeMillis,
-                );
+                const observedAt = yield* Clock.currentTimeMillis;
+                return yield* statusError("update-item-labels", removeResponse, observedAt);
               }
               applied = yield* decode(removeResponse);
             }

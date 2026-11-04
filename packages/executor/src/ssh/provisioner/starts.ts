@@ -21,7 +21,8 @@ export const machineStartsFor = Effect.fn("SshExecutor.machineStartsFor")(functi
     worker: WorkerName,
     provider: MachineProvider,
   ) {
-    const day = DateTime.formatIso(yield* DateTime.now).slice(0, 10);
+    const observedAt = yield* DateTime.now;
+    const day = DateTime.formatIso(observedAt).slice(0, 10);
     yield* Effect.annotateCurrentSpan({ worker, provider, day });
     yield* SynchronizedRef.updateEffect(counts, (current) =>
       Effect.gen(function* () {
@@ -31,7 +32,8 @@ export const machineStartsFor = Effect.fn("SshExecutor.machineStartsFor")(functi
         const next = current
           .filter((entry) => entry !== previous)
           .concat(MachineStarts.make({ worker, provider, day, count: (previous?.count ?? 0) + 1 }));
-        yield* fs.writeFileString(`${file}.next`, yield* Schema.encodeEffect(CountsJson)(next));
+        const countsJson = yield* Schema.encodeEffect(CountsJson)(next);
+        yield* fs.writeFileString(`${file}.next`, countsJson);
         yield* fs.rename(`${file}.next`, file);
         yield* Effect.logInfo("Recorded a machine start", {
           worker,

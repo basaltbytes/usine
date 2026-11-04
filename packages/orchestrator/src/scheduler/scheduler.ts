@@ -285,7 +285,8 @@ export const stepExecutorLayer = (
     Effect.gen(function* () {
       const executor = yield* Executor;
       const instances = yield* CurrentInstance;
-      const positionOf = positionFor(instances, yield* ExpressionEngine);
+      const expressions = yield* ExpressionEngine;
+      const positionOf = positionFor(instances, expressions);
       const app = yield* GitHubApp;
       const workers = yield* validateWorkers(executor.kind, config.workers);
       const bus = yield* ChangeBus;
@@ -805,8 +806,10 @@ export const stepExecutorLayer = (
         const machine = (yield* Ref.get(runMachines)).get(execution.run.id)?.machine;
         if (execution.reattach) {
           const adopted = yield* machines.adopt(worker, attemptId);
-          if (machine !== undefined && Option.isNone(yield* Ref.get(machine)))
-            yield* Ref.set(machine, adopted);
+          if (machine !== undefined) {
+            const heldMachine = yield* Ref.get(machine);
+            if (Option.isNone(heldMachine)) yield* Ref.set(machine, adopted);
+          }
           return yield* Effect.logDebug("The reattached Attempt keeps its machine", {
             ...fields,
             found: Option.isSome(adopted),

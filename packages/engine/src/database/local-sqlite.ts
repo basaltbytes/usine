@@ -223,7 +223,8 @@ const readOnlySqliteLayer = <E>(filename: string, onError: (cause: SqlError) => 
 const existingSqliteLayer = (instanceDirectory: InstanceDirectory) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const filename = runtimeStorePath(yield* Path.Path, instanceDirectory);
+      const path = yield* Path.Path;
+      const filename = runtimeStorePath(path, instanceDirectory);
       yield* readableRuntimeStore(filename);
       return readOnlySqliteLayer(filename, (cause) =>
         startupError("open existing local database", cause),

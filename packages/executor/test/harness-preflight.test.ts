@@ -172,8 +172,9 @@ describe("harness readiness on a Worker", () => {
         yield* Deferred.await(elsewhere.entered);
         yield* Deferred.await(onOneMachine.entered);
         yield* Deferred.await(onOtherMachine.entered);
+        const enteredDone = yield* Deferred.isDone(second.entered);
         assert.isFalse(
-          yield* Deferred.isDone(second.entered),
+          enteredDone,
           "a second Claude check on the Worker waits while the first one runs",
         );
         yield* Deferred.succeed(first.release, undefined);

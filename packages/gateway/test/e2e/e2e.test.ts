@@ -71,12 +71,13 @@ const attachPublicRepository = Effect.gen(function* () {
     baseUrl: `http://${admin.host}:${admin.port}`,
     transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
   });
+  const currentNow = yield* DateTime.now;
   const attached = yield* client.attachments.attach({
     payload: AttachRequest.make({
       worker: WORKER,
       repository: PUBLIC_REPOSITORY,
       credential: AnonymousCredential.make(),
-      expiresAt: DateTime.add(yield* DateTime.now, { minutes: 10 }),
+      expiresAt: DateTime.add(currentNow, { minutes: 10 }),
     }),
   });
   return Redacted.value(attached.callerToken);
@@ -171,14 +172,12 @@ describe.skipIf(!directEgress)("the gateway against GitHub", () => {
     () =>
       Effect.gen(function* () {
         const { egress } = yield* GatewayAddresses;
-        assert.strictEqual(
-          yield* tlsThroughTunnel(
-            egress,
-            "registry.npmjs.org:443",
-            Option.some("registry.npmjs.org"),
-          ),
-          "connected",
+        const tunnelResponse = yield* tlsThroughTunnel(
+          egress,
+          "registry.npmjs.org:443",
+          Option.some("registry.npmjs.org"),
         );
+        assert.strictEqual(tunnelResponse, "connected");
       }).pipe(Effect.provide(gateway)),
     90_000,
   );

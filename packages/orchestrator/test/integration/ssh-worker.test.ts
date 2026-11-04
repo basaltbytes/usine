@@ -185,9 +185,10 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         const config = configFor(values);
         const repository = RepositoryName.make(values.repository);
         const fileSystem = yield* FileSystem.FileSystem;
-        const instanceDirectory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-ssh-integration-" }),
-        );
+        const directory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "usine-ssh-integration-",
+        });
+        const instanceDirectory = InstanceDirectory.make(directory);
         const observed: Observed = {};
         // Acts as a child on the machine: uses gh and git with the Attempt's credential, commits,
         // and leaves a long-running process whose SSH client the parent then drops.
@@ -506,13 +507,10 @@ const gatewayAttachments = Effect.fn("GatewayIntegration.attachments")(function*
       { detached: false, forceKillAfter: "5 seconds", stdin: "ignore" },
     ),
   );
+  const redacted = yield* Config.Redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN");
   const admin = yield* HttpApiClient.make(GatewayAdminApi, {
     baseUrl: `http://127.0.0.1:${String(CHECK_PORT)}`,
-    transformClient: HttpClient.mapRequest(
-      HttpClientRequest.bearerToken(
-        yield* Config.Redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN"),
-      ),
-    ),
+    transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(redacted)),
   });
   // The forward listens once its SSH connection is up.
   return yield* admin.attachments
@@ -543,9 +541,10 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         const repository = RepositoryName.make(values.repository);
         const branch = `usine-gateway-test/${globalThis.crypto.randomUUID()}`;
         const fileSystem = yield* FileSystem.FileSystem;
-        const instanceDirectory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-gateway-integration-" }),
-        );
+        const directory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "usine-gateway-integration-",
+        });
+        const instanceDirectory = InstanceDirectory.make(directory);
         const observed: ObservedBehindGateway = {};
         // Acts as a child on the machine with only the Attempt's child host and environment: git
         // and gh through the Gateway, a package registry through the forward proxy, an AAAA lookup

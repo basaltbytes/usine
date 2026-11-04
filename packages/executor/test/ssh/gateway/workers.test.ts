@@ -100,7 +100,8 @@ describe("SSH Workers added and removed while the executor runs", () => {
         );
         const detach = gateway.calls.at(-1);
         assert(detach?.method === "DELETE" && detach.delivered, "the Attempt detached through it");
-        assert.deepStrictEqual(yield* attachmentsInForce, []);
+        const attachments = yield* attachmentsInForce;
+        assert.deepStrictEqual(attachments, []);
 
         yield* workers.removeWorker(WORKER);
         assert(

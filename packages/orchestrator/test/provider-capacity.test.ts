@@ -82,9 +82,10 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
   (scenario) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       let calls = 0;
       let leased = false;
       const server = Layer.succeed(CodexAppServer)({

@@ -48,7 +48,8 @@ export const planResetRefresh = Effect.fn("PollingTriggers.planResetRefresh")(fu
   const resets = (yield* budgets.pendingResets).filter(
     (reset) => canonicalRepositoryName(reset.repository) === canonicalRepositoryName(repository),
   );
-  const items = Option.all(yield* Effect.forEach(resets, resetItem));
+  const resetItems = yield* Effect.forEach(resets, resetItem);
+  const items = Option.all(resetItems);
   if (Option.isNone(items)) {
     yield* Effect.logInfo(
       "Cycle budget reset names an Item polling never stored; re-polling the repository from scratch",

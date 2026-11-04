@@ -86,6 +86,7 @@ const setup = (
       readonly written: Deferred.Deferred<void, AttemptFailure>;
     }>();
     let inbound = 0;
+    const currentSeed = yield* durable.seed;
     const guard = yield* attemptGuard(
       {
         attemptId,
@@ -114,7 +115,7 @@ const setup = (
         recordUnsupervised: durable.recordUnsupervised,
       },
       io,
-      yield* durable.seed,
+      currentSeed,
     );
     const attempt = Effect.raceFirst(
       Effect.forever(

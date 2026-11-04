@@ -211,10 +211,8 @@ describe("worker harness readiness", () => {
           const server = account(Effect.succeed({ account: auth, requiresOpenaiAuth: true }));
           return Effect.gen(function* () {
             if (auth.type === "chatgpt") {
-              assert.deepStrictEqual(
-                yield* verifyHarness(coder, local, workerEnvironment),
-                HarnessReady.make({ harness: "codex" }),
-              );
+              const available = yield* verifyHarness(coder, local, workerEnvironment);
+              assert.deepStrictEqual(available, HarnessReady.make({ harness: "codex" }));
             } else {
               const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
               const matchesError = Schema.is(HarnessUnavailableError)(error);
@@ -282,10 +280,8 @@ describe("worker harness readiness", () => {
         const server = account(Effect.succeed(null));
         return Effect.gen(function* () {
           if (status.auth.authMethod === "claude.ai") {
-            assert.deepStrictEqual(
-              yield* verifyHarness(brain("claude"), local, workerEnvironment),
-              HarnessReady.make({ harness: "claude" }),
-            );
+            const available = yield* verifyHarness(brain("claude"), local, workerEnvironment);
+            assert.deepStrictEqual(available, HarnessReady.make({ harness: "claude" }));
           } else {
             const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
               Effect.flip,
@@ -367,10 +363,8 @@ describe("worker harness readiness", () => {
       };
       return Effect.gen(function* () {
         if (pool === "apiKeys") {
-          assert.deepStrictEqual(
-            yield* verifyHarness(brain("pi"), local, workerEnvironment),
-            HarnessReady.make({ harness: "pi" }),
-          );
+          const available = yield* verifyHarness(brain("pi"), local, workerEnvironment);
+          assert.deepStrictEqual(available, HarnessReady.make({ harness: "pi" }));
         } else {
           const error = yield* verifyHarness(brain("pi"), local, workerEnvironment).pipe(
             Effect.flip,
@@ -417,10 +411,8 @@ describe("worker harness readiness", () => {
 
   it.effect("checks Claude on a remote host through one SSH command per probe", () =>
     Effect.gen(function* () {
-      assert.deepStrictEqual(
-        yield* verifyHarness(brain("claude"), remote, {}),
-        HarnessReady.make({ harness: "claude" }),
-      );
+      const available = yield* verifyHarness(brain("claude"), remote, {});
+      assert.deepStrictEqual(available, HarnessReady.make({ harness: "claude" }));
     }).pipe(
       Effect.provide(
         commands({

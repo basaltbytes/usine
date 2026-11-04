@@ -154,7 +154,8 @@ const withGateway = <A, E>(
     });
     return yield* Effect.gen(function* () {
       lines.length = 0;
-      const settings = settingsLines(files, yield* freeGatewayPorts, anthropic.origin);
+      const gatewayPorts = yield* freeGatewayPorts;
+      const settings = settingsLines(files, gatewayPorts, anthropic.origin);
       yield* files.write("settings.env", settings);
       return yield* body(files, { settings, anthropic: anthropic.keys }).pipe(
         Effect.provide(gateway),
@@ -188,12 +189,13 @@ const reportedProviders = Effect.gen(function* () {
 /** Attaches the test repository to the test Worker and returns the caller token. */
 const attach = Effect.gen(function* () {
   const client = yield* adminClient;
+  const currentNow = yield* DateTime.now;
   const attached = yield* client.attachments.attach({
     payload: AttachRequest.make({
       worker: WORKER,
       repository: REPOSITORY,
       credential: AnonymousCredential.make(),
-      expiresAt: DateTime.add(yield* DateTime.now, { minutes: 60 }),
+      expiresAt: DateTime.add(currentNow, { minutes: 60 }),
     }),
   });
   return Redacted.value(attached.callerToken);
@@ -257,15 +259,20 @@ describe("reloading the gateway", () => {
         Effect.gen(function* () {
           const { egress } = yield* GatewayAddresses;
           const token = yield* attach;
-          assert.deepStrictEqual(yield* connect(egress, "registry.npmjs.org:443"), admitted);
-          assert.deepStrictEqual(yield* connect(egress, "pypi.org:443"), refused);
+          const connectionResponse = yield* connect(egress, "registry.npmjs.org:443");
+          assert.deepStrictEqual(connectionResponse, admitted);
+          const currentConnectionResponse = yield* connect(egress, "pypi.org:443");
+          assert.deepStrictEqual(currentConnectionResponse, refused);
 
           yield* files.write("egress-allowlist", ["pypi.org", "files.pythonhosted.org"]);
           yield* (yield* GatewayReload).reload;
 
-          assert.deepStrictEqual(yield* connect(egress, "pypi.org:443"), admitted);
-          assert.deepStrictEqual(yield* connect(egress, "registry.npmjs.org:443"), refused);
-          assert.strictEqual(yield* askAnthropic(token), 200);
+          const nextConnectionResponse = yield* connect(egress, "pypi.org:443");
+          assert.deepStrictEqual(nextConnectionResponse, admitted);
+          const updatedConnectionResponse = yield* connect(egress, "registry.npmjs.org:443");
+          assert.deepStrictEqual(updatedConnectionResponse, refused);
+          const providerResponse = yield* askAnthropic(token);
+          assert.strictEqual(providerResponse, 200);
           const reloaded = yield* logged("Reloaded the gateway settings");
           assert.include(reloaded, '"level":"Info"');
           assert.include(reloaded, `"path":"${files.path("egress-allowlist")}"`);
@@ -284,15 +291,19 @@ describe("reloading the gateway", () => {
         yield* files.write("egress-allowlist", ["pypi.org", "https://files.pythonhosted.org/"]);
         yield* (yield* GatewayReload).reload;
 
-        assert.deepStrictEqual(yield* connect(egress, "registry.npmjs.org:443"), admitted);
-        assert.deepStrictEqual(yield* connect(egress, "pypi.org:443"), refused);
-        assert.strictEqual(yield* askAnthropic(token), 200);
+        const connectionResponse = yield* connect(egress, "registry.npmjs.org:443");
+        assert.deepStrictEqual(connectionResponse, admitted);
+        const currentConnectionResponse = yield* connect(egress, "pypi.org:443");
+        assert.deepStrictEqual(currentConnectionResponse, refused);
+        const providerResponse = yield* askAnthropic(token);
+        assert.strictEqual(providerResponse, 200);
         const kept = yield* logged("Kept the previous egress allowlist");
         assert.include(kept, '"level":"Error"');
         assert.include(kept, `"path":"${files.path("egress-allowlist")}"`);
         assert.include(kept, '"line":2');
         assert.include(kept, "https://files.pythonhosted.org/");
-        assert.include(yield* logged("Reloaded the gateway settings"), '"allowlist":"kept"');
+        const loggedMessages = yield* logged("Reloaded the gateway settings");
+        assert.include(loggedMessages, '"allowlist":"kept"');
       }),
     ),
   );
@@ -301,17 +312,17 @@ describe("reloading the gateway", () => {
     withGateway(["registry.npmjs.org"], (files, { anthropic }) =>
       Effect.gen(function* () {
         const token = yield* attach;
-        assert.strictEqual(yield* askAnthropic(token), 200);
+        const providerResponse = yield* askAnthropic(token);
+        assert.strictEqual(providerResponse, 200);
 
         yield* files.write("secrets.env", secretsLines(SECOND_KEY));
         yield* (yield* GatewayReload).reload;
 
-        assert.strictEqual(yield* askAnthropic(token), 200);
+        const currentProviderResponse = yield* askAnthropic(token);
+        assert.strictEqual(currentProviderResponse, 200);
         assert.deepStrictEqual(anthropic, [FIRST_KEY, SECOND_KEY]);
-        assert.include(
-          yield* logged("Reloaded the gateway settings"),
-          '"changed":["ANTHROPIC_API_KEY"]',
-        );
+        const loggedMessages = yield* logged("Reloaded the gateway settings");
+        assert.include(loggedMessages, '"changed":["ANTHROPIC_API_KEY"]');
         assert.notInclude(lines.join("\n"), FIRST_KEY);
         assert.notInclude(lines.join("\n"), SECOND_KEY);
       }),
@@ -323,9 +334,8 @@ describe("reloading the gateway", () => {
     () =>
       withGateway(["registry.npmjs.org"], (files) =>
         Effect.gen(function* () {
-          assert.deepStrictEqual(yield* reportedProviders, [
-            { provider: "anthropic", credential: "api-key" },
-          ]);
+          const providers = yield* reportedProviders;
+          assert.deepStrictEqual(providers, [{ provider: "anthropic", credential: "api-key" }]);
 
           yield* files.write("secrets.env", [
             ...secretsLines(FIRST_KEY).filter((line) => !line.startsWith("ANTHROPIC_API_KEY=")),
@@ -333,7 +343,8 @@ describe("reloading the gateway", () => {
           ]);
           yield* (yield* GatewayReload).reload;
 
-          assert.deepStrictEqual(yield* reportedProviders, [
+          const currentProviders = yield* reportedProviders;
+          assert.deepStrictEqual(currentProviders, [
             { provider: "anthropic", credential: "subscription" },
           ]);
           assert.notInclude(lines.join("\n"), SUBSCRIPTION_TOKEN);
@@ -348,7 +359,8 @@ describe("reloading the gateway", () => {
         Effect.gen(function* () {
           const reload = Effect.flatMap(GatewayReload, ({ reload }) => reload);
           const authFile = `USINE_GATEWAY_CHATGPT_AUTH_FILE=${files.path("auth.json")}`;
-          const access = chatGptAccessToken(DateTime.add(yield* DateTime.now, { hours: 1 }));
+          const currentNow = yield* DateTime.now;
+          const access = chatGptAccessToken(DateTime.add(currentNow, { hours: 1 }));
           yield* files.write("secrets.env", [
             ...secretsLines(FIRST_KEY),
             `OPENAI_API_KEY=${OPENAI_KEY}`,
@@ -358,7 +370,8 @@ describe("reloading the gateway", () => {
             { provider: "anthropic", credential: "api-key" },
             { provider: "openai", credential: "api-key" },
           ];
-          assert.deepStrictEqual(yield* reportedProviders, withKey);
+          const providers = yield* reportedProviders;
+          assert.deepStrictEqual(providers, withKey);
 
           yield* files.write("auth.json", [authFileText({ access, refresh: CHATGPT_REFRESH })]);
           yield* files.write("secrets.env", [
@@ -371,17 +384,20 @@ describe("reloading the gateway", () => {
             "Kept the previous LLM providers",
             "OPENAI_API_KEY and USINE_GATEWAY_CHATGPT_AUTH_FILE are both set",
           );
-          assert.deepStrictEqual(yield* reportedProviders, withKey);
+          const currentProviders = yield* reportedProviders;
+          assert.deepStrictEqual(currentProviders, withKey);
 
           yield* files.write("auth.json", ['{"OPENAI_API_KEY":null}']);
           yield* files.write("secrets.env", [...secretsLines(FIRST_KEY), authFile]);
           yield* reload;
           yield* logged("Kept the previous LLM providers", "isn't a Codex ChatGPT login");
-          assert.deepStrictEqual(yield* reportedProviders, withKey);
+          const nextProviders = yield* reportedProviders;
+          assert.deepStrictEqual(nextProviders, withKey);
 
           yield* files.write("auth.json", [authFileText({ access, refresh: CHATGPT_REFRESH })]);
           yield* reload;
-          assert.deepStrictEqual(yield* reportedProviders, [
+          const updatedProviders = yield* reportedProviders;
+          assert.deepStrictEqual(updatedProviders, [
             { provider: "anthropic", credential: "api-key" },
             { provider: "openai", credential: "subscription" },
           ]);
@@ -411,7 +427,8 @@ describe("reloading the gateway", () => {
         ]);
         yield* (yield* GatewayReload).reload;
 
-        assert.strictEqual(yield* askAnthropic(token), 200);
+        const providerResponse = yield* askAnthropic(token);
+        assert.strictEqual(providerResponse, 200);
         const restart = yield* logged("take effect only after a restart");
         assert.include(restart, '"level":"Warn"');
         assert.include(restart, '"USINE_GATEWAY_DOMAIN"');
@@ -427,8 +444,10 @@ describe("reloading the gateway", () => {
         yield* files.write("egress-allowlist", ["pypi.org"]);
         process.emit("SIGHUP", "SIGHUP");
         yield* logged("Reloaded the gateway settings");
-        assert.deepStrictEqual(yield* connect(egress, "pypi.org:443"), admitted);
-        assert.deepStrictEqual(yield* connect(egress, "registry.npmjs.org:443"), refused);
+        const connectionResponse = yield* connect(egress, "pypi.org:443");
+        assert.deepStrictEqual(connectionResponse, admitted);
+        const currentConnectionResponse = yield* connect(egress, "registry.npmjs.org:443");
+        assert.deepStrictEqual(currentConnectionResponse, refused);
       }),
     ),
   );

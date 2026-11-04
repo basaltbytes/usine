@@ -40,9 +40,10 @@ for (const method of ["standalone", "list", "board"] as const) {
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
-        );
+        const currentDirectory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         return yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
           const store = yield* RunStore;
@@ -134,7 +135,8 @@ for (const method of ["standalone", "list", "board"] as const) {
             const response = yield* Effect.promise(() =>
               fetch(`http://127.0.0.1:${address.port}/health`),
             );
-            assert.strictEqual(yield* Effect.promise(() => response.text()), "ok");
+            const responseBody = yield* Effect.promise(() => response.text());
+            assert.strictEqual(responseBody, "ok");
             assert(
               performance.now() - start < 100,
               "append and HTTP health exceeded 100 ms, including timer delay",
@@ -146,10 +148,9 @@ for (const method of ["standalone", "list", "board"] as const) {
             performance.now() - readStarted >= 1000,
             "the read must run for at least one second",
           );
-          assert.deepStrictEqual(
-            yield* sql`SELECT count(*) AS count FROM usine_attempt_transcripts WHERE attempt_id = ${started.execution.attempt.id}`,
-            [{ count: 3 }],
-          );
+          const rows =
+            yield* sql`SELECT count(*) AS count FROM usine_attempt_transcripts WHERE attempt_id = ${started.execution.attempt.id}`;
+          assert.deepStrictEqual(rows, [{ count: 3 }]);
         }).pipe(
           Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
         );
@@ -166,42 +167,36 @@ it.live(
         yield* sql`CREATE TABLE reader_contract (value INTEGER NOT NULL)`;
         const inserted = yield* sql`INSERT INTO reader_contract VALUES (1)`.raw;
         assert.deepStrictEqual(inserted, { changes: 1, lastInsertRowid: 1 });
-        assert.deepStrictEqual(yield* sql`SELECT value FROM reader_contract`.values, [[1]]);
-        assert.deepStrictEqual(yield* sql`SELECT value FROM reader_contract`.raw, [{ value: 1 }]);
-        assert.deepStrictEqual(
-          yield* sql`SELECT 9007199254740993 AS value`.pipe(
-            Effect.provideService(SqlClient.SafeIntegers, true),
-          ),
-          [{ value: 9007199254740993n }],
+        const rows = yield* sql`SELECT value FROM reader_contract`.values;
+        assert.deepStrictEqual(rows, [[1]]);
+        const currentRows = yield* sql`SELECT value FROM reader_contract`.raw;
+        assert.deepStrictEqual(currentRows, [{ value: 1 }]);
+        const nextRows = yield* sql`SELECT 9007199254740993 AS value`.pipe(
+          Effect.provideService(SqlClient.SafeIntegers, true),
         );
-        assert.deepStrictEqual(yield* sql`SELECT ${new Uint8Array([1, 2])} AS value`, [
-          { value: new Uint8Array([1, 2]) },
-        ]);
-        assert.deepStrictEqual(yield* sql`SELECT ${new Uint16Array([1, 2])} AS value`, [
-          { value: new Uint8Array([1, 0, 2, 0]) },
-        ]);
+        assert.deepStrictEqual(nextRows, [{ value: 9007199254740993n }]);
+        const updatedRows = yield* sql`SELECT ${new Uint8Array([1, 2])} AS value`;
+        assert.deepStrictEqual(updatedRows, [{ value: new Uint8Array([1, 2]) }]);
+        const latestRows = yield* sql`SELECT ${new Uint16Array([1, 2])} AS value`;
+        assert.deepStrictEqual(latestRows, [{ value: new Uint8Array([1, 0, 2, 0]) }]);
         yield* sql`-- SELECT in a comment
         WITH candidate AS (SELECT ')' AS hint, 2 AS value)
         INSERT INTO reader_contract SELECT value FROM candidate`;
-        assert.deepStrictEqual(
-          yield* sql`/* INSERT in a comment */
+        const secondRows = yield* sql`/* INSERT in a comment */
         WITH "DELETE"(value) AS NOT MATERIALIZED (SELECT value FROM reader_contract),
-        other AS (SELECT ')' AS hint) SELECT sum(value) AS total FROM "DELETE" CROSS JOIN other`,
-          [{ total: 3 }],
-        );
+        other AS (SELECT ')' AS hint) SELECT sum(value) AS total FROM "DELETE" CROSS JOIN other`;
+        assert.deepStrictEqual(secondRows, [{ total: 3 }]);
         let committed = false;
         yield* Effect.gen(function* () {
           yield* sql`INSERT INTO reader_contract VALUES (3)`;
-          assert.deepStrictEqual(yield* sql`SELECT sum(value) AS total FROM reader_contract`, [
-            { total: 6 },
-          ]);
+          const rows = yield* sql`SELECT sum(value) AS total FROM reader_contract`;
+          assert.deepStrictEqual(rows, [{ total: 6 }]);
           yield* Effect.gen(function* () {
             yield* sql`INSERT INTO reader_contract VALUES (4)`;
             return yield* Effect.fail("rollback savepoint");
           }).pipe(sql.withTransaction, Effect.result);
-          assert.deepStrictEqual(yield* sql`SELECT sum(value) AS total FROM reader_contract`, [
-            { total: 6 },
-          ]);
+          const currentRows = yield* sql`SELECT sum(value) AS total FROM reader_contract`;
+          assert.deepStrictEqual(currentRows, [{ total: 6 }]);
           yield* sql.afterCommit(
             Effect.sync(() => {
               committed = true;
@@ -209,16 +204,14 @@ it.live(
           );
         }).pipe(sql.withTransaction);
         assert(committed);
-        assert.deepStrictEqual(yield* sql`SELECT sum(value) AS total FROM reader_contract`, [
-          { total: 6 },
-        ]);
+        const thirdRows = yield* sql`SELECT sum(value) AS total FROM reader_contract`;
+        assert.deepStrictEqual(thirdRows, [{ total: 6 }]);
         yield* Effect.gen(function* () {
           yield* sql`INSERT INTO reader_contract VALUES (9)`;
           return yield* Effect.fail("rollback transaction");
         }).pipe(sql.withTransaction, Effect.result);
-        assert.deepStrictEqual(yield* sql`SELECT sum(value) AS total FROM reader_contract`, [
-          { total: 6 },
-        ]);
+        const fourthRows = yield* sql`SELECT sum(value) AS total FROM reader_contract`;
+        assert.deepStrictEqual(fourthRows, [{ total: 6 }]);
         yield* Effect.scoped(
           Effect.gen(function* () {
             const connection = yield* sql.reserve;
@@ -227,17 +220,16 @@ it.live(
               [],
               undefined,
             );
-            assert.deepStrictEqual(
-              yield* connection.execute("SELECT value FROM local_state", [], undefined),
-              [{ value: 42 }],
-            );
+            const rows = yield* connection.execute("SELECT value FROM local_state", [], undefined);
+            assert.deepStrictEqual(rows, [{ value: 42 }]);
           }),
         );
         const invalid = yield* sql`SELECT missing FROM reader_contract`.pipe(Effect.flip);
         assert.strictEqual(invalid._tag, "SqlError");
         const invalidBinding = yield* sql.unsafe("SELECT ?", [new Date()]).pipe(Effect.flip);
         assert.strictEqual(invalidBinding._tag, "SqlError");
-        assert.deepStrictEqual(yield* sql`SELECT 42 AS value`, [{ value: 42 }]);
+        const fifthRows = yield* sql`SELECT 42 AS value`;
+        assert.deepStrictEqual(fifthRows, [{ value: 42 }]);
       }),
     ),
 );
@@ -295,44 +287,47 @@ it.live(
       const interrupted = yield* Fiber.join(slow);
       assert(interrupted._tag === "Failure");
       assert.strictEqual(interrupted.failure.reason._tag, "ConnectionError");
-      states.push(yield* reader.state);
+      const currentState = yield* reader.state;
+      states.push(currentState);
       assert.strictEqual(states[1], "fallback");
-      assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
-      assert.deepStrictEqual(
-        yield* reader.readSnapshot(sql`SELECT value FROM writer_only`.values),
-        [[1]],
+      const rows = yield* sql`SELECT value FROM shared_value`;
+      assert.deepStrictEqual(rows, [{ value: 42 }]);
+      const snapshot = yield* reader.readSnapshot(sql`SELECT value FROM writer_only`.values);
+      assert.deepStrictEqual(snapshot, [[1]]);
+      const currentRows = yield* sql`SELECT value FROM writer_only`.raw;
+      assert.deepStrictEqual(currentRows, [{ value: 1 }]);
+      const nextRows = yield* sql`SELECT 9007199254740993 AS value`.pipe(
+        Effect.provideService(SqlClient.SafeIntegers, true),
       );
-      assert.deepStrictEqual(yield* sql`SELECT value FROM writer_only`.raw, [{ value: 1 }]);
-      assert.deepStrictEqual(
-        yield* sql`SELECT 9007199254740993 AS value`.pipe(
-          Effect.provideService(SqlClient.SafeIntegers, true),
-        ),
-        [{ value: 9007199254740993n }],
-      );
+      assert.deepStrictEqual(nextRows, [{ value: 9007199254740993n }]);
       yield* Deferred.await(respawned);
-      states.push(yield* reader.state);
+      const nextState = yield* reader.state;
+      states.push(nextState);
       assert.strictEqual(states[2], "respawning");
-      assert.deepStrictEqual(yield* sql`SELECT value FROM writer_only`, [{ value: 1 }]);
+      const updatedRows = yield* sql`SELECT value FROM writer_only`;
+      assert.deepStrictEqual(updatedRows, [{ value: 1 }]);
       Atomics.store(gate, 0, 1);
       Atomics.notify(gate, 0);
-      states.push(
-        yield* reader.state.pipe(
-          Effect.repeat({
-            until: (state) => state === "worker",
-            schedule: Schedule.spaced("10 millis"),
-          }),
-          Effect.timeout("5 seconds"),
-        ),
+      const updatedState = yield* reader.state.pipe(
+        Effect.repeat({
+          until: (state) => state === "worker",
+          schedule: Schedule.spaced("10 millis"),
+        }),
+        Effect.timeout("5 seconds"),
       );
+      states.push(updatedState);
       assert.deepStrictEqual(states, ["worker", "fallback", "respawning", "worker"]);
-      assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
+      const latestRows = yield* sql`SELECT value FROM shared_value`;
+      assert.deepStrictEqual(latestRows, [{ value: 42 }]);
       const workerRead = yield* sql`SELECT value FROM writer_only`.pipe(Effect.flip);
       assert.strictEqual(workerRead._tag, "SqlError");
-      assert.strictEqual(yield* reader.state, "worker");
+      const latestState = yield* reader.state;
+      assert.strictEqual(latestState, "worker");
       const recovered = workers[1];
       assert(recovered !== undefined);
       yield* Effect.promise(() => recovered.terminate());
-      assert.strictEqual(yield* reader.state, "fallback");
+      const secondState = yield* reader.state;
+      assert.strictEqual(secondState, "fallback");
       yield* reader.state.pipe(
         Effect.repeat({
           until: (state) => state === "worker",
@@ -340,7 +335,8 @@ it.live(
         }),
         Effect.timeout("3 seconds"),
       );
-      assert.deepStrictEqual(yield* sql`SELECT value FROM shared_value`, [{ value: 42 }]);
+      const secondRows = yield* sql`SELECT value FROM shared_value`;
+      assert.deepStrictEqual(secondRows, [{ value: 42 }]);
     }).pipe(
       Effect.scoped,
       Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
@@ -359,16 +355,16 @@ it.live(
       yield* sql`CREATE TABLE snapshot_value AS SELECT 1 AS value`;
       yield* Effect.gen(function* () {
         yield* sql`UPDATE snapshot_value SET value = 2`;
-        assert.deepStrictEqual(yield* reader.readSnapshot(sql`SELECT value FROM snapshot_value`), [
-          { value: 2 },
-        ]);
+        const snapshot = yield* reader.readSnapshot(sql`SELECT value FROM snapshot_value`);
+        assert.deepStrictEqual(snapshot, [{ value: 2 }]);
         return yield* Effect.fail("rollback writer");
       }).pipe(writer.withTransaction, Effect.result);
       const entered = yield* Deferred.make<void>();
       const slow = yield* reader
         .readSnapshot(
           Effect.gen(function* () {
-            assert.deepStrictEqual(yield* sql`SELECT value FROM snapshot_value`, [{ value: 1 }]);
+            const rows = yield* sql`SELECT value FROM snapshot_value`;
+            assert.deepStrictEqual(rows, [{ value: 1 }]);
             yield* Deferred.succeed(entered, undefined);
             yield* sql`WITH RECURSIVE numbers(i) AS (
         VALUES(1) UNION ALL SELECT i + 1 FROM numbers WHERE i < 32000000
@@ -386,16 +382,18 @@ it.live(
         "standalone reads must wait outside the snapshot",
       );
       yield* Fiber.interrupt(slow);
-      assert.deepStrictEqual(yield* Fiber.join(unrelated), [{ value: 3 }]);
+      const unrelatedResult = yield* Fiber.join(unrelated);
+      assert.deepStrictEqual(unrelatedResult, [{ value: 3 }]);
       const failed = yield* reader
         .readSnapshot(sql`SELECT value FROM missing_snapshot_table`)
         .pipe(Effect.result);
       assert(failed._tag === "Failure");
-      assert.strictEqual(yield* reader.state, "worker");
-      assert.deepStrictEqual(yield* reader.readSnapshot(sql`SELECT value FROM snapshot_value`), [
-        { value: 3 },
-      ]);
-      assert.strictEqual(yield* reader.state, "worker");
+      const currentState = yield* reader.state;
+      assert.strictEqual(currentState, "worker");
+      const snapshot = yield* reader.readSnapshot(sql`SELECT value FROM snapshot_value`);
+      assert.deepStrictEqual(snapshot, [{ value: 3 }]);
+      const nextState = yield* reader.state;
+      assert.strictEqual(nextState, "worker");
     }).pipe(
       Effect.scoped,
       Effect.provide(NodeServices.layer.pipe(Layer.provideMerge(Reactivity.layer))),
@@ -416,8 +414,10 @@ it.effect(
             starts++;
             throw new Error("worker creation failed");
           });
-          assert.strictEqual(yield* reader.state, "fallback");
-          assert.deepStrictEqual(yield* reader.client`SELECT 42 AS value`, [{ value: 42 }]);
+          const currentState = yield* reader.state;
+          assert.strictEqual(currentState, "fallback");
+          const rows = yield* reader.client`SELECT 42 AS value`;
+          assert.deepStrictEqual(rows, [{ value: 42 }]);
           for (const delay of [1000, 5000, 30000, 300000, 300000]) {
             const before = starts;
             yield* TestClock.adjust(delay - 1);

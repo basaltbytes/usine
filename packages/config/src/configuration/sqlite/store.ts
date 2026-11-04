@@ -98,7 +98,8 @@ export const sqliteConfigurationLayer = Layer.effect(
           const row = rows[0];
           if (row === undefined) return Option.none();
           const { value } = yield* Schema.decodeUnknownEffect(Row)(row);
-          return Option.some(yield* Schema.decodeEffect(RevisionJson)(value));
+          const revision = yield* Schema.decodeEffect(RevisionJson)(value);
+          return Option.some(revision);
         },
         Effect.mapError(failure("read revision")),
       ),

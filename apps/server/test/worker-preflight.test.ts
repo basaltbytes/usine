@@ -96,12 +96,11 @@ const submission = Submission.make({
 
 it("runs on-demand preflight, refuses busy workers, stores failures, and restores scheduling and attention without restarting", async () => {
   const program = Effect.gen(function* () {
-    const directory = InstanceDirectory.make(
-      yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-preflight-api-",
-      }),
-    );
+    const currentDirectory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+      prefix: "usine-preflight-api-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     const executing = yield* Deferred.make<WorkerName>();
     let failedChecks = 0;
     let broken = true;
@@ -199,13 +198,16 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         assert.strictEqual(need.worker, failedWorker);
         assert.include(need.message, "Correct the worker destination");
         yield* runs.submit(submission);
-        assert.strictEqual(yield* Deferred.await(executing), healthyWorker);
+        const executingResult = yield* Deferred.await(executing);
+        assert.strictEqual(executingResult, healthyWorker);
         const busy = yield* client.post(`/api/workers/${healthyWorker}/preflight`);
         assert.strictEqual(busy.status, 409);
-        assert.include(yield* busy.text, "WorkerPreflightRejectedError");
+        const currentText = yield* busy.text;
+        assert.include(currentText, "WorkerPreflightRejectedError");
         const missing = yield* client.post("/api/workers/missing/preflight");
         assert.strictEqual(missing.status, 409);
-        assert.include(yield* missing.text, "not configured");
+        const nextText = yield* missing.text;
+        assert.include(nextText, "not configured");
         const failed = yield* client.post(`/api/workers/${failedWorker}/preflight`).pipe(
           Effect.tap((response) => Effect.sync(() => assert.strictEqual(response.status, 200))),
           Effect.flatMap((response) => response.text),
@@ -224,7 +226,8 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         yield* Deferred.await(checking);
         const duplicate = yield* client.post(`/api/workers/${failedWorker}/preflight`);
         assert.strictEqual(duplicate.status, 409);
-        assert.include(yield* duplicate.text, "already running");
+        const updatedText = yield* duplicate.text;
+        assert.include(updatedText, "already running");
         const during = yield* client.get("/api/configuration").pipe(
           Effect.flatMap((response) => response.text),
           Effect.map(Schema.decodeUnknownSync(Schema.fromJsonString(ConfigurationView))),
@@ -241,9 +244,8 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         yield* Deferred.succeed(finishCheck, undefined);
         const response = yield* Fiber.join(requested);
         assert.strictEqual(response.status, 200);
-        const fresh = Schema.decodeSync(Schema.fromJsonString(WorkerPreflightView))(
-          yield* response.text,
-        );
+        const latestText = yield* response.text;
+        const fresh = Schema.decodeSync(Schema.fromJsonString(WorkerPreflightView))(latestText);
         assert.strictEqual(fresh.prerequisites?._tag, "Passed");
         assert.strictEqual((yield* status.checking).size, 0);
         const stored = yield* configuration.view(instance);

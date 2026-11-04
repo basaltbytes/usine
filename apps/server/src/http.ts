@@ -210,10 +210,9 @@ const handlers = HttpApiBuilder.group(
     return routes
       .handleRaw("changes", () =>
         Effect.gen(function* () {
-          return yield* changes.stream(
-            yield* HttpServerRequest.HttpServerRequest,
-            yield* RequestPermissions,
-          );
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const permissions = yield* RequestPermissions;
+          return yield* changes.stream(request, permissions);
         }),
       )
       .handle("upgradeStatus", () => fromUpgrades((upgrades) => upgrades.status))

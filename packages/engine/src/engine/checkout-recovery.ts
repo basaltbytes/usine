@@ -146,7 +146,8 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
    * parent task isn't confirmed stopped.
    */
   const atStartup = Effect.fn("CheckoutRecovery.atStartup")(function* () {
-    const configured = new Set(yield* executor.workers);
+    const configuredWorkers = yield* executor.workers;
+    const configured = new Set(configuredWorkers);
     const candidates = yield* store.salvageCandidates;
     const reconcilable = candidates.filter(({ worker }) => configured.has(worker));
     const unconfigured = candidates.filter(({ worker }) => !configured.has(worker));

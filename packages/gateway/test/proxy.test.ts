@@ -138,20 +138,20 @@ const attachAs = (id: AttachmentId, credential: AttachmentCredential) =>
   Effect.gen(function* () {
     const attachments = yield* Attachments;
     const callers = yield* CallerTokens;
+    const currentNow = yield* DateTime.now;
     yield* attachments.attach(
       Attachment.make({
         id,
         worker: WORKER,
         repository: REPOSITORY,
         credential,
-        expiresAt: DateTime.add(yield* DateTime.now, { hours: 1 }),
+        expiresAt: DateTime.add(currentNow, { hours: 1 }),
       }),
     );
-    return Redacted.value(
-      yield* callers.issue(
-        CallerClaims.make({ attachment: id, worker: WORKER, repository: REPOSITORY }),
-      ),
+    const callerToken = yield* callers.issue(
+      CallerClaims.make({ attachment: id, worker: WORKER, repository: REPOSITORY }),
     );
+    return Redacted.value(callerToken);
   });
 
 const attach = (credential: AttachmentCredential) => attachAs(ATTACHMENT, credential);
@@ -258,60 +258,41 @@ describe("GatewayProxy", () => {
           response.status,
           response.headers.get(REFUSAL_HEADER),
         ];
-        assert.deepStrictEqual(
-          refusal(
-            yield* send("http://git.gw.test/acme/other.git/info/refs", {
-              "x-usine-gateway-token": caller,
-            }),
-          ),
-          [403, "repository-mismatch"],
+        const currentResponse = yield* send("http://git.gw.test/acme/other.git/info/refs", {
+          "x-usine-gateway-token": caller,
+        });
+        assert.deepStrictEqual(refusal(currentResponse), [403, "repository-mismatch"]);
+        const nextResponse = yield* send(
+          "http://git.gw.test/acme/other/releases/download/v1.0.0/tool.tar.gz",
+          {
+            "x-usine-gateway-token": caller,
+          },
         );
-        assert.deepStrictEqual(
-          refusal(
-            yield* send("http://git.gw.test/acme/other/releases/download/v1.0.0/tool.tar.gz", {
-              "x-usine-gateway-token": caller,
-            }),
-          ),
-          [403, "repository-mismatch"],
+        assert.deepStrictEqual(refusal(nextResponse), [403, "repository-mismatch"]);
+        const updatedResponse = yield* send(
+          "http://git.gw.test/api/v3/repos/acme/other/actions/artifacts/42/zip",
+          {
+            "x-usine-gateway-token": caller,
+          },
         );
-        assert.deepStrictEqual(
-          refusal(
-            yield* send("http://git.gw.test/api/v3/repos/acme/other/actions/artifacts/42/zip", {
-              "x-usine-gateway-token": caller,
-            }),
-          ),
-          [403, "repository-mismatch"],
-        );
-        assert.deepStrictEqual(
-          refusal(yield* send("http://git.gw.test/acme/demo.git/info/refs", {})),
-          [401, "missing-caller-token"],
-        );
-        assert.deepStrictEqual(
-          refusal(
-            yield* send("http://git.gw.test/acme/demo.git/info/refs", {
-              authorization: "token ghp_stolen",
-            }),
-          ),
-          [401, "invalid-caller-token"],
-        );
-        assert.deepStrictEqual(
-          refusal(
-            yield* send("http://git.gw.test/acme/demo/settings", {
-              "x-usine-gateway-token": caller,
-            }),
-          ),
-          [404, "unsupported-path"],
-        );
+        assert.deepStrictEqual(refusal(updatedResponse), [403, "repository-mismatch"]);
+        const latestResponse = yield* send("http://git.gw.test/acme/demo.git/info/refs", {});
+        assert.deepStrictEqual(refusal(latestResponse), [401, "missing-caller-token"]);
+        const secondResponse = yield* send("http://git.gw.test/acme/demo.git/info/refs", {
+          authorization: "token ghp_stolen",
+        });
+        assert.deepStrictEqual(refusal(secondResponse), [401, "invalid-caller-token"]);
+        const thirdResponse = yield* send("http://git.gw.test/acme/demo/settings", {
+          "x-usine-gateway-token": caller,
+        });
+        assert.deepStrictEqual(refusal(thirdResponse), [404, "unsupported-path"]);
         yield* Effect.flatMap(Attachments, (attachments) => attachments.detach(ATTACHMENT));
-        assert.deepStrictEqual(
-          refusal(
-            yield* send("http://git.gw.test/acme/demo.git/info/refs", {
-              "x-usine-gateway-token": caller,
-            }),
-          ),
-          [403, "stale-caller-token"],
-        );
-        assert.deepStrictEqual(yield* sent, []);
+        const fourthResponse = yield* send("http://git.gw.test/acme/demo.git/info/refs", {
+          "x-usine-gateway-token": caller,
+        });
+        assert.deepStrictEqual(refusal(fourthResponse), [403, "stale-caller-token"]);
+        const fifthResponse = yield* sent;
+        assert.deepStrictEqual(fifthResponse, []);
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 
@@ -506,7 +487,8 @@ describe("GatewayProxy", () => {
             path,
           );
         }
-        assert.lengthOf(yield* sent, 7, "no refused path reached an upstream");
+        const response = yield* sent;
+        assert.lengthOf(response, 7, "no refused path reached an upstream");
       }).pipe(
         Effect.provide(
           gateway({
@@ -592,30 +574,35 @@ describe("GatewayProxy", () => {
             send(`http://git.gw.test${path}`, { "x-usine-gateway-token": caller }),
             (response) => [response.status, response.headers.get("location")],
           );
-        assert.deepStrictEqual(yield* location("/api/v3/repos/acme/demo/pulls?state=open"), [
+        const redirectLocation = yield* location("/api/v3/repos/acme/demo/pulls?state=open");
+        assert.deepStrictEqual(redirectLocation, [
           301,
           "http://git.gw.test/api/v3/repositories/42/pulls?state=open",
         ]);
-        assert.deepStrictEqual(yield* location("/acme/demo/releases/latest/download/tool.tar.gz"), [
+        const currentRedirectLocation = yield* location(
+          "/acme/demo/releases/latest/download/tool.tar.gz",
+        );
+        assert.deepStrictEqual(currentRedirectLocation, [
           301,
           "http://git.gw.test/acme/demo/releases/download/v1.2.0/tool.tar.gz",
         ]);
-        assert.deepStrictEqual(
-          yield* location("/acme/demo.git/info/refs?service=git-upload-pack"),
-          [301, "http://git.gw.test/acme/renamed.git/info/refs?service=git-upload-pack"],
+        const nextRedirectLocation = yield* location(
+          "/acme/demo.git/info/refs?service=git-upload-pack",
         );
-        assert.deepStrictEqual(yield* location("/api/v3/repositories/42/pulls?state=open"), [
-          200,
-          null,
+        assert.deepStrictEqual(nextRedirectLocation, [
+          301,
+          "http://git.gw.test/acme/renamed.git/info/refs?service=git-upload-pack",
         ]);
+        const updatedRedirectLocation = yield* location("/api/v3/repositories/42/pulls?state=open");
+        assert.deepStrictEqual(updatedRedirectLocation, [200, null]);
         assert.strictEqual(
           (yield* sent).at(-1)?.url,
           "https://api.github.com/repositories/42/pulls?state=open",
         );
-        assert.deepStrictEqual(
-          yield* location("/acme/renamed.git/info/refs?service=git-upload-pack"),
-          [200, null],
+        const latestRedirectLocation = yield* location(
+          "/acme/renamed.git/info/refs?service=git-upload-pack",
         );
+        assert.deepStrictEqual(latestRedirectLocation, [200, null]);
         assert.strictEqual(
           (yield* sent).at(-1)?.url,
           "https://github.com/acme/renamed.git/info/refs?service=git-upload-pack",
@@ -678,14 +665,17 @@ describe("GatewayProxy", () => {
           "/api/v3/repositories/7",
         ])
           yield* outcome(path, caller);
-        assert.deepStrictEqual(yield* outcome("/acme/renamed.git/info/refs", caller), [200, null]);
+        const responseOutcome = yield* outcome("/acme/renamed.git/info/refs", caller);
+        assert.deepStrictEqual(responseOutcome, [200, null]);
         for (const [path, token] of [
           ["/acme/renamed.git/info/refs", otherAttempt],
           ["/acme/temporary/info/refs", caller],
           ["/acme/moved/releases/download/v1.2.0/tool.tar.gz", caller],
           ["/api/v3/repos/acme/elsewhere", caller],
-        ] as const)
-          assert.deepStrictEqual(yield* outcome(path, token), [403, "repository-mismatch"], path);
+        ] as const) {
+          const currentResponseOutcome = yield* outcome(path, token);
+          assert.deepStrictEqual(currentResponseOutcome, [403, "repository-mismatch"], path);
+        }
       }).pipe(
         Effect.provide(
           gateway(
@@ -731,12 +721,10 @@ describe("GatewayProxy", () => {
                 send(`http://git.gw.test${path}`, { "x-usine-gateway-token": caller }),
                 (response) => [response.status, response.headers.get(REFUSAL_HEADER)],
               );
-            assert.deepStrictEqual(yield* outcome("/acme/demo.git/info/refs"), [301, null]);
-            assert.deepStrictEqual(
-              yield* outcome("/acme/impostor.git/info/refs"),
-              [403, "repository-mismatch"],
-              reason,
-            );
+            const responseOutcome = yield* outcome("/acme/demo.git/info/refs");
+            assert.deepStrictEqual(responseOutcome, [301, null]);
+            const currentResponseOutcome = yield* outcome("/acme/impostor.git/info/refs");
+            assert.deepStrictEqual(currentResponseOutcome, [403, "repository-mismatch"], reason);
             const confirmation = (yield* sent).filter(({ url }) =>
               url.startsWith("https://api.github.com/"),
             );
@@ -793,7 +781,8 @@ describe("GatewayProxy", () => {
           );
           assert.strictEqual(refused.body.includes(curl), hint, refused.body);
         }
-        assert.deepStrictEqual(yield* sent, []);
+        const response = yield* sent;
+        assert.deepStrictEqual(response, []);
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 

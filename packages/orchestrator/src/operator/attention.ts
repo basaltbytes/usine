@@ -157,7 +157,8 @@ export const poolAttentionFor = (
   Effect.fn("Operator.poolAttention")(function* (overview: ReadyOverview) {
     const snapshots = yield* reader.latestPoolRateLimits;
     yield* Effect.annotateCurrentSpan({ pools: snapshots.map(({ pool }) => pool) });
-    const needs = poolLimitNeeds(snapshots, yield* DateTime.now);
+    const observedAt = yield* DateTime.now;
+    const needs = poolLimitNeeds(snapshots, observedAt);
     yield* Effect.logDebug("Refreshed pool attention", {
       snapshots: snapshots.map(({ pool, rateLimits: { primary, secondary } }) => ({
         pool,
@@ -167,7 +168,8 @@ export const poolAttentionFor = (
       activeWindows: needs.length,
     });
     if (needs.length === 0) return overview;
-    const { needsYou, dismissedNeeds } = partitionNeeds(needs, yield* acknowledgements.list);
+    const storedAcknowledgements = yield* acknowledgements.list;
+    const { needsYou, dismissedNeeds } = partitionNeeds(needs, storedAcknowledgements);
     return ReadyOverview.make({
       ...overview,
       needsYou: [...overview.needsYou, ...needsYou],

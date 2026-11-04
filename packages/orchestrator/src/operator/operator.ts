@@ -272,7 +272,8 @@ const makeOperatorObservation = Effect.gen(function* () {
   const workerStatus = yield* WorkerStatus;
   const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
   const poolAttention = poolAttentionFor(reader, acknowledgements);
-  const webhookAttention = webhookAttentionFor(yield* WebhookHealth, acknowledgements);
+  const webhookHealth = yield* WebhookHealth;
+  const webhookAttention = webhookAttentionFor(webhookHealth, acknowledgements);
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -420,19 +421,16 @@ const makeOperatorObservation = Effect.gen(function* () {
       ),
     );
     // The Items of failed Runs that are closed, merged, or gone, with their state.
-    const settledItems = new Map(
-      EffectArray.getSomes(
-        yield* Effect.forEach(
-          failedItems,
-          (key) =>
-            settledItemState(key).pipe(
-              Effect.provideService(ItemProjectionReader, itemReader),
-              Effect.map(Option.map((state) => [key, state] as const)),
-            ),
-          { concurrency: 4 },
+    const settledItemStates = yield* Effect.forEach(
+      failedItems,
+      (key) =>
+        settledItemState(key).pipe(
+          Effect.provideService(ItemProjectionReader, itemReader),
+          Effect.map(Option.map((state) => [key, state] as const)),
         ),
-      ),
+      { concurrency: 4 },
     );
+    const settledItems = new Map(EffectArray.getSomes(settledItemStates));
     const projects = groupProjectViews(
       instance.config,
       projected.map(({ name, projectFindings, overviewRuns, board, catalog }) =>
@@ -591,9 +589,11 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
     }
     for (const { attemptId, runId, worker } of unconfirmedStops) {
-      const run =
-        allRuns.get(runId) ??
-        runSummaryView(yield* reader.summary(runId), paused, access, waits, upgrade);
+      let run = allRuns.get(runId);
+      if (run === undefined) {
+        const summary = yield* reader.summary(runId);
+        run = runSummaryView(summary, paused, access, waits, upgrade);
+      }
       const attempt = run.attempts.find(({ id }) => id === attemptId);
       if (attempt === undefined) {
         yield* Effect.logWarning(
@@ -869,13 +869,14 @@ const makeOperatorObservation = Effect.gen(function* () {
         { concurrency: "unbounded" },
       );
     const currentAgent = instance.agents.find(({ name }) => name === snapshot.agent.name);
+    const upgrade = yield* readUpgrade;
     return RunDetailView.make({
       run: runView(
         snapshot,
         paused,
         workerAccesses(instance.config.workers),
         quotaWaits(provisioning),
-        yield* readUpgrade,
+        upgrade,
       ),
       agentDefinitionChanged:
         currentAgent !== undefined && !sameAgent(snapshot.agent, currentAgent.agent),
@@ -1081,7 +1082,8 @@ const makeOperator = Effect.gen(function* () {
   ) {
     yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
-    yield* runs.resolveFailure(runId, attemptId, yield* requestActor(instance.config.operator));
+    const actor = yield* requestActor(instance.config.operator);
+    yield* runs.resolveFailure(runId, attemptId, actor);
   });
 
   const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
@@ -1200,14 +1202,12 @@ const makeOperator = Effect.gen(function* () {
       attemptId: input.attemptId,
       action: input.action._tag,
     });
+    const actor = yield* requestActor(instance.config.operator);
     yield* runs.intervene(
       runId,
       input.attemptId,
       Intervention.make({
-        operator: Option.getOrElse(
-          yield* requestActor(instance.config.operator),
-          () => "local operator",
-        ),
+        operator: Option.getOrElse(actor, () => "local operator"),
         target: input.target,
         action: input.action,
       }),

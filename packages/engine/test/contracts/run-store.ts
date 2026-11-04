@@ -64,7 +64,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             recovered.execution.attempt,
             Result.succeed(StepResult.make({ message: "duplicate", facts: [] })),
           );
-          assert.deepStrictEqual(yield* store.snapshot(runId), finished);
+          const currentSnapshot = yield* store.snapshot(runId);
+          assert.deepStrictEqual(currentSnapshot, finished);
           assert.strictEqual(finished.run.state._tag, "Succeeded");
         }),
       ),
@@ -156,7 +157,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               ._tag,
             "EnginePersistenceError",
           );
-          assert.deepStrictEqual(yield* store.snapshot(runId), running);
+          const currentSnapshot = yield* store.snapshot(runId);
+          assert.deepStrictEqual(currentSnapshot, running);
           yield* restoreAttempt;
           const recovered = yield* store.beginAttempt(
             runId,
@@ -174,7 +176,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             ))._tag,
             "EnginePersistenceError",
           );
-          assert.deepStrictEqual(yield* store.snapshot(runId), beforeCompletion);
+          const nextSnapshot = yield* store.snapshot(runId);
+          assert.deepStrictEqual(nextSnapshot, beforeCompletion);
           yield* restoreRun;
           yield* store.finishAttempt(recovered.execution.attempt, Result.succeed(result));
           const completed = yield* store.snapshot(runId);
@@ -280,7 +283,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           assert.strictEqual((yield* store.snapshot(failedRun)).run.state._tag, "Failed");
 
           yield* store.cancel(openRun);
-          assert.strictEqual(yield* store.retry(failedRun), true);
+          const retryResult = yield* store.retry(failedRun);
+          assert.strictEqual(retryResult, true);
           assert.strictEqual((yield* store.snapshot(failedRun)).run.state._tag, "Running");
         }),
       ),
@@ -459,7 +463,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             recovered.execution.attempt,
             Result.succeed(StepResult.make({ message: "after cancellation", facts: [] })),
           );
-          assert.deepStrictEqual(yield* store.snapshot(runId), canceled);
+          const currentSnapshot = yield* store.snapshot(runId);
+          assert.deepStrictEqual(currentSnapshot, canceled);
         }),
       ),
     );
@@ -522,40 +527,46 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             const ended = yield* begin(fix);
             yield* fail(ended);
             // Another Agent signs differently, so its Attempts are never listed.
-            yield* begin(
-              yield* claim(
-                "review",
-                "review",
-                "pull-71",
-                Agent.make({ ...testAgent, name: AgentName.make("reviewer") }),
-              ),
+            const claimedRun = yield* claim(
+              "review",
+              "review",
+              "pull-71",
+              Agent.make({ ...testAgent, name: AgentName.make("reviewer") }),
             );
+            yield* begin(claimedRun);
             yield* TestClock.adjust("2 seconds");
             yield* store.retry(fix);
             const retried = yield* begin(fix);
-            const triage = yield* begin(yield* claim("triage", "triage", "pull-71"));
-            yield* begin(yield* claim("elsewhere", "fix", "issue-12"));
+            const currentClaimedRun = yield* claim("triage", "triage", "pull-71");
+            const triage = yield* begin(currentClaimedRun);
+            const nextClaimedRun = yield* claim("elsewhere", "fix", "issue-12");
+            yield* begin(nextClaimedRun);
 
             // The first fix Attempt ended a second before either started.
-            assert.deepStrictEqual(yield* windows(retried), {
+            const currentAttemptWindows = yield* windows(retried);
+            assert.deepStrictEqual(currentAttemptWindows, {
               own: Option.some([retried.id, false]),
               overlapping: [[triage.id, false]],
             });
-            assert.deepStrictEqual(yield* windows(triage), {
+            const nextAttemptWindows = yield* windows(triage);
+            assert.deepStrictEqual(nextAttemptWindows, {
               own: Option.some([triage.id, false]),
               overlapping: [[retried.id, false]],
             });
-            assert.deepStrictEqual(yield* windows(ended), {
+            const updatedAttemptWindows = yield* windows(ended);
+            assert.deepStrictEqual(updatedAttemptWindows, {
               own: Option.some([ended.id, true]),
               overlapping: [],
             });
             yield* TestClock.adjust("1 second");
             yield* fail(triage);
-            assert.deepStrictEqual(yield* windows(retried), {
+            const latestAttemptWindows = yield* windows(retried);
+            assert.deepStrictEqual(latestAttemptWindows, {
               own: Option.some([retried.id, false]),
               overlapping: [[triage.id, true]],
             });
-            assert.deepStrictEqual(yield* windows(triage), {
+            const secondAttemptWindows = yield* windows(triage);
+            assert.deepStrictEqual(secondAttemptWindows, {
               own: Option.some([triage.id, true]),
               overlapping: [[retried.id, false]],
             });
@@ -622,7 +633,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               assert(resolvedRevision.value > revision.value);
               yield* TestClock.adjust("5 minutes");
               yield* store.resolveFailure(runId, attempt.id, Option.none());
-              assert.deepStrictEqual(yield* reader.revision, resolvedRevision);
+              const currentRevision = yield* reader.revision;
+              assert.deepStrictEqual(currentRevision, resolvedRevision);
               return evidence;
             }).pipe(Effect.provide(services)),
           );
@@ -745,8 +757,10 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           assert(Option.isNone(snapshot.step.result));
 
           // A repeated retry is accepted until the reopened Run starts its next Attempt.
-          assert.strictEqual(yield* store.retry(runId), true);
-          assert.strictEqual(yield* store.retry(runId), false);
+          const retryResult = yield* store.retry(runId);
+          assert.strictEqual(retryResult, true);
+          const currentRetryResult = yield* store.retry(runId);
+          assert.strictEqual(currentRetryResult, false);
           const restarted = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
@@ -805,10 +819,12 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const state = () => store.snapshot(runId).pipe(Effect.map(({ run }) => run.state._tag));
           yield* store.recordAndClaim(submission, runId);
           yield* store.parkForApproval(runId);
-          assert.strictEqual(yield* state(), "Waiting");
+          const runState = yield* state();
+          assert.strictEqual(runState, "Waiting");
 
           yield* store.approve(runId, approval, unnamed);
-          assert.strictEqual(yield* state(), "Queued");
+          const currentRunState = yield* state();
+          assert.strictEqual(currentRunState, "Queued");
           // Re-delivery of the same approval is a no-op, not a rejection.
           yield* store.approve(
             runId,
@@ -818,7 +834,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               approver: Option.some(OperatorLogin.make("Philippe")),
             }),
           );
-          assert.strictEqual(yield* state(), "Queued");
+          const nextRunState = yield* state();
+          assert.strictEqual(nextRunState, "Queued");
           assert.deepStrictEqual((yield* store.snapshot(runId)).approval, recorded);
           const [listed] = yield* reader.list({ closedLimit: 10 });
           assert.deepStrictEqual(listed?.approval, recorded);
@@ -827,7 +844,8 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
 
           const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert.strictEqual(started._tag, "AttemptStarted");
-          assert.strictEqual(yield* state(), "Running");
+          const updatedRunState = yield* state();
+          assert.strictEqual(updatedRunState, "Running");
         }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );

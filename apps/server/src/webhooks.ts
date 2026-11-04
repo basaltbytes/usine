@@ -196,7 +196,8 @@ export const webhookEndpoint: (
   app: Pick<GitHubApp["Service"], "configureWebhook">,
 ) {
   const initial = yield* instances.get;
-  const active = yield* Ref.make(yield* makeWebhookHandler(instances, polling, health, app));
+  const webhookHandler = yield* makeWebhookHandler(instances, polling, health, app);
+  const active = yield* Ref.make(webhookHandler);
   yield* instances.changes.pipe(
     Stream.map(({ config }) => config.webhooks),
     Stream.changesWith((before, after) => Equal.equals(before, after)),

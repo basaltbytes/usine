@@ -44,7 +44,8 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const logins = yield* ClaudeLoginLock;
-    const reset = machineResetFor(yield* remoteCommandsFor, options.instance, options.instanceId);
+    const remoteCommands = yield* remoteCommandsFor;
+    const reset = machineResetFor(remoteCommands, options.instance, options.instanceId);
     const { commands } = reset;
     const base = options.ssh ?? DEFAULT_SSH;
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)

@@ -22,7 +22,8 @@ export const webhookAttentionFor = (
       startedAt,
       publicUrl: webhooks.publicUrl.href,
     });
-    const { needsYou, dismissedNeeds } = partitionNeeds([need], yield* acknowledgements.list);
+    const storedAcknowledgements = yield* acknowledgements.list;
+    const { needsYou, dismissedNeeds } = partitionNeeds([need], storedAcknowledgements);
     return ReadyOverview.make({
       ...overview,
       needsYou: [...overview.needsYou, ...needsYou],

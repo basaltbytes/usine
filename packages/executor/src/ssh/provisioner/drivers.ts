@@ -64,13 +64,15 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
           Option.isSome(entry.gateway),
           settings.providerEndpoints?.hetzner ?? HETZNER_API,
         );
-      case "boat":
+      case "boat": {
+        const publicKey = yield* readPublicKey(entry);
         return yield* boatDriverFor(
           worker,
           value,
-          yield* readPublicKey(entry),
+          publicKey,
           settings.providerEndpoints?.boat ?? BOAT_API,
         );
+      }
     }
   });
   const drivers = new WeakMap<SshWorkerEntry, MachineDriver>();

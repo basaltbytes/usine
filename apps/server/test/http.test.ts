@@ -529,7 +529,8 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       const schemaId = "https://usine.example/openapi-test";
       registerSchema(document, schemaId, "https://spec.openapis.org/oas/3.1/dialect/base");
       yield* Effect.addFinalizer(() => Effect.sync(() => unregisterSchema(schemaId)));
-      const link = new URL(yield* services.authentication.link);
+      const currentLink = yield* services.authentication.link;
+      const link = new URL(currentLink);
       const session = yield* services.authentication.consumeLink(
         new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
       );
@@ -1161,18 +1162,19 @@ describe("operator HTTP API", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const { operator: client } = yield* HttpApiClient.make(OperatorApi);
-        assert.deepStrictEqual(yield* client.overview(), overview);
-        assert.deepStrictEqual(yield* client.agents(), [agentName]);
-        assert.deepStrictEqual(yield* client.configuration(), configurationView);
+        const currentOverview = yield* client.overview();
+        assert.deepStrictEqual(currentOverview, overview);
+        const currentAgents = yield* client.agents();
+        assert.deepStrictEqual(currentAgents, [agentName]);
+        const currentConfiguration = yield* client.configuration();
+        assert.deepStrictEqual(currentConfiguration, configurationView);
         const edit = EditAndRetry.make({
           task: AttemptTask.make("Fix the reviewed behavior"),
           agent: agentName,
         });
         yield* client.editAndRetry({ params: { runId }, payload: edit });
-        assert.deepStrictEqual(
-          yield* client.runAgain({ params: { runId }, payload: edit }),
-          opened,
-        );
+        const runAgainResult = yield* client.runAgain({ params: { runId }, payload: edit });
+        assert.deepStrictEqual(runAgainResult, opened);
         assert.deepStrictEqual(againEdits, [edit]);
         const input = SessionIntervention.make({
           attemptId: AttemptId.make("attempt/1"),
@@ -1191,27 +1193,25 @@ describe("operator HTTP API", () => {
           }),
         ];
         for (const query of requests) {
-          assert.deepStrictEqual(yield* client.detail({ params: { runId }, query }), detail);
+          const runDetail = yield* client.detail({ params: { runId }, query });
+          assert.deepStrictEqual(runDetail, detail);
         }
         assert.deepStrictEqual(observed, requests);
-        assert.deepStrictEqual(yield* client.githubChanges({ params: { runId } }), githubChanges);
-        assert.deepStrictEqual(
-          yield* client.task({
-            params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
-          }),
-          task,
-        );
-        assert.deepStrictEqual(
-          yield* client.project({ params: { project: ProjectId.make("workspace") } }),
-          overview.projects[0],
-        );
-        assert.deepStrictEqual(
-          yield* client.projectTask({
-            params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
-            query: { repository: repositoryName },
-          }),
-          task,
-        );
+        const currentGithubChanges = yield* client.githubChanges({ params: { runId } });
+        assert.deepStrictEqual(currentGithubChanges, githubChanges);
+        const currentTask = yield* client.task({
+          params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
+        });
+        assert.deepStrictEqual(currentTask, task);
+        const currentProject = yield* client.project({
+          params: { project: ProjectId.make("workspace") },
+        });
+        assert.deepStrictEqual(currentProject, overview.projects[0]);
+        const nextTask = yield* client.projectTask({
+          params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
+          query: { repository: repositoryName },
+        });
+        assert.deepStrictEqual(nextTask, task);
         const unrelatedProject = yield* client
           .projectTask({
             params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
@@ -1221,29 +1221,23 @@ describe("operator HTTP API", () => {
         assert.instanceOf(unrelatedProject, OperatorHttpError);
         assert.strictEqual(unrelatedProject.error, "BoardProjectNotFoundError");
         for (const action of ["dismissNeed", "undoDismissNeed"] as const) {
-          assert.deepStrictEqual(
-            yield* client[action]({
-              payload: AttentionKey.make({
-                id: "finding",
-                revision: AttentionRevision.make("revision"),
-              }),
+          const actionResult = yield* client[action]({
+            payload: AttentionKey.make({
+              id: "finding",
+              revision: AttentionRevision.make("revision"),
             }),
-            { ok: true },
-          );
+          });
+          assert.deepStrictEqual(actionResult, { ok: true });
         }
-        assert.deepStrictEqual(
-          yield* client.resetCycleBudget({
-            payload: { askId: CycleBudgetAskId.make("current-ask") },
-          }),
-          { ok: true },
-        );
-        assert.deepStrictEqual(
-          yield* client.resolveFailure({
-            params: { runId },
-            payload: { attemptId: AttemptId.make("attempt/1") },
-          }),
-          { ok: true },
-        );
+        const resetResult = yield* client.resetCycleBudget({
+          payload: { askId: CycleBudgetAskId.make("current-ask") },
+        });
+        assert.deepStrictEqual(resetResult, { ok: true });
+        const resolution = yield* client.resolveFailure({
+          params: { runId },
+          payload: { attemptId: AttemptId.make("attempt/1") },
+        });
+        assert.deepStrictEqual(resolution, { ok: true });
         const staleResolution = yield* Effect.flip(
           client.resolveFailure({
             params: { runId },
@@ -1253,20 +1247,20 @@ describe("operator HTTP API", () => {
         assert.instanceOf(staleResolution, OperatorHttpError);
         assert.strictEqual(staleResolution.status, 409);
         for (const action of ["approve", "retry", "cancel"] as const) {
-          assert.deepStrictEqual(yield* client[action]({ params: { runId } }), { ok: true });
+          const currentActionResult = yield* client[action]({ params: { runId } });
+          assert.deepStrictEqual(currentActionResult, { ok: true });
         }
         for (const action of ["pause", "unpause"] as const) {
-          assert.deepStrictEqual(yield* client[action]({ params: { loop: loopName } }), {
+          const nextActionResult = yield* client[action]({ params: { loop: loopName } });
+          assert.deepStrictEqual(nextActionResult, {
             ok: true,
           });
         }
-        assert.deepStrictEqual(
-          yield* client.moveBoardItem({
-            params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
-            payload: { toLane: BoardLaneId.make("authored:Review") },
-          }),
-          { ok: true },
-        );
+        const moveResult = yield* client.moveBoardItem({
+          params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
+          payload: { toLane: BoardLaneId.make("authored:Review") },
+        });
+        assert.deepStrictEqual(moveResult, { ok: true });
         const kept = yield* Effect.flip(
           client.discardLeftovers({ params: { worker: WorkerName.make("local") } }),
         );
@@ -1417,7 +1411,8 @@ describe("operator HTTP API", () => {
       try {
         const statuses = await Effect.runPromise(
           Effect.gen(function* () {
-            yield* Layer.build(serverLayer(backend, webRoot, port, yield* authFixture()));
+            const authentication = yield* authFixture();
+            yield* Layer.build(serverLayer(backend, webRoot, port, authentication));
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped),
         );

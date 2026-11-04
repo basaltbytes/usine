@@ -16,7 +16,8 @@ export const cursorContract = (adapter: PersistenceAdapter) => {
 
         yield* Effect.gen(function* () {
           const store = yield* CursorStore;
-          assert(Option.isNone(yield* store.read(key, TestCursor)));
+          const snapshot = yield* store.read(key, TestCursor);
+          assert(Option.isNone(snapshot));
           yield* store.write(key, TestCursor, { etag: "first" });
           yield* store.write(key, TestCursor, { etag: "second" });
         }).pipe(Effect.provide(fixture.open));
@@ -27,7 +28,8 @@ export const cursorContract = (adapter: PersistenceAdapter) => {
           assert(Option.isSome(restored));
           assert.deepStrictEqual(restored.value, { etag: "second" });
           // A stored value that no longer decodes reads as `None` instead of failing.
-          assert(Option.isNone(yield* store.read(key, StricterCursor)));
+          const snapshot = yield* store.read(key, StricterCursor);
+          assert(Option.isNone(snapshot));
         }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );

@@ -158,12 +158,11 @@ describe("PollingTriggers open-issue check", () => {
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-open-issues-",
-          }),
-        );
+        const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-open-issues-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const instance = instanceWith([loop]);
         let deleted = false;
         const asked: Array<ReadonlyArray<number>> = [];
@@ -228,7 +227,8 @@ describe("PollingTriggers open-issue check", () => {
           const board = yield* projectBoard(managed, [], stored, []);
           assert.deepStrictEqual(board.lanes[0]?.items, []);
           assert.strictEqual(board.lanes[1]?.items[0]?.state, "issue-closed");
-          assert.deepStrictEqual(yield* items.openIssues(repository), []);
+          const currentOpenIssues = yield* items.openIssues(repository);
+          assert.deepStrictEqual(currentOpenIssues, []);
         }).pipe(Effect.provide(processLayer(directory, github)));
         assert.deepStrictEqual(asked, [[28], [28]]);
       }).pipe(Effect.provide(NodeServices.layer)),

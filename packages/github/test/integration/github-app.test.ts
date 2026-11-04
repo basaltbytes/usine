@@ -39,7 +39,8 @@ const fetchJson = Effect.fn("integration.fetchJson")(function* <S extends Schema
     catch: (cause) => RequestFailed.make({ cause }),
   });
   if (!response.ok) return yield* Effect.die(`GitHub returned ${response.status}`);
-  return yield* Schema.decodeUnknownEffect(schema)(yield* Effect.promise(() => response.json()));
+  const responseBody = yield* Effect.promise(() => response.json());
+  return yield* Schema.decodeUnknownEffect(schema)(responseBody);
 });
 
 const deleteComment = Effect.fn("integration.deleteComment")(function* (

@@ -55,7 +55,8 @@ const makeSetup = Effect.fn("Setup.make")(function* (
       Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
     );
   const needsCredentials = Effect.gen(function* () {
-    if (Result.isSuccess(yield* credentials.pipe(Effect.result)))
+    const credentialsResult = yield* credentials.pipe(Effect.result);
+    if (Result.isSuccess(credentialsResult))
       return yield* authFailure(
         "This instance already has App credentials. Continue setup with the saved App.",
         409,

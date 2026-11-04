@@ -248,7 +248,8 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
       recordHolds(holds, ended, envelope);
       const isHeld = holds.size > 0;
       if (wasHeld === isHeld) return;
-      supervise(yield* Clock.currentTimeMillis);
+      const now = yield* Clock.currentTimeMillis;
+      supervise(now);
       yield* Effect.logInfo("Attempt wall-clock supervision changed", {
         attemptId,
         heldSessions: holds.size,
@@ -265,7 +266,8 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
         yield* Queue.take(changed);
         continue;
       }
-      const used = usedAt(yield* Clock.currentTimeMillis);
+      const now = yield* Clock.currentTimeMillis;
+      const used = usedAt(now);
       if (used >= until) return used;
       yield* Queue.take(changed).pipe(Effect.timeoutOption(until - used));
     }
@@ -273,7 +275,8 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   /** Records the unsupervised time if it grew since the last record; logs a failure. */
   const recordCounted = Effect.fn("AttemptGuard.recordUnsupervised")(function* () {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    const used = usedAt(yield* Clock.currentTimeMillis);
+    const now = yield* Clock.currentTimeMillis;
+    const used = usedAt(now);
     if (used <= recorded) {
       yield* Effect.logDebug("Attempt unsupervised time has not grown since its last record", {
         attemptId,
@@ -314,7 +317,8 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   const watch = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ attemptId });
     watching = true;
-    supervise(yield* Clock.currentTimeMillis);
+    const now = yield* Clock.currentTimeMillis;
+    supervise(now);
     if (!seed.warned.has("wall-clock")) {
       const used = yield* unsupervised(wallClock.warnAt);
       yield* warn(

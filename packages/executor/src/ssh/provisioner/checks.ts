@@ -74,7 +74,8 @@ export const machineChecksFor = (
   ) {
     const worker = machine.address.name;
     yield* Effect.annotateCurrentSpan({ worker, host: machine.shell.destination });
-    const now = DateTime.toEpochMillis(yield* DateTime.now);
+    const checkStartedAt = yield* DateTime.now;
+    const now = DateTime.toEpochMillis(checkStartedAt);
     const last = checkedOn.get(machine.address);
     const provisioner = machine.address.machine;
     if (provisioner._tag !== "Provisioned")
@@ -135,7 +136,8 @@ export const machineChecksFor = (
         message: "Machine reuse requires container isolation",
         cause: new Error(report.degraded.value),
       });
-    const checkedAt = DateTime.toEpochMillis(yield* DateTime.now);
+    const checkFinishedAt = yield* DateTime.now;
+    const checkedAt = DateTime.toEpochMillis(checkFinishedAt);
     checkedOn.set(machine.address, checkedAt);
     return Option.some(MachineCheck.make({ brains, containerLimits: report.containerLimits }));
   });

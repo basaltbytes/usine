@@ -191,7 +191,8 @@ export class GitHubApp extends Context.Service<
           .execute(request)
           .pipe(Effect.mapError((error) => transportError(operation, error)));
         if (response.status < 200 || response.status >= 300) {
-          const failure = statusError(operation, response, yield* Clock.currentTimeMillis);
+          const now = yield* Clock.currentTimeMillis;
+          const failure = statusError(operation, response, now);
           if (failure._tag === "GitHubRateLimitError") return yield* failure;
           const explained = yield* withGitHubReason(failure, response);
           return yield* explained;

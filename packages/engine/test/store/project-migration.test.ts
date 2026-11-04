@@ -98,16 +98,16 @@ it.effect(
           );
           expect(repeated.result).toMatchObject({ _tag: "Claimed", runId: submission.repository });
         }
-        expect(
-          yield* sql`SELECT loop_name, paused FROM usine_loop_runtime ORDER BY loop_name`,
-        ).toEqual([
+        const currentRows =
+          yield* sql`SELECT loop_name, paused FROM usine_loop_runtime ORDER BY loop_name`;
+        expect(currentRows).toEqual([
           { loop_name: "acme-one/implement", paused: 1 },
           { loop_name: "acme-one/review", paused: 1 },
           { loop_name: "acme-two/implement", paused: 1 },
         ]);
-        expect(
-          yield* sql`SELECT json_extract(revision, '$.ask.loop') AS loop FROM usine_attention_acknowledgements ORDER BY loop`,
-        ).toEqual([{ loop: "acme-one/implement" }, { loop: "acme-two/implement" }]);
+        const nextRows =
+          yield* sql`SELECT json_extract(revision, '$.ask.loop') AS loop FROM usine_attention_acknowledgements ORDER BY loop`;
+        expect(nextRows).toEqual([{ loop: "acme-one/implement" }, { loop: "acme-two/implement" }]);
       }),
     ),
 );

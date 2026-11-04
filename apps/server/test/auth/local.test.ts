@@ -8,12 +8,12 @@ it("reads an owned admin token and rejects a different or unknown owner", async 
   Effect.runPromise(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-admin-owner-" }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-admin-owner-" });
+      const directory = InstanceDirectory.make(currentDirectory);
       yield* fs.makeDirectory(`${directory}/.usine`);
       const token = yield* writeAdminToken(directory);
-      assert.equal(Redacted.value(yield* readAdminToken(directory)), Redacted.value(token));
+      const adminToken = yield* readAdminToken(directory);
+      assert.equal(Redacted.value(adminToken), Redacted.value(token));
       for (const uid of [Option.some((process.getuid?.() ?? 0) + 1), Option.none<number>()]) {
         const error = yield* readAdminToken(directory).pipe(
           Effect.provideService(FileSystem.FileSystem, {

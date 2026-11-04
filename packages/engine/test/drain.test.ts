@@ -44,10 +44,8 @@ describe("engine drain", () => {
           ]);
           const runtime = engineLayer(directory, executorLayer(plans));
           const firstScope = yield* Scope.make();
-          const first = Context.get(
-            yield* Scope.provide(Layer.build(runtime), firstScope),
-            RunEngine,
-          );
+          const services = yield* Scope.provide(Layer.build(runtime), firstScope);
+          const first = Context.get(services, RunEngine);
           const accepted = yield* first.submit(submission({ number: 42 }));
           assert(accepted._tag === "Claimed");
           yield* Deferred.await(started);
@@ -65,14 +63,13 @@ describe("engine drain", () => {
           yield* Scope.close(firstScope, Exit.void);
 
           const secondScope = yield* Scope.make();
-          const second = Context.get(
-            yield* Scope.provide(Layer.build(runtime), secondScope),
-            RunEngine,
-          );
+          const currentServices = yield* Scope.provide(Layer.build(runtime), secondScope);
+          const second = Context.get(currentServices, RunEngine);
           for (const pending of [queued, next]) {
+            const currentRunId = yield* runIdFor(pending);
             const completed = yield* waitFor(
               second,
-              yield* runIdFor(pending),
+              currentRunId,
               ({ run }) => run.state._tag === "Succeeded",
             );
             assert.strictEqual(completed.attempts.length, 1);
@@ -94,10 +91,8 @@ describe("engine drain", () => {
           ]);
           const runtime = engineLayer(directory, executorLayer(plans));
           const firstScope = yield* Scope.make();
-          const first = Context.get(
-            yield* Scope.provide(Layer.build(runtime), firstScope),
-            RunEngine,
-          );
+          const services = yield* Scope.provide(Layer.build(runtime), firstScope);
+          const first = Context.get(services, RunEngine);
           const accepted = yield* first.submit(submission({ number: 48 }));
           assert(accepted._tag === "Claimed");
           yield* Deferred.await(entered);
@@ -106,12 +101,10 @@ describe("engine drain", () => {
           const stopped = yield* Deferred.make<void>();
           yield* Deferred.succeed(stopped, undefined);
           const secondScope = yield* Scope.make();
-          const second = Context.get(
-            yield* Scope.provide(Layer.build(runtime), secondScope).pipe(
-              Effect.provideService(RunEngineShutdown, stopped),
-            ),
-            RunEngine,
+          const currentServices = yield* Scope.provide(Layer.build(runtime), secondScope).pipe(
+            Effect.provideService(RunEngineShutdown, stopped),
           );
+          const second = Context.get(currentServices, RunEngine);
           yield* second.drain;
           assert.strictEqual((yield* second.inspect(accepted.runId)).attempts.length, 1);
           assert.strictEqual((yield* Ref.get(plans)).length, 1);
@@ -148,10 +141,8 @@ describe("engine drain", () => {
           ]);
           const runtime = engineLayer(directory, executorLayer(plans));
           const firstScope = yield* Scope.make();
-          const first = Context.get(
-            yield* Scope.provide(Layer.build(runtime), firstScope),
-            RunEngine,
-          );
+          const services = yield* Scope.provide(Layer.build(runtime), firstScope);
+          const first = Context.get(services, RunEngine);
           const accepted = yield* first.submit(submission({ number: 45 }));
           assert(accepted._tag === "Claimed");
           yield* Deferred.await(started);
@@ -162,10 +153,8 @@ describe("engine drain", () => {
           assert.strictEqual((yield* Ref.get(plans)).length, 1);
           yield* Scope.close(firstScope, Exit.void);
           const secondScope = yield* Scope.make();
-          const second = Context.get(
-            yield* Scope.provide(Layer.build(runtime), secondScope),
-            RunEngine,
-          );
+          const currentServices = yield* Scope.provide(Layer.build(runtime), secondScope);
+          const second = Context.get(currentServices, RunEngine);
           const completed = yield* waitFor(
             second,
             accepted.runId,
@@ -225,7 +214,8 @@ it.live(
             );
             assert(Option.isSome(status));
             assert.strictEqual(status.value.wait.target, "1.2.3");
-            assert.strictEqual(yield* TxRef.get(f.leased), 1);
+            const leasedState = yield* TxRef.get(f.leased);
+            assert.strictEqual(leasedState, 1);
             assert.strictEqual(
               drain.pollUnsafe(),
               undefined,
@@ -243,8 +233,10 @@ it.live(
                 until: (count) => count === 3,
               }),
             );
-            assert.strictEqual(yield* TxRef.get(f.leased), 4);
-            assert(Option.isNone(yield* engine.upgradeDrain));
+            const currentLeasedState = yield* TxRef.get(f.leased);
+            assert.strictEqual(currentLeasedState, 4);
+            const currentUpgradeDrain = yield* engine.upgradeDrain;
+            assert(Option.isNone(currentUpgradeDrain));
             yield* Deferred.succeed(finish, undefined);
           }).pipe(Effect.provide(engineLayer(directory, f.executor)));
         }),

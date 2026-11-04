@@ -19,19 +19,12 @@
     "schemaClassMissingBrand": 2
   },
   "src/sandbox/sandbox.ts": {
-    "asyncFunction": 1,
-    "yieldInCallArgument": 4
-  },
-  "src/sandbox/stream.ts": {
-    "yieldInCallArgument": 2
+    "asyncFunction": 1
   },
   "src/worker.ts": {
     "asyncFunction": 14,
     "globalFetch": 3,
     "schemaSync": 5
-  },
-  "test/access.test.ts": {
-    "yieldInCallArgument": 4
   },
   "test/image.test.ts": {
     "asyncFunction": 1,

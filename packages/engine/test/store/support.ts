@@ -12,12 +12,11 @@ export { lifecycleSubmission, testAgent } from "./fixtures.ts";
 export const withRunStore = <A, E>(effect: Effect.Effect<A, E, RunStore | SqlClient.SqlClient>) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fileSystem.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-store-lifecycle-",
-      }),
-    );
+    const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+      prefix: "usine-store-lifecycle-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     return yield* effect.pipe(
       Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
     );

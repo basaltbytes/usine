@@ -766,7 +766,8 @@ describe("Claude child backend", () => {
       );
       yield* Effect.yieldNow;
       yield* Scope.close(owner, Exit.void);
-      assert.strictEqual(yield* Effect.promise(() => settled), "interrupted");
+      const responseBody = yield* Effect.promise(() => settled);
+      assert.strictEqual(responseBody, "interrupted");
     }).pipe(Effect.scoped),
   );
 
@@ -952,9 +953,10 @@ describe("Claude child backend", () => {
     const host = exitingHost(SSH_FAILURE);
     return Effect.gen(function* () {
       const session = yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
-      const [events, result] = yield* joinAdvancingClock(
-        yield* Effect.forkChild(Effect.all([Stream.runCollect(session.events), session.result])),
+      const fiber = yield* Effect.forkChild(
+        Effect.all([Stream.runCollect(session.events), session.result]),
       );
+      const [events, result] = yield* joinAdvancingClock(fiber);
       assert.strictEqual(result.message, "Tests pass.", "the same child returns the answer");
       assert.deepStrictEqual(resumed, ["claude-session-1"]);
       assert.match(prompts[0] ?? "", /^usine lost its connection to this session/u);
@@ -1014,7 +1016,8 @@ describe("Claude child backend", () => {
       const session = yield* (yield* ChildBackend).launch(
         request(undefined, undefined, exitingHost(SSH_FAILURE)),
       );
-      const error = yield* joinAdvancingClock(yield* Effect.forkChild(Effect.flip(session.result)));
+      const fiber = yield* Effect.forkChild(Effect.flip(session.result));
+      const error = yield* joinAdvancingClock(fiber);
       const matchesError = Schema.is(SessionOperationError)(error);
       assert(matchesError);
       assert.strictEqual(error.message, "Claude output stream failed");

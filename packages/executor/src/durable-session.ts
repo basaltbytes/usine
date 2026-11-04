@@ -263,7 +263,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     io: AttemptChannel.Sink,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    yield* recordComments(attemptId, yield* checkout.harvestComments(io.windows), io.comments);
+    const harvestedComments = yield* checkout.harvestComments(io.windows);
+    yield* recordComments(attemptId, harvestedComments, io.comments);
   });
 
   /**
@@ -337,12 +338,13 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         settled,
       });
       yield* Deferred.succeed(registration(attemptId), undefined);
+      const gatewayCredential = yield* checkout.gatewayCredential;
       yield* Effect.logInfo("Running the Attempt's parent task", {
         attemptId,
         worker: prepared.worker,
         worktree: prepared.worktree,
         childHost: checkout.host._tag,
-        gatewayCredential: Option.getOrElse(yield* checkout.gatewayCredential, () => "none"),
+        gatewayCredential: Option.getOrElse(gatewayCredential, () => "none"),
       });
       const running = yield* runtime
         .execute(
@@ -549,11 +551,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       action: intervention.action._tag,
     });
     const active = attempts.get(attemptId);
-    if (
-      active === undefined ||
-      (yield* Deferred.isDone(active.settled)) ||
-      Option.isSome(yield* Ref.get(active.stopping))
-    )
+    const settled = active === undefined || (yield* Deferred.isDone(active.settled));
+    const stopping = settled ? Option.none() : yield* Ref.get(active.stopping);
+    if (settled || Option.isSome(stopping))
       return yield* AgentFailure.make({
         message: "This attempt has no live session in this orchestrator",
       });

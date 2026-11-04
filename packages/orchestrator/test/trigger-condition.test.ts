@@ -172,8 +172,10 @@ describe("TriggerCondition", () => {
       yield* TestClock.adjust("4 seconds");
       assert.isUndefined(fiber.pollUnsafe());
       yield* TestClock.adjust("1 second");
-      assert.strictEqual(yield* Fiber.join(fiber), "matches");
-      assert.isTrue(yield* Deferred.isDone(interrupted));
+      const fiberResult = yield* Fiber.join(fiber);
+      assert.strictEqual(fiberResult, "matches");
+      const interruptedDone = yield* Deferred.isDone(interrupted);
+      assert.isTrue(interruptedDone);
     }),
   );
 
@@ -202,12 +204,14 @@ describe("TriggerCondition", () => {
         const submission = submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]');
         yield* Effect.gen(function* () {
           const condition = yield* TriggerCondition;
-          assert.strictEqual(yield* condition.recheck(submission), "matches");
+          const triggerMatch = yield* condition.recheck(submission);
+          assert.strictEqual(triggerMatch, "matches");
           yield* SubscriptionRef.set(
             current,
             LoadedInstance.make({ ...instance, loops: [issueLoop] }),
           );
-          assert.strictEqual(yield* condition.recheck(submission), "no-longer-matches");
+          const currentTriggerMatch = yield* condition.recheck(submission);
+          assert.strictEqual(currentTriggerMatch, "no-longer-matches");
         }).pipe(Effect.provide(layerWith(failingGitHub, reloadable)));
       }),
   );

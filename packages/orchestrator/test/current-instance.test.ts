@@ -58,9 +58,10 @@ const withFolder = <A, E>(
   ) => Effect.Effect<A, E, CurrentInstance | FileSystem.FileSystem | Path.Path>,
 ) =>
   Effect.gen(function* () {
-    const root = InstanceDirectory.make(
-      yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({ prefix: "usine-reload-" }),
-    );
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+      prefix: "usine-reload-",
+    });
+    const root = InstanceDirectory.make(directory);
     yield* writeInstanceFiles(root, initialFiles);
     return yield* test(root).pipe(Effect.provide(reloadableInstanceLayer(root)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
@@ -182,7 +183,8 @@ describe("CurrentInstance", () => {
         assert(failure._tag === "FactoryConfigError", failure._tag);
         assert.strictEqual(failure.file, ".usine/runtime.sqlite");
         assert.include(warnings, "Could not re-read the configuration store");
-        assert.strictEqual(yield* instances.get, running);
+        const currentInstance = yield* instances.get;
+        assert.strictEqual(currentInstance, running);
       }),
     ),
   );
@@ -201,7 +203,8 @@ describe("CurrentInstance", () => {
         assert.deepStrictEqual(failure.blocks, ["workers"]);
         assert.deepStrictEqual(failure.fields, ["workers"]);
         assert.include(failure.message, "Restart usine up");
-        assert.strictEqual(yield* instances.get, running);
+        const currentInstance = yield* instances.get;
+        assert.strictEqual(currentInstance, running);
       }),
     ),
   );
@@ -222,7 +225,8 @@ describe("CurrentInstance", () => {
         assert(failure._tag === "RestartRequiredError", failure._tag);
         assert.deepStrictEqual(failure.fields, ["tracing", "auth"]);
         assert.include(failure.message, "the tracing block changed; the auth block changed");
-        assert.strictEqual(yield* instances.get, running);
+        const currentInstance = yield* instances.get;
+        assert.strictEqual(currentInstance, running);
       }).pipe(Effect.scoped),
     ),
   );
@@ -266,7 +270,8 @@ describe("CurrentInstance", () => {
         assert.deepStrictEqual(failure.agents, [AgentName.make("reviewer")]);
         assert.include(failure.message, "Claude Code is not logged in");
         assert.include(failure.message, "The running configuration is unchanged");
-        assert.strictEqual(yield* instances.get, running);
+        const currentInstance = yield* instances.get;
+        assert.strictEqual(currentInstance, running);
       }).pipe(Effect.scoped),
     ),
   );

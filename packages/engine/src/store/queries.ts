@@ -338,7 +338,8 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     attemptId: AttemptId,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    return EffectArray.head(yield* recoveries(eq(attempts.attemptId, attemptId)));
+    const recoveryRows = yield* recoveries(eq(attempts.attemptId, attemptId));
+    return EffectArray.head(recoveryRows);
   });
 
   const attemptRows = Effect.fn("RunStoreQueries.attemptRows")(function* (runId: RunId) {
@@ -581,14 +582,13 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
   });
 
   const revision = Effect.fn("RunStoreQueries.projectionRevision")(function* () {
-    const rows = yield* decodeProjectionRevision(
-      yield* database
-        .select({ revision: projectionRevision.revision })
-        .from(projectionRevision)
-        .where(eq(projectionRevision.singleton, 1))
-        .limit(1)
-        .execute(),
-    );
+    const storedRows = yield* database
+      .select({ revision: projectionRevision.revision })
+      .from(projectionRevision)
+      .where(eq(projectionRevision.singleton, 1))
+      .limit(1)
+      .execute();
+    const rows = yield* decodeProjectionRevision(storedRows);
     return Option.fromNullishOr(rows[0]?.revision);
   });
 
@@ -935,55 +935,51 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
   });
 
   const runForEvent = Effect.fn("RunStoreQueries.runForEvent")(function* (eventId: EventId) {
-    return yield* decodeRunIds(
-      yield* database
-        .select({ runId: runs.runId })
-        .from(runs)
-        .where(eq(runs.eventId, eventId))
-        .execute(),
-    );
+    const rows = yield* database
+      .select({ runId: runs.runId })
+      .from(runs)
+      .where(eq(runs.eventId, eventId))
+      .execute();
+    return yield* decodeRunIds(rows);
   });
 
   const ignoredEvent = Effect.fn("RunStoreQueries.ignoredEvent")(function* (eventId: EventId) {
-    return yield* decodeDiscards(
-      yield* database
-        .select({ reason: ignoredEvents.reason })
-        .from(ignoredEvents)
-        .where(eq(ignoredEvents.eventId, eventId))
-        .execute(),
-    );
+    const rows = yield* database
+      .select({ reason: ignoredEvents.reason })
+      .from(ignoredEvents)
+      .where(eq(ignoredEvents.eventId, eventId))
+      .execute();
+    return yield* decodeDiscards(rows);
   });
 
   const blockingRun = Effect.fn("RunStoreQueries.blockingRun")(function* (
     loop: LoopName,
     itemKey: ItemKey,
   ) {
-    return yield* decodeRunIds(
-      yield* database
-        .select({ runId: runs.runId })
-        .from(runs)
-        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-        .where(and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), openState))
-        .orderBy(desc(runs.openedAt))
-        .limit(1)
-        .execute(),
-    );
+    const rows = yield* database
+      .select({ runId: runs.runId })
+      .from(runs)
+      .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+      .where(and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), openState))
+      .orderBy(desc(runs.openedAt))
+      .limit(1)
+      .execute();
+    return yield* decodeRunIds(rows);
   });
 
   /** Returns the newest reopening of `eventId` (#267), with its reopening number. */
   const newestReopening = Effect.fn("RunStoreQueries.newestReopening")(function* (
     eventId: EventId,
   ) {
-    const rows = yield* decodeReopenings(
-      yield* database
-        .select({ ...eventRouteSelection, reopening: triggerEvents.reopening })
-        .from(events)
-        .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
-        .where(eq(triggerEvents.reopensEventId, eventId))
-        .orderBy(desc(triggerEvents.reopening))
-        .limit(1)
-        .execute(),
-    );
+    const storedRows = yield* database
+      .select({ ...eventRouteSelection, reopening: triggerEvents.reopening })
+      .from(events)
+      .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
+      .where(eq(triggerEvents.reopensEventId, eventId))
+      .orderBy(desc(triggerEvents.reopening))
+      .limit(1)
+      .execute();
+    const rows = yield* decodeReopenings(storedRows);
     return Option.map(Option.fromNullishOr(rows[0]), (row) => ({
       submission: submissionFromRow(row),
       reopening: row.reopening,
@@ -993,14 +989,13 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
   /** Returns the trigger Event that `eventId` reopens or runs again, or `None` for a trigger's own Event. */
   const reopenedEvent = Effect.fn("RunStoreQueries.reopenedEvent")(function* (eventId: EventId) {
     const reopened = alias(events, "reopened_event");
-    const rows = yield* decodeReopenedEvents(
-      yield* database
-        .select({ eventId: reopened.eventId, dedupKey: reopened.dedupKey })
-        .from(triggerEvents)
-        .innerJoin(reopened, eq(reopened.eventId, triggerEvents.reopensEventId))
-        .where(eq(triggerEvents.eventId, eventId))
-        .execute(),
-    );
+    const storedRows = yield* database
+      .select({ eventId: reopened.eventId, dedupKey: reopened.dedupKey })
+      .from(triggerEvents)
+      .innerJoin(reopened, eq(reopened.eventId, triggerEvents.reopensEventId))
+      .where(eq(triggerEvents.eventId, eventId))
+      .execute();
+    const rows = yield* decodeReopenedEvents(storedRows);
     return Option.fromNullishOr(rows[0]);
   });
 
@@ -1160,16 +1155,15 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     const closed = yield* Effect.forEach(decoded, ({ loop, itemKey }) =>
       Effect.gen(function* () {
         if ((yield* blockingRun(loop, itemKey)).length > 0) return [];
-        return yield* decodeRunIds(
-          yield* database
-            .select({ runId: runs.runId })
-            .from(runs)
-            .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-            .where(and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey)))
-            .orderBy(desc(runs.openedAt), desc(runs.runId))
-            .limit(1)
-            .execute(),
-        );
+        const rows = yield* database
+          .select({ runId: runs.runId })
+          .from(runs)
+          .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+          .where(and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey)))
+          .orderBy(desc(runs.openedAt), desc(runs.runId))
+          .limit(1)
+          .execute();
+        return yield* decodeRunIds(rows);
       }),
     );
     return closed.flat().map(({ runId }) => runId);
@@ -1211,16 +1205,15 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     loop: LoopName,
     itemKey: ItemKey,
   ) {
-    const rows = yield* decodeRunIds(
-      yield* database
-        .select({ runId: runs.runId })
-        .from(runs)
-        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-        .where(
-          and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), unstartedState),
-        )
-        .execute(),
-    );
+    const storedRows = yield* database
+      .select({ runId: runs.runId })
+      .from(runs)
+      .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+      .where(
+        and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), unstartedState),
+      )
+      .execute();
+    const rows = yield* decodeRunIds(storedRows);
     const queued = database
       .select({ eventId: triggerEvents.eventId })
       .from(triggerEvents)

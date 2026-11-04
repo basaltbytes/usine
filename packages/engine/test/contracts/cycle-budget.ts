@@ -44,8 +44,10 @@ export const cycleBudgetContract = (adapter: PersistenceAdapter) => {
           );
           assert(blocked.result._tag === "CycleBlocked");
           const ask = blocked.result.ask;
-          assert.deepStrictEqual(yield* budgets.asks, [ask]);
-          assert.strictEqual(yield* budgets.generation(first.itemKey), 0);
+          const currentAsks = yield* budgets.asks;
+          assert.deepStrictEqual(currentAsks, [ask]);
+          const currentGeneration = yield* budgets.generation(first.itemKey);
+          assert.strictEqual(currentGeneration, 0);
           const answer = Event.make({
             ...event,
             id: EventId.make("budget-answer"),
@@ -54,22 +56,27 @@ export const cycleBudgetContract = (adapter: PersistenceAdapter) => {
           yield* Effect.all([budgets.reset(ask.id, answer), budgets.reset(ask.id, answer)], {
             concurrency: "unbounded",
           });
-          assert.strictEqual(yield* budgets.generation(first.itemKey), 1);
-          assert.deepStrictEqual(yield* budgets.asks, []);
+          const nextGeneration = yield* budgets.generation(first.itemKey);
+          assert.strictEqual(nextGeneration, 1);
+          const nextAsks = yield* budgets.asks;
+          assert.deepStrictEqual(nextAsks, []);
           const [reset] = yield* budgets.pendingResets;
           assert(reset !== undefined);
           yield* budgets.acknowledgeReset(
             CycleBudgetReset.make({ ...reset, generation: CycleGeneration.make(0) }),
           );
-          assert.deepStrictEqual(yield* budgets.pendingResets, [reset]);
+          const currentPendingResets = yield* budgets.pendingResets;
+          assert.deepStrictEqual(currentPendingResets, [reset]);
           yield* budgets.acknowledgeReset(reset);
           yield* budgets.acknowledgeReset(reset);
-          assert.deepStrictEqual(yield* budgets.pendingResets, []);
+          const nextPendingResets = yield* budgets.pendingResets;
+          assert.deepStrictEqual(nextPendingResets, []);
           assert.strictEqual(
             (yield* budgets.reset(ask.id, event).pipe(Effect.flip))._tag,
             "CycleBudgetResetRejectedError",
           );
-          assert.strictEqual(yield* budgets.close(ask.id, "ItemClosed"), false);
+          const closed = yield* budgets.close(ask.id, "ItemClosed");
+          assert.strictEqual(closed, false);
         }),
       ),
     );

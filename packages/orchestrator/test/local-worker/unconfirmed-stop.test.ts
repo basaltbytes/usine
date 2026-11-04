@@ -139,11 +139,10 @@ describe("local worker checkout after an unconfirmed stop", () => {
               );
               assert.isTrue(Option.isNone(failed.salvage));
               const worktree = yield* checkoutOf(instance, failed.id);
-              assert.strictEqual(
-                yield* fileSystem.readFileString(join(worktree, "progress.md")),
-                "half done\n",
-              );
-              assert.strictEqual(yield* unconfirmedCount, 1);
+              const contents = yield* fileSystem.readFileString(join(worktree, "progress.md"));
+              assert.strictEqual(contents, "half done\n");
+              const unconfirmedStops = yield* unconfirmedCount;
+              assert.strictEqual(unconfirmedStops, 1);
 
               // Once a retried stop succeeds, the checkout is salvaged and removed, and the retry
               // resumes from the salvage.
@@ -152,13 +151,15 @@ describe("local worker checkout after an unconfirmed stop", () => {
               assert.lengthOf(delivered.attempts, 2);
               const salvage = yield* waitForSalvage(engine, accepted.runId);
               assert(salvage._tag === "Pushed");
-              assert.include(yield* pushedFiles(remote, salvage), "progress.md");
+              const salvagedFiles = yield* pushedFiles(remote, salvage);
+              assert.include(salvagedFiles, "progress.md");
               yield* removed(worktree);
               assert.deepStrictEqual((yield* Ref.get(resumed)).map(Option.map(({ ref }) => ref)), [
                 Option.none(),
                 Option.some(salvage.ref),
               ]);
-              assert.strictEqual(yield* unconfirmedCount, 0);
+              const currentUnconfirmedStops = yield* unconfirmedCount;
+              assert.strictEqual(currentUnconfirmedStops, 0);
             }),
         ).pipe(Effect.provideService(ReconcileInterval, "50 millis"));
       }),
@@ -171,9 +172,8 @@ describe("local worker checkout after an unconfirmed stop", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const instance = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({ prefix: "usine-kept-comments-" }),
-        );
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-kept-comments-" });
+        const instance = InstanceDirectory.make(directory);
         const remote = yield* makeRemote(instance);
         const unstoppable = yield* Ref.make(true);
         const cancels = yield* Ref.make(0);
@@ -182,6 +182,7 @@ describe("local worker checkout after an unconfirmed stop", () => {
         const parent: StubParent = (context) =>
           Effect.gen(function* () {
             if (!(yield* Ref.getAndSet(first, false))) return yield* completes(context);
+            const currentNow = yield* DateTime.now;
             yield* fs
               .writeFileString(
                 join(context.request.cwd, ".test-review.json"),
@@ -191,7 +192,7 @@ describe("local worker checkout after an unconfirmed stop", () => {
                   body: `Review completed.\n\n${githubSignature(context.request.spec.agent.name)}`,
                   user: { login: "usine-test[bot]" },
                   state: "COMMENTED",
-                  submitted_at: DateTime.formatIso(yield* DateTime.now),
+                  submitted_at: DateTime.formatIso(currentNow),
                 }),
               )
               .pipe(Effect.orDie);
@@ -325,7 +326,8 @@ describe("local worker checkout after an unconfirmed stop", () => {
                   );
                 } else {
                   assert(Option.isSome(failed.salvage) && failed.salvage.value._tag === "Pushed");
-                  assert.include(yield* pushedFiles(remote, failed.salvage.value), "committed.md");
+                  const salvagedFiles = yield* pushedFiles(remote, failed.salvage.value);
+                  assert.include(salvagedFiles, "committed.md");
                 }
               }),
           ).pipe(Effect.provideService(ReconcileInterval, "50 millis"));
@@ -362,15 +364,14 @@ describe("local worker checkout after an unconfirmed stop", () => {
               const canceled = yield* engine.inspect(accepted.runId);
               assert.strictEqual(canceled.run.state._tag, "Canceled");
               assert.isTrue(canceled.attempts.every(({ salvage }) => Option.isNone(salvage)));
-              assert.strictEqual(
-                yield* fileSystem.readFileString(join(worktree, "progress.md")),
-                "half done\n",
-              );
+              const contents = yield* fileSystem.readFileString(join(worktree, "progress.md"));
+              assert.strictEqual(contents, "half done\n");
 
               yield* Ref.set(unstoppable, false);
               const salvage = yield* waitForSalvage(engine, accepted.runId);
               assert(salvage._tag === "Pushed");
-              assert.include(yield* pushedFiles(remote, salvage), "progress.md");
+              const salvagedFiles = yield* pushedFiles(remote, salvage);
+              assert.include(salvagedFiles, "progress.md");
               yield* removed(worktree);
             }),
         ).pipe(Effect.provideService(ReconcileInterval, "50 millis"));

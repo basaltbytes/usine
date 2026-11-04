@@ -13,20 +13,20 @@ describe("Access service token check", () => {
       const granted = (headers: Record<string, string>) =>
         accessGranted(new Headers(headers), token);
 
-      expect(
-        yield* granted({
-          "CF-Access-Client-Id": "0123abcd.access",
-          "CF-Access-Client-Secret": "service-token-secret",
-        }),
-      ).toBe(true);
-      expect(yield* granted({})).toBe(false);
-      expect(yield* granted({ "CF-Access-Client-Id": "0123abcd.access" })).toBe(false);
-      expect(
-        yield* granted({
-          "CF-Access-Client-Id": "0123abcd.access",
-          "CF-Access-Client-Secret": "service-token-secreT",
-        }),
-      ).toBe(false);
+      const authorized = yield* granted({
+        "CF-Access-Client-Id": "0123abcd.access",
+        "CF-Access-Client-Secret": "service-token-secret",
+      });
+      expect(authorized).toBe(true);
+      const currentAuthorized = yield* granted({});
+      expect(currentAuthorized).toBe(false);
+      const nextAuthorized = yield* granted({ "CF-Access-Client-Id": "0123abcd.access" });
+      expect(nextAuthorized).toBe(false);
+      const updatedAuthorized = yield* granted({
+        "CF-Access-Client-Id": "0123abcd.access",
+        "CF-Access-Client-Secret": "service-token-secreT",
+      });
+      expect(updatedAuthorized).toBe(false);
     }),
   );
 });

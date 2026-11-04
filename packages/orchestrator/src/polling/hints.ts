@@ -30,7 +30,8 @@ const make = Effect.gen(function* () {
     requestBackoff: Option.Option<DateTime.Utc> = Option.none(),
   ) {
     yield* Effect.annotateCurrentSpan({ repository, item: item?.number });
-    yield* Ref.set(lastHint, Option.some(yield* DateTime.now));
+    const observedAt = yield* DateTime.now;
+    yield* Ref.set(lastHint, Option.some(observedAt));
     yield* defer(requestBackoff);
     const hint = { repository, item: Option.fromUndefinedOr(item) };
     const id = key(hint);

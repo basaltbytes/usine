@@ -162,6 +162,7 @@ const pullRequestParent =
 const reviewedParent: StubParent = ({ request }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
+    const currentNow = yield* DateTime.now;
     yield* fileSystem.writeFileString(
       `${request.cwd}/.test-review.json`,
       JSON.stringify({
@@ -170,7 +171,7 @@ const reviewedParent: StubParent = ({ request }) =>
         body: `No findings.\n\n${githubSignature(request.spec.agent.name)}`,
         user: { login: "usine-test[bot]" },
         state: "COMMENTED",
-        submitted_at: DateTime.formatIso(yield* DateTime.now),
+        submitted_at: DateTime.formatIso(currentNow),
       }),
     );
     return AttemptReport.make({
@@ -241,9 +242,8 @@ describe("local worker", () => {
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const instance = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({ prefix: "usine-preflight-" }),
-        );
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-preflight-" });
+        const instance = InstanceDirectory.make(directory);
         const runtime = localLayer(instance, config, [testAgent.brain], {
           harnessReadiness: harnessUnavailable,
         }).pipe(
@@ -496,10 +496,8 @@ describe("local worker", () => {
           const result = yield* Fiber.join(running);
           assert.strictEqual(result.message, "Completed: Complete local task 7");
           assert.throws(() => Redacted.value(credential));
-          assert.deepStrictEqual(
-            yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
-            [],
-          );
+          const entries = yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`);
+          assert.deepStrictEqual(entries, []);
         }).pipe(Effect.provide(runtime));
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
@@ -607,10 +605,10 @@ describe("local worker", () => {
             }
             assert.throws(() => Redacted.value(credential));
             assert(!(yield* fileSystem.exists(staging)));
-            assert.deepStrictEqual(
-              yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
-              [],
+            const entries = yield* fileSystem.readDirectory(
+              `${root}/.usine/workers/local/attempts`,
             );
+            assert.deepStrictEqual(entries, []);
           }).pipe(Effect.provide(runtime));
         }
       }).pipe(Effect.provide(NodeServices.layer)),
@@ -788,8 +786,10 @@ describe("local worker", () => {
           "--porcelain",
         ]);
         assert(!registrationsAfter.includes(abandoned));
-        assert(yield* fileSystem.exists(turboMarker));
-        assert(yield* fileSystem.exists(strayFile));
+        const currentExists = yield* fileSystem.exists(turboMarker);
+        assert(currentExists);
+        const nextExists = yield* fileSystem.exists(strayFile);
+        assert(nextExists);
         const skipped = logs.filter(({ message }) =>
           message.includes("Skipping a non-cache entry during the local cache sweep"),
         );
@@ -1183,10 +1183,10 @@ describe("local worker", () => {
             const next = yield* engine.submit(submission(2));
             assert(next._tag === "Claimed");
             yield* waitFor(engine, next.runId, "Succeeded");
-            assert.deepStrictEqual(
-              yield* engine.transcript(TranscriptAllQuery.make({ attemptId: attempt.id })),
-              [],
+            const currentTranscript = yield* engine.transcript(
+              TranscriptAllQuery.make({ attemptId: attempt.id }),
             );
+            assert.deepStrictEqual(currentTranscript, []);
           }),
         );
       }),

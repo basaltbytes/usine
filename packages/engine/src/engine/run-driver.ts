@@ -255,7 +255,8 @@ export class RunDriver extends Context.Service<
         submission: Submission,
       ) {
         yield* Effect.annotateCurrentSpan({ runId: closedRunId, itemKey: submission.itemKey });
-        return yield* items.markGone(submission.itemKey, yield* DateTime.now).pipe(
+        const observedAt = yield* DateTime.now;
+        return yield* items.markGone(submission.itemKey, observedAt).pipe(
           retryingStore(closedRunId, "mark the item's projection gone"),
           Effect.catch((error) =>
             Effect.logWarning(
@@ -431,13 +432,19 @@ export class RunDriver extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ runId, worker });
         const open = yield* current;
-        if (Option.isNone(reattaching(open)) && Option.isSome(yield* stopBlocking(submission))) {
-          yield* Effect.logInfo("Run waits for an unconfirmed stop after reserving a worker slot", {
-            runId,
-            worker,
-            itemKey: submission.itemKey,
-          });
-          return "WaitingForStop";
+        if (Option.isNone(reattaching(open))) {
+          const blockingStop = yield* stopBlocking(submission);
+          if (Option.isSome(blockingStop)) {
+            yield* Effect.logInfo(
+              "Run waits for an unconfirmed stop after reserving a worker slot",
+              {
+                runId,
+                worker,
+                itemKey: submission.itemKey,
+              },
+            );
+            return "WaitingForStop";
+          }
         }
         if (Option.isSome(open) && open.value._tag === "Finished") {
           const finished = yield* store
@@ -546,8 +553,8 @@ export class RunDriver extends Context.Service<
         const retry = pendingProviderRetry(snapshot.run.state, snapshot.attempts);
         if (Option.isNone(retry)) return;
         const { retryAt, nextAttempt, message } = retry.value;
-        const delayMillis =
-          DateTime.toEpochMillis(retryAt) - DateTime.toEpochMillis(yield* DateTime.now);
+        const observedAt = yield* DateTime.now;
+        const delayMillis = DateTime.toEpochMillis(retryAt) - DateTime.toEpochMillis(observedAt);
         yield* Effect.logInfo("Run waits before retrying provider capacity", {
           runId,
           nextAttempt,

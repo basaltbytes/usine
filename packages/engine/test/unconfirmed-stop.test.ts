@@ -65,7 +65,8 @@ describe("pending parent stops", () => {
                 : Deferred.succeed(fail, undefined)
             ).pipe(Effect.forkChild);
             yield* Deferred.await(entered);
-            assert.lengthOf(yield* stops.list, 1);
+            const currentList = yield* stops.list;
+            assert.lengthOf(currentList, 1);
             const sameItem = yield* engine.submit(
               Submission.make({
                 ...submission({ number: 2, item: "same-item" }),
@@ -86,7 +87,8 @@ describe("pending parent stops", () => {
             assert.isEmpty((yield* engine.inspect(sameItem.runId)).attempts);
             yield* Ref.set(worker.unstoppable, false);
             yield* waitFor(engine, sameItem.runId, ({ run }) => run.state._tag === "Succeeded");
-            assert.isEmpty(yield* stops.list);
+            const nextList = yield* stops.list;
+            assert.isEmpty(nextList);
           }).pipe(
             Effect.ensuring(Deferred.succeed(release, undefined)),
             Effect.provide(engineLayer(directory, executor)),

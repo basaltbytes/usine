@@ -566,8 +566,10 @@ describe("ConfigParser", () => {
         [...boat, ...tailnet.map((line) => line.replace("100.64.0.2", "203.0.113.2")), ...gateway],
         [...boat, "      snapshot: latest"],
         [...boat, "      snapshot: Bad_Name"],
-      ])
-        expect(Result.isFailure(yield* parse(invalid).pipe(Effect.result))).toBe(true);
+      ]) {
+        const parsedResult = yield* parse(invalid).pipe(Effect.result);
+        expect(Result.isFailure(parsedResult)).toBe(true);
+      }
 
       for (const [workers, message] of [
         [
@@ -1033,15 +1035,14 @@ describe("ConfigParser", () => {
         milestone: null,
         comments: { totalCount: 1, nodes: [{ author: null, body: "", createdAt: "" }] },
       };
-      expect(
-        yield* holds(
-          issueEnvironment,
-          issue,
-          "item.stateReason == null && item.closedAt == null && item.author == null && " +
-            "item.issueType == null && item.milestone == null && !has(item.milestone.title) && " +
-            "item.comments.nodes.all(comment, comment.author == null)",
-        ),
-      ).toBe(true);
+      const matches = yield* holds(
+        issueEnvironment,
+        issue,
+        "item.stateReason == null && item.closedAt == null && item.author == null && " +
+          "item.issueType == null && item.milestone == null && !has(item.milestone.title) && " +
+          "item.comments.nodes.all(comment, comment.author == null)",
+      );
+      expect(matches).toBe(true);
       const pullRequest = {
         mergedAt: null,
         author: null,
@@ -1069,20 +1070,19 @@ describe("ConfigParser", () => {
         },
         comments: { totalCount: 1, nodes: [{ author: null, body: "", createdAt: "" }] },
       };
-      expect(
-        yield* holds(
-          pullRequestEnvironment,
-          pullRequest,
-          'item.mergedAt == null && item.author == null && item.reviewDecision != "APPROVED" && ' +
-            "item.statusCheckRollup == null && " +
-            "item.reviewRequests.nodes.all(request, request.requestedReviewer == null || " +
-            "request.requestedReviewer.login == null) && " +
-            "item.reviews.nodes.all(review, review.author == null && review.submittedAt == null && " +
-            "review.commit == null) && " +
-            "item.reviewThreads.nodes.all(thread, thread.comments.nodes.all(comment, comment.author == null)) && " +
-            "item.comments.nodes.all(comment, comment.author == null)",
-        ),
-      ).toBe(true);
+      const currentMatches = yield* holds(
+        pullRequestEnvironment,
+        pullRequest,
+        'item.mergedAt == null && item.author == null && item.reviewDecision != "APPROVED" && ' +
+          "item.statusCheckRollup == null && " +
+          "item.reviewRequests.nodes.all(request, request.requestedReviewer == null || " +
+          "request.requestedReviewer.login == null) && " +
+          "item.reviews.nodes.all(review, review.author == null && review.submittedAt == null && " +
+          "review.commit == null) && " +
+          "item.reviewThreads.nodes.all(thread, thread.comments.nodes.all(comment, comment.author == null)) && " +
+          "item.comments.nodes.all(comment, comment.author == null)",
+      );
+      expect(currentMatches).toBe(true);
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 

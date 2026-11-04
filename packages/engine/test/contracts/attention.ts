@@ -43,24 +43,30 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
               yield* store.dismiss(acknowledgement);
             const before = yield* reader.revision;
             yield* store.prune(keys);
-            assert.deepStrictEqual(yield* store.list, [current]);
+            const currentList = yield* store.list;
+            assert.deepStrictEqual(currentList, [current]);
             const after = yield* reader.revision;
             assert.notDeepEqual(after, before);
             yield* store.prune(keys);
-            assert.deepStrictEqual(yield* store.list, [current]);
-            assert.deepStrictEqual(yield* reader.revision, after);
+            const nextList = yield* store.list;
+            assert.deepStrictEqual(nextList, [current]);
+            const currentRevision = yield* reader.revision;
+            assert.deepStrictEqual(currentRevision, after);
           }).pipe(Effect.provide(open));
           yield* Effect.gen(function* () {
             const store = yield* AttentionAcknowledgements;
             const reader = yield* RunReader;
-            assert.deepStrictEqual(yield* store.list, [current]);
+            const currentList = yield* store.list;
+            assert.deepStrictEqual(currentList, [current]);
             const before = yield* reader.revision;
             yield* store.prune([]);
-            assert.deepStrictEqual(yield* store.list, []);
+            const nextList = yield* store.list;
+            assert.deepStrictEqual(nextList, []);
             const after = yield* reader.revision;
             assert.notDeepEqual(after, before);
             yield* store.prune([]);
-            assert.deepStrictEqual(yield* reader.revision, after);
+            const currentRevision = yield* reader.revision;
+            assert.deepStrictEqual(currentRevision, after);
           }).pipe(Effect.provide(open));
         }).pipe(Effect.scoped),
     );
@@ -92,8 +98,10 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
             yield* store.dismiss(
               AttentionAcknowledgement.make({ ...acknowledgement, dismissedBy: Option.none() }),
             );
-            assert.deepStrictEqual(yield* reader.revision, after);
-            assert.deepStrictEqual(yield* store.list, [acknowledgement]);
+            const currentRevision = yield* reader.revision;
+            assert.deepStrictEqual(currentRevision, after);
+            const currentList = yield* store.list;
+            assert.deepStrictEqual(currentList, [acknowledgement]);
             yield* store.dismiss(next);
           }).pipe(Effect.provide(open));
           yield* Effect.gen(function* () {
@@ -102,10 +110,13 @@ export const attentionContract = (adapter: PersistenceAdapter) => {
             assert.sameDeepMembers([...(yield* store.list)], [acknowledgement, next]);
             const before = yield* reader.revision;
             yield* store.undo(AttentionKey.make(acknowledgement));
-            assert.notDeepEqual(yield* reader.revision, before);
-            assert.deepStrictEqual(yield* store.list, [next]);
+            const currentRevision = yield* reader.revision;
+            assert.notDeepEqual(currentRevision, before);
+            const currentList = yield* store.list;
+            assert.deepStrictEqual(currentList, [next]);
             yield* store.undo(AttentionKey.make(acknowledgement));
-            assert.deepStrictEqual(yield* store.list, [next]);
+            const nextList = yield* store.list;
+            assert.deepStrictEqual(nextList, [next]);
           }).pipe(Effect.provide(open));
         }).pipe(Effect.scoped),
     );

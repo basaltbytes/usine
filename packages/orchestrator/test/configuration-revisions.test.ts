@@ -23,9 +23,8 @@ const dependencies = Layer.mergeAll(memoryConfigurationLayer, ConfigurationFolde
 
 it.live("applies committed agent brains and webhook settings live", () =>
   Effect.gen(function* () {
-    const root = InstanceDirectory.make(
-      yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped(),
-    );
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
     yield* writeInstanceFiles(root, [
       [
         "usine.yaml",

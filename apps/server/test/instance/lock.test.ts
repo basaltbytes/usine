@@ -54,19 +54,23 @@ describe("instance lock", () => {
     const files = instanceFiles(directory);
     await Effect.runPromise(
       Effect.gen(function* () {
-        assert.isFalse(yield* lockHeld(files));
+        const locked = yield* lockHeld(files);
+        assert.isFalse(locked);
         assert.isFalse(existsSync(files.lock), "probing creates no lock file");
         const first = yield* Scope.make();
         yield* holdInstance(directory, record).pipe(Scope.provide(first));
-        assert.isTrue(yield* lockHeld(files));
+        const currentLocked = yield* lockHeld(files);
+        assert.isTrue(currentLocked);
         assert.strictEqual(readFileSync(files.pid, "utf8").trim(), String(process.pid));
-        assert.deepStrictEqual(yield* readRecord(files), Option.some(record));
+        const instanceRecord = yield* readRecord(files);
+        assert.deepStrictEqual(instanceRecord, Option.some(record));
         const refused = yield* holdInstance(directory, record).pipe(Effect.scoped, Effect.flip);
         const matchesRefused = Schema.is(InstanceInUseError)(refused);
         assert(matchesRefused);
         assert.deepStrictEqual(refused.holder, Option.some(process.pid));
         yield* Scope.close(first, Exit.void);
-        assert.isFalse(yield* lockHeld(files));
+        const nextLocked = yield* lockHeld(files);
+        assert.isFalse(nextLocked);
         assert.isFalse(existsSync(files.pid), "release removes the pid file");
         assert.isFalse(existsSync(files.record), "release removes the record");
         yield* holdInstance(directory, record).pipe(Effect.scoped);

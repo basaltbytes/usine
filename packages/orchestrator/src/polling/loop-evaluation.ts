@@ -117,20 +117,19 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
   }
   const submissions: Array<SubmissionResult> = [];
   // Projections store generic JSON; decode the GitHub PR revision at this boundary.
-  const revision =
-    item.source === "pr"
-      ? RepositoryRevision.make(
-          yield* Schema.decodeUnknownEffect(CommitSha)(payload.headRefOid).pipe(
-            Effect.mapError(() =>
-              InvalidGitHubResponseError.make({
-                operation: "fetch-pull-request-snapshot",
-                message: "The pull request payload has no valid head commit",
-                detail: `pull request #${item.number} has no full headRefOid`,
-              }),
-            ),
-          ),
-        )
-      : DEFAULT_BRANCH_REVISION;
+  let revision = DEFAULT_BRANCH_REVISION;
+  if (item.source === "pr") {
+    const headCommit = yield* Schema.decodeUnknownEffect(CommitSha)(payload.headRefOid).pipe(
+      Effect.mapError(() =>
+        InvalidGitHubResponseError.make({
+          operation: "fetch-pull-request-snapshot",
+          message: "The pull request payload has no valid head commit",
+          detail: `pull request #${item.number} has no full headRefOid`,
+        }),
+      ),
+    );
+    revision = RepositoryRevision.make(headCommit);
+  }
   const failures: Array<LoopEvaluationFailure> = [];
   let revokedRuns = 0;
   for (const { agent, loop, parentModel } of loops) {
@@ -185,21 +184,20 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
       );
       continue;
     }
-    const submitted = yield* runs.submit(
-      yield* triggerSubmission(expressions, {
-        dedupKey,
-        cycleGeneration,
-        itemKey: item.itemKey,
-        loop,
-        payload,
-        receivedAt,
-        repository,
-        revision,
-        task: AttemptTask.make(rendered.success),
-        agent,
-        parentModel,
-      }),
-    );
+    const submission = yield* triggerSubmission(expressions, {
+      dedupKey,
+      cycleGeneration,
+      itemKey: item.itemKey,
+      loop,
+      payload,
+      receivedAt,
+      repository,
+      revision,
+      task: AttemptTask.make(rendered.success),
+      agent,
+      parentModel,
+    });
+    const submitted = yield* runs.submit(submission);
     yield* Effect.logInfo("Submitted matching item state", {
       repository: repository.name,
       loop: loop.name,

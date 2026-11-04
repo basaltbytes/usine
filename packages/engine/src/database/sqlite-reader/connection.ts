@@ -48,7 +48,8 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
   onStopped: Effect.Effect<void>,
 ): Effect.fn.Return<ReadConnection, SqlError, Scope.Scope> {
   yield* Effect.annotateCurrentSpan({ filename });
-  const run = Effect.runForkWith(yield* Effect.context<never>());
+  const readerContext = yield* Effect.context<never>();
+  const run = Effect.runForkWith(readerContext);
   const pending = new Map<number, (result: Effect.Effect<unknown, SqlError>) => void>();
   const stopped = yield* Ref.make(Option.none<SqlError>());
   const access = yield* Semaphore.make(1);

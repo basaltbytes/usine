@@ -54,7 +54,8 @@ it.effect(
         yield* Deferred.await(reserved);
         yield* admission.waitForUpgrade(ReleaseVersion.make("1.2.3"));
         yield* Deferred.await(released);
-        assert.strictEqual(yield* Ref.get(attempt), false);
+        const attemptResultState = yield* Ref.get(attempt);
+        assert.strictEqual(attemptResultState, false);
         yield* admission.drain;
         yield* admission.cancelUpgrade;
         const denied = yield* Effect.forkScoped(
@@ -64,7 +65,8 @@ it.effect(
           { startImmediately: true },
         );
         assert.strictEqual(denied.pollUnsafe(), undefined);
-        assert.strictEqual(yield* Ref.get(attempt), false);
+        const currentAttemptResultState = yield* Ref.get(attempt);
+        assert.strictEqual(currentAttemptResultState, false);
       }),
     ).pipe(Effect.provide(AttemptAdmission.layer)),
 );

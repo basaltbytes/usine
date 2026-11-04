@@ -87,7 +87,8 @@ export const preparedAttemptsFor = (
     ): Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope> =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const scope = yield* Scope.fork(yield* Effect.scope);
+          const parentScope = yield* Effect.scope;
+          const scope = yield* Scope.fork(parentScope);
           const unavailable = yield* Ref.make(false);
           const released = yield* Deferred.make<void>();
           // Scope.close returns immediately when another fiber is already closing the scope, so the

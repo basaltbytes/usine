@@ -86,11 +86,15 @@ describe("durable session settlement", () => {
             const failure = yield* session.launch(workspace, sink, checkout).pipe(Effect.flip);
             assert.strictEqual(failure._tag, "RunawayFailure");
             assert.strictEqual(cancellations, 1);
-            assert.isFalse(yield* runtime.isLive(request.attemptId));
-            assert.isTrue(Option.isNone(yield* runtime.finished(request.attemptId)));
-            assert.isFalse(yield* session.isLive(request.attemptId));
+            const live = yield* runtime.isLive(request.attemptId);
+            assert.isFalse(live);
+            const currentFinished = yield* runtime.finished(request.attemptId);
+            assert.isTrue(Option.isNone(currentFinished));
+            const currentLive = yield* session.isLive(request.attemptId);
+            assert.isFalse(currentLive);
             yield* runtime.settle(request.attemptId);
-            assert.isTrue(Option.isNone(yield* runtime.finished(request.attemptId)));
+            const nextFinished = yield* runtime.finished(request.attemptId);
+            assert.isTrue(Option.isNone(nextFinished));
           }).pipe(Effect.scoped, Effect.provide(runtimeLayer));
 
           for (let startup = 0; startup < 2; startup += 1) {
@@ -106,7 +110,8 @@ describe("durable session settlement", () => {
                 open: false,
                 rejected: Option.none(),
               });
-              assert.isFalse(yield* session.isLive(request.attemptId));
+              const live = yield* session.isLive(request.attemptId);
+              assert.isFalse(live);
               assert.strictEqual(cancellations, 1);
             }).pipe(Effect.scoped, Effect.provide(runtimeLayer));
           }
@@ -144,11 +149,14 @@ describe("durable session settlement", () => {
         };
         const launched = yield* session.launch(workspace, sink, checkout).pipe(Effect.forkChild);
         yield* Deferred.await(terminal);
-        assert.isTrue(yield* session.drain(request.attemptId, "The worker is stopping"));
+        const drainResult = yield* session.drain(request.attemptId, "The worker is stopping");
+        assert.isTrue(drainResult);
         const failure = yield* Fiber.join(launched).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "InfraFailure");
-        assert.isTrue(yield* runtime.isLive(request.attemptId));
-        assert.isTrue(Option.isNone(yield* runtime.finished(request.attemptId)));
+        const live = yield* runtime.isLive(request.attemptId);
+        assert.isTrue(live);
+        const currentFinished = yield* runtime.finished(request.attemptId);
+        assert.isTrue(Option.isNone(currentFinished));
       }).pipe(
         Effect.scoped,
         Effect.provide(

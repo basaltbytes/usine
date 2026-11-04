@@ -1,15 +1,11 @@
 {
-  "src/board/selection.ts": {
-    "yieldInCallArgument": 1
-  },
   "src/ci.ts": {
     "deterministicKeys": 1,
     "globalJsonInEffect": 1
   },
   "src/connections.ts": {
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 2
+    "schemaSyncInEffect": 1
   },
   "src/current-instance/changes.ts": {
     "schemaClassMissingBrand": 1
@@ -25,16 +21,12 @@
   "src/loop-matches.ts": {
     "deterministicKeys": 1
   },
-  "src/operator/approval.ts": {
-    "yieldInCallArgument": 1
-  },
   "src/operator/attempt.ts": {
     "schemaClassMissingBrand": 20
   },
   "src/operator/attention.ts": {
     "globalJson": 3,
-    "schemaSync": 1,
-    "yieldInCallArgument": 2
+    "schemaSync": 1
   },
   "src/operator/board.ts": {
     "schemaClassMissingBrand": 13
@@ -43,8 +35,7 @@
     "schemaClassMissingBrand": 1
   },
   "src/operator/configuration/editor.ts": {
-    "deterministicKeys": 1,
-    "yieldInCallArgument": 6
+    "deterministicKeys": 1
   },
   "src/operator/configuration/loops/model.ts": {
     "schemaClassMissingBrand": 4
@@ -59,8 +50,7 @@
   },
   "src/operator/configuration/view.ts": {
     "deterministicKeys": 1,
-    "schemaClassMissingBrand": 22,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 22
   },
   "src/operator/desk.ts": {
     "deterministicKeys": 1,
@@ -85,8 +75,7 @@
   "src/operator/operator.ts": {
     "deterministicKeys": 2,
     "globalJson": 3,
-    "globalJsonInEffect": 1,
-    "yieldInCallArgument": 6
+    "globalJsonInEffect": 1
   },
   "src/operator/overview.ts": {
     "schemaClassMissingBrand": 5
@@ -128,18 +117,11 @@
     "schemaClassMissingBrand": 7
   },
   "src/operator/upgrade.ts": {
-    "schemaClassMissingBrand": 2,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 2
   },
   "src/operator/usage.ts": {
     "deterministicKeys": 1,
     "schemaClassMissingBrand": 6
-  },
-  "src/operator/webhooks.ts": {
-    "yieldInCallArgument": 1
-  },
-  "src/operator/worker-attention.ts": {
-    "yieldInCallArgument": 1
   },
   "src/orchestrator.ts": {
     "deterministicKeys": 1
@@ -154,29 +136,21 @@
     "schemaClassMissingBrand": 2
   },
   "src/polling/hints.ts": {
-    "deterministicKeys": 1,
-    "yieldInCallArgument": 1
+    "deterministicKeys": 1
   },
   "src/polling/loop-evaluation.ts": {
-    "globalJson": 1,
-    "yieldInCallArgument": 2
+    "globalJson": 1
   },
   "src/polling/open-pull-requests.ts": {
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 1
   },
   "src/polling/polling.ts": {
     "deterministicKeys": 1,
     "globalJson": 2,
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 2
+    "schemaClassMissingBrand": 1
   },
   "src/polling/repository-sync.ts": {
-    "schemaSync": 1,
-    "yieldInCallArgument": 1
-  },
-  "src/polling/reset-refresh.ts": {
-    "yieldInCallArgument": 1
+    "schemaSync": 1
   },
   "src/polling/unfetched-items.ts": {
     "schemaClassMissingBrand": 1
@@ -185,12 +159,10 @@
     "deterministicKeys": 1,
     "globalJson": 2,
     "globalJsonInEffect": 2,
-    "schemaClassMissingBrand": 4,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 4
   },
   "src/scheduler/scheduler.ts": {
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 2
+    "schemaClassMissingBrand": 1
   },
   "src/trigger-submission.ts": {
     "schemaClassMissingBrand": 1
@@ -205,8 +177,7 @@
   "test/approval.test.ts": {
     "globalJson": 1,
     "schemaSync": 2,
-    "schemaSyncInEffect": 2,
-    "yieldInCallArgument": 1
+    "schemaSyncInEffect": 2
   },
   "test/board.test.ts": {
     "globalJsonInEffect": 1,
@@ -218,43 +189,31 @@
     "globalJsonInEffect": 1,
     "nodeBuiltinImport": 1,
     "schemaSync": 2,
-    "strictBooleanExpressions": 1,
-    "yieldInCallArgument": 4
+    "strictBooleanExpressions": 1
   },
   "test/closed-items.test.ts": {
     "globalJson": 1,
     "nodeBuiltinImport": 1,
-    "schemaSync": 2,
-    "yieldInCallArgument": 14
+    "schemaSync": 2
   },
   "test/configuration-revisions.test.ts": {
-    "schemaSync": 2,
-    "yieldInCallArgument": 1
+    "schemaSync": 2
   },
   "test/configuration.test.ts": {
     "globalJsonInEffect": 1,
     "schemaSync": 4,
-    "schemaSyncInEffect": 3,
-    "yieldInCallArgument": 2
-  },
-  "test/connections.test.ts": {
-    "yieldInCallArgument": 2
+    "schemaSyncInEffect": 3
   },
   "test/credentials.test.ts": {
     "schemaSync": 1
   },
-  "test/current-instance.test.ts": {
-    "yieldInCallArgument": 5
-  },
   "test/cycle-reset-polling.test.ts": {
     "globalJson": 1,
     "schemaSync": 5,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 3
+    "schemaSyncInEffect": 1
   },
   "test/deliveries.test.ts": {
-    "schemaSync": 2,
-    "yieldInCallArgument": 2
+    "schemaSync": 2
   },
   "test/desk.test.ts": {
     "schemaSync": 2
@@ -264,12 +223,8 @@
     "schemaSync": 6,
     "schemaSyncInEffect": 2
   },
-  "test/github-changes.test.ts": {
-    "yieldInCallArgument": 9
-  },
   "test/hints.test.ts": {
-    "schemaSync": 1,
-    "yieldInCallArgument": 2
+    "schemaSync": 1
   },
   "test/http-client.test.ts": {
     "asyncFunction": 1,
@@ -281,14 +236,12 @@
     "globalJson": 1,
     "globalJsonInEffect": 1,
     "schemaSync": 2,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 1
+    "schemaSyncInEffect": 1
   },
   "test/integration/exe-dev-worker.test.ts": {
     "cryptoRandomUUIDInEffect": 2,
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 4
+    "schemaSyncInEffect": 1
   },
   "test/integration/polling-triggers.test.ts": {
     "cryptoRandomUUIDInEffect": 1,
@@ -297,15 +250,13 @@
     "globalJson": 1,
     "globalJsonInEffect": 2,
     "schemaSync": 2,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 1
+    "schemaSyncInEffect": 1
   },
   "test/integration/ssh-worker.test.ts": {
     "cryptoRandomUUIDInEffect": 5,
     "globalJsonInEffect": 2,
     "processEnv": 2,
-    "schemaSync": 2,
-    "yieldInCallArgument": 3
+    "schemaSync": 2
   },
   "test/label-preflight-polling.test.ts": {
     "schemaSync": 2
@@ -317,27 +268,13 @@
   "test/local-worker/local-worker.test.ts": {
     "globalJsonInEffect": 3,
     "schemaSync": 2,
-    "schemaSyncInEffect": 2,
-    "yieldInCallArgument": 7
+    "schemaSyncInEffect": 2
   },
   "test/local-worker/permissions.test.ts": {
     "globalJsonInEffect": 1
   },
-  "test/local-worker/reattach-stop.test.ts": {
-    "yieldInCallArgument": 6
-  },
-  "test/local-worker/recovery.test.ts": {
-    "yieldInCallArgument": 1
-  },
-  "test/local-worker/restart.test.ts": {
-    "yieldInCallArgument": 6
-  },
-  "test/local-worker/runaway.test.ts": {
-    "yieldInCallArgument": 1
-  },
   "test/local-worker/salvage.test.ts": {
-    "nodeBuiltinImport": 1,
-    "yieldInCallArgument": 22
+    "nodeBuiltinImport": 1
   },
   "test/local-worker/support.ts": {
     "globalDate": 1,
@@ -346,57 +283,45 @@
   },
   "test/local-worker/unconfirmed-stop.test.ts": {
     "globalJsonInEffect": 1,
-    "nodeBuiltinImport": 2,
-    "yieldInCallArgument": 9
+    "nodeBuiltinImport": 2
   },
   "test/open-issues-polling.test.ts": {
-    "schemaSync": 1,
-    "yieldInCallArgument": 2
+    "schemaSync": 1
   },
   "test/open-pull-request-refresh.test.ts": {
     "globalJson": 1,
     "schemaSync": 6,
-    "schemaSyncInEffect": 4,
-    "yieldInCallArgument": 9
+    "schemaSyncInEffect": 4
   },
   "test/operator.test.ts": {
     "globalJson": 4,
     "globalJsonInEffect": 1,
     "schemaSync": 18,
-    "schemaSyncInEffect": 13,
-    "yieldInCallArgument": 47
+    "schemaSyncInEffect": 13
   },
   "test/polling-triggers.test.ts": {
     "globalJsonInEffect": 3,
     "nodeBuiltinImport": 1,
     "schemaSync": 7,
-    "schemaSyncInEffect": 4,
-    "yieldInCallArgument": 15
-  },
-  "test/provider-capacity.test.ts": {
-    "yieldInCallArgument": 1
+    "schemaSyncInEffect": 4
   },
   "test/running-task-lane.test.ts": {
     "schemaSync": 1
   },
   "test/schedule-triggers.test.ts": {
     "globalJsonInEffect": 1,
-    "schemaSync": 3,
-    "yieldInCallArgument": 1
+    "schemaSync": 3
   },
   "test/scheduler-machines.test.ts": {
     "schemaSync": 4,
-    "schemaSyncInEffect": 3,
-    "yieldInCallArgument": 14
+    "schemaSyncInEffect": 3
   },
   "test/scheduler.test.ts": {
     "schemaSync": 2,
-    "schemaSyncInEffect": 2,
-    "yieldInCallArgument": 27
+    "schemaSyncInEffect": 2
   },
   "test/self-write.test.ts": {
-    "schemaSync": 1,
-    "yieldInCallArgument": 1
+    "schemaSync": 1
   },
   "test/ssh-addresses.test.ts": {
     "globalJsonInEffect": 1,
@@ -407,14 +332,12 @@
   },
   "test/statistics/access.test.ts": {
     "schemaSync": 2,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 1
+    "schemaSyncInEffect": 1
   },
   "test/statistics/cache.test.ts": {
     "globalJsonInEffect": 3,
     "schemaSync": 4,
-    "schemaSyncInEffect": 3,
-    "yieldInCallArgument": 29
+    "schemaSyncInEffect": 3
   },
   "test/statistics/workers.test.ts": {
     "schemaSync": 1
@@ -428,8 +351,7 @@
     "schemaSyncInEffect": 1
   },
   "test/trigger-condition.test.ts": {
-    "schemaSync": 3,
-    "yieldInCallArgument": 4
+    "schemaSync": 3
   },
   "test/trigger-revision.test.ts": {
     "schemaSync": 4,
@@ -438,13 +360,9 @@
   "test/usage.test.ts": {
     "globalJson": 1
   },
-  "test/webhooks.test.ts": {
-    "yieldInCallArgument": 3
-  },
   "test/worker-engine.test.ts": {
     "asyncFunction": 1,
     "schemaSync": 3,
-    "schemaSyncInEffect": 3,
-    "yieldInCallArgument": 7
+    "schemaSyncInEffect": 3
   }
 }

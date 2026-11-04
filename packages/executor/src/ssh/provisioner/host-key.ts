@@ -82,12 +82,14 @@ export const generateHostKey: Effect.Effect<HostKeyPair> = Effect.gen(function* 
   );
   if (!("privateKey" in pair))
     return yield* Effect.die(new Error("WebCrypto returned one Ed25519 key, not a pair"));
-  const publicKey = new Uint8Array(
-    yield* Effect.promise(() => crypto.subtle.exportKey("raw", pair.publicKey)),
+  const publicKeyBuffer = yield* Effect.promise(() =>
+    crypto.subtle.exportKey("raw", pair.publicKey),
   );
-  const pkcs8 = new Uint8Array(
-    yield* Effect.promise(() => crypto.subtle.exportKey("pkcs8", pair.privateKey)),
+  const publicKey = new Uint8Array(publicKeyBuffer);
+  const privateKeyBuffer = yield* Effect.promise(() =>
+    crypto.subtle.exportKey("pkcs8", pair.privateKey),
   );
+  const pkcs8 = new Uint8Array(privateKeyBuffer);
   const seed = pkcs8.slice(PKCS8_HEADER_LENGTH);
   if (publicKey.length !== 32 || seed.length !== 32)
     return yield* Effect.die(new Error("WebCrypto exported an Ed25519 key of an unexpected size"));

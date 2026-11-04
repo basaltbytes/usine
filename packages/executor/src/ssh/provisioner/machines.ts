@@ -413,8 +413,9 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         attemptId,
         provider: driver.provider,
       });
+      const nameSuffix = yield* randomHex(8);
       const created = yield* driver
-        .create(machineName(worker, yield* randomHex(8)), tags)
+        .create(machineName(worker, nameSuffix), tags)
         .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : unregister(hold))));
       const id = created.id;
       yield* update(hold, (current) => ({ ...current, id: Option.some(id) }));
@@ -473,6 +474,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         state: "located",
         machine: Option.some(prepared.machine),
       }));
+      const observedAt = yield* DateTime.now;
       yield* Effect.logInfo("The machine for the Attempt is ready", {
         worker,
         runId,
@@ -480,7 +482,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         provider: driver.provider,
         machine: id,
         host: prepared.machine.shell.destination,
-        seconds: Math.round(Duration.toSeconds(DateTime.distance(since, yield* DateTime.now))),
+        seconds: Math.round(Duration.toSeconds(DateTime.distance(since, observedAt))),
         checked: Option.isSome(prepared.checked),
       });
       return MachineGrant.make({
@@ -612,7 +614,8 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       "Could not look up the machine of an Attempt from before the restart; it stays held, so no sweep deletes it, and its next use looks it up again",
       { worker, attemptId, message: located.failure.message },
     );
-    return Option.map(yield* byAttempt(attemptId), ({ hold }) => hold);
+    const attemptMachine = yield* byAttempt(attemptId);
+    return Option.map(attemptMachine, ({ hold }) => hold);
   });
 
   const release = Effect.fn("SshExecutor.releaseMachine")(function* (hold: MachineHold) {
@@ -685,7 +688,8 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           if (Option.isNone(holder.id))
             yield* update(holder.hold, (found) => ({ ...found, id: Option.some(machine.id) }));
           yield* discard(holder.hold, "an earlier deletion failed");
-          if (Option.isSome(yield* entryOf(holder.hold))) failed += 1;
+          const machineEntry = yield* entryOf(holder.hold);
+          if (Option.isSome(machineEntry)) failed += 1;
         }
         continue;
       }

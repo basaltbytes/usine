@@ -19,8 +19,7 @@
   "src/cycle-budget/cycle-budget.ts": {
     "deterministicKeys": 1,
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 2
+    "schemaSyncInEffect": 1
   },
   "src/cycle-budget/model.ts": {
     "redundantSchemaTagIdentifier": 1,
@@ -41,16 +40,14 @@
   },
   "src/database/local-sqlite.ts": {
     "preferBarrelImport": 1,
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 1
   },
   "src/database/project-migration.ts": {
     "globalJsonInEffect": 4,
     "schemaClassMissingBrand": 1
   },
   "src/database/sqlite-reader/connection.ts": {
-    "preferBarrelImport": 1,
-    "yieldInCallArgument": 1
+    "preferBarrelImport": 1
   },
   "src/database/sqlite-reader/protocol.ts": {
     "schemaStructWithTag": 3
@@ -66,12 +63,10 @@
     "strictBooleanExpressions": 1
   },
   "src/engine/admission.ts": {
-    "deterministicKeys": 1,
-    "yieldInCallArgument": 1
+    "deterministicKeys": 1
   },
   "src/engine/checkout-recovery.ts": {
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 1
   },
   "src/engine/engine.ts": {
     "deterministicKeys": 1
@@ -87,8 +82,7 @@
     "schemaClassMissingBrand": 1
   },
   "src/engine/run-driver.ts": {
-    "deterministicKeys": 1,
-    "yieldInCallArgument": 3
+    "deterministicKeys": 1
   },
   "src/engine/shutdown.ts": {
     "deterministicKeys": 1
@@ -137,24 +131,16 @@
   "src/store/changes.ts": {
     "globalJsonInEffect": 1
   },
-  "src/store/ci.ts": {
-    "yieldInCallArgument": 1
-  },
   "src/store/codec.ts": {
     "schemaSync": 13
   },
-  "src/store/loop-items.ts": {
-    "yieldInCallArgument": 3
-  },
   "src/store/queries.ts": {
     "schemaSync": 3,
-    "schemaSyncInEffect": 2,
-    "yieldInCallArgument": 9
+    "schemaSyncInEffect": 2
   },
   "src/store/store.ts": {
     "deterministicKeys": 1,
-    "schemaClassMissingBrand": 4,
-    "yieldInCallArgument": 10
+    "schemaClassMissingBrand": 4
   },
   "src/transcript.ts": {
     "schemaClassMissingBrand": 7,
@@ -163,101 +149,34 @@
   "src/trigger-condition.ts": {
     "deterministicKeys": 1
   },
-  "test/admission.test.ts": {
-    "yieldInCallArgument": 2
-  },
-  "test/blocker-suppression.test.ts": {
-    "yieldInCallArgument": 3
-  },
-  "test/ci.test.ts": {
-    "yieldInCallArgument": 3
-  },
   "test/contracts/adapter.ts": {
     "deterministicKeys": 1
-  },
-  "test/contracts/attention.ts": {
-    "yieldInCallArgument": 11
-  },
-  "test/contracts/board-moves.ts": {
-    "yieldInCallArgument": 3
-  },
-  "test/contracts/cursor.ts": {
-    "yieldInCallArgument": 2
-  },
-  "test/contracts/cycle-budget.ts": {
-    "yieldInCallArgument": 7
-  },
-  "test/contracts/item-projection.ts": {
-    "yieldInCallArgument": 15
-  },
-  "test/contracts/loop-control.ts": {
-    "yieldInCallArgument": 2
-  },
-  "test/contracts/repository-label-projection.ts": {
-    "yieldInCallArgument": 4
-  },
-  "test/contracts/run-reader.ts": {
-    "yieldInCallArgument": 8
-  },
-  "test/contracts/run-store.ts": {
-    "yieldInCallArgument": 20
-  },
-  "test/contracts/sqlite.ts": {
-    "yieldInCallArgument": 1
-  },
-  "test/contracts/transcript.ts": {
-    "yieldInCallArgument": 3
   },
   "test/cycle-budget.test.ts": {
     "globalJsonInEffect": 3,
     "nodeBuiltinImport": 1,
     "schemaSync": 2,
-    "schemaSyncInEffect": 2,
-    "yieldInCallArgument": 21
-  },
-  "test/drain.test.ts": {
-    "yieldInCallArgument": 10
+    "schemaSyncInEffect": 2
   },
   "test/engine.test.ts": {
-    "globalJson": 1,
-    "yieldInCallArgument": 22
-  },
-  "test/event-reopening.test.ts": {
-    "yieldInCallArgument": 1
-  },
-  "test/overlapping-attempts.test.ts": {
-    "yieldInCallArgument": 5
-  },
-  "test/question-suppression.test.ts": {
-    "yieldInCallArgument": 5
-  },
-  "test/queued-event-recheck.test.ts": {
-    "yieldInCallArgument": 1
+    "globalJson": 1
   },
   "test/restart.test.ts": {
-    "globalJson": 1,
-    "yieldInCallArgument": 49
+    "globalJson": 1
   },
   "test/run-again.test.ts": {
-    "globalJsonInEffect": 2,
-    "yieldInCallArgument": 1
-  },
-  "test/run-reader.test.ts": {
-    "yieldInCallArgument": 3
+    "globalJsonInEffect": 2
   },
   "test/store/changes.test.ts": {
-    "globalJson": 1,
-    "yieldInCallArgument": 6
+    "globalJson": 1
   },
   "test/store/migration.test.ts": {
     "globalJsonInEffect": 11,
     "schemaSync": 8,
-    "schemaSyncInEffect": 8,
-    "yieldInCallArgument": 20
+    "schemaSyncInEffect": 8
   },
   "test/store/project-migration.test.ts": {
-    "globalJsonInEffect": 5,
-    "yieldInCallArgument": 2
+    "globalJsonInEffect": 5
   },
   "test/store/read-plans/benchmark.mts": {
     "asyncFunction": 3,
@@ -280,29 +199,14 @@
     "globalDateInEffect": 1,
     "globalFetchInEffect": 2,
     "newPromise": 2,
-    "nodeBuiltinImport": 1,
-    "yieldInCallArgument": 35
+    "nodeBuiltinImport": 1
   },
   "test/store/statement-retention.test.ts": {
     "globalJsonInEffect": 1,
-    "nodeBuiltinImport": 1,
-    "yieldInCallArgument": 4
-  },
-  "test/store/summary.test.ts": {
-    "yieldInCallArgument": 3
-  },
-  "test/store/support.ts": {
-    "yieldInCallArgument": 1
+    "nodeBuiltinImport": 1
   },
   "test/store/transcript.test.ts": {
     "schemaSync": 3,
-    "schemaSyncInEffect": 3,
-    "yieldInCallArgument": 5
-  },
-  "test/support.ts": {
-    "yieldInCallArgument": 2
-  },
-  "test/unconfirmed-stop.test.ts": {
-    "yieldInCallArgument": 2
+    "schemaSyncInEffect": 3
   }
 }

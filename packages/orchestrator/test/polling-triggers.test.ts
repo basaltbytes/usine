@@ -241,12 +241,11 @@ describe("PollingTriggers", () => {
   it.live("opens a conflict Run within one poll after a sibling merge moves the base branch", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-mergeability-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-mergeability-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const loop = LoopFile.make({
         ...issueLoop("rebase-pr"),
         trigger: PullRequestTrigger.make({
@@ -371,7 +370,8 @@ describe("PollingTriggers", () => {
         assert.strictEqual(conflict.cycle.changedItems, 0);
         const run = claimedRun(conflict.cycle);
         yield* waitForState(engine, run, "Waiting");
-        assert.strictEqual(yield* mergeableOf(28), "CONFLICTING");
+        const mergeability = yield* mergeableOf(28);
+        assert.strictEqual(mergeability, "CONFLICTING");
 
         const settled = yield* fetchedDuring(polling.poll(instance));
         assert.deepStrictEqual(settled.fetched, []);
@@ -384,7 +384,8 @@ describe("PollingTriggers", () => {
         assert.deepStrictEqual(fixed.fetched, [28]);
         assert.strictEqual(fixed.cycle.revokedRuns, 1);
         yield* waitForState(engine, run, "Canceled");
-        assert.strictEqual(yield* mergeableOf(28), "MERGEABLE");
+        const currentMergeability = yield* mergeableOf(28);
+        assert.strictEqual(currentMergeability, "MERGEABLE");
 
         update(28, { state: "CLOSED" });
         detected = [28];
@@ -399,12 +400,11 @@ describe("PollingTriggers", () => {
   it.live("drops an open pull request GitHub no longer has and revokes its unstarted Run", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-missing-pr-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-missing-pr-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const instance = instanceWith([
         LoopFile.make({
           ...issueLoop("review-pr"),
@@ -478,7 +478,8 @@ describe("PollingTriggers", () => {
         const polling = yield* PollingTriggers;
         const engine = yield* RunEngine;
         const items = yield* ItemProjectionReader;
-        const run = claimedRun(yield* polling.poll(instance));
+        const pollResult = yield* polling.poll(instance);
+        const run = claimedRun(pollResult);
         yield* waitForState(engine, run, "Waiting");
         const [observed] = yield* items.list(watchedRepository, { limit: 10 });
         assert(observed !== undefined && Option.isNone(observed.goneAt));
@@ -506,12 +507,11 @@ describe("PollingTriggers", () => {
   it.live("opens exactly one finish Run when the finisher pushes before it relabels", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-finisher-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-finisher-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const loop = LoopFile.make({
         ...issueLoop("finish-pr"),
         trigger: PullRequestTrigger.make({
@@ -793,12 +793,11 @@ describe("PollingTriggers", () => {
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-paused-polling-",
-          }),
-        );
+        const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-paused-polling-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const loop = issueLoop("paused-issues");
         const payload = issuePayload(["ready"]);
         const github: GitHubPolling["Service"] = {
@@ -882,12 +881,11 @@ describe("PollingTriggers", () => {
   it.live("keeps firing Loops and advancing the cursor when the label catalog request fails", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-polling-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-polling-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const catalogFails = yield* Ref.make(false);
       const hash = yield* Ref.make(ContentHash.make("a".repeat(64)));
       const cursorsSeen = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
@@ -1012,12 +1010,11 @@ describe("PollingTriggers", () => {
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-polling-",
-          }),
-        );
+        const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-polling-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const state = yield* Ref.make<RemoteState>({
           hash: ContentHash.make("a".repeat(64)),
           payload: issuePayload(["ready"]),
@@ -1198,7 +1195,8 @@ describe("PollingTriggers", () => {
           repositories.filter((name) => name === "basaltbytes/unwatched").length,
           6,
         );
-        assert.strictEqual(yield* Ref.get(snapshotCalls), 12);
+        const snapshotCallsState = yield* Ref.get(snapshotCalls);
+        assert.strictEqual(snapshotCallsState, 12);
         yield* Scope.close(secondScope, Exit.void);
       }).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -1625,12 +1623,11 @@ describe("PollingTriggers", () => {
   it.live("runs one project loop on items from both repositories through one engine", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-polling-multi-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-polling-multi-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const multiConfig = Schema.decodeSync(UsineConfig)({
         version: 2,
         projects: [
@@ -1714,12 +1711,11 @@ describe("PollingTriggers", () => {
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fileSystem.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-reload-agent-",
-          }),
-        );
+        const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-reload-agent-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const agentFile = (model: string) =>
           `---\nharness: codex\nmodel: ${model}\neffort: high\n---\nImplement the issue.\n`;
         const loopFile = (permissions: string) =>
@@ -1777,7 +1773,9 @@ describe("PollingTriggers", () => {
           const polling = yield* PollingTriggers;
           const engine = yield* RunEngine;
           const instances = yield* CurrentInstance;
-          const openRun = claimedRun(yield* polling.poll(yield* instances.get));
+          const currentInstance = yield* instances.get;
+          const pollResult = yield* polling.poll(currentInstance);
+          const openRun = claimedRun(pollResult);
           yield* waitForState(engine, openRun, "Waiting");
 
           yield* writeInstanceFiles(directory, [
@@ -1788,7 +1786,8 @@ describe("PollingTriggers", () => {
           assert.deepStrictEqual(reload.agents.changed, [agent.name]);
 
           open.add(29);
-          const second = yield* polling.poll(yield* instances.get);
+          const nextInstance = yield* instances.get;
+          const second = yield* polling.poll(nextInstance);
           const nextRun = second.submissions.flatMap((submission) =>
             submission._tag === "Claimed" && submission.runId !== openRun ? [submission.runId] : [],
           )[0];

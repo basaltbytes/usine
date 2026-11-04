@@ -1,8 +1,7 @@
 {
   "src/access.ts": {
     "redundantSchemaTagIdentifier": 1,
-    "schemaClassMissingBrand": 5,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 5
   },
   "src/agent/agent.ts": {
     "schemaClassMissingBrand": 1

@@ -20,7 +20,8 @@ it.effect(
         parentEffort: { _tag: "Some", value: "low" },
         persona: "# Persona\n",
       });
-      expect(yield* validateConfigurationForm(key, value)).toEqual(value);
+      const validation = yield* validateConfigurationForm(key, value);
+      expect(validation).toEqual(value);
       const error = yield* validateConfigurationForm(key, { ...value, typo: true }).pipe(
         Effect.flip,
       );
@@ -109,7 +110,8 @@ it.effect(
         expect.arrayContaining([expect.objectContaining({ path: ["repositories", 0] })]),
       );
       const value = { ...draft, repositories: ["acme/api", "acme/web"] };
-      expect(yield* validateConfigurationForm(key, value)).toEqual(value);
+      const validation = yield* validateConfigurationForm(key, value);
+      expect(validation).toEqual(value);
       const unknown = yield* parseConfigurationForm(
         key,
         "id: product\nname: Product\nrepositories: []\ntypo: true\n",

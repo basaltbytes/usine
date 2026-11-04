@@ -82,7 +82,8 @@ const nodeClientHello = (servername: string) =>
 describe("readClientHello", () => {
   it.effect("reads the server name from the ClientHello Node's TLS client sends", () =>
     Effect.gen(function* () {
-      const read = serverNameOf(yield* nodeClientHello("registry.npmjs.org"));
+      const clientHello = yield* nodeClientHello("registry.npmjs.org");
+      const read = serverNameOf(clientHello);
       assert.deepStrictEqual(read.serverName, Option.some("registry.npmjs.org"));
       assert.isFalse(read.encryptedClientHello);
     }),

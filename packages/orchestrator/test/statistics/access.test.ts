@@ -95,6 +95,7 @@ it.effect("isolates project statistics from cached admin results and hides worke
       revision: Effect.succeedSome(ProjectionRevision.make(1)),
       transcript: () => Effect.succeed([]),
     });
+    const currentNow = yield* DateTime.now;
     yield* OperatorStatistics.use(({ runStatistics }) =>
       Effect.gen(function* () {
         const admin = yield* runStatistics(loaded, "all");
@@ -122,7 +123,7 @@ it.effect("isolates project statistics from cached admin results and hides worke
                 MachineStarts.make({
                   worker: WorkerName.make("worker"),
                   provider: "boat",
-                  day: DateTime.formatIso(yield* DateTime.now).slice(0, 10),
+                  day: DateTime.formatIso(currentNow).slice(0, 10),
                   count: 3,
                 }),
               ]),

@@ -77,10 +77,12 @@ describe("Polling self-write Hints", () => {
     };
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
-      assert(Option.isNone(yield* polling.lastHint));
+      const currentLastHint = yield* polling.lastHint;
+      assert(Option.isNone(currentLastHint));
       for (let index = 0; index < 20; index += 1) yield* polling.hint(repository);
       yield* polling.hint(RepositoryName.make("unknown/repository"));
-      assert(Option.isSome(yield* polling.lastHint));
+      const nextLastHint = yield* polling.lastHint;
+      assert(Option.isSome(nextLastHint));
       const fiber = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
       yield* TestClock.adjust("1 millis");
       assert.strictEqual(requests, 2, "one full poll and one coalesced repository refresh");

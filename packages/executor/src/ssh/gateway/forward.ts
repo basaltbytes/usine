@@ -220,8 +220,11 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
         );
         if (Option.isNone(listening))
           return notOpened(`ssh didn't open the forward within ${OPEN_TIMEOUT}`);
-        if (Option.isNone(listening.value))
-          return notOpened(yield* reported(Number(yield* handle.exitCode)));
+        if (Option.isNone(listening.value)) {
+          const sshExitCode = yield* handle.exitCode;
+          const reportedFailure = yield* reported(Number(sshExitCode));
+          return notOpened(reportedFailure);
+        }
 
         const open: OpenForward = {
           generation: generation.number,

@@ -436,7 +436,8 @@ describe("salvageWorktree in a git checkout", () => {
         assert(Option.isSome(result) && result.value._tag === "Retained");
         assert.strictEqual(result.value.path, worktree);
         assert.include(result.value.message, "model.bin (100.0 MiB)");
-        assert.strictEqual(yield* git(["--git-dir", remote, "branch", "--list"]), "");
+        const gitResult = yield* git(["--git-dir", remote, "branch", "--list"]);
+        assert.strictEqual(gitResult, "");
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -450,7 +451,8 @@ describe("salvageWorktree in a git checkout", () => {
         const result = yield* salvage;
 
         assert(Option.isNone(result));
-        assert.strictEqual(yield* git(["--git-dir", remote, "branch", "--list"]), "");
+        const gitResult = yield* git(["--git-dir", remote, "branch", "--list"]);
+        assert.strictEqual(gitResult, "");
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

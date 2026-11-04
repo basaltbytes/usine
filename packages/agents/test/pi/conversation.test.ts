@@ -83,7 +83,8 @@ describe("session supervision", () => {
           delivery.onDelivery,
         );
         assert.deepStrictEqual([state.held, state.paused, state.queued], [true, false, true]);
-        assert.notInclude(yield* session.emitted, "SessionResumed");
+        const currentEmitted = yield* session.emitted;
+        assert.notInclude(currentEmitted, "SessionResumed");
         assert.deepStrictEqual(delivery.seen(), []);
         yield* session.read((queued) => queued.indexOf("Use pnpm, not npm.") + 1);
         assert.deepStrictEqual(delivery.seen(), ["read, held"]);
@@ -129,7 +130,8 @@ describe("session supervision", () => {
         delivery.onDelivery,
       );
       assert.isFalse(state.queued);
-      assert.include(yield* session.emitted, "SessionResumed");
+      const currentEmitted = yield* session.emitted;
+      assert.include(currentEmitted, "SessionResumed");
       assert.deepStrictEqual(delivery.seen(), []);
     }),
   );

@@ -143,8 +143,9 @@ describe("GitHubApp", () => {
 
       return Effect.gen(function* () {
         const app = yield* GitHubApp;
+        const currentInstallationUrl = yield* app.installationUrl;
         assert.equal(
-          yield* app.installationUrl,
+          currentInstallationUrl,
           "https://github.com/apps/usine-basaltbytes/installations/new",
         );
         const wide = yield* app.installationToken;
@@ -154,7 +155,8 @@ describe("GitHubApp", () => {
         // The slug is the App's bot login, which attributes timeline changes to the factory.
         assert.strictEqual((yield* app.installation).appSlug, "usine-basaltbytes");
 
-        assert.deepStrictEqual(yield* app.repositories, [RepositoryName.make("basaltbytes/usine")]);
+        const currentRepositories = yield* app.repositories;
+        assert.deepStrictEqual(currentRepositories, [RepositoryName.make("basaltbytes/usine")]);
         const access = yield* app.projectAccess([
           RepositoryName.make("BasaltBytes/Usine"),
           RepositoryName.make("basaltbytes/missing"),
@@ -255,7 +257,8 @@ describe("GitHubApp", () => {
         account.noreplyEmail,
         "323694641+usine-basaltbytes[bot]@users.noreply.github.com",
       );
-      assert.deepStrictEqual(yield* app.botAccount, account);
+      const currentBotAccount = yield* app.botAccount;
+      assert.deepStrictEqual(currentBotAccount, account);
       assert.strictEqual(lookups.length, 2);
       assert.strictEqual(lookups[1]?.headers.authorization, "Bearer installation-secret");
     }).pipe(Effect.provide(appLayer(client)));

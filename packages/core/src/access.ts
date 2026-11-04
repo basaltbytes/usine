@@ -107,7 +107,8 @@ export const requirePermission = Effect.fn("Authorization.requirePermission")(fu
     scope: scope._tag,
     project: scope._tag === "Project" ? scope.project : "instance",
   });
-  if (permits(yield* RequestPermissions, permission, scope)) return;
+  const permissions = yield* RequestPermissions;
+  if (permits(permissions, permission, scope)) return;
   yield* Effect.logWarning("Permission refused", { permission, scope });
   return yield* AccessDenied.make({ permission });
 });

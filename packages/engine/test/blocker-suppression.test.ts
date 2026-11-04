@@ -20,7 +20,8 @@ const blocker = BlockedFailure.make({
 /** Returns whether no Run exists yet for the submission's Event. */
 const hasNoRun = (engine: RunEngine["Service"], sighting: ReturnType<typeof submission>) =>
   Effect.gen(function* () {
-    const missing = yield* Effect.flip(engine.inspect(yield* runIdFor(sighting)));
+    const runId = yield* runIdFor(sighting);
+    const missing = yield* Effect.flip(engine.inspect(runId));
     return missing._tag === "RunNotFoundError";
   });
 
@@ -53,7 +54,8 @@ describe("Attempts that end with a blocker", () => {
             assert(suppressed._tag === "Suppressed");
             assert.strictEqual(suppressed.runId, blocked.runId);
           }
-          assert(yield* hasNoRun(engine, posted));
+          const noRun = yield* hasNoRun(engine, posted);
+          assert(noRun);
 
           // A maintainer fixes main, a change the blocker comment did not make.
           const fixed = submission({ number: 3, item: "blocked-item" });
@@ -87,11 +89,8 @@ describe("Attempts that end with a blocker", () => {
           const attempt = failed.attempts[0];
           assert(attempt !== undefined);
           yield* engine.resolveFailure(blocked.runId, attempt.id, Option.none());
-          yield* waitFor(
-            engine,
-            yield* runIdFor(posted),
-            ({ run }) => run.state._tag === "Succeeded",
-          );
+          const currentRunId = yield* runIdFor(posted);
+          yield* waitFor(engine, currentRunId, ({ run }) => run.state._tag === "Succeeded");
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),

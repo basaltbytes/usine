@@ -45,11 +45,11 @@ export const workerConnectionsFor = <A extends { readonly name: WorkerName }>(
       const file = fileOf(attemptId);
       const worker = yield* Effect.gen(function* () {
         if (!(yield* fs.exists(file))) return Option.none<Worker>();
-        return Option.some(
-          yield* Schema.decodeEffect(WorkerJson)(yield* fs.readFileString(file), {
-            onExcessProperty: "error",
-          }),
-        );
+        const contents = yield* fs.readFileString(file);
+        const worker = yield* Schema.decodeEffect(WorkerJson)(contents, {
+          onExcessProperty: "error",
+        });
+        return Option.some(worker);
       }).pipe(Effect.mapError((cause) => failure(attemptId, cause)));
       return yield* Effect.transposeOption(Option.map(worker, resolve));
     });

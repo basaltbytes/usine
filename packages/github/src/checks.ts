@@ -89,8 +89,10 @@ export class GitHubChecks extends Context.Service<
         const response = yield* http
           .execute(HttpClientRequest.get(`${API_ROOT}/${path}`).pipe(authorized(token.value)))
           .pipe(Effect.mapError((error) => transportError("read-ci-checks", error)));
-        if (response.status !== 200)
-          return yield* statusError("read-ci-checks", response, yield* Clock.currentTimeMillis);
+        if (response.status !== 200) {
+          const now = yield* Clock.currentTimeMillis;
+          return yield* statusError("read-ci-checks", response, now);
+        }
         return response;
       }, retryTransientRequest);
       const jobFailure = Effect.fn("GitHubChecks.jobFailure")(function* (
@@ -139,9 +141,10 @@ export class GitHubChecks extends Context.Service<
         ) {
           yield* Effect.annotateCurrentSpan({ repository, item });
           const { owner, name } = splitRepositoryName(repository);
+          const installationToken = yield* app.installationToken;
           const result = yield* queryGraphql(
             http,
-            yield* app.installationToken,
+            installationToken,
             "read-ci-checks",
             HEAD_QUERY,
             { owner, name, number: item },

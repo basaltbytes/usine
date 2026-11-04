@@ -61,12 +61,13 @@ export const machineReuseFor = (options: ReuseOptions) => {
             return yield* Effect.die(new Error("Idle machine has no endpoint"));
           const [id, machine] = available.value;
           const policy = policyOf(machine);
-          if (
-            Option.isNone(policy) ||
-            candidate.uses > policy.value.attempts ||
-            age(candidate, yield* DateTime.now) >= policy.value.maxAgeMillis ||
-            !Equal.equals(machine.address, entry.address)
-          ) {
+          const limitReached = Option.isNone(policy) || candidate.uses > policy.value.attempts;
+          let expired = false;
+          if (!limitReached) {
+            const now = yield* DateTime.now;
+            expired = age(candidate, now) >= policy.value.maxAgeMillis;
+          }
+          if (limitReached || expired || !Equal.equals(machine.address, entry.address)) {
             yield* discard(candidate.hold, "its reuse limit or worker connection changed");
             return Option.none<MachineGrant>();
           }
@@ -139,12 +140,9 @@ export const machineReuseFor = (options: ReuseOptions) => {
         return false;
       }
       const policy = policyOf(machine);
-      if (
-        Option.isNone(policy) ||
-        current.uses >= policy.value.attempts ||
-        age(current, yield* DateTime.now) >= policy.value.maxAgeMillis
-      )
-        return false;
+      if (Option.isNone(policy) || current.uses >= policy.value.attempts) return false;
+      const checkedAt = yield* DateTime.now;
+      if (age(current, checkedAt) >= policy.value.maxAgeMillis) return false;
       const reset = yield* options.reset(machine).pipe(
         Effect.interruptible,
         Effect.timeoutOrElse({
@@ -185,9 +183,8 @@ export const machineReuseFor = (options: ReuseOptions) => {
         machine: current.id,
         attempts: current.uses,
       });
-      yield* Effect.sleep(
-        Math.max(0, policy.value.maxAgeMillis - age(current, yield* DateTime.now)),
-      ).pipe(
+      const observedAt = yield* DateTime.now;
+      yield* Effect.sleep(Math.max(0, policy.value.maxAgeMillis - age(current, observedAt))).pipe(
         Effect.andThen(
           Effect.gen(function* () {
             if (yield* holds.retireIdle(current.hold))

@@ -161,18 +161,21 @@ describe("open pull request refresh", () => {
         baseBranches().baseRefHead,
       );
       return Effect.gen(function* () {
-        assert.deepStrictEqual(yield* poll, {
+        const pollResult = yield* poll;
+        assert.deepStrictEqual(pollResult, {
           changes: 1,
           baseRefReads: [],
           snapshots: [28, 29, 30],
         });
         // The first read of a base branch can't show whether it moved since the fetch.
-        assert.deepStrictEqual(yield* poll, {
+        const currentPollResult = yield* poll;
+        assert.deepStrictEqual(currentPollResult, {
           changes: 1,
           baseRefReads: ["main", "release/1.x"],
           snapshots: [28, 29, 30],
         });
-        assert.deepStrictEqual(yield* poll, {
+        const nextPollResult = yield* poll;
+        assert.deepStrictEqual(nextPollResult, {
           changes: 1,
           baseRefReads: ["main if-none-match", "release/1.x if-none-match"],
           snapshots: [],
@@ -193,7 +196,8 @@ describe("open pull request refresh", () => {
       return Effect.gen(function* () {
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
-        assert.deepStrictEqual(yield* poll, {
+        const pollResult = yield* poll;
+        assert.deepStrictEqual(pollResult, {
           changes: 1,
           baseRefReads: ["main if-none-match"],
           snapshots: [28],
@@ -226,7 +230,8 @@ describe("open pull request refresh", () => {
       return Effect.gen(function* () {
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
-        assert.deepStrictEqual(yield* poll, {
+        const pollResult = yield* poll;
+        assert.deepStrictEqual(pollResult, {
           changes: 1,
           baseRefReads: ["main if-none-match"],
           snapshots: [28],
@@ -301,7 +306,8 @@ describe("open pull request refresh", () => {
           openPullRequests: Schema.decodeUnknownSync(LegacyOpenPullRequests)(openPullRequests),
         });
         pullRequest.statusCheckRollup = { state: "PENDING" };
-        assert.deepStrictEqual(yield* poll, {
+        const pollResult = yield* poll;
+        assert.deepStrictEqual(pollResult, {
           changes: 1,
           baseRefReads: ["main if-none-match"],
           snapshots: [28, 29],
@@ -343,8 +349,10 @@ describe("open pull request refresh", () => {
         openPullRequests: Schema.decodeUnknownSync(LegacyOpenPullRequests)(openPullRequests),
       });
 
-      assert.deepStrictEqual(yield* poll, { changes: 1, baseRefReads: [], snapshots: [28, 29] });
-      assert.deepStrictEqual(yield* poll, {
+      const pollResult = yield* poll;
+      assert.deepStrictEqual(pollResult, { changes: 1, baseRefReads: [], snapshots: [28, 29] });
+      const currentPollResult = yield* poll;
+      assert.deepStrictEqual(currentPollResult, {
         changes: 1,
         baseRefReads: ["main"],
         snapshots: [28, 29],
@@ -383,7 +391,8 @@ describe("open pull request refresh", () => {
         yield* poll;
         assert.deepStrictEqual((yield* poll).snapshots, [28, 29, 30]);
         warnings.length = 0;
-        assert.deepStrictEqual(yield* poll, {
+        const pollResult = yield* poll;
+        assert.deepStrictEqual(pollResult, {
           changes: 1,
           baseRefReads: ["main", "release/1.x if-none-match"],
           snapshots: [28, 29],

@@ -15,7 +15,8 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
           scope: ProjectScope.make({ project: ProjectId.make("acme-project") }),
         }).permissions;
         const { request } = yield* harness(Layer.succeed(RequestPermissions, grants));
-        expect(yield* request("GET", "")).toMatchObject({
+        const response = yield* request("GET", "");
+        expect(response).toMatchObject({
           status: 200,
           body: {
             projects: [{ id: "acme-project" }],
@@ -31,7 +32,8 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
         expect((yield* request("GET", "/entities/project/acme-other")).status).toBe(403);
         expect((yield* request("GET", "/entities/settings/instance")).status).toBe(403);
         expect((yield* request("GET", "/revisions/1")).status).toBe(403);
-        expect(yield* request("GET", "/revisions")).toMatchObject({
+        const currentResponse = yield* request("GET", "/revisions");
+        expect(currentResponse).toMatchObject({
           status: 200,
           body: { revisions: [] },
         });
@@ -66,7 +68,8 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
               value: { ...value, lanes: [{ name: "Ready", sources: [{ label: "ready" }] }] },
             })).status,
           ).toBe(200);
-          expect(yield* request("GET", "/revisions")).toMatchObject({
+          const nextResponse = yield* request("GET", "/revisions");
+          expect(nextResponse).toMatchObject({
             status: 200,
             body: { revisions: [{ number: 3 }, { number: 2 }] },
           });
@@ -85,7 +88,8 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
           scope: ProjectScope.make({ project: ProjectId.make("acme-other") }),
         }).permissions;
         const { request } = yield* harness(Layer.succeed(RequestPermissions, grants));
-        expect(yield* request("GET", "")).toMatchObject({
+        const response = yield* request("GET", "");
+        expect(response).toMatchObject({
           status: 200,
           body: {
             projects: [{ id: "acme-other" }],

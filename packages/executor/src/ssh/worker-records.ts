@@ -95,7 +95,8 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
         return Option.none<SshWorkerRecord>();
       }
       const text = yield* fs.readFileString(file);
-      return Option.some(yield* Schema.decodeEffect(SshWorkerRecordJson)(text));
+      const sshWorkerRecord = yield* Schema.decodeEffect(SshWorkerRecordJson)(text);
+      return Option.some(sshWorkerRecord);
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning(

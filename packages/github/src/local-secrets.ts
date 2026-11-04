@@ -142,7 +142,9 @@ export const loadLocalSecrets = Effect.fn("GitHubCredentials.loadSecrets")(funct
       }),
     ),
   );
-  return exists ? Option.some(yield* readSecretsFile(root)) : Option.none();
+  if (!exists) return Option.none();
+  const secrets = yield* readSecretsFile(root);
+  return Option.some(secrets);
 });
 
 /** Atomically replaces the runtime secrets with a mode 0600 file. */
