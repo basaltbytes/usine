@@ -792,9 +792,9 @@ it.live(
 );
 
 for (const origin of ["startup", "replacement"] as const) {
-  it.live(
-    `recovers a kept ${origin} sandbox through its retained client after a connection change`,
-    () =>
+  it.live.each(["reattach", "recover"] as const)(
+    `uses a kept ${origin} sandbox's retained client for %s after a connection change`,
+    (operation) =>
       Effect.gen(function* () {
         const initial = yield* fakeWorker;
         const original = origin === "startup" ? initial : yield* fakeWorker;
@@ -823,7 +823,7 @@ for (const origin of ["startup", "replacement"] as const) {
             stubAttemptRuntime(storage, parent),
             { attemptConnections },
           );
-        const working = yield* Deferred.make<void>();
+        let working = yield* Deferred.make<void>();
         const blocks: StubParent = () =>
           Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
         const credentials = mintingProvider();
@@ -872,6 +872,34 @@ for (const origin of ["startup", "replacement"] as const) {
           yield* workers.addWorker(address(replacement));
           yield* service.preflight(WORKER, [], 1);
           const salvages: Array<AttemptSalvage> = [];
+          if (operation === "reattach") {
+            const creates = original.state.requests.filter(
+              (line) => line === `PUT /v1/sandboxes/${SANDBOX}`,
+            ).length;
+            working = yield* Deferred.make<void>();
+            yield* Effect.scoped(
+              Effect.gen(function* () {
+                const prepared = yield* service.prepare(
+                  CheckoutRequest.make({ ...request, reattach: true }),
+                );
+                const running = yield* Effect.forkChild(prepared.launch(sink));
+                yield* Deferred.await(working);
+                yield* Fiber.interrupt(running);
+              }),
+            );
+            assert.strictEqual(
+              original.state.requests.filter((line) => line === `PUT /v1/sandboxes/${SANDBOX}`)
+                .length,
+              creates,
+              "reattachment reuses the original sandbox",
+            );
+            assert.isTrue(kept.held);
+            assert.include(
+              kept.github,
+              `${TOKEN_PREFIX}2`,
+              "refreshes the retained sandbox's token",
+            );
+          }
           yield* service.recover(
             keptCheckoutRecovery(request),
             { ...sink, salvage: (salvage) => Effect.sync(() => void salvages.push(salvage)) },
