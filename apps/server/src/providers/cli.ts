@@ -28,14 +28,12 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
     path: string,
     schema: Schema.Codec<A, I>,
     body?: Readonly<Record<string, string>>,
-  ) =>
-    client
-      .execute(
-        HttpClientRequest.make(method)(`${origin}${path}`).pipe(
-          HttpClientRequest.bearerToken(token),
-          HttpClientRequest.bodyJsonUnsafe(body ?? {}),
-        ),
-      )
+  ) => {
+    const outgoing = HttpClientRequest.make(method)(`${origin}${path}`).pipe(
+      HttpClientRequest.bearerToken(token),
+    );
+    return client
+      .execute(body === undefined ? outgoing : HttpClientRequest.bodyJsonUnsafe(outgoing, body))
       .pipe(
         Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
         Effect.timeout("45 seconds"),
@@ -47,6 +45,7 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
         ),
         Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
       );
+  };
   const status = yield* request("GET", "/api/providers", ProviderStatus);
   const targetName = Option.getOrNull(command.target);
   const targets =

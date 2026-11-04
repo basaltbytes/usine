@@ -52,6 +52,8 @@ usine logout claude
 usine logout chatgpt --target usine-gateway
 ```
 
+Both commands read connection status from the running instance and authenticate with its local `.usine/admin-token`. Run them as the user who started the instance. Subscription login polls until authorization completes; logout disconnects the selected provider immediately.
+
 `--target <SSH destination>` selects one gateway when several are configured. With one gateway, usine selects it automatically. With none, it stores credentials where the local Claude Code and Codex harnesses read them, honoring `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
 
 Local preflight and attempt children use the same credential directories. If one gateway is unavailable, Settings shows its error while other gateways remain usable. `--target` can select a healthy gateway independently.
