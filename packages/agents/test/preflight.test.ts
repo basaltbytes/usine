@@ -365,9 +365,15 @@ describe("worker harness readiness", () => {
     it.effect(`checks Pi ${pool} authentication and disposes its unprompted SDK session`, () => {
       let disposed = 0;
       let options: PiStartOptions | undefined;
+      const piBrain = BrainSpec.make({
+        ...brain("pi"),
+        model: ModelId.make(
+          pool === "chatgptPlan" ? "openai-codex/gpt-5.6-sol" : "openai/gpt-5.6-sol",
+        ),
+      });
       const started: PiStartResult = {
         _tag: "Started",
-        model: ModelId.make("provider/model"),
+        model: piBrain.model,
         pool,
         tools: [],
         session: {
@@ -384,18 +390,10 @@ describe("worker harness readiness", () => {
         },
       };
       return Effect.gen(function* () {
-        if (pool === "apiKeys") {
-          const available = yield* verifyHarness(brain("pi"), local, workerEnvironment);
-          assert.deepStrictEqual(available, HarnessReady.make({ harness: "pi" }));
-        } else {
-          const error = yield* verifyHarness(brain("pi"), local, workerEnvironment).pipe(
-            Effect.flip,
-          );
-          const matchesError = Schema.is(HarnessUnavailableError)(error);
-          assert(matchesError);
-          assert.strictEqual(error.capability, "login");
-        }
+        const available = yield* verifyHarness(piBrain, local, workerEnvironment);
+        assert.deepStrictEqual(available, HarnessReady.make({ harness: "pi" }));
         assert.strictEqual(disposed, 1);
+        assert.strictEqual(options?.model, piBrain.model);
         // The session's bash tool would run with the worker's environment, not this process's.
         assert.deepStrictEqual(options?.environment, Option.some(workerEnvironment));
       }).pipe(
@@ -415,6 +413,34 @@ describe("worker harness readiness", () => {
       );
     });
   }
+
+  it.effect("refuses a Pi OAuth provider without a billing pool", () =>
+    Effect.gen(function* () {
+      const piBrain = BrainSpec.make({
+        ...brain("pi"),
+        model: ModelId.make("github-copilot/gpt-5.6-sol"),
+      });
+      const error = yield* verifyHarness(piBrain, local, workerEnvironment).pipe(Effect.flip);
+      const matchesError = Schema.is(HarnessUnavailableError)(error);
+      assert(matchesError);
+      assert.strictEqual(error.capability, "login");
+    }).pipe(
+      Effect.provide(
+        commands({}).pipe(
+          Layer.provideMerge(account(Effect.succeed(null)).layer),
+          Layer.provideMerge(
+            Layer.succeed(PiSdk)({
+              start: async ({ model }) => ({
+                _tag: "UnsupportedAuthentication",
+                model,
+                authentication: { _tag: "OAuth", subscription: true },
+              }),
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
 
   it.effect("refuses remote Codex when its supervisor cannot run Node.js", () =>
     Effect.gen(function* () {

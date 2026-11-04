@@ -152,9 +152,9 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
             Effect.gen(function* () {
               const result = acquired.result;
               yield* Effect.sync(acquired.dispose);
-              if (result._tag !== "Started" || result.pool !== "apiKeys")
+              if (result._tag !== "Started")
                 return yield* loginError(
-                  `Pi child model "${brain.model}" is unavailable, doesn't support effort ${brain.effort}, or doesn't use an API key`,
+                  `Pi child model "${brain.model}" is unavailable, doesn't support effort ${brain.effort}, or has no supported credential (API key or openai-codex ChatGPT login)`,
                 );
             }),
         );
