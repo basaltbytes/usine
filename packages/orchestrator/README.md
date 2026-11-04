@@ -421,4 +421,4 @@ The operator HTTP contract includes identifier-only change notices, scoped navig
 
 ## Schema contracts
 
-Operator records and errors use nominal Schema brands. Construct `RunSummaryView` and `AttemptSummaryView` explicitly when converting full detail records to summaries. `attentionKey`, `partitionNeeds`, `gitHubItemKey`, and `repositoryEditorEntity` return Effects; yield them in the calling operation.
+Operator records and errors use nominal Schema brands. Construct `RunSummaryView` and `AttemptSummaryView` explicitly when converting full detail records to summaries. `attentionKey`, `partitionNeeds`, and `gitHubItemKey` are pure functions over validated values. `repositoryEditorEntity` returns an Effect; yield it in the calling operation.

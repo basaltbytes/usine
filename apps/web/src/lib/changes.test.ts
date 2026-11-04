@@ -5,7 +5,7 @@ import { GitHubItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { assert, expect, it, vi } from "vitest";
 import { fullTask, quietTask, taskRepository } from "~/lib/tasks/fixture";
 import { taskHistoryQuery, taskQuery } from "~/lib/tasks/queries";
@@ -241,9 +241,7 @@ it("refreshes task reads in the changed item's repository without refreshing oth
   const foreignRepository = RepositoryName.make("another/repository");
   const foreignItem = TaskItemView.make({
     ...unrelated.items[0],
-    itemKey: await Effect.runPromise(
-      Schema.encodeEffect(GitHubItemKey)(["github", foreignRepository, unrelated.number]),
-    ),
+    itemKey: Schema.encodeSync(GitHubItemKey)(["github", foreignRepository, unrelated.number]),
     url: `https://github.com/${foreignRepository}/issues/${unrelated.number}`,
   });
   const foreignTask = TaskView.make({

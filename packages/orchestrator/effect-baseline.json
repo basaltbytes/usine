@@ -12,6 +12,9 @@
   "src/loop-matches.ts": {
     "deterministicKeys": 1
   },
+  "src/operator/attention.ts": {
+    "globalJson": 3
+  },
   "src/operator/configuration/editor.ts": {
     "deterministicKeys": 1
   },

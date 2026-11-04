@@ -111,10 +111,11 @@ export const instanceFiles = (directory: string): InstanceFiles => {
   };
 };
 
+const formatRecord = (record: typeof InstanceRecord.Encoded): string =>
+  `${JSON.stringify(record, null, 2)}\n`;
+
 const encodeRecord = (record: InstanceRecord) =>
-  Schema.encodeEffect(InstanceRecord)(record).pipe(
-    Effect.map((encoded) => `${JSON.stringify(encoded, null, 2)}\n`),
-  );
+  Schema.encodeEffect(InstanceRecord)(record).pipe(Effect.map(formatRecord));
 
 const RecordFromJson = Schema.fromJsonString(InstanceRecord);
 
@@ -144,7 +145,10 @@ export const markStoppingSync = (files: InstanceFiles, record: InstanceRecord): 
     systemdUnit: record.systemdUnit,
     stoppingSince: DateTime.nowUnsafe(),
   });
-  writeFileSync(staging, Effect.runSync(encodeRecord(stopping)), { mode: 0o600 });
+  // The signal listener writes the already validated record synchronously.
+  // @effect-diagnostics-next-line schemaSync:off
+  const encoded = Schema.encodeSync(InstanceRecord)(stopping);
+  writeFileSync(staging, formatRecord(encoded), { mode: 0o600 });
   renameSync(staging, files.record);
 };
 

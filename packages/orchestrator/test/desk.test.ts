@@ -122,7 +122,7 @@ const instance = Effect.gen(function* () {
   });
 });
 
-const itemKey = (number: number) => Effect.runSync(gitHubItemKey(repository, number));
+const itemKey = (number: number) => gitHubItemKey(repository, number);
 const issue = (number: number, labels: ReadonlyArray<string>, gone = false) =>
   ItemProjection.make({
     itemKey: itemKey(number),
@@ -677,7 +677,7 @@ describe("Operator desk", () => {
       return RunSummary.make({
         ...summary(`recent-${index}`, index + 100, RunState.Succeeded.make(), "12:00:00"),
         repository: repo,
-        itemKey: Effect.runSync(gitHubItemKey(repo, index + 100)),
+        itemKey: gitHubItemKey(repo, index + 100),
         closedAt: Option.some(DateTime.add(time("13:00:00"), { seconds: -index })),
       });
     });

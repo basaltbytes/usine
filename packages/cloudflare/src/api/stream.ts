@@ -66,8 +66,10 @@ export class StreamFailed extends Schema.TaggedClass<
 export const ServerMessage = Schema.Union([Started, Exited, StreamFailed]);
 export type ServerMessage = typeof ServerMessage.Type;
 
-/** Encodes a client message as JSON text. Fails with `SchemaError` if the value doesn't match the schema. */
-export const encodeClientMessage = Schema.encodeEffect(Schema.fromJsonString(ClientMessage));
+/** Encodes a client message as JSON text. Throws `SchemaError` if the value doesn't match the schema. */
+// WebSocket callbacks encode already validated client messages synchronously.
+// @effect-diagnostics-next-line schemaSync:off
+export const encodeClientMessage = Schema.encodeSync(Schema.fromJsonString(ClientMessage));
 /** Decodes client JSON text, returning `None` for invalid JSON or a message that doesn't match the schema. */
 export const decodeClientMessage = Schema.decodeUnknownOption(Schema.fromJsonString(ClientMessage));
 /** Encodes a server message as JSON text. Fails with `SchemaError` if the value doesn't match the schema. */

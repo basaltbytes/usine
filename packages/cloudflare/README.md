@@ -101,4 +101,4 @@ The Sandbox SDK 1.0 needs the `durable_object` scheduling policy, which rejects 
 
 ## Schema contracts
 
-API records use nominal Schema brands. `encodeClientMessage` and `encodeServerMessage` return Effects that fail with `SchemaError`; yield them before sending a WebSocket message. Their JSON wire format is unchanged.
+API records use nominal Schema brands. `encodeClientMessage` encodes synchronously for WebSocket callbacks. `encodeServerMessage` returns an Effect that fails with `SchemaError`; yield it before sending a server message. Their JSON wire format is unchanged.

@@ -14,9 +14,6 @@ it.effect(
   "warns at ten minutes only for endpoint mode, supports dismissal, and clears after a verified delivery",
   () =>
     Effect.gen(function* () {
-      const fixtureValue1 = yield* Effect.context<never>();
-      const runFixture = Effect.runSyncWith(fixtureValue1);
-
       const health = yield* WebhookHealth;
       const bus = yield* ChangeBus;
       const revision = (yield* bus.open).revision;
@@ -52,7 +49,7 @@ it.effect(
         saved,
         warning.needsYou.map((need) =>
           AttentionAcknowledgement.make({
-            ...runFixture(attentionKey(need)),
+            ...attentionKey(need),
             dismissedBy: Option.some(OperatorLogin.make("operator")),
             dismissedAt: health.startedAt,
           }),

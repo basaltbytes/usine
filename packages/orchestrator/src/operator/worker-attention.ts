@@ -98,7 +98,7 @@ export const workerAttentionFor = (
     }
     if (needs.length === 0) return overview;
     const storedAcknowledgements = yield* acknowledgements.list;
-    const { needsYou, dismissedNeeds } = yield* partitionNeeds(needs, storedAcknowledgements);
+    const { needsYou, dismissedNeeds } = partitionNeeds(needs, storedAcknowledgements);
     const visible = [...overview.needsYou, ...needsYou];
     yield* Effect.logDebug("Refreshed worker attention", {
       workers: [...workers.keys()],

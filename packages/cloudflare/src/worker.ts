@@ -474,11 +474,12 @@ export class SandboxRegistry extends DurableObject<Env> {
   /** Records `sandbox`, the JSON encoding of a `SandboxSummary`. */
   async record(sandbox: Schema.Json): Promise<void> {
     const decoded = decodeSummary(sandbox);
-    if (Option.isSome(decoded))
-      await this.ctx.storage.put(
-        `sandbox:${decoded.value.name}`,
-        await Effect.runPromise(encodeSummary(decoded.value)),
-      );
+    if (Option.isSome(decoded)) {
+      // The Durable Object callback encodes an already validated summary.
+      // @effect-diagnostics-next-line schemaSync:off
+      const encoded = Schema.encodeSync(Schema.toCodecJson(SandboxSummary))(decoded.value);
+      await this.ctx.storage.put(`sandbox:${decoded.value.name}`, encoded);
+    }
   }
 
   async forget(name: string): Promise<void> {
@@ -510,7 +511,9 @@ const logForwarded = (handler: string, request: Request, response: Response) =>
 /** Adds the Attempt's installation token to the sandbox's requests for GitHub. */
 export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    const props = await Effect.runPromise(Schema.decodeEffect(GitHubProps)(this.ctx.props));
+    // Cloudflare calls this handler outside the Effect runtime.
+    // @effect-diagnostics-next-line schemaSync:off
+    const props = Schema.decodeSync(GitHubProps)(this.ctx.props);
     const response = await fetch(gitHubRequest(request, props.host, Redacted.make(props.token)));
     await logForwarded("github", request, response);
     return response;
@@ -523,7 +526,9 @@ export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Enc
  */
 export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    const props = await Effect.runPromise(Schema.decodeEffect(ProviderProps)(this.ctx.props));
+    // Cloudflare calls this handler outside the Effect runtime.
+    // @effect-diagnostics-next-line schemaSync:off
+    const props = Schema.decodeSync(ProviderProps)(this.ctx.props);
     const forwarded = providerRequest(request, props.provider, props.credential);
     if (Option.isNone(forwarded)) {
       await run(

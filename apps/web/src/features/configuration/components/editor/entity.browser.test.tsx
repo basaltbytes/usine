@@ -6,7 +6,7 @@ import { ProjectId } from "@usine/core/project";
 import { taskOverview } from "~/lib/tasks/fixture";
 import { RegistryTag } from "@usine/config/factory";
 import { ContainerLimits } from "@usine/core/worker";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { ConfigurationView, ProjectView, ReadyOverview } from "@usine/orchestrator/operator";
@@ -664,13 +664,11 @@ it("shows derived container limits and validates environment variable names in a
         worker.name === "local"
           ? {
               ...worker,
-              containerLimits: Effect.runSync(
-                Schema.decodeEffect(ContainerLimits)({
-                  cpus: 2,
-                  memoryMib: 2048,
-                  pids: 256,
-                }),
-              ),
+              containerLimits: Schema.decodeSync(ContainerLimits)({
+                cpus: 2,
+                memoryMib: 2048,
+                pids: 256,
+              }),
             }
           : worker,
       ),

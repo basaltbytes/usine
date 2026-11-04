@@ -1,5 +1,5 @@
 import { ConfigurationView } from "@usine/orchestrator/operator";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 
 const label = (
   name: string,
@@ -414,18 +414,16 @@ export const configurationJson = {
 };
 
 export const configurationFixture = (): ConfigurationView =>
-  Effect.runSync(Schema.decodeUnknownEffect(ConfigurationView)(configurationJson));
+  Schema.decodeUnknownSync(ConfigurationView)(configurationJson);
 
 /** Returns the fixture with every list empty, as for a new instance folder. */
 export const emptyConfiguration = (): ConfigurationView =>
-  Effect.runSync(
-    Schema.decodeUnknownEffect(ConfigurationView)({
-      ...configurationJson,
-      loops: [],
-      quarantinedLoops: [],
-      agents: [],
-      invalidAgents: [],
-      removedWorkers: [],
-      repositories: [],
-    }),
-  );
+  Schema.decodeUnknownSync(ConfigurationView)({
+    ...configurationJson,
+    loops: [],
+    quarantinedLoops: [],
+    agents: [],
+    invalidAgents: [],
+    removedWorkers: [],
+    repositories: [],
+  });

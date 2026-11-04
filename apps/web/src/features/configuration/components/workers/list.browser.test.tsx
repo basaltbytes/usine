@@ -4,7 +4,7 @@ import { projectTasksQuery } from "~/features/tasks/queries";
 import { workersQuery } from "~/features/configuration/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
-import { Effect, flow, Schema } from "effect";
+import { Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import {
@@ -213,10 +213,7 @@ declare module "vitest/browser" {
   }
 }
 
-const encodeConfiguration = flow(
-  Schema.encodeEffect(Schema.fromJsonString(ConfigurationView)),
-  Effect.runSync,
-);
+const encodeConfiguration = Schema.encodeSync(Schema.fromJsonString(ConfigurationView));
 const withPreflight = (check: WorkerConfigurationView["prerequisites"]) =>
   ConfigurationView.make({
     ...configuration,

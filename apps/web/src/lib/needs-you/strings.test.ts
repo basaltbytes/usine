@@ -17,7 +17,7 @@ import {
   UnresponsiveWorkerNeed,
   UnconfirmedStopNeed,
 } from "@usine/orchestrator/operator";
-import { Effect, DateTime, Option, Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { needsYouByProject } from "~/lib/overview";
 import { needCopy } from "~/lib/needs-you/strings";
@@ -60,14 +60,12 @@ describe("blocker copy in Needs attention", () => {
 
 describe("config file copy in Needs attention", () => {
   const need = (kind: "loop" | "agent", file: string, message: string) =>
-    Effect.runSync(
-      Schema.decodeEffect(ConfigFileNeed)({
-        _tag: "ConfigFileNeed",
-        id: `config-file:${file}`,
-        kind,
-        error: { _tag: "ConfigFileError", file, stage: "reference", message },
-      }),
-    );
+    Schema.decodeSync(ConfigFileNeed)({
+      _tag: "ConfigFileNeed",
+      id: `config-file:${file}`,
+      kind,
+      error: { _tag: "ConfigFileError", file, stage: "reference", message },
+    });
 
   it("names a quarantined Loop's file and reason", () => {
     const copy = needCopy(

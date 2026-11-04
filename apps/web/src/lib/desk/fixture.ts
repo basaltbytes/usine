@@ -81,7 +81,7 @@ import {
   WorkerUtilizationView,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 
 const deskRepository = RepositoryName.make("basaltbytes/usine");
 
@@ -95,9 +95,7 @@ const links = new Map<string, BoardItemLink>();
 
 const link = (number: number, title: string) => {
   const item = BoardItemLink.make({
-    itemKey: Effect.runSync(
-      Schema.encodeEffect(GitHubItemKey)(["github", deskRepository, ItemNumber.make(number)]),
-    ),
+    itemKey: Schema.encodeSync(GitHubItemKey)(["github", deskRepository, ItemNumber.make(number)]),
     kind: "issue",
     number: ItemNumber.make(number),
     title,

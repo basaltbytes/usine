@@ -20,7 +20,7 @@ import {
   RunDetailView,
   RunView,
 } from "@usine/orchestrator/operator";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
@@ -63,9 +63,7 @@ it.each([1440, 390])(
       }),
     ];
     const configuration = ConfigurationView.make({ ...configurationFixture(), bindings });
-    const configurationJson = JSON.stringify(
-      await Effect.runPromise(Schema.encodeEffect(ConfigurationView)(configuration)),
-    );
+    const configurationJson = JSON.stringify(Schema.encodeSync(ConfigurationView)(configuration));
     await commands.configurationEditorResponses([], configurationJson);
     await commands.accessResponses(configurationJson, JSON.stringify(administratorPermissions));
     const template = fullTask().runs[0];
@@ -91,9 +89,7 @@ it.each([1440, 390])(
       ),
       needsYou: [],
     });
-    const overviewJson = JSON.stringify(
-      await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview)),
-    );
+    const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
     const detail = RunDetailView.make({
       run,
       agentDefinitionChanged: false,
@@ -103,9 +99,7 @@ it.each([1440, 390])(
       sessionState: [],
       earlierTranscript: [],
     });
-    const detailJson = JSON.stringify(
-      await Effect.runPromise(Schema.encodeEffect(RunDetailView)(detail)),
-    );
+    const detailJson = JSON.stringify(Schema.encodeSync(RunDetailView)(detail));
     await commands.approvalResponses(overviewJson, overviewJson, detailJson, detailJson);
     await commands.githubChangesResponse('{"attempts":[]}');
     const client = new QueryClient({

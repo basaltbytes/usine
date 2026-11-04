@@ -19,11 +19,12 @@ import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT } from "./need.ts";
 import type { RunSummaryView } from "./run.ts";
 import { ProjectView, ReadyOverview } from "./overview.ts";
 
-const encodeNeed = Schema.encodeEffect(NeedView);
-const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+// The need is already validated; attention keys are derived synchronously.
+// @effect-diagnostics-next-line schemaSync:off
+const encodeNeed = Schema.encodeSync(NeedView);
 
 /** Identifies the condition to dismiss; pool usage is grouped into threshold bands. */
-export const attentionKey = Effect.fn("Operator.attentionKey")(function* (need: NeedView) {
+export const attentionKey = (need: NeedView): AttentionKey => {
   const content =
     need._tag === "PoolLimitNeed"
       ? {
@@ -35,13 +36,12 @@ export const attentionKey = Effect.fn("Operator.attentionKey")(function* (need: 
             POOL_LIMIT_WARNING_PERCENT,
           ),
         }
-      : yield* encodeNeed(need);
-  const revision = yield* encodeJson(content);
+      : encodeNeed(need);
   return AttentionKey.make({
     id: need.id,
-    revision: AttentionRevision.make(revision),
+    revision: AttentionRevision.make(JSON.stringify(content)),
   });
-}, Effect.orDie);
+};
 
 export const needRepositories = (need: NeedView) =>
   Match.valueTags(need, {
@@ -117,23 +117,21 @@ export const projectAttention = (
   );
 };
 
-export const partitionNeeds = Effect.fn("Operator.partitionNeeds")(function* (
+export const partitionNeeds = (
   needs: ReadonlyArray<NeedView>,
   acknowledgements: ReadonlyArray<Pick<AttentionKey, "id" | "revision">>,
-) {
-  const dismissedKeys = yield* Effect.forEach(acknowledgements, ({ id, revision }) =>
-    encodeJson([id, revision]).pipe(Effect.orDie),
+) => {
+  const dismissed = new Set(
+    acknowledgements.map(({ id, revision }) => JSON.stringify([id, revision])),
   );
-  const dismissed = new Set(dismissedKeys);
   const needsYou: Array<NeedView> = [];
   const dismissedNeeds: Array<NeedView> = [];
   for (const need of needs) {
-    const { id, revision } = yield* attentionKey(need);
-    const key = yield* encodeJson([id, revision]).pipe(Effect.orDie);
-    (dismissed.has(key) ? dismissedNeeds : needsYou).push(need);
+    const { id, revision } = attentionKey(need);
+    (dismissed.has(JSON.stringify([id, revision])) ? dismissedNeeds : needsYou).push(need);
   }
   return { needsYou, dismissedNeeds };
-});
+};
 
 export const poolLimitNeeds = (
   snapshots: ReadonlyArray<PoolRateLimitsUpdated>,
@@ -177,7 +175,7 @@ export const poolAttentionFor = (
     });
     if (needs.length === 0) return overview;
     const storedAcknowledgements = yield* acknowledgements.list;
-    const { needsYou, dismissedNeeds } = yield* partitionNeeds(needs, storedAcknowledgements);
+    const { needsYou, dismissedNeeds } = partitionNeeds(needs, storedAcknowledgements);
     return ReadyOverview.make({
       ...overview,
       needsYou: [...overview.needsYou, ...needsYou],

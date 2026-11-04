@@ -480,9 +480,6 @@ it.live(
         PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor), Layer.provide(dependencies)),
       );
       yield* Effect.gen(function* () {
-        const fixtureValue2 = yield* Effect.context<never>();
-        const runFixture = Effect.runSyncWith(fixtureValue2);
-
         const polling = yield* PollingTriggers;
         const engine = yield* RunEngine;
         const budgets = yield* CycleBudgets;
@@ -510,7 +507,7 @@ it.live(
         const dismiss = (ask: CycleBudgetAsk) =>
           acknowledgements.dismiss(
             AttentionAcknowledgement.make({
-              ...runFixture(attentionKey(needFor(ask))),
+              ...attentionKey(needFor(ask)),
               dismissedBy: Option.none(),
               dismissedAt: DateTime.makeUnsafe("2026-11-02T19:45:00Z"),
             }),
@@ -518,7 +515,7 @@ it.live(
         const attention = Effect.gen(function* () {
           const asks = yield* budgets.asks;
           const dismissed = yield* acknowledgements.list;
-          return yield* partitionNeeds(asks.map(needFor), dismissed);
+          return partitionNeeds(asks.map(needFor), dismissed);
         });
         yield* dismiss(blocked.ask);
         yield* polling.poll(withLoop(loop));

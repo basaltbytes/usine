@@ -142,7 +142,7 @@ interface RunPlan {
 
 const summary = (plan: RunPlan) =>
   RunSummary.make({
-    itemKey: Effect.runSync(gitHubItemKey(repository, plan.item)),
+    itemKey: gitHubItemKey(repository, plan.item),
     run: Run.make({
       id: RunId.make(plan.id),
       eventId: EventId.make(`event-${plan.id}`),
@@ -866,9 +866,6 @@ describe("OperatorStatistics", () => {
     "reads tasks merged through linked issues with their budget resets, and the window's Runs once",
     () =>
       Effect.gen(function* () {
-        const fixtureValue1 = yield* Effect.context<never>();
-        const runFixture = Effect.runSyncWith(fixtureValue1);
-
         const fixtureInstance = yield* instance;
         const since: Array<Option.Option<DateTime.Utc>> = [];
         const closedRuns = [implemented, firstReview, onlyReview];
@@ -915,7 +912,7 @@ describe("OperatorStatistics", () => {
                 // Merged before the window.
                 mergedPullRequest(9, "2026-10-10T08:00:00Z"),
                 ItemProjection.make({
-                  itemKey: runFixture(gitHubItemKey(repository, 12)),
+                  itemKey: gitHubItemKey(repository, 12),
                   repository,
                   source: ItemProjectionSource.make("pr"),
                   number: ItemNumber.make(12),
@@ -928,9 +925,7 @@ describe("OperatorStatistics", () => {
         const budgets = Layer.succeed(CycleBudgets)({
           ...emptyCycleBudgets,
           generation: (itemKey) =>
-            Effect.succeed(
-              CycleGeneration.make(itemKey === runFixture(gitHubItemKey(repository, 1)) ? 1 : 0),
-            ),
+            Effect.succeed(CycleGeneration.make(itemKey === gitHubItemKey(repository, 1) ? 1 : 0)),
         });
         yield* TestClock.setTime(DateTime.toEpochMillis(now));
         const [tasksDone, runsClosed] = yield* OperatorStatistics.use(

@@ -1,4 +1,3 @@
-import { Effect } from "effect";
 import { useCan } from "~/lib/permissions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -23,7 +22,7 @@ type DismissNeedProps = {
 export const DismissNeed = ({ need, action }: DismissNeedProps) => {
   const admin = useCan("admin");
   const queries = useQueryClient();
-  const key = Effect.runSync(attentionKey(need));
+  const key = attentionKey(need);
   const mutation = useMutation({
     mutationFn: () => api((client) => client[action]({ payload: key })),
     onSuccess: async () => {
@@ -34,8 +33,7 @@ export const DismissNeed = ({ need, action }: DismissNeedProps) => {
           if (overview === undefined) return overview;
           const source = action === "dismissNeed" ? overview.needsYou : overview.dismissedNeeds;
           const matching = source.filter(
-            (entry) =>
-              entry.id === key.id && Effect.runSync(attentionKey(entry)).revision === key.revision,
+            (entry) => entry.id === key.id && attentionKey(entry).revision === key.revision,
           );
           const remaining = source.filter((entry) => !matching.includes(entry));
           const needsYou =

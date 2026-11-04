@@ -47,7 +47,7 @@ import {
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { ProjectBoard } from "~/features/projects/board.page";
@@ -86,12 +86,10 @@ const attempt = (number: number, message: string | null) =>
   });
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const itemKey = ItemKey.make(JSON.stringify(["github", repository, 33]));
+const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
 const issueLink = (number: number, title: string) =>
   BoardItemLink.make({
-    itemKey: Effect.runSync(
-      Schema.encodeEffect(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
-    ),
+    itemKey: Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
     kind: "issue",
     number: ItemNumber.make(number),
     title,
@@ -587,9 +585,7 @@ describe("Board drag targets", () => {
 describe("Board card link", () => {
   it("opens the Task page under its originating Item, with or without a current Run", () => {
     const withRun = itemWithRun("Failed", [attempt(1, "Checks failed")]);
-    const prKey = Effect.runSync(
-      Schema.encodeEffect(GitHubItemKey)(["github", repository, ItemNumber.make(40)]),
-    );
+    const prKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(40)]);
     const pullRequest = BoardItemLink.make({
       itemKey: prKey,
       kind: "pr",
@@ -607,9 +603,7 @@ describe("Board card link", () => {
       ...boardRunSummary([], null, [...withRun.items, pullRequest]),
       run: null,
     });
-    const quietKey = Effect.runSync(
-      Schema.encodeEffect(GitHubItemKey)(["github", repository, ItemNumber.make(12)]),
-    );
+    const quietKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(12)]);
     const quiet = BoardTaskView.make({
       ...withRun,
       itemKey: quietKey,

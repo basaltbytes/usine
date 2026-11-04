@@ -1,10 +1,10 @@
 import { RunDetailView, WorkerView } from "@usine/orchestrator/operator";
-import { Effect, flow, Schema } from "effect";
+import { Schema } from "effect";
 
 const machineSchema = RunDetailView.fields.machine;
 const pauseSchema = WorkerView.fields.provisioning;
-const decodeMachine = flow(Schema.decodeUnknownEffect(machineSchema), Effect.runSync);
-const decodePause = flow(Schema.decodeUnknownEffect(pauseSchema), Effect.runSync);
+const decodeMachine = Schema.decodeUnknownSync(machineSchema);
+const decodePause = Schema.decodeUnknownSync(pauseSchema);
 
 /** Returns a Hetzner machine of `hz-pool` with `fields` replaced. */
 export const machineFixture = (

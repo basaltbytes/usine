@@ -18,7 +18,7 @@ import {
   WorkerPreflightNeed,
   WebhookSilenceNeed,
 } from "@usine/orchestrator/operator";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { DeskNeedsYou } from "~/features/overview/overview.page";
 import { LastOutcomes } from "~/features/overview/components/last-outcomes";
@@ -243,13 +243,11 @@ describe("Desk", () => {
     const deferred = WorkerView.make({
       name: WorkerName.make("boat-pool"),
       slots: WorkerSlotsView.make({ capacity: 2, leased: 0 }),
-      preflight: Effect.runSync(
-        Schema.decodeEffect(PreflightCheckView)({
-          _tag: "Deferred",
-          checkedAt: "2026-10-20T09:00:00.000Z",
-          message: "Checked on the worker's first machine each day",
-        }),
-      ),
+      preflight: Schema.decodeSync(PreflightCheckView)({
+        _tag: "Deferred",
+        checkedAt: "2026-10-20T09:00:00.000Z",
+        message: "Checked on the worker's first machine each day",
+      }),
     });
     const html = render(<WorkersLine workers={[deferred]} now={now} />);
     assert.include(text(html), "boat-pool 0 of 2 slots in use Preflight deferred 1h ago");

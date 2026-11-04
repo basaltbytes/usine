@@ -280,9 +280,8 @@ describe("Board self-writes", () => {
             });
             yield* applyMove;
 
-            const decodedValue4 = yield* gitHubItemKey(repository, 74);
             const recorded = yield* (yield* BoardMoves).onItem(
-              decodedValue4,
+              gitHubItemKey(repository, 74),
               DateTime.makeUnsafe(0),
             );
             assert.deepStrictEqual(

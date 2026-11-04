@@ -41,7 +41,7 @@ import {
   RunView,
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
-import { Effect, Option, Schema } from "effect";
+import { Option, Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
@@ -183,13 +183,11 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     earlierTranscript: [],
   });
   await commands.failureResolutionResponses(
-    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(before))),
-    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(after))),
-    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(RunDetailView)(detail))),
+    JSON.stringify(Schema.encodeSync(FactoryOverview)(before)),
+    JSON.stringify(Schema.encodeSync(FactoryOverview)(after)),
+    JSON.stringify(Schema.encodeSync(RunDetailView)(detail)),
     JSON.stringify(
-      await Effect.runPromise(
-        Schema.encodeEffect(RunDetailView)(RunDetailView.make({ ...detail, run: resolvedRun })),
-      ),
+      Schema.encodeSync(RunDetailView)(RunDetailView.make({ ...detail, run: resolvedRun })),
     ),
     attemptId,
   );
@@ -285,44 +283,40 @@ it("marks a closed issue in its drawer and refreshes the agent definition warnin
     itemKey: ItemKey.make('["github","resolution/project",1]'),
   });
   const overview = JSON.stringify(
-    await Effect.runPromise(
-      Schema.encodeEffect(FactoryOverview)(
-        ReadyOverview.make({
-          projects: [
-            ProjectView.make({
-              repository,
-              status: "needs-you",
-              runs: [
-                RunSummaryView.make({
-                  ...onIssue,
-                  attempts: onIssue.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
-                }),
-              ],
-              board: BoardView.make({ lanes: [], failures: [] }),
-              labels: [],
-              preflightFindings: [],
-            }),
-          ],
-          loops: [],
-          needsYou: [unrelated],
-        }),
-      ),
+    Schema.encodeSync(FactoryOverview)(
+      ReadyOverview.make({
+        projects: [
+          ProjectView.make({
+            repository,
+            status: "needs-you",
+            runs: [
+              RunSummaryView.make({
+                ...onIssue,
+                attempts: onIssue.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+              }),
+            ],
+            board: BoardView.make({ lanes: [], failures: [] }),
+            labels: [],
+            preflightFindings: [],
+          }),
+        ],
+        loops: [],
+        needsYou: [unrelated],
+      }),
     ),
   );
   const detail = JSON.stringify(
-    await Effect.runPromise(
-      Schema.encodeEffect(RunDetailView)(
-        RunDetailView.make({
-          agentDefinitionChanged: false,
-          run: onIssue,
-          eventDedupKey: "event",
-          eventPayload: {},
-          transcript: [],
-          sessionState: [],
-          earlierTranscript: [],
-          settledItemState: "issue-closed",
-        }),
-      ),
+    Schema.encodeSync(RunDetailView)(
+      RunDetailView.make({
+        agentDefinitionChanged: false,
+        run: onIssue,
+        eventDedupKey: "event",
+        eventPayload: {},
+        transcript: [],
+        sessionState: [],
+        earlierTranscript: [],
+        settledItemState: "issue-closed",
+      }),
     ),
   );
   await commands.failureResolutionResponses(overview, overview, detail, detail, attemptId);
@@ -384,15 +378,11 @@ it("marks a closed issue in its drawer and refreshes the agent definition warnin
     });
     await expect.element(warning).not.toBeInTheDocument();
     const changed = JSON.stringify(
-      await Effect.runPromise(
-        Schema.encodeEffect(RunDetailView)(
-          RunDetailView.make({
-            ...(await Effect.runPromise(
-              Schema.decodeEffect(Schema.fromJsonString(RunDetailView))(detail),
-            )),
-            agentDefinitionChanged: true,
-          }),
-        ),
+      Schema.encodeSync(RunDetailView)(
+        RunDetailView.make({
+          ...Schema.decodeSync(Schema.fromJsonString(RunDetailView))(detail),
+          agentDefinitionChanged: true,
+        }),
       ),
     );
     await commands.failureResolutionResponses(overview, overview, changed, changed, attemptId);
@@ -459,11 +449,9 @@ it("refreshes an open queued run during machine preparation and quota backoff", 
     loops: [],
     needsYou: [],
   });
-  const overviewJson = JSON.stringify(
-    await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview)),
-  );
+  const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
   const serve = (next: RunDetailView) => {
-    const json = JSON.stringify(Effect.runSync(Schema.encodeEffect(RunDetailView)(next)));
+    const json = JSON.stringify(Schema.encodeSync(RunDetailView)(next));
     return commands.failureResolutionResponses(overviewJson, overviewJson, json, json, attemptId);
   };
   await serve(detail);
@@ -564,7 +552,7 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
           : [TranscriptPageCursor.make({ attemptId, before: TranscriptSequence.make(before) })],
     });
   const encode = (sequences: ReadonlyArray<number>, before: number | null) =>
-    JSON.stringify(Effect.runSync(Schema.encodeEffect(RunDetailView)(detail(sequences, before))));
+    JSON.stringify(Schema.encodeSync(RunDetailView)(detail(sequences, before)));
   await commands.loaderTranscriptResponses({
     cold: encode([3, 4], 3),
     tail: encode([5], null),
@@ -734,12 +722,8 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
     sessionState: [],
     earlierTranscript: [],
   });
-  const overviewJson = JSON.stringify(
-    await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview)),
-  );
-  const detailJson = JSON.stringify(
-    await Effect.runPromise(Schema.encodeEffect(RunDetailView)(detail)),
-  );
+  const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
+  const detailJson = JSON.stringify(Schema.encodeSync(RunDetailView)(detail));
   await commands.failureResolutionResponses(
     overviewJson,
     overviewJson,

@@ -37,15 +37,13 @@ import {
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
-import { Effect, Option, Schema } from "effect";
+import { Option, Schema } from "effect";
 import { taskUsageOf } from "~/lib/projects/fixture";
 
 export const taskRepository = RepositoryName.make("basaltbytes/usine");
 
 const keyOf = (number: number) =>
-  Effect.runSync(
-    Schema.encodeEffect(GitHubItemKey)(["github", taskRepository, ItemNumber.make(number)]),
-  );
+  Schema.encodeSync(GitHubItemKey)(["github", taskRepository, ItemNumber.make(number)]);
 
 const item = (
   number: number,

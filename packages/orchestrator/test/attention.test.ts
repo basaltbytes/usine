@@ -7,7 +7,7 @@ import {
   RateLimitsSnapshot,
   RateLimitWindow,
 } from "@usine/core/agent/session";
-import { Effect, DateTime, Option } from "effect";
+import { DateTime, Option } from "effect";
 import { assert, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/config/label";
 import { RepositoryName } from "@usine/core/repository";
@@ -25,8 +25,8 @@ it("shows a changed preflight finding again and ignores acknowledgements of a di
       message: "Could not create label",
     }),
   });
-  const acknowledged = [Effect.runSync(attentionKey(original))];
-  assert.deepStrictEqual(Effect.runSync(partitionNeeds([original], acknowledged)), {
+  const acknowledged = [attentionKey(original)];
+  assert.deepStrictEqual(partitionNeeds([original], acknowledged), {
     needsYou: [],
     dismissedNeeds: [original],
   });
@@ -35,14 +35,14 @@ it("shows a changed preflight finding again and ignores acknowledgements of a di
     LabelPreflightFinding.make({ ...original.finding, message: "Label permission denied" }),
   ]) {
     const changed = PreflightFindingNeed.make({ ...original, finding });
-    assert.deepStrictEqual(Effect.runSync(partitionNeeds([changed], acknowledged)), {
+    assert.deepStrictEqual(partitionNeeds([changed], acknowledged), {
       needsYou: [changed],
       dismissedNeeds: [],
     });
   }
   const other = PreflightFindingNeed.make({ ...original, id: "another-finding" });
-  assert.deepStrictEqual(Effect.runSync(partitionNeeds([other], acknowledged)).needsYou, [other]);
-  assert.deepStrictEqual(Effect.runSync(partitionNeeds([original], [])).needsYou, [original]);
+  assert.deepStrictEqual(partitionNeeds([other], acknowledged).needsYou, [other]);
+  assert.deepStrictEqual(partitionNeeds([original], []).needsYou, [original]);
 });
 
 it("warns at 80 percent for either window and skips expired or undated windows", () => {
@@ -109,9 +109,9 @@ it("keeps pool warnings dismissed within each threshold band and separates pools
     [100, 110],
   ] as const) {
     const need = PoolLimitNeed.make({ ...original, usedPercent: band });
-    const acknowledgements = [Effect.runSync(attentionKey(need))];
+    const acknowledgements = [attentionKey(need)];
     const updated = PoolLimitNeed.make({ ...need, usedPercent: lastPercent });
-    assert.deepStrictEqual(Effect.runSync(partitionNeeds([updated], acknowledgements)), {
+    assert.deepStrictEqual(partitionNeeds([updated], acknowledgements), {
       needsYou: [],
       dismissedNeeds: [updated],
     });
@@ -122,7 +122,7 @@ it("keeps pool warnings dismissed within each threshold band and separates pools
         .filter((threshold) => threshold > band)
         .map((usedPercent) => PoolLimitNeed.make({ ...need, usedPercent })),
     ]) {
-      assert.deepStrictEqual(Effect.runSync(partitionNeeds([changed], acknowledgements)), {
+      assert.deepStrictEqual(partitionNeeds([changed], acknowledgements), {
         needsYou: [changed],
         dismissedNeeds: [],
       });

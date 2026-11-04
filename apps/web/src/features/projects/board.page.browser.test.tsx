@@ -4,7 +4,7 @@ import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { StateLaneSource, LaneName } from "@usine/config/board";
 import { RepositoryName } from "@usine/core/repository";
 import { ItemKey, ItemNumber } from "@usine/core/item";
@@ -282,7 +282,7 @@ it("loads every Done card as the virtual lane scrolls", async () => {
     const items = cards.slice(offset, offset + 50);
     return new Response(
       JSON.stringify({
-        items: await Effect.runPromise(Schema.encodeEffect(Schema.Array(BoardTaskView))(items)),
+        items: Schema.encodeSync(Schema.Array(BoardTaskView))(items),
         total: cards.length,
         nextOffset: offset + items.length < cards.length ? offset + items.length : null,
       }),

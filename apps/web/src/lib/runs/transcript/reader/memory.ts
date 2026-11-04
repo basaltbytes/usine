@@ -1,6 +1,6 @@
 import type { RunId } from "@usine/core/run";
 import { TranscriptSequence } from "@usine/engine/transcript";
-import { flow, Effect, Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 
 const identity = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024));
 const timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
@@ -38,7 +38,7 @@ const archive = Schema.fromJsonString(
   }),
 );
 const decode = Schema.decodeUnknownOption(archive, { onExcessProperty: "error" });
-const encode = flow(Schema.encodeEffect(archive), Effect.runSync);
+const encode = Schema.encodeSync(archive);
 const storageKey = "usine:conversation-readers:v1";
 const maximumAge = 30 * 24 * 60 * 60 * 1000;
 const maximumSize = 512_000;

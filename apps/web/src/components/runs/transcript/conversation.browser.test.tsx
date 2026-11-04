@@ -1,7 +1,6 @@
-import { ProvisionedWorkerAccess } from "@usine/orchestrator/operator";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
-import { Effect, Option, Schema } from "effect";
+import { Option, Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -204,9 +203,7 @@ beforeEach(async () => {
   // line above the reader, which shrinks it mid-test.
   await commands.githubChangesResponse(
     JSON.stringify(
-      await Effect.runPromise(
-        Schema.encodeEffect(RunGitHubChangesView)(RunGitHubChangesView.make({ attempts: [] })),
-      ),
+      Schema.encodeSync(RunGitHubChangesView)(RunGitHubChangesView.make({ attempts: [] })),
     ),
   );
   localStorage.clear();
@@ -1056,7 +1053,7 @@ const resumeCases: ReadonlyArray<{
   {
     worker: "hz-pool",
     harness: "claude",
-    access: ProvisionedWorkerAccess.make({ provider: "hetzner" }),
+    access: Schema.decodeSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
     facts: ["Worktree /worker/Philippe's repo on hz-pool"],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
     notes: ["Run it on the attempt's Hetzner machine, which is deleted with the attempt"],
@@ -1064,7 +1061,7 @@ const resumeCases: ReadonlyArray<{
   {
     worker: "hz-pool",
     harness: "codex",
-    access: ProvisionedWorkerAccess.make({ provider: "hetzner" }),
+    access: Schema.decodeSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
     gateway: { home: "/worker/codex/attempt-1", kind: "subscription" },
     facts: ["Worktree /worker/Philippe's repo on hz-pool"],
     command: null,

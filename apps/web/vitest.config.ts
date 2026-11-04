@@ -55,13 +55,11 @@ const SLOW_OVERVIEW_MS = 5_000;
 
 const projectResponses = async (page: Page, overview: () => string) => {
   const { FactoryOverview, ProjectView } = await import("@usine/orchestrator/operator");
-  const { Effect, Schema } = await import("effect");
+  const { Schema } = await import("effect");
   await page.unroute("**/api/projects/*");
-  await page.route("**/api/projects/*", async (route) => {
+  await page.route("**/api/projects/*", (route) => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1) ?? "");
-    const view = await Effect.runPromise(
-      Schema.decodeEffect(Schema.fromJsonString(FactoryOverview))(overview()),
-    );
+    const view = Schema.decodeSync(Schema.fromJsonString(FactoryOverview))(overview());
     const project = view.projects.find(
       (project) =>
         (project.id ??
@@ -75,7 +73,7 @@ const projectResponses = async (page: Page, overview: () => string) => {
           status: 404,
           json: { error: "BoardProjectNotFoundError", message: "No project" },
         })
-      : route.fulfill({ json: await Effect.runPromise(Schema.encodeEffect(ProjectView)(project)) });
+      : route.fulfill({ json: Schema.encodeSync(ProjectView)(project) });
   });
 };
 

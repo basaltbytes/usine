@@ -69,7 +69,7 @@ import {
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
-import { Effect, DateTime, Option, Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { clockLabel, dayTimeLabel } from "~/lib/strings";
@@ -87,7 +87,7 @@ import { machineFixture } from "~/lib/runs/machine-fixture";
 import { WithRouter } from "~/lib/testing/memory-router";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const itemKey = ItemKey.make(JSON.stringify(["github", repository, 33]));
+const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
 const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
 const attemptId = AttemptId.make("attempt-1");
 const attempt = (outcome: AttemptView["outcome"], salvage: AttemptView["salvage"] = null) =>
@@ -153,9 +153,7 @@ const member = (
   title = "Board lanes",
 ) =>
   BoardItemLink.make({
-    itemKey: Effect.runSync(
-      Schema.encodeEffect(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
-    ),
+    itemKey: Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
     kind,
     number: ItemNumber.make(number),
     title,

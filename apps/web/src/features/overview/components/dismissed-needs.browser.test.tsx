@@ -12,7 +12,7 @@ import {
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { Effect, DateTime, Option, Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import { PoolLogin } from "@usine/core/agent/session";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -72,7 +72,7 @@ it.each([
     dismissedNeeds: [need],
   });
   const encode = (overview: FactoryOverview) =>
-    JSON.stringify(Effect.runSync(Schema.encodeEffect(FactoryOverview)(overview)));
+    JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
   await commands.attentionResponses(encode(before), encode(after));
   const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await queries.ensureQueryData(overviewQuery());

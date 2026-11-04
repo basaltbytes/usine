@@ -361,8 +361,7 @@ describe("Items no Loop acts on", () => {
           assert.deepStrictEqual(currentAsks, []);
           const currentAttentionTags = yield* needTags(instance);
           assert.deepStrictEqual(currentAttentionTags, []);
-          const fixtureValue1 = yield* gitHubItemKey(repository, 468);
-          const currentGeneration = yield* budgets.generation(fixtureValue1);
+          const currentGeneration = yield* budgets.generation(gitHubItemKey(repository, 468));
           assert.strictEqual(currentGeneration, 0);
           // The budget wasn't reset, so the reopened pull request is at its limit again.
           update(items, 468, { state: "OPEN" });
@@ -555,8 +554,7 @@ describe("Items no Loop acts on", () => {
           const history = yield* reader.list(repository, { limit: 500 });
           assert.lengthOf(history, 500);
           assert(history.every(({ number }) => number >= 203));
-          const fixtureValue2 = yield* gitHubItemKey(repository, 182);
-          const stored = yield* reader.get(fixtureValue2);
+          const stored = yield* reader.get(gitHubItemKey(repository, 182));
           assert(Option.isSome(stored));
           yield* writer.upsert(
             ItemProjection.make({
@@ -574,7 +572,7 @@ describe("Items no Loop acts on", () => {
           if (kind === "issue") {
             yield* writer.upsert(
               ItemProjection.make({
-                itemKey: yield* gitHubItemKey(repository, 702),
+                itemKey: gitHubItemKey(repository, 702),
                 repository,
                 source: ItemProjectionSource.make("pr"),
                 number: ItemNumber.make(702),

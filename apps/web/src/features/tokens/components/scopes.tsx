@@ -6,7 +6,7 @@ import {
   permits,
   InstanceScope,
 } from "@usine/core/access";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
@@ -58,9 +58,7 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
     setPending(true);
     setError("");
     try {
-      const scopes = await Effect.runPromise(
-        Schema.encodeEffect(Schema.Array(PermissionGrant))(selected),
-      );
+      const scopes = Schema.encodeSync(Schema.Array(PermissionGrant))(selected);
       if (token === undefined) {
         const issued = await authRequest("/api/tokens", Schema.Struct({ token: Schema.String }), {
           method: "POST",

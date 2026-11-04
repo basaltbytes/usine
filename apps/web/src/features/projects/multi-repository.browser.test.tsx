@@ -21,7 +21,7 @@ import {
   RunSummaryView,
   WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -111,7 +111,7 @@ afterEach(() => {
 });
 const mount = async (path: string, width: number) => {
   await commands.boardResponses(
-    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview()))),
+    JSON.stringify(Schema.encodeSync(FactoryOverview)(overview())),
     200,
   );
   await page.viewport(width, 844);

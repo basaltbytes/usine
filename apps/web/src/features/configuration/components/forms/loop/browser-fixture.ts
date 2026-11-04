@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 
 export const loopEditorResponses = async (
   { page }: { readonly page: Page },
@@ -7,9 +7,7 @@ export const loopEditorResponses = async (
   resumeRejections: readonly { readonly status: number; readonly body: string }[] = [],
 ) => {
   const { ConfigurationView } = await import("@usine/orchestrator/operator");
-  const current = await Effect.runPromise(
-    Schema.decodeUnknownEffect(ConfigurationView)(JSON.parse(configuration)),
-  );
+  const current = Schema.decodeUnknownSync(ConfigurationView)(JSON.parse(configuration));
   let saved = false;
   let paused = true;
   let value: Schema.JsonObject = {
@@ -28,10 +26,8 @@ export const loopEditorResponses = async (
     '---\ntrigger: { on: issue, if: "true" }\nagent: developer\n---\nImplement {{ item.title }}.';
   await page.route("**/api/configuration/entities/loop/usine%2Fdraft-loop", async (route) => {
     if (route.request().method() === "PUT") {
-      const body = await Effect.runPromise(
-        Schema.decodeUnknownEffect(Schema.Struct({ value: Schema.JsonObject }))(
-          route.request().postDataJSON(),
-        ),
+      const body = Schema.decodeUnknownSync(Schema.Struct({ value: Schema.JsonObject }))(
+        route.request().postDataJSON(),
       );
       value = body.value;
       saved = true;
@@ -51,7 +47,7 @@ export const loopEditorResponses = async (
     route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        ...Effect.runSync(Schema.encodeEffect(ConfigurationView)(current)),
+        ...Schema.encodeSync(ConfigurationView)(current),
         loops: saved
           ? [
               ...current.loops,
@@ -67,13 +63,11 @@ export const loopEditorResponses = async (
     }),
   );
   await page.route("**/api/configuration/loops/check", async (route) => {
-    const draft = await Effect.runPromise(
-      Schema.decodeUnknownEffect(Schema.Struct({ value: Schema.JsonObject }))(
-        route.request().postDataJSON(),
-      ),
+    const draft = Schema.decodeUnknownSync(Schema.Struct({ value: Schema.JsonObject }))(
+      route.request().postDataJSON(),
     );
-    const trigger = await Effect.runPromise(
-      Schema.decodeUnknownEffect(Schema.Struct({ if: Schema.String }))(draft.value.trigger),
+    const trigger = Schema.decodeUnknownSync(Schema.Struct({ if: Schema.String }))(
+      draft.value.trigger,
     );
     await route.fulfill({
       contentType: "application/json",
@@ -100,11 +94,9 @@ export const loopEditorResponses = async (
     });
   });
   await page.route("**/api/configuration/loops/preview", async (route) => {
-    const draft = await Effect.runPromise(
-      Schema.decodeUnknownEffect(Schema.Struct({ itemKey: Schema.optionalKey(Schema.String) }))(
-        route.request().postDataJSON(),
-      ),
-    );
+    const draft = Schema.decodeUnknownSync(
+      Schema.Struct({ itemKey: Schema.optionalKey(Schema.String) }),
+    )(route.request().postDataJSON());
     const number = draft.itemKey?.endsWith("#2") ? 2 : 1;
     await route.fulfill({
       contentType: "application/json",

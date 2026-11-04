@@ -239,7 +239,6 @@ const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number,
   const fixtureInstance = yield* instance;
   const engine = yield* RunEngine;
   const expressions = yield* ExpressionEngine;
-  const decodedValue2 = yield* gitHubItemKey(repository, 815);
 
   const submission = yield* triggerSubmission(expressions, {
     loop: LoopFile.make({
@@ -251,7 +250,7 @@ const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number,
     parentModel: Option.none(),
     dedupKey: DedupKey.make("ci-development"),
     cycleGeneration: CycleGeneration.make(0),
-    itemKey: decodedValue2,
+    itemKey: gitHubItemKey(repository, 815),
     payload: fixturePayload,
     receivedAt: yield* DateTime.now,
     repository: fixtureInstance.config.repos[0] ?? assert.fail("missing repo"),
@@ -502,7 +501,6 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
         yield* engine.drain;
         const expressions = yield* ExpressionEngine;
-        const decodedValue27 = yield* gitHubItemKey(repository, 815);
 
         const another = yield* triggerSubmission(expressions, {
           loop: LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) }),
@@ -510,7 +508,7 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
           parentModel: Option.none(),
           dedupKey: DedupKey.make("another-fix"),
           cycleGeneration: CycleGeneration.make(0),
-          itemKey: decodedValue27,
+          itemKey: gitHubItemKey(repository, 815),
           payload: fixturePayload,
           receivedAt: yield* DateTime.now,
           repository: fixtureInstance.config.repos[0] ?? assert.fail("missing repo"),
@@ -750,7 +748,6 @@ it.live.each([
         const engine = yield* RunEngine;
         const sourceId = yield* openWait(setup.timeoutSeconds);
         const expressions = yield* ExpressionEngine;
-        const decodedValue49 = yield* gitHubItemKey(repository, 815);
 
         const existing = yield* triggerSubmission(expressions, {
           loop,
@@ -758,7 +755,7 @@ it.live.each([
           parentModel: Option.none(),
           dedupKey: DedupKey.make("existing-fix"),
           cycleGeneration: CycleGeneration.make(0),
-          itemKey: decodedValue49,
+          itemKey: gitHubItemKey(repository, 815),
           payload: fixturePayload,
           receivedAt: yield* DateTime.now,
           repository: fixtureInstance.config.repos[0] ?? assert.fail("missing repo"),

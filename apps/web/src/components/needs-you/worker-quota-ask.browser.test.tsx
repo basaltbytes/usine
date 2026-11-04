@@ -20,7 +20,7 @@ import {
   WorkerQuotaNeed,
   WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
@@ -103,24 +103,14 @@ it.each([1440, 390])(
     await page.viewport(width, 900);
     await commands.reducedMotion(true);
     const { overview, detail, need } = fixture();
-    const overviewJson = JSON.stringify(
-      await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview)),
-    );
-    const detailJson = JSON.stringify(
-      await Effect.runPromise(Schema.encodeEffect(RunDetailView)(detail)),
-    );
+    const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
+    const detailJson = JSON.stringify(Schema.encodeSync(RunDetailView)(detail));
     await commands.approvalResponses(overviewJson, overviewJson, detailJson, detailJson);
     const statistics = (window: "7d" | "30d" | "all") =>
-      JSON.stringify(
-        Effect.runSync(
-          Schema.encodeEffect(StatisticsView)(emptyStatisticsFixture(Date.now(), window)),
-        ),
-      );
+      JSON.stringify(Schema.encodeSync(StatisticsView)(emptyStatisticsFixture(Date.now(), window)));
     const runStatistics = (window: "7d" | "30d" | "all") =>
       JSON.stringify(
-        Effect.runSync(
-          Schema.encodeEffect(RunStatisticsView)(emptyRunStatisticsFixture(Date.now(), window)),
-        ),
+        Schema.encodeSync(RunStatisticsView)(emptyRunStatisticsFixture(Date.now(), window)),
       );
     await commands.statisticsResponses(
       overviewJson,

@@ -58,13 +58,14 @@ describe("sandbox exec stream", () => {
       sandbox.state.run = () => command.process;
       return Effect.gen(function* () {
         const client = yield* fakeSocket;
-        const decodedValue1 = yield* encodeClientMessage(ExecStart.make({ command: "cat" }));
-        yield* Queue.offer(client.messages, decodedValue1);
+        yield* Queue.offer(
+          client.messages,
+          encodeClientMessage(ExecStart.make({ command: "cat" })),
+        );
         const stream = yield* Effect.forkChild(execStream(NAME, client.socket));
         yield* Effect.yieldNow;
         yield* Queue.offer(client.messages, text("hello"));
-        const decodedValue2 = yield* encodeClientMessage(StdinEnd.make());
-        yield* Queue.offer(client.messages, decodedValue2);
+        yield* Queue.offer(client.messages, encodeClientMessage(StdinEnd.make()));
         yield* Effect.promise(() => command.stdout("hello"));
         yield* Effect.promise(() => command.stderr("warning"));
         yield* Effect.promise(() => command.exit(0));
@@ -89,8 +90,10 @@ describe("sandbox exec stream", () => {
     sandbox.state.run = () => command.process;
     return Effect.gen(function* () {
       const client = yield* fakeSocket;
-      const decodedValue3 = yield* encodeClientMessage(ExecStart.make({ command: "claude" }));
-      yield* Queue.offer(client.messages, decodedValue3);
+      yield* Queue.offer(
+        client.messages,
+        encodeClientMessage(ExecStart.make({ command: "claude" })),
+      );
       const stream = yield* Effect.forkChild(execStream(NAME, client.socket));
       yield* Effect.yieldNow;
       yield* Queue.end(client.messages);
@@ -122,10 +125,10 @@ describe("sandbox exec stream", () => {
       });
       return Effect.gen(function* () {
         const client = yield* fakeSocket;
-        const decodedValue4 = yield* encodeClientMessage(
-          ExecStart.make({ command: "git status --porcelain" }),
+        yield* Queue.offer(
+          client.messages,
+          encodeClientMessage(ExecStart.make({ command: "git status --porcelain" })),
         );
-        yield* Queue.offer(client.messages, decodedValue4);
         yield* execStream(NAME, client.socket);
 
         const [started, ...rest] = client.control();
@@ -160,8 +163,10 @@ describe("sandbox exec stream", () => {
     sandbox.state.running = false;
     return Effect.gen(function* () {
       const client = yield* fakeSocket;
-      const decodedValue5 = yield* encodeClientMessage(ExecStart.make({ command: "git status" }));
-      yield* Queue.offer(client.messages, decodedValue5);
+      yield* Queue.offer(
+        client.messages,
+        encodeClientMessage(ExecStart.make({ command: "git status" })),
+      );
       yield* execStream(NAME, client.socket);
 
       expect(client.control().map(({ _tag }) => _tag)).toEqual(["StreamFailed"]);

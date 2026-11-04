@@ -19,7 +19,7 @@ import {
   ReadyOverview,
   WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -115,10 +115,7 @@ const Board = ({ selected = repository }: BoardProps) => {
   );
 };
 const respond = (data = overview(), status: 200 | 503 = 200) =>
-  commands.boardResponses(
-    JSON.stringify(Effect.runSync(Schema.encodeEffect(FactoryOverview)(data))),
-    status,
-  );
+  commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(data)), status);
 const lane = (name: string) => page.getByLabelText(`${name} lane`);
 const taskIn = (name: string, number = 1) =>
   lane(name).getByRole("link", { name: `Task ${number}`, exact: true });
@@ -377,7 +374,7 @@ for (const method of ["menu", "keyboard"] as const) {
     });
     await commands.boardLaneItemsResponse(
       JSON.stringify({
-        items: await Effect.runPromise(Schema.encodeEffect(Schema.Array(BoardTaskView))(cards)),
+        items: Schema.encodeSync(Schema.Array(BoardTaskView))(cards),
         total: cards.length,
         nextOffset: null,
       }),

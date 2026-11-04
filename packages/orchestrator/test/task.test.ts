@@ -83,7 +83,7 @@ const pullUrl = (number: number) => `https://github.com/${repository}/pull/${num
 
 const issue = (number: number, title: string, closingPullRequests: ReadonlyArray<number> = []) =>
   ItemProjection.make({
-    itemKey: Effect.runSync(gitHubItemKey(repository, number)),
+    itemKey: gitHubItemKey(repository, number),
     repository,
     source: ItemProjectionSource.make("issue"),
     number: ItemNumber.make(number),
@@ -122,7 +122,7 @@ const pullRequest = (
   state: { readonly merged: boolean; readonly mergeable: string },
 ) =>
   ItemProjection.make({
-    itemKey: Effect.runSync(gitHubItemKey(repository, number)),
+    itemKey: gitHubItemKey(repository, number),
     repository,
     source: ItemProjectionSource.make("pr"),
     number: ItemNumber.make(number),
@@ -203,7 +203,7 @@ const summary = (
     revision: RepositoryRevision.make("main"),
     permissions: "write",
     parentModel: Option.none(),
-    itemKey: Effect.runSync(gitHubItemKey(repository, item)),
+    itemKey: gitHubItemKey(repository, item),
     run: Run.make({
       id: runId,
       eventId: EventId.make(`event-${id}`),
@@ -490,9 +490,8 @@ describe("Task view", () => {
           ["pr", 42, "pr-open", true],
         ],
       );
-      const valueDecoded1 = yield* gitHubItemKey(repository, 42);
       // The open Run on #42 puts the Task in the lane its pull request routes to.
-      assert.strictEqual(task.current, valueDecoded1);
+      assert.strictEqual(task.current, gitHubItemKey(repository, 42));
       assert.strictEqual(task.lane.name, "In review");
       assert.deepStrictEqual(
         task.runs.map(({ id, state }) => [id, state]),
@@ -565,8 +564,7 @@ describe("Task view", () => {
         }),
       });
       const labeled = yield* readTask(40, repository, [triggered]);
-      const valueDecoded2 = yield* gitHubItemKey(repository, 42);
-      assert.strictEqual(labeled.task.current, valueDecoded2);
+      assert.strictEqual(labeled.task.current, gitHubItemKey(repository, 42));
       assert.strictEqual(labeled.task.lane.name, "In review");
       // With no lane for `ready-for-review`, the Task is in the lane its Run was triggered from.
       const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({

@@ -617,7 +617,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
     }
     const saved = yield* acknowledgements.list;
-    const { needsYou: visible, dismissedNeeds } = yield* partitionNeeds(needsYou, saved);
+    const { needsYou: visible, dismissedNeeds } = partitionNeeds(needsYou, saved);
     const overview = ReadyOverview.make({
       projects: projectAttention(projects, visible),
       loops,
@@ -778,9 +778,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           Effect.flatMap((view) => webhookAttention(view, instance.config.webhooks)),
           Effect.tap(({ needsYou, dismissedNeeds }) =>
             reports.pollReported && reports.scheduleReported
-              ? Effect.forEach([...needsYou, ...dismissedNeeds], attentionKey).pipe(
-                  Effect.flatMap(acknowledgements.prune),
-                )
+              ? acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey))
               : Effect.logDebug("Deferred attention pruning until trigger sources report", reports),
           ),
         ),

@@ -48,7 +48,7 @@ const exeWorker = ExeDevWorker.make({
 const workers = [localWorker, exeWorker];
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const itemKey = Effect.runSync(gitHubItemKey(repository, 247));
+const itemKey = gitHubItemKey(repository, 247);
 const runId = RunId.make("d4ca1525f463fad8df76328db85a7611");
 const brain = BrainSpec.make({
   harness: "codex",

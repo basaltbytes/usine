@@ -392,4 +392,4 @@ One server-sent events connection invalidates scoped queries. Disconnected scree
 
 Operator records use nominal Schema brands. Construct summaries explicitly with
 `RunSummaryView.make` and `AttemptSummaryView.make` when converting detail fixtures.
-Decode JSON with `Schema.decodeUnknownEffect` at the query or browser boundary.
+Decode JSON at the query or browser boundary. Synchronous callbacks use synchronous codecs.

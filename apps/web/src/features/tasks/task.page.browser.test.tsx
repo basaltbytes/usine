@@ -10,7 +10,7 @@ import {
   ReadyOverview,
   TaskView,
 } from "@usine/orchestrator/operator";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -48,15 +48,10 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   );
   const method = init?.method ?? (input instanceof Request ? input.method : "GET");
   if (url.pathname === "/api/overview")
-    return json(
-      JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview))),
-    );
+    return json(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)));
   if (/^\/api\/projects\/[^/]+$/u.test(url.pathname)) {
     const project = overview.projects[0];
-    if (project !== undefined)
-      return json(
-        JSON.stringify(await Effect.runPromise(Schema.encodeEffect(ProjectView)(project))),
-      );
+    if (project !== undefined) return json(JSON.stringify(Schema.encodeSync(ProjectView)(project)));
     return json("{}", 404);
   }
   if (url.pathname === "/api/agents") return json('["developer","reviewer"]');
@@ -65,10 +60,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const task = tasks.get(runHistory);
     return json(
       JSON.stringify({
-        runs:
-          task === undefined
-            ? []
-            : (await Effect.runPromise(Schema.encodeEffect(TaskView)(task))).runs,
+        runs: task === undefined ? [] : Schema.encodeSync(TaskView)(task).runs,
         total: task?.runs.length ?? 0,
         nextOffset: null,
       }),
@@ -92,7 +84,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
           }),
           404,
         )
-      : json(JSON.stringify(await Effect.runPromise(Schema.encodeEffect(TaskView)(task))));
+      : json(JSON.stringify(Schema.encodeSync(TaskView)(task)));
   }
   sent.push({ method, path: url.pathname });
   return json('{"ok":true}');

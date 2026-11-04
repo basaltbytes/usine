@@ -787,12 +787,10 @@ describe("Operator", () => {
           assert(need !== undefined);
           const readsState = yield* Ref.get(reads);
           assert.strictEqual(readsState, 1);
-          const valueDecoded1 = yield* attentionKey(need);
-          yield* operator.dismissNeed(endpointInstance, valueDecoded1);
+          yield* operator.dismissNeed(endpointInstance, attentionKey(need));
           const currentConfigWarnings = yield* warnings;
           assert.deepStrictEqual(currentConfigWarnings, []);
-          const valueDecoded2 = yield* attentionKey(need);
-          yield* operator.undoDismissNeed(valueDecoded2);
+          yield* operator.undoDismissNeed(attentionKey(need));
 
           assert.strictEqual((yield* warnings).length, 1);
           const readsBeforeDelivery = yield* Ref.get(reads);
@@ -936,8 +934,7 @@ describe("Operator", () => {
           const readsState = yield* Ref.get(reads);
           assert.strictEqual(readsState, 1, "rate windows refresh without a board revision");
 
-          const valueDecoded1 = yield* attentionKey(need);
-          yield* operator.dismissNeed(fixtureInstance, valueDecoded1);
+          yield* operator.dismissNeed(fixtureInstance, attentionKey(need));
           const currentAttentionNeeds = yield* needs;
           assert.deepStrictEqual(currentAttentionNeeds, []);
 
@@ -955,22 +952,19 @@ describe("Operator", () => {
             assert(dismissed?._tag === "PoolLimitNeed");
             assert.strictEqual(dismissed.usedPercent, usedPercent);
           }
-          const valueDecoded7 = yield* attentionKey(need);
-          yield* operator.undoDismissNeed(valueDecoded7);
+          yield* operator.undoDismissNeed(attentionKey(need));
           const nextAttentionNeeds = yield* needs;
           assert.deepStrictEqual(nextAttentionNeeds, [
             PoolLimitNeed.make({ ...need, usedPercent: 89 }),
           ]);
 
-          const valueDecoded2 = yield* attentionKey(need);
-          yield* operator.dismissNeed(fixtureInstance, valueDecoded2);
+          yield* operator.dismissNeed(fixtureInstance, attentionKey(need));
           append(90);
           const [higherBand] = yield* needs;
           assert(higherBand !== undefined);
           assert.strictEqual(higherBand.usedPercent, 90);
 
-          const valueDecoded3 = yield* attentionKey(higherBand);
-          yield* operator.dismissNeed(fixtureInstance, valueDecoded3);
+          yield* operator.dismissNeed(fixtureInstance, attentionKey(higherBand));
           const updatedAttentionNeeds = yield* needs;
           assert.deepStrictEqual(updatedAttentionNeeds, []);
           const nextReset = DateTime.add(resetsAt, { hours: 1 });
@@ -979,8 +973,7 @@ describe("Operator", () => {
           assert(nextWindow !== undefined);
           assert.deepStrictEqual(nextWindow.resetsAt, nextReset);
 
-          const valueDecoded4 = yield* attentionKey(nextWindow);
-          yield* operator.dismissNeed(fixtureInstance, valueDecoded4);
+          yield* operator.dismissNeed(fixtureInstance, attentionKey(nextWindow));
           const latestAttentionNeeds = yield* needs;
           assert.deepStrictEqual(latestAttentionNeeds, []);
           append(20);
@@ -1093,8 +1086,7 @@ describe("Operator", () => {
           const need = decodedValue7.needsYou.find((need) => need._tag === "WorkerQuotaNeed");
           assert(need !== undefined);
 
-          const valueDecoded5 = yield* attentionKey(need);
-          yield* operator.dismissNeed(fixtureInstance, valueDecoded5);
+          yield* operator.dismissNeed(fixtureInstance, attentionKey(need));
           const decodedValue8 = yield* operator.overview(fixtureInstance);
           assert(!decodedValue8.needsYou.some((entry) => entry._tag === "WorkerQuotaNeed"));
 
@@ -1201,8 +1193,7 @@ describe("Operator", () => {
           const readsState = yield* Ref.get(reads);
           assert.strictEqual(readsState, 1, "worker notices do not need a board revision");
 
-          const valueDecoded6 = yield* attentionKey(need);
-          yield* operator.dismissNeed(fixtureInstance, valueDecoded6);
+          yield* operator.dismissNeed(fixtureInstance, attentionKey(need));
           const currentWorkerAttention = yield* workerNeeds;
           assert.deepStrictEqual(currentWorkerAttention, []);
 
@@ -1262,8 +1253,7 @@ describe("Operator", () => {
 
           const before = yield* operator.overview(fixtureInstance);
           for (const need of before.needsYou) {
-            const fixtureValue1 = yield* attentionKey(need);
-            yield* operator.dismissNeed(fixtureInstance, fixtureValue1);
+            yield* operator.dismissNeed(fixtureInstance, attentionKey(need));
           }
 
           const dismissed = yield* operator.overview(fixtureInstance);
@@ -1287,8 +1277,7 @@ describe("Operator", () => {
           assert.deepStrictEqual(approvedState, []);
           const approval = before.needsYou.find((need) => need._tag === "ApprovalNeed");
           assert(approval !== undefined);
-          const valueDecoded27 = yield* attentionKey(approval);
-          yield* operator.undoDismissNeed(valueDecoded27);
+          yield* operator.undoDismissNeed(attentionKey(approval));
 
           const restored = yield* operator.overview(fixtureInstance);
           assert.deepStrictEqual(restored.needsYou, [approval]);
@@ -1493,8 +1482,7 @@ describe("Operator", () => {
               need.failure.repository === scheduleB.repository,
         );
         for (const need of dismissed) {
-          const fixtureValue2 = yield* attentionKey(need);
-          yield* operator.dismissNeed(fixtureInstance, fixtureValue2);
+          yield* operator.dismissNeed(fixtureInstance, attentionKey(need));
         }
         for (const [pollReport, scheduleReport] of [
           [Option.none<PollCycle>(), Option.none<ScheduleCycle>()],
@@ -1594,8 +1582,7 @@ describe("Operator", () => {
         assert.strictEqual(readsState, readsAfterPruning);
 
         for (const need of failures) {
-          const fixtureValue3 = yield* attentionKey(need);
-          yield* operator.dismissNeed(fixtureInstance, fixtureValue3);
+          yield* operator.dismissNeed(fixtureInstance, attentionKey(need));
         }
         yield* Ref.set(latestPoll, Option.none());
         yield* Ref.set(latestSchedule, Option.none());
@@ -1711,7 +1698,7 @@ describe("Operator", () => {
         id: AttemptId.make("later-failure"),
         number: AttemptNumber.make(2),
       });
-      let dismissedFailure: Effect.Success<ReturnType<typeof attentionKey>> | undefined;
+      let dismissedFailure: ReturnType<typeof attentionKey> | undefined;
       for (const [attempts, resolved, needsAttention] of [
         [[failed], Option.none<AttemptId>(), true],
         [[failed], Option.some(failed.id), false],
@@ -1755,14 +1742,12 @@ describe("Operator", () => {
             assert.deepStrictEqual(outcome.failure, failureNeed.failure);
             assert.include(failureNeed.failure.message, "single-repository installation token");
             if (dismissedFailure !== undefined)
-              assert.deepStrictEqual(
-                (yield* partitionNeeds([failureNeed], [dismissedFailure])).needsYou,
-                [failureNeed],
-              );
+              assert.deepStrictEqual(partitionNeeds([failureNeed], [dismissedFailure]).needsYou, [
+                failureNeed,
+              ]);
 
-            const valueDecoded7 = yield* attentionKey(failureNeed);
-            yield* operator.dismissNeed(fixtureInstance, valueDecoded7);
-            dismissedFailure = yield* attentionKey(failureNeed);
+            yield* operator.dismissNeed(fixtureInstance, attentionKey(failureNeed));
+            dismissedFailure = attentionKey(failureNeed);
 
             const dismissed = yield* operator.overview(fixtureInstance);
             assert(!dismissed.needsYou.some((need) => need._tag === "RunFailureNeed"));
@@ -2556,8 +2541,7 @@ describe("Operator", () => {
           ),
         );
 
-        const valueDecoded8 = yield* attentionKey(need);
-        yield* operator.dismissNeed(fixtureInstance, valueDecoded8);
+        yield* operator.dismissNeed(fixtureInstance, attentionKey(need));
 
         const dismissed = yield* operator.overview(fixtureInstance);
         assert(!dismissed.needsYou.some((entry) => entry.id === need.id));
@@ -2587,10 +2571,8 @@ describe("Operator", () => {
         assert(changedNeed !== undefined);
         assert(!changed.dismissedNeeds.some((entry) => entry.id === need.id));
 
-        const valueDecoded9 = yield* attentionKey(changedNeed);
-        yield* operator.dismissNeed(fixtureInstance, valueDecoded9);
-        const valueDecoded57 = yield* attentionKey(changedNeed);
-        yield* operator.undoDismissNeed(valueDecoded57);
+        yield* operator.dismissNeed(fixtureInstance, attentionKey(changedNeed));
+        yield* operator.undoDismissNeed(attentionKey(changedNeed));
 
         const decodedValue30 = yield* operator.overview(fixtureInstance);
         assert(decodedValue30.needsYou.some((entry) => entry.id === need.id));
@@ -3311,8 +3293,7 @@ it.effect(
         assert(warning?._tag === "UpgradeDrainNeed");
         assert.strictEqual(warning.deferredRuns, 1);
 
-        const valueDecoded10 = yield* attentionKey(warning);
-        yield* operator.dismissNeed(fixtureInstance, valueDecoded10);
+        yield* operator.dismissNeed(fixtureInstance, attentionKey(warning));
 
         const decodedValue41 = yield* operator.overview(fixtureInstance);
         assert(decodedValue41.dismissedNeeds.some(({ _tag }) => _tag === "UpgradeDrainNeed"));

@@ -78,10 +78,9 @@ export const acknowledgeResets = Effect.fn("PollingTriggers.acknowledgeResets")(
 ) {
   yield* Effect.annotateCurrentSpan({ repository, resets: resets.length });
   const budgets = yield* CycleBudgets;
-  const itemKeys = yield* Effect.forEach(unfetched, ({ number }) =>
-    gitHubItemKey(repository, number).pipe(Effect.map((key) => [key, number] as const)),
+  const deferred = new Map(
+    unfetched.map(({ number }) => [gitHubItemKey(repository, number), number] as const),
   );
-  const deferred = new Map(itemKeys);
   const pending = resets.flatMap(({ itemKey }) =>
     Option.toArray(Option.fromNullishOr(deferred.get(itemKey))),
   );
