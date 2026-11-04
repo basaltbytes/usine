@@ -61,6 +61,8 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
    usine login chatgpt
    ```
 
+   Each gateway reports its connection state separately. A gateway that cannot report its state shows an error beside its destination; healthy gateways keep their connection controls. A CLI command with `--target` checks the selected gateway.
+
    Add `--target usine-gateway` when the instance has several gateways. Add `--api-key` for masked API-key entry. usine transfers completed credentials through the gateway admin API over SSH, saves them with mode `0600`, and updates the workers’ `llm_providers` in a configuration revision. No provider credential requires a manual SSH transfer or service reload.
 
    Settings shows each credential kind, reported expiry, and last refresh. **Replace** starts a separate login and keeps the current credential until authorization succeeds. **Disconnect** removes the managed credential and worker routing. `usine logout claude` and `usine logout chatgpt` perform the same actions.

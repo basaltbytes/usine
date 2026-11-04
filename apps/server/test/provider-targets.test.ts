@@ -34,9 +34,9 @@ import {
 } from "@usine/config/configuration";
 import { memoryConfigurationLayer } from "@usine/config/memory";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { ProviderTargets } from "../src/providers/targets.ts";
 import { ProviderLogins } from "../src/providers/control.ts";
 import { ProviderLoginRunner } from "../src/providers/runner.ts";
+import { ProviderTargets } from "../src/providers/targets.ts";
 
 it.live(
   "hands credentials to the gateway admin API and updates routing; uses native files without a gateway",
@@ -74,14 +74,6 @@ it.live(
 operator: operator
 repos: []
 workers:
-  - name: unavailable
-    kind: ssh
-    destination: unavailable-worker
-    root: /srv/usine
-    gateway:
-      domain: unavailable.test
-      destination: unavailable-gateway
-      admin_token_env: MISSING_GATEWAY_ADMIN_TOKEN
   - name: remote
     kind: ssh
     destination: worker
@@ -91,7 +83,20 @@ workers:
       destination: test-gateway
       admin_port: ${admin.port}
       admin_token_env: TEST_GATEWAY_ADMIN_TOKEN
+${["missing-token", "unreachable", "outdated"]
+  .map(
+    (destination) => `  - name: ${destination}
+    kind: ssh
+    destination: worker-${destination}
+    root: /srv/usine
+    gateway:
+      domain: gw.test
+      destination: ${destination}
+      admin_port: ${admin.port}
+      admin_token_env: ${destination === "missing-token" ? "UNSET_GATEWAY_TOKEN" : "TEST_GATEWAY_ADMIN_TOKEN"}
 `,
+  )
+  .join("")}`,
         );
         const instance = LoadedInstance.make({
           config,
@@ -109,13 +114,15 @@ workers:
         });
         yield* fs.writeFileString(
           `${directory}/ssh`,
-          '#!/bin/sh\nfor last do :; done\nexec sh -c "$last"\n',
+          '#!/bin/sh\nfor arg do\ncase "$arg" in\nunreachable) exit 255;;\noutdated) printf \'{}\'; exit 0;;\nesac\ndone\nfor last do :; done\nexec sh -c "$last"\n',
           { mode: 0o700 },
         );
         const native = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const transport = ChildProcessSpawner.make((command) =>
-          native.spawn(ChildProcess.setEnv(command, { PATH: `${directory}:/usr/bin:/bin` })),
-        );
+        const destinations: string[] = [];
+        const transport = ChildProcessSpawner.make((command) => {
+          if (command._tag === "StandardCommand") destinations.push(command.args[5] ?? "");
+          return native.spawn(ChildProcess.setEnv(command, { PATH: `${directory}:/usr/bin:/bin` }));
+        });
         const targetsLayer = ProviderTargets.layer(
           store.read.pipe(
             Effect.orDie,
@@ -138,6 +145,56 @@ workers:
         );
         const context = yield* Layer.build(targetsLayer);
         const targets = Context.get(context, ProviderTargets);
+        let starts = 0;
+        const loginContext = yield* Layer.build(
+          ProviderLogins.layer.pipe(
+            Layer.provide([
+              Layer.succeed(ProviderTargets, targets),
+              Layer.succeed(ProviderLoginRunner, {
+                start: () =>
+                  Effect.sync(() => {
+                    starts += 1;
+                    return {
+                      prompt: Effect.succeed({
+                        url: "https://auth.openai.com/codex/device",
+                        code: "ABCD-EFGH",
+                      }),
+                      result: Effect.never,
+                      submit: () => Effect.void,
+                    };
+                  }),
+              }),
+            ]),
+          ),
+        );
+        const logins = Context.get(loginContext, ProviderLogins);
+        yield* Effect.gen(function* () {
+          const status = yield* logins.status;
+          assert.lengthOf(status.targets, 4);
+          for (const destination of status.targets) {
+            if (destination.target === "test-gateway") assert("providers" in destination);
+            else assert("error" in destination);
+          }
+          const before = destinations.length;
+          const login = yield* logins.begin("test-gateway", "chatgpt");
+          yield* Effect.sleep("20 millis");
+          assert.equal(starts, 1);
+          assert.deepEqual(destinations.slice(before), ["test-gateway"]);
+          yield* logins.cancel(login.id);
+          for (const target of ["missing-token", "unreachable", "outdated", "removed", "local"]) {
+            const failure = yield* logins.begin(target, "chatgpt").pipe(Effect.flip);
+            assert.equal(failure._tag, "ProviderCredentialError");
+          }
+          assert.equal(starts, 1);
+          assert.notInclude(jsonKey(status), Redacted.value(settings.adminToken));
+        }).pipe(
+          Effect.provideService(
+            ConfigProvider.ConfigProvider,
+            ConfigProvider.fromUnknown({
+              TEST_GATEWAY_ADMIN_TOKEN: Redacted.value(settings.adminToken),
+            }),
+          ),
+        );
         const secret = 'private-key-with-"quotes"-and-\\slashes';
         yield* targets
           .replace("test-gateway", { kind: "anthropic-api-key", secret: Redacted.make(secret) })
@@ -157,43 +214,16 @@ workers:
             }),
           ),
         );
-        assert.include(connected[0], {
-          target: "unavailable-gateway",
-          error: "Set MISSING_GATEWAY_ADMIN_TOKEN to the gateway admin token.",
-        });
-        const healthy = connected[1];
-        assert(healthy !== undefined && "providers" in healthy);
-        assert.equal(healthy.providers[0]?.credential, "api-key");
-        const loginContext = yield* Layer.build(
-          ProviderLogins.layer.pipe(
-            Layer.provide(Layer.succeed(ProviderTargets, targets)),
-            Layer.provide(
-              Layer.succeed(ProviderLoginRunner, {
-                start: () =>
-                  Effect.succeed({
-                    prompt: Effect.never,
-                    result: Effect.never,
-                    submit: () => Effect.void,
-                  }),
-              }),
-            ),
-          ),
+        assert.equal(
+          connected[0] !== undefined && "providers" in connected[0]
+            ? connected[0].providers[0]?.credential
+            : undefined,
+          "api-key",
         );
-        const logins = Context.get(loginContext, ProviderLogins);
-        const login = yield* logins.begin("test-gateway", "claude").pipe(
-          Effect.provideService(
-            ConfigProvider.ConfigProvider,
-            ConfigProvider.fromUnknown({
-              TEST_GATEWAY_ADMIN_TOKEN: Redacted.value(settings.adminToken),
-            }),
-          ),
-        );
-        assert.equal(login.target, "test-gateway");
-        yield* logins.cancel(login.id);
         const snapshot = yield* store.read;
         assert.isTrue(Option.isSome(snapshot.instance));
         if (Option.isSome(snapshot.instance)) {
-          const worker = snapshot.instance.value.config.workers[1];
+          const worker = snapshot.instance.value.config.workers[0];
           assert(worker?.kind === "ssh" && Option.isSome(worker.gateway));
           assert.deepEqual(worker.gateway.value.llmProviders, ["anthropic"]);
         }
@@ -219,16 +249,23 @@ workers:
             }),
           ),
         );
-        const disconnected = removed[1];
-        assert(disconnected !== undefined && "providers" in disconnected);
-        assert.equal(disconnected.providers[0]?.credential, null);
+        assert.equal(
+          removed[0] !== undefined && "providers" in removed[0]
+            ? removed[0].providers[0]?.credential
+            : undefined,
+          null,
+        );
         const localContext = yield* Layer.build(
           ProviderTargets.layer(Effect.succeed([])).pipe(
             Layer.provide(Layer.succeed(ConfigurationStore, store)),
             Layer.provide(
               Layer.succeed(
                 ConfigProvider.ConfigProvider,
-                ConfigProvider.fromUnknown({ HOME: directory }),
+                ConfigProvider.fromUnknown({
+                  HOME: directory,
+                  CLAUDE_CONFIG_DIR: `${directory}/custom claude`,
+                  CODEX_HOME: `${directory}/custom codex`,
+                }),
               ),
             ),
           ),
@@ -242,8 +279,8 @@ workers:
           kind: "openai-api-key",
           secret: Redacted.make("private-openai-key"),
         });
-        const nativeSettings = yield* fs.readFileString(`${directory}/.claude/settings.json`);
-        const nativeAuth = yield* fs.readFileString(`${directory}/.codex/auth.json`);
+        const nativeSettings = yield* fs.readFileString(`${directory}/custom claude/settings.json`);
+        const nativeAuth = yield* fs.readFileString(`${directory}/custom codex/auth.json`);
         const env = yield* Schema.decodeEffect(
           Schema.fromJsonString(
             Schema.Struct({ env: Schema.Struct({ CLAUDE_CODE_OAUTH_TOKEN: Schema.String }) }),
@@ -251,14 +288,14 @@ workers:
         )(nativeSettings);
         assert.equal(env.env.CLAUDE_CODE_OAUTH_TOKEN, "private-claude-token");
         assert.include(nativeAuth, "private-openai-key");
-        assert.equal((yield* fs.stat(`${directory}/.codex/auth.json`)).mode & 0o777, 0o600);
+        assert.equal((yield* fs.stat(`${directory}/custom codex/auth.json`)).mode & 0o777, 0o600);
         yield* local.disconnect("local", "anthropic");
         yield* local.disconnect("local", "openai");
         const empty = yield* local.list;
-        const localTarget = empty[0];
-        assert(localTarget !== undefined && "providers" in localTarget);
         assert.deepEqual(
-          localTarget.providers.map(({ credential }) => credential),
+          empty[0] !== undefined && "providers" in empty[0]
+            ? empty[0].providers.map(({ credential }) => credential)
+            : undefined,
           [null, null],
         );
       }),

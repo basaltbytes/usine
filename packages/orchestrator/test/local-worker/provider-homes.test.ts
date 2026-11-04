@@ -29,8 +29,8 @@ it.live(
         const runnerPath = yield* Config.String("PATH").pipe(Effect.orDie);
         const root = yield* fs.makeTempDirectoryScoped();
         const remote = yield* makeRemote(root);
-        const claudeHome = `${root}/claude-login`;
-        const codexHome = `${root}/codex-login`;
+        const claudeHome = `${root}/claude login`;
+        const codexHome = `${root}/codex login`;
         yield* fs.makeDirectory(claudeHome);
         yield* fs.makeDirectory(codexHome);
         yield* fs.writeFileString(

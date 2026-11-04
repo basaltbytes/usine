@@ -59,7 +59,7 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
       "Choose one destination with --target <gateway SSH destination>. Run this command once for each gateway.",
       400,
     );
-  if ("error" in target) return yield* authFailure(target.error, 503);
+  if ("error" in target) return yield* authFailure(`${target.label}: ${target.error}`, 503);
   const body = { target: target.target, provider: command.provider };
   const ok = Schema.Struct({ ok: Schema.Boolean });
   if (command.action === "logout") {
