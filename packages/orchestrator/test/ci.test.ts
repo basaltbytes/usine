@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, it } from "@effect/vitest";
 // The retention assertion must run after Node’s check phase releases native async handles.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -59,10 +60,6 @@ import { PollingTriggers } from "../src/polling-triggers.ts";
 import { triggerSubmission } from "../src/trigger-submission.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { inertLabelReconcilerLayer, unmovedBaseRefHead } from "./support/polling.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const head = CommitSha.make("a".repeat(40));
@@ -151,7 +148,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     ReadonlyArray<{ readonly item: number; readonly mutation: ItemLabelMutation }>
   >([]);
   const result = StepResult.make({
-    message: `[usine:awaiting-ci]\n${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`,
+    message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`,
     facts: [
       PullRequest.make({
         number: 815,
@@ -377,7 +374,7 @@ it.effect("polling an open CI wait releases response bodies across six simulated
       const poll = monitor.reconcile(fixtureInstance, Option.none()).pipe(
         Effect.andThen(engine.inspect(runId)),
         Effect.map(
-          (snapshot) => new ResponseBody(stringifyJson(runView(snapshot, new Set(), new Map()))),
+          (snapshot) => new ResponseBody(jsonKey(runView(snapshot, new Set(), new Map()))),
         ),
         Effect.withSpan("http.request"),
         Effect.asVoid,
@@ -547,7 +544,7 @@ it.live.each(["failure", "conflict"] as const)(
             Effect.map((count) => {
               const fixedHead = heads[count - 1] ?? assert.fail("unexpected fix attempt");
               return StepResult.make({
-                message: `[usine:awaiting-ci]\n${stringifyJson({ pull_request: 815, head: fixedHead, fix_loop: "fix", timeout_seconds: 3600, on_green: [{ item: 815, add: [count === 1 ? "fix-validated" : "ready-for-review"], remove: ["agent-review-findings"] }] })}`,
+                message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head: fixedHead, fix_loop: "fix", timeout_seconds: 3600, on_green: [{ item: 815, add: [count === 1 ? "fix-validated" : "ready-for-review"], remove: ["agent-review-findings"] }] })}`,
                 facts: [
                   PullRequest.make({
                     number: 815,

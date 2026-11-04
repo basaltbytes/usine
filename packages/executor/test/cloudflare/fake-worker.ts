@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import {
   ACCESS_CLIENT_ID_HEADER,
   ACCESS_CLIENT_SECRET_HEADER,
@@ -18,14 +19,6 @@ import { DateTime, Effect, Option, Redacted, Schema, Deferred } from "effect";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { type WebSocket as ServerSocket, WebSocketServer } from "ws";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 export const ACCESS_CLIENT_ID = "0123abcd.access";
 export const ACCESS_CLIENT_SECRET = "service-token-secret";
@@ -141,12 +134,12 @@ const defaultResponse = (
 // WebSocket callbacks encode validated server messages synchronously.
 // @effect-diagnostics-next-line schemaSync:off
 const encodeServerMessage = Schema.encodeSync(Schema.fromJsonString(ServerMessage));
-// Node HTTP handlers decode request fixtures synchronously.
-// @effect-diagnostics-next-line schemaSync:off
-const decodeCreate = Schema.decodeUnknownSync(Schema.toCodecJson(CreateSandbox));
-// Node HTTP handlers decode request fixtures synchronously.
-// @effect-diagnostics-next-line schemaSync:off
-const decodeCredentials = Schema.decodeUnknownSync(Schema.toCodecJson(SandboxCredentials));
+const decodeCreate = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.toCodecJson(CreateSandbox)),
+);
+const decodeCredentials = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.toCodecJson(SandboxCredentials)),
+);
 
 /**
  * Records `credentials` as `sandbox`'s next publication, or returns the Worker's refusal of
@@ -192,7 +185,7 @@ const readBody = (request: IncomingMessage) =>
 
 const json = (response: ServerResponse, status: number, body: Schema.Json) => {
   response.writeHead(status, { "content-type": "application/json" });
-  response.end(stringifyJson(body));
+  response.end(jsonKey(body));
 };
 
 /** Runs one exec stream: the first message starts a command, then stdin until `StdinEnd`. */
@@ -273,7 +266,7 @@ export const fakeWorker = Effect.gen(function* () {
         const sandbox = state.sandboxes.get(name);
         const body = yield* readBody(request);
         if (request.method === "PUT" && action === undefined) {
-          const created = decodeCreate(parseJson(body));
+          const created = yield* decodeCreate(body).pipe(Effect.orDie);
           const existing =
             sandbox ??
             ({
@@ -302,7 +295,8 @@ export const fakeWorker = Effect.gen(function* () {
         if (request.method === "PUT" && action === "credentials") {
           if (!sandbox.running)
             return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
-          const refused = publish(sandbox, decodeCredentials(parseJson(body)));
+          const credentials = yield* decodeCredentials(body).pipe(Effect.orDie);
+          const refused = publish(sandbox, credentials);
           if (Option.isSome(refused)) return json(response, 409, refused.value);
           return json(response, 200, summaryOf(sandbox));
         }

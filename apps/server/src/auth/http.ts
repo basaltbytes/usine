@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { SqliteReader } from "@usine/engine/local-sqlite";
 import { ChangeAccess } from "../changes/access.ts";
 import { SetupApi, setupPermissions } from "../setup/api.ts";
@@ -21,10 +22,6 @@ import {
 } from "./api.ts";
 import { publicOperatorPaths } from "../openapi.ts";
 import { AuthStore } from "./store.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 export interface AuthServices {
   readonly authentication: Authentication["Service"];
@@ -352,7 +349,7 @@ export const authenticatedRoutes = (services: AuthServices) => {
             .authenticate(secretOf(request))
             .pipe(
               Effect.flatMap((current) =>
-                stringifyJson(current.permissions) === stringifyJson(access.permissions)
+                jsonKey(current.permissions) === jsonKey(access.permissions)
                   ? Effect.void
                   : Effect.fail(authFailure("Permissions changed. Reconnect to continue.", 403)),
               ),

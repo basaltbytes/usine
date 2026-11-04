@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
@@ -164,13 +165,9 @@ describe("SSH Worker behind a Gateway", () => {
         assert.strictEqual(given.environment.GH_HOST, "git.gw.test");
         assert.strictEqual(given.environment.GH_CONFIG_DIR, `${WORKER_ROOT}/gh`);
         assert.strictEqual(given.environment.ANTHROPIC_BASE_URL, "http://llm.gw.test/anthropic");
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          given.environment,
-        ).pipe(Effect.orDie);
+        const json1 = jsonKey(given.environment);
         assert.notInclude(json1, callerToken);
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          given.environment,
-        ).pipe(Effect.orDie);
+        const json2 = jsonKey(given.environment);
         assert.notInclude(json2, TOKEN_PREFIX);
 
         const clone = machine.state.calls.find(({ line }) => line.includes("'clone'"));
@@ -189,9 +186,7 @@ describe("SSH Worker behind a Gateway", () => {
           assert.strictEqual(input, "", "no command reads a secret from its input");
           assert.notInclude(command.args.join(" "), TOKEN_PREFIX);
           assert.notInclude(command.args.join(" "), callerToken);
-          const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            command.options.env,
-          ).pipe(Effect.orDie);
+          const json3 = jsonKey(command.options.env);
           assert.notInclude(json3, TOKEN_PREFIX);
           const sent = new Set(sentVariables(command));
           for (const name of Object.keys(command.options.env ?? {}))
@@ -1136,9 +1131,7 @@ describe("SSH Worker behind a Gateway", () => {
         const codexHome = `${WORKER_ROOT}/codex/remote-run_execute_1`;
         assert.strictEqual(given.environment.CODEX_HOME, codexHome);
         assert.isUndefined(given.environment.ANTHROPIC_BASE_URL);
-        const json4 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          given.environment,
-        ).pipe(Effect.orDie);
+        const json4 = jsonKey(given.environment);
         assert.notInclude(json4, callerToken);
         const config = machine.state.files.get(`${codexHome}/config.toml`) ?? "";
         assert.include(config, 'model_provider = "usine-gateway"');

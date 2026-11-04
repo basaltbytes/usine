@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // This synchronous Node crypto boundary requires native key and cipher operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { generateKeyPairSync } from "node:crypto";
@@ -26,10 +27,6 @@ import { Setup } from "../../src/setup/control.ts";
 import { securityMiddleware } from "../../src/security.ts";
 import { setupRoutes } from "../../src/setup/http.ts";
 import { alice, authFixture, localSecret } from "../auth/fixture.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const pem = generateKeyPairSync("rsa", { modulusLength: 2048 })
   .privateKey.export({ type: "pkcs1", format: "pem" })
@@ -130,7 +127,7 @@ const fixture = Effect.gen(function* () {
         method: body === undefined ? "GET" : "POST",
         headers: { "content-type": "application/json", ...headers },
       };
-      if (body !== undefined) options.body = stringifyJson(body);
+      if (body !== undefined) options.body = jsonKey(body);
       return app.handler(new Request(`https://usine.example${path}`, options));
     });
   const begin = Effect.gen(function* () {
@@ -223,9 +220,9 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
 
         assert.equal((yield* f.fs.stat(target)).mode & 0o777, 0o600);
         const contents = yield* f.fs.readFileString(target);
-        const json2 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          contents,
-        ).pipe(Effect.orDie);
+        const json2 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(contents).pipe(
+          Effect.orDie,
+        );
         assert.deepEqual(json2, {
           app_id: 123,
           private_key: pem,
@@ -319,10 +316,10 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
         assert.equal(currentExists, false);
 
         assert.equal((yield* (yield* f.resume).status)._tag, "MissingKey");
-        const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json3 = jsonKey({
           app_id: 123,
           private_key: pem,
-        }).pipe(Effect.orDie);
+        });
         const restored = yield* f.request("/api/setup/restore", {
           credentials: json3,
         });
@@ -345,10 +342,10 @@ it("drains the activation response before closing setup HTTP and preserves its a
         const token = new URLSearchParams(new URL(currentLink).hash.slice(1)).get("link") ?? "";
         const session = yield* f.auth.authentication.consumeLink(token);
         const ready = yield* Deferred.make<HttpClient.HttpClient>();
-        const json4 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json4 = jsonKey({
           app_id: 123,
           private_key: pem,
-        }).pipe(Effect.orDie);
+        });
         yield* f.setup.restore(json4);
         const server = HttpRouter.serve(f.transportRoutes).pipe(
           Layer.provideMerge(NodeHttpServer.layerTest),

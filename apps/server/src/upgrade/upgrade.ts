@@ -1,7 +1,4 @@
 import { requestSystemUpgrade } from "./client.ts";
-// Synchronous Node path callbacks retain the host platform’s path semantics.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { join, sep } from "node:path";
 import type { InstanceDirectory } from "@usine/core/instance";
 import {
   type Brand,
@@ -11,6 +8,7 @@ import {
   Effect,
   FileSystem,
   Option,
+  Path,
   Schema,
 } from "effect";
 import { backup } from "../backup.ts";
@@ -161,6 +159,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   command: UpgradeCommand,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const files = instanceFiles(directory);
   const fileError = (path: string) => (error: { readonly message: string }) =>
     UpgradeFileError.make({ path, reason: error.message });
@@ -190,7 +189,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
         return yield* EngineOutsideInstanceError.make({
           script,
           version: running.value.version,
-          packaged: script.includes(`${sep}node_modules${sep}`),
+          packaged: script.includes(`${path.sep}node_modules${path.sep}`),
         });
       }
 
@@ -202,7 +201,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     }
   }
 
-  const manifestPath = join(directory, "package.json");
+  const manifestPath = path.join(directory, "package.json");
   const manifest = yield* readManifest(directory);
   if (Option.isNone(manifest)) {
     return yield* EnginePinError.make({ path: manifestPath, missing: true, linked: Option.none() });
@@ -245,11 +244,11 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
 
   const versions = yield* targetVersions(directory, manifest.value, target);
   const lockfiles = yield* Effect.forEach(manifest.value.lockfiles, (file) => {
-    const path = join(directory, file);
-    return fileSystem.readFileString(path).pipe(
+    const lockfilePath = path.join(directory, file);
+    return fileSystem.readFileString(lockfilePath).pipe(
       Effect.mapBoth({
-        onSuccess: (text) => [path, text] as const,
-        onFailure: fileError(path),
+        onSuccess: (text) => [lockfilePath, text] as const,
+        onFailure: fileError(lockfilePath),
       }),
     );
   });
@@ -291,7 +290,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   });
   yield* Console.log(`Upgrading ${SERVER_PACKAGE} from ${previous} to ${target}.`);
 
-  const runtimeStore = join(files.folder, "runtime.sqlite");
+  const runtimeStore = path.join(files.folder, "runtime.sqlite");
   const hasStore = yield* fileSystem
     .exists(runtimeStore)
     .pipe(Effect.mapError(fileError(runtimeStore)));
@@ -303,7 +302,9 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   let backupPath = Option.none<string>();
   if (hasStore) {
     const now = yield* DateTime.now;
-    backupPath = Option.some(join(files.backups, `runtime-${backupStamp(now)}-${writer}.sqlite`));
+    backupPath = Option.some(
+      path.join(files.backups, `runtime-${backupStamp(now)}-${writer}.sqlite`),
+    );
   }
   if (Option.isSome(backupPath)) {
     yield* fileSystem

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
@@ -12,10 +13,6 @@ import {
   InstallationWide,
 } from "../src/installation.ts";
 import { RepositoryLabelColor, RepositoryLabelName } from "../src/polling/labels.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const token = InstallationToken.make({
@@ -56,7 +53,7 @@ describe("GitHubLabelWriter", () => {
         HttpClientResponse.fromWeb(
           request,
           new Response(
-            stringifyJson({
+            jsonKey({
               name: "ready-for-agent",
               color: "A2EEEF",
               description: "Ready for an agent to claim",
@@ -88,7 +85,7 @@ describe("GitHubLabelWriter", () => {
       assert.strictEqual(sent.headers.authorization, "Bearer label-writer-token");
       assert.strictEqual(sent.body._tag, "Uint8Array");
       if (sent.body._tag !== "Uint8Array") return;
-      const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+      const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(
         new TextDecoder().decode(sent.body.body),
       ).pipe(Effect.orDie);
       const valueDecoded1 = yield* Schema.decodeUnknownEffect(RequestBody)(json1);

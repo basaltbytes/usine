@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { idleCiMonitor } from "./support/ci.ts";
 import { assert, describe, it } from "@effect/vitest";
@@ -49,10 +50,6 @@ import {
   baseBranches,
   unmovedBaseRefHead,
 } from "./support/polling.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const updatedAt = DateTime.makeUnsafe("2026-10-17T10:00:00Z");
@@ -217,7 +214,7 @@ const capturedLogs = () => {
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
     lines.push({
       level: logLevel,
-      text: stringifyJson(message),
+      text: jsonKey(message),
     });
   });
   return {

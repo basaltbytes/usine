@@ -1,4 +1,5 @@
-import { Effect, Option, Schema } from "effect";
+import { jsonKey } from "@usine/core/json-key";
+import { Effect, Option } from "effect";
 import { assert, describe, it } from "@effect/vitest";
 import {
   EnginePin,
@@ -8,10 +9,6 @@ import {
   parseManifest,
   serverPin,
 } from "../../src/instance/manifest.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const parse = (text: string, lockfiles: ReadonlyArray<string> = []) =>
   Effect.runPromise(parseManifest("/factory/package.json", text, lockfiles));
@@ -52,7 +49,7 @@ describe("instance manifest", () => {
     Effect.gen(function* () {
       const manifest = yield* Effect.promise(() =>
         parse(
-          stringifyJson({
+          jsonKey({
             packageManager: "yarn@4.5.0",
             dependencies: { "@usine/server": "link:../usine.dev/apps/server" },
           }),

@@ -17,9 +17,9 @@ import { addUsage, piMessageUsage, type SessionUsage } from "./usage.ts";
 import { type AgentSessionError, reportedOutcome, SessionResult } from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
+// Pi tool-event callbacks synchronously normalize arbitrary SDK tool values before emitting session events.
 // @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const serializeVendorValue = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 export interface SessionChannelOptions {
   /** The adapter name in log lines. */
@@ -122,7 +122,7 @@ type PiToolFinishedEvent = Extract<PiSessionEvent, { readonly type: "tool_execut
 
 const toolInputJson = (event: PiToolStartedEvent): Schema.Json => {
   try {
-    return Result.getOrElse(decodeSerializedJson(stringifyJson(event.args ?? null)), () =>
+    return Result.getOrElse(decodeSerializedJson(serializeVendorValue(event.args ?? null)), () =>
       String(event.args),
     );
   } catch {
@@ -132,7 +132,7 @@ const toolInputJson = (event: PiToolStartedEvent): Schema.Json => {
 
 const toolOutputJson = (event: PiToolFinishedEvent): Schema.Json => {
   try {
-    return Result.getOrElse(decodeSerializedJson(stringifyJson(event.result ?? null)), () =>
+    return Result.getOrElse(decodeSerializedJson(serializeVendorValue(event.result ?? null)), () =>
       String(event.result),
     );
   } catch {

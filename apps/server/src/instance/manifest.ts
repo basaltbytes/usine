@@ -1,7 +1,7 @@
-// Synchronous Node path callbacks retain the host platform’s path semantics.
+// installedInInstance synchronously compares the CLI script path with the instance node_modules.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { isAbsolute, join, relative } from "node:path";
-import { type Brand, Effect, FileSystem, Option, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Option, Path, Schema } from "effect";
 
 /** The package manager that installs the instance's dependencies. */
 export const PackageManager = Schema.Literals(["pnpm", "npm", "yarn", "bun"]);
@@ -108,7 +108,8 @@ export const parseManifest = (
 /** Reads the instance's `package.json`, or returns `None` if the folder has none. */
 export const readManifest = Effect.fn("Instance.readManifest")(function* (directory: string) {
   const fileSystem = yield* FileSystem.FileSystem;
-  const path = join(directory, "package.json");
+  const paths = yield* Path.Path;
+  const path = paths.join(directory, "package.json");
   const failure = (error: { readonly message: string }) =>
     InstanceManifestError.make({ path, reason: error.message });
   if (!(yield* fileSystem.exists(path).pipe(Effect.mapError(failure)))) {
@@ -117,7 +118,9 @@ export const readManifest = Effect.fn("Instance.readManifest")(function* (direct
   const text = yield* fileSystem.readFileString(path).pipe(Effect.mapError(failure));
   const lockfiles: Array<string> = [];
   for (const [, file] of LOCKFILES) {
-    if (yield* fileSystem.exists(join(directory, file)).pipe(Effect.orElseSucceed(() => false))) {
+    if (
+      yield* fileSystem.exists(paths.join(directory, file)).pipe(Effect.orElseSucceed(() => false))
+    ) {
       lockfiles.push(file);
     }
   }

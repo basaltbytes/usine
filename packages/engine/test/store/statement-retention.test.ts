@@ -1,7 +1,8 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Context, Effect, FileSystem, Layer, Option, Tracer, Schema } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Tracer } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { TestClock } from "effect/testing";
 // The retention assertion must run after Node’s check phase releases native async handles.
@@ -13,9 +14,9 @@ import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
 
 it.effect("cached SQLite statements release completed responses across six hours of polling", () =>
   Effect.gen(function* () {
-    const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+    const json1 = jsonKey({
       data: "x".repeat(1024 * 1024),
-    }).pipe(Effect.orDie);
+    });
     class ResponsePayload {
       readonly body = json1;
     }

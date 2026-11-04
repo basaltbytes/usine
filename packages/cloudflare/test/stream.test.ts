@@ -1,15 +1,6 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, expect, it } from "@effect/vitest";
-import {
-  type Cause,
-  DateTime,
-  Deferred,
-  Duration,
-  Effect,
-  Fiber,
-  Option,
-  Queue,
-  Schema,
-} from "effect";
+import { type Cause, DateTime, Deferred, Duration, Effect, Fiber, Option, Queue } from "effect";
 import { HttpRouter } from "effect/http";
 import { TestClock } from "effect/testing";
 import { ProcessId } from "../src/api/api.ts";
@@ -272,10 +263,10 @@ describe("sandbox attach stream", () => {
       return Effect.gen(function* () {
         const client = yield* attachWhileReading(sandbox, (call) =>
           Effect.gen(function* () {
-            const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+            const json1 = jsonKey({
               issuedAt: "2026-10-26T09:00:00.000Z",
               providers: [],
-            }).pipe(Effect.orDie);
+            });
             const revoked = yield* call("PUT", "/credentials", json1);
             const held = yield* call("POST", "/hold");
             expect([revoked.status, held.status]).toEqual([200, 200]);

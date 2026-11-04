@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
@@ -157,9 +158,7 @@ export const waitFor = Effect.fn("test.waitFor")(function* (
   for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
     if (snapshot.run.state._tag === state) return snapshot;
     if (state === "Succeeded" && snapshot.run.state._tag === "Failed") {
-      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        snapshot.attempts.map((attempt) => attempt.outcome),
-      ).pipe(Effect.orDie);
+      const json1 = jsonKey(snapshot.attempts.map((attempt) => attempt.outcome));
       return yield* Effect.die(json1);
     }
     yield* Effect.sleep("10 millis");

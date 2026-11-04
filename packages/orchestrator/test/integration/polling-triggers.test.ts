@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { webRequest } from "../../../../tooling/test/http.mts";
 import { idleCiMonitor } from "../support/ci.ts";
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
@@ -97,9 +98,7 @@ const makeInstance = (repository: RepositoryName, label: string) =>
       name: LoopName.make("integration-label"),
       trigger: IssueTrigger.make({
         on: "issue",
-        if: Source.make(
-          `item.labels.nodes.exists(label, label.name == ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(label)})`,
-        ),
+        if: Source.make(`item.labels.nodes.exists(label, label.name == ${jsonKey(label)})`),
       }),
       selector: Option.some(
         Selector.make({
@@ -224,7 +223,7 @@ describe("live GitHub polling", () => {
             `${api}/labels`,
             {
               method: "POST",
-              body: yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+              body: jsonKey({
                 name: label,
                 color: "6f42c1",
               }),
@@ -243,7 +242,7 @@ describe("live GitHub polling", () => {
                       `${api}/issues/${settings.issueNumber}/labels`,
                       {
                         method: "POST",
-                        body: yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+                        body: jsonKey({
                           labels: [label],
                         }),
                       },

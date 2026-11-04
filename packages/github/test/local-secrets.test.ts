@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -37,10 +38,10 @@ describe("local GitHub App secrets", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json1 = jsonKey({
           app_id: 123,
           private_key: TEST_PRIVATE_KEY,
-        }).pipe(Effect.orDie);
+        });
         yield* fileSystem.writeFileString(path.join(root, GITHUB_APP_SECRETS_PATH), json1, {
           mode: 0o600,
         });
@@ -87,10 +88,10 @@ describe("local GitHub App secrets", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json2 = jsonKey({
           app_id: 123,
           private_key: TEST_PRIVATE_KEY,
-        }).pipe(Effect.orDie);
+        });
         yield* fileSystem.writeFileString(path.join(root, GITHUB_APP_SECRETS_PATH), json2, {
           mode: 0o644,
         });
@@ -110,22 +111,22 @@ it.effect("replaces an insecure old file with complete owner-only secrets", () =
       const path = yield* Path.Path;
       const target = path.join(root, GITHUB_APP_SECRETS_PATH);
       yield* fs.writeFileString(target, "old", { mode: 0o644 });
-      const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+      const json3 = jsonKey({
         app_id: 123,
         private_key: TEST_PRIVATE_KEY,
         client_id: "Iv1.test",
         client_secret: "oauth-secret",
         webhook_secret: "hook-secret",
-      }).pipe(Effect.orDie);
+      });
       const source = json3;
       const secrets = yield* Schema.decodeEffect(GitHubAppSecretsFromJson)(source);
       yield* writeLocalSecrets(root, secrets);
       assert.equal((yield* fs.stat(target)).mode & 0o777, 0o600);
       const contents = yield* fs.readFileString(target);
-      const json4 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        contents,
-      ).pipe(Effect.orDie);
-      const json5 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(source).pipe(
+      const json4 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(contents).pipe(
+        Effect.orDie,
+      );
+      const json5 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(source).pipe(
         Effect.orDie,
       );
       assert.deepEqual(json4, json5);
@@ -133,13 +134,9 @@ it.effect("replaces an insecure old file with complete owner-only secrets", () =
       assert.ok(Option.isSome(loaded));
       if (Option.isSome(loaded)) {
         assert.equal(Option.getOrNull(loaded.value.clientId), "Iv1.test");
-        const json6 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          loaded.value,
-        ).pipe(Effect.orDie);
+        const json6 = jsonKey(loaded.value);
         assert.ok(!json6.includes("oauth-secret"));
-        const json7 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          loaded.value,
-        ).pipe(Effect.orDie);
+        const json7 = jsonKey(loaded.value);
         assert.ok(!json7.includes("hook-secret"));
       }
       const entries = yield* fs.readDirectory(path.dirname(target));

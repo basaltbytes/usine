@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { ConfigurationStore } from "@usine/config/configuration";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
@@ -45,10 +46,6 @@ import { HttpClient, HttpRouter } from "effect/http";
 import { assert, describe, it } from "@effect/vitest";
 import { liveBackendLayer } from "../src/backend.ts";
 import { apiRoutes } from "../src/http.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 // The dogfood instance has five Loops and about 500 Items on its Board; the overview and the desk
 // each evaluate every Loop's trigger on every Item, and the web UI polls both at once.
@@ -360,12 +357,10 @@ describe("operator read latency", () => {
                 })),
               },
             }));
-            const decodedValue3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-              {
-                ...overview,
-                projects: previousProjects,
-              },
-            );
+            const decodedValue3 = jsonKey({
+              ...overview,
+              projects: previousProjects,
+            });
             const previousBytes = bytes(decodedValue3);
             const measurement = {
               items: initialItems,
@@ -377,17 +372,15 @@ describe("operator read latency", () => {
                 before: Object.fromEntries(
                   Object.entries(previousProjects[index] ?? {}).map(([key, value]) => [
                     key,
-                    bytes(stringifyJson(value)),
+                    bytes(jsonKey(value)),
                   ]),
                 ),
                 after: Object.fromEntries(
-                  Object.entries(project).map(([key, value]) => [key, bytes(stringifyJson(value))]),
+                  Object.entries(project).map(([key, value]) => [key, bytes(jsonKey(value))]),
                 ),
               })),
             };
-            const decodedValue2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-              measurement,
-            );
+            const decodedValue2 = jsonKey(measurement);
             assert.isBelow(responseBytes, SIZE_BUDGET_BYTES, decodedValue2);
             assert.strictEqual(
               overview.projects.flatMap(({ runs }) => runs).length,
@@ -458,9 +451,7 @@ describe("operator read latency", () => {
               desk: desk.millis,
             }));
             yield* Effect.logInfo("Operator read latency", { rounds: measurements });
-            const timings = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-              measurements,
-            );
+            const timings = jsonKey(measurements);
             assert.isBelow(
               fastest(rounds.map(({ overview }) => overview.millis)),
               READ_BUDGET_MILLIS,

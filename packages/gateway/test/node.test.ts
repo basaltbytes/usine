@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { webRequest } from "../../../tooling/test/http.mts";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -29,10 +30,6 @@ import { UpstreamBase } from "../src/upstream.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
 import { abandonedTunnel, rawThroughTunnel, silentTunnel, tlsThroughTunnel } from "./tunnel.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
 const gateway = gatewayLayer({ proxy: LOOPBACK, egress: LOOPBACK, admin: LOOPBACK }).pipe(
@@ -48,7 +45,7 @@ const gatewayRecordingLogs = gateway.pipe(
     Logger.layer(
       [
         Logger.make(({ logLevel, message }) => {
-          gatewayLines.push(stringifyJson({ level: logLevel, message }));
+          gatewayLines.push(jsonKey({ level: logLevel, message }));
         }),
       ],
       { mergeWithExisting: true },
@@ -81,7 +78,7 @@ const relayToUpstream = (handler: RequestListener) =>
     const messages: Array<string> = [];
     const logs = Logger.layer([
       Logger.make(({ message }) => {
-        messages.push(stringifyJson(message));
+        messages.push(jsonKey(message));
       }),
     ]);
     const upstream = createServer(handler);
@@ -189,9 +186,7 @@ describe("the Node gateway", () => {
         assert.isFalse(
           [...span.attributes.keys()].some((name) => name.startsWith("http.request.header.")),
         );
-      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        spans.map((span) => [...span.attributes]),
-      ).pipe(Effect.orDie);
+      const json1 = jsonKey(spans.map((span) => [...span.attributes]));
       assert.notInclude(json1, "synthetic-");
     }).pipe(Effect.provide(gateway), Effect.provideService(Tracer.Tracer, tracer));
   });
@@ -202,7 +197,7 @@ describe("the Node gateway", () => {
       const messages: Array<string> = [];
       const logs = Logger.layer([
         Logger.make(({ message }) => {
-          const line = stringifyJson(message);
+          const line = jsonKey(message);
           messages.push(line);
           if (line.includes('"error":"UpstreamBodyFailure"'))
             Deferred.doneUnsafe(failed, Effect.void);
@@ -330,14 +325,12 @@ describe("the Node gateway", () => {
               HttpClientRequest.bodyText(json, "application/json"),
             ),
           );
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(body).pipe(
-          Effect.orDie,
-        );
+        const json2 = jsonKey(body);
         assert.strictEqual((yield* attach(json2)).status, 200);
-        const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json3 = jsonKey({
           ...body,
           typo: true,
-        }).pipe(Effect.orDie);
+        });
         assert.strictEqual((yield* attach(json3)).status, 400);
       }).pipe(Effect.provide(gatewayRecordingLogs)),
   );

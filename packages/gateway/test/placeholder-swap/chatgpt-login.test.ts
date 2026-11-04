@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem } from "@effect/platform-node";
 // The Node process boundary uses native process handles and synchronous subprocess operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -42,10 +43,6 @@ import {
   settingsLayer,
 } from "../fixtures.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 /*
  * Checks that Codex works when the Worker has only the Gateway's caller token and the Gateway
  * holds the ChatGPT login. Run with `pnpm --filter @usine/gateway test:placeholder-swap`;
@@ -74,7 +71,7 @@ interface Seen {
 /** Returns a Responses API event stream; each event's `type` is also its SSE event name. */
 const sse = (
   events: ReadonlyArray<{ readonly type: string; readonly [field: string]: Schema.Json }>,
-) => events.map((event) => `event: ${event.type}\ndata: ${stringifyJson(event)}\n\n`).join("");
+) => events.map((event) => `event: ${event.type}\ndata: ${jsonKey(event)}\n\n`).join("");
 
 const ANSWER = sse([
   { type: "response.created", response: { id: "resp_stand_in" } },
@@ -130,7 +127,7 @@ const chatGptStandIn = Effect.acquireRelease(
         if (request.url === "/oauth/token") {
           response.writeHead(200, { "content-type": "application/json" });
           response.end(
-            stringifyJson({
+            jsonKey({
               access_token: refreshedAccess,
               refresh_token: "rt-rotated",
             }),
@@ -143,7 +140,7 @@ const chatGptStandIn = Effect.acquireRelease(
           return;
         }
         response.writeHead(404, { "content-type": "application/json" });
-        response.end(stringifyJson({ detail: "stand-in" }));
+        response.end(jsonKey({ detail: "stand-in" }));
       });
     });
     server.listen(0, "127.0.0.1", () => {

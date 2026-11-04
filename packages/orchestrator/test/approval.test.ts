@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { ManagedRepo } from "@usine/config/factory";
@@ -23,10 +24,6 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { triggerSubmission } from "../src/trigger-submission.ts";
 import { runView } from "../src/operator/projection.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const condition = 'item.labelEvents["ready-for-agent"].actor.type != "User"';
 const label = (actor: Schema.Json) => ({
@@ -108,7 +105,7 @@ for (const scenario of [
   it.live(scenario.name, () => {
     const warnings: Array<string> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(stringifyJson(message));
+      if (logLevel === "Warn") warnings.push(jsonKey(message));
     });
     return Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

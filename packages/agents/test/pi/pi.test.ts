@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // SDK streams and hooks require native Promises, including the test implementations.
 // @effect-diagnostics newPromise:off
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
@@ -48,10 +49,6 @@ import {
   type PiStartResult,
 } from "../../src/pi/sdk.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const noDelivery: OnDelivery = () => Effect.void;
 const childTools = ["read", "bash", "edit", "write"];
@@ -416,7 +413,7 @@ describe("Pi child backend", () => {
     });
     const warnings: Array<string> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(stringifyJson(message));
+      if (logLevel === "Warn") warnings.push(jsonKey(message));
     });
     return Effect.scoped(
       Effect.gen(function* () {

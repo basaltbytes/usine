@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { strict as assert } from "node:assert";
@@ -19,10 +20,6 @@ import { EnvHttpProxyAgent, fetch as undiciFetch, getGlobalDispatcher } from "un
 import { DurableHarness } from "../../src/harness.ts";
 import { harnessLayer } from "../../src/live.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 assert(process.argv[2]);
 const directory = InstanceDirectory.make(process.argv[2]);
 const scenario = process.argv[3];
@@ -43,7 +40,7 @@ const origin = createServer((request, response) => {
     return;
   }
   response.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip" });
-  response.end(gzipSync(stringifyJson({ ok: true })));
+  response.end(gzipSync(jsonKey({ ok: true })));
 });
 origin.listen(0, "127.0.0.1");
 await once(origin, "listening");
@@ -86,7 +83,7 @@ if (scenario === "environment") {
 mkdirSync(join(directory, "pi"));
 writeFileSync(
   join(directory, "pi/settings.json"),
-  stringifyJson({
+  jsonKey({
     httpProxy: scenario === "environment" ? "invalid-proxy" : `  ${proxyUrl}  `,
   }),
 );
@@ -94,7 +91,7 @@ writeFileSync(
 mkdirSync(join(directory, ".pi"));
 writeFileSync(
   join(directory, ".pi/settings.json"),
-  stringifyJson({ httpProxy: "invalid-project-proxy" }),
+  jsonKey({ httpProxy: "invalid-project-proxy" }),
 );
 
 const openHarness = () =>

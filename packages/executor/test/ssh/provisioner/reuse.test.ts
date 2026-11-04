@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import {
@@ -6,7 +7,7 @@ import {
   ProvisionerReuse,
   WorkerRoot,
 } from "@usine/core/worker";
-import { Effect, Fiber, Option, Schema } from "effect";
+import { Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { Executor, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
@@ -15,10 +16,6 @@ import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
 import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const policy = ProvisionerReuse.make({
   attempts: MachineAttemptLimit.make(2),
@@ -53,7 +50,7 @@ for (const address of [hetznerAddress, boatAddress]) {
         const machine = machineFixture();
         if (containerRuntime === "podman") {
           machine.state.docker = "absent";
-          machine.state.podmanInfo = stringifyJson({
+          machine.state.podmanInfo = jsonKey({
             version: { Version: "5.4.2" },
             host: {
               security: { rootless: true },
@@ -95,9 +92,7 @@ for (const address of [hetznerAddress, boatAddress]) {
           const assignment = providers.calls.find(
             ({ method }) => method === (provider === "boat" ? "PATCH" : "PUT"),
           );
-          const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            assignment?.body,
-          ).pipe(Effect.orDie);
+          const json1 = jsonKey(assignment?.body);
           assert.include(json1, attemptTag(second));
           yield* machines.release(first.hold);
           assert.strictEqual(

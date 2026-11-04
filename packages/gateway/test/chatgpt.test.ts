@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, request } from "node:http";
@@ -54,10 +55,6 @@ import {
   settingsLayer,
 } from "./fixtures.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 const TOKEN_URL = "https://auth.test/oauth/token";
 const BACKEND = "https://chatgpt.test/backend-api/codex";
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -87,7 +84,7 @@ class Upstreams extends Context.Service<
 }
 
 const json = (status: number, body: Schema.Json) =>
-  new Response(stringifyJson(body), {
+  new Response(jsonKey(body), {
     status,
     headers: { "content-type": "application/json" },
   });
@@ -250,7 +247,7 @@ describe("ChatGptLogins", () => {
         const [refresh] = yield* tokenRequests;
         assert(refresh !== undefined);
         assert.strictEqual(refresh.method, "POST");
-        const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(
           refresh.body,
         ).pipe(Effect.orDie);
         assert.deepStrictEqual(json1, {
@@ -502,7 +499,7 @@ describe("ChatGptLogins", () => {
     [403, {}],
   ] as const)
     it.effect(
-      `a refresh rejected with ${String(status)} ${stringifyJson(body)} stops refreshing until a reload reads a new login`,
+      `a refresh rejected with ${String(status)} ${jsonKey(body)} stops refreshing until a reload reads a new login`,
       () =>
         Effect.gen(function* () {
           const { path, login } = yield* authFile("1 minute");
@@ -554,7 +551,7 @@ describe("ChatGptLogins", () => {
       yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
         fileSystem.writeFileString(
           path,
-          stringifyJson({
+          jsonKey({
             OPENAI_API_KEY: "sk-proj-secretForTests",
           }),
         ),
@@ -661,9 +658,7 @@ describe("GatewayProxy with a ChatGPT login", () => {
           assert.deepStrictEqual(header("chatgpt-account-id"), Option.some(CHATGPT_ACCOUNT));
           assert.deepStrictEqual(header("originator"), Option.some("codex_exec"));
           assert.deepStrictEqual(header("session-id"), Option.some("session-for-tests"));
-          const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            forwarded.headers,
-          ).pipe(Effect.orDie);
+          const json2 = jsonKey(forwarded.headers);
           assert.notInclude(json2, caller);
         }).pipe(Effect.provide(proxyFor(login)));
       }).pipe(Effect.provide(NodeFileSystem.layer)),

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { getTableName } from "drizzle-orm";
 import { projectMigrationDialect } from "./dialect.ts";
 import {
@@ -108,7 +109,7 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
         const decoded = yield* Schema.decodeUnknownEffect(
           Schema.Struct({ key: Schema.String, value: Json }),
         )(row);
-        const qualifiedAsk = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        const qualifiedAsk = yield* Schema.encodeEffect(Json)(
           qualifyJson(decoded.value, project, namespaces),
         ).pipe(Effect.orDie);
         yield* sql`UPDATE ${sql(getTableName(itemCycleBudgets))} SET ask_json = ${qualifiedAsk} WHERE item_key = ${decoded.key}`;
@@ -120,7 +121,7 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
         const decoded = yield* Schema.decodeUnknownEffect(
           Schema.Struct({ key: Schema.String, value: Json }),
         )(row);
-        const qualifiedClosure = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        const qualifiedClosure = yield* Schema.encodeEffect(Json)(
           qualifyJson(decoded.value, project, namespaces),
         ).pipe(Effect.orDie);
         yield* sql`UPDATE ${sql(getTableName(cycleAskClosures))} SET ask_json = ${qualifiedClosure} WHERE ask_id = ${decoded.key}`;
@@ -170,17 +171,12 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
             Schema.fromJsonString(Schema.Array(Schema.Json)),
           )(id.slice("schedule-failure:".length));
           if (Predicate.isString(parts[0]) && !parts[0].includes("/")) {
-            const qualifiedKey = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-              `${project}/${parts[0]}`,
-              ...parts.slice(1),
-            ]).pipe(Effect.orDie);
+            const qualifiedKey = jsonKey([`${project}/${parts[0]}`, ...parts.slice(1)]);
             id = `schedule-failure:${qualifiedKey}`;
             if (isJsonObject(updated)) updated = { ...updated, id };
           }
         }
-        const revision = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          updated,
-        ).pipe(Effect.orDie);
+        const revision = jsonKey(updated);
         if (revision === saved.revision && id === saved.id) continue;
         yield* sql`INSERT INTO ${sql(getTableName(attentionAcknowledgements))} (id, revision, dismissed_by, dismissed_at)
           VALUES (${id}, ${revision}, ${saved.dismissed_by}, ${saved.dismissed_at}) ON CONFLICT DO NOTHING`;

@@ -1,11 +1,8 @@
 // This synchronous Node crypto boundary requires native key and cipher operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-// Synchronous Node path callbacks retain the host platform’s path semantics.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { join } from "node:path";
-import { NodeFileSystem, NodeCrypto } from "@effect/platform-node";
-import { Effect, Exit, FileSystem, Layer, Option, Redacted, Schema, Crypto } from "effect";
+import { NodeFileSystem, NodeCrypto, NodePath } from "@effect/platform-node";
+import { Effect, Exit, FileSystem, Layer, Option, Redacted, Schema, Crypto, Path } from "effect";
 import { AttachmentPersistenceError, LiveAttachment } from "../attachment/attachment.ts";
 import { Attachments, type AttachmentPersistence } from "../attachment/store.ts";
 import { GatewaySettings } from "../settings.ts";
@@ -28,7 +25,8 @@ export const fileAttachmentsLayer = (directory: string) =>
       const fs = yield* FileSystem.FileSystem;
       const crypto = yield* Crypto.Crypto;
       const { callerKey } = yield* GatewaySettings;
-      const path = join(directory, "attachments.enc");
+      const paths = yield* Path.Path;
+      const path = paths.join(directory, "attachments.enc");
       const key = createHash("sha256")
         .update("usine-gateway-attachments-v1\0")
         .update(Redacted.value(callerKey))
@@ -120,4 +118,4 @@ export const fileAttachmentsLayer = (directory: string) =>
       };
       return Attachments.layerWithPersistence(persistence);
     }),
-  ).pipe(Layer.provide(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer)));
+  ).pipe(Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodeCrypto.layer, NodePath.layer)));

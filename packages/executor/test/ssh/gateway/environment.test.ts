@@ -1,15 +1,12 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { GatewayDomain, type GatewayLlmProvider } from "@usine/core/worker";
-import { Redacted, Schema } from "effect";
+import { Redacted } from "effect";
 import {
   GATEWAY_SENT_VARIABLES,
   gatewayConfigFiles,
   gatewayEnvironment,
 } from "../../../src/ssh/gateway/environment.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const CALLER_TOKEN = "ugw1.sample-claims.sample-signature";
 const DIRECTORIES = {
@@ -71,7 +68,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     const { exported, sent } = environmentFor([]);
     assert.deepStrictEqual(exported, WITHOUT_LLM);
     assert.deepStrictEqual(sent, SENT_WITHOUT_LLM);
-    assert.notInclude(stringifyJson(exported), CALLER_TOKEN);
+    assert.notInclude(jsonKey(exported), CALLER_TOKEN);
   });
 
   it("points Claude Code at the Gateway only when the Gateway holds the Anthropic credential", () => {
@@ -113,6 +110,6 @@ describe("An Attempt's environment behind a Gateway", () => {
       withCodex["/home/usine/.usine/workers/eu-one/codex/config.toml"],
       CODEX_CONFIG,
     );
-    assert.notInclude(stringifyJson(withCodex), CALLER_TOKEN);
+    assert.notInclude(jsonKey(withCodex), CALLER_TOKEN);
   });
 });

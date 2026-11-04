@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { ItemProjectionReader, ItemProjection } from "@usine/engine/item-projection";
 import { NodeServices } from "@effect/platform-node";
@@ -34,10 +35,6 @@ import { HttpRouter } from "effect/http";
 import { FactoryBackend } from "../../src/backend.ts";
 import { apiRoutes } from "../../src/http.ts";
 import { configurationLoopControlLayer } from "../../src/configuration/store.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const parserLayer = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
 export const unused = Effect.die("unused test service operation");
@@ -267,7 +264,7 @@ export const harness = (
     const request = (method: string, path: string, body?: Schema.Json) =>
       Effect.gen(function* () {
         const options: RequestInit = { method };
-        if (body !== undefined) options.body = stringifyJson(body);
+        if (body !== undefined) options.body = jsonKey(body);
         const response = yield* Effect.promise(() =>
           app.handler(new Request(`http://localhost/api/configuration${path}`, options)),
         );

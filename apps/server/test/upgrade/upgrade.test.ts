@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 // These fixtures use synchronous subprocess operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -34,10 +35,6 @@ import { probeInstance } from "../../src/instance/state.ts";
 import { PackageLookupError, resolveVersion } from "../../src/registry.ts";
 import { stop } from "../../src/stop.ts";
 import { upgrade } from "../../src/upgrade/upgrade.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const SCENARIO_TIMEOUT_MS = 60_000;
 const FIXTURE = fileURLToPath(new URL("../fixtures/instance.mjs", import.meta.url));
@@ -146,10 +143,7 @@ const pinnedInstance = () =>
     store.close();
     const engine = join(directory, "node_modules", "@usine", "server");
     mkdirSync(engine, { recursive: true });
-    writeFileSync(
-      join(engine, "main.mjs"),
-      `import ${stringifyJson(pathToFileURL(FIXTURE).href)};\n`,
-    );
+    writeFileSync(join(engine, "main.mjs"), `import ${jsonKey(pathToFileURL(FIXTURE).href)};\n`);
     const launch = InstanceLaunch.make({
       node: process.execPath,
       nodeOptions: ["--experimental-strip-types", "--no-warnings"],
@@ -198,9 +192,7 @@ describe("usine upgrade", { timeout: SCENARIO_TIMEOUT_MS }, () => {
   it.live("leaves the pin and the instance alone while a run has a live attempt", () =>
     Effect.gen(function* () {
       const { directory, pid } = yield* pinnedInstance();
-      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-        { id: "run-live", state: "Running" },
-      ]).pipe(Effect.orDie);
+      const json1 = jsonKey([{ id: "run-live", state: "Running" }]);
       writeFileSync(join(directory, "fixture-runs.json"), json1);
 
       const refused = yield* upgrade(directory, latest).pipe(Effect.flip, Effect.provide(services));

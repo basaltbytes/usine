@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // Fetch and agent SDK interfaces require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { assert, describe, it } from "@effect/vitest";
@@ -18,10 +19,6 @@ import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server
 import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/pi/sdk.ts";
 import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** The Claude Code version that the installed Claude Agent SDK bundles. */
 const claudeVersion = Schema.decodeEffect(
@@ -213,11 +210,7 @@ describe("worker harness readiness", () => {
           assert(matchesError);
           assert.strictEqual(error.capability, result.capability);
           assert.strictEqual(server.opened(), 0);
-          assert(
-            !(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(error)).includes(
-              "credential-shaped",
-            ),
-          );
+          assert(!jsonKey(error).includes("credential-shaped"));
         }).pipe(
           Effect.provide(
             commands({ [codexVersionCommand]: result }).pipe(
@@ -324,7 +317,7 @@ describe("worker harness readiness", () => {
           Effect.provide(
             claudeCommands({
               "claude auth status --json": {
-                stdout: stringifyJson(status.auth),
+                stdout: jsonKey(status.auth),
                 exitCode: status.exitCode,
               },
             }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
@@ -338,7 +331,7 @@ describe("worker harness readiness", () => {
     { stdout: "", exitCode: 1 },
     { stdout: "not a status", exitCode: 1 },
     {
-      stdout: stringifyJson({ loggedIn: false }),
+      stdout: jsonKey({ loggedIn: false }),
       exitCode: 2,
     },
   ])
@@ -451,7 +444,7 @@ describe("worker harness readiness", () => {
               exitCode: 0,
             },
             [overSsh("exec 'claude' 'auth' 'status' '--json'")]: {
-              stdout: yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+              stdout: jsonKey({
                 loggedIn: true,
                 authMethod: "claude.ai",
                 apiProvider: "firstParty",

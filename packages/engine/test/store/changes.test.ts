@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { InstanceScope } from "@usine/core/access";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
@@ -25,7 +26,7 @@ import {
   Started,
   SessionEvent,
 } from "@usine/core/attempt/channel";
-import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Result } from "effect";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import {
   AttentionAcknowledgements,
@@ -46,10 +47,6 @@ import { RunDatabase } from "../../src/database/database.ts";
 import { changeTransaction } from "../../src/store/changes.ts";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission } from "./support.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 it.effect(
   "publishes committed engine, transcript, item, attention and cycle writes once and skips duplicates",
@@ -88,7 +85,7 @@ it.effect(
             assert(notice !== undefined);
             for (const target of targets) assert.deepInclude(notice.changes, { audience, target });
             assert.strictEqual(
-              new Set(notice.changes.map((entry) => stringifyJson(entry))).size,
+              new Set(notice.changes.map((entry) => jsonKey(entry))).size,
               notice.changes.length,
             );
             return result;

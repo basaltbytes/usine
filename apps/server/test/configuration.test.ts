@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { HttpClient, FetchHttpClient } from "effect/http";
 
 import { Fiber, Effect, Layer, Option, Schema, Deferred, FileSystem } from "effect";
@@ -30,10 +31,6 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "@effect/vitest";
 import { parse, stringify } from "yaml";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const directoryFixture = Effect.gen(function* () {
@@ -294,9 +291,9 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
           staleEditor,
           `import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-const yaml = ${stringifyJson(join(exported, "usine.yaml"))};
+const yaml = ${jsonKey(join(exported, "usine.yaml"))};
 writeFileSync(yaml, readFileSync(yaml, "utf8").replace("poll_interval: 60", "poll_interval: 45"));
-execFileSync(process.execPath, [${stringifyJson(cli)}, "config", "import", ${stringifyJson(exported)}, "--message", "Concurrent import"]);
+execFileSync(process.execPath, [${jsonKey(cli)}, "config", "import", ${jsonKey(exported)}, "--message", "Concurrent import"]);
 writeFileSync(process.argv[2], readFileSync(process.argv[2], "utf8").replace("harness: claude", "harness: codex"));
 `,
         ),
@@ -409,7 +406,7 @@ it.live(
           webRequest(`${origin}/api/auth/link/consume`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: stringifyJson({ token: link?.[1] }),
+            body: jsonKey({ token: link?.[1] }),
           });
         expect((yield* consume()).status).toBe(200);
         expect((yield* consume()).status).toBe(401);
@@ -486,7 +483,7 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
         const saved = yield* webRequest(`${origin}/api/configuration/entities/agent/developer`, {
           method: "PUT",
           headers: { Origin: origin, ...awaited6 },
-          body: stringifyJson({
+          body: jsonKey({
             expected: entity.number,
             text: entity.text.replace("harness: claude", "harness: codex"),
           }),

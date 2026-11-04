@@ -1,6 +1,7 @@
-import { NodeHttpPlatform, NodeHttpServer, NodeFileSystem } from "@effect/platform-node";
+import { jsonKey } from "@usine/core/json-key";
+import { NodeHttpPlatform, NodeHttpServer, NodeFileSystem, NodePath } from "@effect/platform-node";
 import { UiOrigin } from "@usine/config/factory";
-import { Context, Effect, Layer, Schema, Config, Option, FileSystem } from "effect";
+import { Context, Effect, Layer, Config, Option, FileSystem } from "effect";
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/http";
 import { tmpdir } from "node:os";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
@@ -13,10 +14,6 @@ import { authenticatedRoutes } from "../src/auth/http.ts";
 import { staticRoutes } from "../src/http.ts";
 import { securityMiddleware } from "../src/security.ts";
 import { authFixture, localSecret } from "./auth/fixture.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 it.live(
   "enforces exact origins before credentialed handlers and sets security headers on routes, assets, and errors",
@@ -44,7 +41,7 @@ it.live(
           const app = HttpRouter.toWebHandler(
             Layer.mergeAll(
               routes,
-              staticRoutes(root),
+              staticRoutes(root).pipe(Layer.provide(NodePath.layer)),
               HttpRouter.add("POST", "/webhooks/github", HttpServerResponse.empty({ status: 401 })),
               HttpRouter.add("GET", "/defect", Effect.die("test defect")),
               securityMiddleware(services.authentication),
@@ -142,7 +139,7 @@ it.live(
                 request("/api/auth/link/consume", {
                   method: "POST",
                   headers: { origin, "content-type": "application/json" },
-                  body: stringifyJson({ token }),
+                  body: jsonKey({ token }),
                 }),
               );
               assert.equal(consumed.status, 403);
@@ -155,7 +152,7 @@ it.live(
                     origin: "https://client.example",
                     "content-type": "application/json",
                   },
-                  body: stringifyJson({ token }),
+                  body: jsonKey({ token }),
                 }),
               )).status,
               200,
@@ -290,7 +287,7 @@ it.live(
             page.route(`${url}/api/setup`, (route) => route.fulfill({ json: { _tag: "NoApp" } })),
           );
           const action = "https://github.com/settings/apps/new?state=test";
-          const manifest = stringifyJson({
+          const manifest = jsonKey({
             name: "usine browser test",
           });
           yield* Effect.promise(() =>

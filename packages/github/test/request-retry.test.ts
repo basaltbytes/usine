@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
@@ -9,10 +10,6 @@ import { queryGraphql } from "../src/graphql.ts";
 import { InstallationToken, InstallationWide } from "../src/installation.ts";
 import { PollCursor } from "../src/polling/detection.ts";
 import { GitHubPolling } from "../src/polling/polling.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const token = InstallationToken.make({
   value: Redacted.make("test-token"),
@@ -49,10 +46,10 @@ for (const mode of ["rest", "graphql"] as const) {
             requests++;
             return HttpClientResponse.fromWeb(
               request,
-              new Response(
-                requests === 1 ? null : stringifyJson(mode === "rest" ? [] : { data: true }),
-                { status: requests === 1 ? status : 200, headers: { etag: '"ok"' } },
-              ),
+              new Response(requests === 1 ? null : jsonKey(mode === "rest" ? [] : { data: true }), {
+                status: requests === 1 ? status : 200,
+                headers: { etag: '"ok"' },
+              }),
             );
           }),
         );

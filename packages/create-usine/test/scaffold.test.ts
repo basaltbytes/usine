@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { FetchHttpClient } from "effect/http";
 import { webRequest } from "../../../tooling/test/http.mts";
 import { NodeFileSystem } from "@effect/platform-node";
@@ -24,7 +25,7 @@ import { promisify } from "node:util";
 import { Effect, Schema, Deferred, Config, Option, FileSystem, Layer } from "effect";
 import { assert, it } from "@effect/vitest";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
+// Scaffold assertions synchronously read package manifest fields.
 // @effect-diagnostics-next-line schemaSync:off
 const parseJson = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
@@ -36,10 +37,6 @@ const decodeManifest = Schema.decodeUnknownSync(
     Schema.Struct({ dependencies: Schema.Record(Schema.String, Schema.String) }),
   ),
 );
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
@@ -69,14 +66,14 @@ const fixture = (installer = "npm") =>
         join(bin, installer),
         `#!${process.execPath}
 import { mkdirSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
-if (process.argv.slice(2).join(' ') !== ${stringifyJson(installer === "pnpm" ? "install --ignore-workspace" : "install --workspaces=false")}) process.exit(65);
+if (process.argv.slice(2).join(' ') !== ${jsonKey(installer === "pnpm" ? "install --ignore-workspace" : "install --workspaces=false")}) process.exit(65);
 if (process.env.INSTALL_FAILURE) process.exit(42);
 const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
 mkdirSync('node_modules/@usine', { recursive: true });
 mkdirSync('node_modules/.bin', { recursive: true });
-symlinkSync(${stringifyJson(serverDirectory)}, 'node_modules/@usine/server');
-symlinkSync(${stringifyJson(join(serverDirectory, "dist/main.js"))}, 'node_modules/.bin/usine');
-if (!process.env.NO_LOCKFILE) writeFileSync(${stringifyJson(installer === "npm" ? "package-lock.json" : "pnpm-lock.yaml")}, JSON.stringify(manifest));
+symlinkSync(${jsonKey(serverDirectory)}, 'node_modules/@usine/server');
+symlinkSync(${jsonKey(join(serverDirectory, "dist/main.js"))}, 'node_modules/.bin/usine');
+if (!process.env.NO_LOCKFILE) writeFileSync(${jsonKey(installer === "npm" ? "package-lock.json" : "pnpm-lock.yaml")}, JSON.stringify(manifest));
 `,
         { mode: 0o755 },
       ),
@@ -196,7 +193,7 @@ it.live.each(["npm", "pnpm"])(
         fileSystem.makeDirectory(join(f.root, "package")),
       );
       yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.writeFileString(join(f.root, "package/package.json"), stringifyJson(manifest)),
+        fileSystem.writeFileString(join(f.root, "package/package.json"), jsonKey(manifest)),
       );
       yield* Effect.promise(() => exec("tar", ["-czf", "server.tgz", "package"], { cwd: f.root }));
       const tarball = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
@@ -208,7 +205,7 @@ it.live.each(["npm", "pnpm"])(
         } else {
           response.setHeader("Content-Type", "application/json");
           response.end(
-            stringifyJson({
+            jsonKey({
               name: manifest.name,
               "dist-tags": { latest: release.version },
               versions: {
@@ -239,7 +236,7 @@ it.live.each(["npm", "pnpm"])(
       yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
         fileSystem.writeFileString(
           join(f.root, "package.json"),
-          stringifyJson({
+          jsonKey({
             private: true,
             workspaces: ["instances/*"],
           }),

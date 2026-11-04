@@ -152,8 +152,9 @@ function ChartTooltipContent({
       );
     }
 
-    const hasLabel = Boolean(value);
-    if (!hasLabel) {
+    // ReactNode labels omit false, zero, and empty strings.
+    // @effect-diagnostics-next-line strictBooleanExpressions:off
+    if (!value) {
       return null;
     }
 
@@ -190,7 +191,12 @@ function ChartTooltipContent({
                   indicator === "dot" && "items-center",
                 )}
               >
-                {formatter !== undefined && item?.value !== undefined && Boolean(item.name) ? (
+                {formatter !== undefined &&
+                item?.value !== undefined &&
+                item.name !== undefined &&
+                item.name !== "" &&
+                item.name !== 0 &&
+                !Number.isNaN(item.name) ? (
                   formatter(item.value, item.name, item, index, item.payload)
                 ) : (
                   <>

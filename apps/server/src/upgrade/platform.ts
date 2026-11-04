@@ -134,7 +134,7 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     yield* fs.writeFileString(path.join(folder, "run.sh"), `${variables}\n${helper}`, {
       mode: 0o700,
     });
-    const serializedRecord = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+    const serializedRecord = yield* Schema.encodeEffect(Schema.fromJsonString(UpgradeRecord))(
       UpgradeRecord.make({ previous, target, status: "installing" }),
     ).pipe(Effect.orDie);
     yield* fs.writeFileString(resultPath, serializedRecord, { mode: 0o600 });

@@ -142,7 +142,11 @@ function FieldSeparator({
   return (
     <div
       data-slot="field-separator"
-      data-content={Boolean(children)}
+      data-content={
+        // ReactNode truthiness controls separator spacing, including false, zero, and empty strings.
+        // @effect-diagnostics-next-line strictBooleanExpressions:off
+        !!children
+      }
       className={cn(
         "relative -my-2 h-5 text-xs/relaxed group-data-[variant=outline]/field-group:-mb-2",
         className,
@@ -171,8 +175,9 @@ function FieldError({
   errors?: Array<{ message?: string } | undefined>;
 }) {
   const content = useMemo(() => {
-    const hasChildren = Boolean(children);
-    if (hasChildren) {
+    // Truthy ReactNode children take precedence over generated error messages.
+    // @effect-diagnostics-next-line strictBooleanExpressions:off
+    if (children) {
       return children;
     }
 
@@ -193,8 +198,9 @@ function FieldError({
     );
   }, [children, errors]);
 
-  const hasContent = Boolean(content);
-  if (!hasContent) {
+  // ReactNode errors omit false, zero, and empty strings.
+  // @effect-diagnostics-next-line strictBooleanExpressions:off
+  if (!content) {
     return null;
   }
 

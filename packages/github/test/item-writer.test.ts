@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
@@ -69,9 +70,7 @@ describe("GitHubItemWriter", () => {
             );
           }
         }
-        const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          [...current].map((name) => ({ name })),
-        );
+        const decodedValue1 = jsonKey([...current].map((name) => ({ name })));
         return yield* Effect.succeed(
           HttpClientResponse.fromWeb(
             request,

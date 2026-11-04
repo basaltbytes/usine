@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { SqliteReaderState } from "@usine/engine/local-sqlite";
 import { MemberAccess } from "../../src/auth/access.ts";
 import { securityMiddleware } from "../../src/security.ts";
@@ -13,10 +14,6 @@ import { AuthStore } from "../../src/auth/store.ts";
 import { authFailure, Member, TokenName } from "../../src/auth/model.ts";
 import { authFixture, alice, bob, localSecret } from "./fixture.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 const request = (
   app: { readonly handler: (request: Request) => Promise<Response> },
   path: string,
@@ -28,7 +25,7 @@ const request = (
     method,
     headers: { "content-type": "application/json", ...headers },
   };
-  if (body !== undefined) options.body = stringifyJson(body);
+  if (body !== undefined) options.body = jsonKey(body);
   return app.handler(new Request(`https://usine.example${path}`, options));
 };
 const cookie = (response: Response) =>

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
@@ -19,10 +20,6 @@ import { assert, describe, it } from "@effect/vitest";
 import { authenticatedRoutes } from "../src/auth/http.ts";
 import { tracingLayer } from "../src/tracing.ts";
 import { authFixture } from "./auth/fixture.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 interface ReceivedRequest {
   readonly path: string | undefined;
@@ -105,7 +102,7 @@ const spanExport = <A, E>(
       Effect.provideContext(effect, context),
     ),
   ).pipe(
-    Effect.withLogger(Logger.make(({ message }) => options.logs?.push(stringifyJson(message)))),
+    Effect.withLogger(Logger.make(({ message }) => options.logs?.push(jsonKey(message)))),
     Effect.provide(
       ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.environment ?? {} })).pipe(
         Layer.provideMerge(NodeServices.layer),

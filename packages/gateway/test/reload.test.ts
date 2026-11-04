@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, request } from "node:http";
@@ -38,10 +39,6 @@ import {
   REPOSITORY,
   WORKER,
 } from "./fixtures.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const CALLER_KEY_VALUE = "caller-key-for-reload-tests-0123456789";
 const FIRST_KEY = "sk-ant-api03-firstKeyForReloadTests";
@@ -126,7 +123,7 @@ const secretsLines = (anthropicKey: string) => [
 const lines: Array<string> = [];
 const recordLogs = Logger.layer([
   Logger.make(({ logLevel, message }) => {
-    lines.push(stringifyJson({ level: logLevel, message }));
+    lines.push(jsonKey({ level: logLevel, message }));
   }),
 ]);
 

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { CiHandoff, CiPolicy } from "@usine/core/ci";
 import { Agent } from "@usine/core/agent";
 import {
@@ -16,10 +17,6 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { type Brand, Crypto, Effect, Schema } from "effect";
 import { Hex } from "effect/encoding";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** A matched Event with its Loop, Item, and Run settings. */
 export class Submission extends Schema.Class<
@@ -107,7 +104,7 @@ export const reopeningOf = (
   original: DedupKey,
   reopening: number,
 ): Submission => {
-  const dedupKey = DedupKey.make(stringifyJson(["reopened", reopening, original]));
+  const dedupKey = DedupKey.make(jsonKey(["reopened", reopening, original]));
   return Submission.make({
     ...submission,
     event: Event.make({ ...submission.event, id: EventId.make(dedupKey), dedupKey }),

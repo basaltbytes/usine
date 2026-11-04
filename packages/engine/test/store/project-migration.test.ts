@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { expect, it } from "@effect/vitest";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import { DedupKey, Event, EventId } from "@usine/core/event";
@@ -6,7 +7,7 @@ import { LoopName } from "@usine/core/loop";
 import { ProjectId } from "@usine/core/project";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { migrateProjectLoops, RepositoryProject } from "../../src/database/project-migration.ts";
 import { Submission } from "../../src/engine/submission.ts";
@@ -32,18 +33,9 @@ it.effect(
         );
         const submissions: Array<Submission> = [];
         for (const { repository } of projects) {
-          const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-            "implement",
-            repository,
-            1,
-            "hash",
-          ]).pipe(Effect.orDie);
+          const json1 = jsonKey(["implement", repository, 1, "hash"]);
           const key = json1;
-          const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-            "github",
-            repository,
-            1,
-          ]).pipe(Effect.orDie);
+          const json2 = jsonKey(["github", repository, 1]);
           const submission = Submission.make({
             ...lifecycleSubmission,
             repository,
@@ -69,9 +61,7 @@ it.effect(
             limit: 1,
             counts: [{ loop: "implement", admitted: 1, completed: 0 }],
           };
-          const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(ask).pipe(
-            Effect.orDie,
-          );
+          const json3 = jsonKey(ask);
           yield* sql`UPDATE usine_item_cycle_budgets SET ask_json = ${json3} WHERE item_key = ${submission.itemKey}`;
           const need = {
             id: `cycle-budget:${submission.event.id}`,
@@ -80,9 +70,7 @@ it.effect(
             itemLabel: "item",
             itemUrl: "url",
           };
-          const json4 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            need,
-          ).pipe(Effect.orDie);
+          const json4 = jsonKey(need);
           yield* sql`INSERT INTO usine_attention_acknowledgements (id, revision, dismissed_at) VALUES (${need.id}, ${json4}, '2026-10-29T00:00:00Z')`;
         }
         yield* sql`INSERT INTO usine_loop_runtime (loop_name, paused) VALUES ('implement', 1), ('review', 1)`;
@@ -104,12 +92,7 @@ it.effect(
           const asks =
             yield* sql`SELECT json_extract(ask_json, '$.loop') AS loop, json_extract(ask_json, '$.counts[0].loop') AS participant FROM usine_item_cycle_budgets WHERE item_key = ${submission.itemKey}`;
           expect(asks).toEqual([{ loop: name, participant: name }]);
-          const json5 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-            name,
-            submission.repository,
-            1,
-            "hash",
-          ]).pipe(Effect.orDie);
+          const json5 = jsonKey([name, submission.repository, 1, "hash"]);
           const dedupKey = DedupKey.make(json5);
           const repeated = yield* store.recordAndClaim(
             Submission.make({

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 
 import { AttemptId } from "@usine/core/attempt";
@@ -9,7 +10,7 @@ import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
 import { TestClock } from "effect/testing";
-import { Cause, Effect, Exit, Fiber, Logger, Option, Scope, Layer, Schema } from "effect";
+import { Cause, Effect, Exit, Fiber, Logger, Option, Scope, Layer } from "effect";
 
 import {
   aloneOnItem,
@@ -493,9 +494,7 @@ describe("exe.dev preparation", () => {
         windows: aloneOnItem(),
       });
       assert.strictEqual(result.message, `Completed: ${request.task}`);
-      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(errors).pipe(
-        Effect.orDie,
-      );
+      const json1 = jsonKey(errors);
       assert(json1.includes("worktree-directory"));
       assert(
         ssh.state.commands.some((command) => remoteLine(command).includes("'worktree' 'prune'")),
@@ -546,13 +545,9 @@ describe("exe.dev preparation", () => {
         assert(!remote.some((line) => line.includes("'worktree' 'prune'")));
         assert(!remote.some((line) => line.startsWith("exec 'rm'")));
         assert.strictEqual(issued.filter(({ args }) => args.includes("detach")).length, 1);
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          errors,
-        ).pipe(Effect.orDie);
+        const json2 = jsonKey(errors);
         assert(json2.includes("retained for recovery"));
-        const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          errors,
-        ).pipe(Effect.orDie);
+        const json3 = jsonKey(errors);
         assert(json3.includes(prepared.workspace.worktree));
         const completed = ssh.state.commands.length;
         yield* Scope.close(owner, Exit.void);

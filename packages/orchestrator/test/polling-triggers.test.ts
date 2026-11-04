@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { idleCiMonitor } from "./support/ci.ts";
@@ -310,9 +311,7 @@ describe("PollingTriggers", () => {
           Effect.gen(function* () {
             fetched.push(item.number);
             const pullRequest = remote.get(item.number) ?? assert.fail("unknown pull request");
-            const decodedValue16 = yield* Schema.encodeEffect(
-              Schema.fromJsonString(Schema.Unknown),
-            )([item.number, pullRequest]);
+            const decodedValue16 = jsonKey([item.number, pullRequest]);
             return PullRequestSnapshot.make({
               contentHash: ContentHash.make(
                 createHash("sha256").update(decodedValue16).digest("hex"),
@@ -654,11 +653,7 @@ describe("PollingTriggers", () => {
         const polling = yield* PollingTriggers;
         const engine = yield* RunEngine;
         const reader = yield* RunReader;
-        const decodedValue15 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-          "github",
-          watchedRepository,
-          162,
-        ]);
+        const decodedValue15 = jsonKey(["github", watchedRepository, 162]);
         const itemKey = ItemKey.make(decodedValue15);
 
         const reviewPassed = yield* polling.poll(instance);
@@ -1888,10 +1883,7 @@ describe("PollingTriggers", () => {
 
           assert.strictEqual((yield* engine.inspect(openRun)).permissions, "read");
 
-          const decodedValue14 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-            "operator-approval",
-            openRun,
-          ]);
+          const decodedValue14 = jsonKey(["operator-approval", openRun]);
           const dedupKey = DedupKey.make(decodedValue14);
           yield* engine.approve(
             openRun,

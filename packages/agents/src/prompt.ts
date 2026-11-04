@@ -122,4 +122,4 @@ export const assembleChildPrompt = (parts: ChildPromptParts): string =>
 
 // Prompt rendering synchronously formats the validated payload.
 // @effect-diagnostics-next-line schemaSync:off
-const prettyPayload = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }));
+const prettyPayload = Schema.encodeSync(Schema.fromJsonString(Schema.Json, { space: 2 }));

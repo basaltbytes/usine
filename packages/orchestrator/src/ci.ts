@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { ConfigParser } from "@usine/config/parser";
 import type { LoadedInstance } from "@usine/config/instance";
 import { matchesLoop } from "@usine/config/project";
@@ -19,7 +20,7 @@ import { GitHubChecks } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { ChangedPullRequest, GitHubPolling } from "@usine/github/polling";
-import { Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Result } from "effect";
 import { resolveTriggerLoops, triggerSubmission } from "./trigger-submission.ts";
 import {
   RepositoryPollFailure,
@@ -80,11 +81,7 @@ export class CiMonitor extends Context.Service<
         if (endedAt === undefined || Option.isNone(endedAt))
           return yield* Effect.die("A CI wait has no ended attempt");
         const observed = yield* checks.snapshot(wait.repository, pullRequest);
-        const dedupKeyJson = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-          "ci-failure",
-          runId,
-          head,
-        ]).pipe(Effect.orDie);
+        const dedupKeyJson = jsonKey(["ci-failure", runId, head]);
         const dedupKey = DedupKey.make(dedupKeyJson);
         const admitted = yield* reader.runForEvent(dedupKey);
         if (Option.isSome(admitted)) {

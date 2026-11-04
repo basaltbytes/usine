@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -19,10 +20,6 @@ import {
 import { DateTime, Effect, Logger, Option, Schema, Layer } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { baseBranches, memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const instance = Effect.gen(function* () {
@@ -413,7 +410,7 @@ describe("open pull request refresh", () => {
       const readable = baseBranches();
       const warnings: Array<string> = [];
       const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(stringifyJson(message));
+        if (logLevel === "Warn") warnings.push(jsonKey(message));
       });
       const { github, poll } = fakeRepository(
         new Map([

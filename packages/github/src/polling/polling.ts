@@ -692,7 +692,7 @@ export {
 
 const makeContentHash = (crypto: Crypto.Crypto) =>
   Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
-    const json = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+    const json = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(
       canonicalContent(payload),
     );
     const encoded = new TextEncoder().encode(json);

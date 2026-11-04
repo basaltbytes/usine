@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { FetchHttpClient } from "effect/http";
 import { NodeFileSystem } from "@effect/platform-node";
 import { webRequest } from "../../../tooling/test/http.mts";
@@ -207,14 +208,14 @@ describe("the usine-gateway command", () => {
         let started = yield* start(environment);
         try {
           assert.isTrue(started.listening, started.output());
-          const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          const json1 = jsonKey({
             worker: "worker",
             repository: "acme/demo",
             credential: { _tag: "InstallationCredential", token: "ghs_restart-secret" },
             expiresAt: DateTime.formatIso(
               DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 3_600_000),
             ),
-          }).pipe(Effect.orDie);
+          });
           const payload = json1;
           const adminRequest = (path: string, method: string, body?: string) =>
             webRequest(`http://127.0.0.1:${started.ports.admin}/v1/attachments${path}`, {

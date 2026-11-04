@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { AttemptSummary } from "@usine/engine/run-reader";
 import type { Worker } from "@usine/config/factory";
 import { BotLogin } from "@usine/core/worker";
@@ -34,10 +35,6 @@ import {
 } from "effect";
 import { GitHubItemKey } from "@usine/core/item";
 import { LabelView } from "./board.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /**
  * A label that an Attempt's Agent added to the Run's Item, with GitHub's current label definition.
@@ -305,13 +302,13 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     const workerActors = new Map(
       workers.map(({ name, kind }) => [name, githubBotLogin(kind, appActor)]),
     );
-    const identityKey = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+    const identityKey = jsonKey([
       appActor,
       [...workerActors].sort(([left], [right]) => left.localeCompare(right)),
-    ]).pipe(Effect.orDie);
+    ]);
     const cacheKey = (attempt: Attempt) =>
       Option.map(Option.fromUndefinedOr(workerActors.get(attempt.worker)), (actor) =>
-        stringifyJson([attempt.id, actor, identityKey]),
+        jsonKey([attempt.id, actor, identityKey]),
       );
     const stored = yield* Ref.get(cache);
     const cached = new Map(

@@ -1,5 +1,6 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Effect, Exit, Option, Stream, Tracer, Schema } from "effect";
+import { DateTime, Effect, Exit, Option, Stream, Tracer } from "effect";
 import {
   Headers,
   HttpClient,
@@ -11,10 +12,6 @@ import { AnonymousCredential, Attachment } from "../src/attachment/attachment.ts
 import { githubDownloadClient } from "../src/github/download.ts";
 import { GITHUB_ORIGINS, githubRoute, type GitHubHost } from "../src/github/github.ts";
 import { ATTACHMENT, REPOSITORY, WORKER } from "./fixtures.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const attachment = Attachment.make({
   id: ATTACHMENT,
@@ -94,7 +91,7 @@ describe("GitHub download redirects", () => {
           const span = new Tracer.NativeSpan(options);
           const end = span.end.bind(span);
           span.end = (endTime, exit) => {
-            failures.push(stringifyJson(exit));
+            failures.push(jsonKey(exit));
             end(endTime, exit);
           };
           return span;

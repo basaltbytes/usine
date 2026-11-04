@@ -24,3 +24,16 @@ export const ManifestResponse = Schema.Struct({
 );
 
 export const RestoreRequest = Schema.Struct({ credentials: Schema.NonEmptyString });
+
+/** The GitHub App manifest submitted by the setup form. */
+export const AppManifest = Schema.Struct({
+  name: ManifestRequest.fields.name,
+  url: Schema.String,
+  public: Schema.Literal(false),
+  redirect_url: Schema.String,
+  callback_urls: Schema.Array(Schema.String),
+  setup_url: Schema.String,
+  hook_attributes: Schema.Struct({ active: Schema.Literal(true), url: Schema.String }),
+  default_permissions: Schema.Record(Schema.String, Schema.Literals(["read", "write"])),
+  default_events: Schema.Array(Schema.String),
+});

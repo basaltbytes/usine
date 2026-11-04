@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem } from "@effect/platform-node";
 // The Node process boundary uses native process handles and synchronous subprocess operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -21,7 +22,6 @@ import {
   Option,
   Predicate,
   Redacted,
-  Schema,
   FileSystem,
   Config,
 } from "effect";
@@ -44,10 +44,6 @@ import {
   secret,
   settingsLayer,
 } from "../fixtures.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /*
  * Checks whether Claude Code works when the Worker has only a placeholder subscription token
@@ -114,10 +110,10 @@ const SSE_ANSWER = [
   ],
   ["message_stop", { type: "message_stop" }],
 ]
-  .map(([event, data]) => `event: ${String(event)}\ndata: ${stringifyJson(data)}\n\n`)
+  .map(([event, data]) => `event: ${String(event)}\ndata: ${jsonKey(data)}\n\n`)
   .join("");
 
-const JSON_ANSWER = stringifyJson({
+const JSON_ANSWER = jsonKey({
   id: "msg_stub",
   type: "message",
   role: "assistant",
@@ -145,7 +141,7 @@ const anthropicStub = Effect.acquireRelease(
         if (!(request.url ?? "").startsWith("/v1/messages")) {
           response.writeHead(404, { "content-type": "application/json" });
           response.end(
-            stringifyJson({
+            jsonKey({
               type: "error",
               error: { type: "not_found_error", message: "stub" },
             }),
@@ -250,7 +246,7 @@ const egressAttempts: Array<string> = [];
 const recordEgress = Logger.layer(
   [
     Logger.make(({ message }) => {
-      const line = stringifyJson(message);
+      const line = jsonKey(message);
       if (line.includes("Gateway refused a request") || line.includes("Opened an egress tunnel"))
         egressAttempts.push(line);
     }),

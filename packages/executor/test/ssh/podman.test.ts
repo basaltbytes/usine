@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import type { ContainerOutOfMemoryKills } from "@usine/core/attempt";
@@ -23,10 +24,6 @@ import {
   WORKER,
 } from "./support.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 const CONTAINER = "usine-remote-run_execute_1";
 const info = () => ({
   version: { Version: "5.4.2" },
@@ -42,7 +39,7 @@ const info = () => ({
 });
 const podmanMachine = () => {
   const machine = fakeMachine();
-  machine.state.podmanInfo = stringifyJson(info());
+  machine.state.podmanInfo = jsonKey(info());
   return machine;
 };
 const sink = {
@@ -168,7 +165,7 @@ describe("rootless Podman", () => {
     const machine = podmanMachine();
     const value = info();
     change(value);
-    machine.state.podmanInfo = stringifyJson(value);
+    machine.state.podmanInfo = jsonKey(value);
     return Effect.gen(function* () {
       const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
       assert.strictEqual(error._tag, "WorkerCapabilityError");

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { GitHubAppSecretsFromJson } from "@usine/github/local-secrets";
 import { ConfigProvider, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
@@ -5,9 +6,11 @@ import { assert, it } from "@effect/vitest";
 import { GitHubSignIn, githubSignInLayer } from "../../src/auth/github.ts";
 import { alice } from "./fixture.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
+// The fake HTTP client synchronously asserts the token revocation body.
 // @effect-diagnostics-next-line schemaSync:off
-const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const parseJson = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ access_token: Schema.String })),
+);
 
 for (const flow of ["web", "device"] as const)
   for (const identityStatus of [200, 503])
@@ -83,12 +86,12 @@ it.each(["none", "id", "secret", "both"] as const)(
   (override) =>
     Effect.runPromise(
       Effect.gen(function* () {
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json1 = jsonKey({
           app_id: 123,
           private_key: "-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----",
           client_id: "Iv1.file",
           client_secret: "file-secret",
-        }).pipe(Effect.orDie);
+        });
         const fromFile = yield* Schema.decodeEffect(GitHubAppSecretsFromJson)(json1);
         const env: Record<string, string> = {};
         if (override === "id" || override === "both") env.USINE_GITHUB_CLIENT_ID = "Iv1.env";

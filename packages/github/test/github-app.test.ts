@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // This synchronous Node crypto boundary requires native key and cipher operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
@@ -10,13 +11,13 @@ import { AppCredentials, AppId, GitHubCredentials, PrivateKey } from "../src/cre
 import { CoveredProject, REQUIRED_REPOSITORY_PERMISSIONS } from "../src/access.ts";
 import { InstallationId, RepositoryId } from "../src/installation.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
+// The fake HTTP client synchronously asserts the webhook configuration body.
 // @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const parseJson = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ url: Schema.String, content_type: Schema.Literal("json") }),
+  ),
+);
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const privatePem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
@@ -54,7 +55,7 @@ const jsonResponse = (
 ) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(stringifyJson(body), {
+    new Response(jsonKey(body), {
       status,
       headers: { "content-type": "application/json" },
     }),
@@ -481,14 +482,14 @@ describe("GitHubApp", () => {
   it.live("keeps GitHub's reason for a refused mint and tells a refusal from an outage", () => {
     const answers: Array<Response> = [
       new Response(
-        stringifyJson({
+        jsonKey({
           message: "The permissions requested are not granted to this installation.",
         }),
         { status: 422, headers: { "content-type": "application/json" } },
       ),
       new Response("upstream timeout", { status: 503 }),
       new Response(
-        stringifyJson({
+        jsonKey({
           message: "API rate limit exceeded",
         }),
         {
@@ -611,7 +612,7 @@ describe("GitHubApp webhook deliveries", () => {
           first ||
             request.url === "https://api.github.com/app/hook/deliveries?per_page=100&cursor=older",
         );
-        const decodedValue5 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        const decodedValue5 = jsonKey(
           first
             ? [
                 { id: 12, event: "ping", repository_id: null },

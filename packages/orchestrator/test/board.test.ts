@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { boardRunSummary, boardTaskRuns } from "../src/operator/operator.ts";
 import { ProjectView } from "../src/operator/overview.ts";
 import { groupProjectViews } from "../src/operator/projects.ts";
@@ -848,11 +849,7 @@ it.effect("matches a project's label lane by name in both repositories", () =>
     });
     const views: Array<ProjectView> = [];
     for (const managed of boardRepositories(config)) {
-      const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-        "github",
-        managed.name,
-        item.number,
-      ]);
+      const decodedValue1 = jsonKey(["github", managed.name, item.number]);
       const projection = ItemProjection.make({
         ...item,
         repository: managed.name,

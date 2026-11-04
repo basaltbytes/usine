@@ -10,7 +10,13 @@ import {
   Redacted,
   Schema,
 } from "effect";
-import { AppCredentials, AppId, GitHubCredentials, RedactedPrivateKey } from "./credentials.ts";
+import {
+  AppCredentials,
+  AppId,
+  GitHubCredentials,
+  PrivateKey,
+  RedactedPrivateKey,
+} from "./credentials.ts";
 
 /** The credential file path relative to the instance directory; the file must have mode 0600 (ADR 0011). */
 export const GITHUB_APP_SECRETS_PATH = ".usine/github-app.json";
@@ -64,19 +70,28 @@ export class GitHubAppSecrets extends Schema.Class<
   webhookSecret: Schema.OptionFromOptionalKey(Schema.RedactedFromValue(Schema.NonEmptyString)),
 }) {}
 
+const secretsFileKeys = {
+  appId: "app_id",
+  privateKey: "private_key",
+  clientId: "client_id",
+  clientSecret: "client_secret",
+  webhookSecret: "webhook_secret",
+} as const;
+
 /** Decodes the runtime file; legacy files can omit user authorization and webhook fields. */
 export const GitHubAppSecretsFromJson = Schema.fromJsonString(
-  GitHubAppSecrets.pipe(
-    Schema.encodeKeys({
-      appId: "app_id",
-      privateKey: "private_key",
-      clientId: "client_id",
-      clientSecret: "client_secret",
-      webhookSecret: "webhook_secret",
-    }),
-  ),
+  GitHubAppSecrets.pipe(Schema.encodeKeys(secretsFileKeys)),
 );
 const decodeCredentialsFile = Schema.decodeUnknownEffect(GitHubAppSecretsFromJson);
+
+// Only file persistence unwraps secrets; encoding GitHubAppSecrets still rejects private keys.
+const SecretsFileContents = Schema.Struct({
+  ...GitHubAppSecrets.fields,
+  privateKey: PrivateKey,
+  clientSecret: Schema.OptionFromOptionalKey(Schema.NonEmptyString),
+  webhookSecret: Schema.OptionFromOptionalKey(Schema.NonEmptyString),
+}).pipe(Schema.encodeKeys(secretsFileKeys));
+const encodeSecretsFile = Schema.encodeEffect(Schema.fromJsonString(SecretsFileContents));
 
 const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function* (
   root: InstanceDirectory,
@@ -179,12 +194,12 @@ export const writeLocalSecrets = Effect.fn("GitHubCredentials.writeSecrets")(fun
         prefix: ".github-app-",
       });
       const source = path.join(temporary, "secrets.json");
-      const serialized = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
-        app_id: secrets.appId,
-        private_key: Redacted.value(secrets.privateKey),
-        client_id: Option.getOrUndefined(secrets.clientId),
-        client_secret: Option.getOrUndefined(Option.map(secrets.clientSecret, Redacted.value)),
-        webhook_secret: Option.getOrUndefined(Option.map(secrets.webhookSecret, Redacted.value)),
+      const serialized = yield* encodeSecretsFile({
+        appId: secrets.appId,
+        privateKey: Redacted.value(secrets.privateKey),
+        clientId: secrets.clientId,
+        clientSecret: Option.map(secrets.clientSecret, Redacted.value),
+        webhookSecret: Option.map(secrets.webhookSecret, Redacted.value),
       }).pipe(Effect.orDie);
       yield* fs.writeFileString(source, serialized, { mode: 0o600, flag: "wx" });
       yield* fs.rename(source, target);

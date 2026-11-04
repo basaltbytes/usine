@@ -1,20 +1,8 @@
 import { Clock, Effect, Redacted, Schema } from "effect";
 import { AppAuthenticationError, type AppCredentials } from "./credentials.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
-interface JwtHeader {
-  readonly alg: "RS256";
-  readonly typ: "JWT";
-}
-
-interface JwtClaims {
-  readonly iat: number;
-  readonly exp: number;
-  readonly iss: number;
-}
+const JwtHeader = Schema.Struct({ alg: Schema.Literal("RS256"), typ: Schema.Literal("JWT") });
+const JwtClaims = Schema.Struct({ iat: Schema.Int, exp: Schema.Int, iss: Schema.Int });
 
 const encoder = new TextEncoder();
 const RSA_ALGORITHM_IDENTIFIER = new Uint8Array([
@@ -62,9 +50,6 @@ const base64Url = (value: Uint8Array): string => {
   return btoa(binary).replace(/=/gu, "").replace(/\+/gu, "-").replace(/\//gu, "_");
 };
 
-const encodeJson = (value: JwtHeader | JwtClaims): string =>
-  base64Url(encoder.encode(stringifyJson(value)));
-
 const toArrayBuffer = (value: Uint8Array): ArrayBuffer => {
   const buffer = new ArrayBuffer(value.byteLength);
   new Uint8Array(buffer).set(value);
@@ -96,11 +81,16 @@ export const appJwtSigner = Effect.fn("AppJwt.import")(function* (credentials: A
 
   const sign: AppJwtSigner = Effect.fn("AppJwt.sign")(function* () {
     const now = Math.floor((yield* Clock.currentTimeMillis) / 1_000);
-    const unsigned = `${encodeJson({ alg: "RS256", typ: "JWT" })}.${encodeJson({
+    const header = yield* Schema.encodeEffect(Schema.fromJsonString(JwtHeader))({
+      alg: "RS256",
+      typ: "JWT",
+    }).pipe(Effect.orDie);
+    const claims = yield* Schema.encodeEffect(Schema.fromJsonString(JwtClaims))({
       iat: now - 60,
       exp: now + 9 * 60,
       iss: credentials.appId,
-    })}`;
+    }).pipe(Effect.orDie);
+    const unsigned = `${base64Url(encoder.encode(header))}.${base64Url(encoder.encode(claims))}`;
     const signature = yield* Effect.promise(() =>
       crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, toArrayBuffer(encoder.encode(unsigned))),
     );

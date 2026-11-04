@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { testAppLayer } from "./support/github-app.ts";
@@ -64,10 +65,6 @@ import {
   inertLabelReconcilerLayer,
   unmovedBaseRefHead,
 } from "./support/polling.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const developer = AgentFile.make({
@@ -199,7 +196,7 @@ const pullRequestPayload = (item: GitHubItem): PullRequestPayload => ({
 });
 
 const contentHash = (item: GitHubItem) =>
-  ContentHash.make(createHash("sha256").update(stringifyJson(item)).digest("hex"));
+  ContentHash.make(createHash("sha256").update(jsonKey(item)).digest("hex"));
 
 /** Serves every Item in `items` as changed on each poll, with its current state. */
 const fakeGitHub = (items: Map<number, GitHubItem>): GitHubPolling["Service"] => ({

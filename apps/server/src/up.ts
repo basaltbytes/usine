@@ -25,10 +25,6 @@ import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { configurationLayer, initializeConfiguration } from "./configuration/runtime.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
-// Synchronous Node path callbacks retain the host platform’s path semantics.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { InstanceDirectory, type InstanceId } from "@usine/core/instance";
 import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
@@ -55,6 +51,7 @@ import {
   FileSystem,
   Layer,
   Option,
+  Path,
   References,
   Result,
 } from "effect";
@@ -189,7 +186,9 @@ const start = Effect.fnUntraced(function* (
     ).pipe(Layer.provide(NodeServices.layer), Layer.provide(FetchHttpClient.layer)),
   );
   const setup = Context.get(setupContext, Setup);
-  const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "web");
+  const path = yield* Path.Path;
+  const modulePath = yield* path.fromFileUrl(new URL(import.meta.url)).pipe(Effect.orDie);
+  const webRoot = path.resolve(path.dirname(modulePath), "web");
   const url = `http://127.0.0.1:${port}`;
 
   if (Result.isFailure(credentials)) {

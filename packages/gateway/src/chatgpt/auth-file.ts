@@ -188,9 +188,9 @@ export const writeAuthFile = Effect.fn("ChatGptAuthFile.write")(function* (
   };
   const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
   const temporary = besides(path, uuid, "tmp");
-  const serialized = yield* Schema.encodeEffect(
-    Schema.fromJsonString(Schema.Unknown, { space: 2 }),
-  )(next).pipe(Effect.orDie);
+  const serialized = yield* Schema.encodeEffect(Schema.fromJsonString(JsonObject, { space: 2 }))(
+    next,
+  ).pipe(Effect.orDie);
   yield* fs.writeFileString(temporary, `${serialized}\n`, { mode: 0o600 }).pipe(
     Effect.andThen(fs.rename(temporary, path)),
     Effect.onExit((exit) =>

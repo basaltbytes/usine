@@ -75,9 +75,9 @@ export class AttentionAcknowledgements extends Context.Service<
           current: ReadonlyArray<AttentionKey>,
         ) {
           yield* Effect.annotateCurrentSpan({ currentEntries: current.length });
-          const currentKeys = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            current,
-          ).pipe(Effect.orDie);
+          const currentKeys = yield* Schema.encodeEffect(
+            Schema.fromJsonString(Schema.Array(AttentionKey)),
+          )(current).pipe(Effect.orDie);
           const removed = yield* database
             .delete(attentionAcknowledgements)
             .where(sql`not exists (

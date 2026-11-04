@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { ChangeBus } from "@usine/core/changes";
 import { CiMonitor } from "../ci.ts";
 import type { DeclaredLabel } from "@usine/config/label";
@@ -72,10 +73,6 @@ import { ItemHints, type ItemHint } from "./hints.ts";
 import { checkOpenIssues, NO_OPEN_ISSUE_CHECK, OPEN_ISSUE_CHECK_INTERVAL } from "./open-issues.ts";
 import { OpenPullRequest, openPullRequest, openPullRequestRefresh } from "./open-pull-requests.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 /** The number of repositories polled in parallel, kept low for GitHub's per-token limits. */
 const REPOSITORY_CONCURRENCY = 4;
 
@@ -128,7 +125,7 @@ const cursorKey = (repository: ManagedRepo): CursorKey =>
   CursorKey.make(`github-poll:${canonicalRepositoryName(repository.name)}`);
 
 const watchKey = ({ loop }: ResolvedLoop): WatchKey =>
-  WatchKey.make(stringifyJson([loop.name, loop.trigger.on, loop.trigger.if]));
+  WatchKey.make(jsonKey([loop.name, loop.trigger.on, loop.trigger.if]));
 
 const watchedRepositories = (
   instance: LoadedInstance,
@@ -653,7 +650,7 @@ export class PollingTriggers extends Context.Service<
             watched.flatMap(({ repository }) => {
               const audience = { _tag: "Repository", repository: repository.name } as const;
               const findings = (value: PollCycle | undefined) =>
-                stringifyJson([
+                jsonKey([
                   (value?.failures ?? []).filter(
                     (failure) =>
                       canonicalRepositoryName(failure.repository) ===

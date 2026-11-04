@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { DatabaseSync } from "node:sqlite";
@@ -165,10 +166,7 @@ describe("Item cycle budgets", () => {
           const legacy = (round: number) =>
             Submission.make({ ...submission("review", round), cycleLimit: Option.none() });
           const third = legacy(3);
-          const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-            "github",
-            "basaltbytes/usine",
-          ]).pipe(Effect.orDie);
+          const json1 = jsonKey(["github", "basaltbytes/usine"]);
           const scheduled = Submission.make({
             ...submission("schedule", 1, json1),
             cycleLimit: Option.none(),
@@ -411,7 +409,7 @@ describe("Item cycle budgets", () => {
         assert.strictEqual(closures[0]?.["item_key"], "pr-72");
         assert.strictEqual(closures[0]?.["reason"], "ItemClosed");
         const decodedValue8 = yield* Schema.encodeEffect(CycleBudgetAsk)(ask);
-        const json2 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        const json2 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(
           String(closures[0]?.["ask_json"]),
         ).pipe(Effect.orDie);
         assert.deepStrictEqual(json2, decodedValue8);
@@ -467,7 +465,7 @@ describe("Item cycle budgets", () => {
         assert.strictEqual(closures[0]?.["ask_id"], first.id);
         assert.strictEqual(closures[0]?.["reason"], "ItemClosed");
         const decodedValue9 = yield* Schema.encodeEffect(CycleBudgetAsk)(second);
-        const json3 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        const json3 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(
           String(closures[0]?.["ask_json"]),
         ).pipe(Effect.orDie);
         assert.deepStrictEqual(json3, decodedValue9);

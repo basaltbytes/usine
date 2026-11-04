@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { webRequest } from "../../../../tooling/test/http.mts";
 import { idleCiMonitor } from "../support/ci.ts";
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
@@ -82,8 +83,7 @@ const requestJson = Effect.fn("agentIntegration.requestJson")(function* <A>(opti
     },
   };
   if (options.method !== undefined) init.method = options.method;
-  if (options.body !== undefined)
-    init.body = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(options.body);
+  if (options.body !== undefined) init.body = jsonKey(options.body);
   const response = yield* webRequest(options.url, init).pipe(
     Effect.mapError((cause) => RequestFailed.make({ cause })),
   );
@@ -159,7 +159,7 @@ const makeInstance = (options: {
       trigger: IssueTrigger.make({
         on: "issue",
         if: Source.make(
-          `item.number == ${String(options.issueNumber)} && item.comments.nodes.exists(comment, comment.body == ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(options.kick)})`,
+          `item.number == ${String(options.issueNumber)} && item.comments.nodes.exists(comment, comment.body == ${jsonKey(options.kick)})`,
         ),
       }),
       selector: Option.some(

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
@@ -50,10 +51,6 @@ import {
   unmovedBaseRefHead,
 } from "./support/polling.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 const repository = RepositoryName.make("basaltbytes/usine");
 const instance = Effect.gen(function* () {
   const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
@@ -92,7 +89,7 @@ const issuePayload = (number: number, labels: ReadonlyArray<string> = []): Issue
 
 const storedIssue = (number: number) =>
   ItemProjection.make({
-    itemKey: ItemKey.make(stringifyJson(["github", repository, number])),
+    itemKey: ItemKey.make(jsonKey(["github", repository, number])),
     repository,
     source: ItemProjectionSource.make("issue"),
     number: ItemNumber.make(number),

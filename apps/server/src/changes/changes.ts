@@ -7,10 +7,6 @@ import { ChangeNotice } from "@usine/orchestrator/operator/http";
 import { Context, Effect, Layer, Option, Ref, Schedule, Stream, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 const makeChanges = Effect.gen(function* () {
   const bus = yield* ChangeBus;
   const instances = yield* Effect.serviceOption(CurrentInstance);
@@ -46,7 +42,10 @@ const makeChanges = Effect.gen(function* () {
           suppliedCursor < oldest - 1 ||
           suppliedCursor > revision;
         const frame = (notice: ChangeNotice) =>
-          `id: ${notice.revision}\nevent: change\ndata: ${stringifyJson(notice)}\n\n`;
+          Schema.encodeEffect(Schema.fromJsonString(ChangeNotice))(notice).pipe(
+            Effect.orDie,
+            Effect.map((data) => `id: ${notice.revision}\nevent: change\ndata: ${data}\n\n`),
+          );
         const send = Effect.fn("Http.changes.send")(function* (notice: (typeof history)[number]) {
           const previous = yield* Ref.get(cursor);
           if (notice.revision <= previous) return "";
@@ -61,7 +60,9 @@ const makeChanges = Effect.gen(function* () {
             reset: gap,
             targets: changes.length,
           });
-          return frame(ChangeNotice.make({ revision: notice.revision, reset: gap, changes }));
+          return yield* frame(
+            ChangeNotice.make({ revision: notice.revision, reset: gap, changes }),
+          );
         });
         const initial = reset
           ? Effect.gen(function* () {
@@ -72,7 +73,8 @@ const makeChanges = Effect.gen(function* () {
                 resume: supplied ?? "initial",
               });
               return (
-                frame(ChangeNotice.make({ revision, reset: true, changes: [] })) + ": heartbeat\n\n"
+                (yield* frame(ChangeNotice.make({ revision, reset: true, changes: [] }))) +
+                ": heartbeat\n\n"
               );
             })
           : Effect.forEach(

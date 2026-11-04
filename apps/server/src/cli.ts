@@ -4,10 +4,9 @@ import { UpgradeChannel } from "@usine/core/upgrade";
 import { ConfigCommand, parseConfigCommand } from "./configuration/command.ts";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-// Synchronous Node path callbacks retain the host platform’s path semantics.
+// volatileRoots and volatileRoot synchronously normalize paths for CLI validation.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import { RunId } from "@usine/core/run";
 import {
   type Brand,
@@ -17,6 +16,7 @@ import {
   Effect,
   FileSystem,
   Option,
+  Path,
   Schema,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -552,7 +552,10 @@ const PackageMetadataFromJson = Schema.fromJsonString(
 
 export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  const packagePath = fileURLToPath(new URL("../package.json", import.meta.url));
+  const path = yield* Path.Path;
+  const packagePath = yield* path
+    .fromFileUrl(new URL("../package.json", import.meta.url))
+    .pipe(Effect.mapError((cause) => CliVersionError.make({ cause })));
   const source = yield* fileSystem
     .readFileString(packagePath)
     .pipe(Effect.mapError((cause) => CliVersionError.make({ cause })));

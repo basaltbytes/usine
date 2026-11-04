@@ -1,11 +1,7 @@
+import { Schema } from "effect";
 import type { Statement, SqlClient } from "effect/sql";
 
-import { Schema } from "effect";
 import { sql, type SQLWrapper } from "drizzle-orm";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
 
@@ -20,8 +16,12 @@ export const jsonEach = (value: SQLWrapper, path?: string) =>
     ? sql`json_each(${value})`
     : sql`json_each(${value}, ${sql.raw(quoted(path))})`;
 
-export const jsonArrayValues = (values: ReadonlyArray<unknown>) =>
-  sql`select value from ${jsonEach(sql`${stringifyJson(values)}`)}`;
+// jsonArrayValues synchronously constructs a Drizzle SQL fragment for identifier membership.
+// @effect-diagnostics-next-line schemaSync:off
+const encodeIdentifiers = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)));
+
+export const jsonArrayValues = (values: ReadonlyArray<string>) =>
+  sql`select value from ${jsonEach(sql`${encodeIdentifiers(values)}`)}`;
 
 export const jsonObject = (fields: ReadonlyArray<readonly [string, SQLWrapper]>) =>
   sql`json_object(${sql.join(

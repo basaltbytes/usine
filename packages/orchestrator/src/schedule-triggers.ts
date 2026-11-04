@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { ChangeBus } from "@usine/core/changes";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import type { ConfigFileError } from "@usine/config/file";
@@ -46,10 +47,6 @@ import {
   submissionLogFields,
   triggerSubmission,
 } from "./trigger-submission.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** The maximum concurrent submissions, kept small to avoid piling up SQLite write transactions. */
 const FANOUT_CONCURRENCY = 4;
@@ -214,15 +211,11 @@ const earliest = (values: ReadonlyArray<DateTime.Utc>): Option.Option<DateTime.U
 };
 
 const itemKey = (repository: ManagedRepo): ItemKey =>
-  ItemKey.make(stringifyJson(["github", canonicalRepositoryName(repository.name)]));
+  ItemKey.make(jsonKey(["github", canonicalRepositoryName(repository.name)]));
 
 const eventKey = (loop: LoopFile, repository: ManagedRepo, scheduledAt: DateTime.Utc): DedupKey =>
   DedupKey.make(
-    stringifyJson([
-      loop.name,
-      canonicalRepositoryName(repository.name),
-      DateTime.formatIso(scheduledAt),
-    ]),
+    jsonKey([loop.name, canonicalRepositoryName(repository.name), DateTime.formatIso(scheduledAt)]),
   );
 
 const tickPayload = (due: DueTick): Schema.JsonObject => ({
@@ -526,13 +519,7 @@ export class ScheduleTriggers extends Context.Service<
         });
         const previous = yield* Ref.getAndSet(latestCycle, Option.some(cycle));
         const failuresChanged =
-          Option.isNone(previous) ||
-          (yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            previous.value.failures,
-          ).pipe(Effect.orDie)) !==
-            (yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(cycle.failures).pipe(
-              Effect.orDie,
-            ));
+          Option.isNone(previous) || jsonKey(previous.value.failures) !== jsonKey(cycle.failures);
         if (failuresChanged) {
           const affected = [
             ...new Set(

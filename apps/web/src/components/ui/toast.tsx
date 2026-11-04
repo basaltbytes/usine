@@ -157,8 +157,7 @@ function ToastIcon({ type }: { type: string | undefined }) {
     icon = <SpinnerIcon className="animate-spin" aria-hidden="true" />;
   }
 
-  const hasIcon = Boolean(icon);
-  if (!hasIcon) {
+  if (icon === null) {
     return null;
   }
 

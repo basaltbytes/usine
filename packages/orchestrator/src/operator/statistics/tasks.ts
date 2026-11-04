@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import type { ItemNumber } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
@@ -5,7 +6,7 @@ import type { RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import type { RunSummary } from "@usine/engine/run-reader";
-import { Array as EffectArray, DateTime, Option, Schema } from "effect";
+import { Array as EffectArray, DateTime, Option } from "effect";
 import type { RunUsageView } from "../usage.ts";
 import { attemptMillis, operatorRetry } from "./runs.ts";
 import {
@@ -33,10 +34,6 @@ import {
   utcDay,
   windowStart,
 } from "./window.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** A task whose pull request merged, with every Run on its Items. */
 export interface MergedTask {
@@ -117,7 +114,7 @@ const firstTimeRight = (runs: ReadonlyArray<RunSummary>): boolean =>
   Object.values(
     EffectArray.groupBy(
       runs.filter(({ run }) => run.state._tag === "Succeeded"),
-      ({ itemKey, run }) => stringifyJson([itemKey, run.loop]),
+      ({ itemKey, run }) => jsonKey([itemKey, run.loop]),
     ),
   ).every((members) => members.length === 1);
 

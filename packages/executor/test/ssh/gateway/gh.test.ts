@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem } from "@effect/platform-node";
 // The Node process boundary uses native process handles and synchronous subprocess operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -11,12 +12,8 @@ import { join, dirname, basename } from "node:path";
 import { promisify } from "node:util";
 import { assert, it } from "@effect/vitest";
 import { GatewayDomain } from "@usine/core/worker";
-import { Redacted, Effect, Schema, Config, Option, FileSystem } from "effect";
+import { Redacted, Effect, Config, Option, FileSystem } from "effect";
 import { gatewayEnvironment, ghGatewayConfig } from "../../../src/ssh/gateway/environment.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const run = promisify(execFile);
 const ghOnPath = spawnSync("gh", ["--version"]).error === undefined;
@@ -48,7 +45,7 @@ it.live(
         if (request.headers.authorization !== `token ${caller}`) {
           response.writeHead(401);
           response.end(
-            stringifyJson({
+            jsonKey({
               message: "missing-caller-token",
             }),
           );
@@ -59,12 +56,12 @@ it.live(
             "Link",
             '<https://api.github.com/repos/owner/repo/issues?per_page=1&page=2>; rel="next"',
           );
-          response.end(stringifyJson([{ number: 1 }]));
+          response.end(jsonKey([{ number: 1 }]));
         } else if (request.url?.includes("page=2") === true) {
-          response.end(stringifyJson([{ number: 2 }]));
+          response.end(jsonKey([{ number: 2 }]));
         } else {
           response.end(
-            stringifyJson({
+            jsonKey({
               data: { repository: { issue: { title: "issues" }, pullRequest: { title: "pull" } } },
             }),
           );

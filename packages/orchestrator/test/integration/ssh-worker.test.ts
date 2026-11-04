@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -310,9 +311,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           const finished = yield* waitForTerminal(engine, accepted.runId);
           const attempt = finished.attempts[0];
           assert(attempt !== undefined);
-          const decodedValue2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            Option.getOrNull(attempt.outcome),
-          );
+          const decodedValue2 = jsonKey(Option.getOrNull(attempt.outcome));
           assert.strictEqual(finished.run.state._tag, "Succeeded", decodedValue2);
           assert.strictEqual(attempt.worker, WORKER);
           assert.strictEqual(observed.ghRepository, repository);
@@ -696,9 +695,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           const finished = yield* waitForTerminal(engine, accepted.runId);
           const attempt = finished.attempts[0];
           assert(attempt !== undefined);
-          const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            Option.getOrNull(attempt.outcome),
-          );
+          const decodedValue1 = jsonKey(Option.getOrNull(attempt.outcome));
           assert.strictEqual(finished.run.state._tag, "Succeeded", decodedValue1);
           assert.strictEqual(observed.callerTokenFormat, "ugw1", "the child has a caller token");
           assert.match(observed.advertisedHead ?? "", /^[0-9a-f]{40}\tHEAD$/u);

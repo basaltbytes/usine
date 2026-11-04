@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { githubSignature } from "@usine/core/agent";
 import { Event } from "@usine/core/event";
@@ -18,7 +19,7 @@ import {
   worksFor,
 } from "@usine/durable/testing";
 import { ReconcileInterval, RunEngine, Submission, UnconfirmedStops } from "@usine/engine/engine";
-import { DateTime, Effect, FileSystem, Layer, Option, Path, Ref, Schedule, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Path, Ref, Schedule } from "effect";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { writeFileSync } from "node:fs";
@@ -187,14 +188,14 @@ describe("local worker checkout after an unconfirmed stop", () => {
           Effect.gen(function* () {
             if (!(yield* Ref.getAndSet(first, false))) return yield* completes(context);
             const currentNow = yield* DateTime.now;
-            const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+            const json1 = jsonKey({
               id: 81,
               html_url: reviewUrl,
               body: `Review completed.\n\n${githubSignature(context.request.spec.agent.name)}`,
               user: { login: "usine-test[bot]" },
               state: "COMMENTED",
               submitted_at: DateTime.formatIso(currentNow),
-            }).pipe(Effect.orDie);
+            });
             yield* fs
               .writeFileString(join(context.request.cwd, ".test-review.json"), json1)
               .pipe(Effect.orDie);

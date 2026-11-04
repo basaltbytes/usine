@@ -32,7 +32,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import type { AuthServices } from "../auth/http.ts";
 import { authFailure, type AuthError, type TokenHash } from "../auth/model.ts";
 import { randomSecret, secretHash } from "../auth/crypto.ts";
-import { ManifestRequest, ManifestResponse } from "./model.ts";
+import { AppManifest, ManifestRequest, ManifestResponse } from "./model.ts";
 
 const makeSetup = Effect.fn("Setup.make")(function* (
   directory: InstanceDirectory,
@@ -184,7 +184,7 @@ const makeSetup = Effect.fn("Setup.make")(function* (
             onSome: (organization) => `organizations/${encodeURIComponent(organization)}/settings`,
           });
           yield* Effect.logInfo("GitHub App manifest prepared");
-          const manifest = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          const manifest = yield* Schema.encodeEffect(Schema.fromJsonString(AppManifest))({
             name: request.name,
             url: origin,
             public: false,

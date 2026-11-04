@@ -24,6 +24,30 @@ import { queriesFor } from "../../../src/store/queries.ts";
 import { lifecycleSubmission } from "../support.ts";
 import { seedReadFixture } from "./fixture.ts";
 
+const ReadPlanReport = Schema.Struct({
+  bytes: Schema.Finite,
+  migrationBytes: Schema.Finite,
+  migrationMillis: Schema.Finite,
+  readerTimes: Schema.Array(Schema.Struct({ reader: Schema.String, millis: Schema.Finite })),
+  queries: Schema.Array(
+    Schema.Struct({
+      reader: Schema.String,
+      sql: Schema.String,
+      params: Schema.Array(Schema.Unknown),
+      plan: Schema.Array(Schema.String),
+      rows: Schema.Finite,
+      medianMillis: Schema.optional(Schema.Finite),
+    }),
+  ),
+  transcriptPlans: Schema.Array(
+    Schema.Struct({
+      statistics: Schema.String,
+      reader: Schema.String,
+      plan: Schema.Array(Schema.String),
+    }),
+  ),
+});
+
 it.live(
   "hot runtime reads search indexes and transcript projections on a history-sized store",
   () =>
@@ -210,7 +234,7 @@ it.live(
       const size = yield* fs.stat(`${directory}/.usine/runtime.sqlite`);
       if (Option.isSome(reportPath)) {
         const json1 = yield* Schema.encodeEffect(
-          Schema.fromJsonString(Schema.Unknown, { space: 2 }),
+          Schema.fromJsonString(ReadPlanReport, { space: 2 }),
         )({
           bytes: Number(size.size),
           migrationBytes,

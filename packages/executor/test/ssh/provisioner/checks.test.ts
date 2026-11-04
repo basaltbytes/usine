@@ -29,7 +29,7 @@ import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fix
 import { fakeProviders } from "./fake-providers.ts";
 import { hetznerSettings } from "./support.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
+// Array.map synchronously decodes captured log entries for assertions.
 // @effect-diagnostics-next-line schemaSync:off
 const parseJson = Schema.decodeUnknownSync(CapturedLog);
 

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { AttemptContext } from "@usine/core/attempt";
 import { type CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { DedupKey, Event, EventId } from "@usine/core/event";
@@ -7,10 +8,6 @@ import { StepName } from "@usine/core/step";
 import { type Brand, type DateTime, Schema } from "effect";
 import type { RunSnapshot } from "../run-reader/model.ts";
 import { Claimed, CycleBlocked, Submission } from "./submission.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /**
  * An operator request to run a succeeded or canceled Run again with the Loop's current settings
@@ -66,7 +63,7 @@ export const runAgainSubmission = (
   identity: RunAgainIdentity,
 ): Submission => {
   const dedupKey = DedupKey.make(
-    stringifyJson(["operator-run-again", identity.reopening, identity.trigger]),
+    jsonKey(["operator-run-again", identity.reopening, identity.trigger]),
   );
   return Submission.make({
     event: Event.make({

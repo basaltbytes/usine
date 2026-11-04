@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { Deferred, DateTime, Duration, Effect, Option, Redacted, Schema, Clock } from "effect";
 import { assert, describe, expect, it } from "@effect/vitest";
 
@@ -19,10 +20,6 @@ import {
   text,
 } from "./support.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
 /** Returns the time usine issued credentials, `minutes` after the first. */
 const issuedAt = (minutes: number) =>
   DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(ISSUED_AT), { minutes }));
@@ -33,12 +30,12 @@ const encodeCredentials = (token: string, issued = issuedAt(0)) => ({
   providers: [{ provider: "anthropic", credential: { _tag: "ApiKey", key: "sk-ant-key" } }],
 });
 
-const renewedBody = stringifyJson(encodeCredentials("ghs_second", issuedAt(1)));
+const renewedBody = jsonKey(encodeCredentials("ghs_second", issuedAt(1)));
 
-const revocation = (issued: string) => stringifyJson({ issuedAt: issued, providers: [] });
+const revocation = (issued: string) => jsonKey({ issuedAt: issued, providers: [] });
 
 const createBody = (attempt: string = ATTEMPT, issued = issuedAt(0)) =>
-  stringifyJson({
+  jsonKey({
     owner: OWNER,
     attempt,
     image: IMAGE,
@@ -213,9 +210,7 @@ describe("sandbox routes", () => {
           Effect.andThen(Deferred.await(registered)),
         );
       };
-      const decodedValue16 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        encodeCredentials("ghs_second", issuedAt(1)),
-      );
+      const decodedValue16 = jsonKey(encodeCredentials("ghs_second", issuedAt(1)));
       const renewal = call("PUT", `/v1/sandboxes/${NAME}/credentials`, decodedValue16);
       yield* Deferred.await(reached);
       // The executor stopped waiting for the renewal and revokes the credentials.

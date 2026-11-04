@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { AttemptConnections } from "../../src/executor.ts";
 import type { CloudflareWorkerAddress } from "../../src/cloudflare/model.ts";
 import type { AttemptId } from "@usine/core/attempt";
@@ -257,17 +258,11 @@ describe("cloudflare Worker", () => {
         );
         const currentGatewayCredential = yield* given.gatewayCredential;
         assert.isTrue(Option.contains(currentGatewayCredential, "api-key"));
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          given.environment,
-        ).pipe(Effect.orDie);
+        const json1 = jsonKey(given.environment);
         assert.notInclude(json1, TOKEN_PREFIX);
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          given.environment,
-        ).pipe(Effect.orDie);
+        const json2 = jsonKey(given.environment);
         assert.notInclude(json2, "sk-ant-test-key");
-        const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-          ...worker.state.sandboxes.values(),
-        ]).pipe(Effect.orDie);
+        const json3 = jsonKey([...worker.state.sandboxes.values()]);
         assert.notInclude(json3, "sk-ant");
       }).pipe(Effect.scoped),
   );

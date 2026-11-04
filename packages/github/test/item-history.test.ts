@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { ItemNumber } from "@usine/core/item";
 import { BotLogin } from "@usine/core/worker";
@@ -7,10 +8,6 @@ import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } fr
 import { GitHubApp } from "../src/github-app.ts";
 import { InstallationToken, InstallationWide } from "../src/installation.ts";
 import { GitHubItemHistory } from "../src/item-history.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const appLayer = Layer.succeed(GitHubApp)({
@@ -56,7 +53,7 @@ const variablesOf = (request: HttpClientRequest.HttpClientRequest) =>
 const respond = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(stringifyJson(body), {
+    new Response(jsonKey(body), {
       headers: { "content-type": "application/json" },
     }),
   );

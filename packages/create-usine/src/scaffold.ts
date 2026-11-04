@@ -1,11 +1,18 @@
 import { InstanceDirectory } from "@usine/core/instance";
-import type { ReleaseVersion } from "@usine/core/upgrade";
+import { ReleaseVersion } from "@usine/core/upgrade";
 import { type Brand, Config, Effect, FileSystem, Path, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { environmentTemplate } from "./environment.ts";
 
 const Installer = Schema.Literals(["npm", "pnpm"]);
 type Installer = typeof Installer.Type;
+
+const PackageManifest = Schema.Struct({
+  private: Schema.Boolean,
+  scripts: Schema.Struct({ usine: Schema.String }),
+  dependencies: Schema.Struct({ "@usine/server": ReleaseVersion }),
+  engines: Schema.Struct({ node: Schema.String }),
+});
 
 class ScaffoldError extends Schema.TaggedError<
   ScaffoldError,
@@ -53,7 +60,7 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
     engines: { node: ">=22" },
   };
   const serializedManifest = yield* Schema.encodeEffect(
-    Schema.fromJsonString(Schema.Unknown, { space: 2 }),
+    Schema.fromJsonString(PackageManifest, { space: 2 }),
   )(manifest).pipe(Effect.orDie);
   yield* fs.writeFileString(path.join(directory, "package.json"), `${serializedManifest}\n`, {
     flag: "wx",

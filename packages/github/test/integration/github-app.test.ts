@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { webRequest } from "../../../../tooling/test/http.mts";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -91,9 +92,9 @@ describe("operator-created GitHub App", () => {
 
         const bot = yield* app.botAccount;
         const token = Redacted.value(workerToken.value);
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json1 = jsonKey({
           body: "usine @usine/github integration check; this comment is removed automatically.",
-        }).pipe(Effect.orDie);
+        });
         yield* Effect.acquireUseRelease(
           fetchJson(
             `https://api.github.com/repos/${repository}/issues/${settings.issueNumber}/comments`,

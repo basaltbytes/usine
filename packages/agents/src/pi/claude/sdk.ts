@@ -10,9 +10,9 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { Context, Layer, Schema } from "effect";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
+// The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
 // @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const serializeVendorValue = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** A user message sent to a Claude Code child through the SDK's streaming input. */
 export interface ClaudeUserMessage {
@@ -85,7 +85,7 @@ export class ClaudeSdk extends Context.Service<
 const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
 
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>
-  decodeVendorMessage(stringifyJson(message));
+  decodeVendorMessage(serializeVendorValue(message));
 
 /** Provides `ClaudeSdk` through the installed Agent SDK, exposing output messages as JSON for decoding by the child backend. */
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({

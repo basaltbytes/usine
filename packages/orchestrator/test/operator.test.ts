@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { boardHistory } from "./support/run-reader.ts";
 import { summarizeRun } from "@usine/engine/run-reader";
@@ -147,10 +148,6 @@ import { failureView, runDuration, runView } from "../src/operator/projection.ts
 import { type ProvisioningPause, WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const now = DateTime.makeUnsafe("2026-08-31T12:00:00.000Z");
 const runId = RunId.make("run-operator-test");
@@ -1297,7 +1294,7 @@ describe("Operator", () => {
             HttpClientResponse.fromWeb(
               request,
               new Response(
-                stringifyJson(
+                jsonKey(
                   request.url.includes("/labels") === (operation === "list-repository-labels")
                     ? [{ unexpected: true }]
                     : [],
@@ -1329,7 +1326,7 @@ describe("Operator", () => {
         );
         const lines: Array<string> = [];
         const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-          if (logLevel === "Error") lines.push(stringifyJson(message));
+          if (logLevel === "Error") lines.push(jsonKey(message));
         });
         const cycle = yield* Effect.gen(function* () {
           const polling = yield* PollingTriggers;
@@ -1354,7 +1351,7 @@ describe("Operator", () => {
           lines.some(
             (line) =>
               line.includes(`"operation":"${operation}"`) &&
-              line.includes(`"detail":${stringifyJson(detail)}`),
+              line.includes(`"detail":${jsonKey(detail)}`),
           ),
         );
 
@@ -2788,10 +2785,7 @@ describe("Operator", () => {
         // The approval Event is recorded whole: a deterministic identity for idempotent re-approval
         // and a typed payload.
         assert.strictEqual<string>(recorded.event.id, recorded.event.dedupKey);
-        const decodedValue10 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-          "operator-approval",
-          runId,
-        ]);
+        const decodedValue10 = jsonKey(["operator-approval", runId]);
         assert.strictEqual<string>(recorded.event.dedupKey, decodedValue10);
         assert.deepStrictEqual(recorded.event.payload, {
           runId,
@@ -3225,7 +3219,7 @@ describe("Operator", () => {
           }),
         );
         const encoded = yield* Schema.encodeUnknownEffect(FailureView)(view);
-        const json = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(encoded);
+        const json = jsonKey(encoded);
 
         assert.deepStrictEqual(encoded, {
           _tag: Failure === InfraFailure ? "InfraFailure" : "DefectFailure",

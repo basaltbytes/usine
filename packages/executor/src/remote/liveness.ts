@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { RemoteShell } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import {
@@ -7,12 +8,8 @@ import {
   WORKER_UNRESPONSIVE_PROBES,
 } from "@usine/core/attempt/channel";
 import type { MachineId, WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Fiber, Match, Option, Ref, type Scope, Semaphore, Schema } from "effect";
+import { DateTime, Effect, Fiber, Match, Option, Ref, type Scope, Semaphore } from "effect";
 import type { RemoteCommands } from "./commands.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const PROBE_INTERVAL = "1 minute";
 /** The SSH `ConnectTimeout` in seconds, covering the TCP connection, server banner, and key exchange. */
@@ -310,7 +307,7 @@ export const workerWatchesFor = (
     // Boat sandboxes can share a destination host while using different forwarded ports.
     const watched = new Map<string, Watched>();
     const keyOf = (watch: WorkerWatch) =>
-      `${watch.worker} ${Option.getOrElse(watch.machine, () => `${watch.shell.destination} ${stringifyJson(watch.shell.ssh)}`)}`;
+      `${watch.worker} ${Option.getOrElse(watch.machine, () => `${watch.shell.destination} ${jsonKey(watch.shell.ssh)}`)}`;
 
     const join = (watch: WorkerWatch) =>
       Semaphore.withPermit(

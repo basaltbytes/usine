@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -19,7 +20,7 @@ import {
 import { CheckoutRequest, claudeLoginLockLayer } from "../../src/executor.ts";
 import { layer as exeDevLayer } from "../../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
-import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream, Schema } from "effect";
+import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
 
 import { claudeVersionOutput } from "../claude-code.ts";
 
@@ -212,7 +213,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         return oneShotHandle("", 1, "rm: cannot remove: device or resource busy");
       }
       if (command.args.includes("exe.dev") && command.args.includes("ls")) {
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json1 = jsonKey({
           vms: [
             {
               vm_name: WORKER,
@@ -221,7 +222,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
               region: "fra",
             },
           ],
-        }).pipe(Effect.orDie);
+        });
         return oneShotHandle(json1, 0);
       }
       if (line === "exec 'printenv' 'HOME'") return oneShotHandle("/home/exedev\n", 0);
@@ -232,11 +233,11 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         return oneShotHandle("MemTotal:        8074035 kB\nSwapTotal:       2097148 kB\n", 0);
       if (line === "exec 'claude' '--version'") return oneShotHandle(claudeVersionOutput, 0);
       if (line === "exec 'claude' 'auth' 'status' '--json'") {
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json2 = jsonKey({
           loggedIn: state.claudeLoggedIn,
           authMethod: state.claudeLoggedIn ? "claude.ai" : "none",
           apiProvider: "firstParty",
-        }).pipe(Effect.orDie);
+        });
         return oneShotHandle(json2, state.claudeLoggedIn ? 0 : 1);
       }
       if (line.startsWith("exec 'sh' '-c'")) return oneShotHandle("no-children\n", 0);

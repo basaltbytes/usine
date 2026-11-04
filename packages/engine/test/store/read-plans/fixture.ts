@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { CiHandoff } from "@usine/core/ci";
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha } from "@usine/core/repository";
@@ -31,19 +32,13 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
   const sql = yield* SqlClient.SqlClient;
   const at = "2026-11-01T00:00:00.000Z";
   const valueDecoded1 = yield* Schema.encodeEffect(Agent)(testAgent);
-  const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded1,
-  ).pipe(Effect.orDie);
+  const json1 = jsonKey(valueDecoded1);
   const agent = json1;
   const valueDecoded2 = yield* Schema.encodeEffect(Agent.fields.brain)(testAgent.brain);
-  const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded2,
-  ).pipe(Effect.orDie);
+  const json2 = jsonKey(valueDecoded2);
   const brain = json2;
   const valueDecoded3 = yield* Schema.encodeEffect(RunState.RunState)(RunState.Running.make());
-  const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded3,
-  ).pipe(Effect.orDie);
+  const json3 = jsonKey(valueDecoded3);
   const running = json3;
   const valueDecoded4 = yield* Schema.encodeEffect(RunState.RunState)(
     RunState.AwaitingCi.make({
@@ -56,9 +51,7 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
       }),
     }),
   );
-  const json4 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded4,
-  ).pipe(Effect.orDie);
+  const json4 = jsonKey(valueDecoded4);
   const awaitingCi = json4;
   const valueDecoded5 = yield* Schema.encodeEffect(RunState.RunState)(
     RunState.HandedOff.make({
@@ -68,29 +61,19 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
       fixRunId: RunId.make("run-989"),
     }),
   );
-  const json5 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded5,
-  ).pipe(Effect.orDie);
+  const json5 = jsonKey(valueDecoded5);
   const handedOff = json5;
   const valueDecoded6 = yield* Schema.encodeEffect(RunState.RunState)(RunState.Succeeded.make());
-  const json6 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded6,
-  ).pipe(Effect.orDie);
+  const json6 = jsonKey(valueDecoded6);
   const succeeded = json6;
   const valueDecoded7 = yield* Schema.encodeEffect(AttemptOutcome)(AttemptSucceeded.make());
-  const json7 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded7,
-  ).pipe(Effect.orDie);
+  const json7 = jsonKey(valueDecoded7);
   const succeededOutcome = json7;
   const valueDecoded8 = yield* Schema.encodeEffect(AttemptOutcome)(AttemptHandedOff.make());
-  const json8 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded8,
-  ).pipe(Effect.orDie);
+  const json8 = jsonKey(valueDecoded8);
   const handedOffOutcome = json8;
   const valueDecoded9 = yield* Schema.encodeEffect(AttemptOutcome)(AttemptAwaitingCi.make());
-  const json9 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-    valueDecoded9,
-  ).pipe(Effect.orDie);
+  const json9 = jsonKey(valueDecoded9);
   const awaitingCiOutcome = json9;
   yield* sql`CREATE TEMP TABLE fixture_numbers AS WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i + 1 FROM n WHERE i < 999) SELECT i FROM n`;
   yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)

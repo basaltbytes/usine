@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
@@ -59,10 +60,6 @@ import {
   type SshWorkerAddress,
 } from "../../src/ssh/ssh.ts";
 import { claudeVersionOutput } from "../claude-code.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
 
@@ -652,7 +649,7 @@ export const fakeMachine = () => {
       return oneShotHandle(`${state.codexVersion}\n`, 0);
     if (line === "exec 'claude' 'auth' 'status' '--json'")
       return oneShotHandle(
-        stringifyJson({
+        jsonKey({
           loggedIn: state.claudeLoggedIn,
           authMethod: "claude.ai",
           apiProvider: "firstParty",
@@ -885,7 +882,7 @@ export const capturedLogs = () => {
   const warnings: Array<string> = [];
   const infos: Array<string> = [];
   const logger = Logger.make<unknown, void>(({ message, logLevel }) => {
-    const line = stringifyJson(message);
+    const line = jsonKey(message);
     lines.push(line);
     if (logLevel === "Warn") warnings.push(line);
     if (logLevel === "Info") infos.push(line);

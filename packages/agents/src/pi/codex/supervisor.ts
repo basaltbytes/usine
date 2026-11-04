@@ -1,8 +1,8 @@
 import { Schema } from "effect";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
+// The supervisor program embeds its source in a synchronous string replacement callback.
 // @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const quoteSource = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 
 /** Remote Node program: a detached app-server supervisor and a replaceable SSH relay. */
 const source = String.raw`
@@ -146,5 +146,5 @@ if (mode === 'stop') {
 `;
 
 export const CODEX_SUPERVISOR = source.replace("null /* supervisor source */", () =>
-  stringifyJson(source),
+  quoteSource(source),
 );

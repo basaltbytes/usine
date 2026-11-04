@@ -134,6 +134,10 @@
     "./changes": {
       "types": "./dist/changes.d.ts",
       "default": "./dist/changes.js"
+    },
+    "./json-key": {
+      "types": "./dist/json-key.d.ts",
+      "default": "./dist/json-key.js"
     }
   },
   "publishConfig": {

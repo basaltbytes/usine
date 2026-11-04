@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -22,7 +23,7 @@ import {
   Executor,
 } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
-import { ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Redacted, Schema } from "effect";
+import { ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Redacted } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import {
   aloneOnItem,
@@ -215,9 +216,7 @@ describe("local worker Loop permissions", () => {
 
           const [environment] = environments;
           assert(environment !== undefined);
-          const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            environment,
-          ).pipe(Effect.orDie);
+          const json1 = jsonKey(environment);
           assert.notInclude(json1, ambient);
           assert.deepStrictEqual(
             Object.keys(environment).filter((name) => /TOKEN|CREDENTIAL|ASKPASS/u.test(name)),

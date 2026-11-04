@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { fileURLToPath } from "node:url";
 import { webRequest } from "../../../tooling/test/http.mts";
 import { RunSummaryView, AttemptSummaryView } from "@usine/orchestrator/operator";
@@ -35,7 +36,7 @@ import { tmpdir } from "node:os";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join, dirname, basename } from "node:path";
-import { NodeHttpPlatform, NodeHttpServer, NodeFileSystem } from "@effect/platform-node";
+import { NodeHttpPlatform, NodeHttpServer, NodeFileSystem, NodePath } from "@effect/platform-node";
 import { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/config/label";
 import { LaneName, StateLaneSource } from "@usine/config/board";
@@ -124,10 +125,6 @@ import { beforeAll, afterAll, assert, describe, it } from "@effect/vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
 import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const runId = RunId.make("run-1");
 const loopName = LoopName.make("review-issue");
@@ -534,9 +531,7 @@ it.live(
       const validation = yield* Effect.promise(() =>
         validate("https://spec.openapis.org/oas/3.1/schema-base", document, "BASIC"),
       );
-      const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        validation,
-      );
+      const decodedValue1 = jsonKey(validation);
       assert.isTrue(validation.valid, decodedValue1);
       const generated = operatorOpenApi();
       assert.deepEqual(document, generated);
@@ -545,9 +540,9 @@ it.live(
           fileURLToPath(new URL("../../docs/public/openapi.json", import.meta.url)),
         ),
       );
-      const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        committed,
-      ).pipe(Effect.orDie);
+      const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(committed).pipe(
+        Effect.orDie,
+      );
       assert.deepEqual(document, json1);
       const documentedRoutes = Object.entries(generated.paths).flatMap(([path, methods]) =>
         Object.entries(methods).map(([method, operation]) => {
@@ -600,7 +595,7 @@ it.live(
         );
         assert.isTrue(
           refusedValidation.valid,
-          `${endpoint.method} ${path}: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(refusedBody)}`,
+          `${endpoint.method} ${path}: ${jsonKey(refusedBody)}`,
         );
         if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
         for (const spelling of [
@@ -636,10 +631,7 @@ it.live(
             assert.equal(response.status, 403);
             const body = yield* Effect.promise(() => response.json());
             const result = yield* Effect.promise(() => validate(responseSchema, body));
-            assert.isTrue(
-              result.valid,
-              `${endpoint.method} ${path}: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(body)}`,
-            );
+            assert.isTrue(result.valid, `${endpoint.method} ${path}: ${jsonKey(body)}`);
           }
         }
       }
@@ -736,7 +728,7 @@ describe("operator HTTP API", () => {
             new Request("http://localhost/api/upgrade", {
               headers: authorization,
               method: "POST",
-              body: stringifyJson({ timing: "tomorrow" }),
+              body: jsonKey({ timing: "tomorrow" }),
             }),
           ),
         );
@@ -746,7 +738,7 @@ describe("operator HTTP API", () => {
             new Request("http://localhost/api/upgrade", {
               headers: authorization,
               method: "POST",
-              body: stringifyJson({ timing: "now", version: "1.0.0-01" }),
+              body: jsonKey({ timing: "now", version: "1.0.0-01" }),
             }),
           ),
         );
@@ -758,7 +750,7 @@ describe("operator HTTP API", () => {
             new Request("http://localhost/api/upgrade", {
               headers: authorization,
               method: "POST",
-              body: stringifyJson({ timing: "idle" }),
+              body: jsonKey({ timing: "idle" }),
             }),
           ),
         );
@@ -790,7 +782,7 @@ describe("operator HTTP API", () => {
             new Request(`http://localhost/api/attention/${path}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: stringifyJson(body),
+              body: jsonKey(body),
             }),
           );
         const invalid = yield* Effect.promise(() =>
@@ -1092,10 +1084,10 @@ describe("operator HTTP API", () => {
           message: `Cannot retry run ${runId}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
         });
 
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json2 = jsonKey({
           task: "Look again",
           agent: agentName,
-        }).pipe(Effect.orDie);
+        });
         const edit = json2;
         const open = yield* Effect.promise(() =>
           rejectingApp.handler(
@@ -1144,7 +1136,7 @@ describe("operator HTTP API", () => {
             new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: stringifyJson({ toLane: BoardLaneId.make("authored:Review") }),
+              body: jsonKey({ toLane: BoardLaneId.make("authored:Review") }),
             }),
           ),
         );
@@ -1157,7 +1149,7 @@ describe("operator HTTP API", () => {
             new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: stringifyJson({ toLane: "Ready" }),
+              body: jsonKey({ toLane: "Ready" }),
             }),
           ),
         );
@@ -1172,7 +1164,7 @@ describe("operator HTTP API", () => {
             new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: stringifyJson({ toLane: "proposed:ready" }),
+              body: jsonKey({ toLane: "proposed:ready" }),
             }),
           ),
         );
@@ -1497,7 +1489,7 @@ describe("operator HTTP API", () => {
         { concurrency: "unbounded" },
       );
       const web = HttpRouter.toWebHandler(
-        Layer.mergeAll(apiRoutes, staticRoutes(webRoot)).pipe(
+        Layer.mergeAll(apiRoutes, staticRoutes(webRoot).pipe(Layer.provide(NodePath.layer))).pipe(
           HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer)),
         ),
         { disableLogger: true },

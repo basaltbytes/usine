@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem } from "@effect/platform-node";
 import { tmpdir } from "node:os";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
@@ -5,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
-import { DateTime, Effect, Layer, Redacted, Schema, FileSystem } from "effect";
+import { DateTime, Effect, Layer, Redacted, FileSystem } from "effect";
 import { TestClock } from "effect/testing";
 import { Attachment, InstallationCredential } from "../src/attachment/attachment.ts";
 import { Attachments } from "../src/attachment/store.ts";
@@ -113,9 +114,7 @@ describe("encrypted attachments", () => {
           .attach(attachment(ATTACHMENT, 120, "replacement-secret"))
           .pipe(Effect.flip);
         assert.strictEqual(failedRenewal._tag, "AttachmentPersistenceError");
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          failedRenewal,
-        ).pipe(Effect.orDie);
+        const json1 = jsonKey(failedRenewal);
         assert.notInclude(json1, TOKEN);
         const failedDetach = yield* store.detach(ATTACHMENT).pipe(Effect.flip);
         assert.strictEqual(failedDetach._tag, "AttachmentPersistenceError");

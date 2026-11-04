@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { WorkerStatus } from "../../src/worker-status.ts";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { configurationLayer } from "../support/configuration.ts";
@@ -200,9 +201,7 @@ describe("Statistics cache", () => {
         const reader = yield* RunReader;
         const input = submission(1);
         const valueDecoded1 = yield* Schema.encodeEffect(Agent)(input.agent);
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          valueDecoded1,
-        ).pipe(Effect.orDie);
+        const json1 = jsonKey(valueDecoded1);
         const agent = json1;
         yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
           VALUES (${input.event.id}, ${input.event.dedupKey}, '{}', '2026-10-25T00:00:00.000Z')`;
@@ -211,9 +210,7 @@ describe("Statistics cache", () => {
         const valueDecoded2 = yield* Schema.encodeEffect(RunState.RunState)(
           RunState.Pending.make(),
         );
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          valueDecoded2,
-        ).pipe(Effect.orDie);
+        const json2 = jsonKey(valueDecoded2);
         const pending = json2;
         yield* sql`INSERT INTO usine_runs (run_id, event_id, loop_name, state_json, opened_at, repository, revision, task, agent_json)
           VALUES ('cached-run', ${input.event.id}, ${input.loop}, ${pending}, '2026-10-25T00:00:00.000Z', ${input.repository}, ${input.revision}, ${input.task}, ${agent})`;
@@ -231,9 +228,7 @@ describe("Statistics cache", () => {
         }
         assert.strictEqual(reads, 3);
         const valueDecoded3 = yield* Schema.encodeEffect(RunState.RunState)(RunState.Failed.make());
-        const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          valueDecoded3,
-        ).pipe(Effect.orDie);
+        const json3 = jsonKey(valueDecoded3);
         const failed = json3;
         yield* sql`UPDATE usine_runs SET state_json = ${failed}, closed_at = '2026-10-25T01:00:00.000Z' WHERE run_id = 'cached-run'`;
         for (const window of ["7d", "30d", "all"] as const) {

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -129,9 +130,9 @@ describe("instance lock", () => {
       const files = instanceFiles(directory);
       yield* Effect.gen(function* () {
         yield* holdInstance(directory, record);
-        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const json1 = jsonKey({
           pid: "not a pid",
-        }).pipe(Effect.orDie);
+        });
         writeFileSync(files.record, json1);
         const error = yield* readRecord(files).pipe(Effect.flip);
         assert.instanceOf(error, InstanceRecordError);

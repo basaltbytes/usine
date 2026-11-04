@@ -18,60 +18,75 @@ export interface InitializeParams {
   readonly capabilities: null;
 }
 
-export interface ModelListParams {
-  readonly cursor?: string | null;
-  readonly limit?: number | null;
-  readonly includeHidden?: boolean | null;
-}
+export const ModelListParams = Schema.Struct({
+  cursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  limit: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  includeHidden: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+});
+export type ModelListParams = typeof ModelListParams.Type;
 
 export interface GetAccountParams {
   readonly refreshToken?: boolean;
 }
 
-export interface ThreadStartParams {
-  readonly model?: string | null;
-  readonly allowProviderModelFallback?: boolean;
-  readonly cwd?: string | null;
-  readonly approvalPolicy?: "never" | "on-request" | "untrusted" | null;
-  readonly sandbox?: "read-only" | "workspace-write" | "danger-full-access" | null;
-  readonly serviceName?: string | null;
-  readonly ephemeral?: boolean | null;
-}
+const ApprovalPolicy = Schema.optionalKey(
+  Schema.NullOr(Schema.Literals(["never", "on-request", "untrusted"])),
+);
+const Sandbox = Schema.optionalKey(
+  Schema.NullOr(Schema.Literals(["read-only", "workspace-write", "danger-full-access"])),
+);
 
-export interface ThreadResumeParams {
-  readonly threadId: string;
-  readonly model?: string | null;
-  readonly cwd?: string | null;
-  readonly approvalPolicy?: "never" | "on-request" | "untrusted" | null;
-  readonly sandbox?: "read-only" | "workspace-write" | "danger-full-access" | null;
-  readonly excludeTurns?: boolean;
-}
+export const ThreadStartParams = Schema.Struct({
+  model: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  allowProviderModelFallback: Schema.optionalKey(Schema.Boolean),
+  cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  approvalPolicy: ApprovalPolicy,
+  sandbox: Sandbox,
+  serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  ephemeral: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+});
+export type ThreadStartParams = typeof ThreadStartParams.Type;
 
-interface TextInput {
-  readonly type: "text";
-  readonly text: string;
-  readonly text_elements: ReadonlyArray<never>;
-}
+export const ThreadResumeParams = Schema.Struct({
+  threadId: Schema.String,
+  model: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  approvalPolicy: ApprovalPolicy,
+  sandbox: Sandbox,
+  excludeTurns: Schema.optionalKey(Schema.Boolean),
+});
+export type ThreadResumeParams = typeof ThreadResumeParams.Type;
 
-export interface TurnStartParams {
-  readonly threadId: string;
-  readonly input: ReadonlyArray<TextInput>;
-  readonly cwd?: string | null;
-  readonly approvalPolicy?: "never" | "on-request" | "untrusted" | null;
-  readonly sandboxPolicy?: { readonly type: "dangerFullAccess" } | null;
-  readonly effort?: string | null;
-}
+const TextInput = Schema.Struct({
+  type: Schema.Literal("text"),
+  text: Schema.String,
+  text_elements: Schema.Array(Schema.Never),
+});
 
-export interface TurnSteerParams {
-  readonly threadId: string;
-  readonly expectedTurnId: string;
-  readonly input: ReadonlyArray<TextInput>;
-}
+export const TurnStartParams = Schema.Struct({
+  threadId: Schema.String,
+  input: Schema.Array(TextInput),
+  cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  approvalPolicy: ApprovalPolicy,
+  sandboxPolicy: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ type: Schema.Literal("dangerFullAccess") })),
+  ),
+  effort: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
+export type TurnStartParams = typeof TurnStartParams.Type;
 
-export interface TurnInterruptParams {
-  readonly threadId: string;
-  readonly turnId: string;
-}
+export const TurnSteerParams = Schema.Struct({
+  threadId: Schema.String,
+  expectedTurnId: Schema.String,
+  input: Schema.Array(TextInput),
+});
+export type TurnSteerParams = typeof TurnSteerParams.Type;
+
+export const TurnInterruptParams = Schema.Struct({
+  threadId: Schema.String,
+  turnId: Schema.String,
+});
+export type TurnInterruptParams = typeof TurnInterruptParams.Type;
 
 export const AccountResponse = Schema.Struct({
   account: Schema.NullOr(

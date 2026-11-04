@@ -1,11 +1,8 @@
-import { Effect, Layer, Logger, Sink, Stream, Schema } from "effect";
+import { jsonKey } from "@usine/core/json-key";
+import { Effect, Layer, Logger, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { assert, describe, it } from "@effect/vitest";
 import { warnIfSystemSleeps } from "../src/system-sleep.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** The output of `pmset -g` on a MacBook, with the `sleep` setting given. */
 const pmset = (sleep: string) => `System-wide power settings:
@@ -69,8 +66,8 @@ describe("system sleep check", () => {
       const logged = yield* warnings(pmset(sleep));
       assert.lengthOf(logged, warns ? 1 : 0);
       if (warns) {
-        assert.match(stringifyJson(logged[0]), /caffeinate -s/u);
-        assert.match(stringifyJson(logged[0]), /guides\/run-the-orchestrator-on-a-server\//u);
+        assert.match(jsonKey(logged[0]), /caffeinate -s/u);
+        assert.match(jsonKey(logged[0]), /guides\/run-the-orchestrator-on-a-server\//u);
       }
     }),
   );

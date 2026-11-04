@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { type Brand, DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
 // The test fixture uses native subprocess handles and synchronous process operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -47,10 +48,6 @@ import {
 import { probeInstance } from "../src/instance/state.ts";
 import { restart } from "../src/restart.ts";
 import { stop } from "../src/stop.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const SCENARIO_TIMEOUT_MS = 60_000;
 const FIXTURE = fileURLToPath(new URL("./fixtures/instance.mjs", import.meta.url));
@@ -184,7 +181,7 @@ const fakeSystemctl = (directory: InstanceDirectory, launch: InstanceLaunch) => 
 const { appendFileSync, existsSync, openSync, readFileSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const { join } = require("node:path");
-const directory = ${stringifyJson(directory)};
+const directory = ${jsonKey(directory)};
 const args = process.argv.slice(2);
 appendFileSync(join(directory, "systemctl.log"), args.join(" ") + "\\n");
 const flag = (name) => existsSync(join(directory, name));
@@ -207,7 +204,7 @@ if (verb === "show" && args.includes("--property=MainPID")) {
   process.exit(1);
 } else if (verb === "start" && !flag("systemctl-failing")) {
   const log = openSync(join(directory, ".usine", "usine.log"), "a");
-  spawn(${stringifyJson(launch.node)}, ${stringifyJson([...launch.nodeOptions, launch.script, "up", "--port", String(launch.port)])}, { cwd: directory, detached: true, stdio: ["ignore", log, log] }).unref();
+  spawn(${jsonKey(launch.node)}, ${jsonKey([...launch.nodeOptions, launch.script, "up", "--port", String(launch.port)])}, { cwd: directory, detached: true, stdio: ["ignore", log, log] }).unref();
 }
 `,
   );
@@ -322,10 +319,10 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     Effect.gen(function* () {
       const directory = instanceFolder();
       const first = yield* startFixture(directory);
-      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+      const json1 = jsonKey([
         { id: "run-live", state: "Running" },
         { id: "run-done", state: "Succeeded" },
-      ]).pipe(Effect.orDie);
+      ]);
       writeFileSync(join(directory, "fixture-runs.json"), json1);
       writeFileSync(join(directory, "fixture-drain"), "never");
 
@@ -351,16 +348,14 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
       const directory = instanceFolder();
       const files = instanceFiles(directory);
       const first = yield* startFixture(directory);
-      const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+      const json2 = jsonKey({
         pid: "unreadable",
-      }).pipe(Effect.orDie);
+      });
       const unreadable = json2;
       writeFileSync(files.record, unreadable);
       const variable = `USINE_TEST_GATEWAY_TOKEN_${process.pid}`;
       writeFileSync(join(directory, "fixture-gateway-env"), variable);
-      const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-        { id: "run-live", state: "Running" },
-      ]).pipe(Effect.orDie);
+      const json3 = jsonKey([{ id: "run-live", state: "Running" }]);
       writeFileSync(join(directory, "fixture-runs.json"), json3);
       writeFileSync(join(directory, "fixture-drain"), "never");
       // Nothing answers on the new port, so checks that asked it would pass and signal the instance.

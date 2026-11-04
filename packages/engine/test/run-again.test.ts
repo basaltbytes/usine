@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptContext, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
@@ -6,7 +7,7 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { StepName } from "@usine/core/step";
-import { Effect, Option, Ref, Schema } from "effect";
+import { Effect, Option, Ref } from "effect";
 import { CycleBudgets } from "../src/cycle-budget/cycle-budget.ts";
 import { RunEngine } from "../src/engine/engine.ts";
 import { RunAgainRequest } from "../src/engine/run-again.ts";
@@ -76,11 +77,7 @@ describe("Run again", () => {
           assert.strictEqual(reran.permissions, "read");
           assert.strictEqual(reran.itemKey, sighting.itemKey);
           assert.deepStrictEqual(reran.event.payload, sighting.event.payload);
-          const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-            "operator-run-again",
-            1,
-            sighting.event.dedupKey,
-          ]).pipe(Effect.orDie);
+          const json1 = jsonKey(["operator-run-again", 1, sighting.event.dedupKey]);
           assert.strictEqual(reran.event.dedupKey, json1);
           assert(Option.isSome(reran.runAgain));
           assert.strictEqual(reran.runAgain.value.from, first.runId);
@@ -134,11 +131,7 @@ describe("Run again", () => {
             const reopened = yield* engine.submit(sighting);
             assert(reopened._tag === "Claimed");
             assert.notInclude([first.runId, again.runId], reopened.runId);
-            const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-              "reopened",
-              2,
-              sighting.event.dedupKey,
-            ]).pipe(Effect.orDie);
+            const json2 = jsonKey(["reopened", 2, sighting.event.dedupKey]);
             assert.strictEqual((yield* engine.inspect(reopened.runId)).event.dedupKey, json2);
           }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
         }),

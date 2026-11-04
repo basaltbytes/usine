@@ -20,9 +20,6 @@ import { type UpgradeError, ServerUpgrades } from "./upgrade/control.ts";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
-// Synchronous Node path callbacks retain the host platform’s path semantics.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { extname, resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
 import { RepositoryName } from "@usine/core/repository";
 import { type ConfigurationEditor, BoardMove } from "@usine/orchestrator/operator";
@@ -34,7 +31,7 @@ import {
   OperatorHttpPolicy,
   operatorPermissions,
 } from "@usine/orchestrator/operator/http";
-import { Effect, Layer, Option, Schema, type Types } from "effect";
+import { Effect, Layer, Option, Path, Schema, type Types } from "effect";
 import {
   Headers,
   HttpPlatform,
@@ -501,52 +498,61 @@ export const apiRoutes = Layer.mergeAll(
   Layer.provide(NodeHttpServer.layerHttpServices),
 );
 
-export const staticRoutes = (webRoot: string) => {
-  const assetsRoot = resolve(webRoot, "assets");
-  const applicationShell = HttpServerResponse.file(resolve(webRoot, "index.html"));
-  return HttpRouter.addAll([
-    HttpRouter.route("GET", "/", applicationShell),
-    HttpRouter.route("GET", "/assets/*", (request) =>
-      Effect.gen(function* () {
-        const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
-        const asset = resolve(webRoot, pathname.slice(1));
-        if (!asset.startsWith(`${assetsRoot}${sep}`)) {
-          return HttpServerResponse.text("Not found", { status: 404 });
-        }
-        return yield* HttpServerResponse.file(asset).pipe(
-          Effect.catch((error) =>
-            Effect.logDebug("Static asset could not be served", {
-              asset,
-              message: String(error),
-            }).pipe(Effect.as(HttpServerResponse.text("Not found", { status: 404 }))),
-          ),
-        );
-      }),
-    ),
-    HttpRouter.route("GET", "*", (request) =>
-      Effect.gen(function* () {
-        const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
-        const reservedNamespace =
-          pathname === "/webhooks" ||
-          pathname.startsWith("/webhooks/") ||
-          pathname === "/api" ||
-          pathname.startsWith("/api/") ||
-          pathname === "/assets" ||
-          pathname.startsWith("/assets/");
-        const hasFileExtension = extname(pathname) !== "";
-        if (reservedNamespace || hasFileExtension) {
-          yield* Effect.logDebug("Request was not eligible for the application shell fallback", {
-            pathname,
-            reason: reservedNamespace ? "reserved-namespace" : "file-extension",
-          });
-          return HttpServerResponse.text("Not found", { status: 404 });
-        }
-        yield* Effect.logDebug("Serving the application shell for a client route", { pathname });
-        return yield* applicationShell;
-      }),
-    ),
-  ]);
-};
+export const staticRoutes = (webRoot: string) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const assetsRoot = path.resolve(webRoot, "assets");
+      const applicationShell = HttpServerResponse.file(path.resolve(webRoot, "index.html"));
+      return HttpRouter.addAll([
+        HttpRouter.route("GET", "/", applicationShell),
+        HttpRouter.route("GET", "/assets/*", (request) =>
+          Effect.gen(function* () {
+            const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
+            const asset = path.resolve(webRoot, pathname.slice(1));
+            if (!asset.startsWith(`${assetsRoot}${path.sep}`)) {
+              return HttpServerResponse.text("Not found", { status: 404 });
+            }
+            return yield* HttpServerResponse.file(asset).pipe(
+              Effect.catch((error) =>
+                Effect.logDebug("Static asset could not be served", {
+                  asset,
+                  message: String(error),
+                }).pipe(Effect.as(HttpServerResponse.text("Not found", { status: 404 }))),
+              ),
+            );
+          }),
+        ),
+        HttpRouter.route("GET", "*", (request) =>
+          Effect.gen(function* () {
+            const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
+            const reservedNamespace =
+              pathname === "/webhooks" ||
+              pathname.startsWith("/webhooks/") ||
+              pathname === "/api" ||
+              pathname.startsWith("/api/") ||
+              pathname === "/assets" ||
+              pathname.startsWith("/assets/");
+            const hasFileExtension = path.extname(pathname) !== "";
+            if (reservedNamespace || hasFileExtension) {
+              yield* Effect.logDebug(
+                "Request was not eligible for the application shell fallback",
+                {
+                  pathname,
+                  reason: reservedNamespace ? "reserved-namespace" : "file-extension",
+                },
+              );
+              return HttpServerResponse.text("Not found", { status: 404 });
+            }
+            yield* Effect.logDebug("Serving the application shell for a client route", {
+              pathname,
+            });
+            return yield* applicationShell;
+          }),
+        ),
+      ]);
+    }),
+  );
 
 /**
  * Serves the authenticated operator API and the UI on `SERVER_HOST` at `port`.

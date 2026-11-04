@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // The Node process boundary uses native process handles and synchronous subprocess operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { spawnSync } from "node:child_process";
@@ -29,10 +30,6 @@ import {
   signalProcess,
 } from "../../src/instance/state.ts";
 
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const prettyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }));
-
 const folders: Array<string> = [];
 
 afterEach(() => {
@@ -62,7 +59,7 @@ const recordFor = (pid: number) =>
 
 /** `.usine/instance.json` as `@usine/server` 0.3.0 at e22d67c wrote it, before `launch.logLevel`. */
 const previousVersionRecord = (pid: number) =>
-  `${prettyJson({
+  `${jsonKey({
     pid,
     version: "0.3.0",
     startedAt: "2026-10-25T18:00:00.000Z",
@@ -112,9 +109,7 @@ describe("instance state", () => {
       writeFileSync(files.lock, "");
       // The test process is live, but it doesn't hold the lock: a reused pid never counts.
       const actual1 = yield* Schema.encodeEffect(InstanceRecord)(recordFor(process.pid));
-      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(actual1).pipe(
-        Effect.orDie,
-      );
+      const json1 = jsonKey(actual1);
       writeFileSync(files.record, json1);
       const state = yield* Effect.promise(() => probe(directory));
       assert(state._tag === "Stopped");
@@ -164,9 +159,7 @@ describe("instance state", () => {
         assert.deepStrictEqual(legacy.pid, Option.some(process.pid));
         const valueDecoded1 = yield* Schema.encodeEffect(InstanceRecord)(recordFor(exitedPid()));
         // A record of an exited process, left by a crash before this holder wrote its own.
-        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          valueDecoded1,
-        ).pipe(Effect.orDie);
+        const json2 = jsonKey(valueDecoded1);
         writeFileSync(files.record, json2);
         writeFileSync(files.pid, `${exitedPid()}\n`);
         const starting = yield* probeInstance(directory);

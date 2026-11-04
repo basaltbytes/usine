@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
 // The test fixture uses native subprocess handles and synchronous process operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -35,10 +36,6 @@ import { HttpRouter, HttpServerResponse } from "effect/http";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { authFixture, localSecret } from "../auth/fixture.ts";
 import { assert, expect, it } from "@effect/vitest";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const helper = readFileSync(new URL("../../src/upgrade/helper.sh", import.meta.url), "utf8");
 
@@ -98,7 +95,7 @@ const run = (
     fileURLToPath(new URL("../../dist/main.js", import.meta.url)),
     join(packageFolder, "dist/main.js"),
   );
-  writeFileSync(join(packageFolder, "package.json"), stringifyJson({ version: "1.0.0" }));
+  writeFileSync(join(packageFolder, "package.json"), jsonKey({ version: "1.0.0" }));
   writeFileSync(join(folder, "installed"), "@usine/server@1.0.0");
   writeFileSync(join(folder, "running"), "@usine/server@1.0.0");
   writeFileSync(join(folder, "commands"), "");

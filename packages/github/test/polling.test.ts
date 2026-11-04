@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ItemNumber } from "@usine/core/item";
@@ -22,10 +23,6 @@ import {
 import { RepositoryLabelCatalog, RepositoryLabelsNotModified } from "../src/polling/labels.ts";
 import { IssuePayload, PullRequestPayload } from "../src/polling/payload.ts";
 import { GitHubPolling } from "../src/polling/polling.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const token = InstallationToken.make({
@@ -69,7 +66,7 @@ const response = (
     (() => {
       const headers = new Headers(options.headers);
       if (body !== null) headers.set("content-type", "application/json");
-      return new Response(body === null ? null : stringifyJson(body), {
+      return new Response(body === null ? null : jsonKey(body), {
         status: options.status ?? 200,
         headers,
       });

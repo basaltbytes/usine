@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -255,9 +256,7 @@ describe("ConfigParser", () => {
       });
 
       const encoded = yield* Schema.encodeEffect(UsineConfig)(configured);
-      const decodedValue7 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        encoded,
-      );
+      const decodedValue7 = jsonKey(encoded);
       const reloaded = yield* parser.parseUsineYaml(InstancePath.make("usine.yaml"), decodedValue7);
       expect(reloaded).toEqual(configured);
 

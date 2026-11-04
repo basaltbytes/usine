@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -23,10 +24,6 @@ import {
 } from "../src/instance/record.ts";
 import { OperatorApiError, listRuns } from "../src/instance/operator-api.ts";
 import { status } from "../src/status.ts";
-
-// Pure serializers and synchronous callbacks return JSON values directly.
-// @effect-diagnostics-next-line schemaSync:off
-const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const folders: Array<string> = [];
 const servers: Array<Server> = [];
@@ -67,7 +64,7 @@ const fakeOperatorApi = (runs: ReadonlyArray<{ id: string; state: string }>) =>
       }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
-        stringifyJson({
+        jsonKey({
           _tag: "Ready",
           projects: [{ repository: "acme/widgets", runs }],
           loops: [],
