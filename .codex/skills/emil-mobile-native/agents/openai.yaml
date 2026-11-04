@@ -1,0 +1,3 @@
+interface:
+  display_name: "Mobile Native"
+  short_description: "Make a web app feel installed on a phone, not like a website in a browser"
