@@ -1,6 +1,6 @@
 import { configDefaults, defineConfig } from "vitest/config";
 
-const latencyTest = "test/operator-read-latency.test.ts";
+const latencyTest = "test/operator-reads/latency.test.ts";
 
 export default defineConfig({
   test: {

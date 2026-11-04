@@ -12,7 +12,7 @@
     "check": "node scripts/docs/check.mjs && turbo run check && pnpm --filter @usine/docs openapi:check && git diff --exit-code -- apps/docs/public/openapi.json",
     "effect:fix": "node scripts/effect-diagnostics/fix.mjs",
     "check:packed-install": "node scripts/check-packed-install.mjs",
-    "test": "node --experimental-strip-types --test tooling/test/*.test.mts scripts/docs/*.test.mjs scripts/release/*.test.mjs scripts/effect-diagnostics/*.test.mjs infra/hetzner/gateway/test/*.test.mjs infra/boat/test/*.test.mjs && turbo run test --concurrency=1",
+    "test": "pnpm test:scripts && turbo run test --concurrency=1",
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
@@ -21,7 +21,8 @@
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "changeset:publish": "pnpm build && pnpm stage publish -r --tag latest --no-git-checks && node scripts/release/tag.mjs",
     "prerelease:publish": "node scripts/release/next.mjs",
-    "prepare": "effect-tsgo patch --typescript"
+    "prepare": "effect-tsgo patch --typescript",
+    "test:scripts": "node --experimental-strip-types --test tooling/test/*.test.mts scripts/ci/*.test.mjs scripts/docs/*.test.mjs scripts/release/*.test.mjs scripts/effect-diagnostics/*.test.mjs infra/hetzner/gateway/test/*.test.mjs infra/boat/test/*.test.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:",

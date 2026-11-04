@@ -140,3 +140,7 @@ Enable the App webhook to record deliveries. A delivery with a failed HTTP statu
 GitHub response records and errors use nominal Schema brands. Use their schema constructors for typed values, and decode external responses with `Schema.decodeUnknownEffect`.
 
 Run `pnpm --filter @usine/github check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+## CI failure evidence
+
+`GitHubChecks` reads the pull request head and aggregate check state. For failed Actions jobs, it extracts bounded failed-step logs from the run-attempt archive. If the archive is unavailable or lacks the failed step, it reads the completed job's plain log, including when other matrix jobs are running. Rate limits defer polling; unavailable job logs use the check output.
