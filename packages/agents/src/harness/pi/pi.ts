@@ -1,5 +1,5 @@
 import { Harness, BrainSpec } from "@usine/core/agent/brain";
-import { ChildSession, SessionStarted } from "@usine/core/agent/session";
+import { ChildSession, EndpointName, SessionStarted } from "@usine/core/agent/session";
 import { Deferred, Effect, Layer, Option, Stream } from "effect";
 import {
   AgentResultError,
@@ -139,6 +139,14 @@ const makePiChild = Effect.gen(function* () {
                 effort: request.session.brain.effort,
               }),
               gatewayCredential: request.session.gatewayCredential,
+              pool: Option.some(started.pool),
+              endpoint:
+                started.pool === "apiKeys"
+                  ? Option.map(
+                      Option.fromUndefinedOr(splitPiModel(started.model)),
+                      ({ provider }) => EndpointName.make(provider),
+                    )
+                  : Option.none(),
             });
             const channel = yield* sessionChannel({
               label: "Pi child session",

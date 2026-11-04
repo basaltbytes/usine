@@ -1,4 +1,4 @@
-import { type Brand, Effect, Match, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 import { GatewayCredentialKind } from "../worker.ts";
 import { AgentName } from "./agent.ts";
 import { BrainSpec } from "./brain.ts";
@@ -23,6 +23,25 @@ export type ChildSessionBudget = typeof ChildSessionBudget.Type;
 export const ChildSessionCount = PositiveInt.pipe(Schema.brand("ChildSessionCount"));
 export type ChildSessionCount = typeof ChildSessionCount.Type;
 
+/** The billing source for a session's model requests (ADR 0013). */
+export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
+export type BillingPool = typeof BillingPool.Type;
+
+/** The configured provider name of a model endpoint, excluding its URL and credentials. */
+export const EndpointName = Schema.NonEmptyString.pipe(Schema.brand("EndpointName"));
+export type EndpointName = typeof EndpointName.Type;
+
+const sessionBilling = {
+  /** The billing pool resolved at launch, or `None` in older records. */
+  pool: Schema.OptionFromOptionalKey(BillingPool).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<BillingPool>())),
+  ),
+  /** The model endpoint's provider name, or `None` for a plan or an older record. */
+  endpoint: Schema.OptionFromOptionalKey(EndpointName).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<EndpointName>())),
+  ),
+};
+
 /** The Pi session that supervises the attempt and starts its child sessions. */
 export class ParentSession extends Schema.TaggedClass<
   ParentSession,
@@ -34,6 +53,7 @@ export class ParentSession extends Schema.TaggedClass<
   agent: AgentName,
   /** The Pi brain actually selected for this parent session. */
   brain: BrainSpec,
+  ...sessionBilling,
 }) {}
 
 /** A session spawned by the parent session; a child can't spawn children. */
@@ -49,10 +69,10 @@ export class ChildSession extends Schema.TaggedClass<
   agent: AgentName,
   /** The harness, model, and effort selected for this child. */
   brain: BrainSpec,
+  ...sessionBilling,
   /**
-   * The credential kind the Gateway (ADR 0027) or a Cloudflare Worker's outbound handler used
-   * for the child's model requests, or `None` if the child used its harness's own login or the
-   * record is older.
+   * The credential kind injected by a gateway, a sandbox, or an attempt API key, or `None` if
+   * the child used its harness's own login or the record is older.
    */
   gatewayCredential: Schema.OptionFromOptionalKey(GatewayCredentialKind).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<GatewayCredentialKind>())),
@@ -218,39 +238,20 @@ export class SessionTokensUpdated extends Schema.TaggedClass<
   ),
 }) {}
 
-/** The billing source for a session's model requests: API keys, a Claude plan, or a ChatGPT plan (ADR 0013). */
-export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
-export type BillingPool = typeof BillingPool.Type;
-
-/**
- * Returns the billing pool of a session with `brain` and the kind of the credential that a
- * Gateway or a Cloudflare Worker's outbound handler injects, if any.
- *
- * - Claude Code: `apiKeys` if an API key is injected, otherwise `claudePlan` (ADR 0013).
- * - Codex: `apiKeys` if an API key is injected, otherwise `chatgptPlan`.
- * - Pi: `chatgptPlan` for `openai-codex/` models, otherwise `apiKeys` (ADR 0021).
- */
-export const brainPool = (
-  brain: BrainSpec,
-  gatewayCredential: Option.Option<GatewayCredentialKind>,
-): BillingPool => {
-  switch (brain.harness) {
-    case "claude":
-      return Option.contains(gatewayCredential, "api-key") ? "apiKeys" : "claudePlan";
-    case "codex":
-      return Option.contains(gatewayCredential, "api-key") ? "apiKeys" : "chatgptPlan";
-    case "pi":
-      return brain.model.startsWith("openai-codex/") ? "chatgptPlan" : "apiKeys";
-    default:
-      throw new Error(`No legacy billing pool for harness "${brain.harness}"`);
-  }
-};
-
-/** Returns the billing pool of a recorded session; the parent never uses a Gateway credential. */
+/** Returns the recorded pool, using the historical inference only for older sessions. */
 export const sessionPool = (session: AgentSession): BillingPool =>
-  Match.valueTags(session, {
-    ParentSession: ({ brain }) => brainPool(brain, Option.none()),
-    ChildSession: ({ brain, gatewayCredential }) => brainPool(brain, gatewayCredential),
+  Option.getOrElse(session.pool, () => {
+    const credential = session._tag === "ChildSession" ? session.gatewayCredential : Option.none();
+    switch (session.brain.harness) {
+      case "claude":
+        return Option.contains(credential, "api-key") ? "apiKeys" : "claudePlan";
+      case "codex":
+        return Option.contains(credential, "api-key") ? "apiKeys" : "chatgptPlan";
+      case "pi":
+        return session.brain.model.startsWith("openai-codex/") ? "chatgptPlan" : "apiKeys";
+      default:
+        throw new Error(`No legacy billing pool for harness "${session.brain.harness}"`);
+    }
   });
 
 /** One provider-reported allowance window, including usage outside usine. */

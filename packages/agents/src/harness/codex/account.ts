@@ -1,5 +1,5 @@
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { brainPool, PoolLogin } from "@usine/core/agent/session";
+import { type BillingPool, PoolLogin } from "@usine/core/agent/session";
 import type { GatewayCredentialKind } from "@usine/core/worker";
 import { Effect, Option, Schema } from "effect";
 import { PoolUnavailableError } from "../../runtime.ts";
@@ -77,7 +77,7 @@ export const codexChildAccount = Effect.fn("Codex.childAccount")(function* (
   gatewayCredential: Option.Option<GatewayCredentialKind>,
 ) {
   if (Option.isNone(gatewayCredential)) return yield* verifyCodexAccount(connection, brain.model);
-  const pool = brainPool(brain, gatewayCredential);
+  const pool: BillingPool = gatewayCredential.value === "api-key" ? "apiKeys" : "chatgptPlan";
   yield* Effect.logInfo("Codex uses the Gateway's OpenAI credential; skipped the login check", {
     model: brain.model,
     credential: gatewayCredential.value,

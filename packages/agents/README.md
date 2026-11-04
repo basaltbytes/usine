@@ -45,6 +45,8 @@ Codex rate-window events include the login email returned by `account/read`. A s
 
 Codex commands, including preflight's account check, disable plugins, the remote plugin catalog, apps, startup update checks, and analytics with command-line overrides. This stops automatic plugin downloads and their bundled skill sync; local skills remain available. The overrides apply on every worker kind and take precedence over user configuration.
 
+Each adapter records its resolved billing pool on the launched session and every session event. Pi records the provider name as `endpoint` for API-key models, including OpenAI-compatible endpoints and local models. Codex records its selected model provider for API-key sessions. Endpoint names exclude URLs and credentials.
+
 Logs record the verified authentication method and pool. On completion or interrupt, usine closes the input of the child's Codex app server and waits for it to exit before publishing, releasing background commands. Scope cleanup does the same, bounded, and logs before force-stopping a stalled process.
 
 `/pi/authentication` exports the parent's rules for other runtimes: `splitPiModel` (parses `provider/model`), `piAuthentication` (a provider's credential check), `requiredPiPool` (a provider's pool), and `resolvePiPool` (its credential's pool).

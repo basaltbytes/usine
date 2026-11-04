@@ -23,6 +23,7 @@ const EDGE_GITHUB_HOST = "github.int.exe.xyz";
 const edgeAccess = (machine: RemoteMachine): RemoteAccess => ({
   shell: machine.shell,
   secrets: {},
+  apiKeyHarnesses: new Set(),
   readOnlyPaths: [],
   writablePaths: [],
   environment: { GH_HOST: EDGE_GITHUB_HOST },

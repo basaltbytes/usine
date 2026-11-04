@@ -96,6 +96,11 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
     // sends them.
     shell: sendingShell(access.shell, secrets),
     secrets: { ...access.secrets, ...secrets },
+    apiKeyHarnesses: new Set([
+      ...access.apiKeyHarnesses,
+      ...Option.toArray(Option.map(anthropic, () => Harness.make("claude"))),
+      ...Option.toArray(Option.map(openai, () => Harness.make("codex"))),
+    ]),
     writablePaths: [...access.writablePaths, ...Option.toArray(codexHome)],
     environment: Option.match(codexHome, {
       onNone: () => access.environment,

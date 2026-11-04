@@ -4,7 +4,7 @@ Worker execution for [usine](https://github.com/basaltbytes/usine). The platform
 
 0.x APIs can change. Supply `effect` at the workspace's pinned version.
 
-Harness credential providers, login mounts, and login egress hosts come from the platform-free `@usine/agents/harness` catalog. Worker preflight and credential preparation use the same descriptor data.
+Harness credential providers, login mounts, and login egress hosts come from the platform-free `@usine/agents/harness` catalog. Worker preflight and credential preparation use the same descriptor data. Credential preparation records which harnesses receive provisioned API keys. Child adapters resolve and record the billing pool from the injected credential kind.
 
 ## Attempt lifetime
 

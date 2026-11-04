@@ -28,6 +28,8 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
+Parent and child sessions record the resolved `pool` at launch. API-key sessions can also record an `endpoint` provider name. Both keys are optional in serialized records, so older transcripts remain readable. `sessionPool` reads the recorded pool and applies the historical harness and model rule only when it is absent.
+
 `SessionStarted.prompt` records the exact initial prompt sent to a child. It is `None` for parents and older transcripts.
 
 ## Runs

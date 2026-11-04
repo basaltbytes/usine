@@ -192,7 +192,7 @@ export const attemptTask = (
       yield* commit(runtime, context, "record the failed start", () => outcome);
       return;
     }
-    const { ref, model } = resolved.success;
+    const { ref, model, pool, endpoint } = resolved.success;
     const { extension, tool } = selection();
     let parent = Option.none<ConversationId>();
     yield* commit(runtime, context, "create the parent conversation", async (tx) => {
@@ -210,6 +210,8 @@ export const attemptTask = (
       await tx.doc(HoldDoc, task.id);
       const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
       record.parentModel = model;
+      record.parentPool = pool;
+      record.parentEndpoint = Option.getOrNull(endpoint);
       record.parentConversation = conversation.id;
       parent = Option.some(conversation.id);
       return {
@@ -236,13 +238,13 @@ export const attemptTask = (
       runtime.snapshot(AttemptRecordDoc, spec.attemptId, context),
     );
     const model = record?.parentModel ?? null;
-    if (model === null) {
+    if (model === null || record === undefined) {
       return yield* Effect.logWarning(
         "The parent has no resolved model; its lifecycle event is dropped",
         { lifecycle },
       );
     }
-    const session = parentSession(spec, ModelId.make(model));
+    const session = parentSession(spec, ModelId.make(model), record);
     const hub = yield* services.hubs.hub(spec.attemptId, taskId);
     yield* services.hubs.event(
       hub,

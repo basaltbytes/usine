@@ -4,6 +4,7 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
+  EndpointName,
   ChildSession,
   ParentSession,
   SessionTokensUpdated,
@@ -190,6 +191,34 @@ describe("RunUsageReader", () => {
         ),
       ),
   );
+
+  it.effect("bills recorded pools independently of harness and model inference", () => {
+    const parent = ParentSession.make({
+      ...planParent,
+      pool: Option.some("apiKeys"),
+      endpoint: Option.some(EndpointName.make("private-endpoint")),
+    });
+    const added = ChildSession.make({
+      ...child("new", Harness.make("new-harness"), "qwen"),
+      pool: Option.some("apiKeys"),
+      endpoint: Option.some(EndpointName.make("ollama")),
+    });
+    return Effect.gen(function* () {
+      const usage = yield* (yield* RunUsageReader).read(runUsageSource(source));
+      assert.deepStrictEqual(
+        usage.sessions.map(({ pool, session }) => [pool, session.endpoint]),
+        [
+          ["apiKeys", parent.endpoint],
+          ["apiKeys", added.endpoint],
+        ],
+      );
+      assert.deepStrictEqual(costs(usage.pools), [{ usd: 0.75, estimate: false }]);
+    }).pipe(
+      Effect.provide(
+        readerOf([report(1, parent, 0.25, Option.none()), report(2, added, 0.5, Option.none())]),
+      ),
+    );
+  });
 
   it.effect("leaves a Codex model without rates unpriced and logs it once", () => {
     const warnings: Array<string> = [];
