@@ -9,7 +9,7 @@ You run a usine instance for a human who reads this thread rarely, maybe never. 
 
 ## Load first
 
-1. **Discover the instance** with [`discover.md`](discover.md). The result is `.scratchpad/orchestrating-usine/env.sh`, which every script here sources. Redo it when a call fails with a connection error.
+1. **Discover the instance** with [`discover.md`](discover.md). The result is `.scratchpad/orchestrating-usine/env.sh`, which every script here sources. Redo it when a call fails with a connection error, or with `AuthenticationError` after a restart: the server writes a new admin token on every start.
 2. **Open the ledger** at `.scratchpad/orchestrating-usine/ledger.md`. If it is missing, create it from [`ledger.md`](ledger.md). Read the open items before anything else: they are the human's answers you still owe and the actions still pending.
 3. **Read the handoff** if the human points at one, and merge its open items into the ledger.
 
@@ -17,7 +17,7 @@ You run a usine instance for a human who reads this thread rarely, maybe never. 
 
 Repeat until the human says stop. Every pass ends with the ledger updated and, when something changed, a report in the format of [`ledger.md`](ledger.md).
 
-1. **Observe.** Run `scripts/overview.sh` from this skill's folder. It prints Needs attention, running attempts, stalled items, open agent PRs with labels and mergeability, failed default-branch workflows, and recent server errors. For a long unattended stretch, arm `scripts/watch.sh` with the Monitor tool. It will print only the changes.
+1. **Observe.** Run `scripts/overview.sh` from this skill's folder. It prints Needs attention, running attempts, stalled items, open agent PRs with labels and mergeability, failed default-branch workflows, and recent server errors. For a long unattended stretch, run `scripts/wait-change.sh` with Bash `run_in_background` and run it again after each notification. It polls without printing and exits on the first change that needs a reaction, so an idle factory costs no tokens. Don't use `scripts/watch.sh` with Monitor for this: each event re-reads the whole conversation.
 2. **Act on what you can.** Table of first moves; `api.md` has the calls.
 
    | Signal | Move |
@@ -40,7 +40,7 @@ Agent PRs merge through you, one at a time:
 
 1. `gh pr view <n> --json mergeable,statusCheckRollup,labels,headRefOid` and read the fields. A piped `gh pr checks` exit code is not evidence.
 2. Confirm no finishing loop has a running attempt on the PR (`scripts/overview.sh` lists running attempts by item). Merging under a finisher wastes its run and can push after the merge.
-3. Read the whole source diff: `gh pr diff <n>`. Load `effect-ts` for Effect code and `code-review` for an independent second read of a large or security-sensitive PR. UI changes get screenshots the human sees before the merge: Decisions, not merge.
+3. Read the whole source diff: `gh pr diff <n>`. Load `effect-ts` for Effect code and `code-review` for an independent second read of a large or security-sensitive PR. A new screen or a large redesign of one gets screenshots the human sees before the merge: Decisions, not merge. Smaller UI changes merge on the diff and get checked on the instance.
 4. Merge with the repository's merge method. Then watch the default branch's workflows for that commit and retry transient failures once.
 5. Record the merge under Done with the issue it closed, and remove the PR from the watchlist.
 

@@ -28,9 +28,9 @@
 | `POST /api/runs/<id>/run-again` | `{"task":"...","agent":"<name>"}` | New run on a closed one; `CycleBlocked` when the budget is used. |
 | `POST /api/runs/<id>/cancel` | `{}` | Salvages the worktree. |
 | `POST /api/runs/<id>/resolve-failure` | `{"attemptId":"<runId>/<step>/<n>"}` | Clears the Needs entry. |
-| `POST /api/runs/<id>/intervene` | `{"attemptId":"...","target":"parent","action":{"_tag":"OperatorMessage","text":"..."}}` | Also `Steer`, `Interrupt`, `Release`. A message holds the parent; send `Release` after it answers or the attempt never ends. |
+| `POST /api/runs/<id>/intervene` | `{"attemptId":"...","target":{"_tag":"Parent"},"action":{"_tag":"OperatorMessage","text":"..."}}` | Also `Steer` (field `message`, no hold), `Interrupt`, `Release`. A message holds the parent; send `Release` after it answers or the attempt never ends. |
 | `POST /api/cycle-budgets/reset` | `{"askId":"..."}` | `ask.id` of the `CycleBudgetNeed` entry. |
-| `POST /api/attention/dismiss` | `{"id":"<need id>","revision":<n>}` | Hides a Needs entry; `/undo` with the same body brings it back. |
+| `POST /api/attention/dismiss` | `{"id":"<need id>","revision":"<the need's JSON>"}` | Hides a Needs entry; `revision` is the `needsYou` entry serialized as a string (`jq '{id:$n.id,revision:($n\|tojson)}'`). `/undo` with the same body brings it back. |
 | `POST /api/loops/<loop>/pause`, `/unpause` | none | |
 | `POST /api/projects/<o>/<r>/items/<n>/lane` | `{"toLane":"<lane>"}` | Label swap on GitHub; use when `gh` label edits are refused. |
 | `POST /api/workers/<name>/discard-leftovers` | none | Only for an undeclared worker with no running attempt. |
@@ -50,7 +50,7 @@ On the host, the same store answers to `usine config export <folder>`, `usine co
 
 ```sh
 scripts/usine-api.sh GET /api/upgrade
-scripts/usine-api.sh POST /api/upgrade '{"timing":"idle"}'                      # waits for running attempts
+scripts/usine-api.sh POST /api/upgrade '{"timing":"idle"}'                      # waits for running attempts and defers every new attempt until the restart (#783); only with an empty queue, a restart is the only cancel
 scripts/usine-api.sh POST /api/upgrade '{"timing":"now","version":"0.4.1-next.271"}'
 ```
 
@@ -65,3 +65,5 @@ ssh $USINE_SSH "cd $USINE_DIR && sqlite3 -readonly .usine/runtime.sqlite \"selec
 ```
 
 `PoolRateLimitsUpdated` carries the harness plan's `usedPercent` and `resetsAt`; check it before queuing a large batch on a subscription plan.
+
+A steer to the `Parent` while it waits on a child isn't seen by the child (#835): steer the child, or post the finding on the PR and send the item back through the findings lane.

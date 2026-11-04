@@ -17,3 +17,7 @@ coverage/
 
 # Overseer ledger and helper state (orchestrating-usine skill)
 .scratchpad/
+
+# Local environment and agent worktrees
+.env
+.claude/worktrees/
