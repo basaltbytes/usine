@@ -36,11 +36,7 @@ export const RepositoryMark = ({ repository, size = "inline" }: RepositoryMarkPr
         referrerPolicy="no-referrer"
         className="rounded-sm"
       />
-      {/* The delay keeps the letter from flashing while an uncached image loads. */}
-      <AvatarFallback
-        delay={600}
-        className="rounded-sm bg-accent text-xs font-semibold text-foreground"
-      >
+      <AvatarFallback className="rounded-sm bg-accent text-xs font-semibold text-foreground">
         {monogram(name)}
       </AvatarFallback>
     </Avatar>

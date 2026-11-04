@@ -1,4 +1,4 @@
-import { createTwoFilesPatch } from "diff";
+import { createTwoFilesPatch, FILE_HEADERS_ONLY } from "diff";
 
 export const configurationDiff = (name: string, before: string, after: string): string =>
   before === after
@@ -8,4 +8,7 @@ export const configurationDiff = (name: string, before: string, after: string): 
         after === "" ? "/dev/null" : `b/${name}`,
         before,
         after,
+        undefined,
+        undefined,
+        { headerOptions: FILE_HEADERS_ONLY },
       );
