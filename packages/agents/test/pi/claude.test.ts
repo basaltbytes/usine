@@ -410,10 +410,10 @@ describe("Claude child backend", () => {
             snapshots,
             [
               { primary, secondary: null },
-              { primary, secondary },
-              { primary: resetPrimary, secondary },
+              { primary: null, secondary },
+              { primary: resetPrimary, secondary: null },
               ...Array.from({ length: 3 }, () => ({
-                primary: resetPrimary,
+                primary: null,
                 secondary: { ...secondary, usedPercent: 125 },
               })),
             ].map((windows) => ({ limitId: null, limitName: null, ...windows })),
@@ -423,7 +423,7 @@ describe("Claude child backend", () => {
     );
   }
 
-  it.effect("skips incomplete or invalid plan reports without losing the last valid window", () => {
+  it.effect("skips incomplete or invalid plan reports and emits only the observed window", () => {
     const sdk = Layer.succeed(ClaudeSdk)({
       open: () =>
         scripted([
@@ -478,7 +478,7 @@ describe("Claude child backend", () => {
       assert.deepStrictEqual(snapshot, {
         limitId: null,
         limitName: null,
-        primary: { usedPercent: 25, windowDurationMinutes: 300, resetsAt: null },
+        primary: null,
         secondary: { usedPercent: 50, windowDurationMinutes: 10_080, resetsAt: null },
       });
     }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);

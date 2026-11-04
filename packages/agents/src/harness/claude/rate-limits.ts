@@ -33,15 +33,9 @@ const decodeRateLimit = Schema.decodeUnknownEffect(
   }),
 );
 
-/** Retains the other allowance when Claude reports only one window, including across resumes. */
+/** Emits only the allowance window included in the provider report. */
 export const claudeRateLimits = (session: ChildSession) => {
   const pool = sessionPool(session);
-  let snapshot = RateLimitsSnapshot.make({
-    limitId: Option.none(),
-    limitName: Option.none(),
-    primary: Option.none(),
-    secondary: Option.none(),
-  });
 
   return Effect.fn("ClaudeRateLimits.read")(
     function* (message: Schema.Json) {
@@ -69,7 +63,12 @@ export const claudeRateLimits = (session: ChildSession) => {
         windowDurationMinutes: Option.some(field === "primary" ? 300 : 10_080),
         resetsAt: Option.fromUndefinedOr(info.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
       });
-      snapshot = RateLimitsSnapshot.make({ ...snapshot, [field]: Option.some(window) });
+      const snapshot = RateLimitsSnapshot.make({
+        limitId: Option.none(),
+        limitName: Option.none(),
+        primary: field === "primary" ? Option.some(window) : Option.none(),
+        secondary: field === "secondary" ? Option.some(window) : Option.none(),
+      });
       yield* Effect.logDebug("Claude plan rate-limit window updated", {
         sessionId: session.id,
         rateLimitType: info.rateLimitType,

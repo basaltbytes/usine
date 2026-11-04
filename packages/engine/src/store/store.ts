@@ -155,8 +155,15 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ pool: event.pool });
     for (const window of ["primary", "secondary"] as const) {
       const key = `${event.pool}:${window}`;
-      yield* FiberMap.remove(poolResets, key);
       const limit = event.rateLimits[window];
+      if (event.pool === "claudePlan" && Option.isNone(limit)) {
+        yield* Effect.logDebug("Claude window unreported; keeping its pool reset deadline", {
+          pool: event.pool,
+          window,
+        });
+        continue;
+      }
+      yield* FiberMap.remove(poolResets, key);
       if (Option.isNone(limit) || Option.isNone(limit.value.resetsAt)) {
         yield* Effect.logDebug("Pool reset has no deadline", { pool: event.pool, window });
         continue;
