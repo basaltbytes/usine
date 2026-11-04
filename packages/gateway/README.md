@@ -32,7 +32,7 @@ On Hetzner Cloud, `gateway.sh install` does either on the gateway VM and restart
 
 | Import | Contents |
 | --- | --- |
-| `@usine/gateway` | The platform-free core: `GatewaySettings`, `SettingsInForce` (the allowlist and LLM providers that a reload replaces), `Attachments`, `CallerTokens`, `ChatGptLogins` (the ChatGPT logins and their refresh), `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone and returns redirects without following them, and a `FileSystem` for ChatGPT auth files. |
+| `@usine/gateway` | The platform-free core: `GatewaySettings`, `SettingsInForce` (the allowlist and LLM providers that a reload replaces), `Attachments`, `CallerTokens`, `ChatGptLogins` (the ChatGPT logins and their refresh), `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone and returns redirects without following them, a `FileSystem` for ChatGPT auth files, and `Crypto` for auth-file names. The Node entry point supplies `NodeCrypto.layer`. |
 | `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract for `HttpApiClient.make` in the executor, with the records a client sends and reads (`AttachRequest`, `InstallationCredential`, `Attached`, `AttachmentId`, `CallerToken`, `Detached`, `AttachmentList`, `LlmProviderList`) and `GATEWAY_TOKEN_HEADER`. |
 | `@usine/gateway/node` | `gatewayLayer` (the three servers on Node, with undici upstream), `gatewayFromEnvironment`, `settingsFromEnvironment`, `GatewayAddresses`, and `GatewayReload`. |
 | `usine-gateway` | The gateway VM's command. It reads the settings below, reloads on SIGHUP, and logs one JSON object per line. |
@@ -226,3 +226,5 @@ The unit tests for the ChatGPT login (`test/chatgpt.test.ts`) use stand-ins for 
 ## Schema contracts
 
 Gateway records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Attachment persistence encodes snapshots inside Effects and reports codec failures through `AttachmentPersistenceError`.
+
+Run `pnpm --filter @usine/gateway check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

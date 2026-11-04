@@ -59,3 +59,5 @@ pnpm --filter @usine/docs run deploy
 ```
 
 `wrangler.jsonc` configures the `usine-docs` Worker and custom domain.
+
+Diagram tests use scoped Effects with live services and keep source-based test registration synchronous.

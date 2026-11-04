@@ -33,3 +33,5 @@ After `pnpm build`, `pnpm --filter create-usine test` runs the compiled CLI in t
 ## Schema contracts
 
 Scaffold operations decode configuration inside Effects and report failures through the scaffold error channel.
+
+Run `pnpm --filter create-usine check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

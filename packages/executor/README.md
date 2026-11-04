@@ -343,3 +343,5 @@ Remote Codex children keep their app-server running when SSH disconnects. Reconn
 ## Schema contracts
 
 Executor records and errors use nominal Schema brands. Use their schema constructors for typed values. Worker protocol encoding runs inside Effects and reports failures through the operation’s existing error type.
+
+Run `pnpm --filter @usine/executor check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

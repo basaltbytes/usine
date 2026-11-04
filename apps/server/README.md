@@ -258,3 +258,5 @@ Read `GET /api/health` to check `sqliteReader`: `worker` means standalone reads 
 ## Schema contracts
 
 Operator request and response records use nominal Schema brands. TypeScript integrations construct records with their schema’s `make` method or decode JSON with `Schema.decodeUnknownEffect`. HTTP request and response formats remain unchanged.
+
+Run `pnpm --filter @usine/server check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

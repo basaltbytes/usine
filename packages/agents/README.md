@@ -147,3 +147,5 @@ Remote Codex children run under a detached Node supervisor. Preflight checks tha
 ## Schema contracts
 
 Session records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Codex request serialization is pure over validated parameters. Child backends decode responses inside Effects and report invalid responses through session operation errors.
+
+Run `pnpm --filter @usine/agents check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
