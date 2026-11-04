@@ -5,7 +5,12 @@ import { jsonKey } from "@usine/core/json-key";
 // @effect-diagnostics asyncFunction:off
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import {
+  AgentSessionId,
+  ChildSession,
+  PoolRateLimitsUpdated,
+  RateLimitsSnapshot,
+} from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import {
   Cause,
@@ -322,6 +327,199 @@ const droppedLaunch = () => {
 };
 
 describe("Claude child backend", () => {
+  for (const gatewayCredential of [Option.none(), Option.some("subscription" as const)]) {
+    it.effect(
+      `reports Claude plan windows with ${Option.isSome(gatewayCredential) ? "a gateway subscription" : "the worker login"}`,
+      () => {
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: () =>
+            scripted([
+              {
+                type: "rate_limit_event",
+                rate_limit_info: {
+                  status: "allowed_warning",
+                  rateLimitType: "five_hour",
+                  utilization: 0.82,
+                  resetsAt: 1_793_836_800,
+                },
+              },
+              {
+                type: "rate_limit_event",
+                rate_limit_info: {
+                  status: "allowed",
+                  rateLimitType: "seven_day",
+                  utilization: 0.4,
+                  resetsAt: 1_794_355_200,
+                },
+              },
+              {
+                type: "rate_limit_event",
+                rate_limit_info: {
+                  status: "allowed",
+                  rateLimitType: "five_hour",
+                  utilization: 0,
+                },
+              },
+              ...["seven_day_opus", "seven_day_sonnet", "seven_day_overage_included"].map(
+                (rateLimitType) => ({
+                  type: "rate_limit_event",
+                  rate_limit_info: {
+                    status: "rejected",
+                    rateLimitType,
+                    utilization: 1.25,
+                    resetsAt: 1_794_355_200,
+                  },
+                }),
+              ),
+              { type: "result", subtype: "success", result: "Done" },
+            ]),
+        });
+        return Effect.gen(function* () {
+          const original = request();
+          const childRequest = ChildRequest.make({
+            ...original,
+            session: ChildSession.make({ ...original.session, gatewayCredential }),
+          });
+          const session = yield* (yield* ChildBackend).launch(childRequest);
+          const [events, result] = yield* Effect.all([
+            Stream.runCollect(session.events),
+            session.result,
+          ]);
+          assert.strictEqual(result.message, "Done");
+          const reports = events.filter(Schema.is(PoolRateLimitsUpdated));
+          for (const report of reports) {
+            assert.strictEqual(report.pool, "claudePlan");
+            assert.deepStrictEqual(report.session, childRequest.session);
+            assert.isTrue(Option.isNone(report.login));
+          }
+          const primary = {
+            usedPercent: 82,
+            windowDurationMinutes: 300,
+            resetsAt: "2026-11-05T00:00:00.000Z",
+          };
+          const resetPrimary = { usedPercent: 0, windowDurationMinutes: 300, resetsAt: null };
+          const secondary = {
+            usedPercent: 40,
+            windowDurationMinutes: 10_080,
+            resetsAt: "2026-11-11T00:00:00.000Z",
+          };
+          const snapshots = yield* Effect.forEach(reports, ({ rateLimits }) =>
+            Schema.encodeEffect(RateLimitsSnapshot)(rateLimits),
+          );
+          assert.deepStrictEqual(
+            snapshots,
+            [
+              { primary, secondary: null },
+              { primary, secondary },
+              { primary: resetPrimary, secondary },
+              ...Array.from({ length: 3 }, () => ({
+                primary: resetPrimary,
+                secondary: { ...secondary, usedPercent: 125 },
+              })),
+            ].map((windows) => ({ limitId: null, limitName: null, ...windows })),
+          );
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
+      },
+    );
+  }
+
+  it.effect("skips incomplete or invalid plan reports without losing the last valid window", () => {
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () =>
+        scripted([
+          {
+            type: "rate_limit_event",
+            rate_limit_info: {
+              status: "allowed",
+              rateLimitType: "five_hour",
+              utilization: 0.25,
+            },
+          },
+          rateLimitEvent,
+          { type: "rate_limit_event" },
+          ...[
+            { rateLimitType: "seven_day" },
+            { utilization: 0.9 },
+            { rateLimitType: "overage", utilization: 0.9 },
+            { rateLimitType: "future_window", utilization: 0.9 },
+            { rateLimitType: "five_hour", utilization: -1 },
+            { rateLimitType: "five_hour", utilization: "0.9" },
+            { rateLimitType: "five_hour", utilization: 0.9, resetsAt: "tomorrow" },
+            { rateLimitType: "five_hour", utilization: 0.9, resetsAt: 1e20 },
+            { rateLimitType: "five_hour", utilization: 1e308 },
+          ].map((info) => ({
+            type: "rate_limit_event",
+            rate_limit_info: { status: "allowed_warning", ...info },
+          })),
+          {
+            type: "rate_limit_event",
+            rate_limit_info: {
+              status: "allowed",
+              rateLimitType: "seven_day",
+              utilization: 0.5,
+              extra_vendor_field: true,
+            },
+          },
+          { type: "result", subtype: "success", result: "Done" },
+        ]),
+    });
+    return Effect.gen(function* () {
+      const session = yield* (yield* ChildBackend).launch(request());
+      const [events, result] = yield* Effect.all([
+        Stream.runCollect(session.events),
+        session.result,
+      ]);
+      assert.strictEqual(result.message, "Done");
+      const reports = events.filter(Schema.is(PoolRateLimitsUpdated));
+      assert.lengthOf(reports, 2);
+      const latest = reports.at(-1);
+      assert(latest !== undefined);
+      const snapshot = yield* Schema.encodeEffect(RateLimitsSnapshot)(latest.rateLimits);
+      assert.deepStrictEqual(snapshot, {
+        limitId: null,
+        limitName: null,
+        primary: { usedPercent: 25, windowDurationMinutes: 300, resetsAt: null },
+        secondary: { usedPercent: 50, windowDurationMinutes: 10_080, resetsAt: null },
+      });
+    }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
+  });
+
+  it.effect("keeps API-key sessions out of the Claude plan rate windows", () => {
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () =>
+        scripted([
+          {
+            type: "rate_limit_event",
+            rate_limit_info: {
+              status: "allowed_warning",
+              rateLimitType: "five_hour",
+              utilization: 0.9,
+              resetsAt: 1_793_836_800,
+            },
+          },
+          { type: "result", subtype: "success", result: "Done" },
+        ]),
+    });
+    return Effect.gen(function* () {
+      const original = request();
+      const session = yield* (yield* ChildBackend).launch(
+        ChildRequest.make({
+          ...original,
+          session: ChildSession.make({
+            ...original.session,
+            gatewayCredential: Option.some("api-key"),
+          }),
+        }),
+      );
+      const [events, result] = yield* Effect.all([
+        Stream.runCollect(session.events),
+        session.result,
+      ]);
+      assert.strictEqual(result.message, "Done");
+      assert.lengthOf(events.filter(Schema.is(PoolRateLimitsUpdated)), 0);
+    }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))), Effect.scoped);
+  });
+
   it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>
     Effect.gen(function* () {
       const { launches, sdk } = loginRace(1);
