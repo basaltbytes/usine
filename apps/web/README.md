@@ -304,6 +304,12 @@ The tests use up to about 4.7 GiB of memory, roughly half in Vitest's process an
 
 React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, shadcn components on Base UI with Phosphor icons, GitHub Octicons for issue and pull request marks, and shadcn/typeset over react-markdown for prose. The visual system (ADR 0015) is dark-only on Catppuccin Mocha; [`DESIGN.md`](DESIGN.md) defines its colors, type, and components.
 
+## Role bindings
+
+**Configuration > Role bindings** creates and edits named bindings through a form. Select a member by GitHub login and choose instance scope for admin access, or a configured project for viewer, operator, or maintainer access. Changing scope updates the available roles. **Edit as text** switches to the export format for the same draft.
+
+**Members** links each binding to its editor and offers **Add binding** with that member preselected. Imported bindings for unenrolled members show **Member not enrolled** and preserve the stored identity until a member is selected. Saving and deleting bindings uses configuration revisions with the acting member recorded in history.
+
 ## How to add UI
 
 The registry is the component library, and the theme is the only place for colors and type.

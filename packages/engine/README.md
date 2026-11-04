@@ -256,6 +256,6 @@ Run `pnpm --filter @usine/engine check` after building dependencies to check Typ
 
 ## Step outputs
 
-`StepOutputStore` (`/step-outputs`) writes full documents idempotently by attempt and name. `/step-outputs/sqlite` provides the SQL adapter on the application's `SqlClient`, with gzip bodies and a separate migration ledger. `/step-outputs/memory` provides the same contract with an injected attempt-success reader. `list` reads metadata by repository, item, and optional opaque type; `read` returns a document by attempt and name. Both expose only succeeded attempts.
+`StepOutputStore` (`/step-outputs`) writes full documents idempotently by attempt and name. `/step-outputs/sqlite` provides the SQL adapter on the application's `SqlClient`, with gzip bodies and a separate migration ledger. `/step-outputs/memory` provides the same contract with an injected attempt-success reader. `list` reads metadata by repository, item, and optional opaque type; `read` returns a document by attempt and name. Both expose only succeeded attempts. Lists use binary order by attempt ID, then output name.
 
 The local database composition provides `StepOutputStore` alongside `RunDatabase`. `layerWithDatabase` requires both ports. The engine writes documents before `finishAttempt`; replay preserves one row per output. Run reads and exports include only `StepResult.outputs` refs.

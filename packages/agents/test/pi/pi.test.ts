@@ -21,7 +21,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import { AgentSessionId, ChildSession, sessionPool } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Fiber, Layer, Logger, Option, Queue, Stream, Schema } from "effect";
@@ -38,7 +38,7 @@ import {
   type OnDelivery,
 } from "../../src/runtime.ts";
 import { LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
-import { piChildBackendLayer } from "../../src/pi/pi.ts";
+import { piChildBackendLayer } from "../../src/harness/pi/pi.ts";
 import {
   environmentBashTool,
   piChildTools,
@@ -47,8 +47,8 @@ import {
   type PiSessionEvent,
   type PiStartOptions,
   type PiStartResult,
-} from "../../src/pi/sdk.ts";
-import { resolvePiPool } from "../../src/pi/authentication.ts";
+} from "../../src/harness/pi/sdk.ts";
+import { resolvePiPool } from "../../src/harness/pi/authentication.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
 const childTools = ["read", "bash", "edit", "write"];
@@ -288,7 +288,10 @@ describe("Pi child backend", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("normalizes session events and forwards input and controls", () => {
+  it.effect.each([
+    { pool: "apiKeys", model: "openai/gpt-5.6-terra-2026-08-01" },
+    { pool: "chatgptPlan", model: "openai-codex/gpt-5.6-sol" },
+  ] as const)("normalizes $pool events and controls", ({ pool, model }) => {
     let options: PiStartOptions | undefined;
     const listeners: Array<(event: PiSessionEvent) => void> = [];
     const publish = (event: PiSessionEvent) => {
@@ -311,7 +314,17 @@ describe("Pi child backend", () => {
         publish({ type: "compaction_start", reason: "threshold" });
         publish({
           type: "message_end",
-          message: fauxAssistantMessage("Pi child done."),
+          message: {
+            ...fauxAssistantMessage("Pi child done."),
+            usage: {
+              input: 10,
+              output: 5,
+              cacheRead: 20,
+              cacheWrite: 2,
+              totalTokens: 37,
+              cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+            },
+          },
         });
         return Promise.resolve();
       },
@@ -324,14 +337,14 @@ describe("Pi child backend", () => {
         return () => undefined;
       },
     };
-    const effectiveModel = ModelId.make("openai/gpt-5.6-terra-2026-08-01");
+    const effectiveModel = ModelId.make(model);
     const sdk = Layer.succeed(PiSdk)({
       start: (found) => {
         options = found;
         return Promise.resolve({
           _tag: "Started",
           model: effectiveModel,
-          pool: "apiKeys",
+          pool,
           session,
           tools: childTools,
         });
@@ -350,6 +363,12 @@ describe("Pi child backend", () => {
         ]);
         assert.strictEqual(result.message, "Pi child done.");
         assert.strictEqual(running.session.brain.model, effectiveModel);
+        assert.strictEqual(sessionPool(running.session), pool);
+        const usage = events.find((event) => event._tag === "SessionTokensUpdated");
+        assert(usage?._tag === "SessionTokensUpdated");
+        assert.strictEqual(sessionPool(usage.session), pool);
+        assert.strictEqual(usage.totalTokens, 17);
+        assert.deepStrictEqual(usage.costUsd, Option.some(0.03));
         assert.strictEqual(prompt, childRequest.prompt);
         assert.strictEqual(steer, "Check the test output.");
         assert.strictEqual(interrupted, true);
@@ -504,41 +523,37 @@ describe("Pi child backend", () => {
     );
   });
 
-  it.effect("rejects a child model outside the API-key pool", () => {
-    const model = ModelId.make("openai-codex/gpt-5.6-sol");
-    let disposed = false;
-    const session: PiSession = {
-      abort: () => Promise.resolve(),
-      dispose: () => {
-        disposed = true;
+  for (const [started, pool] of [
+    [
+      { _tag: "AuthenticationUnavailable", model: ModelId.make("openai-codex/gpt-5.6-sol") },
+      "chatgptPlan",
+    ],
+    [{ _tag: "AuthenticationUnavailable", model: ModelId.make("openai/gpt-5.6-sol") }, "apiKeys"],
+    [
+      {
+        _tag: "UnsupportedAuthentication",
+        model: ModelId.make("github-copilot/gpt-5.6-sol"),
+        authentication: { _tag: "OAuth", subscription: true },
       },
-      messages: [],
-      prompt: () => Promise.resolve(),
-      steer: () => Promise.resolve(),
-      subscribe: () => () => undefined,
-    };
-    const sdk = Layer.succeed(PiSdk)({
-      start: () =>
-        Promise.resolve({
-          _tag: "Started",
-          model,
-          pool: "chatgptPlan",
-          session,
-          tools: childTools,
-        }),
+      "apiKeys",
+    ],
+  ] as const) {
+    it.effect(`rejects ${started.model} with ${started._tag}`, () => {
+      const sdk = Layer.succeed(PiSdk)({
+        start: () => Promise.resolve(started),
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const backend = yield* PiChildBackend;
+          const error = yield* Effect.flip(backend.launch(childRequest));
+          const matchesError = Schema.is(PoolUnavailableError)(error);
+          assert(matchesError);
+          assert.strictEqual(error.pool, pool);
+          assert.strictEqual(error.model, started.model);
+        }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
+      );
     });
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* PiChildBackend;
-        const error = yield* Effect.flip(backend.launch(childRequest));
-        const matchesError = Schema.is(PoolUnavailableError)(error);
-        assert(matchesError);
-        assert.strictEqual(error.pool, "apiKeys");
-        assert.strictEqual(error.model, model);
-        assert.strictEqual(disposed, true);
-      }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
-    );
-  });
+  }
 
   it.effect("runs a child's bash commands with exactly its environment and nothing inherited", () =>
     Effect.gen(function* () {

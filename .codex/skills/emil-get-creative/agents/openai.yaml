@@ -1,0 +1,5 @@
+interface:
+  display_name: "Get Creative"
+  short_description: "Turn a vibe into researched rules and a generator you can explore"
+policy:
+  allow_implicit_invocation: false

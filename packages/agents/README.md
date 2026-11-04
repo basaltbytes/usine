@@ -37,7 +37,7 @@ Child prompts include the rendered loop task unchanged, including edit-and-retry
 - **Parent:** a Pi model with an API key, or an `openai-codex` ChatGPT model through Plus or Pro OAuth. The start log records `apiKeys` or `chatgptPlan`. A child past the run spec's child-session budget stops the parent with `ChildSessionBudgetExceededError`.
 - **Claude Code:** the worker's `claude` through the Agent SDK, with `bypassPermissions`, worker-user settings only, and the CLI login.
 - **Codex:** app-server JSON-RPC over stdio, with `approvalPolicy: never` and the CLI login. It checks the login with `account/read` before creating a thread, and records plan rate windows as `PoolRateLimitsUpdated`. An API-key login, no login, or an unsupported account fails with `PoolUnavailableError`, which needs the operator. A change to unsupported authentication ends the session before more rate windows are recorded. If `ChildSession.gatewayCredential` is set, the gateway holds the OpenAI credential and Codex has no login: the child skips the login check and ignores login changes, and its pool follows the credential kind, `chatgptPlan` for a ChatGPT login and `apiKeys` for an API key.
-- **Pi children:** API keys only.
+- **Pi children:** an API key for the selected provider, or a ChatGPT subscription login for an `openai-codex/...` model, using the same authentication and billing pools as the parent. Other OAuth providers remain unavailable. Pi reports tokens and cost, but no plan rate windows, so usine cannot warn before Pi sessions reach the ChatGPT plan limit.
 
 Codex rate-window events include the login email returned by `account/read`. A supported account change refreshes that identity before more snapshots are recorded. Gateway-backed children have no local login and leave it absent. Account identity is stored for display and excluded from diagnostic logs.
 
@@ -118,13 +118,13 @@ Claude children save sessions, and Codex threads aren't ephemeral. `SessionStart
 
 `preflight(brain, host, environment)` (`/preflight`, Node) checks a worker without a prompt, using a `ChildProcessSpawner` layer. Each check sees `environment` as a child does. On a `RemoteShell` host, checks run over SSH, an SSH failure (exit 255) is an incomplete check rather than a missing harness, and a Pi brain is unavailable.
 
-It accepts Codex CLI **0.164.0 (or 0.159.0 through 0.159.3 for one release)** (`supportedCodexVersions`; `unsupportedCodexVersion` returns the error for other `codex --version` output) with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
+It accepts Codex CLI **0.164.0 (or 0.159.0 through 0.159.3 for one release)** (`supportedCodexVersions`; `unsupportedCodexVersion` returns the error for other `codex --version` output) with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key or `openai-codex` ChatGPT login through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
 
 ## Live contract tests
 
 The opt-in live contracts, in disposable directories, steer a child during a waiting command, checking the response and event framing, and interrupt another; Codex also needs a real rate-window snapshot. Claude and Codex cases also run through `test/fixtures/ssh-shim.sh`, an SSH stand-in that runs the remote command locally, to check it, its environment, and its pid file with the real CLIs.
 
-They need a supported Codex CLI with a ChatGPT login, a Claude CLI with a subscription login, an API key for the Pi provider, and explicit models:
+They need a supported Codex CLI with a ChatGPT login, a Claude CLI with a subscription login, an API key or ChatGPT login for the Pi provider, and explicit models:
 
 ```sh
 USINE_CLAUDE_INTEGRATION_MODEL=claude-sonnet-5-5 pnpm --filter @usine/agents test:integration:claude
@@ -147,6 +147,8 @@ Remote Codex children run under a detached Node supervisor. Preflight checks tha
 ## Schema contracts
 
 Session records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Codex request serialization is pure over validated parameters. Child backends decode responses inside Effects and report invalid responses through session operation errors.
+
+The harness implementations are grouped under `src/harness/claude/`, `src/harness/codex/`, and `src/harness/pi/`. Shared dispatch, conversation, session-channel, and usage helpers are in `src/harness/`. Consumers use the published subpaths shown above.
 
 Run `pnpm --filter @usine/agents check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
 

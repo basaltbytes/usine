@@ -16,13 +16,11 @@ const failure = (operation: string) => (cause: unknown) =>
   EnginePersistenceError.make({ operation, cause });
 
 const compress = (text: string) =>
-  Effect.tryPromise({
-    try: () =>
-      new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip")))
-        .arrayBuffer()
-        .then((body) => new Uint8Array(body)),
-    catch: failure("compress step output"),
-  });
+  Effect.promise(() =>
+    new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip")))
+      .arrayBuffer()
+      .then((body) => new Uint8Array(body)),
+  );
 const decompress = (body: Uint8Array) =>
   Effect.tryPromise({
     try: () =>
@@ -59,7 +57,7 @@ export const sqliteStepOutputLayer = Layer.effect(
           const now = yield* DateTime.now;
           const createdAt = DateTime.formatIso(now);
           for (const output of outputs) {
-            const json = yield* Schema.encodeEffect(ContentJson)(output.content);
+            const json = yield* Schema.encodeEffect(ContentJson)(output.content).pipe(Effect.orDie);
             const body = yield* compress(json);
             yield* sql`INSERT INTO usine_step_outputs ${sql.insert({
               attempt_id: context.attemptId,
@@ -89,12 +87,14 @@ export const sqliteStepOutputLayer = Layer.effect(
       list: Effect.fn("StepOutputStore.list")(
         function* (repository, itemNumber, type) {
           yield* Effect.annotateCurrentSpan({ repository, itemNumber });
-          const rows = yield* sql.unsafe(
-            `SELECT ${fields} FROM usine_step_outputs o ${succeeded}
-        WHERE o.repository = ? AND o.item_number = ? ${Option.isSome(type) ? "AND o.type = ?" : ""}
-        ORDER BY o.attempt_id, o.name`,
-            Option.isSome(type) ? [repository, itemNumber, type.value] : [repository, itemNumber],
-          );
+          const typeFilter = Option.match(type, {
+            onNone: () => sql``,
+            onSome: (value) => sql`AND o.type = ${value}`,
+          });
+          const rows = yield* sql`SELECT ${sql.literal(fields)}
+            FROM usine_step_outputs o ${sql.literal(succeeded)}
+            WHERE o.repository = ${repository} AND o.item_number = ${itemNumber} ${typeFilter}
+            ORDER BY o.attempt_id, o.name`;
           return (yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct(RefFields)))(
             rows,
           )).map((row) => StoredStepOutput.make(row));
@@ -104,11 +104,9 @@ export const sqliteStepOutputLayer = Layer.effect(
       read: Effect.fn("StepOutputStore.read")(
         function* (attemptId, name) {
           yield* Effect.annotateCurrentSpan({ attemptId, name });
-          const rows = yield* sql.unsafe(
-            `SELECT ${fields}, o.body FROM usine_step_outputs o ${succeeded}
-        WHERE o.attempt_id = ? AND o.name = ?`,
-            [attemptId, name],
-          );
+          const rows = yield* sql`SELECT ${sql.literal(fields)}, o.body
+            FROM usine_step_outputs o ${sql.literal(succeeded)}
+            WHERE o.attempt_id = ${attemptId} AND o.name = ${name}`;
           const row = rows[0];
           if (row === undefined) return Option.none();
           const decoded = yield* Schema.decodeUnknownEffect(

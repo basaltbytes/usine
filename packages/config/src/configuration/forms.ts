@@ -1,3 +1,4 @@
+import { RoleBinding } from "@usine/core/access";
 import { RepositoryName } from "@usine/core/repository";
 import { Project } from "../project/project.ts";
 import { Effect, Option, Record, Schema } from "effect";
@@ -22,6 +23,7 @@ const ProjectDraft = Schema.Struct({
   repositories: Schema.Array(RepositoryName),
 });
 const formSchemas = {
+  binding: RoleBinding,
   project: Project,
   agent: AgentJson,
   loop: LoopJson,

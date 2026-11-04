@@ -149,9 +149,9 @@ export const readOutputs = Effect.fn("Executor.readOutputs")(
         const envelope = yield* Schema.decodeUnknownEffect(Envelope)(entry.envelope, {
           onExcessProperty: "error",
         }).pipe(
-          Effect.mapError(() =>
+          Effect.mapError((cause) =>
             AgentFailure.make({
-              message: `${file}: invalid envelope; expected a non-empty type of at most 128 characters, optional full commit, and JSON content`,
+              message: `${file}: invalid envelope: ${cause.message}`,
             }),
           ),
         );
@@ -171,13 +171,7 @@ export const readOutputs = Effect.fn("Executor.readOutputs")(
           return yield* AgentFailure.make({
             message: `${file}: content exceeds ${MAX_STEP_OUTPUT_BYTES} bytes (8 MiB)`,
           });
-        const digest = yield* crypto
-          .digest("SHA-256", bytes)
-          .pipe(
-            Effect.mapError((cause) =>
-              InfraFailure.make({ message: "Can't hash step output content", cause }),
-            ),
-          );
+        const digest = yield* crypto.digest("SHA-256", bytes).pipe(Effect.orDie);
         return StepOutput.make({
           name,
           ...envelope,

@@ -1,6 +1,5 @@
 export const title = "Members";
-export const adminAccess =
-  "Role bindings control access. Add bindings in Configuration using the member’s GitHub ID.";
+export const adminAccess = "Role bindings control access to the instance and projects.";
 export const loginLabel = "GitHub login";
 export const addMember = "Add member";
 export const adding = "Saving…";
@@ -14,3 +13,5 @@ export const bindingsTitle = "Bindings";
 export const actionsTitle = "Actions";
 export const noBindings = "No bindings";
 export const instanceScope = "Instance";
+
+export const addBinding = "Add binding";

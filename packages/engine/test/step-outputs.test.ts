@@ -121,6 +121,24 @@ for (const [name, fixture] of [
         expect(secondBody).toEqual(Option.some(other));
         const allRefs = yield* store.list(context.repository, ItemNumber.make(42), Option.none());
         expect(allRefs).toHaveLength(2);
+        const ordered = ["A", "a", "\ue000", "\u{10000}"];
+        for (const suffix of [...ordered].reverse()) {
+          const attemptId = AttemptId.make(`attempt-${suffix}`);
+          yield* outcome(attemptId, "Succeeded");
+          yield* store.write(StepOutputContext.make({ ...context, attemptId }), [
+            StepOutput.make({ ...output, name: StepOutputName.make("a_2") }),
+            StepOutput.make({ ...output, name: StepOutputName.make("a-2") }),
+          ]);
+        }
+        const sorted = yield* store.list(context.repository, ItemNumber.make(42), Option.none());
+        expect(sorted.map((ref) => [ref.attemptId, ref.name])).toEqual([
+          [context.attemptId, "second"],
+          [context.attemptId, "walkthrough"],
+          ...ordered.flatMap((suffix) => [
+            [`attempt-${suffix}`, "a-2"],
+            [`attempt-${suffix}`, "a_2"],
+          ]),
+        ]);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
   });

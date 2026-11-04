@@ -16,32 +16,32 @@
   "sideEffects": false,
   "exports": {
     "./pi": {
-      "types": "./dist/pi/pi.d.ts",
-      "default": "./dist/pi/pi.js"
+      "types": "./dist/harness/pi/pi.d.ts",
+      "default": "./dist/harness/pi/pi.js"
     },
     "./child-host": {
       "types": "./dist/child-host/child-host.d.ts",
       "default": "./dist/child-host/child-host.js"
     },
     "./children": {
-      "types": "./dist/pi/children.d.ts",
-      "default": "./dist/pi/children.js"
+      "types": "./dist/harness/children.d.ts",
+      "default": "./dist/harness/children.js"
     },
     "./claude": {
-      "types": "./dist/pi/claude/claude.d.ts",
-      "default": "./dist/pi/claude/claude.js"
+      "types": "./dist/harness/claude/claude.d.ts",
+      "default": "./dist/harness/claude/claude.js"
     },
     "./codex": {
-      "types": "./dist/pi/codex/codex.d.ts",
-      "default": "./dist/pi/codex/codex.js"
+      "types": "./dist/harness/codex/codex.d.ts",
+      "default": "./dist/harness/codex/codex.js"
     },
     "./openai-prices": {
       "types": "./dist/openai-prices.d.ts",
       "default": "./dist/openai-prices.js"
     },
     "./pi/authentication": {
-      "types": "./dist/pi/authentication.d.ts",
-      "default": "./dist/pi/authentication.js"
+      "types": "./dist/harness/pi/authentication.d.ts",
+      "default": "./dist/harness/pi/authentication.js"
     },
     "./prompt": {
       "types": "./dist/prompt.d.ts",

@@ -1,9 +1,14 @@
 import { jsonKey } from "@usine/core/json-key";
 import type { AttemptId } from "@usine/core/attempt";
 import type { StepOutput } from "@usine/core/step/output";
-import { DateTime, Effect, Layer, Option, Ref } from "effect";
+import { DateTime, Effect, Layer, Option, Order, Ref } from "effect";
 import type { EnginePersistenceError } from "../engine/error.ts";
 import { StepOutputStore, StoredStepOutput } from "./store.ts";
+
+// SQLite's binary collation compares UTF-8 bytes, independent of the host locale.
+const binaryOrder = Order.mapInput(Order.Array(Order.Number), (value: string) =>
+  Array.from(new TextEncoder().encode(value)),
+);
 
 /** Provides an independent store; `succeeded` reads the caller's attempt outcomes. */
 export const memoryStepOutputLayer = (
@@ -52,7 +57,7 @@ export const memoryStepOutputLayer = (
           const visible = yield* Effect.filter(matching, ({ ref }) => succeeded(ref.attemptId));
           return visible
             .map(({ ref }) => ref)
-            .sort((a, b) => a.attemptId.localeCompare(b.attemptId) || a.name.localeCompare(b.name));
+            .sort((a, b) => binaryOrder(a.attemptId, b.attemptId) || binaryOrder(a.name, b.name));
         }),
         read: Effect.fn("StepOutputStore.read")(function* (attemptId, name) {
           yield* Effect.annotateCurrentSpan({ attemptId, name });

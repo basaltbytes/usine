@@ -12,18 +12,19 @@ import { CommandButton } from "~/components/command-palette/button";
 import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "~/components/ui/button";
+import { Button, buttonVariants } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ErrorAlert } from "~/components/error-alert";
 import { Acknowledged, authRequest, type AuthRequestOptions } from "~/lib/auth";
 import { rejectionMessage } from "~/lib/api";
-import { membersQuery } from "./queries";
+import { membersQuery } from "~/lib/members/queries";
 import {
   title,
   adminAccess,
   loginLabel,
   addMember,
+  addBinding,
   adding,
   removeMember,
   confirmRemove,
@@ -137,6 +138,14 @@ export const MembersPage = () => {
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap justify-end gap-2">
+                  <Link
+                    to="/configuration/bindings"
+                    search={{ member: member.login }}
+                    aria-label={`${addBinding} · ${member.login}`}
+                    className={buttonVariants({ variant: "outline" })}
+                  >
+                    {addBinding}
+                  </Link>
                   {removing === member.id ? (
                     <>
                       <Button

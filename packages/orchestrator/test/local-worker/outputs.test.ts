@@ -203,7 +203,7 @@ describe("local step outputs", () => {
     ["commit must equal", jsonKey({ type: "balade.walkthrough", commit: "f".repeat(40), content })],
     ["8 MiB", " ".repeat(MAX_STEP_OUTPUT_BYTES + 1)],
     ["type", jsonKey({ type: "", content })],
-    ["128 characters", jsonKey({ type: "x".repeat(129), content })],
+    ["length of at most 128", jsonKey({ type: "x".repeat(129), content })],
     [
       "cannot be serialized",
       `{"type":"nested","content":${"[".repeat(200_000)}0${"]".repeat(200_000)}}`,

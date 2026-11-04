@@ -4,7 +4,7 @@ import { AttemptId } from "@usine/core/attempt";
 import { jsonKey } from "@usine/core/json-key";
 import { CommitSha } from "@usine/core/repository";
 import { MAX_STEP_OUTPUT_BYTES } from "@usine/core/step/output";
-import { Crypto, Effect, Schema } from "effect";
+import { Cause, Crypto, Effect, Exit, PlatformError, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { collectCommand, CommandOutputLimitExceeded } from "../src/child-command.ts";
 import { readOutputs } from "../src/outputs.ts";
@@ -43,9 +43,29 @@ describe("step output collection boundary", () => {
       }),
     ],
     [
-      "128 characters",
+      "length of at most 128",
       jsonKey({
         outputs: [{ file: "type.json", envelope: { type: "x".repeat(129), content: null } }],
+      }),
+    ],
+    [
+      'at ["type"]',
+      jsonKey({ outputs: [{ file: "empty-type.json", envelope: { type: "", content: null } }] }),
+    ],
+    [
+      'at ["commit"]',
+      jsonKey({
+        outputs: [
+          { file: "commit.json", envelope: { type: "example", commit: "invalid", content: null } },
+        ],
+      }),
+    ],
+    [
+      'at ["unexpected"]',
+      jsonKey({
+        outputs: [
+          { file: "extra.json", envelope: { type: "example", content: null, unexpected: true } },
+        ],
       }),
     ],
     [
@@ -75,6 +95,37 @@ describe("step output collection boundary", () => {
       );
       assert.strictEqual(outputs[0]?.type, type);
     }),
+  );
+
+  it.effect("keeps hashing defects out of the retryable failure channel", () =>
+    Effect.gen(function* () {
+      const crypto = yield* Crypto.Crypto;
+      const exit = yield* Effect.exit(
+        readOutputs(
+          spec,
+          () =>
+            Effect.succeed(
+              jsonKey({
+                outputs: [{ file: "valid.json", envelope: { type: "example", content: null } }],
+              }),
+            ),
+          {
+            ...crypto,
+            digest: () =>
+              Effect.fail(
+                PlatformError.badArgument({
+                  module: "Crypto",
+                  method: "digest",
+                  description: "unsupported algorithm",
+                }),
+              ),
+          },
+        ),
+      );
+      assert(Exit.isFailure(exit));
+      assert.isTrue(Cause.hasDies(exit.cause));
+      assert.isFalse(Cause.hasFails(exit.cause));
+    }).pipe(Effect.provide(NodeCrypto.layer)),
   );
 
   for (const stream of ["stdout", "stderr"] as const) {

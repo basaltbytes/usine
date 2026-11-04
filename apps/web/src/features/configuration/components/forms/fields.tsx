@@ -17,6 +17,7 @@ export type FieldDefinition = {
   readonly description?: string;
   readonly kind?: "number" | "textarea";
   readonly options?: readonly string[];
+  readonly labeledOptions?: readonly { readonly value: string; readonly label: string }[];
   readonly suggestions?: readonly string[];
   readonly readOnly?: boolean;
   readonly optional?: boolean;
@@ -31,11 +32,13 @@ export const FormField = ({
   description,
   kind,
   options,
+  labeledOptions,
   suggestions,
   readOnly,
   optional,
 }: FormFieldProps) => {
   const id = useId();
+  const choices = labeledOptions ?? options?.map((value) => ({ value, label: value }));
   const errors = problems.filter((problem) => problem.path.join(".") === path);
   const props = {
     id,
@@ -61,12 +64,12 @@ export const FormField = ({
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
-      {options !== undefined ? (
+      {choices !== undefined ? (
         <NativeSelect {...props} className="w-full" disabled={readOnly}>
           <option value="">{formCopy.choose}</option>
-          {options.map((option) => (
-            <option key={option} value={option}>
-              {option}
+          {choices.map(({ value, label }) => (
+            <option key={value} value={value}>
+              {label}
             </option>
           ))}
         </NativeSelect>

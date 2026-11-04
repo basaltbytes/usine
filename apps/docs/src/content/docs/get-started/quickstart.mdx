@@ -8,11 +8,11 @@ import settings from "../../../../quickstart/usine.yaml?raw";
 import agent from "../../../../quickstart/agents/developer.md?raw";
 import loop from "../../../../quickstart/projects/scratch/loops/first-pr.md?raw";
 
-This quickstart opens a pull request that adds one sentence to a scratch repository's README. It uses one local worker, one Pi agent, and one loop that waits for your approval.
+This quickstart opens a pull request that adds one sentence to a scratch repository's README. It uses one local worker, a Codex child coordinated by a Pi parent, and one loop that waits for your approval. Both sessions use your ChatGPT subscription.
 
 ## Prerequisites
 
-Use macOS or Linux with Node.js 22.22 or later, npm, Git, and the [GitHub CLI](https://cli.github.com/) installed. You need a GitHub account that can create a repository and a GitHub App, plus an Anthropic API key for Pi. Model usage is billed by the provider.
+Use macOS or Linux with Node.js 22.22 or later, npm, Git, and the [GitHub CLI](https://cli.github.com/) installed. You need a GitHub account that can create a repository and a GitHub App, plus a ChatGPT subscription that includes Codex. Model usage counts against your subscription's plan limits instead of being billed per token.
 
 Run the commands in the same terminal, as the user who will run `usine up`. Keep the computer awake while the run is open.
 
@@ -25,18 +25,29 @@ usine --version
 
 Expected: npm finishes installing, and `usine --version` prints the installed release number.
 
-## 2. Set up the agent credential
+## 2. Sign in to Codex and Pi
 
-Install Pi and open its terminal interface:
+Install the Codex CLI version that usine's preflight accepts and sign in with your ChatGPT account:
 
 ```sh
-npm install --global --ignore-scripts @earendil-works/pi-coding-agent
+npm install --global @openai/codex@0.164.0
+codex --version
+codex login
+codex login status
+```
+
+Complete the browser login with your ChatGPT account. Expected: `codex --version` prints `codex-cli 0.164.0`, and `codex login status` confirms a ChatGPT login. Codex saves its credential in `~/.codex` (or `CODEX_HOME` if set) for the child on your local worker.
+
+Install Pi to sign in separately for the parent, then open its terminal interface:
+
+```sh
+npm install --global --ignore-scripts @earendil-works/pi-coding-agent@1.4.0
 pi
 ```
 
-In Pi, enter `/login`, choose **Anthropic**, and enter your API key. Use `/model` to select `anthropic/claude-sonnet-4-6`, then ask it to reply with `ready`.
+In Pi, enter `/login`, choose **OpenAI Codex (legacy)** (the `openai-codex` ChatGPT subscription provider), and complete the browser login with the same ChatGPT account. Use `/model` to select `openai-codex/gpt-6-astra`, then ask it to reply with `ready`.
 
-Expected: Pi replies `ready`. Exit Pi with Ctrl+C twice. Pi saves the credential for this user in `~/.pi/agent` (or `PI_CODING_AGENT_DIR` if set); both the attempt's parent and its child use it. See [Pi parent](/reference/configuration/agents/#parent-selection) for the credential requirements.
+Expected: Pi replies `ready`. Exit Pi with Ctrl+C twice. Pi saves the parent's credential for this user in `~/.pi/agent` (or `PI_CODING_AGENT_DIR` if set). Keep both logins available to the user running `usine up`. See [Pi parent](/reference/configuration/agents/#parent-selection) for the credential requirements.
 
 ## 3. Create a scratch repository
 
@@ -75,6 +86,8 @@ Create a separate instance folder on persistent storage and write these files. T
 />
 
 Expected: `ls` lists `developer.md` under `agents` and `first-pr.md` under `projects/scratch/loops`. The `scratch` project contains your repository. Omitting `workers` selects the default local worker, which runs children on this machine as this user.
+
+The developer agent uses the `codex` harness with `gpt-6-astra`. The instance setting `parent_model: openai-codex/gpt-6-astra` selects the Pi parent's ChatGPT model.
 
 The loop selects open issues labeled `ready-for-agent` and requires approval. Its task removes that label before changing the README, then opens a pull request that closes the issue. Review the instructions before continuing.
 

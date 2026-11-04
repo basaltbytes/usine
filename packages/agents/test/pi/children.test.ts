@@ -16,7 +16,7 @@ import {
   SessionResult,
   WorkingDirectory,
 } from "../../src/runtime.ts";
-import { childDispatcherLayer } from "../../src/pi/children.ts";
+import { childDispatcherLayer } from "../../src/harness/children.ts";
 
 const request = (harness: Harness) =>
   ChildRequest.make({

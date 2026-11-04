@@ -493,10 +493,17 @@ export const preflightCommand = (worker: string) => `Run preflight on ${worker}`
 
 export const bindingCopy = {
   title: "Role bindings",
-  description:
-    "Grant a member instance admin access or a role on one project. Use the member's numeric GitHub ID from Members.",
+  description: "Grant a member instance admin access or a role on one project.",
   member: "Member",
   instance: "Instance",
+  role: "Role",
+  scope: "Scope",
+  unenrolledMember: "Member not enrolled",
+  noMembers: "Add a member before creating a binding.",
+  members: "Open Members",
+  loadingMembers: "Loading members…",
+  retryMembers: "Retry loading members",
+  instanceHint: "Instance scope grants admin access. Project scope grants access to one project.",
 };
 
 export const machineReuseCopy = {

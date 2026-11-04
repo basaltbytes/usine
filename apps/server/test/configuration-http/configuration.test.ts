@@ -26,17 +26,45 @@ import { GitHubApp, InvalidGitHubResponseError } from "@usine/github/github-app"
 import { Effect, Layer, Option, Ref, Schema } from "effect";
 
 import { harness, agentText, loopText, unused } from "./support.ts";
-it("attributes a revision to the authenticated member instead of the configured operator", () =>
+it("attributes binding creation, edits, and deletion to the authenticated member", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const { request } = yield* harness(
         Layer.succeed(ActingMember, Option.some(OperatorLogin.make("alice"))),
       );
-      const response = yield* request("PUT", "/entities/label/ready", {
+      const binding = {
+        name: "project-reader",
+        member: 42,
+        role: "viewer",
+        scope: { _tag: "Project", project: "acme-project" },
+      };
+      const created = yield* request("PUT", "/entities/binding/project-reader", {
         expected: 1,
-        value: { name: "ready" },
+        value: binding,
       });
-      expect(response).toMatchObject({ status: 200, body: { actor: "alice" } });
+      expect(created).toMatchObject({ status: 200, body: { actor: "alice", number: 2 } });
+      const stored = yield* request("GET", "/entities/binding/project-reader");
+      expect(stored).toMatchObject({ status: 200, body: { value: binding } });
+      const edited = yield* request("PUT", "/entities/binding/project-reader", {
+        expected: 2,
+        value: { ...binding, role: "admin", scope: { _tag: "Instance" } },
+      });
+      expect(edited).toMatchObject({ status: 200, body: { actor: "alice", number: 3 } });
+      const deleted = yield* request("DELETE", "/entities/binding/project-reader", {
+        expected: 3,
+      });
+      expect(deleted).toMatchObject({ status: 200, body: { actor: "alice", number: 4 } });
+      const history = yield* request("GET", "/revisions?kind=binding&identifier=project-reader");
+      expect(history).toMatchObject({
+        status: 200,
+        body: {
+          revisions: [
+            { actor: "alice", number: 4 },
+            { actor: "alice", number: 3 },
+            { actor: "alice", number: 2 },
+          ],
+        },
+      });
     }).pipe(Effect.scoped),
   ));
 
