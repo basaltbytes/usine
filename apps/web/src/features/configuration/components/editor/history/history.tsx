@@ -137,7 +137,7 @@ export const ConfigurationHistory = ({ entity }: ConfigurationHistoryProps) => {
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <Button
                 variant="ghost"
-                className="-ml-2.5 font-mono text-xs"
+                className="font-mono text-xs"
                 aria-expanded={selected === revision.number}
                 onClick={() => setSelected(selected === revision.number ? null : revision.number)}
               >
