@@ -1,5 +1,12 @@
+import { jsonKey } from "@usine/core/json-key";
+// SDK streams and hooks require native Promises, including the test implementations.
+// @effect-diagnostics newPromise:off
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
@@ -406,7 +413,7 @@ describe("Pi child backend", () => {
     });
     const warnings: Array<string> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+      if (logLevel === "Warn") warnings.push(jsonKey(message));
     });
     return Effect.scoped(
       Effect.gen(function* () {
@@ -553,9 +560,13 @@ describe("Pi child backend", () => {
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
       );
+      // The SDK test deliberately changes the host environment to verify tool isolation.
+      // @effect-diagnostics-next-line processEnvInEffect:off
       process.env.USINE_ORCHESTRATOR_ONLY = "yes";
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
+          // The SDK test deliberately changes the host environment to verify tool isolation.
+          // @effect-diagnostics-next-line processEnvInEffect:off
           delete process.env.USINE_ORCHESTRATOR_ONLY;
         }),
       );

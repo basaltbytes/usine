@@ -9,6 +9,8 @@ import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import { ChatGptLogin, HostFilePath, OpenAiProvider, UpstreamBase } from "@usine/gateway";
 import { Deferred, Effect, Fiber, Layer, Option, References, Schema } from "effect";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { readFileSync } from "node:fs";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import { ATTEMPT_IMAGE, type SshWorkerAddress, SshWorkers } from "../../src/ssh/ssh.ts";
@@ -17,6 +19,7 @@ import {
   ADDRESS,
   aloneOnItem,
   capturedLogs,
+  CapturedLog,
   CREDENTIALS,
   executorLayer,
   fails,
@@ -152,7 +155,8 @@ describe("SSH Worker with Docker", () => {
         assert.include(inspections[0] ?? "", '"durationMillis":');
         const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
         assert.lengthOf(pulls, 1);
-        assert.deepInclude(JSON.parse(pulls[0] ?? "")[1], {
+        const json1 = yield* Schema.decodeEffect(CapturedLog)(pulls[0] ?? "").pipe(Effect.orDie);
+        assert.deepInclude(json1[1], {
           image: ATTEMPT_IMAGE,
           downloaded: !present || changed,
           durationMillis: 0,
@@ -166,7 +170,8 @@ describe("SSH Worker with Docker", () => {
           present ? 0 : 1,
         );
         const cache = logs.lines.find((line) => line.includes("Prepared shared cache volume"));
-        assert.deepInclude(JSON.parse(cache ?? "")[1], {
+        const json2 = yield* Schema.decodeEffect(CapturedLog)(cache ?? "").pipe(Effect.orDie);
+        assert.deepInclude(json2[1], {
           runDurationMillis: 17,
           durationMillis: 0,
         });
@@ -190,7 +195,8 @@ describe("SSH Worker with Docker", () => {
         const prepared = logs.lines.filter((line) => line.includes("Prepared shared cache volume"));
         assert.lengthOf(prepared, 2);
         for (const line of prepared) {
-          const fields = JSON.parse(line)[1];
+          const json3 = yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie);
+          const fields = json3[1];
           assert.notProperty(fields, "runDurationMillis");
           assert.property(fields, "durationMillis");
         }
@@ -198,7 +204,10 @@ describe("SSH Worker with Docker", () => {
           line.includes("Could not read the shared cache container run duration"),
         );
         assert.lengthOf(unreadable, 2);
-        for (const line of unreadable) assert.strictEqual(JSON.parse(line)[1].stdout, stdout);
+        for (const line of unreadable) {
+          const json4 = yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie);
+          assert.strictEqual(json4[1].stdout, stdout);
+        }
       }).pipe(
         Effect.scoped,
         Effect.provide(runtime(machine, mintingProvider()).pipe(Layer.provideMerge(logs.layer))),
@@ -357,8 +366,9 @@ describe("SSH Worker with Docker", () => {
           line.includes("Concurrent container memory exceeds"),
         );
         assert.lengthOf(warnings, warns ? 1 : 0);
-        for (const warning of warnings)
-          assert.deepInclude(JSON.parse(warning)[1], {
+        for (const warning of warnings) {
+          const json5 = yield* Schema.decodeEffect(CapturedLog)(warning).pipe(Effect.orDie);
+          assert.deepInclude(json5[1], {
             worker: WORKER,
             maxConcurrentAttempts: slots,
             memoryMib,
@@ -366,6 +376,7 @@ describe("SSH Worker with Docker", () => {
             availableMemoryMib: 7168,
             hostReserveMib: 1024,
           });
+        }
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -429,7 +440,8 @@ describe("SSH Worker with Docker", () => {
         assert.deepStrictEqual([String(cpus), `${memoryMib}m`, String(pids)], limits);
         const verified = logs.lines.find((line) => line.includes("SSH Worker preflight verified"));
         assert(verified !== undefined, "the preflight logged its outcome");
-        assert.deepInclude(JSON.parse(verified)[1], {
+        const json6 = yield* Schema.decodeEffect(CapturedLog)(verified).pipe(Effect.orDie);
+        assert.deepInclude(json6[1], {
           cpus,
           memoryMib,
           pids,
@@ -998,7 +1010,8 @@ describe("SSH Worker with Docker", () => {
           line.includes("SSH Worker runs each Attempt in its own container"),
         );
         assert(contained !== undefined, "the recovery logged the limits it applied");
-        assert.deepInclude(JSON.parse(contained)[1], {
+        const json7 = yield* Schema.decodeEffect(CapturedLog)(contained).pipe(Effect.orDie);
+        assert.deepInclude(json7[1], {
           worker: WORKER,
           cpus: 4,
           memoryMib: 7168,

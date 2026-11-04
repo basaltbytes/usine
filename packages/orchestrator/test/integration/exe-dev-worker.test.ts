@@ -16,7 +16,7 @@ import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 import { GitHubIntegration, IntegrationName } from "@usine/executor/exe-dev";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
-import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema, Crypto } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";
 import { fixedConfigLayer } from "../support/current-instance.ts";
@@ -118,11 +118,13 @@ describe("live exe.dev Worker", () => {
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
 
+        const uuid1 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+        const uuid2 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
         const accepted = yield* engine.submit(
           Submission.make({
             event: Event.make({
-              id: EventId.make(`exe-dev-${globalThis.crypto.randomUUID()}`),
-              dedupKey: DedupKey.make(`exe-dev/${repository}/${globalThis.crypto.randomUUID()}`),
+              id: EventId.make(`exe-dev-${uuid1}`),
+              dedupKey: DedupKey.make(`exe-dev/${repository}/${uuid2}`),
               payload: { integration: "exe.dev" },
               receivedAt: yield* DateTime.now,
             }),

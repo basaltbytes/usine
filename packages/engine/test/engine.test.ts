@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { EnginePersistenceError } from "../src/engine/error.ts";
 import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { NodeServices } from "@effect/platform-node";
@@ -1417,7 +1418,7 @@ describe("store failures in a Run's fiber", () => {
         ).pipe(Layer.provide(executorLayer(plans)));
         const failureSpans: Array<string | undefined> = [];
         const recovering = Logger.make(({ message, fiber }) => {
-          if (/fiber stopped on an engine failure/u.test(JSON.stringify(message))) {
+          if (/fiber stopped on an engine failure/u.test(jsonKey(message))) {
             const span = Context.getOrUndefined(fiber.context, Tracer.ParentSpan);
             failureSpans.push(span?._tag === "Span" ? span.name : undefined);
             failures.left = 0;

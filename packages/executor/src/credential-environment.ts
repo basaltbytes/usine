@@ -1,6 +1,12 @@
+import { Schema } from "effect";
+
+// ghHostsConfig returns YAML synchronously to credential-file callers.
+// @effect-diagnostics-next-line schemaSync:off
+const quoteToken = Schema.encodeSync(Schema.fromJsonString(Schema.String));
+
 /** Returns the gh `hosts.yml` content that authenticates github.com with `token`. */
 export const ghHostsConfig = (token: string): string =>
-  `github.com:\n    user: x-access-token\n    oauth_token: ${JSON.stringify(token)}\n    git_protocol: https\n    users:\n        x-access-token:\n            oauth_token: ${JSON.stringify(token)}\n`;
+  `github.com:\n    user: x-access-token\n    oauth_token: ${quoteToken(token)}\n    git_protocol: https\n    users:\n        x-access-token:\n            oauth_token: ${quoteToken(token)}\n`;
 
 /** The gh `config.yml` content, required next to `hosts.yml`. */
 export const GH_CONFIG = 'version: "1"\n';

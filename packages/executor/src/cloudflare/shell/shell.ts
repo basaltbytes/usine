@@ -23,8 +23,8 @@ import {
   SandboxName,
   StdinEnd,
 } from "@usine/cloudflare/stream";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
+import { Effect, Exit, Option, Schema } from "effect";
+
 import { SHELL_ENVIRONMENT, SHELL_FAILURE } from "./environment.ts";
 
 const Settings = Schema.Struct({
@@ -102,80 +102,92 @@ else {
 
   /** Opens one exec or attach stream and resolves when it ends. */
   const stream = (url: URL, start: Option.Option<string>) =>
-    new Promise<Outcome>((resolve) => {
-      const socket = openSocket(new URL(url.href.replace(/^http/u, "ws")), init);
-      socket.binaryType = "arraybuffer";
-      let process_: Option.Option<ProcessId> = Option.none();
-      let settled = false;
-      const settle = (outcome: Outcome) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (start._tag === "Some") stdinTarget = { _tag: "Dropped" };
-        resolve(outcome);
-        socket.close();
-      };
-      const timer = setTimeout(
-        () =>
-          settle({ _tag: "Dropped", process: process_, reason: "the stream didn't open in time" }),
-        OPEN_TIMEOUT,
-      );
-      socket.addEventListener("open", () => {
-        clearTimeout(timer);
-        Option.match(start, {
-          onNone: () => undefined,
-          onSome: (line) => {
-            socket.send(encodeClientMessage(ExecStart.make({ command: line })));
-            if (stdinTarget._tag === "Buffering")
-              for (const chunk of stdinTarget.chunks) socket.send(chunk);
-            stdinTarget = { _tag: "Streaming", socket };
-            if (!stdinOpen) socket.send(encodeClientMessage(StdinEnd.make()));
-          },
-        });
-      });
-      socket.addEventListener("message", (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          Option.map(decodeOutputFrame(new Uint8Array(event.data)), ({ channel, bytes }) => {
-            written[channel] += bytes.length;
-            (channel === "stdout" ? process.stdout : process.stderr).write(bytes);
+    Effect.scoped(
+      Effect.gen(function* () {
+        let onTimeout = () => {};
+        const timer = yield* Effect.sleep(OPEN_TIMEOUT).pipe(
+          Effect.andThen(Effect.sync(() => onTimeout())),
+          Effect.forkScoped,
+        );
+        return yield* Effect.callback<Outcome>((resume) => {
+          const resolve = (outcome: Outcome) => resume(Effect.succeed(outcome));
+          const socket = openSocket(new URL(url.href.replace(/^http/u, "ws")), init);
+          socket.binaryType = "arraybuffer";
+          let process_: Option.Option<ProcessId> = Option.none();
+          let settled = false;
+          const settle = (outcome: Outcome) => {
+            if (settled) return;
+            settled = true;
+            timer.interruptUnsafe();
+            if (start._tag === "Some") stdinTarget = { _tag: "Dropped" };
+            resolve(outcome);
+            socket.close();
+          };
+          onTimeout = () =>
+            settle({
+              _tag: "Dropped",
+              process: process_,
+              reason: "the stream didn't open in time",
+            });
+          socket.addEventListener("open", () => {
+            timer.interruptUnsafe();
+            Option.match(start, {
+              onNone: () => undefined,
+              onSome: (line) => {
+                socket.send(encodeClientMessage(ExecStart.make({ command: line })));
+                if (stdinTarget._tag === "Buffering")
+                  for (const chunk of stdinTarget.chunks) socket.send(chunk);
+                stdinTarget = { _tag: "Streaming", socket };
+                if (!stdinOpen) socket.send(encodeClientMessage(StdinEnd.make()));
+              },
+            });
           });
-          return;
-        }
-        Option.map(decodeServerMessage(String(event.data)), (message) => {
-          switch (message._tag) {
-            case "Started":
-              process_ = Option.some(message.process);
+          socket.addEventListener("message", (event) => {
+            if (event.data instanceof ArrayBuffer) {
+              Option.map(decodeOutputFrame(new Uint8Array(event.data)), ({ channel, bytes }) => {
+                written[channel] += bytes.length;
+                (channel === "stdout" ? process.stdout : process.stderr).write(bytes);
+              });
               return;
-            case "Exited":
-              return settle({ _tag: "Exited", exitCode: message.exitCode });
-            case "StreamFailed":
-              return settle({ _tag: "Failed", message: message.message });
-          }
+            }
+            Option.map(decodeServerMessage(String(event.data)), (message) => {
+              switch (message._tag) {
+                case "Started":
+                  process_ = Option.some(message.process);
+                  return;
+                case "Exited":
+                  return settle({ _tag: "Exited", exitCode: message.exitCode });
+                case "StreamFailed":
+                  return settle({ _tag: "Failed", message: message.message });
+              }
+            });
+          });
+          socket.addEventListener("close", (event) =>
+            settle({
+              _tag: "Dropped",
+              process: process_,
+              reason: `the stream closed with code ${String(event.code)}`,
+            }),
+          );
+          socket.addEventListener("error", () =>
+            settle({ _tag: "Dropped", process: process_, reason: "the stream failed" }),
+          );
+          return Effect.sync(() => socket.close());
         });
-      });
-      socket.addEventListener("close", (event) =>
-        settle({
-          _tag: "Dropped",
-          process: process_,
-          reason: `the stream closed with code ${String(event.code)}`,
-        }),
-      );
-      socket.addEventListener("error", () =>
-        settle({ _tag: "Dropped", process: process_, reason: "the stream failed" }),
-      );
-    });
+      }),
+    );
 
-  const main = async () => {
+  const main = Effect.gen(function* () {
     const name = destination.value;
-    let outcome = await stream(new URL(execPath(name), worker), Option.some(command));
+    let outcome = yield* stream(new URL(execPath(name), worker), Option.some(command));
     for (const delay of REATTACH_DELAYS) {
       if (outcome._tag !== "Dropped" || Option.isNone(outcome.process)) break;
       const process = outcome.process.value;
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      yield* Effect.sleep(delay);
       const url = new URL(attachPath(name, process), worker);
       url.searchParams.set("stdout", String(written.stdout));
       url.searchParams.set("stderr", String(written.stderr));
-      const attached = await stream(url, Option.none());
+      const attached = yield* stream(url, Option.none());
       outcome =
         attached._tag === "Dropped" ? { ...attached, process: Option.some(process) } : attached;
     }
@@ -187,6 +199,9 @@ else {
       case "Dropped":
         return finish(SHELL_FAILURE, `lost sandbox ${name}: ${outcome.reason}`);
     }
-  };
-  void main();
+  });
+  Effect.runFork(main).addObserver((exit) => {
+    // WebSocket constructor errors can contain Access credentials.
+    if (Exit.isFailure(exit)) finish(SHELL_FAILURE, "command stream failed unexpectedly");
+  });
 }

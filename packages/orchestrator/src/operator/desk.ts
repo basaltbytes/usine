@@ -849,7 +849,7 @@ export class OperatorDesk extends Context.Service<
     /** Returns the instance's desk, as described in `OperatorObservation.desk`. */
     readonly desk: (instance: LoadedInstance) => Effect.Effect<DeskView, RunStoreError>;
   }
->()("@usine/orchestrator/OperatorDesk") {
+>()("@usine/orchestrator/operator/desk/OperatorDesk") {
   static readonly layer = Layer.effect(OperatorDesk, makeDesk).pipe(
     Layer.provide(LoopMatches.layer),
   );

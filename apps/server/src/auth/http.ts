@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { SqliteReader } from "@usine/engine/local-sqlite";
 import { ChangeAccess } from "../changes/access.ts";
 import { SetupApi, setupPermissions } from "../setup/api.ts";
@@ -38,7 +39,7 @@ const COOKIE = "usine_session";
 const STATE_COOKIE = "usine_sign_in_state";
 const json = <A>(body: A, status = 200) => HttpServerResponse.jsonUnsafe(body, { status });
 const secretOf = (request: HttpServerRequest.HttpServerRequest) =>
-  request.headers.authorization?.startsWith("Bearer ")
+  request.headers.authorization?.startsWith("Bearer ") === true
     ? request.headers.authorization.slice(7)
     : (request.cookies[COOKIE] ?? "");
 const body = <A, I>(schema: Schema.Codec<A, I>) =>
@@ -348,7 +349,7 @@ export const authenticatedRoutes = (services: AuthServices) => {
             .authenticate(secretOf(request))
             .pipe(
               Effect.flatMap((current) =>
-                JSON.stringify(current.permissions) === JSON.stringify(access.permissions)
+                jsonKey(current.permissions) === jsonKey(access.permissions)
                   ? Effect.void
                   : Effect.fail(authFailure("Permissions changed. Reconnect to continue.", 403)),
               ),

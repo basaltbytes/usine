@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { ChangeBus } from "@usine/core/changes";
 import { CiMonitor } from "../ci.ts";
 import type { DeclaredLabel } from "@usine/config/label";
@@ -103,7 +104,7 @@ const cursorKey = (repository: ManagedRepo): CursorKey =>
   CursorKey.make(`github-poll:${canonicalRepositoryName(repository.name)}`);
 
 const watchKey = ({ loop }: ResolvedLoop): WatchKey =>
-  WatchKey.make(JSON.stringify([loop.name, loop.trigger.on, loop.trigger.if]));
+  WatchKey.make(jsonKey([loop.name, loop.trigger.on, loop.trigger.if]));
 
 const watchedRepositories = (
   instance: LoadedInstance,
@@ -164,7 +165,7 @@ export class PollingTriggers extends Context.Service<
     /** The last received hint in this process, including coalesced or dropped hints. */
     readonly lastHint: Effect.Effect<Option.Option<DateTime.Utc>>;
   }
->()("@usine/orchestrator/PollingTriggers") {
+>()("@usine/orchestrator/polling/polling/PollingTriggers") {
   /**
    * Provides polling, hint handling, and trigger submission using the supplied GitHub and engine
    * services.

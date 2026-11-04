@@ -62,7 +62,7 @@ export class ConfigurationStore extends Context.Service<
       number: ConfigurationRevisionNumber,
     ) => Stream.Stream<ConfigurationRevision, ConfigurationStoreError>;
   }
->()("@usine/config/ConfigurationStore") {}
+>()("@usine/config/configuration/store/ConfigurationStore") {}
 
 export {
   Configuration,

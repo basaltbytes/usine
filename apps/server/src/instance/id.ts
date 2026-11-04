@@ -1,5 +1,5 @@
 import { InstanceId } from "@usine/core/instance";
-import { type Brand, Effect, FileSystem, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Schema, Crypto } from "effect";
 import type { InstanceFiles } from "./record.ts";
 
 /** `.usine/instance-id` couldn't be read or created, or doesn't contain an instance ID. */
@@ -32,7 +32,8 @@ export const instanceIdOf = Effect.fn("Instance.id")(function* (files: InstanceF
     yield* Effect.logDebug("Read the instance ID", { instanceId, path: files.id });
     return instanceId;
   }
-  const instanceId = InstanceId.make(crypto.randomUUID());
+  const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+  const instanceId = InstanceId.make(uuid);
   yield* Effect.annotateCurrentSpan({ instanceId });
   // A rename never leaves a partial file for the next start to refuse.
   const staging = `${files.id}.${instanceId}`;

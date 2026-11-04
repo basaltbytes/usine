@@ -823,7 +823,7 @@ export class OperatorConfiguration extends Context.Service<
       instance: LoadedInstance,
     ) => Effect.Effect<ConfigurationView, EnginePersistenceError>;
   }
->()("@usine/orchestrator/OperatorConfiguration") {
+>()("@usine/orchestrator/operator/configuration/view/OperatorConfiguration") {
   /**
    * Provides configuration views using worker status, stored labels, loop control, and trigger
    * status.

@@ -15,6 +15,7 @@ import {
   Schedule,
   Scope,
   Stream,
+  Crypto,
 } from "effect";
 import { env } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -203,7 +204,8 @@ export const steeringContract = (
 ) =>
   controlledChild(backend, brain, child, (running, release) =>
     Effect.gen(function* () {
-      const marker = `STEER_${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+      const uuid1 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+      const marker = `STEER_${uuid1.replaceAll("-", "")}`;
       yield* running.steer(
         `Change the final reply: after the command exits, reply with exactly ${marker}.`,
       );

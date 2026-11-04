@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import type { ContainerOutOfMemoryKills } from "@usine/core/attempt";
@@ -10,6 +11,7 @@ import { fakeGateway, gatewayRuntime } from "./gateway/support.ts";
 import {
   aloneOnItem,
   capturedLogs,
+  CapturedLog,
   fails,
   fakeContainerId,
   fakeMachine,
@@ -37,7 +39,7 @@ const info = () => ({
 });
 const podmanMachine = () => {
   const machine = fakeMachine();
-  machine.state.podmanInfo = JSON.stringify(info());
+  machine.state.podmanInfo = jsonKey(info());
   return machine;
 };
 const sink = {
@@ -69,7 +71,8 @@ describe("rootless Podman", () => {
         assert.include(inspections[0] ?? "", '"status":"absent"');
         const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
         assert.lengthOf(pulls, 1);
-        assert.deepInclude(JSON.parse(pulls[0] ?? "")[1], {
+        const json1 = yield* Schema.decodeEffect(CapturedLog)(pulls[0] ?? "").pipe(Effect.orDie);
+        assert.deepInclude(json1[1], {
           image: ATTEMPT_IMAGE,
           runtime: "podman",
           downloaded: true,
@@ -162,7 +165,7 @@ describe("rootless Podman", () => {
     const machine = podmanMachine();
     const value = info();
     change(value);
-    machine.state.podmanInfo = JSON.stringify(value);
+    machine.state.podmanInfo = jsonKey(value);
     return Effect.gen(function* () {
       const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
       assert.strictEqual(error._tag, "WorkerCapabilityError");

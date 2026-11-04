@@ -58,7 +58,11 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
         const lastAssistant = [...options.sdk.messages]
           .reverse()
           .find((message) => message.role === "assistant");
-        if (lastAssistant?.stopReason === "error" && lastAssistant.errorMessage) {
+        if (
+          lastAssistant?.stopReason === "error" &&
+          lastAssistant.errorMessage !== undefined &&
+          lastAssistant.errorMessage !== ""
+        ) {
           const failure = harnessFailure(
             Option.some(options.session.id),
             lastAssistant.errorMessage,

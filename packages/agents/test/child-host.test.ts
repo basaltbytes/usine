@@ -1,8 +1,15 @@
+import { Effect, Clock, Duration, Deferred } from "effect";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentSessionId } from "@usine/core/agent/session";
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import {
   CHILD_KILL_SCRIPT,
@@ -68,46 +75,70 @@ describe("remote shell commands", () => {
     assert.strictEqual(spawnSync("sh", ["-c", line]).status, 7);
   });
 
-  it("stops a running child through its pid file and leaves nothing to stop after", async () => {
-    const worktree = mkdtempSync(join(tmpdir(), "usine-remote-shell-"));
-    const pidFile = childPidFile(worktree, AgentSessionId.make("parent:attempt/1:child:1"));
-    const child = spawn("sh", ["-c", remoteLine({ pidFile, command: "sleep", args: ["30"] })]);
-    const exited = new Promise((resolve) => child.once("exit", resolve));
-    while (!existsSync(pidFile) || readFileSync(pidFile, "utf8") === "")
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    const stop = () =>
-      execFileSync("sh", ["-c", CHILD_KILL_SCRIPT, "sh", worktree], { encoding: "utf8" }).trim();
-    assert.strictEqual(stop(), `${pidFile} stopped`);
-    await exited;
-    assert.strictEqual(existsSync(pidFile), false);
-    assert.strictEqual(stop(), "no-children");
-  });
-
-  it("stops one child through its pid file and leaves its siblings running", async () => {
-    const worktree = mkdtempSync(join(tmpdir(), "usine-remote-shell-"));
-    const started = (child: number) => {
-      const pidFile = childPidFile(
-        worktree,
-        AgentSessionId.make(`parent:attempt/1:child:${child}`),
-      );
-      const process = spawn("sh", ["-c", remoteLine({ pidFile, command: "sleep", args: ["30"] })]);
-      return { pidFile, exited: new Promise((resolve) => process.once("exit", resolve)) };
-    };
-    const [stopped, sibling] = [started(1), started(2)];
-    for (const { pidFile } of [stopped, sibling])
+  it.live("stops a running child through its pid file and leaves nothing to stop after", () =>
+    Effect.gen(function* () {
+      const worktree = mkdtempSync(join(tmpdir(), "usine-remote-shell-"));
+      const pidFile = childPidFile(worktree, AgentSessionId.make("parent:attempt/1:child:1"));
+      const child = spawn("sh", ["-c", remoteLine({ pidFile, command: "sleep", args: ["30"] })]);
+      const exited = (() => {
+        const completion = Deferred.makeUnsafe<void>();
+        const resolve = () => {
+          Deferred.doneUnsafe(completion, Effect.void);
+        };
+        child.once("exit", resolve);
+        return Deferred.await(completion);
+      })();
       while (!existsSync(pidFile) || readFileSync(pidFile, "utf8") === "")
-        await new Promise((resolve) => setTimeout(resolve, 10));
-    const stop = () =>
-      execFileSync("sh", ["-c", CHILD_STOP_SCRIPT, "sh", stopped.pidFile], {
-        encoding: "utf8",
-      }).trim();
-    assert.strictEqual(stop(), `${stopped.pidFile} stopped`);
-    await stopped.exited;
-    assert.strictEqual(stop(), `${stopped.pidFile} absent`);
-    assert.isTrue(existsSync(sibling.pidFile), "the sibling still runs");
-    execFileSync("sh", ["-c", CHILD_KILL_SCRIPT, "sh", worktree]);
-    await sibling.exited;
-  });
+        yield* Clock.Clock.defaultValue().sleep(Duration.millis(10));
+      const stop = () =>
+        execFileSync("sh", ["-c", CHILD_KILL_SCRIPT, "sh", worktree], { encoding: "utf8" }).trim();
+      assert.strictEqual(stop(), `${pidFile} stopped`);
+      yield* exited;
+      assert.strictEqual(existsSync(pidFile), false);
+      assert.strictEqual(stop(), "no-children");
+    }),
+  );
+
+  it.live("stops one child through its pid file and leaves its siblings running", () =>
+    Effect.gen(function* () {
+      const worktree = mkdtempSync(join(tmpdir(), "usine-remote-shell-"));
+      const started = (child: number) => {
+        const pidFile = childPidFile(
+          worktree,
+          AgentSessionId.make(`parent:attempt/1:child:${child}`),
+        );
+        const process = spawn("sh", [
+          "-c",
+          remoteLine({ pidFile, command: "sleep", args: ["30"] }),
+        ]);
+        return {
+          pidFile,
+          exited: (() => {
+            const completion = Deferred.makeUnsafe<void>();
+            const resolve = () => {
+              Deferred.doneUnsafe(completion, Effect.void);
+            };
+            process.once("exit", resolve);
+            return Deferred.await(completion);
+          })(),
+        };
+      };
+      const [stopped, sibling] = [started(1), started(2)];
+      for (const { pidFile } of [stopped, sibling])
+        while (!existsSync(pidFile) || readFileSync(pidFile, "utf8") === "")
+          yield* Clock.Clock.defaultValue().sleep(Duration.millis(10));
+      const stop = () =>
+        execFileSync("sh", ["-c", CHILD_STOP_SCRIPT, "sh", stopped.pidFile], {
+          encoding: "utf8",
+        }).trim();
+      assert.strictEqual(stop(), `${stopped.pidFile} stopped`);
+      yield* stopped.exited;
+      assert.strictEqual(stop(), `${stopped.pidFile} absent`);
+      assert.isTrue(existsSync(sibling.pidFile), "the sibling still runs");
+      execFileSync("sh", ["-c", CHILD_KILL_SCRIPT, "sh", worktree]);
+      yield* sibling.exited;
+    }),
+  );
 
   it("runs the command line inside a container with its directory, variables, and pid file", () => {
     const worktree = mkdtempSync(join(tmpdir(), "usine-remote-shell-"));

@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { Files, SandboxFileError } from "@cloudflare/sandbox";
 import { CloudflareLlmProvider } from "@usine/core/worker";
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
@@ -20,7 +22,12 @@ import { ProcessId, ProviderCredential, SandboxName, SandboxSummary } from "./ap
 import { GITHUB_HOSTS } from "./api/harness.ts";
 import { AttachOffsets } from "./api/stream.ts";
 import { registryRoutes, RegistryStorage, SandboxLookup, SandboxLookupFailed } from "./registry.ts";
-import { allowedHostsOf, gitHubRequest, providerRequest } from "./sandbox/outbound.ts";
+import {
+  allowedHostsOf,
+  forwardRequest,
+  gitHubRequest,
+  providerRequest,
+} from "./sandbox/outbound.ts";
 import {
   ContainerFailure,
   type ContainerOperation,
@@ -68,7 +75,7 @@ const settingsOf = (env: Env): Option.Option<WorkerSettings> =>
 const logger = Logger.layer([Logger.consoleJson]);
 
 /** Runs `effect` with the Worker's JSON logger. */
-const run = <A>(effect: Effect.Effect<A>): Promise<A> =>
+const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(logger)));
 
 /** The name of the Durable Object that answers `/v1/health`. It never starts a container. */
@@ -247,9 +254,9 @@ const storageOf = (storage: DurableObjectStorage): SandboxStorage["Service"] => 
       }
       return result;
     }),
-  clear: Effect.promise(async () => {
-    await storage.deleteAlarm();
-    await storage.deleteAll();
+  clear: Effect.gen(function* () {
+    yield* Effect.promise(() => storage.deleteAlarm());
+    yield* Effect.promise(() => storage.deleteAll());
   }),
   alarmAt: (at) => Effect.promise(() => storage.setAlarm(DateTime.toEpochMillis(at))),
 });
@@ -496,27 +503,19 @@ const ProviderProps = Schema.Struct({
   credential: ProviderCredential,
 });
 
-/** Logs one forwarded request without its headers, body, or query string. */
-const logForwarded = (handler: string, request: Request, response: Response) =>
-  run(
-    Effect.logInfo("Forwarded a sandbox request", {
-      handler,
-      method: request.method,
-      host: new URL(request.url).host,
-      path: new URL(request.url).pathname,
-      status: response.status,
-    }),
-  );
-
 /** Adds the Attempt's installation token to the sandbox's requests for GitHub. */
 export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
     // Cloudflare calls this handler outside the Effect runtime.
     // @effect-diagnostics-next-line schemaSync:off
     const props = Schema.decodeSync(GitHubProps)(this.ctx.props);
-    const response = await fetch(gitHubRequest(request, props.host, Redacted.make(props.token)));
-    await logForwarded("github", request, response);
-    return response;
+    return run(
+      forwardRequest(
+        "github",
+        request,
+        gitHubRequest(request, props.host, Redacted.make(props.token)),
+      ),
+    );
   }
 }
 
@@ -544,18 +543,14 @@ export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps
         `usine forwards only the routes Claude Code and Codex call to ${props.provider}.\n`,
       );
     }
-    const response = await fetch(forwarded.value);
-    await logForwarded(props.provider, request, response);
-    return response;
+    return run(forwardRequest(props.provider, request, forwarded.value));
   }
 }
 
 /** Forwards the sandbox's requests for an allowlisted host unchanged. */
 export class AllowedOutbound extends WorkerEntrypoint<Env, Record<string, never>> {
   override async fetch(request: Request): Promise<Response> {
-    const response = await fetch(request);
-    await logForwarded("allowed", request, response);
-    return response;
+    return run(forwardRequest("allowed", request));
   }
 }
 

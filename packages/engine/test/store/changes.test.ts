@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { InstanceScope } from "@usine/core/access";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
@@ -84,7 +85,7 @@ it.effect(
             assert(notice !== undefined);
             for (const target of targets) assert.deepInclude(notice.changes, { audience, target });
             assert.strictEqual(
-              new Set(notice.changes.map((entry) => JSON.stringify(entry))).size,
+              new Set(notice.changes.map((entry) => jsonKey(entry))).size,
               notice.changes.length,
             );
             return result;

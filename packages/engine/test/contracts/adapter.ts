@@ -29,7 +29,7 @@ export class WriteFailures extends Context.Service<
       EnginePersistenceError
     >;
   }
->()("test/WriteFailures") {}
+>()("@usine/engine/test/contracts/adapter/WriteFailures") {}
 
 export type PersistencePorts =
   | AttentionAcknowledgements

@@ -26,7 +26,7 @@ import {
   UpstreamBase,
 } from "@usine/gateway";
 import { TestClock } from "effect/testing";
-import { Deferred, Effect, Fiber, Option, Redacted, Schema, Layer } from "effect";
+import { Deferred, Effect, Fiber, Option, Redacted, Schema, Layer, DateTime } from "effect";
 import { CheckoutRequest, Executor, MachineCheck, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
@@ -637,7 +637,7 @@ describe("Provisioned SSH Worker", () => {
     () => {
       const machine = fakeMachine();
       const providers = fakeProviders();
-      const now = new Date().toISOString();
+      const now = DateTime.formatIso(DateTime.nowUnsafe());
       const earlier = (id: number, attempt: string | undefined) => {
         const labels = new Map<string, string>([
           ["usine-instance", INSTANCE],
@@ -736,7 +736,7 @@ describe("Provisioned SSH Worker", () => {
           id: 22,
           name: "usine-eu-one-22",
           status: "running",
-          created: new Date().toISOString(),
+          created: DateTime.formatIso(DateTime.nowUnsafe()),
           labels: {
             "usine-instance": INSTANCE,
             "usine-worker": WORKER,

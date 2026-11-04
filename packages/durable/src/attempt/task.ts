@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import type { Context as ChordContext } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import {

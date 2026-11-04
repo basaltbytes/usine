@@ -627,7 +627,7 @@ export class ConfigParser extends Context.Service<
       context: Schema.JsonObject,
     ) => Effect.Effect<string, ConfigFileError>;
   }
->()("@usine/config/ConfigParser") {
+>()("@usine/config/parser/ConfigParser") {
   /** Provides a parser using `ExpressionEngine` for CEL checks and prompt evaluation. */
   static readonly layer = Layer.effect(
     ConfigParser,

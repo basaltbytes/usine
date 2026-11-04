@@ -139,7 +139,7 @@ export class GatewayProxy extends Context.Service<
       HttpServerRequest.HttpServerRequest
     >;
   }
->()("@usine/gateway/GatewayProxy") {
+>()("@usine/gateway/proxy/proxy/GatewayProxy") {
   /**
    * Creates the handler from the shared gateway services and an HTTP client. The client must
    * return redirects without following them and preserve compressed response bytes and headers.

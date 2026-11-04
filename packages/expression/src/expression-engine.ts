@@ -137,7 +137,7 @@ export interface ExpressionEngineService {
 
 /** The CEL expression service, provided by `MarcbachmannCelLayer` from `@usine/expression/marcbachmann-cel`. */
 export class ExpressionEngine extends Context.Service<ExpressionEngine, ExpressionEngineService>()(
-  "@usine/expression/ExpressionEngine",
+  "@usine/expression/expression-engine/ExpressionEngine",
 ) {}
 
 export { TypeReference, ObjectField, ObjectType, Variable, Environment } from "./environment.ts";

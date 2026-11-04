@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
@@ -16,7 +17,7 @@ import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ChangedIssue, ContentHash, IssueSnapshot, type IssuePayload } from "@usine/github/polling";
-import { Effect, Deferred, Fiber, FileSystem, Layer } from "effect";
+import { Effect, Deferred, Fiber, FileSystem, Layer, Schema, DateTime, Option } from "effect";
 import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -39,7 +40,7 @@ import {
   RepositoryLabelCatalog,
   RepositoryNotModified,
 } from "@usine/github/polling";
-import { DateTime, Option, Schema } from "effect";
+
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { attentionKey, partitionNeeds } from "../src/operator/attention.ts";
 import { CycleBudgetNeed } from "../src/operator/need.ts";
@@ -88,7 +89,7 @@ const issuePayload = (number: number, labels: ReadonlyArray<string> = []): Issue
 
 const storedIssue = (number: number) =>
   ItemProjection.make({
-    itemKey: ItemKey.make(JSON.stringify(["github", repository, number])),
+    itemKey: ItemKey.make(jsonKey(["github", repository, number])),
     repository,
     source: ItemProjectionSource.make("issue"),
     number: ItemNumber.make(number),

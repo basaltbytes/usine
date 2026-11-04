@@ -1,4 +1,5 @@
 import {
+  Crypto,
   Cause,
   ConfigProvider,
   Context,
@@ -10,6 +11,7 @@ import {
   Redacted,
   Semaphore,
 } from "effect";
+
 import { ChatGptLogins } from "../chatgpt/logins.ts";
 import type { EgressAllowlist } from "../egress/egress.ts";
 import type { LlmProvider, LlmProviders } from "../llm/llm.ts";
@@ -39,7 +41,7 @@ export class GatewayReload extends Context.Service<
      */
     readonly reload: Effect.Effect<void>;
   }
->()("@usine/gateway/node/GatewayReload") {}
+>()("@usine/gateway/node/reload/GatewayReload") {}
 
 /** Returns each restart-only setting as text, keyed by its variable. */
 const restartValues = ({ domain, adminToken, callerKey, listeners }: RestartSettings) => ({
@@ -185,6 +187,7 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
       const inForce = yield* SettingsInForce;
       const logins = yield* ChatGptLogins;
       const fileSystem = yield* FileSystem.FileSystem;
+      const crypto = yield* Crypto.Crypto;
       const oneAtATime = yield* Semaphore.make(1);
       const { domain, adminToken, callerKey } = started.settings;
       const startedRestartSettings: RestartSettings = {
@@ -242,7 +245,10 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
       return {
         reload: oneAtATime
           .withPermits(1)(reload())
-          .pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)),
+          .pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Crypto.Crypto, crypto),
+          ),
       };
     }),
   );

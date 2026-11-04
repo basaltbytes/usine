@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { ChangeBus } from "@usine/core/changes";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import type { ConfigFileError } from "@usine/config/file";
@@ -210,15 +211,11 @@ const earliest = (values: ReadonlyArray<DateTime.Utc>): Option.Option<DateTime.U
 };
 
 const itemKey = (repository: ManagedRepo): ItemKey =>
-  ItemKey.make(JSON.stringify(["github", canonicalRepositoryName(repository.name)]));
+  ItemKey.make(jsonKey(["github", canonicalRepositoryName(repository.name)]));
 
 const eventKey = (loop: LoopFile, repository: ManagedRepo, scheduledAt: DateTime.Utc): DedupKey =>
   DedupKey.make(
-    JSON.stringify([
-      loop.name,
-      canonicalRepositoryName(repository.name),
-      DateTime.formatIso(scheduledAt),
-    ]),
+    jsonKey([loop.name, canonicalRepositoryName(repository.name), DateTime.formatIso(scheduledAt)]),
   );
 
 const tickPayload = (due: DueTick): Schema.JsonObject => ({
@@ -250,7 +247,7 @@ export class ScheduleTriggers extends Context.Service<
     /** The most recent completed cycle, or `None` before the first evaluation. */
     readonly latest: Effect.Effect<Option.Option<ScheduleCycle>>;
   }
->()("@usine/orchestrator/ScheduleTriggers") {
+>()("@usine/orchestrator/schedule-triggers/ScheduleTriggers") {
   /**
    * Provides schedule evaluation and submission with in-memory fired-tick tracking and durable
    * event deduplication.
@@ -521,10 +518,9 @@ export class ScheduleTriggers extends Context.Service<
           nextTickAt: earliest(nexts),
         });
         const previous = yield* Ref.getAndSet(latestCycle, Option.some(cycle));
-        if (
-          Option.isNone(previous) ||
-          JSON.stringify(previous.value.failures) !== JSON.stringify(cycle.failures)
-        ) {
+        const failuresChanged =
+          Option.isNone(previous) || jsonKey(previous.value.failures) !== jsonKey(cycle.failures);
+        if (failuresChanged) {
           const affected = [
             ...new Set(
               [

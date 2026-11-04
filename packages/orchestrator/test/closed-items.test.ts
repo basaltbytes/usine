@@ -1,7 +1,10 @@
+import { jsonKey } from "@usine/core/json-key";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createHash } from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -193,7 +196,7 @@ const pullRequestPayload = (item: GitHubItem): PullRequestPayload => ({
 });
 
 const contentHash = (item: GitHubItem) =>
-  ContentHash.make(createHash("sha256").update(JSON.stringify(item)).digest("hex"));
+  ContentHash.make(createHash("sha256").update(jsonKey(item)).digest("hex"));
 
 /** Serves every Item in `items` as changed on each poll, with its current state. */
 const fakeGitHub = (items: Map<number, GitHubItem>): GitHubPolling["Service"] => ({

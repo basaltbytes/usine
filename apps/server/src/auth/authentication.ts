@@ -7,7 +7,7 @@ import {
 } from "@usine/core/access";
 import { type UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
-import { Clock, Context, Effect, Layer, Option, Redacted } from "effect";
+import { Clock, Context, Effect, Layer, Option, Redacted, Crypto } from "effect";
 import { GitHubSignIn } from "./github.ts";
 import {
   AuthError,
@@ -88,7 +88,7 @@ export class Authentication extends Context.Service<
     readonly limit: (endpoint: string) => Effect.Effect<void, AuthError>;
     readonly signOut: (secret: string) => Effect.Effect<void, AuthError>;
   }
->()("@usine/server/Authentication") {}
+>()("@usine/server/auth/authentication") {}
 
 export const authenticationLayer = (options: {
   readonly origin: UiOrigin;
@@ -99,6 +99,7 @@ export const authenticationLayer = (options: {
     Authentication,
     Effect.gen(function* () {
       const store = yield* AuthStore;
+      const crypto = yield* Crypto.Crypto;
       const access = yield* MemberAccess;
       const github = yield* GitHubSignIn;
       const links = new Map<
@@ -132,8 +133,9 @@ export const authenticationLayer = (options: {
         yield* Effect.annotateCurrentSpan({ memberId: member.id, kind });
         const secret = randomSecret();
         const now = yield* Clock.currentTimeMillis;
+        const tokenId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
         const token = InstanceToken.make({
-          id: TokenId.make(crypto.randomUUID()),
+          id: TokenId.make(tokenId),
           memberId: member.id,
           hash: secretHash(Redacted.value(secret)),
           name,

@@ -1,6 +1,7 @@
+import { Schema } from "effect";
+import type { Statement, SqlClient } from "effect/sql";
+
 import { sql, type SQLWrapper } from "drizzle-orm";
-import type { SqlClient } from "effect/sql/SqlClient";
-import type { Fragment } from "effect/sql/Statement";
 
 const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
 
@@ -15,8 +16,12 @@ export const jsonEach = (value: SQLWrapper, path?: string) =>
     ? sql`json_each(${value})`
     : sql`json_each(${value}, ${sql.raw(quoted(path))})`;
 
-export const jsonArrayValues = (values: ReadonlyArray<unknown>) =>
-  sql`select value from ${jsonEach(sql`${JSON.stringify(values)}`)}`;
+// jsonArrayValues synchronously constructs a Drizzle SQL fragment for identifier membership.
+// @effect-diagnostics-next-line schemaSync:off
+const encodeIdentifiers = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)));
+
+export const jsonArrayValues = (values: ReadonlyArray<string>) =>
+  sql`select value from ${jsonEach(sql`${encodeIdentifiers(values)}`)}`;
 
 export const jsonObject = (fields: ReadonlyArray<readonly [string, SQLWrapper]>) =>
   sql`json_object(${sql.join(
@@ -36,13 +41,13 @@ export const elapsedMillis = (start: SQLWrapper, end: SQLWrapper) =>
 export const distinctFrom = (left: SQLWrapper, right: SQLWrapper) => sql`${left} IS NOT ${right}`;
 
 /** SQLite fragments for the historical project migration, which uses Effect SQL. */
-export const projectMigrationDialect = (client: SqlClient) => ({
-  jsonExtract: (value: Fragment, path: string) =>
+export const projectMigrationDialect = (client: SqlClient.SqlClient) => ({
+  jsonExtract: (value: Statement.Fragment, path: string) =>
     client`json_extract(${value}, ${client.literal(quoted(path))})`,
-  jsonValid: (value: Fragment) => client`json_valid(${value})`,
-  jsonSet: (value: Fragment, path: string, replacement: Fragment) =>
+  jsonValid: (value: Statement.Fragment) => client`json_valid(${value})`,
+  jsonSet: (value: Statement.Fragment, path: string, replacement: Statement.Fragment) =>
     client`json_set(${value}, ${client.literal(quoted(path))}, ${replacement})`,
-  unqualified: (value: Fragment) => client`instr(${value}, '/') = 0`,
+  unqualified: (value: Statement.Fragment) => client`instr(${value}, '/') = 0`,
 });
 
 export const foreignKeys = {
@@ -50,7 +55,7 @@ export const foreignKeys = {
   enable: sql`PRAGMA foreign_keys = ON`,
 };
 
-export const migrationNameColumn = (client: SqlClient) =>
+export const migrationNameColumn = (client: SqlClient.SqlClient) =>
   client`SELECT name FROM pragma_table_info('usine_migrations') WHERE name = 'name'`;
 
 export const isTrue = (value: SQLWrapper) => sql`${value} = 1`;

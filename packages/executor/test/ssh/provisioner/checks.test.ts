@@ -18,6 +18,7 @@ import { CheckoutRequest, Executor, WorkerMachines } from "../../../src/executor
 import {
   ADDRESS,
   capturedLogs,
+  CapturedLog,
   DESTINATION,
   fakeMachine,
   request,
@@ -27,6 +28,10 @@ import {
 import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 import { hetznerSettings } from "./support.ts";
+
+// Array.map synchronously decodes captured log entries for assertions.
+// @effect-diagnostics-next-line schemaSync:off
+const parseJson = Schema.decodeUnknownSync(CapturedLog);
 
 const imagePullAddress = {
   ...hetznerAddress,
@@ -85,9 +90,11 @@ it.effect("keeps the same machine when a missing image pull succeeds on retry", 
     assert.isTrue(Option.isSome(grant.checked));
     const warnings = logs.warnings.filter((line) => line.includes("Attempt image pull failed"));
     assert.lengthOf(warnings, 1);
-    assert.deepInclude(JSON.parse(warnings[0] ?? "")[1], { attempt: 1, stderr });
+    const json1 = yield* Schema.decodeEffect(CapturedLog)(warnings[0] ?? "").pipe(Effect.orDie);
+    assert.deepInclude(json1[1], { attempt: 1, stderr });
     const pulled = logs.lines.find((line) => line.includes("Pulled the attempt image"));
-    assert.deepInclude(JSON.parse(pulled ?? "")[1], { attempt: 2, downloaded: true });
+    const json2 = yield* Schema.decodeEffect(CapturedLog)(pulled ?? "").pipe(Effect.orDie);
+    assert.deepInclude(json2[1], { attempt: 2, downloaded: true });
     yield* machines.release(grant.hold);
   }).pipe(
     Effect.scoped,
@@ -144,11 +151,11 @@ it.effect("fails preflight after three image pulls and logs the bounded last std
     const warnings = logs.warnings.filter((line) => line.includes("Attempt image pull failed"));
     assert.lengthOf(warnings, 3);
     assert.deepStrictEqual(
-      warnings.map((line) => JSON.parse(line)[1].stderr),
+      warnings.map((line) => parseJson(line)[1].stderr),
       errors.map((stderr) => stderr.slice(0, 1000)),
     );
     assert.deepStrictEqual(
-      warnings.map((line) => JSON.parse(line)[1].attempt),
+      warnings.map((line) => parseJson(line)[1].attempt),
       [1, 2, 3],
     );
   }).pipe(

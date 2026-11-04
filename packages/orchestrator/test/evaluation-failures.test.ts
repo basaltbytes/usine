@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { idleCiMonitor } from "./support/ci.ts";
 import { assert, describe, it } from "@effect/vitest";
@@ -211,7 +212,10 @@ const processLayer = (github: GitHubPolling["Service"], cursors: CursorStore["Se
 const capturedLogs = () => {
   const lines: Array<{ readonly level: string; readonly text: string }> = [];
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-    lines.push({ level: logLevel, text: JSON.stringify(message) });
+    lines.push({
+      level: logLevel,
+      text: jsonKey(message),
+    });
   });
   return {
     logger,

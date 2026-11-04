@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { ChangeBus, type ScopedChange } from "@usine/core/changes";
 import { Effect } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
@@ -15,7 +16,7 @@ export const changeTransaction =
         const changes = new Map<string, ScopedChange>();
         const record: RecordChange = (change) =>
           Effect.sync(() => {
-            changes.set(JSON.stringify([change.audience, change.target]), change);
+            changes.set(jsonKey([change.audience, change.target]), change);
           });
         const value = yield* database.transaction((transaction) =>
           restore(operation(transaction, record)),

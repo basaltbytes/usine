@@ -963,7 +963,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       for (const machine of (yield* Ref.get(held)).values())
         if (yield* retireIdle(machine.hold))
           yield* discard(machine.hold, "the orchestrator stopped");
-    }),
+    }).pipe(Effect.orDie),
   );
 
   const provisions = (worker: WorkerName) =>

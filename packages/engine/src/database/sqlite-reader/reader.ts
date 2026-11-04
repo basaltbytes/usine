@@ -1,3 +1,5 @@
+import { type SqlError, type SqlConnection, SqlClient, Statement } from "effect/sql";
+
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import {
   Data,
@@ -12,9 +14,7 @@ import {
   Layer,
 } from "effect";
 import { Reactivity } from "effect/reactivity";
-import { SqlClient, Statement } from "effect/sql";
-import type { Connection } from "effect/sql/SqlConnection";
-import type { SqlError } from "effect/sql/SqlError";
+
 import {
   connectionError,
   readConnection,
@@ -152,8 +152,8 @@ const routedSqliteClient = (
     reactiveMailbox: writer.reactiveMailbox,
   } satisfies Partial<SqliteClient.SqliteClient>);
 
-const snapshotConnection = (queries: ReadQueries): Connection => {
-  const rows: Connection["execute"] = (sql, params, transform) => {
+const snapshotConnection = (queries: ReadQueries): SqlConnection.Connection => {
+  const rows: SqlConnection.Connection["execute"] = (sql, params, transform) => {
     const result = queries.rows(sql, params);
     return transform === undefined ? result : Effect.map(result, transform);
   };
@@ -175,12 +175,13 @@ export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* 
 ) {
   yield* Effect.annotateCurrentSpan({ filename: writer.config.filename });
   const reader = yield* supervise(writer.config.filename, spawn);
-  const onWriter = <A>(use: (connection: Connection) => Effect.Effect<A, SqlError>) =>
-    Effect.scoped(Effect.flatMap(writer.reserve, use));
+  const onWriter = <A>(
+    use: (connection: SqlConnection.Connection) => Effect.Effect<A, SqlError.SqlError>,
+  ) => Effect.scoped(Effect.flatMap(writer.reserve, use));
   const route = <A>(
     sql: string,
-    onReader: (current: ReadConnection) => Effect.Effect<A, SqlError>,
-    useWriter: (connection: Connection) => Effect.Effect<A, SqlError>,
+    onReader: (current: ReadConnection) => Effect.Effect<A, SqlError.SqlError>,
+    useWriter: (connection: SqlConnection.Connection) => Effect.Effect<A, SqlError.SqlError>,
   ) =>
     isReadQuery(sql)
       ? Effect.flatMap(
@@ -191,7 +192,7 @@ export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* 
           }),
         )
       : onWriter(useWriter);
-  const rows: Connection["execute"] = (sql, params, transform) =>
+  const rows: SqlConnection.Connection["execute"] = (sql, params, transform) =>
     route(
       sql,
       (current) => {
@@ -200,13 +201,13 @@ export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* 
       },
       (connection) => connection.execute(sql, params, transform),
     );
-  const values: Connection["executeValues"] = (sql, params) =>
+  const values: SqlConnection.Connection["executeValues"] = (sql, params) =>
     route(
       sql,
       (current) => current.values(sql, params),
       (connection) => connection.executeValues(sql, params),
     );
-  const connection: Connection = {
+  const connection: SqlConnection.Connection = {
     execute: rows,
     executeUnprepared: rows,
     executeRaw: (sql, params) =>

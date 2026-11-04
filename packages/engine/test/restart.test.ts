@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import type { Attempt, AttemptId, StopReason } from "@usine/core/attempt";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -1312,7 +1313,7 @@ describe("engine restart", () => {
           >([]);
           const warnings: Array<string> = [];
           const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-            if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+            if (logLevel === "Warn") warnings.push(jsonKey(message));
           });
 
           // `usine.yaml` now declares only `usine-worker-1`.

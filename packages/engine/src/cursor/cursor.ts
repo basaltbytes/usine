@@ -39,7 +39,7 @@ export class CursorStore extends Context.Service<
       value: T,
     ) => Effect.Effect<void, EnginePersistenceError>;
   }
->()("@usine/engine/CursorStore") {
+>()("@usine/engine/cursor/cursor/CursorStore") {
   /** Stores JSON cursors in the supplied runtime database. */
   static readonly layer = Layer.effect(
     CursorStore,

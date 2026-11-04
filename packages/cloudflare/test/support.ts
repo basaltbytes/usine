@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { AttemptId } from "@usine/core/attempt";
 import { CloudflareImageName } from "@usine/core/worker";
 import { DateTime, Effect, Layer, Option, Redacted } from "effect";
@@ -61,6 +63,8 @@ export const controlledProcess = () => {
   const received: Array<Uint8Array> = [];
   let stdinClosed = false;
   let resolveExit: (code: number) => void = () => undefined;
+  // The ContainerProcess SDK contract exposes its exit code as a Promise.
+  // @effect-diagnostics-next-line newPromise:off
   const exitCode = new Promise<number>((resolve) => (resolveExit = resolve));
   const stdin = new WritableStream<Uint8Array>({
     write: (chunk) => {

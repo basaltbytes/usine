@@ -1,7 +1,36 @@
 import type { CloudflareLlmProvider } from "@usine/core/worker";
-import { Match, Option, Redacted } from "effect";
+import { Effect, Match, Option, Redacted } from "effect";
+import { FetchHttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import type { ProviderCredential, SandboxCredentials } from "../api/api.ts";
 import { GITHUB_HOSTS, type GitHubHost, PROVIDER_HOSTS } from "../api/harness.ts";
+
+export const forwardRequest = Effect.fn("Sandbox.forwardRequest")(function* (
+  handler: string,
+  request: Request,
+  forwarded: Request = request,
+) {
+  const route = {
+    handler,
+    method: request.method,
+    host: new URL(request.url).host,
+    path: new URL(request.url).pathname,
+  };
+  yield* Effect.annotateCurrentSpan(route);
+  // Cloudflare fetch supports WebSocket upgrades; Effect's HTTP client rejects them.
+  const platformFetch = yield* FetchHttpClient.Fetch;
+  const response = yield* Effect.tryPromise({
+    try: () => platformFetch(forwarded),
+    catch: (cause) =>
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({
+          request: HttpClientRequest.fromWeb(forwarded),
+          cause,
+        }),
+      }),
+  }).pipe(Effect.tapError(() => Effect.logWarning("Failed to forward a sandbox request", route)));
+  yield* Effect.logInfo("Forwarded a sandbox request", { ...route, status: response.status });
+  return response;
+});
 
 /** GitHub requests over HTTPS, with the Attempt's installation token added. */
 interface GitHubInterception {

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 
@@ -127,7 +128,7 @@ const json = (
 ) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(JSON.stringify(body), {
+    new Response(jsonKey(body), {
       status,
       headers: { "content-type": "application/json" },
     }),

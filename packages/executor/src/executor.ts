@@ -342,7 +342,7 @@ export class CredentialProvider extends Context.Service<
       permissions: LoopPermissions,
     ) => Effect.Effect<WorkerCredential, CredentialUnavailableError>;
   }
->()("@usine/executor/CredentialProvider") {}
+>()("@usine/executor/executor/CredentialProvider") {}
 
 /** The service that prepares checkouts, runs Attempts on a Worker, and releases their resources (ADR 0006). */
 export class Executor extends Context.Service<
@@ -422,7 +422,7 @@ export class Executor extends Context.Service<
      */
     readonly sweep: Effect.Effect<void>;
   }
->()("@usine/executor/Executor") {}
+>()("@usine/executor/executor") {}
 
 /** The executor's hold on one provisioned machine, which `WorkerMachines.release` ends. */
 export const MachineHold = Schema.NonEmptyString.pipe(Schema.brand("MachineHold"));
@@ -538,7 +538,7 @@ export class WorkerMachines extends Context.Service<
     /** Persisted counts of acknowledged provider creations, including failed preflights. */
     readonly starts: Effect.Effect<ReadonlyArray<MachineStarts>>;
   }
->()("@usine/executor/WorkerMachines") {}
+>()("@usine/executor/executor/WorkerMachines") {}
 
 export { claudeLoginLockLayer } from "./claude-login-lock.ts";
 

@@ -40,7 +40,10 @@ const addForbiddenResponse = (
     content: {
       ...forbidden?.content,
       "application/json": {
-        schema: existingSchema ? { anyOf: [existingSchema, additionalSchema] } : additionalSchema,
+        schema:
+          existingSchema !== undefined
+            ? { anyOf: [existingSchema, additionalSchema] }
+            : additionalSchema,
       },
     },
   };

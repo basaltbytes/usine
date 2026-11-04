@@ -53,7 +53,7 @@ export class ConfigurationFolder extends Context.Service<
       instance: LoadedInstance,
     ) => Effect.Effect<void, ConfigurationStoreError>;
   }
->()("@usine/config/ConfigurationFolder") {
+>()("@usine/config/configuration/folder/ConfigurationFolder") {
   /** Provides strict folder import and export using `FileSystem`, `Path`, and `ConfigParser`. */
   static readonly layer = Layer.effect(
     ConfigurationFolder,

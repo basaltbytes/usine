@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { MACHINE_RUN } from "./fixtures.ts";
 import { AttemptId } from "@usine/core/attempt";
 import { remoteCommandsFor } from "../../../src/remote/commands.ts";
@@ -255,7 +256,8 @@ describe("Boat tailnet", () => {
         api.state.refuseKeys = true;
         const error = yield* client.withKey(() => Effect.void).pipe(Effect.flip);
         assert.include(error.message, "HTTP 403");
-        assert.notInclude(JSON.stringify(error), "test-client-secret");
+        const json1 = jsonKey(error);
+        assert.notInclude(json1, "test-client-secret");
         yield* client.verifyGateway(GatewayDomain.make("gw.test"));
         api.state.gatewayAnswers = false;
 
@@ -296,7 +298,8 @@ describe("Boat tailnet", () => {
           .create(WORKER, MACHINE_RUN, AttemptId.make("remote-run/execute/1"), [TEST_AGENT.brain])
           .pipe(Effect.flip);
         assert.include(failure.message, "could not join");
-        assert.notInclude(JSON.stringify(failure), "tskey-auth-test");
+        const json2 = jsonKey(failure);
+        assert.notInclude(json2, "tskey-auth-test");
         assert.strictEqual(boat.boat.sandboxes.size, 0);
         assert.isTrue(api.calls.some((call) => call.method === "DELETE"));
         assert.isFalse(

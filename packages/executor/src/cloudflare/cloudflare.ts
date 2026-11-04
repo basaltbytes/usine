@@ -921,7 +921,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             ),
             Effect.ignore,
           );
-        }),
+        }).pipe(Effect.orDie),
       );
 
       const acquire = Effect.gen(function* () {

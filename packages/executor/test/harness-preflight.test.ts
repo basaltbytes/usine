@@ -1,3 +1,4 @@
+import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
@@ -6,8 +7,7 @@ import { HarnessReady } from "@usine/core/agent/capability";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Fiber, Option, Sink, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import { ChildProcessSpawner } from "effect/process";
-import type { StandardCommand } from "effect/process/ChildProcess";
+
 import { claudeLoginLockLayer } from "../src/executor.ts";
 import {
   agentsHarnessProbe,
@@ -40,7 +40,7 @@ const exited = (exitCode: number) =>
 describe("harness probe on a remote host", () => {
   it.effect("runs each check as one SSH command with exactly the SSH client's environment", () =>
     Effect.gen(function* () {
-      const spawned: Array<StandardCommand> = [];
+      const spawned: Array<ChildProcess.StandardCommand> = [];
       const spawner = ChildProcessSpawner.make((command) =>
         Effect.sync(() => {
           if (command._tag === "StandardCommand") spawned.push(command);

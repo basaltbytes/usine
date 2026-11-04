@@ -48,7 +48,7 @@ export const FormField = ({
     ) => {
       const text = event.target.value;
       const next =
-        optional && text === ""
+        optional === true && text === ""
           ? undefined
           : kind === "number"
             ? text === ""

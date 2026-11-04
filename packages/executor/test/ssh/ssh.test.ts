@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { SshWorkers, type SshWorkerAddress } from "../../src/ssh/ssh.ts";
 import { keptCheckoutRecovery } from "../../src/provision.ts";
 import { assert, describe, it } from "@effect/vitest";
@@ -169,13 +170,15 @@ describe("SSH Worker", () => {
         assert.include(written.input, `oauth_token: "${TOKEN_PREFIX}1"`);
         for (const { command, line, input } of machine.state.calls) {
           assert.notInclude(command.args.join(" "), TOKEN_PREFIX);
-          assert.notInclude(JSON.stringify(command.options.env), TOKEN_PREFIX);
+          const json1 = jsonKey(command.options.env);
+          assert.notInclude(json1, TOKEN_PREFIX);
           assert.strictEqual(command.options.extendEnv, false);
           for (const name of Object.keys(command.options.env ?? {}))
             assert(allowlisted.has(name), `unexpected SSH environment key: ${name}`);
           if (input !== "") assert(writesCredential(line), "only the credential write reads stdin");
         }
-        assert.notInclude(JSON.stringify(given.environment), TOKEN_PREFIX);
+        const json2 = jsonKey(given.environment);
+        assert.notInclude(json2, TOKEN_PREFIX);
         assert.notInclude(logs.lines.join("\n"), TOKEN_PREFIX);
       }).pipe(
         Effect.scoped,

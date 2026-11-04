@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import type { JsonValue } from "@earendil-works/chord";
 import {
   type Cursor,

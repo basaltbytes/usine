@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import type { ItemNumber } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
@@ -113,7 +114,7 @@ const firstTimeRight = (runs: ReadonlyArray<RunSummary>): boolean =>
   Object.values(
     EffectArray.groupBy(
       runs.filter(({ run }) => run.state._tag === "Succeeded"),
-      ({ itemKey, run }) => JSON.stringify([itemKey, run.loop]),
+      ({ itemKey, run }) => jsonKey([itemKey, run.loop]),
     ),
   ).every((members) => members.length === 1);
 
@@ -381,7 +382,7 @@ export const taskStatisticsView = ({
     );
   return StatisticsView.make({
     window,
-    from: new Date(from).toISOString(),
+    from: DateTime.formatIso(DateTime.makeUnsafe(from)),
     to: DateTime.formatIso(now),
     bucket,
     loops: order,

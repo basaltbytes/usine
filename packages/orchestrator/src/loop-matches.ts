@@ -31,7 +31,7 @@ export class LoopMatches extends Context.Service<
       items: ReadonlyArray<ItemProjection>,
     ) => Effect.Effect<ReadonlyArray<LoopItemMatch>>;
   }
->()("@usine/orchestrator/LoopMatches") {
+>()("@usine/orchestrator/loop-matches/LoopMatches") {
   static readonly layer = Layer.effect(
     LoopMatches,
     Effect.gen(function* () {

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { ManagedRepo } from "@usine/config/factory";
 import type { LoopFile } from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
@@ -36,7 +37,7 @@ const eventKey = (
   { projection: item, cycleGeneration }: ObservedItem,
 ): DedupKey =>
   DedupKey.make(
-    JSON.stringify([
+    jsonKey([
       loop.name,
       canonicalRepositoryName(repository.name),
       item.number,

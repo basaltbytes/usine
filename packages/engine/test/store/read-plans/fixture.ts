@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { CiHandoff } from "@usine/core/ci";
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha } from "@usine/core/repository";
@@ -31,11 +32,14 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
   const sql = yield* SqlClient.SqlClient;
   const at = "2026-11-01T00:00:00.000Z";
   const valueDecoded1 = yield* Schema.encodeEffect(Agent)(testAgent);
-  const agent = JSON.stringify(valueDecoded1);
+  const json1 = jsonKey(valueDecoded1);
+  const agent = json1;
   const valueDecoded2 = yield* Schema.encodeEffect(Agent.fields.brain)(testAgent.brain);
-  const brain = JSON.stringify(valueDecoded2);
+  const json2 = jsonKey(valueDecoded2);
+  const brain = json2;
   const valueDecoded3 = yield* Schema.encodeEffect(RunState.RunState)(RunState.Running.make());
-  const running = JSON.stringify(valueDecoded3);
+  const json3 = jsonKey(valueDecoded3);
+  const running = json3;
   const valueDecoded4 = yield* Schema.encodeEffect(RunState.RunState)(
     RunState.AwaitingCi.make({
       handoff: CiHandoff.make({
@@ -47,7 +51,8 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
       }),
     }),
   );
-  const awaitingCi = JSON.stringify(valueDecoded4);
+  const json4 = jsonKey(valueDecoded4);
+  const awaitingCi = json4;
   const valueDecoded5 = yield* Schema.encodeEffect(RunState.RunState)(
     RunState.HandedOff.make({
       reason: "CI fix admitted",
@@ -56,15 +61,20 @@ export const seedReadFixture = Effect.fn("ReadPlans.seedFixture")(function* (pad
       fixRunId: RunId.make("run-989"),
     }),
   );
-  const handedOff = JSON.stringify(valueDecoded5);
+  const json5 = jsonKey(valueDecoded5);
+  const handedOff = json5;
   const valueDecoded6 = yield* Schema.encodeEffect(RunState.RunState)(RunState.Succeeded.make());
-  const succeeded = JSON.stringify(valueDecoded6);
+  const json6 = jsonKey(valueDecoded6);
+  const succeeded = json6;
   const valueDecoded7 = yield* Schema.encodeEffect(AttemptOutcome)(AttemptSucceeded.make());
-  const succeededOutcome = JSON.stringify(valueDecoded7);
+  const json7 = jsonKey(valueDecoded7);
+  const succeededOutcome = json7;
   const valueDecoded8 = yield* Schema.encodeEffect(AttemptOutcome)(AttemptHandedOff.make());
-  const handedOffOutcome = JSON.stringify(valueDecoded8);
+  const json8 = jsonKey(valueDecoded8);
+  const handedOffOutcome = json8;
   const valueDecoded9 = yield* Schema.encodeEffect(AttemptOutcome)(AttemptAwaitingCi.make());
-  const awaitingCiOutcome = JSON.stringify(valueDecoded9);
+  const json9 = jsonKey(valueDecoded9);
+  const awaitingCiOutcome = json9;
   yield* sql`CREATE TEMP TABLE fixture_numbers AS WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i + 1 FROM n WHERE i < 999) SELECT i FROM n`;
   yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
     SELECT 'event-' || i, 'dedup-' || i, '{}', ${at} FROM fixture_numbers`;

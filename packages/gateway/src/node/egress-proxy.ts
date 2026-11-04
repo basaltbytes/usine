@@ -4,8 +4,12 @@ import {
   type IncomingMessage,
   request as httpRequest,
   type ServerResponse,
+  // The Node server adapter requires native HTTP server and connection types.
+  // @effect-diagnostics-next-line nodeBuiltinImport:off
 } from "node:http";
 import { BlockList, connect, type Socket } from "node:net";
+// The Node adapter exposes native stream handles to its vendor interface.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import type { Duplex } from "node:stream";
 import type { WorkerName } from "@usine/core/worker";
 import { type Brand, Data, Effect, Fiber, Match, Option, Predicate, Schema } from "effect";
@@ -693,6 +697,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
             server.close(() => resume(Effect.void));
           }),
         ),
+        Effect.orDie,
       ),
   );
   const address = server.address();

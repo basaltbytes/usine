@@ -25,4 +25,4 @@ export class TriggerCondition extends Context.Service<
      */
     readonly recheck: (submission: Submission) => Effect.Effect<TriggerRecheck>;
   }
->()("@usine/engine/TriggerCondition") {}
+>()("@usine/engine/trigger-condition/TriggerCondition") {}

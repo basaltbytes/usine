@@ -65,7 +65,7 @@ export class CycleBudgets extends Context.Service<
       reset: CycleBudgetReset,
     ) => Effect.Effect<void, EnginePersistenceError>;
   }
->()("@usine/engine/CycleBudgets") {
+>()("@usine/engine/cycle-budget/cycle-budget/CycleBudgets") {
   /**
    * Uses the supplied runtime database for atomic budget resets and durable re-poll requests (ADR
    * 0022).

@@ -495,7 +495,9 @@ export const containersFor = (commands: RemoteCommands) => {
       spec.settings.image,
       ...lifetime.command,
     ];
-    yield* Effect.addFinalizer(() => remove(shell, spec.name, spec.settings.runtime));
+    yield* Effect.addFinalizer(() =>
+      remove(shell, spec.name, spec.settings.runtime).pipe(Effect.orDie),
+    );
     yield* commands
       .runWithInput(
         operation,

@@ -1,4 +1,7 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, it } from "@effect/vitest";
+// The retention assertion must run after Node’s check phase releases native async handles.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { setImmediate } from "node:timers/promises";
 import { queryObjects } from "node:v8";
 import { NodeServices } from "@effect/platform-node";
@@ -145,7 +148,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     ReadonlyArray<{ readonly item: number; readonly mutation: ItemLabelMutation }>
   >([]);
   const result = StepResult.make({
-    message: `[usine:awaiting-ci]\n${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`,
+    message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`,
     facts: [
       PullRequest.make({
         number: 815,
@@ -243,7 +246,7 @@ const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number,
   const submission = yield* triggerSubmission(expressions, {
     loop: LoopFile.make({
       ...loop,
-      name: sameLoop ? loop.name : LoopName.make("development"),
+      name: sameLoop === true ? loop.name : LoopName.make("development"),
       ci: Option.some(CiPolicy.make({ fixLoop: loop.name, timeoutSeconds })),
     }),
     agent: agent.agent,
@@ -371,7 +374,7 @@ it.effect("polling an open CI wait releases response bodies across six simulated
       const poll = monitor.reconcile(fixtureInstance, Option.none()).pipe(
         Effect.andThen(engine.inspect(runId)),
         Effect.map(
-          (snapshot) => new ResponseBody(JSON.stringify(runView(snapshot, new Set(), new Map()))),
+          (snapshot) => new ResponseBody(jsonKey(runView(snapshot, new Set(), new Map()))),
         ),
         Effect.withSpan("http.request"),
         Effect.asVoid,
@@ -379,7 +382,7 @@ it.effect("polling an open CI wait releases response bodies across six simulated
       );
       for (let hour = 0; hour <= 6; hour++) {
         for (let request = 0; request < 8; request++) {
-          yield* Effect.promise(() => Effect.runPromiseWith(context)(poll));
+          yield* poll;
         }
         yield* Effect.promise(() => setImmediate());
         queryObjects(ResponseBody, { format: "count" });
@@ -541,7 +544,7 @@ it.live.each(["failure", "conflict"] as const)(
             Effect.map((count) => {
               const fixedHead = heads[count - 1] ?? assert.fail("unexpected fix attempt");
               return StepResult.make({
-                message: `[usine:awaiting-ci]\n${JSON.stringify({ pull_request: 815, head: fixedHead, fix_loop: "fix", timeout_seconds: 3600, on_green: [{ item: 815, add: [count === 1 ? "fix-validated" : "ready-for-review"], remove: ["agent-review-findings"] }] })}`,
+                message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head: fixedHead, fix_loop: "fix", timeout_seconds: 3600, on_green: [{ item: 815, add: [count === 1 ? "fix-validated" : "ready-for-review"], remove: ["agent-review-findings"] }] })}`,
                 facts: [
                   PullRequest.make({
                     number: 815,

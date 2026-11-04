@@ -8,13 +8,13 @@ type CommandButtonProps = Omit<ComponentProps<typeof Button>, "ref"> & { readonl
 export const CommandButton = ({ command, disabled, ...props }: CommandButtonProps) => {
   const button = useRef<HTMLButtonElement>(null);
   usePageCommands(
-    disabled
+    disabled === true
       ? []
       : [
           {
             label: command,
             run: () => {
-              if (button.current?.isConnected && !button.current.matches(":disabled")) {
+              if (button.current?.isConnected === true && !button.current.matches(":disabled")) {
                 button.current.focus();
                 button.current.click();
               }

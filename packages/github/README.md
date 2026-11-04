@@ -138,3 +138,5 @@ Enable the App webhook to record deliveries. A delivery with a failed HTTP statu
 ## Schema contracts
 
 GitHub response records and errors use nominal Schema brands. Use their schema constructors for typed values, and decode external responses with `Schema.decodeUnknownEffect`.
+
+Run `pnpm --filter @usine/github check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

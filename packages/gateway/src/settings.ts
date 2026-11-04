@@ -41,7 +41,7 @@ export class GatewaySettings extends Context.Service<
     /** The secret used to sign caller tokens; changing it invalidates existing signatures. */
     readonly callerKey: CallerKey;
   }
->()("@usine/gateway/GatewaySettings") {}
+>()("@usine/gateway/settings/GatewaySettings") {}
 
 /** The settings a reload replaces: the egress allowlist and LLM providers. */
 export interface ReloadableSettings {
@@ -64,7 +64,7 @@ export class SettingsInForce extends Context.Service<
     /** Replaces them for all later requests. */
     readonly replace: (next: ReloadableSettings) => Effect.Effect<void>;
   }
->()("@usine/gateway/SettingsInForce") {
+>()("@usine/gateway/settings/SettingsInForce") {
   /**
    * Initializes shared reloadable settings from `GatewaySettings`; does not read files or watch
    * for changes.

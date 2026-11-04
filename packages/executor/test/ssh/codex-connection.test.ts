@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
@@ -241,9 +242,10 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
             assert.strictEqual(secondContents, "thread-one\n");
           }
           const saved = (yield* fs.readFileString(`${directory}/saved-inputs`)).trim().split("\n");
-          const originalInput = JSON.stringify([
+          const json1 = jsonKey([
             { type: "text", text: "Finish this attempt.", text_elements: [] },
           ]);
+          const originalInput = json1;
           assert.strictEqual(
             saved[0],
             originalInput,

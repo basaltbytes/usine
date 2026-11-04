@@ -4,7 +4,7 @@ import type { PermissionGrant } from "@usine/core/access";
 import { ChangeBus, type ScopedChange, type ChangeTarget } from "@usine/core/changes";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
-import { Context, Effect, Layer, Option, Ref, Schedule, Stream } from "effect";
+import { Context, Effect, Layer, Option, Ref, Schedule, Stream, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 
 const makeChanges = Effect.gen(function* () {
@@ -42,7 +42,10 @@ const makeChanges = Effect.gen(function* () {
           suppliedCursor < oldest - 1 ||
           suppliedCursor > revision;
         const frame = (notice: ChangeNotice) =>
-          `id: ${notice.revision}\nevent: change\ndata: ${JSON.stringify(notice)}\n\n`;
+          Schema.encodeEffect(Schema.fromJsonString(ChangeNotice))(notice).pipe(
+            Effect.orDie,
+            Effect.map((data) => `id: ${notice.revision}\nevent: change\ndata: ${data}\n\n`),
+          );
         const send = Effect.fn("Http.changes.send")(function* (notice: (typeof history)[number]) {
           const previous = yield* Ref.get(cursor);
           if (notice.revision <= previous) return "";
@@ -57,7 +60,9 @@ const makeChanges = Effect.gen(function* () {
             reset: gap,
             targets: changes.length,
           });
-          return frame(ChangeNotice.make({ revision: notice.revision, reset: gap, changes }));
+          return yield* frame(
+            ChangeNotice.make({ revision: notice.revision, reset: gap, changes }),
+          );
         });
         const initial = reset
           ? Effect.gen(function* () {
@@ -68,7 +73,8 @@ const makeChanges = Effect.gen(function* () {
                 resume: supplied ?? "initial",
               });
               return (
-                frame(ChangeNotice.make({ revision, reset: true, changes: [] })) + ": heartbeat\n\n"
+                (yield* frame(ChangeNotice.make({ revision, reset: true, changes: [] }))) +
+                ": heartbeat\n\n"
               );
             })
           : Effect.forEach(
@@ -103,7 +109,7 @@ const makeChanges = Effect.gen(function* () {
 });
 
 export class Changes extends Context.Service<Changes, Effect.Success<typeof makeChanges>>()(
-  "@usine/server/Changes",
+  "@usine/server/changes/changes",
 ) {
   static readonly layer = Layer.effect(Changes, makeChanges);
 }

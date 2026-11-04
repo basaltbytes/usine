@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import {
@@ -49,7 +50,7 @@ for (const address of [hetznerAddress, boatAddress]) {
         const machine = machineFixture();
         if (containerRuntime === "podman") {
           machine.state.docker = "absent";
-          machine.state.podmanInfo = JSON.stringify({
+          machine.state.podmanInfo = jsonKey({
             version: { Version: "5.4.2" },
             host: {
               security: { rootless: true },
@@ -91,7 +92,8 @@ for (const address of [hetznerAddress, boatAddress]) {
           const assignment = providers.calls.find(
             ({ method }) => method === (provider === "boat" ? "PATCH" : "PUT"),
           );
-          assert.include(JSON.stringify(assignment?.body), attemptTag(second));
+          const json1 = jsonKey(assignment?.body);
+          assert.include(json1, attemptTag(second));
           yield* machines.release(first.hold);
           assert.strictEqual(
             (yield* machines.machines)[0]?.state,

@@ -35,7 +35,7 @@ export class UnconfirmedStops extends Context.Service<
     /** Returns attempts in the order their stop was first requested. */
     readonly list: Effect.Effect<ReadonlyArray<UnconfirmedStop>>;
   }
->()("@usine/engine/UnconfirmedStops") {
+>()("@usine/engine/engine/unconfirmed-stops/UnconfirmedStops") {
   /** Lists no Attempt, for a process that drives no Run, as in setup mode. */
   static readonly empty = Layer.succeed(UnconfirmedStops)({ list: Effect.succeed([]) });
 }

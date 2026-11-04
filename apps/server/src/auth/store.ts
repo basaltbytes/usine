@@ -33,4 +33,4 @@ export class AuthStore extends Context.Service<
     ) => Effect.Effect<void, AuthError>;
     readonly revoke: (member: GitHubUserId, token: TokenId) => Effect.Effect<void, AuthError>;
   }
->()("@usine/server/AuthStore") {}
+>()("@usine/server/auth/store/AuthStore") {}

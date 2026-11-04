@@ -46,7 +46,7 @@ export class ServerUpgrades extends Context.Service<
     readonly status: Effect.Effect<UpgradeView, UpgradeError>;
     readonly request: (request: UpgradeRequest) => Effect.Effect<void, UpgradeError>;
   }
->()("@usine/server/ServerUpgrades") {
+>()("@usine/server/upgrade/control/ServerUpgrades") {
   static readonly layer = (options: UpgradeOptions) =>
     Layer.effect(ServerUpgrades, makeUpgrades(options));
 }

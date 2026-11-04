@@ -249,6 +249,6 @@ export class OperatorStatistics extends Context.Service<
       window: StatisticsWindow,
     ) => Effect.Effect<RunStatisticsView, RunStoreError | ConfigurationStoreError>;
   }
->()("@usine/orchestrator/OperatorStatistics") {
+>()("@usine/orchestrator/operator/statistics/statistics/OperatorStatistics") {
   static readonly layer = Layer.effect(OperatorStatistics, makeStatistics);
 }

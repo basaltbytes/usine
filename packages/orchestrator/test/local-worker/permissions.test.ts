@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -215,7 +216,8 @@ describe("local worker Loop permissions", () => {
 
           const [environment] = environments;
           assert(environment !== undefined);
-          assert.notInclude(JSON.stringify(environment), ambient);
+          const json1 = jsonKey(environment);
+          assert.notInclude(json1, ambient);
           assert.deepStrictEqual(
             Object.keys(environment).filter((name) => /TOKEN|CREDENTIAL|ASKPASS/u.test(name)),
             ["USINE_GITHUB_TOKEN_FILE"],

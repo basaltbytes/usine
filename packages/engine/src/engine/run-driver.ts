@@ -155,7 +155,7 @@ export class RunDriver extends Context.Service<
      */
     readonly releaseKept: (stop: UnconfirmedStop) => Effect.Effect<void>;
   }
->()("@usine/engine/internal/RunDriver") {
+>()("@usine/engine/engine/run-driver/RunDriver") {
   static readonly layer = Layer.effect(
     RunDriver,
     Effect.gen(function* () {

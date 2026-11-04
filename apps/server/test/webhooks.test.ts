@@ -1,5 +1,8 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeHttpServer } from "@effect/platform-node";
 import { TestClock } from "effect/testing";
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createHmac } from "node:crypto";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -238,7 +241,7 @@ it("bounds startup hook configuration and request bodies on the Node HTTP server
       const server = HttpRouter.serve(routes).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
       yield* Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient;
-        const oversized = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        const oversized = jsonKey({
           unused: "x".repeat(25 * 1024 * 1024),
         });
         for (const [body, status] of [
@@ -290,7 +293,7 @@ it("switches a running endpoint between modes and public URLs without rebuilding
       );
       const web = HttpRouter.toWebHandler(routes, { disableLogger: true });
       yield* Effect.addFinalizer(() => Effect.promise(() => web.dispose()));
-      const body = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+      const body = jsonKey({
         repository: { full_name: repository },
       });
 

@@ -1,4 +1,8 @@
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { spawn } from "node:child_process";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { InstanceDirectory } from "@usine/core/instance";
 import {

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Effect, Exit, Option, Stream, Tracer } from "effect";
 import {
@@ -90,7 +91,7 @@ describe("GitHub download redirects", () => {
           const span = new Tracer.NativeSpan(options);
           const end = span.end.bind(span);
           span.end = (endTime, exit) => {
-            failures.push(JSON.stringify(exit));
+            failures.push(jsonKey(exit));
             end(endTime, exit);
           };
           return span;

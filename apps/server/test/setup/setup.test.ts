@@ -1,3 +1,6 @@
+import { jsonKey } from "@usine/core/json-key";
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { generateKeyPairSync } from "node:crypto";
 import { NodeServices, NodeHttpServer } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -14,6 +17,7 @@ import {
   Option,
   Redacted,
   Schema,
+  DateTime,
 } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter } from "effect/http";
 import { assert, it } from "vitest";
@@ -54,7 +58,9 @@ const fixture = Effect.gen(function* () {
         : request.url.includes("/access_tokens")
           ? {
               token: "installation-token",
-              expires_at: new Date(Date.now() + 3600_000).toISOString(),
+              expires_at: DateTime.formatIso(
+                DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3600_000),
+              ),
             }
           : request.url.includes("/app/installations")
             ? installed
@@ -121,7 +127,7 @@ const fixture = Effect.gen(function* () {
         method: body === undefined ? "GET" : "POST",
         headers: { "content-type": "application/json", ...headers },
       };
-      if (body !== undefined) options.body = JSON.stringify(body);
+      if (body !== undefined) options.body = jsonKey(body);
       return app.handler(new Request(`https://usine.example${path}`, options));
     });
   const begin = Effect.gen(function* () {
@@ -182,7 +188,16 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
         const currentAvailable = yield* f.github.available;
         assert.equal(currentAvailable, false);
         const begun = yield* f.begin;
-        const manifest = JSON.parse(begun.manifest);
+        const json1 = yield* Schema.decodeEffect(
+          Schema.fromJsonString(
+            Schema.Struct({
+              default_permissions: Schema.Record(Schema.String, Schema.String),
+              callback_urls: Schema.Array(Schema.String),
+              hook_attributes: Schema.Struct({ url: Schema.String }),
+            }),
+          ),
+        )(begun.manifest).pipe(Effect.orDie);
+        const manifest = json1;
         assert.deepEqual(manifest.default_permissions, REQUIRED_REPOSITORY_PERMISSIONS);
         assert.deepEqual(manifest.callback_urls, ["https://usine.example/api/auth/callback"]);
         assert.equal(manifest.hook_attributes.url, "https://usine.example/webhooks/github");
@@ -205,7 +220,10 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
 
         assert.equal((yield* f.fs.stat(target)).mode & 0o777, 0o600);
         const contents = yield* f.fs.readFileString(target);
-        assert.deepEqual(JSON.parse(contents), {
+        const json2 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(contents).pipe(
+          Effect.orDie,
+        );
+        assert.deepEqual(json2, {
           app_id: 123,
           private_key: pem,
           client_id: conversion.client_id,
@@ -298,8 +316,12 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
         assert.equal(currentExists, false);
 
         assert.equal((yield* (yield* f.resume).status)._tag, "MissingKey");
+        const json3 = jsonKey({
+          app_id: 123,
+          private_key: pem,
+        });
         const restored = yield* f.request("/api/setup/restore", {
-          credentials: JSON.stringify({ app_id: 123, private_key: pem }),
+          credentials: json3,
         });
         assert.equal(restored.status, 200);
         const saved = yield* loadLocalSecrets(f.directory);
@@ -320,7 +342,11 @@ it("drains the activation response before closing setup HTTP and preserves its a
         const token = new URLSearchParams(new URL(currentLink).hash.slice(1)).get("link") ?? "";
         const session = yield* f.auth.authentication.consumeLink(token);
         const ready = yield* Deferred.make<HttpClient.HttpClient>();
-        yield* f.setup.restore(JSON.stringify({ app_id: 123, private_key: pem }));
+        const json4 = jsonKey({
+          app_id: 123,
+          private_key: pem,
+        });
+        yield* f.setup.restore(json4);
         const server = HttpRouter.serve(f.transportRoutes).pipe(
           Layer.provideMerge(NodeHttpServer.layerTest),
         );

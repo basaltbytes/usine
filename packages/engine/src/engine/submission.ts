@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { CiHandoff, CiPolicy } from "@usine/core/ci";
 import { Agent } from "@usine/core/agent";
 import {
@@ -103,7 +104,7 @@ export const reopeningOf = (
   original: DedupKey,
   reopening: number,
 ): Submission => {
-  const dedupKey = DedupKey.make(JSON.stringify(["reopened", reopening, original]));
+  const dedupKey = DedupKey.make(jsonKey(["reopened", reopening, original]));
   return Submission.make({
     ...submission,
     event: Event.make({ ...submission.event, id: EventId.make(dedupKey), dedupKey }),

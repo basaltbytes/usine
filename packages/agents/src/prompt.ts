@@ -1,9 +1,10 @@
+import { Schema, Option } from "effect";
 import { AWAITING_CI_MARKER } from "@usine/core/ci";
 import { githubSignature, type AgentPersona, type AgentName } from "@usine/core/agent";
 import type { AttemptTask } from "@usine/core/attempt";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import type { RepositoryName } from "@usine/core/repository";
-import { Option, type Schema } from "effect";
+
 import { BLOCKED_MARKER, QUESTION_MARKER } from "./runtime.ts";
 
 /** The trigger context, agent instructions, and task for the parent prompt. */
@@ -81,7 +82,7 @@ export const assemblePrompt = (parts: PromptParts): string =>
     "",
     "Payload snapshot:",
     "```json",
-    JSON.stringify(parts.payload, undefined, 2),
+    prettyPayload(parts.payload),
     "```",
     "",
     "# Agent persona",
@@ -118,3 +119,7 @@ export const assembleChildPrompt = (parts: ChildPromptParts): string =>
     "",
     ...githubInstructions(parts.agent),
   ].join("\n");
+
+// Prompt rendering synchronously formats the validated payload.
+// @effect-diagnostics-next-line schemaSync:off
+const prettyPayload = Schema.encodeSync(Schema.fromJsonString(Schema.Json, { space: 2 }));

@@ -22,8 +22,7 @@
   },
   "scripts": {
     "build": "tsc -b && node scripts/release.mjs",
-    "check": "node ../../scripts/effect-diagnostics/check.mjs tsconfig.check.json",
-    "effect:baseline": "node ../../scripts/effect-diagnostics/check.mjs --update tsconfig.check.json",
+    "check": "effect-tsgo tsc -p tsconfig.check.json",
     "test": "vitest run"
   },
   "dependencies": {
@@ -33,6 +32,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@usine/server": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "typescript": "catalog:",

@@ -1,7 +1,7 @@
+import { Migrator, SqlClient } from "effect/sql";
 import { getTableName } from "drizzle-orm";
 import { DateTime, Effect, Layer, Option, Schema } from "effect";
-import { SqlClient } from "effect/sql";
-import { make as makeMigrator, fromRecord } from "effect/sql/Migrator";
+
 import { ConfigParser } from "../../parser.ts";
 import { commit, validateConfiguration } from "../commit.ts";
 import { configurationEntities } from "../entities.ts";
@@ -35,9 +35,9 @@ export const sqliteConfigurationLayer = Layer.effect(
     const parser = yield* ConfigParser;
     const failure = (operation: string) => (cause: unknown) =>
       ConfigurationStoreError.make({ operation, cause });
-    yield* makeMigrator({})({
+    yield* Migrator.make({})({
       table: "usine_configuration_migrations",
-      loader: fromRecord(
+      loader: Migrator.fromRecord(
         Object.fromEntries(
           migrations.map(([name, statements]) => [
             name,

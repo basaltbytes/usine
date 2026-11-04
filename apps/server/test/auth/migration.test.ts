@@ -1,36 +1,35 @@
 import { MemberAccess } from "../../src/auth/access.ts";
 import { Effect, Option } from "effect";
-import { assert, it } from "vitest";
+import { assert, it } from "@effect/vitest";
 import { seedOperator } from "../../src/auth/authentication.ts";
 import { GitHubSignIn } from "../../src/auth/github.ts";
 import { AuthStore } from "../../src/auth/store.ts";
 import { alice, authFixture, bob } from "./fixture.ts";
 
-it("enrolls the existing operator once without looking up GitHub on later starts", async () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const services = yield* authFixture([]);
-      const seed = (login: typeof alice.login | undefined) =>
-        seedOperator(Option.fromUndefinedOr(login)).pipe(
-          Effect.provideService(AuthStore, services.store),
-          Effect.provideService(MemberAccess, {
-            permissions: () => Effect.succeed([]),
-            enroll: (member) => services.store.add(member, true),
-            remove: services.store.remove,
-          }),
-          Effect.provideService(GitHubSignIn, services.github),
-        );
-      yield* seed(undefined);
-      const currentMembers = yield* services.store.members;
-      assert.deepEqual(currentMembers, []);
-      yield* seed(alice.login);
-      const members = yield* services.store.members;
-      assert.equal(members.length, 1);
-      assert.equal(members[0]?.id, alice.id);
-      assert.equal(members[0]?.addedBy, alice.login);
-      yield* seed(bob.login);
-      const nextMembers = yield* services.store.members;
-      assert.deepEqual(nextMembers, members);
-      assert.deepEqual(services.seen, ["https://api.github.com/users/alice"]);
-    }).pipe(Effect.scoped),
-  ));
+it.live("enrolls the existing operator once without looking up GitHub on later starts", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture([]);
+    const seed = (login: typeof alice.login | undefined) =>
+      seedOperator(Option.fromUndefinedOr(login)).pipe(
+        Effect.provideService(AuthStore, services.store),
+        Effect.provideService(MemberAccess, {
+          permissions: () => Effect.succeed([]),
+          enroll: (member) => services.store.add(member, true),
+          remove: services.store.remove,
+        }),
+        Effect.provideService(GitHubSignIn, services.github),
+      );
+    yield* seed(undefined);
+    const currentMembers = yield* services.store.members;
+    assert.deepEqual(currentMembers, []);
+    yield* seed(alice.login);
+    const members = yield* services.store.members;
+    assert.equal(members.length, 1);
+    assert.equal(members[0]?.id, alice.id);
+    assert.equal(members[0]?.addedBy, alice.login);
+    yield* seed(bob.login);
+    const nextMembers = yield* services.store.members;
+    assert.deepEqual(nextMembers, members);
+    assert.deepEqual(services.seen, ["https://api.github.com/users/alice"]);
+  }).pipe(Effect.scoped),
+);

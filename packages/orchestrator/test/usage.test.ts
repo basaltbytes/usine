@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, type Harness, ModelId } from "@usine/core/agent/brain";
@@ -183,7 +184,7 @@ describe("RunUsageReader", () => {
   it.effect("leaves a Codex model without rates unpriced and logs it once", () => {
     const warnings: Array<string> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+      if (logLevel === "Warn") warnings.push(jsonKey(message));
     });
     return Effect.gen(function* () {
       const reader = yield* RunUsageReader;

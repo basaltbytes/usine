@@ -1,3 +1,5 @@
+import { jsonKey } from "@usine/core/json-key";
+import { webRequest } from "../../../../tooling/test/http.mts";
 import { idleCiMonitor } from "../support/ci.ts";
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -34,6 +36,7 @@ import {
   Redacted,
   Schema,
   Scope,
+  Crypto,
 } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { gitHubCredentialLayer } from "../../src/credentials.ts";
@@ -80,12 +83,10 @@ const requestJson = Effect.fn("agentIntegration.requestJson")(function* <A>(opti
     },
   };
   if (options.method !== undefined) init.method = options.method;
-  if (options.body !== undefined)
-    init.body = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(options.body);
-  const response = yield* Effect.tryPromise({
-    try: () => fetch(options.url, init),
-    catch: (cause) => RequestFailed.make({ cause }),
-  });
+  if (options.body !== undefined) init.body = jsonKey(options.body);
+  const response = yield* webRequest(options.url, init).pipe(
+    Effect.mapError((cause) => RequestFailed.make({ cause })),
+  );
   if (response.status !== options.expectedStatus) {
     const detail = yield* Effect.tryPromise({
       try: () => response.text(),
@@ -108,18 +109,14 @@ const requestEmpty = Effect.fn("agentIntegration.requestEmpty")(function* (optio
   readonly token: string;
   readonly url: string;
 }) {
-  const response = yield* Effect.tryPromise({
-    try: () =>
-      fetch(options.url, {
-        method: options.method,
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${options.token}`,
-          "x-github-api-version": "2026-03-10",
-        },
-      }),
-    catch: (cause) => RequestFailed.make({ cause }),
-  });
+  const response = yield* webRequest(options.url, {
+    method: options.method,
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${options.token}`,
+      "x-github-api-version": "2026-03-10",
+    },
+  }).pipe(Effect.mapError((cause) => RequestFailed.make({ cause })));
   if (response.status !== options.expectedStatus) {
     const detail = yield* Effect.tryPromise({
       try: () => response.text(),
@@ -162,7 +159,7 @@ const makeInstance = (options: {
       trigger: IssueTrigger.make({
         on: "issue",
         if: Source.make(
-          `item.number == ${String(options.issueNumber)} && item.comments.nodes.exists(comment, comment.body == ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(options.kick)})`,
+          `item.number == ${String(options.issueNumber)} && item.comments.nodes.exists(comment, comment.body == ${jsonKey(options.kick)})`,
         ),
       }),
       selector: Option.some(
@@ -306,8 +303,10 @@ describe("live agent loop", () => {
           repository: Config.String("USINE_GITHUB_INTEGRATION_REPO"),
         });
         const repository = RepositoryName.make(settings.repository);
-        const marker = `usine live agent contract ${globalThis.crypto.randomUUID()}`;
-        const kick = `usine live agent kick ${globalThis.crypto.randomUUID()}`;
+        const uuid1 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+        const marker = `usine live agent contract ${uuid1}`;
+        const uuid2 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+        const kick = `usine live agent kick ${uuid2}`;
         const instance = yield* makeInstance({
           childModel: ModelId.make(settings.childModel),
           issueNumber: settings.issueNumber,
@@ -334,7 +333,6 @@ describe("live agent loop", () => {
         const api = repositoryApi(repository);
         const installationToken = yield* app.installationToken;
         const token = Redacted.value(installationToken.value);
-
         const listComments = () =>
           requestJson({
             expectedStatus: 200,
@@ -358,7 +356,6 @@ describe("live agent loop", () => {
             { concurrency: "unbounded", discard: true },
           );
         });
-
         yield* Effect.acquireUseRelease(
           Effect.undefined,
           () =>
@@ -398,7 +395,6 @@ describe("live agent loop", () => {
               const payload = yield* Schema.decodeUnknownEffect(IssuePayload)(
                 snapshot.event.payload,
               );
-
               const comments = (yield* listComments()).filter(
                 ({ body }) => body?.includes(marker) === true,
               );
@@ -414,7 +410,6 @@ describe("live agent loop", () => {
                 "the result comment must contain the CEL-interpolated issue title",
               );
               assert.match(comment.body ?? "", /— usine agent: live-contract-agent/u);
-
               const transcript = yield* engine.transcript(
                 TranscriptAllQuery.make({ attemptId: attempt.id }),
               );
@@ -429,7 +424,11 @@ describe("live agent loop", () => {
             }),
           () => removeTestComments,
         );
-      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+      }).pipe(
+        Effect.provide(NodeServices.layer),
+        Effect.scoped,
+        Effect.provide(FetchHttpClient.layer),
+      ),
     // The run spans a poll claim plus a full agent session; the terminal wait
     // inside the test caps it at ten minutes.
     720_000,

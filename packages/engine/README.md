@@ -251,3 +251,5 @@ The domain services are the persistence boundary. `RunDatabase` is the current S
 ## Schema contracts
 
 Engine records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Persistence encoding and decoding run inside Effects. Invalid stored data fails with `EnginePersistenceError`; internal encoding failures are defects.
+
+Run `pnpm --filter @usine/engine check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

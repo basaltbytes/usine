@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ItemNumber } from "@usine/core/item";
@@ -65,7 +66,7 @@ const response = (
     (() => {
       const headers = new Headers(options.headers);
       if (body !== null) headers.set("content-type", "application/json");
-      return new Response(body === null ? null : JSON.stringify(body), {
+      return new Response(body === null ? null : jsonKey(body), {
         status: options.status ?? 200,
         headers,
       });
@@ -211,7 +212,7 @@ describe("GitHubPolling", () => {
     "detects issues and PRs with one conditional REST request and an overlapping cursor",
     () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-      const reset = Math.floor((Date.now() + 120_000) / 1_000);
+      const reset = Math.floor((DateTime.toEpochMillis(DateTime.nowUnsafe()) + 120_000) / 1_000);
       const client = HttpClient.make((request) =>
         Effect.sync(() => {
           requests.push(request);
@@ -1118,7 +1119,7 @@ describe("GitHubPolling", () => {
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      const before = Date.now();
+      const before = yield* Clock.currentTimeMillis;
       const failure = yield* polling.changes(repository, PollCursor.empty).pipe(Effect.flip);
       assert.strictEqual(failure._tag, "GitHubRateLimitError");
       if (failure._tag === "GitHubRateLimitError") {

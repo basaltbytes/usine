@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -173,9 +174,7 @@ it.effect(
         );
         const replay = frames.join("");
         for (const [, target] of cases) {
-          const encodedTarget = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-            target,
-          );
+          const encodedTarget = jsonKey(target);
           assert.include(replay, encodedTarget);
         }
         assert.notInclude(replay, "secret");

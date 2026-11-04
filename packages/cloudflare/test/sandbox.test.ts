@@ -1,5 +1,7 @@
+import { jsonKey } from "@usine/core/json-key";
+import { Deferred, DateTime, Duration, Effect, Option, Redacted, Schema, Clock } from "effect";
 import { assert, describe, expect, it } from "@effect/vitest";
-import { DateTime, Duration, Effect, Option, Redacted, Schema } from "effect";
+
 import { HttpRouter } from "effect/http";
 import { TestClock } from "effect/testing";
 import { ProcessStatus, SandboxSummary } from "../src/api/api.ts";
@@ -28,12 +30,12 @@ const encodeCredentials = (token: string, issued = issuedAt(0)) => ({
   providers: [{ provider: "anthropic", credential: { _tag: "ApiKey", key: "sk-ant-key" } }],
 });
 
-const renewedBody = JSON.stringify(encodeCredentials("ghs_second", issuedAt(1)));
+const renewedBody = jsonKey(encodeCredentials("ghs_second", issuedAt(1)));
 
-const revocation = (issued: string) => JSON.stringify({ issuedAt: issued, providers: [] });
+const revocation = (issued: string) => jsonKey({ issuedAt: issued, providers: [] });
 
 const createBody = (attempt: string = ATTEMPT, issued = issuedAt(0)) =>
-  JSON.stringify({
+  jsonKey({
     owner: OWNER,
     attempt,
     image: IMAGE,
@@ -152,7 +154,7 @@ describe("sandbox routes", () => {
       yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
       assert(Option.isSome(state.stored));
       const firstLease = state.stored.value.leaseUntil;
-      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 5)));
+      yield* Clock.Clock.defaultValue().sleep(Duration.millis(5));
       const renewed = yield* Effect.promise(() =>
         call("PUT", `/v1/sandboxes/${NAME}/credentials`, renewedBody),
       );
@@ -169,56 +171,52 @@ describe("sandbox routes", () => {
     }),
   );
 
-  it.each([
+  it.live.each([
     ["a reattachment's credentials", "", createBody()],
     ["renewed credentials", "/credentials", renewedBody],
-  ])("keeps a hold that completes while it registers %s", async (_, path, body) => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    let registering: () => void = () => undefined;
-    const reached = new Promise<void>((resolve) => (registering = resolve));
-    let register: () => void = () => undefined;
-    const registered = new Promise<void>((resolve) => (register = resolve));
-    state.beforeIntercept = () => {
-      state.beforeIntercept = () => Effect.void;
-      registering();
-      return Effect.promise(() => registered);
-    };
-    const pending = call("PUT", `/v1/sandboxes/${NAME}${path}`, body);
-    await reached;
-    const held = await call("POST", `/v1/sandboxes/${NAME}/hold`);
-    register();
-    const response = await pending;
+  ])("keeps a hold that completes while it registers %s", ([, path, body]) =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      const reached = yield* Deferred.make<void>();
+      const registered = yield* Deferred.make<void>();
+      state.beforeIntercept = () => {
+        state.beforeIntercept = () => Effect.void;
+        return Deferred.succeed(reached, undefined).pipe(
+          Effect.andThen(Deferred.await(registered)),
+        );
+      };
+      const pending = call("PUT", `/v1/sandboxes/${NAME}${path}`, body);
+      yield* Deferred.await(reached);
+      const held = yield* Effect.promise(() => call("POST", `/v1/sandboxes/${NAME}/hold`));
+      yield* Deferred.succeed(registered, undefined);
+      const response = yield* Effect.promise(() => pending);
 
-    expect([held.status, response.status]).toEqual([200, 200]);
-    assert(Option.isSome(state.stored));
-    expect(state.stored.value.held).toBe(true);
-  });
+      expect([held.status, response.status]).toEqual([200, 200]);
+      assert(Option.isSome(state.stored));
+      expect(state.stored.value.held).toBe(true);
+    }),
+  );
 
   it.live("keeps a revocation that arrives while an earlier renewal registers its handlers", () =>
     Effect.gen(function* () {
       const { state, call } = served();
       yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
-      let registering: () => void = () => undefined;
-      const reached = new Promise<void>((resolve) => (registering = resolve));
-      let register: () => void = () => undefined;
-      const registered = new Promise<void>((resolve) => (register = resolve));
+      const reached = yield* Deferred.make<void>();
+      const registered = yield* Deferred.make<void>();
       state.beforeIntercept = () => {
         state.beforeIntercept = () => Effect.void;
-        registering();
-        return Effect.promise(() => registered);
+        return Deferred.succeed(reached, undefined).pipe(
+          Effect.andThen(Deferred.await(registered)),
+        );
       };
-      const decodedValue16 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        encodeCredentials("ghs_second", issuedAt(1)),
-      );
+      const decodedValue16 = jsonKey(encodeCredentials("ghs_second", issuedAt(1)));
       const renewal = call("PUT", `/v1/sandboxes/${NAME}/credentials`, decodedValue16);
-      yield* Effect.promise(() => reached);
+      yield* Deferred.await(reached);
       // The executor stopped waiting for the renewal and revokes the credentials.
       const revoked = call("PUT", `/v1/sandboxes/${NAME}/credentials`, revocation(issuedAt(2)));
-      yield* Effect.promise(() =>
-        Promise.race([revoked, new Promise((resolve) => setTimeout(resolve, 50))]),
-      );
-      register();
+      yield* Effect.promise(() => revoked).pipe(Effect.timeoutOption(50));
+      yield* Deferred.succeed(registered, undefined);
       const statuses = (yield* Effect.promise(() => Promise.all([renewal, revoked]))).map(
         ({ status }) => status,
       );
@@ -237,25 +235,23 @@ describe("sandbox routes", () => {
     }),
   );
 
-  it.each([
+  it.live.each([
     ["renewal", "/credentials", renewedBody],
     ["reattachment", "", createBody(ATTEMPT, issuedAt(1))],
-  ])(
-    "refuses a %s issued before a revocation that reached the sandbox first",
-    async (_, path, body) => {
+  ])("refuses a %s issued before a revocation that reached the sandbox first", ([, path, body]) =>
+    Effect.gen(function* () {
       const { state, call } = served();
-      await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-      const revoked = await call(
-        "PUT",
-        `/v1/sandboxes/${NAME}/credentials`,
-        revocation(issuedAt(2)),
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      const revoked = yield* Effect.promise(() =>
+        call("PUT", `/v1/sandboxes/${NAME}/credentials`, revocation(issuedAt(2))),
       );
       const registered = state.interceptions.length;
-      const stale = await call("PUT", `/v1/sandboxes/${NAME}${path}`, body);
+      const stale = yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}${path}`, body));
 
       expect(revoked.status).toBe(200);
       expect(stale.status).toBe(409);
-      expect(await stale.json()).toMatchObject({
+      const actual1 = yield* Effect.promise(() => stale.json());
+      expect(actual1).toMatchObject({
         _tag: "StaleCredentials",
         issuedAt: issuedAt(1),
         current: issuedAt(2),
@@ -264,7 +260,7 @@ describe("sandbox routes", () => {
       assert(Option.isSome(state.stored));
       expect(Option.isNone(state.stored.value.credentials.github)).toBe(true);
       expect(DateTime.formatIso(state.stored.value.credentials.issuedAt)).toBe(issuedAt(2));
-    },
+    }),
   );
 
   it.live("refuses to renew the credentials of a sandbox whose container stopped", () =>

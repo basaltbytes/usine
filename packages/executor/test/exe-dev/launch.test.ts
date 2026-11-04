@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { githubSignature } from "@usine/core/agent";
@@ -82,7 +83,7 @@ const postSignedComment = (ssh: ReturnType<typeof fakeSsh>) => {
     created_at: at,
     updated_at: at,
   });
-  ssh.state.issueComments = JSON.stringify([
+  ssh.state.issueComments = jsonKey([
     [signed(COMMENT, "2026-10-20T10:00:00Z"), signed(SHARED, "2026-10-20T10:07:00Z")],
   ]);
 };
@@ -872,7 +873,8 @@ describe("exe.dev launch", () => {
         const issued = ssh.state.commands.slice(restart);
         assert(!issued.some(({ args }) => args.includes("attach")), "no credential is granted");
         assert(!issued.map(remoteLine).some((line) => line.includes("'gh'")));
-        assert(JSON.stringify(warnings).includes("its checkout is gone"));
+        const json1 = jsonKey(warnings);
+        assert(json1.includes("its checkout is gone"));
       });
     },
   );

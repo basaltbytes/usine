@@ -113,7 +113,9 @@ export class RepositoryLabelProjectionReader extends Context.Service<
       repository: RepositoryName,
     ) => Effect.Effect<Option.Option<RepositoryLabelProjection>, EnginePersistenceError>;
   }
->()("@usine/engine/RepositoryLabelProjectionReader") {
+>()(
+  "@usine/engine/repository-label-projection/repository-label-projection/RepositoryLabelProjectionReader",
+) {
   /** Reads label catalogs from the supplied runtime database. */
   static readonly layer = Layer.effect(RepositoryLabelProjectionReader, makeReader);
 }
@@ -127,7 +129,9 @@ export class RepositoryLabelProjectionWriter extends Context.Service<
       projection: RepositoryLabelProjection,
     ) => Effect.Effect<boolean, EnginePersistenceError>;
   }
->()("@usine/engine/RepositoryLabelProjectionWriter") {
+>()(
+  "@usine/engine/repository-label-projection/repository-label-projection/RepositoryLabelProjectionWriter",
+) {
   /**
    * Writes label catalogs to the supplied runtime database, invalidating operator projections on
    * changes.

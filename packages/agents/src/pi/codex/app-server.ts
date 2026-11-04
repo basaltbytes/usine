@@ -25,6 +25,7 @@ import {
   type CodexNotification,
   operationError,
 } from "./connection.ts";
+
 export {
   CodexAppServer,
   type CodexClient,
@@ -63,8 +64,11 @@ interface PendingRequest {
   readonly response: Deferred.Deferred<Schema.Json, SessionOperationError>;
 }
 
+// codexAppServerCommand returns a command synchronously, including its quoted TOML key.
+// @effect-diagnostics-next-line schemaSync:off
+const quoteDirectory = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 const repositoryTrustOverride = (cwd: string): string =>
-  `projects.${JSON.stringify(cwd)}.trust_level="untrusted"`;
+  `projects.${quoteDirectory(cwd)}.trust_level="untrusted"`;
 /** Command-line overrides for every Codex invocation: disable nested agents, plugins, apps, startup update checks, and analytics. */
 export const codexConfigArgs: ReadonlyArray<string> = [
   "features.multi_agent=false",
@@ -163,7 +167,9 @@ const makeCodexAppServer = Effect.gen(function* () {
       );
 
       const write = (message: Schema.Json, operation: SessionOperationError["operation"]) =>
-        Queue.offer(input, encoder.encode(`${JSON.stringify(message)}\n`)).pipe(
+        Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(message).pipe(
+          Effect.orDie,
+          Effect.flatMap((line) => Queue.offer(input, encoder.encode(`${line}\n`))),
           Effect.flatMap((accepted) =>
             accepted
               ? Effect.void
