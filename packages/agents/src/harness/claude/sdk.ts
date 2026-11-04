@@ -78,7 +78,7 @@ export class ClaudeSdk extends Context.Service<
       options: ClaudeQueryOptions,
     ) => ClaudeQuery;
   }
->()("@usine/agents/pi/claude/sdk/ClaudeSdk") {}
+>()("@usine/agents/harness/claude/sdk/ClaudeSdk") {}
 
 // The SDK async iterator converts each message before yielding it.
 // @effect-diagnostics-next-line schemaSync:off

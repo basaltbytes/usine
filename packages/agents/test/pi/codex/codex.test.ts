@@ -42,9 +42,9 @@ import {
   type CodexClient,
   type CodexConnection,
   type CodexNotification,
-} from "../../../src/pi/codex/app-server.ts";
-import { RemoteCodexProcessLost } from "../../../src/pi/codex/remote.ts";
-import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
+} from "../../../src/harness/codex/app-server.ts";
+import { RemoteCodexProcessLost } from "../../../src/harness/codex/remote.ts";
+import { codexChildBackendLayer } from "../../../src/harness/codex/codex.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
 

@@ -10,7 +10,7 @@ import { SessionOperationError } from "../../runtime.ts";
 
 export class RemoteCodexProcessLost extends Schema.TaggedError<
   RemoteCodexProcessLost,
-  Brand.Brand<"@usine/agents/pi/codex/remote/RemoteCodexProcessLost">
+  Brand.Brand<"@usine/agents/harness/codex/remote/RemoteCodexProcessLost">
 >("@usine/agents/RemoteCodexProcessLost")("RemoteCodexProcessLost", {
   message: Schema.String,
 }) {}

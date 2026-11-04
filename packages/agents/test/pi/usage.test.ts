@@ -7,7 +7,7 @@ import {
   codexThreadTokens,
   codexTokenBreakdown,
   piMessageUsage,
-} from "../../src/pi/usage.ts";
+} from "../../src/harness/usage.ts";
 import { CodexTokenUsage } from "../../src/protocol/codex.ts";
 
 describe("Claude query tokens", () => {

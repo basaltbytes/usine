@@ -6,10 +6,10 @@ import {
   type AgentSessionError,
   harnessFailure,
   type RunningSession,
-} from "../runtime.ts";
-import { type MessageTaken, sessionConversation } from "./conversation.ts";
+} from "../../runtime.ts";
+import { type MessageTaken, sessionConversation } from "../conversation.ts";
 import type { PiSession } from "./sdk.ts";
-import { lastPiMessageText, piUserMessageText, type SessionChannel } from "./session.ts";
+import { lastPiMessageText, piUserMessageText, type SessionChannel } from "../session.ts";
 
 /** Creates a gate that blocks Pi tool calls and provider requests at their next boundary while an operator pause is active. */
 export const piPauseGate = Effect.gen(function* () {

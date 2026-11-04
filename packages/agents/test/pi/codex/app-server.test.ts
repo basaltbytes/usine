@@ -26,7 +26,7 @@ import {
   CodexAppServer,
   codexAppServerCommand,
   codexAppServerLive,
-} from "../../../src/pi/codex/app-server.ts";
+} from "../../../src/harness/codex/app-server.ts";
 
 const request = ChildRequest.make({
   worker: WorkerName.make("worker-1"),

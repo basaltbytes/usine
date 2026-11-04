@@ -10,8 +10,8 @@ import {
   SessionOperationError,
   UnknownModelError,
   UnsupportedEffortError,
-} from "../runtime.ts";
-import { sessionChannel, subscribePiSession } from "./session.ts";
+} from "../../runtime.ts";
+import { sessionChannel, subscribePiSession } from "../session.ts";
 import { PiSdk, type PiStartResult, usePiStart } from "./sdk.ts";
 import { piPauseGate, piTurns } from "./turns.ts";
 import { requiredPiPool, splitPiModel } from "./authentication.ts";

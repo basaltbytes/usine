@@ -15,7 +15,7 @@ import {
 import { Cause, Deferred, Effect, Option, Queue, Ref, Result, Schema } from "effect";
 import { addUsage, piMessageUsage, type SessionUsage } from "./usage.ts";
 import { type AgentSessionError, reportedOutcome, SessionResult } from "../runtime.ts";
-import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
+import type { PiMessage, PiSession, PiSessionEvent } from "./pi/sdk.ts";
 
 // Pi tool-event callbacks synchronously normalize arbitrary SDK tool values before emitting session events.
 // @effect-diagnostics-next-line schemaSync:off

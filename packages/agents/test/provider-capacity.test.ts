@@ -1,8 +1,8 @@
 import { assert, it } from "@effect/vitest";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { Effect, Option, Schema } from "effect";
-import { turnFailure } from "../src/pi/codex/codec.ts";
-import { resultFailure } from "../src/pi/claude/codec.ts";
+import { turnFailure } from "../src/harness/codex/codec.ts";
+import { resultFailure } from "../src/harness/claude/codec.ts";
 import { AgentCapacityError } from "../src/runtime.ts";
 import { TurnCompleted } from "../src/protocol/codex.ts";
 
