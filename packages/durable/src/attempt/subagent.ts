@@ -26,7 +26,6 @@ import {
   ChildSessionCount,
   SessionFinished,
   SessionStarted,
-  sessionPool,
 } from "@usine/core/agent/session";
 import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Stream } from "effect";
 import { durableError } from "../harness.ts";
@@ -199,7 +198,6 @@ export const subagentTool = (services: ExtensionServices) => {
         attemptedChildren,
         maxChildren: spec.maxChildren,
         sessionId: session.id,
-        pool: sessionPool(session),
         taskCharacters: spec.task.length,
         contextCharacters: task.length,
         taskExcerpt: excerpt,

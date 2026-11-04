@@ -166,6 +166,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
       gitEnvironment: environment,
       shell: machine.shell,
       secrets: {},
+      apiKeyHarnesses: new Set(),
       readOnlyPaths: [directory],
       writablePaths: [],
       refresh: credential.refresh(),

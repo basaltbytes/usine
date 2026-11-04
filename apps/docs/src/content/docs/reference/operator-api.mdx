@@ -41,6 +41,8 @@ Each run summary read uses one read-only snapshot for run state and attempts. Th
 
 Read `GET /api/runs/:runId` for the run's task, result message, each attempt's task, event payload, and transcript. The task endpoint, `GET /api/projects/:owner/:repository/tasks/:item`, also returns full run and attempt records. The board's **Run again** action reads run detail before submitting the saved task and agent.
 
+Session records in transcripts and usage responses include an optional `pool` resolved at launch and an optional `endpoint` provider name for API-key models. Usage reads the recorded pool; older records without it use the historical harness and model rule. Endpoint names exclude URLs and credentials.
+
 ## Operations
 
 <OperatorApiReference />

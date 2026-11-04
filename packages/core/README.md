@@ -28,6 +28,8 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
+Parent and child sessions record the resolved `pool` at launch. API-key sessions can also record an `endpoint` provider name. Both keys are optional in serialized records, so older transcripts remain readable. `sessionPool` reads the recorded pool and applies the historical harness and model rule only when it is absent.
+
 `SessionStarted.prompt` records the exact initial prompt sent to a child. It is `None` for parents and older transcripts.
 
 ## Runs
@@ -65,7 +67,7 @@ An `InterventionApplied` receipt uses the original input sequence and interventi
 
 `SessionTokensUpdated` has a session's cumulative `TokenCount` and, as `costUsd`, the `UsdAmount` its harness priced it at: Pi from its model catalog, Claude Code from the Agent SDK. Codex sets no price. Older transcripts decode it to `Option.none()`.
 
-`ChildSession.gatewayCredential` is the `GatewayCredentialKind` the gateway in front of the child's worker used for its model requests: none if the child used its harness's login, and in older transcripts. `brainPool(brain, gatewayCredential)` returns a started session's billing pool; `sessionPool(session)` reads a recorded one's. A Claude Code child is in `apiKeys` if its gateway used an API key, otherwise in `claudePlan`; a Codex child is in `apiKeys` if its gateway used an API key, otherwise in `chatgptPlan` (ADR 0013, ADR 0021). `GatewayLlmProvider` is `anthropic` (Claude Code) or `openai` (Codex).
+`ChildSession.gatewayCredential` is the `GatewayCredentialKind` the gateway in front of the child's worker used for its model requests: none if the child used its harness's login, and in older transcripts. `sessionPool(session)` reads the pool recorded at launch, with historical inference for older sessions. Claude Code and Codex children use `apiKeys` for local or injected API keys; subscription credentials use `claudePlan` and `chatgptPlan`, respectively (ADR 0013, ADR 0021). `GatewayLlmProvider` is `anthropic` (Claude Code) or `openai` (Codex).
 
 `PoolRateLimitsUpdated.login` records the provider-reported `PoolLogin` with a rate-window snapshot. Older events and providers that omit the login decode it as `Option.none()`.
 

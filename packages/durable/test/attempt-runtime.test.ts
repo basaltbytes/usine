@@ -199,6 +199,16 @@ describe("durable AttemptRuntime", () => {
         const nextLive = yield* runtime.isLive(request.spec.attemptId);
         assert.isFalse(nextLive);
         const outbound = recording.outbound();
+        const parentEvents = outbound.flatMap(({ payload }) =>
+          payload._tag === "SessionEvent" && payload.event.session._tag === "ParentSession"
+            ? [payload.event]
+            : [],
+        );
+        assert.isAbove(parentEvents.length, 0);
+        for (const { session } of parentEvents) {
+          assert.deepStrictEqual(session.pool, Option.some("apiKeys"));
+          assert.deepStrictEqual(session.endpoint, Option.some("faux"));
+        }
         const launch = outbound.flatMap(({ payload }) =>
           payload._tag === "SessionEvent" &&
           payload.event._tag === "SessionStarted" &&
@@ -270,6 +280,12 @@ describe("durable AttemptRuntime", () => {
       const finished = yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const reported = yield* runtime.finished(attemptId);
+        const harness = yield* DurableHarness;
+        const record = yield* harness.use("read persisted parent billing", (runtime, context) =>
+          runtime.snapshot(AttemptRecordDoc, attemptId, context),
+        );
+        assert.strictEqual(record?.parentPool, "apiKeys");
+        assert.strictEqual(record?.parentEndpoint, "faux");
         yield* runtime.recordResult(attemptId, harvested);
         return {
           reported,

@@ -525,7 +525,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     return settledOf(task);
   }
   let session = Option.map(Option.fromNullishOr(loaded.parentModel), (model) =>
-    parentSession(spec, ModelId.make(model)),
+    parentSession(spec, ModelId.make(model), loaded),
   );
   if (loaded.parentConversation !== null) hubs.bindParent(hub, loaded.parentConversation);
 
@@ -538,7 +538,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       return Option.none<ParentSession>();
     }
     if (record.parentConversation !== null) hubs.bindParent(hub, record.parentConversation);
-    const started = parentSession(spec, ModelId.make(record.parentModel));
+    const started = parentSession(spec, ModelId.make(record.parentModel), record);
     session = Option.some(started);
     if (progress().outbound.state === "AwaitingStarted") {
       yield* emitPayload(

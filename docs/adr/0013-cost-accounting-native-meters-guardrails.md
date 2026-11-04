@@ -82,3 +82,9 @@ The adapter converts utilization fractions to percentages and epoch-second reset
 Provider connections support local subscription credentials and API keys for Claude Code and Codex. Subscription-only readiness checks reject credentials that the connection controls save successfully, so local readiness and child authentication accept both kinds. Claude setup tokens use the Claude plan pool.
 
 Each child records its verified billing pool at launch. Claude Code reports its authentication source through the Agent SDK, and Codex reports its account type through the app server. Local API-key children use the API keys pool, including their usage prices, and do not update Claude plan allowance windows. Gateway credentials retain precedence. Older transcripts without a verified pool retain the previous harness and gateway inference.
+
+## Amendment (2026-11-04, #954): session billing facts
+
+Adapters record each session's billing pool from the resolved credential at launch. Usage reads this fact instead of deriving the pool from the harness or model. The durable parent record preserves the launch pool across restarts, and older session records use one compatibility rule in the session module. Credential preparation records injected API keys; worker executors do not assign pools.
+
+OpenAI-compatible endpoints and local models use `apiKeys`, with the endpoint's provider name recorded on the session when available. Endpoint names exclude URLs and credentials.

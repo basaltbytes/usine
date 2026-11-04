@@ -533,7 +533,7 @@ const makeClaudeChild = Effect.gen(function* () {
         : request.session.gatewayCredential.value === "api-key";
       const session = ChildSession.make({
         ...request.session,
-        billingPool: Option.some(usesApiKey ? "apiKeys" : "claudePlan"),
+        pool: Option.some(usesApiKey ? "apiKeys" : "claudePlan"),
       });
       yield* Effect.logInfo("Claude billing pool verified", {
         sessionId: session.id,

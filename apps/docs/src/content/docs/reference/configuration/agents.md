@@ -41,8 +41,8 @@ An unavailable model, unsupported effort, or missing parent credential fails the
 
 | Harness | Version requirement | Authentication | Workers |
 | --- | --- | --- | --- |
-| `claude` | Claude Code with `auth status --json` | Claude subscription login, gateway credential, or provisioned-worker API key | Local, SSH, Cloudflare |
-| `codex` | Codex CLI 0.164.0 | ChatGPT login, gateway credential, or provisioned-worker API key | Local, SSH, Cloudflare |
+| `claude` | Claude Code with `auth status --json` | Claude subscription login, setup token, or API key | Local, SSH, Cloudflare |
+| `codex` | Codex CLI 0.164.0 | ChatGPT login or API key | Local, SSH, Cloudflare |
 | `pi` | Bundled Pi runtime | API key for the selected provider or ChatGPT login for `openai-codex` | Local |
 
 For a worker using subscription logins, run these commands as the user running its children:
@@ -54,9 +54,13 @@ claude auth status
 codex login status
 ```
 
-A gateway can inject either a provider API key or a subscription credential. Cloudflare workers require provider API keys. Provisioned SSH workers require credentials from their gateway or `api_keys` settings. Codex subscription preflight refuses an API-key login in its login file; API-key workers use a separate provider configuration.
+A gateway can inject either a provider API key or a subscription credential. Cloudflare workers require provider API keys. Provisioned SSH workers require credentials from their gateway or `api_keys` settings. Local preflight and children accept managed Claude setup tokens and API keys, and Codex ChatGPT logins and API keys. Local Codex launches select file credential storage so they use the credentials managed by `usine login` and removed by `usine logout`, including when Codex configuration selects keyring storage.
 
 For Pi children on a ChatGPT subscription, set `harness` to `pi` and `model` to an `openai-codex/...` model. Run Pi as the Unix user running the orchestrator, with the same `~/.pi/agent` or `PI_CODING_AGENT_DIR` configuration as the parent. Enter `/login` and choose **OpenAI (ChatGPT Plus/Pro)** for the `openai-codex` provider. Preflight accepts that login without an API key. Other OAuth providers have no supported usine pool and fail preflight.
+
+Each parent and child session records the billing pool resolved at launch. Usage totals read that recorded pool, including after an orchestrator restart. Older transcripts without a recorded pool use the historical harness and model rule.
+
+OpenAI-compatible endpoints and local models use `apiKeys`. API-key sessions record the endpoint's provider name when available, such as a Pi provider configured in `models.json`. The transcript includes the name without the endpoint URL or credential. An API-key credential uses `apiKeys` even when the model ID has an `openai-codex/` prefix.
 
 Pi parents and children record ChatGPT usage under `chatgptPlan`, including tokens and Pi's cost estimate. Pi reports no plan rate windows, so usine cannot warn before Pi sessions reach the ChatGPT plan limit.
 
@@ -68,7 +72,7 @@ Children run without approval prompts. Claude Code ignores project settings, Cod
 
 Preflight checks tools and credentials; it does not install harnesses. Startup checks each rostered child brain on every worker. A changed roster is checked before the running configuration accepts it. Each attempt also checks its selected agent. Failures identify the worker, capability, and remediation.
 
-For local and SSH subscription workers, Claude Code must report a first-party subscription login, and Codex must report a ChatGPT login. Gateway-injected providers need the harness binary and a configured gateway credential. Pi requires a local worker and an API key for the selected provider or an `openai-codex` ChatGPT login. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
+For workers using harness credentials, Claude Code must report a subscription login, setup token, or API key, and Codex must report a ChatGPT login or API key. Gateway-injected providers need the harness binary and a configured gateway credential. Pi requires a local worker and an API key for the selected provider or an `openai-codex` ChatGPT login. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
 
 Every GitHub comment, issue, pull request, and review written by an agent ends with `— usine agent: <name>`. Agents share the App identity, so this signature attributes their work to an attempt. Commits use the App's bot identity.
 

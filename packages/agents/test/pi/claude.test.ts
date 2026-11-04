@@ -391,13 +391,8 @@ describe("Claude child backend", () => {
           const reports = events.filter(Schema.is(PoolRateLimitsUpdated));
           for (const report of reports) {
             assert.strictEqual(report.pool, "claudePlan");
-            assert.deepStrictEqual(
-              report.session,
-              ChildSession.make({
-                ...childRequest.session,
-                billingPool: Option.some("claudePlan"),
-              }),
-            );
+            assert.deepStrictEqual(report.session, session.session);
+            assert.deepStrictEqual(report.session.pool, Option.some("claudePlan"));
             assert.isTrue(Option.isNone(report.login));
           }
           const primary = {
@@ -541,6 +536,7 @@ describe("Claude child backend", () => {
             session.result,
           ]);
           assert.strictEqual(result.message, "Done");
+          assert.deepStrictEqual(session.session.pool, Option.some("apiKeys"));
           assert(events.some((event) => event._tag === "SessionTokensUpdated"));
           for (const event of events) assert.strictEqual(sessionPool(event.session), "apiKeys");
           assert.lengthOf(events.filter(Schema.is(PoolRateLimitsUpdated)), 0);

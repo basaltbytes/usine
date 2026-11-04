@@ -4,6 +4,8 @@ Browser captures for issue #962 use representative configuration fixtures. Deskt
 
 Entity detail pages link to History from the heading. Form captures show the shared field width and controls. The filtered History captures include an expanded revision and the permitted Revert action.
 
+History and repository mark captures include the fixes from #969: diffs start with file headers, revision buttons align with the content column, and repository initials appear while avatars load.
+
 | Screen | Desktop dark | Desktop light | Phone dark | Phone light |
 | --- | --- | --- | --- | --- |
 | Agents | [desktop dark](agents-desktop-dark.png) | [desktop light](agents-desktop-light.png) | [phone dark](agents-phone-dark.png) | [phone light](agents-phone-light.png) |

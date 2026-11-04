@@ -298,6 +298,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     return {
       shell: sendingShell(machine.shell, sent),
       secrets: sent,
+      apiKeyHarnesses: new Set(),
       readOnlyPaths: [directories.ghConfigDirectory, GH_GATEWAY_SOCKET_DIRECTORY],
       writablePaths: codex ? [directories.codexHome] : [],
       environment: exported,

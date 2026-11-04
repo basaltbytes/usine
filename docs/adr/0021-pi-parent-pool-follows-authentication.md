@@ -19,3 +19,9 @@ The Pi parent accepts API-key models and Pi's `openai-codex` ChatGPT subscriptio
 Pi children accept the same authentication as the parent: API keys and Pi's `openai-codex` ChatGPT subscription login. The SDK already resolves both pools from the provider's authentication; the child-only API-key restriction predates the parent's ChatGPT support and serves no separate requirement. This replaces the API-key-only child rule above.
 
 Preflight accepts a supported Pi credential on a local worker, and child launch records the resolved model. Usage follows that model into `apiKeys` or `chatgptPlan`, as for the parent. OAuth providers without a usine pool remain unavailable. Pi sessions emit no plan rate windows, so usine cannot warn before they reach the ChatGPT plan limit.
+
+## Amendment (2026-11-04, #954): persist the resolved pool
+
+The parent previously resolved its pool from authentication at launch, then inferred it again from the model prefix for accounting. An API-key credential for an `openai-codex` model could therefore appear in the ChatGPT plan pool. Parent and child sessions now record the resolved pool at launch. The durable parent record preserves it for transcript relay after a restart.
+
+Usage reads the recorded pool. One compatibility rule infers the pool only for sessions recorded before this field existed. API-key sessions also record the selected endpoint's provider name when available, including OpenAI-compatible endpoints and local models. The endpoint name contains no URL or credential.

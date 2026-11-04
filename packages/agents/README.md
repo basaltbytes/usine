@@ -8,6 +8,8 @@ The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the
 
 `/harness` exports the platform-free `catalog` and descriptor schemas. Each harness defines its display label, worker installation and accepted versions, login files and hosts, credential provider, token price table, and terminal resume command. `catalog.harness` validates registered IDs; `catalog.get` reads a descriptor. Importing this subpath loads no vendor SDK or Node adapter.
 
+`workerImageInputs(catalog)` returns the worker npm packages and image tag from each descriptor's `worker.install`, in catalog order. Harnesses bundled in the orchestrator have no worker packages and don't contribute to the tag. Run `pnpm worker-image:generate` from the repository root after changing installation requirements. It builds the catalog and updates both Dockerfiles, Hetzner cloud-init, and `infra/worker-image/tag.txt`. `pnpm check` rejects stale generated inputs. Claude Code preflight accepts any installed version; the image install version doesn't restrict worker readiness.
+
 ## Compose the child backends
 
 `/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `childDispatcherLayer` (`/children`) picks a backend from the agent's `harness`. Provide its three backends from `/claude`, `/codex`, and `/pi`, which also export their SDK contracts and production SDK layers. `@usine/durable/live` composes them:
@@ -44,6 +46,8 @@ Child prompts include the rendered loop task unchanged, including edit-and-retry
 Codex rate-window events include the login email returned by `account/read`. A supported account change refreshes that identity before more snapshots are recorded. Gateway-backed children have no local login and leave it absent. Account identity is stored for display and excluded from diagnostic logs.
 
 Codex commands, including preflight's account check, disable plugins, the remote plugin catalog, apps, startup update checks, and analytics with command-line overrides. This stops automatic plugin downloads and their bundled skill sync; local skills remain available. The overrides apply on every worker kind and take precedence over user configuration.
+
+Each adapter records its resolved billing pool on the launched session and every session event. Pi records the provider name as `endpoint` for API-key models, including OpenAI-compatible endpoints and local models. Codex records its selected model provider for API-key sessions. Endpoint names exclude URLs and credentials.
 
 Logs record the verified authentication method and pool. On completion or interrupt, usine closes the input of the child's Codex app server and waits for it to exit before publishing, releasing background commands. Scope cleanup does the same, bounded, and logs before force-stopping a stalled process.
 

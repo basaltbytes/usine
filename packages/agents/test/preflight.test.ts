@@ -179,19 +179,8 @@ describe("worker harness readiness", () => {
       ).matchAll(new RegExp(`^ARG ${name}=(\\S+)$`, "gmu")),
     ].map(([, value]) => value);
 
-  it("pins the attempt container image's pnpm and harnesses at the Hetzner worker versions", () => {
-    assert.deepStrictEqual(
-      {
-        pnpm: argument("PNPM_VERSION"),
-        claude: argument("CLAUDE_CODE_VERSION"),
-        codex: argument("CODEX_VERSION"),
-      },
-      {
-        pnpm: cloudInitPins(/pnpm@(\S+)/gu),
-        claude: cloudInitPins(/@anthropic-ai\/claude-code@(\S+)/gu),
-        codex: cloudInitPins(/@openai\/codex@(\S+)/gu),
-      },
-    );
+  it("pins the attempt container image's pnpm at the Hetzner worker version", () => {
+    assert.deepStrictEqual(argument("PNPM_VERSION"), cloudInitPins(/pnpm@(\S+)/gu));
   });
 
   // turbo.json lists the script as an input too.

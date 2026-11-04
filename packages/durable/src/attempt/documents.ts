@@ -5,6 +5,7 @@ import {
   type SubmissionId,
   type TaskId,
 } from "@earendil-works/pi-durable";
+import type { BillingPool, EndpointName } from "@usine/core/agent/session";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { Schema } from "effect";
 
@@ -41,6 +42,9 @@ export type AttemptRecord = {
   taskId: TaskId<AttemptResult> | null;
   /** The parent model resolved at start. */
   parentModel: string | null;
+  /** The pool and endpoint resolved at launch; absent on older records. */
+  parentPool?: BillingPool;
+  parentEndpoint?: EndpointName | null;
   parentConversation: ConversationId | null;
   /** The number of child spawn requests, including those rejected by the child-session budget. */
   children: number;
