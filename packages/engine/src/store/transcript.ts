@@ -3,7 +3,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 
 import { DateTime, Effect, Match, Option } from "effect";
-import { jsonExtract } from "../database/dialect.ts";
+import { jsonExtract, jsonSet, jsonValue } from "../database/dialect.ts";
 import type { RunDatabaseClient } from "../database/database.ts";
 import { attemptTranscripts, poolRateLimits, sessionUsage } from "../database/schema.ts";
 
@@ -77,7 +77,24 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
         .values({ ...limits, pool: event.pool })
         .onConflictDoUpdate({
           target: poolRateLimits.pool,
-          set: limits,
+          set: {
+            ...limits,
+            envelope:
+              event.pool === "claudePlan"
+                ? jsonSet(
+                    sql`excluded.envelope`,
+                    ["primary", "secondary"].map((window) => {
+                      const path = `$.payload.event.rateLimits.${window}`;
+                      return [
+                        path,
+                        jsonValue(
+                          sql`coalesce(${jsonExtract(sql`excluded.envelope`, path)}, ${jsonExtract(poolRateLimits.envelope, path)})`,
+                        ),
+                      ];
+                    }),
+                  )
+                : limits.envelope,
+          },
           setWhere: gt(sql`excluded.sequence`, poolRateLimits.sequence),
         })
         .returning({ sequence: poolRateLimits.sequence })

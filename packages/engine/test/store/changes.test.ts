@@ -133,7 +133,7 @@ it.effect(
             agent: attempt.agent,
             brain: attempt.brain,
           }),
-          pool: "chatgptPlan",
+          pool: "claudePlan",
           login: Option.none(),
           rateLimits: RateLimitsSnapshot.make({
             limitId: Option.none(),
@@ -159,10 +159,30 @@ it.effect(
           ),
           [{ kind: "attempt", id: attempt.id }],
         );
+        yield* expectWrite(
+          store.appendTranscript(
+            "outbound",
+            OutboundEnvelope.make({
+              ...envelope,
+              sequence: Sequence.make(3),
+              payload: SessionEvent.make({
+                event: PoolRateLimitsUpdated.make({
+                  ...report,
+                  rateLimits: RateLimitsSnapshot.make({
+                    ...report.rateLimits,
+                    primary: Option.none(),
+                    secondary: report.rateLimits.primary,
+                  }),
+                }),
+              }),
+            }),
+          ),
+          [{ kind: "attempt", id: attempt.id }],
+        );
         const beforeReset = (yield* bus.open).revision;
         yield* TestClock.adjust("1 minute");
 
-        assert.strictEqual((yield* bus.open).revision, beforeReset + 1);
+        assert.strictEqual((yield* bus.open).revision, beforeReset + 2);
 
         assert.deepStrictEqual((yield* bus.open).history.at(-1)?.changes, [
           { audience: InstanceScope.make(), target: { kind: "attention", id: "instance" } },

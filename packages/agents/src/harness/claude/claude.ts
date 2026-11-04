@@ -58,6 +58,7 @@ import { hostOutput } from "../../child-host/command.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { claudeSessionMeter, claudeTokenMeter } from "../usage.ts";
+import { claudeRateLimits } from "./rate-limits.ts";
 import {
   apiRetryMessage,
   ClaudeApiRetry,
@@ -545,6 +546,7 @@ const makeClaudeChild = Effect.gen(function* () {
       boundary = conversation.awaitUnpaused;
       const tools = new Map<string, string>();
       const usage = claudeSessionMeter();
+      const readRateLimits = claudeRateLimits(request.session);
       // The latest session ID from Claude, which a resume loads.
       let harnessSessionId = Option.none<HarnessSessionId>();
       // Resumes since Claude last sent a message.
@@ -600,6 +602,8 @@ const makeClaudeChild = Effect.gen(function* () {
       /** Applies one message from Claude to the session. */
       const handle = (message: Schema.Json) =>
         Effect.gen(function* () {
+          const limits = yield* readRateLimits(message);
+          if (Option.isSome(limits)) yield* channel.emit(limits.value);
           const retry = decodeApiRetry(message);
           if (Option.isSome(retry)) {
             providerFailure = apiRetryFailure(request.session.id, retry.value);
