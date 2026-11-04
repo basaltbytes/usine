@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -268,7 +268,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           id: AgentSessionId.make("claude-child-a"),
           parentId: AgentSessionId.make("pool-parent"),
           agent: testAgent.name,
-          brain: BrainSpec.make({ ...testAgent.brain, harness: "claude" }),
+          brain: BrainSpec.make({ ...testAgent.brain, harness: Harness.make("claude") }),
         });
         const second = ChildSession.make({ ...first, id: AgentSessionId.make("claude-child-b") });
         const report = (
