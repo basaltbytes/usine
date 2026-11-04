@@ -1,4 +1,4 @@
-import { openAiPrice } from "@usine/agents/openai-prices";
+import { catalog } from "@usine/agents/harness";
 import {
   AgentSession,
   BillingPool,
@@ -137,9 +137,11 @@ const sessionPrice = ({
   costUsd,
   breakdown,
 }: SessionTokensUpdated): Option.Option<UsdAmount> =>
-  Option.isSome(costUsd) || session.brain.harness !== "codex"
-    ? costUsd
-    : Option.flatMap(breakdown, (tokens) => openAiPrice(session.brain.model, tokens));
+  Option.orElse(costUsd, () =>
+    Option.flatMap(catalog.get(session.brain.harness), (descriptor) =>
+      Option.flatMap(breakdown, (tokens) => descriptor.price(session.brain.model, tokens)),
+    ),
+  );
 
 interface RunUsage {
   readonly view: RunUsageView;
@@ -179,7 +181,9 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
   const unknownModels = new Set(
     latest.flatMap(({ report, price }) =>
       Option.isNone(price) &&
-      report.session.brain.harness === "codex" &&
+      Option.exists(catalog.get(report.session.brain.harness), (descriptor) =>
+        Option.isSome(descriptor.prices),
+      ) &&
       Option.isSome(report.breakdown)
         ? [report.session.brain.model]
         : [],

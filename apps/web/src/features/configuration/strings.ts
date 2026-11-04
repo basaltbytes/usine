@@ -1,6 +1,5 @@
 import type { LoopApproval } from "@usine/config/loop";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
-import type { Harness } from "@usine/core/agent/brain";
 import type { LoopPermissions } from "@usine/core/loop";
 import { CONTAINER_LIMITS, type ContainerLimit, type WorkerKind } from "@usine/core/worker";
 import type {
@@ -12,12 +11,6 @@ import type {
 
 export const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
-
-export const harnessLabel = {
-  claude: "Claude Code",
-  codex: "Codex",
-  pi: "Pi",
-} satisfies Record<Harness, string>;
 
 export const workerKindLabel = {
   local: "Local",
@@ -510,4 +503,32 @@ export const machineReuseCopy = {
   idle: "Idle",
   limits: "Reuse stops at the configured attempt or age limit",
   attempts: "Attempts",
+};
+
+export const historyCopy = {
+  title: "Configuration history",
+  view: "View history",
+  forEntity: (key: string) => `View history for ${key}`,
+  changedBy: (actor: string) => `Changed by ${actor}`,
+  unavailable: "· Last change unavailable",
+  type: "Entity type",
+  name: "Entity name",
+  filter: "Filter history",
+  all: "All entities",
+  kinds: {
+    loop: "Loop",
+    agent: "Agent",
+    worker: "Worker",
+    project: "Project",
+    repository: "Repository",
+    label: "Label",
+    binding: "Role binding",
+    settings: "Settings",
+  },
+};
+
+export const labelDetailCopy = {
+  label: "Label",
+  description: "Description",
+  noDescription: "No description",
 };

@@ -3,7 +3,7 @@ import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { BlockedFailure, type AttemptFailure } from "@usine/core/attempt/failure";
@@ -89,7 +89,7 @@ describe("Run evidence reader", () => {
           task: AttemptTask.make("Retain a consistent record."),
           agent: Agent.make({
             name: AgentName.make("developer"),
-            brain: BrainSpec.make({ harness: "codex", model, effort: "high" }),
+            brain: BrainSpec.make({ harness: Harness.make("codex"), model, effort: "high" }),
             parentModel: Option.none(),
             parentEffort: Option.none(),
             persona: AgentPersona.make("Implement the task."),

@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, DateTime, Option, Result, Schema } from "effect";
 import { Agent, AgentPersona, AgentName } from "../src/agent/agent.ts";
-import { BrainSpec, ModelId } from "../src/agent/brain.ts";
+import { Harness, BrainSpec, ModelId } from "../src/agent/brain.ts";
 import {
   AgentSessionId,
   ChildSessionBudget,
@@ -25,7 +25,7 @@ import { Comment, Commit, PullRequest, StepResult } from "../src/step/result.ts"
 const agent = Agent.make({
   name: AgentName.make("developer"),
   brain: BrainSpec.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
@@ -262,7 +262,11 @@ describe("attempt channel", () => {
         const session = ParentSession.make({
           id: AgentSessionId.make("parent-1"),
           agent: agent.name,
-          brain: BrainSpec.make({ harness: "pi", model: parentModel, effort: "high" }),
+          brain: BrainSpec.make({
+            harness: Harness.make("pi"),
+            model: parentModel,
+            effort: "high",
+          }),
         });
         const envelope = AttemptChannel.OutboundEnvelope.make({
           version: AttemptChannel.PROTOCOL_VERSION,
@@ -400,7 +404,11 @@ describe("attempt channel", () => {
         session: ParentSession.make({
           id: AgentSessionId.make("parent-1"),
           agent: agent.name,
-          brain: BrainSpec.make({ harness: "pi", model: parentModel, effort: "high" }),
+          brain: BrainSpec.make({
+            harness: Harness.make("pi"),
+            model: parentModel,
+            effort: "high",
+          }),
         }),
       }),
     });

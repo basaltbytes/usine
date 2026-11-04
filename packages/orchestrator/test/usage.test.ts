@@ -1,7 +1,7 @@
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, type Harness, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -42,7 +42,7 @@ const child = (id: string, harness: Harness, model: string, apiKey = false) =>
 const planParent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
-  brain: brain("pi", "openai-codex/gpt-5.6-terra"),
+  brain: brain(Harness.make("pi"), "openai-codex/gpt-5.6-terra"),
 });
 // 3K uncached input, 200K cache reads, 1K cache writes, and 1K output: 5K tokens.
 const breakdown = TokenBreakdown.make({
@@ -96,7 +96,7 @@ const source = {
       stepName: StepName.make("run"),
       worker: WorkerName.make("w1"),
       number: AttemptNumber.make(1),
-      brain: brain("pi", "openai-codex/gpt-5.6-terra"),
+      brain: brain(Harness.make("pi"), "openai-codex/gpt-5.6-terra"),
       task: AttemptTask.make("Review it."),
       agent: AgentName.make("developer"),
       operatorIntervened: false,
@@ -167,15 +167,25 @@ describe("RunUsageReader", () => {
       }).pipe(
         Effect.provide(
           readerOf([
-            report(1, child("plan-codex", "codex", "gpt-5.6-terra"), null, Option.some(breakdown)),
+            report(
+              1,
+              child("plan-codex", Harness.make("codex"), "gpt-5.6-terra"),
+              null,
+              Option.some(breakdown),
+            ),
             report(
               2,
-              child("key-codex", "codex", "gpt-5.6-terra", true),
+              child("key-codex", Harness.make("codex"), "gpt-5.6-terra", true),
               null,
               Option.some(breakdown),
             ),
             report(3, planParent, 0.25, Option.none()),
-            report(4, child("claude", "claude", "claude-opus-5-5"), 1.5, Option.none()),
+            report(
+              4,
+              child("claude", Harness.make("claude"), "claude-opus-5-5"),
+              1.5,
+              Option.none(),
+            ),
           ]),
         ),
       ),
@@ -197,9 +207,14 @@ describe("RunUsageReader", () => {
     }).pipe(
       Effect.provide(
         readerOf([
-          report(1, child("unknown", "codex", "gpt-7-nova"), null, Option.some(breakdown)),
+          report(
+            1,
+            child("unknown", Harness.make("codex"), "gpt-7-nova"),
+            null,
+            Option.some(breakdown),
+          ),
           // Recorded before Codex reports had a breakdown: unpriced, but its model has rates.
-          report(2, child("older", "codex", "gpt-5.6-terra"), null, Option.none()),
+          report(2, child("older", Harness.make("codex"), "gpt-5.6-terra"), null, Option.none()),
         ]).pipe(Layer.provideMerge(Logger.layer([logger]))),
       ),
     );

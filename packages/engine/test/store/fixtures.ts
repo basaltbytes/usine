@@ -1,5 +1,5 @@
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
@@ -13,7 +13,7 @@ import { Submission } from "../../src/engine/submission.ts";
 export const testAgent = Agent.make({
   name: AgentName.make("developer"),
   brain: BrainSpec.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),

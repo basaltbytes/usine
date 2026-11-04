@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
 import { Agent } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
@@ -78,7 +78,7 @@ const callerTokenOf = (request: AttemptRequest | undefined): string => {
 };
 
 const CODEX_BRAIN = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "low",
 });
@@ -1042,7 +1042,7 @@ describe("SSH Worker behind a Gateway", () => {
       const machine = fakeMachine();
       const gateway = fakeGateway(machine);
       const codex = BrainSpec.make({
-        harness: "codex",
+        harness: Harness.make("codex"),
         model: ModelId.make("gpt-5.6-sol"),
         effort: "low",
       });

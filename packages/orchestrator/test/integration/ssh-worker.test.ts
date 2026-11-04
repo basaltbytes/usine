@@ -5,7 +5,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { childPidFile, type RemoteShell, sshArguments } from "@usine/agents/child-host";
 import { UsineConfig } from "@usine/config/factory";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, type Harness, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady } from "@usine/core/agent/capability";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { AttemptTask } from "@usine/core/attempt";
@@ -113,7 +113,7 @@ const brain = (harness: Harness, model: string) =>
 
 const agent = Agent.make({
   name: AgentName.make("developer"),
-  brain: brain("claude", "claude-sonnet-4-6"),
+  brain: brain(Harness.make("claude"), "claude-sonnet-4-6"),
   parentModel: Option.none(),
   parentEffort: Option.none(),
   persona: AgentPersona.make("Verify the SSH Worker transport."),
@@ -429,8 +429,8 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           const ssh = yield* Executor;
           yield* ssh.preflight(WORKER, [], 1);
           for (const checked of [
-            brain("claude", "claude-sonnet-4-6"),
-            brain("codex", "gpt-5.6-sol"),
+            brain(Harness.make("claude"), "claude-sonnet-4-6"),
+            brain(Harness.make("codex"), "gpt-5.6-sol"),
           ]) {
             const outcome = yield* ssh.preflight(WORKER, [checked], 1).pipe(Effect.result);
             // A Worker that nobody logged in to yet has the harness but not its login.
@@ -782,8 +782,8 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         yield* Effect.gen(function* () {
           const ssh = yield* Executor;
           for (const checked of [
-            brain("claude", "claude-sonnet-4-6"),
-            brain("codex", "gpt-5.6-sol"),
+            brain(Harness.make("claude"), "claude-sonnet-4-6"),
+            brain(Harness.make("codex"), "gpt-5.6-sol"),
           ]) {
             const outcome = yield* ssh.preflight(GATEWAY_WORKER, [checked], 1).pipe(Effect.result);
             // A Worker that nobody logged in to yet has the harness but not its login.

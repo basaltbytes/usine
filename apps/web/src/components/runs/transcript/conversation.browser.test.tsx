@@ -1,9 +1,11 @@
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
+import { capabilitiesFixture } from "~/lib/configuration/fixture";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { Option, Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -63,7 +65,11 @@ const attemptId = AttemptId.make("attempt");
 const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
-  brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
+  brain: BrainSpec.make({
+    harness: Harness.make("codex"),
+    model: ModelId.make("gpt-5"),
+    effort: "high",
+  }),
 });
 const record = (sequence: number, event: AgentSessionEvent) =>
   TranscriptEventView.make({
@@ -208,6 +214,7 @@ beforeEach(async () => {
   );
   localStorage.clear();
   queryClient = new QueryClient();
+  queryClient.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
   host = document.createElement("div");
   host.style.cssText = "height:600px;width:1100px;display:flex;flex-direction:column";
   document.body.append(host);
@@ -1001,7 +1008,7 @@ const usineWorker = SshDestination.make("usine-worker-1");
 const sameLogin = "Same harness login as the attempt. The worktree is removed at attempt cleanup";
 const resumeCases: ReadonlyArray<{
   readonly worker: string;
-  readonly harness: "claude" | "codex";
+  readonly harness: Harness;
   readonly access: WorkerAccess | null;
   readonly facts: ReadonlyArray<string>;
   readonly command: string | null;
@@ -1013,21 +1020,21 @@ const resumeCases: ReadonlyArray<{
 }> = [
   {
     worker: "local",
-    harness: "claude",
+    harness: Harness.make("claude"),
     access: LocalWorkerAccess.make(),
     facts: ["Worktree /worker/Philippe's repo"],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
   },
   {
     worker: "usine-worker-1",
-    harness: "codex",
+    harness: Harness.make("codex"),
     access: SshWorkerAccess.make({ destination: usineWorker, port: null }),
     facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
     command: String.raw`ssh -t usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && codex resume -- '\''native-session'\'''`,
   },
   {
     worker: "usine-worker-1",
-    harness: "codex",
+    harness: Harness.make("codex"),
     access: SshWorkerAccess.make({ destination: usineWorker, port: null }),
     gateway: { home: "/worker/codex/attempt-1", kind: "subscription" },
     facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
@@ -1035,14 +1042,14 @@ const resumeCases: ReadonlyArray<{
   },
   {
     worker: "usine-worker-1",
-    harness: "claude",
+    harness: Harness.make("claude"),
     access: SshWorkerAccess.make({ destination: usineWorker, port: SshPort.make(2222) }),
     facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
     command: String.raw`ssh -t -p 2222 usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && claude --resume '\''native-session'\'''`,
   },
   {
     worker: "retired-worker",
-    harness: "claude",
+    harness: Harness.make("claude"),
     access: null,
     facts: [
       "Worktree /worker/Philippe's repo",
@@ -1052,7 +1059,7 @@ const resumeCases: ReadonlyArray<{
   },
   {
     worker: "hz-pool",
-    harness: "claude",
+    harness: Harness.make("claude"),
     access: Schema.decodeSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
     facts: ["Worktree /worker/Philippe's repo on hz-pool"],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
@@ -1060,7 +1067,7 @@ const resumeCases: ReadonlyArray<{
   },
   {
     worker: "hz-pool",
-    harness: "codex",
+    harness: Harness.make("codex"),
     access: Schema.decodeSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
     gateway: { home: "/worker/codex/attempt-1", kind: "subscription" },
     facts: ["Worktree /worker/Philippe's repo on hz-pool"],
@@ -1068,7 +1075,7 @@ const resumeCases: ReadonlyArray<{
   },
   {
     worker: "local",
-    harness: "codex",
+    harness: Harness.make("codex"),
     access: LocalWorkerAccess.make(),
     home: "/worker/codex/local-login",
     facts: ["Worktree /worker/Philippe's repo"],
@@ -1076,7 +1083,7 @@ const resumeCases: ReadonlyArray<{
   },
   {
     worker: "retired-worker",
-    harness: "codex",
+    harness: Harness.make("codex"),
     access: null,
     gateway: { home: "/worker/codex/attempt-1", kind: "api-key" },
     facts: [],
@@ -1235,7 +1242,11 @@ it("shows that a Pi child has no saved harness session to resume", async () => {
     id: AgentSessionId.make("pi-child"),
     parentId: parent.id,
     agent: AgentName.make("reviewer"),
-    brain: BrainSpec.make({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
+    brain: BrainSpec.make({
+      harness: Harness.make("pi"),
+      model: ModelId.make("test-model"),
+      effort: "high",
+    }),
   });
   mount(
     [
@@ -1260,7 +1271,11 @@ it.each([390, 1280])(
       id: AgentSessionId.make("prompt-child"),
       parentId: parent.id,
       agent: AgentName.make("reviewer"),
-      brain: BrainSpec.make({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
+      brain: BrainSpec.make({
+        harness: Harness.make("pi"),
+        model: ModelId.make("test-model"),
+        effort: "high",
+      }),
     });
     const prompt =
       "# Delegated task\n\n  Add `ready-to-merge`.\nDo not wait for CI.\n" + "x".repeat(300);

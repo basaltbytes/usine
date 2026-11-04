@@ -20,7 +20,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession, sessionPool } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
@@ -155,7 +155,7 @@ describe("Pi child backend", () => {
       parentId: AgentSessionId.make("parent-1"),
       agent: AgentName.make("developer"),
       brain: BrainSpec.make({
-        harness: "pi",
+        harness: Harness.make("pi"),
         model: ModelId.make("openai/gpt-5.6-terra"),
         effort: "medium",
       }),

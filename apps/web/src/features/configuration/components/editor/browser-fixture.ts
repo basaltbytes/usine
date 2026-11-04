@@ -51,7 +51,8 @@ export const configurationEditorResponses = async (
   rejections: readonly { readonly status: number; readonly body: string }[],
   configuration: string,
 ) => {
-  const { HARNESSES, EFFORTS } = await import("@usine/core/agent/brain");
+  const { EFFORTS } = await import("@usine/core/agent/brain");
+  const { catalog, harnessPresentations } = await import("@usine/agents/harness");
   await page.route("**/api/overview", (route) =>
     route.fulfill({
       contentType: "application/json",
@@ -99,6 +100,27 @@ export const configurationEditorResponses = async (
       },
     ],
   });
+  const entityText = new Map([
+    ["binding", "name: instance-admin\nmember: 1\nrole: admin\nscope: { _tag: Instance }\n"],
+    [
+      "project",
+      "id: usine\nname: Usine\nrepositories: [basaltbytes/usine]\nlanes:\n  - name: Ready\n    sources: [{ label: ready }]\n  - name: Review\n    sources: [{ label: review }]\n",
+    ],
+    [
+      "settings",
+      "version: 1\nsettings:\n  poll_interval: 60\n  max_children: 4\n  upgrade_channel: latest\n  upgrade_mode: propose\nwebhooks: { mode: off }\n",
+    ],
+    [
+      "repository",
+      "name: basaltbytes/usine\ntags: []\nlanes:\n  - name: Ready\n    sources: [{ label: ready }]\n  - name: Review\n    sources: [{ label: review }]\n",
+    ],
+    [
+      "loop",
+      '---\ntrigger: { on: issue, if: "true" }\nagent: developer\n---\nImplement {{ item.title }}.\n',
+    ],
+    ["label", 'name: ready\ncolor: "0e8a16"\ndescription: Ready for work\n'],
+    ["agent", "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement.\n"],
+  ]);
   await page.route("**/api/configuration", (route) =>
     route.fulfill({ contentType: "application/json", body: configuration }),
   );
@@ -140,7 +162,11 @@ export const configurationEditorResponses = async (
     if (last === "capabilities") {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({ harnesses: HARNESSES, efforts: EFFORTS }),
+        body: JSON.stringify({
+          harnesses: catalog.ids,
+          harnessDetails: harnessPresentations,
+          efforts: EFFORTS,
+        }),
       });
       return;
     }
@@ -166,8 +192,19 @@ export const configurationEditorResponses = async (
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
-          revisions: [revision(before === null ? number : 1)],
-          nextBefore: before === null ? 2 : null,
+          revisions:
+            url.searchParams.has("kind") &&
+            (url.searchParams.get("kind") !== "worker" ||
+              url.searchParams.get("identifier") !== "local")
+              ? []
+              : [revision(before === null ? number : 1)],
+          nextBefore:
+            before === null &&
+            (!url.searchParams.has("kind") ||
+              (url.searchParams.get("kind") === "worker" &&
+                url.searchParams.get("identifier") === "local"))
+              ? 2
+              : null,
         }),
       });
       return;
@@ -189,6 +226,7 @@ export const configurationEditorResponses = async (
       "developer",
       "basaltbytes/usine",
       "ready",
+      "instance-admin",
     ].includes(last);
     if (!known || (last === "local" && !exists)) {
       await route.fulfill({
@@ -203,16 +241,7 @@ export const configurationEditorResponses = async (
       body: JSON.stringify({
         key: { kind, identifier: last },
         value: {},
-        text:
-          kind === "project"
-            ? "id: usine\nname: Usine\nrepositories: [basaltbytes/usine]\nlanes:\n  - name: Ready\n    sources: [{ label: ready }]\n  - name: Review\n    sources: [{ label: review }]\n"
-            : kind === "settings"
-              ? "version: 1\nsettings:\n  poll_interval: 60\n  max_children: 4\n  upgrade_channel: latest\n  upgrade_mode: propose\nwebhooks: { mode: off }\n"
-              : kind === "agent"
-                ? "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement.\n"
-                : kind === "repository"
-                  ? "name: basaltbytes/usine\ntags: []\nlanes:\n  - name: Ready\n    sources: [{ label: ready }]\n  - name: Review\n    sources: [{ label: review }]\n"
-                  : text,
+        text: entityText.get(kind ?? "") ?? text,
         number,
       }),
     });
@@ -229,7 +258,10 @@ export const configurationEditorScreenshot = Effect.fn("configurationEditorScree
   yield* Effect.annotateCurrentSpan({ screenshot: name, path: output });
   yield* fs.makeDirectory(path.dirname(output), { recursive: true });
   yield* Effect.tryPromise({
-    try: () => page.screenshot({ path: output, fullPage: true, animations: "disabled" }),
+    try: async () => {
+      await page.mouse.move(0, 0);
+      return page.screenshot({ path: output, fullPage: true, animations: "disabled" });
+    },
     catch: (cause) => ConfigurationEditorScreenshotError.make({ path: output, cause }),
   });
   yield* Effect.logDebug("Configuration editor screenshot saved", {

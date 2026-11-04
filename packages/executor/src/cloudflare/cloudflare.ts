@@ -1,6 +1,6 @@
-import { prepareOutputs, readOutputs } from "../outputs.ts";
 import type { RemoteShell, SshCommand } from "@usine/agents/child-host";
 import { codexConfigArgs } from "@usine/agents/codex";
+import { catalog } from "@usine/agents/harness";
 import { unsupportedCodexVersion } from "@usine/agents/preflight";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import {
@@ -21,12 +21,7 @@ import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/
 import type { LoopPermissions } from "@usine/core/loop";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
-import type {
-  BotAccount,
-  CloudflareLlmProvider,
-  GatewayCredentialKind,
-  WorkerName,
-} from "@usine/core/worker";
+import type { BotAccount, GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { AttemptRuntime, type StoredRequest } from "@usine/durable/attempt-runtime";
 import {
   Array as Arr,
@@ -61,6 +56,7 @@ import {
   WorkerCapabilityError,
 } from "../executor.ts";
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
+import { prepareOutputs, readOutputs } from "../outputs.ts";
 import {
   cacheDirectoryName,
   keptCheckoutRecovery,
@@ -99,18 +95,6 @@ printf '%s' "$2" > "$1"
 chmod 755 "$1"
 `.trim();
 
-/** The provider whose API key each harness needs in a sandbox, which holds no harness login. */
-const HARNESS_PROVIDERS = {
-  claude: Option.some("anthropic"),
-  codex: Option.some("openai"),
-  pi: Option.none(),
-} as const satisfies Record<Harness, Option.Option<CloudflareLlmProvider>>;
-
-const PROVIDER_LABELS = {
-  anthropic: "Claude Code needs an Anthropic API key",
-  openai: "Codex needs an OpenAI API key",
-} as const satisfies Record<CloudflareLlmProvider, string>;
-
 /** The sandbox paths of one Attempt's checkout. */
 const layoutFor = (repository: RepositoryName, attemptId: AttemptId) => {
   const cache = `${WORKSPACE}/repos/${cacheDirectoryName(repository)}`;
@@ -133,28 +117,33 @@ const brainGap = (
   address: CloudflareWorkerAddress,
   brain: BrainSpec,
 ): Option.Option<WorkerCapabilityError> =>
-  Option.match(HARNESS_PROVIDERS[brain.harness], {
-    onNone: () =>
-      Option.some(
-        WorkerCapabilityError.make({
-          worker: address.name,
-          capability: "toolchain",
-          message: `Cloudflare worker "${address.name}" can't run Pi children, which run only on local workers`,
-          cause: new Error(`unsupported harness ${brain.harness}`),
-        }),
-      ),
-    onSome: (provider) =>
-      address.providers.some((key) => key.provider === provider)
-        ? Option.none()
-        : Option.some(
-            WorkerCapabilityError.make({
-              worker: address.name,
-              capability: "harness-login",
-              message: `${PROVIDER_LABELS[provider]} on cloudflare worker "${address.name}", which holds no harness login. Add ${provider} to the worker's llm_providers with its api_key_env.`,
-              cause: new Error(`no ${provider} key`),
-            }),
-          ),
-  });
+  Option.match(
+    Option.flatMap(catalog.get(brain.harness), (descriptor) =>
+      Option.map(descriptor.worker.credential, (credential) => ({ descriptor, credential })),
+    ),
+    {
+      onNone: () =>
+        Option.some(
+          WorkerCapabilityError.make({
+            worker: address.name,
+            capability: "toolchain",
+            message: `Cloudflare worker "${address.name}" can't run Pi children, which run only on local workers`,
+            cause: new Error(`unsupported harness ${brain.harness}`),
+          }),
+        ),
+      onSome: ({ descriptor, credential: { provider, label } }) =>
+        address.providers.some((key) => key.provider === provider)
+          ? Option.none()
+          : Option.some(
+              WorkerCapabilityError.make({
+                worker: address.name,
+                capability: "harness-login",
+                message: `${descriptor.label} needs an ${label} API key on cloudflare worker "${address.name}", which holds no harness login. Add ${provider} to the worker's llm_providers with its api_key_env.`,
+                cause: new Error(`no ${provider} key`),
+              }),
+            ),
+    },
+  );
 
 /** Returns the sandbox credentials of a running Attempt: `github` and every provider key of `address`. */
 const credentialsFor = (
@@ -263,8 +252,10 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       worker: CloudflareWorker,
       harness: Harness,
     ): Option.Option<GatewayCredentialKind> =>
-      Option.flatMap(HARNESS_PROVIDERS[harness], (provider) =>
-        worker.providers.includes(provider) ? Option.some("api-key" as const) : Option.none(),
+      Option.flatMap(
+        Option.flatMap(catalog.get(harness), (descriptor) => descriptor.worker.credential),
+        ({ provider }) =>
+          worker.providers.includes(provider) ? Option.some("api-key" as const) : Option.none(),
       );
 
     const destroySandbox = Effect.fn("CloudflareExecutor.destroySandbox")(function* (

@@ -54,6 +54,10 @@
     "./preflight": {
       "types": "./dist/preflight/preflight.d.ts",
       "default": "./dist/preflight/preflight.js"
+    },
+    "./harness": {
+      "types": "./dist/harness/catalog.d.ts",
+      "default": "./dist/harness/catalog.js"
     }
   },
   "publishConfig": {

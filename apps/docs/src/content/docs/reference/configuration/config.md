@@ -71,7 +71,11 @@ usine config log
 usine config log agent developer
 ```
 
-Output has tab-separated revision number, actor, ISO 8601 UTC time, and message in ascending order. An empty history prints no rows. **Configuration > History** also shows diffs and can revert a revision by creating a new one.
+Output has tab-separated revision number, actor, ISO 8601 UTC time, and message in ascending order. An empty history prints no rows.
+
+In the web UI, **Configuration > History** shows revisions, export-format diffs, and revert controls. Choose an **Entity type**, enter an **Entity name**, and select **Filter history** to restrict the list to one entity. For loops, use the qualified name, such as `usine/start-dev`; for settings, use `instance`. The `kind` and `identifier` URL parameters preserve the filter when you share the link. **All entities** clears the filter. You can filter by a deleted entity's name.
+
+Each configuration entity page links to its filtered history beside the title. In an entity editor, **Cmd+Enter** or **Ctrl+Enter** saves the form. When a revision is available, the link shows who changed the entity and when. **Revert** restores every entity in the selected revision and creates a new revision. Instance admins can revert revisions; project maintainers can revert a revision that changes only the selected project or loop. Later changes can prevent a revert. Review the affected entities before confirming.
 
 ## Revision application
 

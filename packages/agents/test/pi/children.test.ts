@@ -1,5 +1,6 @@
+import { catalog } from "../../src/harness/catalog.ts";
 import { assert, describe, it } from "@effect/vitest";
-import { BrainSpec, Harness, HARNESSES, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -56,7 +57,7 @@ describe("child backend dispatcher", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const dispatcher = yield* ChildBackend;
-        for (const harness of HARNESSES) {
+        for (const harness of catalog.ids) {
           const running = yield* dispatcher.launch(request(harness));
           const result = yield* running.result;
           assert.strictEqual(result.message, harness);
@@ -64,9 +65,9 @@ describe("child backend dispatcher", () => {
       }).pipe(
         Effect.provide(
           childDispatcherLayer.pipe(
-            Layer.provideMerge(Layer.succeed(ClaudeChildBackend)(backend("claude"))),
-            Layer.provideMerge(Layer.succeed(CodexChildBackend)(backend("codex"))),
-            Layer.provideMerge(Layer.succeed(PiChildBackend)(backend("pi"))),
+            Layer.provideMerge(Layer.succeed(ClaudeChildBackend)(backend(Harness.make("claude")))),
+            Layer.provideMerge(Layer.succeed(CodexChildBackend)(backend(Harness.make("codex")))),
+            Layer.provideMerge(Layer.succeed(PiChildBackend)(backend(Harness.make("pi")))),
           ),
         ),
       ),

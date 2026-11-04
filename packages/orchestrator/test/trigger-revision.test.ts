@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import { assert, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
@@ -29,7 +30,7 @@ it.effect.each(["issue", "pr"] as const)(
       );
       const agent = yield* Schema.decodeEffect(AgentFile)({
         name: "reviewer",
-        harness: "codex",
+        harness: Harness.make("codex"),
         model: "gpt-5.6-sol",
         effort: "high",
         parentModel: Option.none(),

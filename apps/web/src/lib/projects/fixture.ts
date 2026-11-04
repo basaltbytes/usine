@@ -6,7 +6,7 @@ import {
 } from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { ItemKey, ItemNumber } from "@usine/core/item";
@@ -80,7 +80,11 @@ const attempt = (
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),
     workerAccess: LocalWorkerAccess.make(),
-    brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5.6-sol"), effort: "high" }),
+    brain: BrainSpec.make({
+      harness: Harness.make("codex"),
+      model: ModelId.make("gpt-5.6-sol"),
+      effort: "high",
+    }),
     startedAt,
     outcome:
       failure === "running"
@@ -108,7 +112,7 @@ const run = (
 ) =>
   RunSummaryView.make({
     agentBrain: BrainSpec.make({
-      harness: "codex",
+      harness: Harness.make("codex"),
       model: ModelId.make("test-model"),
       effort: "high",
     }),

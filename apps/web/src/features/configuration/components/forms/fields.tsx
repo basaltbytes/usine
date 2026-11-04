@@ -44,6 +44,8 @@ export const FormField = ({
     id,
     value: stringValue(fieldValue(value, path)),
     readOnly,
+    autoComplete: "off",
+    spellCheck: false,
     "aria-invalid": errors.length > 0,
     "aria-describedby": `${id}-help`,
     onChange: (
@@ -104,7 +106,7 @@ export const FormField = ({
 
 type FieldsProps = FormFieldsProps & { readonly definitions: readonly FieldDefinition[] };
 export const Fields = ({ definitions, ...fields }: FieldsProps) => (
-  <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+  <div className="grid min-w-0 gap-x-8 gap-y-5 sm:grid-cols-2">
     {definitions.map((definition) => (
       <FormField key={definition.path} {...fields} {...definition} />
     ))}

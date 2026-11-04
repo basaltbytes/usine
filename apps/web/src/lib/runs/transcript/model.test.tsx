@@ -1,4 +1,7 @@
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import type { ReactNode } from "react";
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
+import { capabilitiesFixture } from "~/lib/configuration/fixture";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -52,8 +55,8 @@ import {
   TranscriptPageCursor,
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
-import { QueryClient } from "@tanstack/react-query";
-import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { LaneName } from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
@@ -75,9 +78,15 @@ import { MessageScrollerProvider } from "~/components/ui/message-scroller";
 import { presentTool, type ToolSection } from "~/lib/runs/transcript/tool/presentation";
 import { fetchRunDetail } from "~/lib/runs/transcript/fetch";
 
+const renderMarkup = (element: ReactNode): string => {
+  const client = new QueryClient();
+  client.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
+  return renderToStaticMarkup(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
+};
+
 const attemptId = AttemptId.make("attempt-31");
 const brain = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-5"),
   effort: "high",
 });

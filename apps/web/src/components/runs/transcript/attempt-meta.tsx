@@ -1,3 +1,4 @@
+import { useHarnessLabel } from "~/lib/configuration/capabilities";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import { DateTime, Option } from "effect";
 import { Markdown } from "~/components/markdown";
@@ -7,7 +8,7 @@ import { Button } from "~/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
 import type { Chapter } from "~/lib/runs/transcript/document/model";
 import { childPromptLabel } from "~/lib/runs/strings";
-import { dayLabel, harnessLabel, poolLabel, windowLabel } from "~/lib/strings";
+import { dayLabel, poolLabel, windowLabel } from "~/lib/strings";
 
 type AttemptMetaProps = {
   readonly chapter: Chapter;
@@ -15,6 +16,7 @@ type AttemptMetaProps = {
 };
 
 export const AttemptMeta = ({ chapter, runTask }: AttemptMetaProps) => {
+  const harnessLabel = useHarnessLabel();
   const attempt = Option.getOrUndefined(chapter.attempt);
   const parent = chapter.sessions.find(({ session }) => session._tag === "ParentSession");
   const parentModel = Option.orElse(chapter.parentModel, () =>

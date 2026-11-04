@@ -13,16 +13,21 @@ import { editorCopy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { ConfigurationEditorForm } from "./form";
 import { WriteFailure } from "./failure";
-import { ConfigurationHistory } from "./history";
+import { ConfigurationHeader } from "~/features/configuration/components/header";
 
 type EntityMode =
   | { readonly _tag: "read" }
   | { readonly _tag: "edit"; readonly initial: ConfigurationEntityView }
   | { readonly _tag: "delete"; readonly initial: ConfigurationEntityView };
 
-type EntityEditorProps = { readonly entity: ConfigurationEntityKey; readonly children: ReactNode };
+type EntityEditorProps = {
+  readonly entity: ConfigurationEntityKey;
+  readonly heading: ReactNode;
+  readonly actions?: ReactNode;
+  readonly children: ReactNode;
+};
 
-export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
+export const EntityEditor = ({ entity, heading, actions, children }: EntityEditorProps) => {
   const canEdit = useCan(
     entity.kind === "loop" || entity.kind === "project" ? "maintain" : "admin",
     entity.kind === "project"
@@ -38,38 +43,51 @@ export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
   const [message, setMessage] = useState("");
   const [saved, setSaved] = useState(false);
   const write = useConfigurationWrite();
-  if (!canEdit) return children;
+  if (!canEdit)
+    return (
+      <>
+        <ConfigurationHeader heading={heading} actions={actions} />
+        {children}
+      </>
+    );
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <CommandButton
-          command={editorCopy.edit}
-          variant="outline"
-          disabled={current.data === undefined || current.isError || mode._tag !== "read"}
-          onClick={() => {
-            setSaved(false);
-            if (current.data !== undefined) setMode({ _tag: "edit", initial: current.data });
-          }}
-        >
-          {editorCopy.edit}
-        </CommandButton>
-        {(admin || entity.kind !== "project") && (
-          <CommandButton
-            command={editorCopy.delete}
-            variant="ghost"
-            disabled={current.data === undefined || current.isError || mode._tag !== "read"}
-            onClick={() => {
-              write.reset();
-              if (current.data !== undefined) setMode({ _tag: "delete", initial: current.data });
-            }}
-          >
-            {editorCopy.delete}
-          </CommandButton>
-        )}
-        {current.isPending && <span role="status">{editorCopy.loading}</span>}
-        {saved && <span role="status">{editorCopy.saved}</span>}
-        {write.isSuccess && current.isError && <span role="status">{editorCopy.deleted}</span>}
-      </div>
+      <ConfigurationHeader
+        heading={heading}
+        actions={
+          <>
+            {actions}
+            <CommandButton
+              command={editorCopy.edit}
+              variant="outline"
+              disabled={current.data === undefined || current.isError || mode._tag !== "read"}
+              onClick={() => {
+                setSaved(false);
+                if (current.data !== undefined) setMode({ _tag: "edit", initial: current.data });
+              }}
+            >
+              {editorCopy.edit}
+            </CommandButton>
+            {(admin || entity.kind !== "project") && (
+              <CommandButton
+                command={editorCopy.delete}
+                variant="ghost"
+                disabled={current.data === undefined || current.isError || mode._tag !== "read"}
+                onClick={() => {
+                  write.reset();
+                  if (current.data !== undefined)
+                    setMode({ _tag: "delete", initial: current.data });
+                }}
+              >
+                {editorCopy.delete}
+              </CommandButton>
+            )}
+            {current.isPending && <span role="status">{editorCopy.loading}</span>}
+            {saved && <span role="status">{editorCopy.saved}</span>}
+            {write.isSuccess && current.isError && <span role="status">{editorCopy.deleted}</span>}
+          </>
+        }
+      />
       {current.isError && !write.isSuccess && <ErrorAlert message={current.error.message} />}
       {mode._tag === "edit" && (
         <ConfigurationEditorForm
@@ -131,7 +149,6 @@ export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
         </form>
       )}
       {mode._tag === "read" && children}
-      <ConfigurationHistory entity={entity} />
     </div>
   );
 };

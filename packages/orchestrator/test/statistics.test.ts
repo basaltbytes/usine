@@ -5,7 +5,7 @@ import { WorkerStatus } from "../src/worker-status.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   type BillingPool,
@@ -77,11 +77,15 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const repository = RepositoryName.make("basaltbytes/usine");
 const opus = BrainSpec.make({
-  harness: "claude",
+  harness: Harness.make("claude"),
   model: ModelId.make("claude-opus"),
   effort: "high",
 });
-const gpt = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
+const gpt = BrainSpec.make({
+  harness: Harness.make("codex"),
+  model: ModelId.make("gpt-5"),
+  effort: "high",
+});
 const agentOf = (name: string, brain: BrainSpec) =>
   Agent.make({
     name: AgentName.make(name),

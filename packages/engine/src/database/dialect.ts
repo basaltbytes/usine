@@ -29,6 +29,12 @@ export const jsonObject = (fields: ReadonlyArray<readonly [string, SQLWrapper]>)
     sql`, `,
   )})`;
 
+export const jsonSet = (value: SQLWrapper, fields: ReadonlyArray<readonly [string, SQLWrapper]>) =>
+  sql<string>`json_set(${value}, ${sql.join(
+    fields.flatMap(([path, replacement]) => [sql.raw(quoted(path)), replacement]),
+    sql`, `,
+  )})`;
+
 export const jsonValue = (value: SQLWrapper) => sql`json(${value})`;
 
 export const jsonGroupArray = (value: SQLWrapper, filter: SQLWrapper) =>

@@ -77,6 +77,13 @@ export const revisionsQuery = (key?: ConfigurationEntityKey) =>
     getNextPageParam: (page) => page.nextBefore ?? undefined,
   });
 
+export const latestRevisionQuery = (key: ConfigurationEntityKey) =>
+  queryOptions({
+    queryKey: [...configurationEditorKeys, "latest-revision", key.kind, key.identifier],
+    meta: { refreshLabel: "Configuration", changes: changes.kind("configuration") },
+    queryFn: () => api((client) => client.configurationRevisions({ query: { ...key, limit: 1 } })),
+  });
+
 export const revisionQuery = (number: ConfigurationRevisionNumber) =>
   queryOptions({
     queryKey: [...configurationEditorKeys, "revision", number],
@@ -167,13 +174,6 @@ export const useConfigurationWrite = () => {
       ]),
   });
 };
-
-export const capabilitiesQuery = () =>
-  queryOptions({
-    queryKey: [...configurationEditorKeys, "capabilities"],
-    queryFn: () => api((client) => client.configurationCapabilities({})),
-    staleTime: Infinity,
-  });
 
 export const installationRepositoriesQuery = () =>
   queryOptions({

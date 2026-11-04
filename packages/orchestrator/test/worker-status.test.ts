@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { BrainSpec, type Harness, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import {
   ContainerCpus,
@@ -15,9 +15,9 @@ import { recordPreflight, unchecked, type WorkerPreflight } from "../src/worker-
 const worker = WorkerName.make("local");
 const brain = (harness: Harness, model: string) =>
   BrainSpec.make({ harness, model: ModelId.make(model), effort: "high" });
-const codex = brain("codex", "gpt-5.6-sol");
-const claude = brain("claude", "claude-opus-4-1");
-const pi = brain("pi", "gpt-5.6-sol");
+const codex = brain(Harness.make("codex"), "gpt-5.6-sol");
+const claude = brain(Harness.make("claude"), "claude-opus-4-1");
+const pi = brain(Harness.make("pi"), "gpt-5.6-sol");
 const at = (hour: number) =>
   DateTime.makeUnsafe(`2026-10-20T${String(hour).padStart(2, "0")}:00:00Z`);
 
@@ -113,7 +113,7 @@ describe("Worker preflight record", () => {
       started,
       [codex, claude, pi],
       at(9),
-      Result.fail(notLoggedIn("claude")),
+      Result.fail(notLoggedIn(Harness.make("claude"))),
     );
     assert.deepStrictEqual(summary(record), {
       prerequisites: "Passed 2026-10-20T08:00:00.000Z",

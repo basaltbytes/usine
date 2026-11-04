@@ -33,7 +33,7 @@ import {
 } from "@usine/core/cycle-budget";
 import { type BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentName, Agent, AgentPersona } from "@usine/core/agent";
 import {
   AttemptId,
@@ -156,7 +156,7 @@ const loopName = LoopName.make("review-issue");
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = ItemKey.make("github:basaltbytes/usine:31");
 const brain = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
 });
@@ -353,17 +353,27 @@ const sessionOf = (
         brain: sessionBrain,
       });
 };
-const apiParent = sessionOf("api-parent", "pi", "openai/gpt-5.5", "developer");
-const claudeChild = sessionOf("claude-child", "claude", "claude-opus-4-7", "developer");
-const planParent = sessionOf("plan-parent", "pi", "openai-codex/gpt-5.5", "developer");
-const codexChild = sessionOf("codex-child", "codex", "gpt-5.6-sol", "reviewer");
+const apiParent = sessionOf("api-parent", Harness.make("pi"), "openai/gpt-5.5", "developer");
+const claudeChild = sessionOf(
+  "claude-child",
+  Harness.make("claude"),
+  "claude-opus-4-7",
+  "developer",
+);
+const planParent = sessionOf(
+  "plan-parent",
+  Harness.make("pi"),
+  "openai-codex/gpt-5.5",
+  "developer",
+);
+const codexChild = sessionOf("codex-child", Harness.make("codex"), "gpt-5.6-sol", "reviewer");
 /** A Claude Code child on the SSH Worker whose Gateway billed its model requests to an API key. */
 const gatewayClaudeChild = ChildSession.make({
   id: AgentSessionId.make("gateway-claude-child"),
   parentId: AgentSessionId.make("parent-of-gateway-claude-child"),
   agent: AgentName.make("developer"),
   brain: BrainSpec.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     model: ModelId.make("claude-opus-4-7"),
     effort: "high",
   }),
@@ -2249,7 +2259,7 @@ describe("Operator", () => {
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-      const replacement = AgentFile.make({ ...agentFile, harness: "claude" });
+      const replacement = AgentFile.make({ ...agentFile, harness: Harness.make("claude") });
       const reloaded = LoadedInstance.make({ ...fixtureInstance, agents: [replacement] });
       const amended = RunSnapshot.make({ ...snapshot, agent: replacement.agent });
       const changedPersona = LoadedInstance.make({
@@ -2290,7 +2300,7 @@ describe("Operator", () => {
         const replacement = AgentFile.make({
           ...agentFile,
           name: AgentName.make("reviewer"),
-          harness: "codex",
+          harness: Harness.make("codex"),
           model: ModelId.make("new-model"),
           persona: AgentPersona.make("Review the implementation"),
           parentModel: Option.some(ModelId.make("openai/new-parent")),

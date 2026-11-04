@@ -15,7 +15,7 @@ import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
 import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
 import { AgentName, AgentPersona } from "@usine/core/agent";
-import { ModelId } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { QuestionFailure } from "@usine/core/attempt/failure";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -69,7 +69,7 @@ import {
 const repository = RepositoryName.make("basaltbytes/usine");
 const developer = AgentFile.make({
   name: AgentName.make("developer"),
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-6-astra"),
   effort: "medium",
   parentModel: Option.none(),

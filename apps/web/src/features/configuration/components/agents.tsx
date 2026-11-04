@@ -1,3 +1,4 @@
+import { useHarnessLabel } from "~/lib/configuration/capabilities";
 import { entityKey } from "~/features/configuration/lib/entities";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type {
@@ -15,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
-import { agentCopy, harnessLabel, plural } from "~/features/configuration/strings";
+import { agentCopy, plural } from "~/features/configuration/strings";
 import { FileError } from "~/features/configuration/components/file-error";
 import {
   ConfigurationPage,
@@ -41,6 +42,7 @@ const agentCounts = (configuration: ConfigurationView): string =>
 type AgentRowProps = { readonly agent: AgentFileView };
 
 const AgentRow = ({ agent }: AgentRowProps) => {
+  const harnessLabel = useHarnessLabel();
   const navigate = useNavigate();
   const params = { agent: agent.name };
   return (
@@ -55,7 +57,7 @@ const AgentRow = ({ agent }: AgentRowProps) => {
           {agent.name}
         </Link>
       </TableCell>
-      <TableCell>{harnessLabel[agent.harness]}</TableCell>
+      <TableCell>{harnessLabel(agent.harness)}</TableCell>
       <TableCell className="font-mono text-xs">{agent.model}</TableCell>
       <TableCell className="hidden sm:table-cell">{agent.effort}</TableCell>
       <TableCell className="hidden font-mono text-xs lg:table-cell">
@@ -144,58 +146,61 @@ type AgentFactsProps = {
   readonly configuration: ConfigurationView;
 };
 
-const AgentFacts = ({ agent, configuration }: AgentFactsProps) => (
-  <Facts>
-    <Fact label="Harness">{harnessLabel[agent.harness]}</Fact>
-    <Fact label="Model">
-      <code className="font-mono text-xs">{agent.model}</code>
-    </Fact>
-    <Fact label="Effort">{agent.effort}</Fact>
-    <Fact label="Parent model">
-      {agent.resolvedParentModel === null ? (
-        <Unset>Chosen by Pi</Unset>
-      ) : (
-        <code className="font-mono text-xs">{agent.resolvedParentModel}</code>
-      )}
-      <Source>
-        {agent.parentModel !== null
-          ? agentCopy.parentOverride
-          : configuration.settings.parentModel !== null
-            ? "From settings.parent_model"
-            : agentCopy.parentModelUnset}
-      </Source>
-    </Fact>
-    <Fact label="Parent effort">
-      {agent.resolvedParentEffort}
-      <Source>
-        {agent.parentEffort !== null
-          ? agentCopy.parentOverride
-          : configuration.settings.parentEffort !== null
-            ? "From settings.parent_effort"
-            : "Same as effort"}
-      </Source>
-    </Fact>
-    <Fact label="Loops">
-      {agent.loops.length === 0 ? (
-        <Unset>No loop uses this agent</Unset>
-      ) : (
-        <ul className="flex flex-col gap-0.5">
-          {agent.loops.map((loop) => (
-            <li key={loop}>
-              <Link
-                to="/configuration/loops/$loop"
-                params={{ loop }}
-                className="text-primary hover:underline"
-              >
-                {loop}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Fact>
-  </Facts>
-);
+const AgentFacts = ({ agent, configuration }: AgentFactsProps) => {
+  const harnessLabel = useHarnessLabel();
+  return (
+    <Facts>
+      <Fact label="Harness">{harnessLabel(agent.harness)}</Fact>
+      <Fact label="Model">
+        <code className="font-mono text-xs">{agent.model}</code>
+      </Fact>
+      <Fact label="Effort">{agent.effort}</Fact>
+      <Fact label="Parent model">
+        {agent.resolvedParentModel === null ? (
+          <Unset>Chosen by Pi</Unset>
+        ) : (
+          <code className="font-mono text-xs">{agent.resolvedParentModel}</code>
+        )}
+        <Source>
+          {agent.parentModel !== null
+            ? agentCopy.parentOverride
+            : configuration.settings.parentModel !== null
+              ? "From settings.parent_model"
+              : agentCopy.parentModelUnset}
+        </Source>
+      </Fact>
+      <Fact label="Parent effort">
+        {agent.resolvedParentEffort}
+        <Source>
+          {agent.parentEffort !== null
+            ? agentCopy.parentOverride
+            : configuration.settings.parentEffort !== null
+              ? "From settings.parent_effort"
+              : "Same as effort"}
+        </Source>
+      </Fact>
+      <Fact label="Loops">
+        {agent.loops.length === 0 ? (
+          <Unset>No loop uses this agent</Unset>
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {agent.loops.map((loop) => (
+              <li key={loop}>
+                <Link
+                  to="/configuration/loops/$loop"
+                  params={{ loop }}
+                  className="text-primary hover:underline"
+                >
+                  {loop}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Fact>
+    </Facts>
+  );
+};
 
 type AgentDetailProps = {
   readonly name: string;

@@ -3,7 +3,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
@@ -81,7 +81,7 @@ describe("live exe.dev Worker", () => {
       const agent = Agent.make({
         name: AgentName.make("developer"),
         brain: BrainSpec.make({
-          harness: "codex",
+          harness: Harness.make("codex"),
           model: ModelId.make("gpt-5.6-sol"),
           effort: "high",
         }),

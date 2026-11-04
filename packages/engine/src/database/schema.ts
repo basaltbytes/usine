@@ -379,7 +379,7 @@ export const sessionUsage = snakeCase.table(
   (table) => [primaryKey({ columns: [table.attemptId, table.sessionId] })],
 );
 
-/** The latest rate-limit report of each billing pool, copied from its transcript row. */
+/** The latest observed rate-limit windows for each billing pool. */
 export const poolRateLimits = snakeCase.table("usine_pool_rate_limits", {
   pool: text().$type<BillingPool>().primaryKey(),
   sequence: integer().notNull(),

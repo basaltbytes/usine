@@ -1,5 +1,5 @@
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -26,7 +26,11 @@ const attempt = (outcome: AttemptView["outcome"]) =>
     number: AttemptNumber.make(1),
     worker: WorkerName.make("local"),
     workerAccess: LocalWorkerAccess.make(),
-    brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" }),
+    brain: BrainSpec.make({
+      harness: Harness.make("codex"),
+      model: ModelId.make("gpt-5"),
+      effort: "high",
+    }),
     task: AttemptTask.make("Fix issue 33."),
     agent: AgentName.make("developer"),
     operatorIntervened: false,
@@ -38,7 +42,7 @@ const attempt = (outcome: AttemptView["outcome"]) =>
 const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
   RunView.make({
     agentBrain: BrainSpec.make({
-      harness: "codex",
+      harness: Harness.make("codex"),
       model: ModelId.make("test-model"),
       effort: "high",
     }),

@@ -2,7 +2,7 @@ import { RunSummaryView, AttemptSummaryView } from "@usine/orchestrator/operator
 import { LabelLaneSource, LaneName, StateLaneSource } from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -65,7 +65,7 @@ const item = (
   });
 
 const brain = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
 });

@@ -1,5 +1,5 @@
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ParentSession,
@@ -56,7 +56,11 @@ it("warns at 80 percent for either window and skips expired or undated windows",
     session: ParentSession.make({
       id: AgentSessionId.make("parent"),
       agent: AgentName.make("developer"),
-      brain: BrainSpec.make({ harness: "pi", model: ModelId.make("test/model"), effort: "high" }),
+      brain: BrainSpec.make({
+        harness: Harness.make("pi"),
+        model: ModelId.make("test/model"),
+        effort: "high",
+      }),
     }),
     pool: "chatgptPlan",
     rateLimits: RateLimitsSnapshot.make({

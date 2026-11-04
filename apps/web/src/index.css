@@ -290,3 +290,18 @@
     color: var(--foreground);
   }
 }
+
+@media (width < 40rem), (pointer: coarse) {
+  [data-slot="configuration"] :is(input, select, textarea) {
+    font-size: var(--text-lg);
+  }
+
+  [data-slot="configuration"]
+    :is(input:not([type="checkbox"]):not([type="radio"]), select, [data-slot="button"], a) {
+    min-height: 44px;
+  }
+
+  [data-slot="configuration"] button:has(> svg:only-child) {
+    min-width: 44px;
+  }
+}

@@ -30,7 +30,7 @@ import {
   AttentionRevision,
   type AttentionAcknowledgement,
 } from "@usine/engine/attention";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { TokenCount } from "@usine/core/agent/session";
 import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { createServer } from "node:net";
@@ -149,7 +149,7 @@ const instance = Effect.gen(function* () {
 });
 const run = RunView.make({
   agentBrain: BrainSpec.make({
-    harness: "codex",
+    harness: Harness.make("codex"),
     model: ModelId.make("test-model"),
     effort: "high",
   }),

@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { TerminalWindowIcon } from "@phosphor-icons/react";
 import type { AttemptView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
@@ -13,10 +15,12 @@ type ResumeDetailsProps = {
 };
 
 export const ResumeDetails = ({ session, attempt }: ResumeDetailsProps) => {
+  const { data } = useQuery(capabilitiesQuery());
   const identity = session.session;
+  const handoff = data?.harnessDetails.find(({ id }) => id === identity.brain.harness)?.handoff;
   if (
     identity._tag === "ChildSession" &&
-    identity.brain.harness === "codex" &&
+    handoff?.gateway === false &&
     Option.isSome(identity.gatewayCredential)
   )
     return null;

@@ -1,3 +1,4 @@
+import { catalog, type HarnessCredential, type HarnessDescriptor } from "@usine/agents/harness";
 import { type RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import { codexConfigArgs } from "@usine/agents/codex";
 import { unsupportedCodexVersion } from "@usine/agents/preflight";
@@ -138,16 +139,12 @@ const credentialMode = (kind: Option.Option<GatewayCredentialKind>, listed: bool
 export const gatewayCredentialFor = (
   gateway: MachineGateway,
   harness: Harness,
-): Effect.Effect<Option.Option<GatewayCredentialKind>> => {
-  switch (harness) {
-    case "claude":
-      return Effect.map(Ref.get(gateway.credentials), ({ anthropic }) => anthropic);
-    case "codex":
-      return Effect.map(Ref.get(gateway.credentials), ({ openai }) => openai);
-    case "pi":
-      return Effect.succeedNone;
-  }
-};
+): Effect.Effect<Option.Option<GatewayCredentialKind>> =>
+  Effect.map(Ref.get(gateway.credentials), (credentials) =>
+    Option.flatMap(catalog.get(harness), (descriptor) =>
+      Option.flatMap(descriptor.worker.credential, ({ provider }) => credentials[provider]),
+    ),
+  );
 
 /**
  * Verifies the Gateway's admin API for an SSH Worker without attaching anything: the forward
@@ -277,10 +274,13 @@ export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(fu
   commands: RemoteCommands,
   host: string,
   shell: RemoteShell,
-  harness: "claude" | "codex",
+  harness: Harness,
   credential: string,
 ) {
-  const label = harness === "claude" ? "Claude Code" : "Codex";
+  const label = Option.match(catalog.get(harness), {
+    onNone: () => harness,
+    onSome: ({ label }) => label,
+  });
   yield* Effect.annotateCurrentSpan({ host, harness, credential });
   if (harness === "codex") {
     const runtime = yield* commands.inspect("preflight", shell, "node", ["--version"]);
@@ -311,43 +311,6 @@ export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(fu
   });
   return HarnessReady.make({ harness });
 });
-
-/**
- * The harnesses that can use the operator's login on the machine or the Gateway's credential
- * for their provider, with the hosts each login calls through the forward proxy, which
- * `infra/hetzner/gateway/egress-allowlist` lists, and the API host that an API key in the
- * Attempt's environment calls.
- */
-const LOGINS = {
-  claude: {
-    label: "Claude Code",
-    provider: "Anthropic",
-    gatewayProvider: "anthropic",
-    hosts: ["api.anthropic.com", "platform.claude.com"],
-    apiHost: "api.anthropic.com",
-  },
-  codex: {
-    label: "Codex",
-    provider: "OpenAI",
-    gatewayProvider: "openai",
-    hosts: ["chatgpt.com", "auth.openai.com"],
-    apiHost: "api.openai.com",
-  },
-} as const satisfies Partial<
-  Record<
-    Harness,
-    {
-      readonly label: string;
-      readonly provider: string;
-      readonly gatewayProvider: GatewayLlmProvider;
-      readonly hosts: ReadonlyArray<string>;
-      readonly apiHost: string;
-    }
-  >
->;
-
-/** A harness that can use a login, the Gateway's credential, or an API key. */
-export type LoginHarness = keyof typeof LOGINS;
 
 /**
  * A script that takes the forward proxy URL and host names, and prints one line per host: the
@@ -383,7 +346,7 @@ export const gatewayHarnessProbe = (
   gateway: MachineGateway,
   probe: HarnessProbe,
   shell: RemoteShell,
-  apiKeyed: (harness: LoginHarness) => boolean,
+  apiKeyed: (harness: Harness) => boolean,
 ): HarnessProbe => {
   const worker = machine.address.name;
   const host = machine.shell.destination;
@@ -391,24 +354,19 @@ export const gatewayHarnessProbe = (
   const proxy = forwardProxyUrl(domain);
 
   /** Checks only the binary of a harness whose provider credential the Gateway holds. */
-  const binaryOnly = (harness: LoginHarness) =>
-    harnessBinaryProbe(
-      commands,
-      host,
-      shell,
-      harness,
-      `the Gateway's ${LOGINS[harness].provider} credential`,
-    );
+  const binaryOnly = (harness: Harness, providerLabel: string) =>
+    harnessBinaryProbe(commands, host, shell, harness, `the Gateway's ${providerLabel} credential`);
 
   const loginHostsReachable = Effect.fn("SshExecutor.probeLoginHostsBehindGateway")(function* (
-    harness: LoginHarness,
+    descriptor: HarnessDescriptor,
+    credential: HarnessCredential,
   ) {
-    const { label } = LOGINS[harness];
+    const { id: harness, label } = descriptor;
     const keyed = apiKeyed(harness);
-    const hosts: ReadonlyArray<string> = keyed ? [LOGINS[harness].apiHost] : LOGINS[harness].hosts;
+    const hosts: ReadonlyArray<string> = keyed ? [credential.apiHost] : credential.hosts;
     const uses = keyed ? "an API key" : "its login";
     const alternative = keyed
-      ? `, or add ${LOGINS[harness].gatewayProvider} to the worker's llm_providers with the key on the gateway`
+      ? `, or add ${credential.provider} to the worker's llm_providers with the key on the gateway`
       : "";
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
     const result = yield* commands.inspect("preflight", shell, "sh", [
@@ -453,24 +411,28 @@ export const gatewayHarnessProbe = (
 
   const loginOnMachine = Effect.fn("SshExecutor.probeLoginBehindGateway")(function* (
     brain: BrainSpec,
-    harness: LoginHarness,
+    descriptor: HarnessDescriptor,
+    credential: HarnessCredential,
   ) {
+    const harness = descriptor.id;
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
     const readiness = yield* probe(brain);
     if (readiness._tag === "HarnessUnavailableError") return readiness;
-    if (gateway.settings.egress === "proxy") yield* loginHostsReachable(harness);
+    if (gateway.settings.egress === "proxy") yield* loginHostsReachable(descriptor, credential);
     return readiness;
   });
 
-  return (brain) => {
-    switch (brain.harness) {
-      case "claude":
-      case "codex":
-        return gateway.settings.llmProviders.includes(LOGINS[brain.harness].gatewayProvider)
-          ? binaryOnly(brain.harness)
-          : loginOnMachine(brain, brain.harness);
-      case "pi":
-        return probe(brain);
-    }
-  };
+  return (brain) =>
+    Option.match(
+      Option.flatMap(catalog.get(brain.harness), (descriptor) =>
+        Option.map(descriptor.worker.credential, (credential) => ({ descriptor, credential })),
+      ),
+      {
+        onNone: () => probe(brain),
+        onSome: ({ descriptor, credential }) =>
+          gateway.settings.llmProviders.includes(credential.provider)
+            ? binaryOnly(brain.harness, credential.label)
+            : loginOnMachine(brain, descriptor, credential),
+      },
+    );
 };

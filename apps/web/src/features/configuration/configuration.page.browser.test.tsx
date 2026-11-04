@@ -1,3 +1,5 @@
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
+import { capabilitiesFixture } from "~/lib/configuration/fixture";
 import { projectQuery } from "~/features/projects/queries";
 import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
@@ -28,6 +30,7 @@ beforeEach(() => {
   queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
   });
+  queryClient.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
   queryClient.setQueryData(
     overviewQuery().queryKey,
     ReadyOverview.make({ projects: [], loops: [], needsYou: [] }),

@@ -1,3 +1,4 @@
+import { configurationHistoryResponses } from "./src/features/configuration/components/editor/history/browser-fixture.ts";
 import { bindingEditorResponses } from "./src/features/configuration/components/forms/binding/browser-fixture.ts";
 import { accessResponses } from "./src/features/members/browser-fixture.ts";
 import {
@@ -132,6 +133,7 @@ export default mergeConfig(
                 delayConfigurationLookup,
                 releaseConfigurationLookup,
                 configurationEditorResponses,
+                configurationHistoryResponses,
                 configurationEditorRequests,
                 configurationEditorScreenshot: (context, name: string) =>
                   configurationEditorScreenshot(context, name).pipe(

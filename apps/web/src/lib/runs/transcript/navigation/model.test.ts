@@ -1,5 +1,5 @@
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -34,7 +34,11 @@ import {
 } from "~/lib/runs/transcript/navigation/model";
 
 const attemptId = AttemptId.make("attempt");
-const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
+const brain = BrainSpec.make({
+  harness: Harness.make("codex"),
+  model: ModelId.make("gpt-5"),
+  effort: "high",
+});
 const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),

@@ -71,8 +71,14 @@ export const ConfigurationEditorForm = ({
     : [];
   return (
     <form
-      className="flex min-w-0 flex-col gap-4"
+      className="flex w-full min-w-0 max-w-3xl flex-col gap-5"
       noValidate
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          event.currentTarget.requestSubmit();
+        }
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         if (write.isPending || Schema.is(StaleRevisionRefusal)(write.error)) return;
@@ -97,7 +103,7 @@ export const ConfigurationEditorForm = ({
         <CommandButton
           command={editor.mode === "form" ? formCopy.text : formCopy.form}
           type="button"
-          variant="outline"
+          variant="ghost"
           className="self-start"
           disabled={write.isPending}
           onClick={() => {

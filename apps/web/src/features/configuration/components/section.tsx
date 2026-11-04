@@ -5,6 +5,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/u
 import { TableRow } from "~/components/ui/table";
 import { cn } from "~/lib/utils";
 import type { ConfigurationEntityKey, ConfigurationEntityKind } from "@usine/config/configuration";
+import { ConfigurationHeader } from "~/features/configuration/components/header";
+import { EntityHistoryLink } from "~/features/configuration/components/editor/history/link";
 import { EntityEditor } from "~/features/configuration/components/editor/entity";
 import { CreateEntity } from "~/features/configuration/components/editor/create";
 
@@ -31,27 +33,38 @@ export const ConfigurationPage = ({
   file,
   actions,
   children,
-}: ConfigurationPageProps) => (
-  <Page width="full">
-    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-      <div className="flex min-w-0 flex-col gap-1">
-        <PageHeading title={title} leading={leading} counts={counts}>
-          {marks}
-        </PageHeading>
-        {file !== undefined && <p className="font-mono text-xs text-muted-foreground">{file}</p>}
+}: ConfigurationPageProps) => {
+  const heading = (
+    <div className="flex min-w-0 flex-col gap-1">
+      <PageHeading title={title} leading={leading} counts={counts}>
+        {marks}
+      </PageHeading>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4">
+        {file !== undefined && (
+          <p className="font-mono text-xs text-muted-foreground wrap-anywhere">{file}</p>
+        )}
+        {entity !== undefined && <EntityHistoryLink entity={entity} />}
       </div>
-      <div className="flex items-center gap-2">{actions}</div>
     </div>
-    {createKind !== undefined && <CreateEntity kind={createKind} />}
-    {entity === undefined ? (
-      children
-    ) : (
-      <EntityEditor key={entity.key} entity={entity}>
-        {children}
-      </EntityEditor>
-    )}
-  </Page>
-);
+  );
+  return (
+    <Page width="full">
+      <div data-slot="configuration" className="flex min-w-0 flex-col gap-6">
+        {entity === undefined ? (
+          <>
+            <ConfigurationHeader heading={heading} actions={actions} />
+            {createKind !== undefined && <CreateEntity kind={createKind} />}
+            {children}
+          </>
+        ) : (
+          <EntityEditor key={entity.key} entity={entity} heading={heading} actions={actions}>
+            {children}
+          </EntityEditor>
+        )}
+      </div>
+    </Page>
+  );
+};
 
 type DetailColumnsProps = {
   readonly facts: ReactNode;
@@ -60,7 +73,7 @@ type DetailColumnsProps = {
 
 /** On narrow screens, renders the facts rail before the main column. */
 export const DetailColumns = ({ facts, children }: DetailColumnsProps) => (
-  <div className="grid gap-x-10 gap-y-8 pt-2 lg:grid-cols-[minmax(0,1fr)_21rem]">
+  <div className="grid gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_19rem]">
     <div className="flex min-w-0 flex-col gap-8 max-lg:order-2">{children}</div>
     <aside className="min-w-0 max-lg:order-1 lg:border-l lg:pl-6">{facts}</aside>
   </div>
@@ -115,7 +128,7 @@ type FrontmatterProps = {
 export const Frontmatter = ({ entries, className }: FrontmatterProps) => (
   <dl
     className={cn(
-      "grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 rounded-lg bg-card px-3 py-2.5 font-mono text-xs [font-variant-ligatures:none] ring-1 ring-border",
+      "grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 py-1 font-mono text-xs [font-variant-ligatures:none]",
       className,
     )}
   >

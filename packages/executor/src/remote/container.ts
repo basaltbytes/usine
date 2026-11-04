@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { CHILD_KILL_SCRIPT, RemoteShell, type ShellContainer } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import { type AttemptId, ContainerOutOfMemoryKills } from "@usine/core/attempt";
@@ -108,20 +109,6 @@ export type AttemptIsolation =
   | { readonly _tag: "Container"; readonly settings: ContainerSettings };
 
 export const sharedUser: AttemptIsolation = { _tag: "SharedUser" };
-
-/**
- * The harness login files under the SSH user's home: `mounted` ones at the same path under the
- * container's home, read-write because the harness rewrites them when it refreshes its OAuth
- * token, and `seeded` ones copied there at start.
- */
-const LOGIN_FILES = {
-  claude: { mounted: [".claude/.credentials.json"], seeded: [".claude.json"] },
-  codex: { mounted: [".codex/auth.json"], seeded: [".codex/config.toml"] },
-  pi: { mounted: [], seeded: [] },
-} as const satisfies Record<
-  Harness,
-  { readonly mounted: ReadonlyArray<string>; readonly seeded: ReadonlyArray<string> }
->;
 
 /** Returns the name of `attemptId`'s container. */
 export const attemptContainerName = (attemptId: AttemptId): string =>
@@ -389,10 +376,12 @@ export const containersFor = (commands: RemoteCommands) => {
   ) {
     const fields = containerFields(shell, spec);
     yield* Effect.annotateCurrentSpan(fields);
-    const logins = spec.harnesses.flatMap((harness) => [
-      ...LOGIN_FILES[harness].mounted.map((file) => ({ file, mounted: true })),
-      ...LOGIN_FILES[harness].seeded.map((file) => ({ file, mounted: false })),
-    ]);
+    const logins = spec.harnesses.flatMap((harness) =>
+      Option.toArray(catalog.get(harness)).flatMap(({ worker }) => [
+        ...worker.login.mounted.map((file) => ({ file, mounted: true })),
+        ...worker.login.seeded.map((file) => ({ file, mounted: false })),
+      ]),
+    );
     const [home = "", ...present] = (yield* commands.run(operation, shell, "sh", [
       "-c",
       PREPARE_SCRIPT,

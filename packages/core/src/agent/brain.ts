@@ -6,10 +6,12 @@ export const ModelId = Schema.String.check(
 ).pipe(Schema.brand("ModelId"));
 export type ModelId = typeof ModelId.Type;
 
-/** The supported coding-agent CLIs: Claude Code, Codex CLI, and Pi. */
-export const HARNESSES = ["claude", "codex", "pi"] as const;
-/** The coding-agent CLI that runs a session. */
-export const Harness = Schema.Literals(HARNESSES);
+/** A coding-agent CLI ID. Configuration validates membership in the harness catalog. */
+export const Harness = Schema.String.check(
+  Schema.isPattern(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u, {
+    message: "Expected a kebab-case harness ID",
+  }),
+).pipe(Schema.brand("Harness"));
 export type Harness = typeof Harness.Type;
 
 /** The reasoning levels; support depends on the harness and model. */

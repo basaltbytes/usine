@@ -6,6 +6,8 @@ The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Co
 
 The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the parent in `@usine/durable`.
 
+`/harness` exports the platform-free `catalog` and descriptor schemas. Each harness defines its display label, worker installation and accepted versions, login files and hosts, credential provider, token price table, and terminal resume command. `catalog.harness` validates registered IDs; `catalog.get` reads a descriptor. Importing this subpath loads no vendor SDK or Node adapter.
+
 ## Compose the child backends
 
 `/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `childDispatcherLayer` (`/children`) picks a backend from the agent's `harness`. Provide its three backends from `/claude`, `/codex`, and `/pi`, which also export their SDK contracts and production SDK layers. `@usine/durable/live` composes them:
@@ -35,7 +37,7 @@ Child prompts include the rendered loop task unchanged, including edit-and-retry
 ## Harnesses and credentials
 
 - **Parent:** a Pi model with an API key, or an `openai-codex` ChatGPT model through Plus or Pro OAuth. The start log records `apiKeys` or `chatgptPlan`. A child past the run spec's child-session budget stops the parent with `ChildSessionBudgetExceededError`.
-- **Claude Code:** the worker's `claude` through the Agent SDK, with `bypassPermissions`, worker-user settings only, and the CLI login.
+- **Claude Code:** the worker's `claude` through the Agent SDK, with `bypassPermissions`, worker-user settings only, and the CLI login. Subscription sessions map `rate_limit_event` reports to `PoolRateLimitsUpdated` for `claudePlan`. The five-hour allowance is the primary window; the latest seven-day allowance, including model-specific allowances, is the secondary window. Each report contains only the observed window. The pool projection preserves the other window across children, attempts, and resumes. Utilization fractions become percentages, reset timestamps use epoch seconds, and omitted reset times remain unknown. Reports without utilization and unsupported allowance types are skipped. API-key sessions emit no Claude plan windows.
 - **Codex:** app-server JSON-RPC over stdio, with `approvalPolicy: never` and the CLI login. It checks the login with `account/read` before creating a thread, and records plan rate windows as `PoolRateLimitsUpdated`. An API-key login, no login, or an unsupported account fails with `PoolUnavailableError`, which needs the operator. A change to unsupported authentication ends the session before more rate windows are recorded. If `ChildSession.gatewayCredential` is set, the gateway holds the OpenAI credential and Codex has no login: the child skips the login check and ignores login changes, and its pool follows the credential kind, `chatgptPlan` for a ChatGPT login and `apiKeys` for an API key.
 - **Pi children:** an API key for the selected provider, or a ChatGPT subscription login for an `openai-codex/...` model, using the same authentication and billing pools as the parent. Other OAuth providers remain unavailable. Pi reports tokens and cost, but no plan rate windows, so usine cannot warn before Pi sessions reach the ChatGPT plan limit.
 

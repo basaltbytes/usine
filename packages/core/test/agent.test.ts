@@ -7,7 +7,7 @@ import {
   resolveParentModel,
   AgentName,
 } from "../src/agent/agent.ts";
-import { BrainSpec, ModelId } from "../src/agent/brain.ts";
+import { Harness, BrainSpec, ModelId } from "../src/agent/brain.ts";
 
 const decodeBrain = Schema.decodeUnknownEffect(BrainSpec);
 
@@ -15,21 +15,28 @@ describe("Agent brain specs", () => {
   it.effect("validates usine harness and effort shapes while passing model ids through", () =>
     Effect.gen(function* () {
       const brain = yield* decodeBrain({
-        harness: "claude",
+        harness: Harness.make("claude"),
         model: "vendor/model-from-tomorrow",
         effort: "xhigh",
       });
       expect(brain.model).toBe("vendor/model-from-tomorrow");
       expect(
-        (yield* Effect.flip(decodeBrain({ harness: "unknown", model: "model", effort: "high" })))
-          ._tag,
+        (yield* decodeBrain({ harness: "new-harness", model: "model", effort: "high" })).harness,
+      ).toBe("new-harness");
+      expect(
+        (yield* Effect.flip(
+          decodeBrain({ harness: "Not a harness ID", model: "model", effort: "high" }),
+        ))._tag,
       ).toBe("SchemaError");
       expect(
-        (yield* Effect.flip(decodeBrain({ harness: "claude", model: "model", effort: "extreme" })))
-          ._tag,
+        (yield* Effect.flip(
+          decodeBrain({ harness: Harness.make("claude"), model: "model", effort: "extreme" }),
+        ))._tag,
       ).toBe("SchemaError");
       expect(
-        (yield* Effect.flip(decodeBrain({ harness: "claude", model: " ", effort: "high" })))._tag,
+        (yield* Effect.flip(
+          decodeBrain({ harness: Harness.make("claude"), model: " ", effort: "high" }),
+        ))._tag,
       ).toBe("SchemaError");
     }),
   );
@@ -40,7 +47,7 @@ describe("Agent brain specs", () => {
     const base = {
       name: AgentName.make("developer"),
       brain: BrainSpec.make({
-        harness: "claude",
+        harness: Harness.make("claude"),
         model: ModelId.make("claude-sonnet-4-6"),
         effort: "high",
       }),
@@ -66,7 +73,7 @@ describe("Agent brain specs", () => {
     const base = {
       name: AgentName.make("developer"),
       brain: BrainSpec.make({
-        harness: "codex",
+        harness: Harness.make("codex"),
         model: ModelId.make("gpt-5.6-sol"),
         effort: "xhigh",
       }),
@@ -85,7 +92,7 @@ describe("Agent brain specs", () => {
     Effect.gen(function* () {
       const stored = yield* Schema.decodeEffect(Agent)({
         name: "developer",
-        brain: { harness: "codex", model: "gpt-5.6-sol", effort: "xhigh" },
+        brain: { harness: Harness.make("codex"), model: "gpt-5.6-sol", effort: "xhigh" },
         parentModel: null,
         persona: "Implement the issue.",
       });
