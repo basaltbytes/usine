@@ -674,6 +674,7 @@ describe("sandbox shell", () => {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const handle = yield* spawner.spawn(
         ChildProcess.make(process.execPath, ["--no-warnings", SHELL, SANDBOX, "--", line], {
+          stdin: Stream.empty,
           env: {
             [SHELL_ENVIRONMENT.workerUrl]: url.origin,
             [SHELL_ENVIRONMENT.accessClientId]: ACCESS_CLIENT_ID,
@@ -724,6 +725,23 @@ describe("sandbox shell", () => {
       assert.strictEqual(gone.exitCode, 255);
       assert.include(gone.stderr, SANDBOX);
     }).pipe(Effect.scoped),
+  );
+
+  it.live("exits 255 without exposing credentials when WebSocket startup fails", () =>
+    Effect.gen(function* () {
+      const result = yield* run(
+        new URL("https://worker.example.test"),
+        "exec 'true'",
+        "secret-before-newline\nsecret-after-newline",
+      );
+
+      assert.strictEqual(result.exitCode, 255);
+      assert.strictEqual(result.stdout, "");
+      assert.include(result.stderr, "usine sandbox shell:");
+      assert.notInclude(result.stderr, "secret-before-newline");
+      assert.notInclude(result.stderr, "secret-after-newline");
+      assert.notInclude(result.stderr, ACCESS_CLIENT_ID);
+    }),
   );
 });
 

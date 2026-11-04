@@ -23,7 +23,7 @@ import {
   SandboxName,
   StdinEnd,
 } from "@usine/cloudflare/stream";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Exit, Option, Schema } from "effect";
 
 import { SHELL_ENVIRONMENT, SHELL_FAILURE } from "./environment.ts";
 
@@ -200,5 +200,8 @@ else {
         return finish(SHELL_FAILURE, `lost sandbox ${name}: ${outcome.reason}`);
     }
   });
-  Effect.runFork(main);
+  Effect.runFork(main).addObserver((exit) => {
+    // WebSocket constructor errors can contain Access credentials.
+    if (Exit.isFailure(exit)) finish(SHELL_FAILURE, "command stream failed unexpectedly");
+  });
 }

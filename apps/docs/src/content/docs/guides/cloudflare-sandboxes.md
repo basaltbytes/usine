@@ -39,6 +39,8 @@ Preflight checks the Access token, image, provider keys, and harness versions in
 
 A sandbox can reach GitHub, configured providers, and the allowed package hosts. It has no interactive terminal. A dropped command stream can reattach to stored output. On a platform stop, usine attempts to salvage the checkout and retries through an infrastructure failure.
 
+The command shell returns exit code 255 if its command stream fails, including during startup. Unexpected failures produce a generic error message that excludes Access credentials.
+
 Requests to allowlisted hosts preserve their headers and redirect policy. WebSocket upgrades use the Cloudflare platform connection.
 
 A retained sandbox stays billable while held for recovery. Startup reattaches live attempts or salvages retained work. A stopped container loses its disk, so recovery depends on pushed salvage. If a sandbox remains after an attempt, inspect the orchestrator and Worker logs before deleting it. [Cloudflare settings](/reference/configuration/workers/#cloudflare-connection) lists fields and defaults.
