@@ -1,205 +1,32 @@
-import { codex } from "../harness/codex/descriptor.ts";
-import { Harness, BrainSpec } from "@usine/core/agent/brain";
-import {
-  type HarnessCapability,
-  HarnessReady,
-  HarnessUnavailableError,
-} from "@usine/core/agent/capability";
-import { Effect, Option, Schema, Layer } from "effect";
-import { homedir } from "node:os";
-import type { ChildHost } from "../child-host/child-host.ts";
-import { SessionOperationError, WorkingDirectory } from "../runtime.ts";
-import {
-  CodexAppServer,
-  codexAppServerLive,
-  codexConfigArgs,
-} from "../harness/codex/app-server.ts";
-import { initializeCodex, verifyCodexAccount } from "../harness/codex/account.ts";
-import { PiSdk, piSdkLive, usePiStart } from "../harness/pi/sdk.ts";
-import { probeCommand, probeFailed, probeOutput } from "./command.ts";
+import type { BrainSpec } from "@usine/core/agent/brain";
+import { HarnessUnavailableError } from "@usine/core/agent/capability";
+import { Effect, Layer } from "effect";
+import { Harnesses, harnessesLive, type ProbeTarget } from "../harness/node.ts";
 
 export { CODEX_CLI_VERSION } from "../harness/codex/descriptor.ts";
+export { supportedCodexVersions, unsupportedCodexVersion } from "../harness/codex/preflight.ts";
 
-/** The accepted Codex CLI versions, with the protocol baseline first. */
-export const supportedCodexVersions = codex.worker.versions;
-
-/** Returns the error for `codex --version` output that names no supported Codex CLI version. */
-export const unsupportedCodexVersion = (version: string): Option.Option<HarnessUnavailableError> =>
-  supportedCodexVersions.some((supported) => version === `codex-cli ${supported}`)
-    ? Option.none()
-    : Option.some(
-        HarnessUnavailableError.make({
-          harness: Harness.make("codex"),
-          capability: "version",
-          message: `The worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Install a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
-        }),
-      );
-
-const ClaudeAuthentication = Schema.Struct({
-  loggedIn: Schema.Boolean,
-  authMethod: Schema.String,
-  apiProvider: Schema.String,
-});
-const decodeClaudeAuthentication = Schema.decodeUnknownOption(
-  Schema.fromJsonString(ClaudeAuthentication),
-);
-const CLAUDE_AUTH_STATUS = ["auth", "status", "--json"];
-
-/**
- * Checks `brain` on `host` without starting a prompt; each check process gets `environment` as its
- * complete local environment, or on top of the remote host's environment (ADR 0011). Fails with
- * `HarnessUnavailableError` for Pi on a remote host.
- */
-export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
-  function* (brain: BrainSpec, host: ChildHost, environment: Readonly<Record<string, string>>) {
-    yield* Effect.annotateCurrentSpan({
-      harness: brain.harness,
-      model: brain.model,
-      host: host._tag,
-    });
-    const loginError = (message: string) =>
-      HarnessUnavailableError.make({
-        harness: brain.harness,
-        capability: "login",
-        message,
-      });
-    const probe = (capability: HarnessCapability, command: string, args: ReadonlyArray<string>) =>
-      probeCommand(host, environment, brain.harness, capability, command, args);
-    switch (brain.harness) {
-      case "codex": {
-        if (host._tag === "RemoteShell") yield* probe("binary", "node", ["--version"]);
-        const version = yield* probe("binary", "codex", [...codexConfigArgs, "--version"]);
-        const unsupported = unsupportedCodexVersion(version);
-        if (Option.isSome(unsupported)) return yield* unsupported.value;
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const server = yield* CodexAppServer;
-            const connection = yield* server.open({
-              cwd: WorkingDirectory.make(homedir()),
-              sessionId: Option.none(),
-              environment,
-              host,
-            });
-            yield* initializeCodex(connection);
-            yield* verifyCodexAccount(connection, brain.model);
-          }),
-        ).pipe(Effect.catchTag("PoolUnavailableError", (error) => loginError(error.message)));
-        break;
-      }
-      case "claude": {
-        yield* probe("binary", "claude", ["--version"]);
-        const status = yield* probeOutput(
-          host,
-          environment,
-          brain.harness,
-          "login",
-          "claude",
-          CLAUDE_AUTH_STATUS,
-        );
-        // Claude prints the same status and exits 1 when not logged in.
-        const auth =
-          status.exitCode === 0 || status.exitCode === 1
-            ? decodeClaudeAuthentication(status.stdout)
-            : Option.none();
-        if (Option.isNone(auth))
-          return yield* status.exitCode === 0
-            ? loginError("Claude returned an unrecognized login status")
-            : probeFailed(brain.harness, "login", "claude", CLAUDE_AUTH_STATUS);
-        const { loggedIn, authMethod, apiProvider } = auth.value;
-        if (
-          status.exitCode !== 0 ||
-          !loggedIn ||
-          authMethod !== "claude.ai" ||
-          apiProvider !== "firstParty"
-        )
-          return yield* loginError(
-            "Claude Code needs a subscription login. Run claude auth login on the worker.",
-          );
-        break;
-      }
-      case "pi": {
-        if (host._tag === "RemoteShell")
-          return yield* HarnessUnavailableError.make({
-            harness: Harness.make("pi"),
-            capability: "binary",
-            message: "Pi children run only on local workers",
-          });
-        // Pi runs from the SDK installed with this process, not from a CLI binary.
-        const sdk = yield* PiSdk;
-        yield* usePiStart(
-          (signal) =>
-            sdk.start({
-              cwd: homedir(),
-              environment: Option.some(environment),
-              extensions: [],
-              model: brain.model,
-              signal,
-              thinkingLevel: brain.effort,
-            }),
-          (cause) =>
-            SessionOperationError.make({
-              operation: "launch",
-              sessionId: Option.none(),
-              message: `Can't check Pi authentication for "${brain.model}"`,
-              cause,
-            }),
-          (acquired) =>
-            Effect.gen(function* () {
-              const result = acquired.result;
-              yield* Effect.sync(acquired.dispose);
-              if (result._tag !== "Started")
-                return yield* loginError(
-                  `Pi child model "${brain.model}" is unavailable, doesn't support effort ${brain.effort}, or has no supported credential (API key or openai-codex ChatGPT login)`,
-                );
-            }),
-        );
-        break;
-      }
-      default:
-        return yield* HarnessUnavailableError.make({
-          harness: brain.harness,
-          capability: "binary",
-          message: `No preflight runtime for harness "${brain.harness}"`,
-        });
-    }
-    yield* Effect.logInfo("Worker harness verified", {
-      harness: brain.harness,
-      model: brain.model,
-      host: host._tag,
-    });
-    return HarnessReady.make({ harness: brain.harness });
-  },
-  (effect, brain) =>
-    effect.pipe(
-      Effect.timeout("60 seconds"),
-      Effect.catchTag("TimeoutError", (cause) =>
-        SessionOperationError.make({
-          operation: "launch",
-          sessionId: Option.none(),
-          message: `${brain.harness} readiness check timed out`,
-          cause,
-        }),
-      ),
-      Effect.tapError((error) =>
-        Effect.logError("Worker harness preflight failed", {
-          harness: brain.harness,
-          model: brain.model,
-          errorTag: error._tag,
-          message: error.message,
-        }),
-      ),
-    ),
-);
-
-/** Checks only `brain` on `host`, with `environment` and the Worker user's configuration; does not run a prompt or log in. */
-export const preflight = (
+/** Checks one brain through its runtime without a prompt, installation, or login. */
+export const preflight = Effect.fn("HarnessPreflight.verify")(function* (
   brain: BrainSpec,
-  host: ChildHost,
-  environment: Readonly<Record<string, string>>,
-) =>
-  Effect.scoped(
+  target: ProbeTarget,
+) {
+  return yield* Effect.scoped(
     Effect.gen(function* () {
-      const context = yield* Layer.build(codexAppServerLive.pipe(Layer.provideMerge(piSdkLive)));
-      return yield* verifyHarness(brain, host, environment).pipe(Effect.provideContext(context));
+      const context = yield* Layer.build(harnessesLive);
+      return yield* Effect.gen(function* () {
+        const harnesses = yield* Harnesses;
+        const runtime = yield* harnesses.runtime(brain.harness).pipe(
+          Effect.mapError((error) =>
+            HarnessUnavailableError.make({
+              harness: error.harness,
+              capability: "binary",
+              message: error.message,
+            }),
+          ),
+        );
+        return yield* runtime.preflight(brain, target);
+      }).pipe(Effect.provideContext(context));
     }),
-  );
+  ).pipe(Effect.catchTag("HarnessUnavailableError", (unavailable) => Effect.succeed(unavailable)));
+});

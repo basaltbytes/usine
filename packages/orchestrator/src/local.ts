@@ -13,7 +13,7 @@ import { withSshWorkerDiscard } from "./ssh.ts";
 
 /**
  * Provides the full engine and `WorkerStatus` for local Workers. Requires the credential provider,
- * `GitHubApp`, `TriggerCondition`, `AttemptRuntime`, `ClaudeLoginLock`, and `CurrentInstance`.
+ * `GitHubApp`, `TriggerCondition`, `AttemptRuntime`, `HostLoginLock`, and `CurrentInstance`.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,

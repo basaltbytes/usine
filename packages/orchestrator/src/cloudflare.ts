@@ -74,7 +74,7 @@ export const cloudflareWorkerAddressesOf = Effect.fn("Orchestrator.cloudflareWor
  * Provides the full engine and `WorkerStatus` for Cloudflare Workers. The executor reads its
  * workers' secrets when a revision adds or changes a worker. Attempts retain their original client.
  * Requires `CredentialProvider`, `GitHubApp`, `TriggerCondition`, `AttemptRuntime` (built before
- * the engine), `ClaudeLoginLock`, and `CurrentInstance`.
+ * the engine), `HostLoginLock`, and `CurrentInstance`.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,

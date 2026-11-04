@@ -16,7 +16,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { HarnessReady } from "@usine/core/agent/capability";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { claudeLoginLockLayer, CredentialProvider, WorkerCredential } from "@usine/executor";
+import { hostLoginLockLayer, CredentialProvider, WorkerCredential } from "@usine/executor";
 import type { HarnessProbe, LocalExecutorOptions } from "@usine/executor/local";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -236,7 +236,7 @@ export const localRuntime = (
         ),
         Layer.provide(options.credentials ?? credentialLayer),
         Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
-        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(hostLoginLockLayer),
         Layer.provide(alwaysHoldsLayer),
       ),
     ),

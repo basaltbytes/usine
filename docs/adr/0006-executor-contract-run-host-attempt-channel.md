@@ -154,3 +154,9 @@ The executor reads credential provider mappings, login file mounts, and login eg
 ## Amendment (2026-11-04): step outputs
 
 [ADR 0034](./0034-step-outputs.md) adds typed JSON documents written in the attempt's checkout and collected before cleanup. The durable completion stores full documents for restart recovery; the step result stores refs. Gzip bodies use a separate output store and migration ledger in the runtime database. Idempotent body writes precede attempt completion, and reads expose only outputs of succeeded attempts. This extends the result beyond harvested facts without adding large bodies to run reads or requiring the parent model to emit them.
+
+## Amendment (2026-11-04, #952): harness runtime registration
+
+`Harnesses` pairs each platform-free descriptor with one Node runtime. Registration fails for a descriptor without a runtime, a runtime without a descriptor, or duplicate runtime IDs. Child dispatch selects the runtime by harness ID. Each runtime owns preflight and launch, so gateway, injected-key, and Cloudflare checks use the same binary and version policies as host-login checks. Host-login routes also verify authentication. Claude versions remain unpinned, Codex retains its accepted version list, and Pi remains local-only.
+
+`HostLoginLock` replaces `ClaudeLoginLock` and keys locks by harness, worker, and provisioned machine. Claude’s runtime takes its lock for authentication checks and child startup. Keeping the lock inside the runtime removes the executor’s harness branch while preserving serialization of commands that can refresh the same login. The executor and attempt runtime share one lock service.

@@ -1,3 +1,6 @@
+import { codexPreflight } from "./preflight.ts";
+import { codex } from "./descriptor.ts";
+import type { HarnessRuntime } from "../runtime.ts";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
@@ -48,7 +51,7 @@ import {
 } from "./codec.ts";
 import {
   type AgentSessionError,
-  CodexChildBackend,
+  ChildBackend,
   type RunningSession,
   UnknownModelError,
   UnsupportedEffortError,
@@ -83,7 +86,7 @@ const isTurnActivity = Schema.is(TurnActivity);
 const makeCodexChild = Effect.gen(function* () {
   const appServer = yield* CodexAppServer;
 
-  const launch: CodexChildBackend["Service"]["launch"] = Effect.fn("CodexChildBackend.launch")(
+  const launch: ChildBackend["Service"]["launch"] = Effect.fn("CodexRuntime.launch")(
     function* (request) {
       yield* Effect.annotateCurrentSpan({
         agent: request.session.agent,
@@ -243,7 +246,7 @@ const makeCodexChild = Effect.gen(function* () {
       // Provider retries reported for the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;
-      const startTurn = Effect.fn("CodexChildBackend.startTurn")(function* (message: string) {
+      const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (message: string) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         const encodedTurnStartParams = yield* Schema.encodeEffect(
           Schema.toCodecJson(TurnStartParams),
@@ -267,7 +270,7 @@ const makeCodexChild = Effect.gen(function* () {
         retries = 0;
         retrying = false;
       });
-      const reportRetry = Effect.fn("CodexChildBackend.reportRetry")(function* (
+      const reportRetry = Effect.fn("CodexRuntime.reportRetry")(function* (
         notification: typeof ErrorNotification.Type,
       ) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, turnId });
@@ -290,7 +293,7 @@ const makeCodexChild = Effect.gen(function* () {
           ProviderRetrying.make({ session, message, retries: ProviderRetries.make(retries) }),
         );
       });
-      const reportRecovery = Effect.fn("CodexChildBackend.reportRecovery")(function* () {
+      const reportRecovery = Effect.fn("CodexRuntime.reportRecovery")(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, turnId });
         retrying = false;
         yield* Effect.logInfo("Codex child reached its provider again", {
@@ -302,7 +305,7 @@ const makeCodexChild = Effect.gen(function* () {
           ProviderRecovered.make({ session, retries: ProviderRetries.make(retries) }),
         );
       });
-      const interruptTurn = Effect.fn("CodexChildBackend.interruptTurn")(function* () {
+      const interruptTurn = Effect.fn("CodexRuntime.interruptTurn")(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         if (!turnActive || interrupting) return;
         interrupting = true;
@@ -321,7 +324,7 @@ const makeCodexChild = Effect.gen(function* () {
         );
       });
       const steer: (message: string) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn(
-        "CodexChildBackend.steer",
+        "CodexRuntime.steer",
       )(function* (message) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         if (interrupting) {
@@ -355,7 +358,7 @@ const makeCodexChild = Effect.gen(function* () {
         beforeFinish: Effect.suspend(() => connection.close),
       });
 
-      const fail = Effect.fn("CodexChildBackend.fail")(function* (error: AgentSessionError) {
+      const fail = Effect.fn("CodexRuntime.fail")(function* (error: AgentSessionError) {
         yield* connection.close.pipe(
           Effect.tapError((cause) =>
             Effect.logWarning("Codex child cleanup failed while reporting its original failure", {
@@ -368,7 +371,7 @@ const makeCodexChild = Effect.gen(function* () {
         yield* channel.fail(error);
       });
       let resumed = false;
-      const resume = Effect.fn("CodexChildBackend.resume")(function* (error: AgentSessionError) {
+      const resume = Effect.fn("CodexRuntime.resume")(function* (error: AgentSessionError) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.thread.id });
         if (
           resumed ||
@@ -707,10 +710,17 @@ const makeCodexChild = Effect.gen(function* () {
       } satisfies RunningSession;
     },
   );
-  return CodexChildBackend.of({ launch });
+  return ChildBackend.of({ launch });
 });
 
-/** Provides `CodexChildBackend` for local or remote children. Requires `CodexAppServer`; validates the model and authentication before starting the task. */
-export const codexChildBackendLayer = Layer.effect(CodexChildBackend, makeCodexChild);
+/** Provides `ChildBackend` for local or remote children. Requires `CodexAppServer`; validates the model and authentication before starting the task. */
+export const codexChildLayer = Layer.effect(ChildBackend, makeCodexChild);
 
 export { codexConfigArgs } from "./app-server.ts";
+
+/** Combines preflight and scoped launch for registration. */
+export const codexRuntime = Effect.gen(function* () {
+  const child = yield* makeCodexChild;
+  const preflight = yield* codexPreflight;
+  return { id: codex.id, preflight, launch: child.launch } satisfies HarnessRuntime;
+});

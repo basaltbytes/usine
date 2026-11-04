@@ -1,5 +1,4 @@
 import type { RemoteShell } from "@usine/agents/child-host";
-import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Match, Option } from "effect";
@@ -37,12 +36,11 @@ const capabilityError = (
  * the Attempt image and changes nothing else. With a container runtime, it derives the container limits that
  * `usine.yaml` leaves unset for `maxConcurrentAttempts` containers, which the report gives, and
  * brains are probed in a container from the image; without, as the SSH user, which the report
- * gives as degraded. Claude brains are checked under the Worker's lock in `logins`.
+ * gives as degraded. Each runtime synchronizes its login checks.
  */
 export const sshMachinePreflightFor = (
   commands: RemoteCommands,
   harnessProbe: (machine: SshMachine, shell: RemoteShell) => HarnessProbe,
-  logins: ClaudeLoginLock["Service"],
   containers: SshContainers,
 ) =>
   Effect.fn("SshExecutor.verifyMachine")(function* (
@@ -139,13 +137,7 @@ export const sshMachinePreflightFor = (
     }
     const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
     const probe = (shell: RemoteShell) =>
-      verifyHarnessReadiness(
-        worker,
-        machine.provisioned,
-        brains,
-        harnessProbe(machine, shell),
-        logins,
-      );
+      verifyHarnessReadiness(worker, machine.provisioned, brains, harnessProbe(machine, shell));
     yield* containerCheck._tag === "Container"
       ? Effect.scoped(
           containers

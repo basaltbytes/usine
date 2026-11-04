@@ -19,7 +19,7 @@ import { WorkerName } from "@usine/core/worker";
 import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import {
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   CredentialProvider,
   CredentialUnavailableError,
   Executor,
@@ -292,7 +292,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(app),
         );
@@ -421,7 +421,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         }).pipe(
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
         );
@@ -679,7 +679,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(app),
         );
@@ -775,7 +775,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         }).pipe(
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
         );

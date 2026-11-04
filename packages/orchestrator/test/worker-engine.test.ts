@@ -9,7 +9,7 @@ import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { claudeLoginLockLayer } from "@usine/executor";
+import { hostLoginLockLayer } from "@usine/executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ConfigProvider, Effect, Fiber, FileSystem, Layer, Option, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";
@@ -60,7 +60,7 @@ const startupFailure = (workers: NonNullable<(typeof UsineConfig.Encoded)["worke
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(credentialLayer),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
-        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(hostLoginLockLayer),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(fixedConfigLayer(config)),
         Layer.provide(testAppLayer),
@@ -158,7 +158,7 @@ const productionObservation = (
     Layer.provide(MarcbachmannCelLayer),
     Layer.provide(credentialLayer),
     Layer.provide(stubAttemptRuntime(new StubStorage())),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
     Layer.provide(alwaysHoldsLayer),
     Layer.provide(testAppLayer),
     Layer.provide(testCredentialsLayer),

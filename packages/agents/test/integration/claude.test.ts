@@ -3,8 +3,8 @@ import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 
-import { ClaudeChildBackend, ClaudeLoginLock } from "../../src/runtime.ts";
-import { claudeChildBackendLayer, claudeSdkLive } from "../../src/harness/claude/claude.ts";
+import { ChildBackend, HostLoginLock } from "../../src/runtime.ts";
+import { claudeChildLayer, claudeSdkLive } from "../../src/harness/claude/claude.ts";
 import { interruptionContract, localHost, shimHost, steeringContract } from "./contract.ts";
 
 const brain = Effect.gen(function* () {
@@ -18,18 +18,14 @@ const brain = Effect.gen(function* () {
 });
 
 // Contracts run one child at a time, so launches skip the Worker login lock.
-const noLoginLock = Layer.succeed(ClaudeLoginLock)({ withLock: () => (effect) => effect });
+const noLoginLock = Layer.succeed(HostLoginLock)({ withLock: () => (effect) => effect });
 
 const live = <A, E>(
-  effect: Effect.Effect<
-    A,
-    E,
-    ClaudeChildBackend | FileSystem.FileSystem | Path.Path | Crypto.Crypto
-  >,
+  effect: Effect.Effect<A, E, ChildBackend | FileSystem.FileSystem | Path.Path | Crypto.Crypto>,
 ) =>
   effect.pipe(
     Effect.provide(
-      claudeChildBackendLayer.pipe(
+      claudeChildLayer.pipe(
         Layer.provideMerge(claudeSdkLive),
         Layer.provideMerge(noLoginLock),
         Layer.provideMerge(NodeServices.layer),
@@ -48,7 +44,7 @@ describe("Claude child live contract", () => {
         live(
           Effect.gen(function* () {
             const fixtureBrain = yield* brain;
-            const claudeChildBackend = yield* ClaudeChildBackend;
+            const claudeChildBackend = yield* ChildBackend;
 
             return yield* steeringContract(claudeChildBackend, fixtureBrain, child);
           }),
@@ -62,7 +58,7 @@ describe("Claude child live contract", () => {
         live(
           Effect.gen(function* () {
             const fixtureBrain = yield* brain;
-            const claudeChildBackend = yield* ClaudeChildBackend;
+            const claudeChildBackend = yield* ChildBackend;
 
             return yield* interruptionContract(claudeChildBackend, fixtureBrain, child);
           }),

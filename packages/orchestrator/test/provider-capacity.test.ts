@@ -2,10 +2,10 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { LocalProcess } from "@usine/agents/child-host";
-import { CodexAppServer, codexChildBackendLayer } from "@usine/agents/codex";
+import { CodexAppServer, codexChildLayer } from "@usine/agents/codex";
 import {
   ChildRequest,
-  CodexChildBackend,
+  ChildBackend,
   WorkingDirectory,
   toAttemptFailure,
 } from "@usine/agents/runtime";
@@ -132,11 +132,11 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
             };
           }),
       });
-      const backend = codexChildBackendLayer.pipe(Layer.provide(server));
+      const backend = codexChildLayer.pipe(Layer.provide(server));
       const executor = Layer.effect(
         StepExecutor,
         Effect.gen(function* () {
-          const codex = yield* CodexChildBackend;
+          const codex = yield* ChildBackend;
           return {
             workers: Effect.succeed([worker]),
             isLive: () => Effect.succeed(false),

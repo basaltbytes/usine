@@ -29,7 +29,7 @@ import {
   AgentResultError,
   AgentCapacityError,
   ChildRequest,
-  PiChildBackend,
+  ChildBackend,
   PoolUnavailableError,
   SessionOperationError,
   toAttemptFailure,
@@ -38,7 +38,7 @@ import {
   type OnDelivery,
 } from "../../src/runtime.ts";
 import { LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
-import { piChildBackendLayer } from "../../src/harness/pi/pi.ts";
+import { piChildLayer } from "../../src/harness/pi/pi.ts";
 import {
   environmentBashTool,
   piChildTools,
@@ -194,7 +194,7 @@ describe("Pi child backend", () => {
         },
       });
       yield* Effect.gen(function* () {
-        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const running = yield* (yield* ChildBackend).launch(childRequest);
         const result = yield* Effect.forkScoped(running.result);
         yield* Effect.forkScoped(
           running.events.pipe(
@@ -224,7 +224,7 @@ describe("Pi child backend", () => {
         yield* running.intervene(AttemptChannel.Release.make(), noDelivery);
         assert.strictEqual((yield* Fiber.join(result)).message, "Pi session completed");
         assert.strictEqual(opens, 1);
-      }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk))));
+      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
 
@@ -256,7 +256,7 @@ describe("Pi child backend", () => {
           }),
       });
       yield* Effect.gen(function* () {
-        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const running = yield* (yield* ChildBackend).launch(childRequest);
         const reads: Array<Option.Option<AttemptChannel.InterventionState>> = [];
         const state = yield* running.intervene(
           AttemptChannel.OperatorMessage.make({ message: "Use pnpm, not npm." }),
@@ -284,7 +284,7 @@ describe("Pi child backend", () => {
         const [read] = reads;
         assert(read !== undefined && Option.isSome(read));
         assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk))));
+      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
   );
 
@@ -353,7 +353,7 @@ describe("Pi child backend", () => {
 
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* PiChildBackend;
+        const backend = yield* ChildBackend;
         const running = yield* backend.launch(childRequest);
         yield* running.steer("Check the test output.");
         yield* running.interrupt;
@@ -382,7 +382,7 @@ describe("Pi child backend", () => {
           events.map((event) => event._tag),
           ["SessionStarted", "SessionTokensUpdated", "TextOutput", "SessionFinished"],
         );
-      }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -436,7 +436,7 @@ describe("Pi child backend", () => {
     });
     return Effect.scoped(
       Effect.gen(function* () {
-        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const running = yield* (yield* ChildBackend).launch(childRequest);
         const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
         assert.deepStrictEqual(
           events.map((event) => event._tag),
@@ -468,10 +468,7 @@ describe("Pi child backend", () => {
         assert.lengthOf(retries, 3, "one warning per provider retry");
       }).pipe(
         Effect.provide(
-          piChildBackendLayer.pipe(
-            Layer.provideMerge(sdk),
-            Layer.provideMerge(Logger.layer([logger])),
-          ),
+          piChildLayer.pipe(Layer.provideMerge(sdk), Layer.provideMerge(Logger.layer([logger]))),
         ),
       ),
     );
@@ -488,7 +485,7 @@ describe("Pi child backend", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const error = yield* Effect.flip(
-          (yield* PiChildBackend).launch(
+          (yield* ChildBackend).launch(
             ChildRequest.make({
               ...childRequest,
               host: RemoteShell.make({
@@ -504,7 +501,7 @@ describe("Pi child backend", () => {
         assert.match(error.message, /^Pi children run only on local workers/u);
         assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
         assert.strictEqual(started, false);
-      }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -514,12 +511,12 @@ describe("Pi child backend", () => {
     });
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* PiChildBackend;
+        const backend = yield* ChildBackend;
         const error = yield* Effect.flip(backend.launch(childRequest));
         const matchesError = Schema.is(UnknownModelError)(error);
         assert(matchesError);
         assert.strictEqual(error.harness, "pi");
-      }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -544,13 +541,13 @@ describe("Pi child backend", () => {
       });
       return Effect.scoped(
         Effect.gen(function* () {
-          const backend = yield* PiChildBackend;
+          const backend = yield* ChildBackend;
           const error = yield* Effect.flip(backend.launch(childRequest));
           const matchesError = Schema.is(PoolUnavailableError)(error);
           assert(matchesError);
           assert.strictEqual(error.pool, pool);
           assert.strictEqual(error.model, started.model);
-        }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
+        }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
       );
     });
   }
@@ -628,7 +625,7 @@ describe("Pi child backend", () => {
 
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* PiChildBackend;
+        const backend = yield* ChildBackend;
         const launchFiber = yield* Effect.forkChild(backend.launch(childRequest));
         yield* Effect.promise(() => delayed.startCalled);
         const interruptFiber = yield* Effect.forkChild(Fiber.interrupt(launchFiber));
@@ -641,7 +638,7 @@ describe("Pi child backend", () => {
         yield* Effect.promise(() => delayed.disposed);
         yield* Fiber.join(interruptFiber);
         assert.strictEqual(delayed.disposeCount(), 1);
-      }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -651,12 +648,12 @@ describe("Pi child backend", () => {
     });
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* PiChildBackend;
+        const backend = yield* ChildBackend;
         const error = yield* Effect.flip(backend.launch(childRequest));
         const matchesError = Schema.is(SessionOperationError)(error);
         assert(matchesError);
         assert.strictEqual(error.operation, "launch");
-      }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk)))),
+      }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
     );
   });
 
@@ -736,7 +733,7 @@ describe("Pi child backend", () => {
             }),
         });
         yield* Effect.gen(function* () {
-          const running = yield* (yield* PiChildBackend).launch(childRequest);
+          const running = yield* (yield* ChildBackend).launch(childRequest);
           if (scenario.outcome === "capacity") {
             const error = yield* Effect.flip(running.result);
             const matchesError = Schema.is(AgentCapacityError)(error);
@@ -751,7 +748,7 @@ describe("Pi child backend", () => {
             faux.state.callCount,
             scenario.responses + (scenario.outcome === "success" ? 1 : 0),
           );
-        }).pipe(Effect.provide(piChildBackendLayer.pipe(Layer.provideMerge(sdk))));
+        }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
       }).pipe(Effect.scoped),
     );
   }

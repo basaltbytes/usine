@@ -1,3 +1,7 @@
+import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
+import { claude } from "../../src/harness/claude/descriptor.ts";
+import { Harnesses, type HarnessRuntime, ProbeTarget } from "../../src/harness/node.ts";
+import { HarnessReady } from "@usine/core/agent/capability";
 import { catalog } from "../../src/harness/catalog.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
@@ -8,12 +12,9 @@ import { WorkerName } from "@usine/core/worker";
 import { Effect, Layer, Option, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import {
-  ChildBackend,
   type ChildBackendService,
   ChildRequest,
-  ClaudeChildBackend,
-  CodexChildBackend,
-  PiChildBackend,
+  ChildBackend,
   SessionResult,
   WorkingDirectory,
 } from "../../src/runtime.ts";
@@ -52,25 +53,81 @@ const backend = (selected: Harness): ChildBackendService => ({
     }),
 });
 
-describe("child backend dispatcher", () => {
-  it.effect("selects the backend named by the BrainSpec harness", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const dispatcher = yield* ChildBackend;
-        for (const harness of catalog.ids) {
-          const running = yield* dispatcher.launch(request(harness));
-          const result = yield* running.result;
-          assert.strictEqual(result.message, harness);
-        }
-      }).pipe(
-        Effect.provide(
-          childDispatcherLayer.pipe(
-            Layer.provideMerge(Layer.succeed(ClaudeChildBackend)(backend(Harness.make("claude")))),
-            Layer.provideMerge(Layer.succeed(CodexChildBackend)(backend(Harness.make("codex")))),
-            Layer.provideMerge(Layer.succeed(PiChildBackend)(backend(Harness.make("pi")))),
+const extra = Harness.make("example");
+const extended = HarnessCatalog.make({
+  descriptors: [
+    ...catalog.descriptors,
+    HarnessDescriptor.make({ ...claude, id: extra, label: "Example" }),
+  ],
+});
+const runtimes = extended.ids.map((id): HarnessRuntime => ({
+  id,
+  ...backend(id),
+  preflight: () => Effect.succeed(HarnessReady.make({ harness: id })),
+}));
+
+describe("harness runtime registration", () => {
+  it.effect(
+    "dispatches launch and preflight to every registered harness, including an added descriptor",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const dispatcher = yield* ChildBackend;
+          const harnesses = yield* Harnesses;
+          for (const harness of extended.ids) {
+            const child = request(harness);
+            const running = yield* dispatcher.launch(child);
+            assert.strictEqual((yield* running.result).message, harness);
+            const runtime = yield* harnesses.runtime(harness);
+            const readiness = yield* runtime.preflight(
+              child.session.brain,
+              ProbeTarget.make({
+                host: child.host,
+                environment: child.environment,
+                worker: child.worker,
+                machine: child.machine,
+                credential: "host-login",
+              }),
+            );
+            assert.strictEqual(readiness.harness, harness);
+          }
+          const error = yield* dispatcher
+            .launch(request(Harness.make("unknown")))
+            .pipe(Effect.flip);
+          assert(error._tag === "SessionOperationError");
+          assert(Option.isSome(error.sessionId));
+        }).pipe(
+          Effect.provide(
+            childDispatcherLayer.pipe(Layer.provideMerge(Harnesses.layerFrom(extended, runtimes))),
           ),
         ),
       ),
-    ),
   );
+
+  for (const [description, entries] of [
+    ["a descriptor has no runtime", runtimes.slice(1)],
+    [
+      "a runtime has no descriptor",
+      [
+        ...runtimes,
+        {
+          ...backend(extra),
+          id: Harness.make("orphan"),
+          preflight: () => Effect.succeed(HarnessReady.make({ harness: extra })),
+        },
+      ],
+    ],
+    ["a runtime ID is duplicated", [...runtimes, ...runtimes]],
+  ] as const) {
+    it.effect(`refuses registration when ${description}`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const error = yield* Layer.build(Harnesses.layerFrom(extended, entries)).pipe(
+            Effect.flip,
+          );
+          assert.strictEqual(error._tag, "HarnessRegistrationError");
+        }),
+      ),
+    );
+  }
 });

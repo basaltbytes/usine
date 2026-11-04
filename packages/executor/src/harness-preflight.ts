@@ -1,6 +1,7 @@
 import type { ChildHost } from "@usine/agents/child-host";
+import { ProbeTarget } from "@usine/agents/harness/node";
 import { preflight } from "@usine/agents/preflight";
-import type { ClaudeLoginLock } from "@usine/agents/runtime";
+import { HostLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { HarnessReadiness } from "@usine/core/agent/capability";
 import type { MachineId, WorkerName } from "@usine/core/worker";
@@ -14,20 +15,18 @@ import { logPreflightFailure, ExecutorOperationError, WorkerCapabilityError } fr
  */
 export type HarnessProbe = (
   brain: BrainSpec,
+  login: Pick<ProbeTarget, "worker" | "machine">,
 ) => Effect.Effect<HarnessReadiness, ExecutorOperationError | WorkerCapabilityError>;
 
 /**
  * Probes each distinct brain on `worker`, or on its provisioned `machine` if `Some`, and fails with
- * a capability error if a harness is unavailable. A Claude probe holds that login's lock in
- * `logins`, so two preparations never refresh one Claude login concurrently or while a Claude
- * child starts (#453).
+ * a capability error if a harness is unavailable. Each runtime owns its login synchronization.
  */
 export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness")(function* (
   worker: WorkerName,
   machine: Option.Option<MachineId>,
   brains: ReadonlyArray<BrainSpec>,
   probe: HarnessProbe,
-  logins: ClaudeLoginLock["Service"],
 ) {
   const fields = {
     worker,
@@ -36,12 +35,7 @@ export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness
   yield* Effect.annotateCurrentSpan(fields);
   const distinct = Arr.dedupe(brains);
   for (const brain of distinct) {
-    const result = yield* brain.harness === "claude"
-      ? Effect.logDebug("Checking Claude under its Claude login lock", {
-          ...fields,
-          model: brain.model,
-        }).pipe(Effect.andThen(logins.withLock(worker, machine)(probe(brain))))
-      : probe(brain);
+    const result = yield* probe(brain, { worker, machine });
     if (result._tag === "HarnessUnavailableError")
       return yield* WorkerCapabilityError.make({
         worker,
@@ -69,11 +63,11 @@ export const agentsHarnessProbe =
     spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
     host: ChildHost,
     environment: Readonly<Record<string, string>>,
+    logins: HostLoginLock["Service"],
+    credential: ProbeTarget["credential"] = "host-login",
   ): HarnessProbe =>
-  (brain) =>
-    preflight(brain, host, environment).pipe(
-      Effect.map((ready): HarnessReadiness => ready),
-      Effect.catchTag("HarnessUnavailableError", (unavailable) => Effect.succeed(unavailable)),
+  (brain, { worker, machine }) =>
+    preflight(brain, ProbeTarget.make({ host, environment, worker, machine, credential })).pipe(
       Effect.mapError((cause) =>
         ExecutorOperationError.make({
           operation: "preflight",
@@ -82,4 +76,5 @@ export const agentsHarnessProbe =
         }),
       ),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(HostLoginLock, logins),
     );

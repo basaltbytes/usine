@@ -14,7 +14,7 @@ import {
   observationLayer as localObservationLayer,
   localSqliteLayer,
 } from "@usine/engine/local-sqlite";
-import { claudeLoginLockLayer } from "@usine/executor";
+import { hostLoginLockLayer } from "@usine/executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubItemHistory } from "@usine/github/item-history";
@@ -89,7 +89,7 @@ export const runtimeLayer = (
   // One Claude login lock per Worker, or per machine of a provisioned Worker, shared by the
   // executor's preflight and the Attempts' Claude children.
   const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
-    Layer.provideMerge(claudeLoginLockLayer),
+    Layer.provideMerge(hostLoginLockLayer),
     Layer.provide(NodeServices.layer),
   );
   const engine = Layer.unwrap(

@@ -18,7 +18,7 @@ import { Run, RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import {
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   CheckoutRequest,
   CredentialProvider,
   CredentialUnavailableError,
@@ -214,7 +214,7 @@ const withGitHubEngine = <A, E, R>(
     }).pipe(
       Layer.provide(credentialLayer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-      Layer.provide(claudeLoginLockLayer),
+      Layer.provide(hostLoginLockLayer),
       Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, github)),
       Layer.provide(NodeServices.layer),
     );
@@ -252,7 +252,7 @@ describe("local worker", () => {
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(decodedValue5)),
           Layer.provide(testAppLayer),
@@ -432,7 +432,7 @@ describe("local worker", () => {
             }),
           ),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
         const decodedValue9 = yield* config;
@@ -555,10 +555,10 @@ describe("local worker", () => {
           const runtime = localExecutorLayer({
             instanceDirectory: InstanceDirectory.make(root),
             repositoryUrl: () => remote,
-            harnessReadiness: (brain) =>
+            harnessReadiness: (brain, login) =>
               phase === "preflight"
                 ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
-                : harnessReady(brain),
+                : harnessReady(brain, login),
           }).pipe(
             Layer.provide(
               Layer.mergeAll(
@@ -569,7 +569,7 @@ describe("local worker", () => {
                       : Effect.succeed(workerCredential(credential)),
                 }),
                 stubAttemptRuntime(new StubStorage()),
-                claudeLoginLockLayer,
+                hostLoginLockLayer,
                 Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
               ),
             ),
@@ -659,7 +659,7 @@ describe("local worker", () => {
         }).pipe(
           Layer.provide(credentials),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
         );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
@@ -791,7 +791,7 @@ describe("local worker", () => {
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(decodedValue17)),
           Layer.provide(testAppLayer),

@@ -1,4 +1,4 @@
-import type { ClaudeLoginLock } from "@usine/agents/runtime";
+import type { HostLoginLock } from "@usine/agents/runtime";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
@@ -112,7 +112,7 @@ export const layer = (
 ): Layer.Layer<
   Executor,
   never,
-  AttemptRuntime | ClaudeLoginLock | ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
+  AttemptRuntime | HostLoginLock | ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
 > => Layer.effect(Executor, makeExeDevExecutor(options));
 
 export {

@@ -39,7 +39,7 @@ import type { CloudflareProviderKey } from "../../src/cloudflare/model.ts";
 import { SHELL_ENVIRONMENT } from "../../src/cloudflare/shell/environment.ts";
 import {
   CheckoutRequest,
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   CredentialProvider,
   CredentialUnavailableError,
   Executor,
@@ -139,7 +139,7 @@ const executor = (
   }).pipe(
     Layer.provide(credentials.layer),
     Layer.provide(runtime),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );

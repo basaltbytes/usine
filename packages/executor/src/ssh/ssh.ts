@@ -3,7 +3,7 @@ import { safeSegment } from "@usine/core/repository";
 import type { AttemptId } from "@usine/core/attempt";
 import { attemptConnectionsFor } from "../attempt-connections.ts";
 import type { RemoteShell } from "@usine/agents/child-host";
-import { ClaudeLoginLock } from "@usine/agents/runtime";
+import { HostLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
@@ -30,7 +30,6 @@ import { provisionedApiKey, withApiKeys } from "./api-keys.ts";
 import {
   gatewayCredentialFor,
   gatewayHarnessProbe,
-  harnessBinaryProbe,
   verifyGatewayAdmin,
 } from "./gateway/preflight.ts";
 import type { SshExecutorOptions, SshMachine, SshWorkerAddress } from "./model.ts";
@@ -43,7 +42,7 @@ import { sshMachinesFor, SshWorkers } from "./workers.ts";
 const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const logins = yield* ClaudeLoginLock;
+    const logins = yield* HostLoginLock;
     const remoteCommands = yield* remoteCommandsFor;
     const reset = machineResetFor(remoteCommands, options.instance, options.instanceId);
     const { commands } = reset;
@@ -96,21 +95,24 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     // Probes with no extra environment; the harness login is on the machine or at its Gateway,
     // or a provisioned machine's Attempts get an API key.
     const harnessProbe = (machine: SshMachine, shell: RemoteShell): HarnessProbe => {
-      const own = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(spawner, shell, {});
+      const own =
+        options.harnessReadiness?.(machine) ?? agentsHarnessProbe(spawner, shell, {}, logins);
       const keyed = (harness: Harness) => Option.isSome(provisionedApiKey(machine, harness));
-      const probe: HarnessProbe = (brain) =>
-        brain.harness !== "pi" && keyed(brain.harness)
-          ? harnessBinaryProbe(
-              commands,
-              machine.shell.destination,
-              shell,
-              brain.harness,
-              "the API key in the attempt's environment",
-            )
-          : own(brain);
+      const external = agentsHarnessProbe(spawner, shell, {}, logins, "api-key");
+      const probe: HarnessProbe = (brain, login) =>
+        keyed(brain.harness) ? external(brain, login) : own(brain, login);
       return Option.match(machine.gateway, {
         onNone: () => probe,
-        onSome: (gateway) => gatewayHarnessProbe(commands, machine, gateway, probe, shell, keyed),
+        onSome: (gateway) =>
+          gatewayHarnessProbe(
+            commands,
+            machine,
+            gateway,
+            probe,
+            shell,
+            keyed,
+            agentsHarnessProbe(spawner, shell, {}, logins, "gateway"),
+          ),
       });
     };
     const credentials = yield* sshCredentialsFor(commands);
@@ -119,7 +121,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       reset.failed(machine.shell),
     );
     const containers = yield* sshContainersFor(commands, options.instance, options.instanceId);
-    const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, logins, containers);
+    const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, containers);
     const forgetConnection = Effect.fn("SshExecutor.forgetReleasedConnection")(function* (
       attemptId: AttemptId,
     ) {
@@ -372,7 +374,7 @@ export const layer = (
   Executor | SshWorkers | WorkerMachines,
   never,
   | AttemptRuntime
-  | ClaudeLoginLock
+  | HostLoginLock
   | CredentialProvider
   | Crypto.Crypto
   | ChildProcessSpawner.ChildProcessSpawner

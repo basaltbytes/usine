@@ -51,7 +51,7 @@ import { HttpClient } from "effect/http";
 
 import {
   CheckoutRequest,
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   CredentialProvider,
   WorkerCredential,
 } from "../../src/executor.ts";
@@ -949,7 +949,7 @@ export const executorLayer = (
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
   );
 
 /**

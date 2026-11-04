@@ -57,7 +57,7 @@ import {
   AgentCapacityError,
   ChildBackend,
   ChildRequest,
-  ClaudeLoginLock,
+  HostLoginLock,
   type OnDelivery,
   SessionOperationError,
   UnknownModelError,
@@ -73,9 +73,9 @@ import {
 
 /** A single login lock for all Workers, since each test launches its children on one Worker. */
 const loginLock = Layer.effect(
-  ClaudeLoginLock,
+  HostLoginLock,
   Effect.map(Semaphore.make(1), (mutex) =>
-    ClaudeLoginLock.of({ withLock: () => (effect) => mutex.withPermit(effect) }),
+    HostLoginLock.of({ withLock: () => (effect) => mutex.withPermit(effect) }),
   ),
 );
 
@@ -625,9 +625,10 @@ describe("Claude child backend", () => {
         });
         yield* Effect.gen(function* () {
           const backend = yield* ChildBackend;
-          const logins = yield* ClaudeLoginLock;
+          const logins = yield* HostLoginLock;
           const worker = request().worker;
-          const preflight = () => logins.withLock(worker, Option.none())(Effect.void);
+          const preflight = () =>
+            logins.withLock(Harness.make("claude"), worker, Option.none())(Effect.void);
 
           const answering = yield* Effect.forkChild(backend.launch(request()));
           while (outputs.length < 1) yield* Effect.yieldNow;

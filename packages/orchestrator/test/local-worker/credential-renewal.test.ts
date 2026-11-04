@@ -8,7 +8,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import {
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   CheckoutRequest,
   CredentialProvider,
   Executor,
@@ -88,7 +88,7 @@ it.effect(
       }).pipe(
         Layer.provide(credentials),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
-        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(hostLoginLockLayer),
         Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, capturing)),
       );
       yield* Effect.gen(function* () {

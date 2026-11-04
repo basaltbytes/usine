@@ -1,45 +1,32 @@
 import { Effect, Layer, Option } from "effect";
-import {
-  SessionOperationError,
+import { SessionOperationError, ChildBackend } from "../runtime.ts";
+import { Harnesses } from "./registry.ts";
+
+/** Dispatches delegated tasks through the registered harness runtime. */
+export const childDispatcherLayer = Layer.effect(
   ChildBackend,
-  ClaudeChildBackend,
-  CodexChildBackend,
-  PiChildBackend,
-} from "../runtime.ts";
-
-const makeChildDispatcher = Effect.gen(function* () {
-  const claude = yield* ClaudeChildBackend;
-  const codex = yield* CodexChildBackend;
-  const pi = yield* PiChildBackend;
-
-  return ChildBackend.of({
-    launch: Effect.fn("ChildBackend.launch")(function* (request) {
-      yield* Effect.annotateCurrentSpan({
-        sessionId: request.session.id,
-        harness: request.session.brain.harness,
-      });
-      yield* Effect.logDebug("Dispatching child session", {
-        harness: request.session.brain.harness,
-        sessionId: request.session.id,
-      });
-      switch (request.session.brain.harness) {
-        case "claude":
-          return yield* claude.launch(request);
-        case "codex":
-          return yield* codex.launch(request);
-        case "pi":
-          return yield* pi.launch(request);
-        default:
-          return yield* SessionOperationError.make({
-            operation: "launch",
-            sessionId: Option.some(request.session.id),
-            message: `No child runtime for harness "${request.session.brain.harness}"`,
-            cause: new Error("Unknown harness runtime"),
-          });
-      }
-    }),
-  });
-});
-
-/** Dispatches each delegated task to the Claude Code, Codex, or Pi backend according to the Agent's harness; requires all three backend layers. */
-export const childDispatcherLayer = Layer.effect(ChildBackend, makeChildDispatcher);
+  Effect.gen(function* () {
+    const harnesses = yield* Harnesses;
+    return ChildBackend.of({
+      launch: Effect.fn("ChildBackend.launch")(function* (request) {
+        const harness = request.session.brain.harness;
+        yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, harness });
+        yield* Effect.logDebug("Dispatching child session", {
+          harness,
+          sessionId: request.session.id,
+        });
+        const runtime = yield* harnesses.runtime(harness).pipe(
+          Effect.mapError((cause) =>
+            SessionOperationError.make({
+              operation: "launch",
+              sessionId: Option.some(request.session.id),
+              message: cause.message,
+              cause,
+            }),
+          ),
+        );
+        return yield* runtime.launch(request);
+      }),
+    });
+  }),
+);

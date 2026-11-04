@@ -2,8 +2,8 @@ import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Config, Effect, Schema, Layer } from "effect";
-import { PiChildBackend } from "../../src/runtime.ts";
-import { piChildBackendLayer, piSdkLive } from "../../src/harness/pi/pi.ts";
+import { ChildBackend } from "../../src/runtime.ts";
+import { piChildLayer, piSdkLive } from "../../src/harness/pi/pi.ts";
 import { steeringContract, interruptionContract } from "./contract.ts";
 
 const brain = Effect.gen(function* () {
@@ -22,15 +22,12 @@ describe("Pi child live contract", () => {
     () =>
       Effect.gen(function* () {
         const fixtureBrain = yield* brain;
-        const piChildBackend = yield* PiChildBackend;
+        const piChildBackend = yield* ChildBackend;
 
         return yield* steeringContract(piChildBackend, fixtureBrain);
       }).pipe(
         Effect.provide(
-          piChildBackendLayer.pipe(
-            Layer.provideMerge(piSdkLive),
-            Layer.provideMerge(NodeServices.layer),
-          ),
+          piChildLayer.pipe(Layer.provideMerge(piSdkLive), Layer.provideMerge(NodeServices.layer)),
         ),
       ),
     210_000,
@@ -41,15 +38,12 @@ describe("Pi child live contract", () => {
     () =>
       Effect.gen(function* () {
         const fixtureBrain = yield* brain;
-        const piChildBackend = yield* PiChildBackend;
+        const piChildBackend = yield* ChildBackend;
 
         return yield* interruptionContract(piChildBackend, fixtureBrain);
       }).pipe(
         Effect.provide(
-          piChildBackendLayer.pipe(
-            Layer.provideMerge(piSdkLive),
-            Layer.provideMerge(NodeServices.layer),
-          ),
+          piChildLayer.pipe(Layer.provideMerge(piSdkLive), Layer.provideMerge(NodeServices.layer)),
         ),
       ),
     150_000,

@@ -18,7 +18,7 @@ import {
   stubAttemptRuntime,
   StubStorage,
 } from "@usine/durable/testing";
-import { CheckoutRequest, claudeLoginLockLayer } from "../../src/executor.ts";
+import { CheckoutRequest, hostLoginLockLayer } from "../../src/executor.ts";
 import { layer as exeDevLayer } from "../../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
 import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
@@ -375,5 +375,5 @@ export const runtime = (
     Layer.provide(sshLayer),
     Layer.provide(NodeCrypto.layer),
     Layer.provide(wrap(stubAttemptRuntime(storage, parent))),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
   );

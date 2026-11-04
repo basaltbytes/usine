@@ -47,7 +47,7 @@ import { BrainSpec } from "@usine/core/agent/brain";
 import { layer as localWorkerLayer } from "../../src/local.ts";
 import { fixedInstanceLayer } from "../support/current-instance.ts";
 import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
-import { claudeLoginLockLayer } from "@usine/executor";
+import { hostLoginLockLayer } from "@usine/executor";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
@@ -225,7 +225,7 @@ const runtimeLayer = (
     Layer.provide(triggerCondition),
     Layer.provide(
       durableAttemptRuntimeLayer(runtimeDirectory).pipe(
-        Layer.provideMerge(claudeLoginLockLayer),
+        Layer.provideMerge(hostLoginLockLayer),
         Layer.provide(NodeServices.layer),
       ),
     ),

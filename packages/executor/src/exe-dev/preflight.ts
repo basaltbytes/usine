@@ -1,5 +1,5 @@
 import type { RemoteShell } from "@usine/agents/child-host";
-import { ClaudeLoginLock } from "@usine/agents/runtime";
+import { HostLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { SshDestination, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Ref, Schema } from "effect";
@@ -37,11 +37,11 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   commands: ExeDevCommands,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const logins = yield* ClaudeLoginLock;
+  const logins = yield* HostLoginLock;
   const workers = yield* Ref.make(new Map<WorkerName, VmState>());
 
   /** Returns a harness probe that runs on the VM with no extra environment variables. */
-  const harnessProbe = (shell: RemoteShell) => agentsHarnessProbe(spawner, shell, {});
+  const harnessProbe = (shell: RemoteShell) => agentsHarnessProbe(spawner, shell, {}, logins);
 
   const resolveVm = Effect.fn("ExeDevExecutor.resolveVm")(function* (worker: WorkerName) {
     const response = yield* commands.lobbyJson("preflight", ["ls", worker]);
@@ -130,7 +130,6 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       Option.none(),
       brains,
       harnessProbe(commands.childHost(vm.sshDest)),
-      logins,
     );
 
     for (const integration of options.githubIntegrations) {

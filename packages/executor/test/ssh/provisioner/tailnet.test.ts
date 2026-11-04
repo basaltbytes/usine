@@ -27,7 +27,7 @@ import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect
 import { HttpClient, HttpClientResponse } from "effect/http";
 import {
   CheckoutRequest,
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   Executor,
   WorkerMachines,
 } from "../../../src/executor.ts";
@@ -177,7 +177,7 @@ describe("Boat tailnet", () => {
       Layer.provide(machine.layer),
       Layer.provide(mintingProvider().layer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
-      Layer.provide(claudeLoginLockLayer),
+      Layer.provide(hostLoginLockLayer),
       Layer.provide(boat.over(api.over(gateway.layer))),
     );
     return Effect.gen(function* () {
@@ -289,7 +289,7 @@ describe("Boat tailnet", () => {
         Layer.provide(machine.layer),
         Layer.provide(mintingProvider().layer),
         Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
-        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(hostLoginLockLayer),
         Layer.provide(boat.over(api.over(gateway.layer))),
       );
       return Effect.gen(function* () {
@@ -361,7 +361,7 @@ describe("Boat tailnet", () => {
           Layer.provide(machine.layer),
           Layer.provide(mintingProvider().layer),
           Layer.provide(runtime),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(boat.over(api.over(gateway.layer))),
         );
         return Effect.gen(function* () {

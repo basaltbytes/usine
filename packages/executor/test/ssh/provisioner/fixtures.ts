@@ -16,7 +16,7 @@ import {
 } from "@usine/durable/testing";
 
 import { Effect, Layer, Option, Redacted } from "effect";
-import { claudeLoginLockLayer, type AttemptConnections } from "../../../src/executor.ts";
+import { hostLoginLockLayer, type AttemptConnections } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 
 import { layer as sshLayer } from "../../../src/ssh/ssh.ts";
@@ -101,7 +101,7 @@ export const runtimeOf = (
     Layer.provide(machine.layer),
     Layer.provide(mintingProvider().layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
     Layer.provide(providers.layer),
   );
 
@@ -133,7 +133,7 @@ export const gatewayRuntimeOf = (
       Layer.provide(machine.layer),
       Layer.provide(mintingProvider().layer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-      Layer.provide(claudeLoginLockLayer),
+      Layer.provide(hostLoginLockLayer),
       Layer.provide(providers.over(gateway.layer)),
     ),
     Layer.effect(Attachments, Attachments).pipe(Layer.provide(gateway.layer)),

@@ -1,6 +1,5 @@
 import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { CHILD_KILL_SCRIPT, type RemoteShell } from "@usine/agents/child-host";
-import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -111,7 +110,6 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const { commands, label } = worker;
     const span = (name: string) => `${worker.spanPrefix}.${name}`;
     const fetches = yield* keyedLockFor<RepositoryName>();
-    const logins = yield* ClaudeLoginLock;
     const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
     const workerLeftovers = yield* workerLeftoversFor(commands, worker.machineFor, worker.reclaim);
     const session = yield* durableSessionFor({ interruptGrace: worker.interruptGrace });
@@ -788,7 +786,6 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           machine.provisioned,
           [request.agent.brain],
           worker.harnessProbe(machine, shell),
-          logins,
         );
       // An Attempt container doesn't exist yet, so its probe runs once the checkout is prepared.
       if (isolation._tag === "SharedUser") yield* probeBrain(machine.shell);

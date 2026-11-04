@@ -16,12 +16,7 @@ import {
   type StubParent,
   StubStorage,
 } from "@usine/durable/testing";
-import {
-  claudeLoginLockLayer,
-  CheckoutRequest,
-  CredentialProvider,
-  Executor,
-} from "@usine/executor";
+import { hostLoginLockLayer, CheckoutRequest, CredentialProvider, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Redacted } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -102,7 +97,7 @@ describe("local worker Loop permissions", () => {
         }).pipe(
           Layer.provide(credentials),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
         );
         const request = (permissions: LoopPermissions) =>
           CheckoutRequest.make({
