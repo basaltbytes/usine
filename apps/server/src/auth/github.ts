@@ -28,7 +28,7 @@ export class GitHubSignIn extends Context.Service<
     ) => Effect.Effect<Option.Option<GitHubIdentity>, AuthError>;
     readonly lookup: (login: OperatorLogin) => Effect.Effect<GitHubIdentity, AuthError>;
   }
->()("@usine/server/GitHubSignIn") {}
+>()("@usine/server/auth/github/GitHubSignIn") {}
 
 export const githubSignInLayer = (
   file: Effect.Effect<Option.Option<GitHubAppSecrets>, LocalSecretsError> = Effect.succeedNone,

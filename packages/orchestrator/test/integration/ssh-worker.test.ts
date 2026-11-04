@@ -37,6 +37,7 @@ import {
   Schedule,
   Schema,
   Stream,
+  Crypto,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
@@ -50,6 +51,8 @@ const INSTANCE_ID = InstanceId.make("0b4e7f3c-5a2d-4c1e-9f6b-8d7a2e1c3b4f");
 
 // `USINE_SSH_INTEGRATION_DESTINATION` sets the machine; without it, there is nothing to run
 // against.
+// Native command fixtures and test registration inspect the host environment synchronously.
+// @effect-diagnostics-next-line processEnv:off
 const destination = process.env.USINE_SSH_INTEGRATION_DESTINATION;
 const WORKER = WorkerName.make("ssh-integration");
 const PLAIN_SSH = [
@@ -281,11 +284,13 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
 
+          const uuid1 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+          const uuid2 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
           const accepted = yield* engine.submit(
             Submission.make({
               event: Event.make({
-                id: EventId.make(`ssh-${globalThis.crypto.randomUUID()}`),
-                dedupKey: DedupKey.make(`ssh/${repository}/${globalThis.crypto.randomUUID()}`),
+                id: EventId.make(`ssh-${uuid1}`),
+                dedupKey: DedupKey.make(`ssh/${repository}/${uuid2}`),
                 payload: { integration: "ssh" },
                 receivedAt: yield* DateTime.now,
               }),
@@ -432,6 +437,8 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
 });
 
 // These variables set the Worker behind a Gateway; without them, the Gateway case is skipped.
+// Native command fixtures and test registration inspect the host environment synchronously.
+// @effect-diagnostics-next-line processEnv:off
 const gatewayDestination = process.env.USINE_GATEWAY_INTEGRATION_DESTINATION;
 const GATEWAY_WORKER = WorkerName.make("gateway-integration");
 
@@ -548,7 +555,8 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         const values = yield* gatewaySettings;
         const config = yield* gatewayConfigFor(values);
         const repository = RepositoryName.make(values.repository);
-        const branch = `usine-gateway-test/${globalThis.crypto.randomUUID()}`;
+        const uuid3 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+        const branch = `usine-gateway-test/${uuid3}`;
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = yield* fileSystem.makeTempDirectoryScoped({
           prefix: "usine-gateway-integration-",
@@ -662,11 +670,13 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
 
+          const uuid4 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+          const uuid5 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
           const accepted = yield* engine.submit(
             Submission.make({
               event: Event.make({
-                id: EventId.make(`gateway-${globalThis.crypto.randomUUID()}`),
-                dedupKey: DedupKey.make(`gateway/${repository}/${globalThis.crypto.randomUUID()}`),
+                id: EventId.make(`gateway-${uuid4}`),
+                dedupKey: DedupKey.make(`gateway/${repository}/${uuid5}`),
                 payload: { integration: "gateway" },
                 receivedAt: yield* DateTime.now,
               }),

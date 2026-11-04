@@ -154,7 +154,7 @@ const nextPollAt = (headers: Headers, now: number) =>
 
 const sinceParameter = (watermark: DateTime.Utc): string => {
   const epoch = DateTime.toEpochMillis(watermark) - WATERMARK_OVERLAP_MS;
-  return `${new Date(epoch - (epoch % 1_000)).toISOString().slice(0, 19)}Z`;
+  return `${DateTime.formatIso(DateTime.makeUnsafe(epoch - (epoch % 1_000))).slice(0, 19)}Z`;
 };
 
 const changesUrl = (repository: RepositoryName, cursor: PollCursor): string => {
@@ -259,7 +259,7 @@ export class GitHubPolling extends Context.Service<
       numbers: ReadonlyArray<ItemNumber>,
     ) => Effect.Effect<ReadonlyArray<ItemNumber>, GitHubAppError>;
   }
->()("@usine/github/GitHubPolling") {
+>()("@usine/github/polling/polling/GitHubPolling") {
   /**
    * Provides REST change detection and GraphQL snapshots with the App's shared token.
    * Uses the supplied HTTP client for requests and crypto service for SHA-256 content hashes.
@@ -692,10 +692,13 @@ export {
 
 const makeContentHash = (crypto: Crypto.Crypto) =>
   Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
-    const encoded = new TextEncoder().encode(JSON.stringify(canonicalContent(payload)));
+    const json = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+      canonicalContent(payload),
+    );
+    const encoded = new TextEncoder().encode(json);
     // An in-memory SHA-256 digest fails only on a broken platform, so a failure is a defect.
-    const digest = yield* crypto.digest("SHA-256", encoded).pipe(Effect.orDie);
+    const digest = yield* crypto.digest("SHA-256", encoded);
     return ContentHash.make(
       Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
     );
-  });
+  }, Effect.orDie);

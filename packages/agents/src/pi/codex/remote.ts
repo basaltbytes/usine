@@ -44,7 +44,10 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
 
   const send = (frame: { readonly data: string } | { readonly eof: true }) =>
     Effect.gen(function* () {
-      const line = JSON.stringify({ ...frame, sequence: history.length + 1 });
+      const line = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        ...frame,
+        sequence: history.length + 1,
+      }).pipe(Effect.orDie);
       history.push(line);
       yield* Queue.offer(outgoing, line);
     });

@@ -17,7 +17,11 @@ import { GitHubPolling } from "@usine/github/polling";
 import { configurationRepositories, configurationLabels } from "./configuration/catalog.ts";
 import { fromConfiguration, fromConfigurationRevision } from "./configuration/http.ts";
 import { type UpgradeError, ServerUpgrades } from "./upgrade/control.ts";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { extname, resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
 import { RepositoryName } from "@usine/core/repository";

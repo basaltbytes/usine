@@ -1,12 +1,18 @@
+import { NodeFileSystem } from "@effect/platform-node";
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { execFile } from "node:child_process";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
-import { DateTime, Effect, Layer, Option, Redacted } from "effect";
+import { DateTime, Effect, Layer, Option, Redacted, FileSystem } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
@@ -17,19 +23,22 @@ import { tlsThroughTunnel } from "../tunnel.ts";
 
 // These tests access github.com and registry.npmjs.org anonymously, so CI needs no secret.
 // They're skipped on machines without a direct internet route, such as a Worker behind a Gateway (#273).
-const directEgress = await new Promise<boolean>((resolve) => {
-  const socket = connect({ host: "api.github.com", port: 443 });
-  socket.setTimeout(3_000);
-  socket.once("connect", () => {
-    socket.destroy();
-    resolve(true);
-  });
-  socket.once("error", () => resolve(false));
-  socket.once("timeout", () => {
-    socket.destroy();
-    resolve(false);
-  });
-});
+const directEgress = await Effect.runPromise(
+  Effect.callback<boolean>((resume) => {
+    const resolve = (value: boolean) => resume(Effect.succeed(value));
+    const socket = connect({ host: "api.github.com", port: 443 });
+    socket.setTimeout(3_000);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+  }),
+);
 
 const PUBLIC_REPOSITORY = RepositoryName.make("octocat/Hello-World");
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
@@ -55,13 +64,23 @@ const run = (command: string, args: ReadonlyArray<string>, env: Record<string, s
   });
 
 const installed = (command: string) =>
+  // The SDK test deliberately changes the host environment to verify tool isolation.
+  // @effect-diagnostics-next-line processEnv:off
   ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", ...(process.env.PATH ?? "").split(":")].some(
     (directory) => existsSync(join(directory, command)),
   );
 
 const scratch = Effect.acquireRelease(
-  Effect.promise(() => mkdtemp(join(tmpdir(), "usine-gw-"))),
-  (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+  Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+    fileSystem.makeTempDirectory({
+      directory: dirname(join(tmpdir(), "usine-gw-")),
+      prefix: basename(join(tmpdir(), "usine-gw-")),
+    }),
+  ),
+  (directory) =>
+    Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.remove(directory, { recursive: true, force: true }),
+    ).pipe(Effect.orDie),
 );
 
 /** Attaches the public repository anonymously for the test Worker and returns its caller token. */
@@ -85,6 +104,8 @@ const attachPublicRepository = Effect.gen(function* () {
 
 /** Returns a Worker child's environment, without this machine's git or gh configuration. */
 const workerEnvironment = (home: string) => ({
+  // The SDK test deliberately changes the host environment to verify tool isolation.
+  // @effect-diagnostics-next-line processEnv:off
   PATH: process.env.PATH ?? "/usr/bin:/bin",
   HOME: home,
   GIT_CONFIG_NOSYSTEM: "1",
@@ -138,7 +159,7 @@ describe.skipIf(!directEgress)("the gateway against GitHub", () => {
         const refused = yield* git("http://git.gw.test/octocat/Spoon-Knife.git", "spoon");
         assert.notStrictEqual(refused.code, 0);
         assert.include(refused.stderr, "403");
-      }).pipe(Effect.provide(gateway)),
+      }).pipe(Effect.provide(Layer.provideMerge(gateway, NodeFileSystem.layer))),
     90_000,
   );
 
@@ -151,10 +172,12 @@ describe.skipIf(!directEgress)("the gateway against GitHub", () => {
         const directory = yield* scratch;
         const socket = join(directory, "gh.sock");
         yield* socketForwarder(socket, proxy);
-        yield* Effect.promise(() =>
-          writeFile(join(directory, "config.yml"), `http_unix_socket: ${socket}\n`),
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.writeFileString(
+            join(directory, "config.yml"),
+            `http_unix_socket: ${socket}\n`,
+          ),
         );
-        // `rate_limit` doesn't count against GitHub's anonymous rate limit, so CI runners that share an address can't exhaust it.
         const answered = yield* run("gh", ["api", "rate_limit", "--jq", ".resources.core.limit"], {
           ...workerEnvironment(directory),
           GH_CONFIG_DIR: directory,
@@ -163,7 +186,7 @@ describe.skipIf(!directEgress)("the gateway against GitHub", () => {
         });
         assert.strictEqual(answered.code, 0, answered.stderr);
         assert.match(answered.stdout.trim(), /^\d+$/u);
-      }).pipe(Effect.provide(gateway)),
+      }).pipe(Effect.provide(Layer.provideMerge(gateway, NodeFileSystem.layer))),
     90_000,
   );
 

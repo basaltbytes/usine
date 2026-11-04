@@ -23,6 +23,10 @@ import {
 } from "../trigger-submission.ts";
 import { LoopEvaluationFailure } from "./evaluation-failures.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
@@ -36,7 +40,7 @@ const eventKey = (
   { projection: item, cycleGeneration }: ObservedItem,
 ): DedupKey =>
   DedupKey.make(
-    JSON.stringify([
+    stringifyJson([
       loop.name,
       canonicalRepositoryName(repository.name),
       item.number,

@@ -10,6 +10,10 @@ import { InstallationToken, InstallationWide } from "../src/installation.ts";
 import { PollCursor } from "../src/polling/detection.ts";
 import { GitHubPolling } from "../src/polling/polling.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const token = InstallationToken.make({
   value: Redacted.make("test-token"),
   expiresAt: DateTime.makeUnsafe("2026-11-03T22:00:00Z"),
@@ -46,7 +50,7 @@ for (const mode of ["rest", "graphql"] as const) {
             return HttpClientResponse.fromWeb(
               request,
               new Response(
-                requests === 1 ? null : JSON.stringify(mode === "rest" ? [] : { data: true }),
+                requests === 1 ? null : stringifyJson(mode === "rest" ? [] : { data: true }),
                 { status: requests === 1 ? status : 200, headers: { etag: '"ok"' } },
               ),
             );

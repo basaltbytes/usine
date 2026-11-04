@@ -97,7 +97,7 @@ export class FactoryBackend extends Context.Service<
       window: StatisticsWindow,
     ) => Effect.Effect<RunStatisticsView, BackendError>;
   }
->()("@usine/server/FactoryBackend") {}
+>()("@usine/server/backend/FactoryBackend") {}
 
 type BackendInstance = Pick<CurrentInstance["Service"], "get">;
 

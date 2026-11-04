@@ -1,10 +1,14 @@
+import { Schedule, DateTime, Effect, Layer, Option, Schema, FileSystem } from "effect";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { NodeServices } from "@effect/platform-node";
+import { NodeServices, NodeFileSystem } from "@effect/platform-node";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
@@ -26,8 +30,8 @@ import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
-import { DateTime, Effect, Layer, Option, Schema } from "effect";
-import { assert, describe, expect, it } from "vitest";
+
+import { assert, describe, expect, it } from "@effect/vitest";
 import { RunEvidenceFromJson } from "../src/export-run.ts";
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
@@ -160,204 +164,290 @@ const runCli = (directory: string, args: ReadonlyArray<string>) =>
     timeout: 15_000,
   });
 
-const test = it.extend<{
-  directory: string;
-  saved: Effect.Success<ReturnType<typeof seed>>;
-}>({
-  directory: async ({ task }, use) => {
-    const directory = await mkdtemp(join(sqliteTempDirectory(), `usine-export-${task.id}-`));
-    try {
-      await use(directory);
-    } finally {
-      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    }
-  },
-  saved: async ({ directory, signal }, use) => {
-    await use(
-      await Effect.runPromise(seed(directory).pipe(Effect.provide(NodeServices.layer)), { signal }),
-    );
-  },
+const directoryFixture = Effect.gen(function* () {
+  const directory = yield* Effect.acquireRelease(
+    Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.makeTempDirectory({
+        directory: dirname(join(sqliteTempDirectory(), "usine-export-")),
+        prefix: basename(join(sqliteTempDirectory(), "usine-export-")),
+      }),
+    ),
+    (directory) =>
+      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem
+          .remove(directory, {
+            recursive: true,
+            force: true,
+          })
+          .pipe(Effect.retry({ times: 5, schedule: Schedule.spaced(100) })),
+      ).pipe(Effect.orDie),
+  );
+  return directory;
 });
 
 describe("Run evidence export", { timeout: 30_000 }, () => {
-  test("exports complete evidence for every Attempt beyond the UI page", async ({
-    directory,
-    saved,
-  }) => {
-    const runId = saved.snapshot.run.id;
-    const exported = runCli(directory, ["export-run", runId]);
-    assert.strictEqual(exported.status, 0, exported.stderr);
-    const output = join(directory, `run-${encodeURIComponent(runId)}.json`);
-    const evidence = await Effect.runPromise(
-      Schema.decodeEffect(RunEvidenceFromJson)(await readFile(output, "utf8")),
-    );
+  it.live("exports complete evidence for every Attempt beyond the UI page", () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const saved = yield* seed(directory).pipe(Effect.provide(NodeServices.layer));
+      const runId = saved.snapshot.run.id;
+      const exported = runCli(directory, ["export-run", runId]);
+      assert.strictEqual(exported.status, 0, exported.stderr);
+      const output = join(directory, `run-${encodeURIComponent(runId)}.json`);
+      const awaited1 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFileString(output),
+      );
+      const evidence = yield* Schema.decodeEffect(RunEvidenceFromJson)(awaited1);
 
-    assert.strictEqual(evidence.version, 1);
-    assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
-    assert.deepStrictEqual(evidence.transcript, saved.transcript);
-    assert.strictEqual(evidence.snapshot.attempts.length, 2);
-    assert.strictEqual(evidence.transcript.length, 504);
-    assert.strictEqual((await stat(output)).mode & 0o777, 0o600);
-    assert.include(exported.stdout, output);
-  });
+      assert.strictEqual(evidence.version, 1);
+      assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
+      assert.deepStrictEqual(evidence.transcript, saved.transcript);
+      assert.strictEqual(evidence.snapshot.attempts.length, 2);
+      assert.strictEqual(evidence.transcript.length, 504);
+      assert.strictEqual(
+        (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.stat(output)))
+          .mode & 0o777,
+        0o600,
+      );
+      assert.include(exported.stdout, output);
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
 
-  test("backs up live WAL state and exports the restored Run with all Attempts and transcripts", async ({
-    directory,
-    saved,
-  }) => {
-    const restored = join(directory, "restored");
-    await mkdir(join(restored, ".usine"), { recursive: true });
-    const output = join(restored, ".usine", "runtime.sqlite");
-    const writer = new DatabaseSync(join(directory, ".usine", "runtime.sqlite"));
-    try {
-      writer.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0");
-      writer.exec("CREATE TABLE backup_marker (value TEXT)");
-      writer.exec("INSERT INTO backup_marker VALUES ('committed WAL evidence')");
-      writer.exec("BEGIN IMMEDIATE; INSERT INTO backup_marker VALUES ('uncommitted')");
-      const backedUp = runCli(directory, ["backup", output]);
-      assert.strictEqual(backedUp.status, 0, backedUp.stderr);
-      assert.include(backedUp.stdout, output);
-      assert.strictEqual((await stat(output)).mode & 0o777, 0o600);
-      const copy = new DatabaseSync(output, { readOnly: true });
-      try {
-        assert.deepStrictEqual(
-          copy
-            .prepare("SELECT value FROM backup_marker")
-            .all()
-            .map((row) => row.value),
-          ["committed WAL evidence"],
+  it.live(
+    "backs up live WAL state and exports the restored Run with all Attempts and transcripts",
+    () =>
+      Effect.gen(function* () {
+        const directory = yield* directoryFixture;
+        const saved = yield* seed(directory).pipe(Effect.provide(NodeServices.layer));
+        const restored = join(directory, "restored");
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.makeDirectory(join(restored, ".usine"), { recursive: true }),
         );
-        assert.strictEqual(copy.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
-      } finally {
-        copy.close();
+        const output = join(restored, ".usine", "runtime.sqlite");
+        const writer = new DatabaseSync(join(directory, ".usine", "runtime.sqlite"));
+        try {
+          writer.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0");
+          writer.exec("CREATE TABLE backup_marker (value TEXT)");
+          writer.exec("INSERT INTO backup_marker VALUES ('committed WAL evidence')");
+          writer.exec("BEGIN IMMEDIATE; INSERT INTO backup_marker VALUES ('uncommitted')");
+          const backedUp = runCli(directory, ["backup", output]);
+          assert.strictEqual(backedUp.status, 0, backedUp.stderr);
+          assert.include(backedUp.stdout, output);
+          assert.strictEqual(
+            (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.stat(output)))
+              .mode & 0o777,
+            0o600,
+          );
+          const copy = new DatabaseSync(output, { readOnly: true });
+          try {
+            assert.deepStrictEqual(
+              copy
+                .prepare("SELECT value FROM backup_marker")
+                .all()
+                .map((row) => row.value),
+              ["committed WAL evidence"],
+            );
+            assert.strictEqual(copy.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
+          } finally {
+            copy.close();
+          }
+          writer.exec("COMMIT; INSERT INTO backup_marker VALUES ('after backup')");
+          assert.strictEqual(writer.prepare("SELECT count(*) AS n FROM backup_marker").get()?.n, 3);
+        } finally {
+          writer.close();
+        }
+        const exported = runCli(restored, ["export-run", saved.snapshot.run.id]);
+        assert.strictEqual(exported.status, 0, exported.stderr);
+        const awaited2 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFileString(
+            join(restored, `run-${encodeURIComponent(saved.snapshot.run.id)}.json`),
+          ),
+        );
+        const evidence = yield* Schema.decodeEffect(RunEvidenceFromJson)(awaited2);
+        assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
+        assert.deepStrictEqual(evidence.transcript, saved.transcript);
+        assert.strictEqual(evidence.transcript.length, 504);
+      }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("exports a Run awaiting approval to the requested destination", () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const saved = yield* seed(directory).pipe(Effect.provide(NodeServices.layer));
+      const output = join(directory, "waiting.json");
+      const exported = runCli(directory, [
+        "export-run",
+        saved.waitingSnapshot.run.id,
+        "--output",
+        "waiting.json",
+      ]);
+      assert.strictEqual(exported.status, 0, exported.stderr);
+      const awaited3 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFileString(output),
+      );
+      const evidence = yield* Schema.decodeEffect(RunEvidenceFromJson)(awaited3);
+
+      assert.deepStrictEqual(evidence.snapshot, saved.waitingSnapshot);
+      assert.deepStrictEqual(evidence.snapshot.attempts, []);
+      assert.deepStrictEqual(evidence.transcript, []);
+      assert.include(exported.stdout, output);
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("refuses to overwrite an existing evidence file", () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const saved = yield* seed(directory).pipe(Effect.provide(NodeServices.layer));
+      const output = join(directory, "evidence.json");
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(output, "Previously exported evidence"),
+      );
+      const exported = runCli(directory, ["export-run", saved.snapshot.run.id, "--output", output]);
+
+      assert.strictEqual(exported.status, 1);
+      assert.match(exported.stderr, /write the evidence/i);
+      assert.include(exported.stderr, output);
+      const actual1 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFileString(output),
+      );
+      assert.strictEqual(actual1, "Previously exported evidence");
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("reports a missing Run without publishing a file", () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const saved = yield* seed(directory).pipe(Effect.provide(NodeServices.layer));
+      const missingId = `${saved.snapshot.run.id}/missing`;
+      const output = join(directory, "missing.json");
+      const exported = runCli(directory, ["export-run", missingId, "--output", output]);
+
+      assert.strictEqual(exported.status, 1);
+      assert.include(exported.stderr, missingId);
+      assert.match(exported.stderr, /not found/i);
+      {
+        const missingFile1 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.stat(output),
+        ).pipe(Effect.flip);
+        expect(missingFile1.reason.cause).toMatchObject({
+          code: "ENOENT",
+        });
       }
-      writer.exec("COMMIT; INSERT INTO backup_marker VALUES ('after backup')");
-      assert.strictEqual(writer.prepare("SELECT count(*) AS n FROM backup_marker").get()?.n, 3);
-    } finally {
-      writer.close();
-    }
-    const exported = runCli(restored, ["export-run", saved.snapshot.run.id]);
-    assert.strictEqual(exported.status, 0, exported.stderr);
-    const evidence = await Effect.runPromise(
-      Schema.decodeEffect(RunEvidenceFromJson)(
-        await readFile(
-          join(restored, `run-${encodeURIComponent(saved.snapshot.run.id)}.json`),
-          "utf8",
-        ),
-      ),
-    );
-    assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
-    assert.deepStrictEqual(evidence.transcript, saved.transcript);
-    assert.strictEqual(evidence.transcript.length, 504);
-  });
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
 
-  test("exports a Run awaiting approval to the requested destination", async ({
-    directory,
-    saved,
-  }) => {
-    const output = join(directory, "waiting.json");
-    const exported = runCli(directory, [
-      "export-run",
-      saved.waitingSnapshot.run.id,
-      "--output",
-      "waiting.json",
-    ]);
-    assert.strictEqual(exported.status, 0, exported.stderr);
-    const evidence = await Effect.runPromise(
-      Schema.decodeEffect(RunEvidenceFromJson)(await readFile(output, "utf8")),
-    );
+  it.live("reports an unavailable output directory without creating it", () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const saved = yield* seed(directory).pipe(Effect.provide(NodeServices.layer));
+      const parent = join(directory, "absent");
+      const exported = runCli(directory, [
+        "export-run",
+        saved.snapshot.run.id,
+        "--output",
+        join(parent, "evidence.json"),
+      ]);
 
-    assert.deepStrictEqual(evidence.snapshot, saved.waitingSnapshot);
-    assert.deepStrictEqual(evidence.snapshot.attempts, []);
-    assert.deepStrictEqual(evidence.transcript, []);
-    assert.include(exported.stdout, output);
-  });
+      assert.strictEqual(exported.status, 1);
+      assert.match(exported.stderr, /write the evidence/i);
+      {
+        const missingFile2 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.stat(parent),
+        ).pipe(Effect.flip);
+        expect(missingFile2.reason.cause).toMatchObject({
+          code: "ENOENT",
+        });
+      }
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
 
-  test("refuses to overwrite an existing evidence file", async ({ directory, saved }) => {
-    const output = join(directory, "evidence.json");
-    await writeFile(output, "Previously exported evidence");
-    const exported = runCli(directory, ["export-run", saved.snapshot.run.id, "--output", output]);
-
-    assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /write the evidence/i);
-    assert.include(exported.stderr, output);
-    assert.strictEqual(await readFile(output, "utf8"), "Previously exported evidence");
-  });
-
-  test("reports a missing Run without publishing a file", async ({ directory, saved }) => {
-    const missingId = `${saved.snapshot.run.id}/missing`;
-    const output = join(directory, "missing.json");
-    const exported = runCli(directory, ["export-run", missingId, "--output", output]);
-
-    assert.strictEqual(exported.status, 1);
-    assert.include(exported.stderr, missingId);
-    assert.match(exported.stderr, /not found/i);
-    await expect(stat(output)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  test("reports an unavailable output directory without creating it", async ({
-    directory,
-    saved,
-  }) => {
-    const parent = join(directory, "absent");
-    const exported = runCli(directory, [
-      "export-run",
-      saved.snapshot.run.id,
-      "--output",
-      join(parent, "evidence.json"),
-    ]);
-
-    assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /write the evidence/i);
-    await expect(stat(parent)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  test("refuses a missing runtime store without creating one", async ({ directory }) => {
-    const exported = runCli(directory, ["export-run", "missing"]);
-
-    assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /read the evidence/i);
-    await expect(stat(join(directory, ".usine"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
-
-  test("leaves an unrelated database unchanged when export fails", async ({ directory }) => {
-    await mkdir(join(directory, ".usine"));
-    const filename = join(directory, ".usine", "runtime.sqlite");
-    const database = new DatabaseSync(filename);
-    try {
-      database.exec("CREATE TABLE original_marker (value TEXT)");
-      database.exec("INSERT INTO original_marker VALUES ('preserve me')");
-    } finally {
-      database.close();
-    }
-    const original = await readFile(filename);
-    const exported = runCli(directory, ["export-run", "missing"]);
-
-    assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /read the evidence/i);
-    assert.deepStrictEqual(await readFile(filename), original);
-    await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
-
-  test.for(["corrupt", "directory"])(
-    "reports a %s runtime store as a read failure",
-    async (kind, { directory }) => {
-      await mkdir(join(directory, ".usine"));
-      const filename = join(directory, ".usine", "runtime.sqlite");
-      if (kind === "directory") await mkdir(filename);
-      else await writeFile(filename, "not a SQLite database");
+  it.live("refuses a missing runtime store without creating one", () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
       const exported = runCli(directory, ["export-run", "missing"]);
 
       assert.strictEqual(exported.status, 1);
       assert.match(exported.stderr, /read the evidence/i);
-      await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
-        code: "ENOENT",
-      });
-    },
+      {
+        const missingFile3 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.stat(join(directory, ".usine")),
+        ).pipe(Effect.flip);
+        expect(missingFile3.reason.cause).toMatchObject({ code: "ENOENT" });
+      }
+      {
+        const missingFile4 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.stat(join(directory, "run-missing.json")),
+        ).pipe(Effect.flip);
+        expect(missingFile4.reason.cause).toMatchObject({
+          code: "ENOENT",
+        });
+      }
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live("leaves an unrelated database unchanged when export fails", () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeDirectory(join(directory, ".usine")),
+      );
+      const filename = join(directory, ".usine", "runtime.sqlite");
+      const database = new DatabaseSync(filename);
+      try {
+        database.exec("CREATE TABLE original_marker (value TEXT)");
+        database.exec("INSERT INTO original_marker VALUES ('preserve me')");
+      } finally {
+        database.close();
+      }
+      const original = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFile(filename).pipe(Effect.map(Buffer.from)),
+      );
+      const exported = runCli(directory, ["export-run", "missing"]);
+
+      assert.strictEqual(exported.status, 1);
+      assert.match(exported.stderr, /read the evidence/i);
+      const actual2 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFile(filename).pipe(Effect.map(Buffer.from)),
+      );
+      assert.deepStrictEqual(actual2, original);
+      {
+        const missingFile5 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.stat(join(directory, "run-missing.json")),
+        ).pipe(Effect.flip);
+        expect(missingFile5.reason.cause).toMatchObject({
+          code: "ENOENT",
+        });
+      }
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+  it.live.each(["corrupt", "directory"])("reports a %s runtime store as a read failure", (kind) =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeDirectory(join(directory, ".usine")),
+      );
+      const filename = join(directory, ".usine", "runtime.sqlite");
+      if (kind === "directory")
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.makeDirectory(filename),
+        );
+      else
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.writeFileString(filename, "not a SQLite database"),
+        );
+      const exported = runCli(directory, ["export-run", "missing"]);
+
+      assert.strictEqual(exported.status, 1);
+      assert.match(exported.stderr, /read the evidence/i);
+      {
+        const missingFile6 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.stat(join(directory, "run-missing.json")),
+        ).pipe(Effect.flip);
+        expect(missingFile6.reason.cause).toMatchObject({
+          code: "ENOENT",
+        });
+      }
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 });

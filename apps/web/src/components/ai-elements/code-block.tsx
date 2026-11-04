@@ -69,9 +69,9 @@ const highlight = async (
         style: {
           color: token.color,
           backgroundColor: token.bgColor,
-          fontStyle: (token.fontStyle ?? 0) & 1 ? "italic" : undefined,
-          fontWeight: (token.fontStyle ?? 0) & 2 ? "bold" : undefined,
-          textDecoration: (token.fontStyle ?? 0) & 4 ? "underline" : undefined,
+          fontStyle: ((token.fontStyle ?? 0) & 1) !== 0 ? "italic" : undefined,
+          fontWeight: ((token.fontStyle ?? 0) & 2) !== 0 ? "bold" : undefined,
+          textDecoration: ((token.fontStyle ?? 0) & 4) !== 0 ? "underline" : undefined,
         },
       })),
     );

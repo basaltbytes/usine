@@ -12,10 +12,20 @@ import {
   outputFrame,
   Started,
 } from "@usine/cloudflare/stream";
-import { DateTime, Effect, Option, Redacted, Schema } from "effect";
+import { DateTime, Effect, Option, Redacted, Schema, Deferred } from "effect";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { type WebSocket as ServerSocket, WebSocketServer } from "ws";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 export const ACCESS_CLIENT_ID = "0123abcd.access";
 export const ACCESS_CLIENT_SECRET = "service-token-secret";
@@ -106,7 +116,7 @@ const defaultResponse = (
     case "codex":
       return ok("codex-cli 0.159.2\n");
     case "sh":
-      if (args[1]?.includes("ls -A"))
+      if (args[1]?.includes("ls -A") === true)
         return {
           stdout: "",
           exitCode: [...sandbox.paths].some((path) => path.startsWith(`${last}/`)) ? 0 : 1,
@@ -169,15 +179,20 @@ const summaryOf = (sandbox: FakeSandbox) => ({
 });
 
 const readBody = (request: IncomingMessage) =>
-  new Promise<string>((resolve) => {
+  (() => {
+    const completion = Deferred.makeUnsafe<string>();
+    const resolve = (value: string) => {
+      Deferred.doneUnsafe(completion, Effect.succeed(value));
+    };
     let body = "";
     request.on("data", (chunk: Buffer) => (body += chunk.toString()));
     request.on("end", () => resolve(body));
-  });
+    return Deferred.await(completion);
+  })();
 
 const json = (response: ServerResponse, status: number, body: Schema.Json) => {
   response.writeHead(status, { "content-type": "application/json" });
-  response.end(JSON.stringify(body));
+  response.end(stringifyJson(body));
 };
 
 /** Runs one exec stream: the first message starts a command, then stdin until `StdinEnd`. */
@@ -236,74 +251,78 @@ export const fakeWorker = Effect.gen(function* () {
   const authorized = (request: IncomingMessage) =>
     request.headers[ACCESS_CLIENT_ID_HEADER] === ACCESS_CLIENT_ID &&
     request.headers[ACCESS_CLIENT_SECRET_HEADER] === ACCESS_CLIENT_SECRET;
+  const actual1 = yield* Effect.context<never>();
+  const runRequest = Effect.runForkWith(actual1);
   const server = createServer((request, response) => {
-    void (async () => {
-      const url = new URL(request.url ?? "/", "http://worker.test");
-      state.requests.push(`${request.method} ${url.pathname}`);
-      if (!authorized(request)) return json(response, 401, {});
-      if (url.pathname === "/v1/health")
-        return json(response, 200, { protocol: 1, images: state.images });
-      if (url.pathname === "/v1/sandboxes") {
-        const owner = url.searchParams.get("owner");
-        return json(response, 200, {
-          sandboxes: [...state.sandboxes.values()]
-            .filter((sandbox) => sandbox.owner === owner)
-            .map(summaryOf),
-        });
-      }
-      const [, , , name = "", action] = url.pathname.split("/");
-      const sandbox = state.sandboxes.get(name);
-      const body = await readBody(request);
-      if (request.method === "PUT" && action === undefined) {
-        const created = decodeCreate(JSON.parse(body));
-        const existing =
-          sandbox ??
-          ({
-            name,
-            owner: created.owner,
-            attempt: created.attempt,
-            running: true,
-            held: false,
-            draining: false,
-            github: [],
-            providers: [],
-            issued: [],
-            paths: new Set(),
-            commands: [],
-            stops: 0,
-          } satisfies FakeSandbox);
-        const refused = publish(existing, created.credentials);
-        if (Option.isSome(refused)) return json(response, 409, refused.value);
-        existing.running = true;
-        state.sandboxes.set(name, existing);
-        return json(response, 200, summaryOf(existing));
-      }
-      if (sandbox === undefined) return json(response, 404, { _tag: "SandboxNotFound", name });
-      if (request.method === "GET" && action === undefined)
-        return json(response, 200, summaryOf(sandbox));
-      if (request.method === "PUT" && action === "credentials") {
-        if (!sandbox.running)
-          return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
-        const refused = publish(sandbox, decodeCredentials(JSON.parse(body)));
-        if (Option.isSome(refused)) return json(response, 409, refused.value);
-        return json(response, 200, summaryOf(sandbox));
-      }
-      if (request.method === "POST" && action === "hold") {
-        if (!sandbox.running)
-          return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
-        sandbox.held = true;
-        return json(response, 200, summaryOf(sandbox));
-      }
-      if (request.method === "POST" && action === "stop") {
-        sandbox.stops += 1;
-        return json(response, 200, { stopped: 0 });
-      }
-      if (request.method === "DELETE") {
-        state.sandboxes.delete(name);
-        return json(response, 200, { destroyed: true });
-      }
-      return json(response, 404, {});
-    })();
+    runRequest(
+      Effect.gen(function* () {
+        const url = new URL(request.url ?? "/", "http://worker.test");
+        state.requests.push(`${request.method} ${url.pathname}`);
+        if (!authorized(request)) return json(response, 401, {});
+        if (url.pathname === "/v1/health")
+          return json(response, 200, { protocol: 1, images: state.images });
+        if (url.pathname === "/v1/sandboxes") {
+          const owner = url.searchParams.get("owner");
+          return json(response, 200, {
+            sandboxes: [...state.sandboxes.values()]
+              .filter((sandbox) => sandbox.owner === owner)
+              .map(summaryOf),
+          });
+        }
+        const [, , , name = "", action] = url.pathname.split("/");
+        const sandbox = state.sandboxes.get(name);
+        const body = yield* readBody(request);
+        if (request.method === "PUT" && action === undefined) {
+          const created = decodeCreate(parseJson(body));
+          const existing =
+            sandbox ??
+            ({
+              name,
+              owner: created.owner,
+              attempt: created.attempt,
+              running: true,
+              held: false,
+              draining: false,
+              github: [],
+              providers: [],
+              issued: [],
+              paths: new Set(),
+              commands: [],
+              stops: 0,
+            } satisfies FakeSandbox);
+          const refused = publish(existing, created.credentials);
+          if (Option.isSome(refused)) return json(response, 409, refused.value);
+          existing.running = true;
+          state.sandboxes.set(name, existing);
+          return json(response, 200, summaryOf(existing));
+        }
+        if (sandbox === undefined) return json(response, 404, { _tag: "SandboxNotFound", name });
+        if (request.method === "GET" && action === undefined)
+          return json(response, 200, summaryOf(sandbox));
+        if (request.method === "PUT" && action === "credentials") {
+          if (!sandbox.running)
+            return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
+          const refused = publish(sandbox, decodeCredentials(parseJson(body)));
+          if (Option.isSome(refused)) return json(response, 409, refused.value);
+          return json(response, 200, summaryOf(sandbox));
+        }
+        if (request.method === "POST" && action === "hold") {
+          if (!sandbox.running)
+            return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
+          sandbox.held = true;
+          return json(response, 200, summaryOf(sandbox));
+        }
+        if (request.method === "POST" && action === "stop") {
+          sandbox.stops += 1;
+          return json(response, 200, { stopped: 0 });
+        }
+        if (request.method === "DELETE") {
+          state.sandboxes.delete(name);
+          return json(response, 200, { destroyed: true });
+        }
+        return json(response, 404, {});
+      }),
+    );
   });
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://worker.test");

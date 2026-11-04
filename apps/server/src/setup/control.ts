@@ -184,34 +184,35 @@ const makeSetup = Effect.fn("Setup.make")(function* (
             onSome: (organization) => `organizations/${encodeURIComponent(organization)}/settings`,
           });
           yield* Effect.logInfo("GitHub App manifest prepared");
+          const manifest = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+            name: request.name,
+            url: origin,
+            public: false,
+            redirect_url: `${origin}/api/setup/callback`,
+            callback_urls: [`${origin}/api/auth/callback`],
+            setup_url: `${origin}/setup`,
+            hook_attributes: {
+              active: true,
+              url:
+                new URL(origin).protocol === "https:"
+                  ? `${origin}/webhooks/github`
+                  : "https://usine.invalid/webhooks/github",
+            },
+            default_permissions: REQUIRED_REPOSITORY_PERMISSIONS,
+            default_events: [
+              "issues",
+              "issue_comment",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "push",
+              "check_suite",
+            ],
+          }).pipe(Effect.orDie);
           return {
             state,
             action: `https://github.com/${account}/apps/new?state=${encodeURIComponent(state)}`,
-            manifest: JSON.stringify({
-              name: request.name,
-              url: origin,
-              public: false,
-              redirect_url: `${origin}/api/setup/callback`,
-              callback_urls: [`${origin}/api/auth/callback`],
-              setup_url: `${origin}/setup`,
-              hook_attributes: {
-                active: true,
-                url:
-                  new URL(origin).protocol === "https:"
-                    ? `${origin}/webhooks/github`
-                    : "https://usine.invalid/webhooks/github",
-              },
-              default_permissions: REQUIRED_REPOSITORY_PERMISSIONS,
-              default_events: [
-                "issues",
-                "issue_comment",
-                "pull_request",
-                "pull_request_review",
-                "pull_request_review_comment",
-                "push",
-                "check_suite",
-              ],
-            }),
+            manifest: manifest,
           };
         }),
       ),
@@ -305,7 +306,7 @@ export class Setup extends Context.Service<
     readonly exchange: (state: string, code: string) => Effect.Effect<void, AuthError>;
     readonly restore: (source: string) => Effect.Effect<void, AuthError>;
   }
->()("@usine/server/Setup") {
+>()("@usine/server/setup/control/Setup") {
   static readonly layer = (
     directory: InstanceDirectory,
     registered: Effect.Effect<boolean>,

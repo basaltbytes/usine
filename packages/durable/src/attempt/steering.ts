@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Effect, Option, Schema } from "effect";
 import { durableError, type DurableHarness } from "../harness.ts";

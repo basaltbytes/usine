@@ -13,6 +13,10 @@ import {
 } from "../src/installation.ts";
 import { RepositoryLabelColor, RepositoryLabelName } from "../src/polling/labels.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const repository = RepositoryName.make("basaltbytes/usine");
 const token = InstallationToken.make({
   value: Redacted.make("label-writer-token"),
@@ -52,7 +56,7 @@ describe("GitHubLabelWriter", () => {
         HttpClientResponse.fromWeb(
           request,
           new Response(
-            JSON.stringify({
+            stringifyJson({
               name: "ready-for-agent",
               color: "A2EEEF",
               description: "Ready for an agent to claim",
@@ -84,9 +88,10 @@ describe("GitHubLabelWriter", () => {
       assert.strictEqual(sent.headers.authorization, "Bearer label-writer-token");
       assert.strictEqual(sent.body._tag, "Uint8Array");
       if (sent.body._tag !== "Uint8Array") return;
-      const valueDecoded1 = yield* Schema.decodeUnknownEffect(RequestBody)(
-        JSON.parse(new TextDecoder().decode(sent.body.body)),
-      );
+      const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        new TextDecoder().decode(sent.body.body),
+      ).pipe(Effect.orDie);
+      const valueDecoded1 = yield* Schema.decodeUnknownEffect(RequestBody)(json1);
       assert.deepStrictEqual(valueDecoded1, {
         name: "ready-for-agent",
         color: "A2EEEF",

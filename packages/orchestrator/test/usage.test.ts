@@ -22,8 +22,12 @@ import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { RunReader } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
-import { DateTime, Effect, Layer, Logger, Option } from "effect";
+import { DateTime, Effect, Layer, Logger, Option, Schema } from "effect";
 import { RunUsageReader, runUsageSource } from "../src/operator/usage.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const now = DateTime.makeUnsafe("2026-10-26T09:00:00.000Z");
 const runId = RunId.make("run");
@@ -183,7 +187,7 @@ describe("RunUsageReader", () => {
   it.effect("leaves a Codex model without rates unpriced and logs it once", () => {
     const warnings: Array<string> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+      if (logLevel === "Warn") warnings.push(stringifyJson(message));
     });
     return Effect.gen(function* () {
       const reader = yield* RunUsageReader;

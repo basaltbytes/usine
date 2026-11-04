@@ -27,6 +27,10 @@ import {
   codexAppServerLive,
 } from "../../../src/pi/codex/app-server.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const request = ChildRequest.make({
   worker: WorkerName.make("worker-1"),
   machine: Option.none(),
@@ -47,7 +51,7 @@ const request = ChildRequest.make({
 });
 
 const encoder = new TextEncoder();
-const line = (value: Schema.Json): Uint8Array => encoder.encode(`${JSON.stringify(value)}\n`);
+const line = (value: Schema.Json): Uint8Array => encoder.encode(`${stringifyJson(value)}\n`);
 
 interface FakeProcess {
   readonly stdout: Queue.Queue<Uint8Array, Cause.Done>;
@@ -278,7 +282,10 @@ describe("Codex app-server transport", () => {
             .request("interrupt", "turn/interrupt", {})
             .pipe(Effect.result, Effect.forkChild);
           yield* awaitStdinLines(process, 2);
-          const sent: unknown = JSON.parse(process.stdinLines[0] ?? "");
+          const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            process.stdinLines[0] ?? "",
+          ).pipe(Effect.orDie);
+          const sent: unknown = json1;
           assert(Schema.is(Schema.Struct({ id: Schema.Int }))(sent));
           yield* Queue.offer(process.stdout, line({ id: sent.id, result: { accepted: true } }));
 
@@ -408,7 +415,10 @@ describe("Codex app-server transport", () => {
           yield* Queue.offer(process.stdout, line({ id: 9, method: "item/approval" }));
           yield* Queue.offer(process.stdout, line({ method: "turn/started", params: {} }));
           yield* awaitStdinLines(process, 1);
-          const written: unknown = JSON.parse(process.stdinLines[0] ?? "");
+          const json2 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            process.stdinLines[0] ?? "",
+          ).pipe(Effect.orDie);
+          const written: unknown = json2;
           assert.deepStrictEqual(written, {
             id: 9,
             error: { code: -32601, message: "usine runs Codex headlessly" },

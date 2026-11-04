@@ -29,6 +29,10 @@ import {
   runtime,
 } from "./support.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const KILL_CHILDREN = `exec 'sh' '-c' '${CHILD_KILL_SCRIPT.replaceAll("'", `'"'"'`)}' 'sh' '${WORKTREE}'`;
 
 /** A parent that reports it started, then runs until its task is canceled or the process stops. */
@@ -82,7 +86,7 @@ const postSignedComment = (ssh: ReturnType<typeof fakeSsh>) => {
     created_at: at,
     updated_at: at,
   });
-  ssh.state.issueComments = JSON.stringify([
+  ssh.state.issueComments = stringifyJson([
     [signed(COMMENT, "2026-10-20T10:00:00Z"), signed(SHARED, "2026-10-20T10:07:00Z")],
   ]);
 };
@@ -872,7 +876,10 @@ describe("exe.dev launch", () => {
         const issued = ssh.state.commands.slice(restart);
         assert(!issued.some(({ args }) => args.includes("attach")), "no credential is granted");
         assert(!issued.map(remoteLine).some((line) => line.includes("'gh'")));
-        assert(JSON.stringify(warnings).includes("its checkout is gone"));
+        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          warnings,
+        ).pipe(Effect.orDie);
+        assert(json1.includes("its checkout is gone"));
       });
     },
   );

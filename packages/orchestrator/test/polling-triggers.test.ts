@@ -5,6 +5,8 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { noCycleBudgets } from "./support/polling.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createHash } from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";

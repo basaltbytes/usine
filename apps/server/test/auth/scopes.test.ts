@@ -1,4 +1,4 @@
-import { assert, it } from "vitest";
+import { assert, it } from "@effect/vitest";
 import { Clock, Effect, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import {
@@ -13,8 +13,9 @@ import { alice, authFixture, localSecret } from "./fixture.ts";
 import { InstanceToken, TokenId, TokenName } from "../../src/auth/model.ts";
 import { secretHash } from "../../src/auth/crypto.ts";
 
-it("keeps local attribution separate from members and limits issued tokens to current grants", async () =>
-  Effect.runPromise(
+it.live(
+  "keeps local attribution separate from members and limits issued tokens to current grants",
+  () =>
     Effect.gen(function* () {
       const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
       const beta = ProjectScope.make({ project: ProjectId.make("beta") });
@@ -60,11 +61,12 @@ it("keeps local attribution separate from members and limits issued tokens to cu
       grants = [];
       assert.deepEqual((yield* auth.authenticate(Redacted.value(issued.secret))).permissions, []);
     }).pipe(Effect.scoped),
-  ));
+);
 
 for (const initialRole of ["none", "viewer"] as const)
-  it(`updates the same browser session when a ${initialRole} member gains an operator binding`, async () =>
-    Effect.runPromise(
+  it.live(
+    `updates the same browser session when a ${initialRole} member gains an operator binding`,
+    () =>
       Effect.gen(function* () {
         const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
         const binding = RoleBinding.make({
@@ -105,93 +107,86 @@ for (const initialRole of ["none", "viewer"] as const)
         if (browser === undefined) return;
         assert.equal((yield* auth.setScopes(secret, browser.id, []).pipe(Effect.flip)).status, 400);
       }).pipe(Effect.scoped),
-    ));
+  );
 
-it("uses current bindings for a browser session with a stored scope ceiling", async () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
-      const binding = RoleBinding.make({
-        name: "alice-alpha",
-        member: alice.id,
-        role: "operator",
-        scope: alpha,
-      });
-      const { authentication: auth, store } = yield* authFixture(
-        [alice],
-        alice,
-        () => binding.permissions,
-      );
-      const now = yield* Clock.currentTimeMillis;
-      yield* store.issue(
-        InstanceToken.make({
-          id: TokenId.make("existing-browser"),
-          memberId: alice.id,
-          name: TokenName.make("Browser"),
-          hash: secretHash("existing-browser-secret"),
-          scopes: RoleBinding.make({ ...binding, role: "viewer" }).permissions,
-          kind: "session",
-          createdAt: now,
-          lastUsedAt: now,
-          expiresAt: now + 60000,
-        }),
-      );
-      assert.isTrue(
-        permits(
-          (yield* auth.authenticate("existing-browser-secret")).permissions,
-          "operate",
-          alpha,
-        ),
-      );
-    }).pipe(Effect.scoped),
-  ));
+it.live("uses current bindings for a browser session with a stored scope ceiling", () =>
+  Effect.gen(function* () {
+    const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+    const binding = RoleBinding.make({
+      name: "alice-alpha",
+      member: alice.id,
+      role: "operator",
+      scope: alpha,
+    });
+    const { authentication: auth, store } = yield* authFixture(
+      [alice],
+      alice,
+      () => binding.permissions,
+    );
+    const now = yield* Clock.currentTimeMillis;
+    yield* store.issue(
+      InstanceToken.make({
+        id: TokenId.make("existing-browser"),
+        memberId: alice.id,
+        name: TokenName.make("Browser"),
+        hash: secretHash("existing-browser-secret"),
+        scopes: RoleBinding.make({ ...binding, role: "viewer" }).permissions,
+        kind: "session",
+        createdAt: now,
+        lastUsedAt: now,
+        expiresAt: now + 60000,
+      }),
+    );
+    assert.isTrue(
+      permits((yield* auth.authenticate("existing-browser-secret")).permissions, "operate", alpha),
+    );
+  }).pipe(Effect.scoped),
+);
 
-it("removes access from an existing browser session when its binding is removed", async () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
-      let grants: ReadonlyArray<PermissionGrant> = RoleBinding.make({
-        name: "alice-alpha",
-        member: alice.id,
-        role: "operator",
-        scope: alpha,
-      }).permissions;
-      const { authentication: auth } = yield* authFixture([alice], alice, () => grants);
-      const currentLink = yield* auth.link;
-      const link = new URL(currentLink);
-      const session = yield* auth.consumeLink(
-        new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
-      );
-      const secret = Redacted.value(session.secret);
-      assert.isTrue(permits((yield* auth.authenticate(secret)).permissions, "operate", alpha));
-      grants = [];
-      assert.deepEqual((yield* auth.authenticate(secret)).permissions, []);
-    }).pipe(Effect.scoped),
-  ));
+it.live("removes access from an existing browser session when its binding is removed", () =>
+  Effect.gen(function* () {
+    const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+    let grants: ReadonlyArray<PermissionGrant> = RoleBinding.make({
+      name: "alice-alpha",
+      member: alice.id,
+      role: "operator",
+      scope: alpha,
+    }).permissions;
+    const { authentication: auth } = yield* authFixture([alice], alice, () => grants);
+    const currentLink = yield* auth.link;
+    const link = new URL(currentLink);
+    const session = yield* auth.consumeLink(
+      new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
+    );
+    const secret = Redacted.value(session.secret);
+    assert.isTrue(permits((yield* auth.authenticate(secret)).permissions, "operate", alpha));
+    grants = [];
+    assert.deepEqual((yield* auth.authenticate(secret)).permissions, []);
+  }).pipe(Effect.scoped),
+);
 
-it("keeps device sign-in scopes at the current binding snapshot after a promotion", async () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
-      const binding = RoleBinding.make({
-        name: "alice-alpha",
-        member: alice.id,
-        role: "viewer",
-        scope: alpha,
-      });
-      let grants: ReadonlyArray<PermissionGrant> = binding.permissions;
-      const { authentication: auth } = yield* authFixture([alice], alice, () => grants);
-      const started = yield* auth.startDevice(TokenName.make("Laptop"));
-      yield* TestClock.adjust("1 second");
-      const issued = yield* auth.pollDevice(Redacted.value(started.id));
-      assert.isTrue(Option.isSome(issued));
-      if (Option.isNone(issued)) return;
-      const secret = Redacted.value(issued.value.secret);
-      grants = RoleBinding.make({ ...binding, role: "operator" }).permissions;
-      const access = yield* auth.authenticate(secret);
-      assert.isTrue(permits(access.permissions, "read", alpha));
-      assert.isFalse(permits(access.permissions, "operate", alpha));
-      grants = [];
-      assert.deepEqual((yield* auth.authenticate(secret)).permissions, []);
-    }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
-  ));
+it.live("keeps device sign-in scopes at the current binding snapshot after a promotion", () =>
+  Effect.gen(function* () {
+    const alpha = ProjectScope.make({ project: ProjectId.make("alpha") });
+    const binding = RoleBinding.make({
+      name: "alice-alpha",
+      member: alice.id,
+      role: "viewer",
+      scope: alpha,
+    });
+    let grants: ReadonlyArray<PermissionGrant> = binding.permissions;
+    const { authentication: auth } = yield* authFixture([alice], alice, () => grants);
+    const started = yield* auth.startDevice(TokenName.make("Laptop"));
+    yield* TestClock.adjust("1 second");
+    const issued = yield* auth.pollDevice(Redacted.value(started.id));
+    assert.isTrue(Option.isSome(issued));
+    if (Option.isNone(issued)) return;
+    const secret = Redacted.value(issued.value.secret);
+    grants = RoleBinding.make({ ...binding, role: "operator" }).permissions;
+    const access = yield* auth.authenticate(secret);
+    assert.isTrue(permits(access.permissions, "read", alpha));
+    assert.isFalse(permits(access.permissions, "operate", alpha));
+    grants = [];
+    assert.deepEqual((yield* auth.authenticate(secret)).permissions, []);
+  }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
+);

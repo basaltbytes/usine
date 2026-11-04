@@ -52,11 +52,12 @@ export const scaffold = Effect.fn("Scaffold.create")(function* (
     dependencies: { "@usine/server": serverVersion },
     engines: { node: ">=22" },
   };
-  yield* fs.writeFileString(
-    path.join(directory, "package.json"),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    { flag: "wx" },
-  );
+  const serializedManifest = yield* Schema.encodeEffect(
+    Schema.fromJsonString(Schema.Unknown, { space: 2 }),
+  )(manifest).pipe(Effect.orDie);
+  yield* fs.writeFileString(path.join(directory, "package.json"), `${serializedManifest}\n`, {
+    flag: "wx",
+  });
   yield* fs.writeFileString(path.join(directory, ".gitignore"), ".usine/\nnode_modules/\n.env\n", {
     flag: "wx",
   });

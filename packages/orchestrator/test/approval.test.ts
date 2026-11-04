@@ -24,6 +24,10 @@ import { triggerSubmission } from "../src/trigger-submission.ts";
 import { runView } from "../src/operator/projection.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const condition = 'item.labelEvents["ready-for-agent"].actor.type != "User"';
 const label = (actor: Schema.Json) => ({
   labelEvents: { "ready-for-agent": { actor, createdAt: "2026-10-30T12:00:00Z" } },
@@ -104,7 +108,7 @@ for (const scenario of [
   it.live(scenario.name, () => {
     const warnings: Array<string> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+      if (logLevel === "Warn") warnings.push(stringifyJson(message));
     });
     return Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

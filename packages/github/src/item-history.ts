@@ -202,7 +202,7 @@ export class GitHubItemHistory extends Context.Service<
       actor: BotLogin,
     ) => Effect.Effect<ReadonlyArray<ItemChange>, GitHubAppError | GitHubItemNotFoundError>;
   }
->()("@usine/github/GitHubItemHistory") {
+>()("@usine/github/item-history/GitHubItemHistory") {
   /** Provides bot timeline reads through GraphQL with the App's shared token and HTTP client. */
   static readonly layer: Layer.Layer<GitHubItemHistory, never, GitHubApp | HttpClient.HttpClient> =
     Layer.effect(

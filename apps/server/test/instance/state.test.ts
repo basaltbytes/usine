@@ -1,11 +1,17 @@
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { spawnSync } from "node:child_process";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { DateTime, Effect, Option, Schema } from "effect";
-import { afterEach, assert, describe, it } from "vitest";
+import { afterEach, assert, describe, it } from "@effect/vitest";
 import { Port } from "../../src/cli.ts";
 import { holdInstance } from "../../src/instance/lock.ts";
 import {
@@ -22,6 +28,10 @@ import {
   probeInstance,
   signalProcess,
 } from "../../src/instance/state.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const prettyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }));
 
 const folders: Array<string> = [];
 
@@ -52,22 +62,18 @@ const recordFor = (pid: number) =>
 
 /** `.usine/instance.json` as `@usine/server` 0.3.0 at e22d67c wrote it, before `launch.logLevel`. */
 const previousVersionRecord = (pid: number) =>
-  `${JSON.stringify(
-    {
-      pid,
-      version: "0.3.0",
-      startedAt: "2026-10-25T18:00:00.000Z",
-      launch: {
-        node: process.execPath,
-        nodeOptions: [],
-        script: "/opt/usine/apps/server/dist/main.js",
-        port: 8_113,
-        allowVolatileInstance: false,
-      },
+  `${prettyJson({
+    pid,
+    version: "0.3.0",
+    startedAt: "2026-10-25T18:00:00.000Z",
+    launch: {
+      node: process.execPath,
+      nodeOptions: [],
+      script: "/opt/usine/apps/server/dist/main.js",
+      port: 8_113,
+      allowVolatileInstance: false,
     },
-    null,
-    2,
-  )}\n`;
+  })}\n`;
 
 /** Returns the PID of a process that has exited. */
 const exitedPid = (): number => {
@@ -91,46 +97,49 @@ const pid1OwnedByThisUser = () => {
 };
 
 describe("instance state", () => {
-  it("reports a folder that never ran usine as stopped", async () => {
-    const state = await probe(instanceFolder());
-    assert.deepStrictEqual(state, Stopped.make({ stale: Option.none() }));
-  });
+  it.live("reports a folder that never ran usine as stopped", () =>
+    Effect.gen(function* () {
+      const state = yield* Effect.promise(() => probe(instanceFolder()));
+      assert.deepStrictEqual(state, Stopped.make({ stale: Option.none() }));
+    }),
+  );
 
-  it("reports a record without a lock holder as stale, even if its pid is live", async () => {
-    const directory = instanceFolder();
-    const files = instanceFiles(directory);
-    mkdirSync(files.folder);
-    writeFileSync(files.lock, "");
-    // The test process is live, but it doesn't hold the lock: a reused pid never counts.
-    writeFileSync(
-      files.record,
-      JSON.stringify(
-        await Effect.runPromise(Schema.encodeEffect(InstanceRecord)(recordFor(process.pid))),
-      ),
-    );
-    const state = await probe(directory);
-    assert(state._tag === "Stopped");
-    assert.deepStrictEqual(state.stale, Option.some(process.pid));
-  });
+  it.live("reports a record without a lock holder as stale, even if its pid is live", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      const files = instanceFiles(directory);
+      mkdirSync(files.folder);
+      writeFileSync(files.lock, "");
+      // The test process is live, but it doesn't hold the lock: a reused pid never counts.
+      const actual1 = yield* Schema.encodeEffect(InstanceRecord)(recordFor(process.pid));
+      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(actual1).pipe(
+        Effect.orDie,
+      );
+      writeFileSync(files.record, json1);
+      const state = yield* Effect.promise(() => probe(directory));
+      assert(state._tag === "Stopped");
+      assert.deepStrictEqual(state.stale, Option.some(process.pid));
+    }),
+  );
 
-  it("reports the lock holder whose record names a live process as running", async () => {
-    const directory = instanceFolder();
-    await Effect.runPromise(
-      Effect.gen(function* () {
+  it.live("reports the lock holder whose record names a live process as running", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      yield* Effect.gen(function* () {
         yield* holdInstance(directory, recordFor(process.pid));
         const state = yield* probeInstance(directory);
         assert.instanceOf(state, Running);
         assert.strictEqual(state.record.pid, process.pid);
         assert.strictEqual(state.record.launch.port, 8_112);
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-    );
-  });
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+    }),
+  );
 
-  it("reads the record that the previous engine version wrote", async () => {
-    const directory = instanceFolder();
-    const files = instanceFiles(directory);
-    await Effect.runPromise(
-      Effect.gen(function* () {
+  it.live("reads the record that the previous engine version wrote", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      const files = instanceFiles(directory);
+      yield* Effect.gen(function* () {
         yield* holdInstance(directory, recordFor(process.pid));
         writeFileSync(files.record, previousVersionRecord(process.pid));
         const state = yield* probeInstance(directory);
@@ -138,15 +147,15 @@ describe("instance state", () => {
         assert.strictEqual(state.record.version, "0.3.0");
         assert.strictEqual(state.record.launch.port, 8_113);
         assert.strictEqual(state.record.launch.logLevel, "Info");
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-    );
-  });
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+    }),
+  );
 
-  it("reports a lock holder without a usable record as unrecorded", async () => {
-    const directory = instanceFolder();
-    const files = instanceFiles(directory);
-    await Effect.runPromise(
-      Effect.gen(function* () {
+  it.live("reports a lock holder without a usable record as unrecorded", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      const files = instanceFiles(directory);
+      yield* Effect.gen(function* () {
         yield* holdInstance(directory, recordFor(process.pid));
         // An older usine writes only the pid file.
         rmSync(files.record);
@@ -155,29 +164,31 @@ describe("instance state", () => {
         assert.deepStrictEqual(legacy.pid, Option.some(process.pid));
         const valueDecoded1 = yield* Schema.encodeEffect(InstanceRecord)(recordFor(exitedPid()));
         // A record of an exited process, left by a crash before this holder wrote its own.
-        writeFileSync(files.record, JSON.stringify(valueDecoded1));
+        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          valueDecoded1,
+        ).pipe(Effect.orDie);
+        writeFileSync(files.record, json2);
         writeFileSync(files.pid, `${exitedPid()}\n`);
         const starting = yield* probeInstance(directory);
         assert.deepStrictEqual(starting, Unrecorded.make({ pid: Option.none() }));
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-    );
-  });
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+    }),
+  );
 
   // Signaling pid 1 as another user fails with EPERM. As root, or in a container whose init runs
   // as this user (the attempt image's tini runs as `usine`), the signal would reach init and stop
   // it, so the case runs only where pid 1 belongs to someone else.
-  it.skipIf(process.getuid?.() === 0 || pid1OwnedByThisUser())(
+  it.live.skipIf(process.getuid?.() === 0 || pid1OwnedByThisUser())(
     "reports a process that it may not signal",
-    async () => {
-      const error = await Effect.runPromise(
-        signalProcess(ProcessId.make(1), "SIGTERM").pipe(Effect.flip),
-      );
-      assert.instanceOf(error, SignalError);
-      assert.strictEqual(error.signal, "SIGTERM");
-    },
+    () =>
+      Effect.gen(function* () {
+        const error = yield* signalProcess(ProcessId.make(1), "SIGTERM").pipe(Effect.flip);
+        assert.instanceOf(error, SignalError);
+        assert.strictEqual(error.signal, "SIGTERM");
+      }),
   );
 
-  it("succeeds when the process exited before the signal", async () => {
-    await Effect.runPromise(signalProcess(ProcessId.make(exitedPid()), "SIGTERM"));
-  });
+  it.live("succeeds when the process exited before the signal", () =>
+    signalProcess(ProcessId.make(exitedPid()), "SIGTERM"),
+  );
 });

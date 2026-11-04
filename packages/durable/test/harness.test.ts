@@ -1,6 +1,8 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { assert, it } from "@effect/vitest";
 import { defineDoc, defineExtension, defineTask } from "@earendil-works/pi-durable";
-import { Effect } from "effect";
+import { Effect, DateTime } from "effect";
 import { HoldDoc } from "../src/attempt/documents.ts";
 import { DurableHarness } from "../src/harness.ts";
 import { layer } from "../src/testing.ts";
@@ -32,7 +34,7 @@ it.live(
               () => ({
                 status: "sleeping",
                 checkpoint: { phase: "wait" },
-                until: Date.now() + 60_000,
+                until: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
               }),
               context,
             ),

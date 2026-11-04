@@ -1,6 +1,10 @@
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** The base URL of the fake Hetzner Cloud API. */
 export const HETZNER_TEST_API = "https://hetzner.test/v1";
 /** The base URL of the fake Boat API. */
@@ -127,7 +131,7 @@ const json = (
 ) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(JSON.stringify(body), {
+    new Response(stringifyJson(body), {
       status,
       headers: { "content-type": "application/json" },
     }),

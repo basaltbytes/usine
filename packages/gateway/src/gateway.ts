@@ -74,7 +74,7 @@ export { UpstreamBase } from "./upstream.ts";
  * The Gateway's shared state for one process: the attachment store, the caller token signer,
  * the current settings, and the ChatGPT logins. Provide this layer once to the reverse proxy,
  * forward proxy, admin API, and reload. The logins need a `FileSystem` for their auth files and
- * an `HttpClient` for refreshes.
+ * an `HttpClient` for refreshes and `Crypto` for temporary auth-file names.
  */
 export const gatewayServicesWithAttachments = <E, R>(attachments: Layer.Layer<Attachments, E, R>) =>
   Layer.mergeAll(attachments, CallerTokens.layer, SettingsInForce.layer, ChatGptLogins.layer);

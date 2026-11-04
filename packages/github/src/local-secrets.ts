@@ -179,17 +179,14 @@ export const writeLocalSecrets = Effect.fn("GitHubCredentials.writeSecrets")(fun
         prefix: ".github-app-",
       });
       const source = path.join(temporary, "secrets.json");
-      yield* fs.writeFileString(
-        source,
-        JSON.stringify({
-          app_id: secrets.appId,
-          private_key: Redacted.value(secrets.privateKey),
-          client_id: Option.getOrUndefined(secrets.clientId),
-          client_secret: Option.getOrUndefined(Option.map(secrets.clientSecret, Redacted.value)),
-          webhook_secret: Option.getOrUndefined(Option.map(secrets.webhookSecret, Redacted.value)),
-        }),
-        { mode: 0o600, flag: "wx" },
-      );
+      const serialized = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        app_id: secrets.appId,
+        private_key: Redacted.value(secrets.privateKey),
+        client_id: Option.getOrUndefined(secrets.clientId),
+        client_secret: Option.getOrUndefined(Option.map(secrets.clientSecret, Redacted.value)),
+        webhook_secret: Option.getOrUndefined(Option.map(secrets.webhookSecret, Redacted.value)),
+      }).pipe(Effect.orDie);
+      yield* fs.writeFileString(source, serialized, { mode: 0o600, flag: "wx" });
       yield* fs.rename(source, target);
     }),
   ).pipe(

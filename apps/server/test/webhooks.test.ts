@@ -1,5 +1,7 @@
 import { NodeHttpServer } from "@effect/platform-node";
 import { TestClock } from "effect/testing";
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createHmac } from "node:crypto";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";

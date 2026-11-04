@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { ContainerMemoryMib, ContainerScratchMib } from "@usine/core/worker";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import { Executor } from "../../src/executor.ts";
 import {
   ADDRESS,
@@ -10,6 +10,10 @@ import {
   noGateway,
   request,
 } from "./support.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const cases = [
   { setting: "default", memory: 4096, shm: undefined, tmpfs: undefined, expected: [2048, 2048] },
@@ -30,7 +34,7 @@ it.effect.each(
   const machine = fakeMachine();
   if (entry.runtime === "docker") machine.state.docker = "running";
   else
-    machine.state.podmanInfo = JSON.stringify({
+    machine.state.podmanInfo = stringifyJson({
       version: { Version: "5.4.2" },
       host: {
         security: { rootless: true },

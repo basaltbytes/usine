@@ -7,7 +7,7 @@ import { ItemKey } from "@usine/core/item";
 import { RunId } from "@usine/core/run";
 import { EffectLogger } from "drizzle-orm/effect-core";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
-import { Config, Context, DateTime, Effect, FileSystem, Layer, Option } from "effect";
+import { Config, Context, DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { sqliteTempDirectory } from "../../../../../tooling/test/sqlite.mts";
 import { RunDatabase } from "../../../src/database/database.ts";
@@ -208,22 +208,19 @@ it.live(
       }
       yield* client`PRAGMA wal_checkpoint(TRUNCATE)`;
       const size = yield* fs.stat(`${directory}/.usine/runtime.sqlite`);
-      if (Option.isSome(reportPath))
-        yield* fs.writeFileString(
-          reportPath.value,
-          JSON.stringify(
-            {
-              bytes: Number(size.size),
-              migrationBytes,
-              migrationMillis,
-              readerTimes,
-              queries: measurements,
-              transcriptPlans,
-            },
-            null,
-            2,
-          ) + "\n",
-        );
+      if (Option.isSome(reportPath)) {
+        const json1 = yield* Schema.encodeEffect(
+          Schema.fromJsonString(Schema.Unknown, { space: 2 }),
+        )({
+          bytes: Number(size.size),
+          migrationBytes,
+          migrationMillis,
+          readerTimes,
+          queries: measurements,
+          transcriptPlans,
+        }).pipe(Effect.orDie);
+        yield* fs.writeFileString(reportPath.value, json1 + "\n");
+      }
       for (const { reader, sql, plan } of measurements) {
         if (/usine_attempt_transcripts|usine_pool_rate_limits/iu.test(sql)) continue;
         for (const detail of plan)

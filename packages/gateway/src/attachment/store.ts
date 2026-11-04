@@ -83,7 +83,7 @@ export class Attachments extends Context.Service<
     /** Removes expired attachments and returns the number removed. */
     readonly sweep: Effect.Effect<number, AttachmentPersistenceError>;
   }
->()("@usine/gateway/Attachments") {
+>()("@usine/gateway/attachment/store/Attachments") {
   /**
    * Restores unexpired entries from `persistence` and saves that filtered snapshot before use.
    * Persists mutations before updating memory and removes expired entries every minute until

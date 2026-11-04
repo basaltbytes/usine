@@ -34,6 +34,7 @@ import {
   Schedule,
   Tracer,
   TxRef,
+  Schema,
 } from "effect";
 import type { SqlError } from "effect/sql";
 import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts";
@@ -66,6 +67,10 @@ import {
   waitFor,
   withInstance,
 } from "./support.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 describe("durable run engine", () => {
   it.live(
@@ -1417,7 +1422,7 @@ describe("store failures in a Run's fiber", () => {
         ).pipe(Layer.provide(executorLayer(plans)));
         const failureSpans: Array<string | undefined> = [];
         const recovering = Logger.make(({ message, fiber }) => {
-          if (/fiber stopped on an engine failure/u.test(JSON.stringify(message))) {
+          if (/fiber stopped on an engine failure/u.test(stringifyJson(message))) {
             const span = Context.getOrUndefined(fiber.context, Tracer.ParentSpan);
             failureSpans.push(span?._tag === "Span" ? span.name : undefined);
             failures.left = 0;

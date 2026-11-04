@@ -135,10 +135,12 @@ export const cycleQueries = (database: RunDatabaseClient, record?: RecordChange)
     const completed = participants.find(({ loop }) => loop === submission.loop);
     if (completed === undefined || completed.admitted < submission.cycleLimit.value)
       return Option.none<CycleBudgetAsk>();
+    const askId = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+      submission.event.id,
+      budget.value.generation,
+    ]).pipe(Effect.orDie);
     const ask = CycleBudgetAsk.make({
-      id: CycleBudgetAskId.make(
-        EventId.make(JSON.stringify([submission.event.id, budget.value.generation])),
-      ),
+      id: CycleBudgetAskId.make(EventId.make(askId)),
       itemKey: submission.itemKey,
       repository: submission.repository,
       loop: submission.loop,

@@ -71,7 +71,7 @@ export class SandboxContainer extends Context.Service<
     /** Sends the container's requests for the interception's host to its outbound handler. */
     readonly intercept: (interception: Interception) => Effect.Effect<void, ContainerFailure>;
   }
->()("@usine/cloudflare/SandboxContainer") {}
+>()("@usine/cloudflare/sandbox/ports/SandboxContainer") {}
 
 /** A sandbox as its Durable Object stores it. */
 export class StoredSandbox extends Schema.Class<
@@ -130,7 +130,7 @@ export class SandboxStorage extends Context.Service<
     /** Replaces the sandbox's alarm. */
     readonly alarmAt: (at: DateTime.Utc) => Effect.Effect<void>;
   }
->()("@usine/cloudflare/SandboxStorage") {}
+>()("@usine/cloudflare/sandbox/ports/SandboxStorage") {}
 
 /** The registry that lists the sandboxes of each usine Worker. */
 export class SandboxDirectory extends Context.Service<
@@ -139,7 +139,7 @@ export class SandboxDirectory extends Context.Service<
     readonly record: (sandbox: SandboxSummary) => Effect.Effect<void>;
     readonly forget: (name: SandboxName) => Effect.Effect<void>;
   }
->()("@usine/cloudflare/SandboxDirectory") {}
+>()("@usine/cloudflare/sandbox/ports/SandboxDirectory") {}
 
 /** The Worker's settings that every sandbox reads. */
 export class SandboxSettings extends Context.Service<
@@ -148,4 +148,4 @@ export class SandboxSettings extends Context.Service<
     /** The hosts the sandboxes reach over HTTPS without a credential, from `ALLOWED_HOSTS`. */
     readonly allowedHosts: ReadonlyArray<string>;
   }
->()("@usine/cloudflare/SandboxSettings") {}
+>()("@usine/cloudflare/sandbox/ports/SandboxSettings") {}

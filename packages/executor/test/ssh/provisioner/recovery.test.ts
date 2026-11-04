@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { WorkerRoot } from "@usine/core/worker";
-import { Effect, Option } from "effect";
+import { Effect, Option, DateTime } from "effect";
 import { Executor, ExecutorOperationError, WorkerMachines } from "../../../src/executor.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
@@ -25,7 +25,7 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
           id: 21,
           name: "usine-eu-one-21",
           status: "running",
-          created: new Date().toISOString(),
+          created: DateTime.formatIso(DateTime.nowUnsafe()),
           labels: {
             "usine-instance": INSTANCE,
             "usine-worker": WORKER,

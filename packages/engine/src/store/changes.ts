@@ -1,6 +1,10 @@
 import { ChangeBus, type ScopedChange } from "@usine/core/changes";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 export type RecordChange = (change: ScopedChange) => Effect.Effect<void>;
 
@@ -15,7 +19,7 @@ export const changeTransaction =
         const changes = new Map<string, ScopedChange>();
         const record: RecordChange = (change) =>
           Effect.sync(() => {
-            changes.set(JSON.stringify([change.audience, change.target]), change);
+            changes.set(stringifyJson([change.audience, change.target]), change);
           });
         const value = yield* database.transaction((transaction) =>
           restore(operation(transaction, record)),

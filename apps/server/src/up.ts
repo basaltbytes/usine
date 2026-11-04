@@ -1,5 +1,7 @@
 import { changeBusLayer } from "@usine/core/changes";
 import { startupListener, type StartupListener } from "./listener.ts";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
 import { memberAccessLayer } from "./auth/access.ts";
 import { Setup } from "./setup/control.ts";
@@ -23,6 +25,8 @@ import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { configurationLayer, initializeConfiguration } from "./configuration/runtime.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";

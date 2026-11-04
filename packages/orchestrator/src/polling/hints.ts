@@ -77,7 +77,7 @@ const make = Effect.gen(function* () {
 
 /** The pending hint and request-backoff state of a polling runtime. */
 export class ItemHints extends Context.Service<ItemHints, Effect.Success<typeof make>>()(
-  "@usine/orchestrator/ItemHints",
+  "@usine/orchestrator/polling/hints/ItemHints",
 ) {
   static readonly layer = Layer.effect(ItemHints, make);
 }

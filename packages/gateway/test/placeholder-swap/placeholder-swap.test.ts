@@ -1,11 +1,30 @@
+import { NodeFileSystem } from "@effect/platform-node";
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { execFile } from "node:child_process";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Effect, Layer, Logger, Option, Predicate, Redacted } from "effect";
+import {
+  DateTime,
+  Effect,
+  Layer,
+  Logger,
+  Option,
+  Predicate,
+  Redacted,
+  Schema,
+  FileSystem,
+  Config,
+} from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
@@ -26,6 +45,10 @@ import {
   settingsLayer,
 } from "../fixtures.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /*
  * Checks whether Claude Code works when the Worker has only a placeholder subscription token
  * and the Gateway swaps in the real one. Run with
@@ -36,12 +59,16 @@ import {
  */
 
 const STUB_SUBSCRIPTION_TOKEN = "sk-ant-oat01-stub-subscription-token-for-the-swap-check";
+// Native command fixtures and test registration inspect the host environment synchronously.
+// @effect-diagnostics-next-line processEnv:off
 const LIVE_TOKEN = Option.fromNullishOr(process.env.CLAUDE_CODE_OAUTH_TOKEN).pipe(
   Option.filter((token) => token.trim() !== ""),
 );
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
 const installed = (command: string) =>
+  // The SDK test deliberately changes the host environment to verify tool isolation.
+  // @effect-diagnostics-next-line processEnv:off
   (process.env.PATH ?? "").split(":").some((directory) => existsSync(join(directory, command)));
 
 interface Seen {
@@ -87,10 +114,10 @@ const SSE_ANSWER = [
   ],
   ["message_stop", { type: "message_stop" }],
 ]
-  .map(([event, data]) => `event: ${String(event)}\ndata: ${JSON.stringify(data)}\n\n`)
+  .map(([event, data]) => `event: ${String(event)}\ndata: ${stringifyJson(data)}\n\n`)
   .join("");
 
-const JSON_ANSWER = JSON.stringify({
+const JSON_ANSWER = stringifyJson({
   id: "msg_stub",
   type: "message",
   role: "assistant",
@@ -118,7 +145,10 @@ const anthropicStub = Effect.acquireRelease(
         if (!(request.url ?? "").startsWith("/v1/messages")) {
           response.writeHead(404, { "content-type": "application/json" });
           response.end(
-            JSON.stringify({ type: "error", error: { type: "not_found_error", message: "stub" } }),
+            stringifyJson({
+              type: "error",
+              error: { type: "not_found_error", message: "stub" },
+            }),
           );
           return;
         }
@@ -155,6 +185,8 @@ const runClaude = (env: Record<string, string>) =>
 /** Runs Claude Code on a test Worker whose only Anthropic credential is the Gateway's caller token. */
 const swap = (providers: LlmProviders) =>
   Effect.gen(function* () {
+    const actual1 = yield* Config.option(Config.String("PATH"));
+    const environmentPATH1 = Option.getOrUndefined(actual1);
     const { proxy, egress, admin } = yield* GatewayAddresses;
     const client = yield* HttpApiClient.make(GatewayAdminApi, {
       baseUrl: `http://${admin.host}:${admin.port}`,
@@ -170,12 +202,20 @@ const swap = (providers: LlmProviders) =>
       }),
     });
     const home = yield* Effect.acquireRelease(
-      Effect.promise(() => mkdtemp(join(tmpdir(), "usine-swap-"))),
-      (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeTempDirectory({
+          directory: dirname(join(tmpdir(), "usine-swap-")),
+          prefix: basename(join(tmpdir(), "usine-swap-")),
+        }),
+      ),
+      (directory) =>
+        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.remove(directory, { recursive: true, force: true }),
+        ).pipe(Effect.orDie),
     );
     const placeholder = Redacted.value(attached.callerToken);
     return yield* runClaude({
-      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      PATH: environmentPATH1 ?? "/usr/bin:/bin",
       HOME: home,
       CLAUDE_CONFIG_DIR: join(home, ".claude"),
       ANTHROPIC_BASE_URL: "http://llm.gw.test/anthropic",
@@ -210,7 +250,7 @@ const egressAttempts: Array<string> = [];
 const recordEgress = Logger.layer(
   [
     Logger.make(({ message }) => {
-      const line = JSON.stringify(message);
+      const line = stringifyJson(message);
       if (line.includes("Gateway refused a request") || line.includes("Opened an egress tunnel"))
         egressAttempts.push(line);
     }),
@@ -248,7 +288,7 @@ describe("placeholder swap for a Claude subscription", () => {
         }
         assert.strictEqual(result.code, 0, result.stderr);
         assert.include(result.stdout, "OK");
-      }).pipe(Effect.provide(recordEgress)),
+      }).pipe(Effect.provide(Layer.provideMerge(recordEgress, NodeFileSystem.layer))),
     240_000,
   );
 
@@ -265,7 +305,7 @@ describe("placeholder swap for a Claude subscription", () => {
         });
         assert.strictEqual(result.code, 0, result.stderr);
         assert.include(result.stdout, "OK");
-      }),
+      }).pipe(Effect.provide(NodeFileSystem.layer)),
     240_000,
   );
 });

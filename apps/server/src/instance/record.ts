@@ -1,4 +1,8 @@
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { renameSync, writeFileSync } from "node:fs";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { type Brand, DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { UiOrigin } from "@usine/config/factory";
@@ -112,7 +116,9 @@ export const instanceFiles = (directory: string): InstanceFiles => {
 };
 
 const formatRecord = (record: typeof InstanceRecord.Encoded): string =>
-  `${JSON.stringify(record, null, 2)}\n`;
+  // JSON serialization at this synchronous boundary preserves the caller's return type.
+  // @effect-diagnostics-next-line schemaSync:off
+  `${Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }))(record)}\n`;
 
 const encodeRecord = (record: InstanceRecord) =>
   Schema.encodeEffect(InstanceRecord)(record).pipe(Effect.map(formatRecord));
@@ -145,7 +151,7 @@ export const markStoppingSync = (files: InstanceFiles, record: InstanceRecord): 
     systemdUnit: record.systemdUnit,
     stoppingSince: DateTime.nowUnsafe(),
   });
-  // The signal listener writes the already validated record synchronously.
+  // JSON serialization at this synchronous boundary preserves the caller's return type.
   // @effect-diagnostics-next-line schemaSync:off
   const encoded = Schema.encodeSync(InstanceRecord)(stopping);
   writeFileSync(staging, formatRecord(encoded), { mode: 0o600 });

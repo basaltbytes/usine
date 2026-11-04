@@ -124,6 +124,6 @@ const make = Effect.gen(function* () {
 export class WebhookDeliveries extends Context.Service<
   WebhookDeliveries,
   Effect.Success<typeof make>
->()("@usine/orchestrator/WebhookDeliveries") {
+>()("@usine/orchestrator/polling/deliveries/WebhookDeliveries") {
   static readonly layer = Layer.effect(WebhookDeliveries, make);
 }

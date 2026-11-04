@@ -7,6 +7,7 @@ import {
   Stream,
   SynchronizedRef,
   type Scope,
+  Clock,
 } from "effect";
 import { AccessScope } from "./access.ts";
 import { LoopName } from "./loop.ts";
@@ -76,7 +77,10 @@ export const changeBusLayer = Layer.effect(
       PubSub.sliding<CommittedChanges>(256),
       PubSub.shutdown,
     );
-    const state = yield* SynchronizedRef.make<Journal>({ revision: Date.now(), history: [] });
+    const state = yield* SynchronizedRef.make<Journal>({
+      revision: yield* Clock.currentTimeMillis,
+      history: [],
+    });
     const publish = Effect.fn("ChangeBus.publish")(function* (
       changes: ReadonlyArray<ScopedChange>,
     ) {

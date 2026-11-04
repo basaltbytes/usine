@@ -347,6 +347,6 @@ export class TaskReader extends Context.Service<
       item: ItemNumber,
     ) => Effect.Effect<TaskView, TaskReadError>;
   }
->()("@usine/orchestrator/TaskReader") {
+>()("@usine/orchestrator/operator/task/TaskReader") {
   static readonly layer = Layer.effect(TaskReader, makeTaskReader);
 }

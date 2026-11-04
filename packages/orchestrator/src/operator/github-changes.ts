@@ -35,6 +35,10 @@ import {
 import { GitHubItemKey } from "@usine/core/item";
 import { LabelView } from "./board.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /**
  * A label that an Attempt's Agent added to the Run's Item, with GitHub's current label definition.
  */
@@ -301,13 +305,13 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     const workerActors = new Map(
       workers.map(({ name, kind }) => [name, githubBotLogin(kind, appActor)]),
     );
-    const identityKey = JSON.stringify([
+    const identityKey = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
       appActor,
       [...workerActors].sort(([left], [right]) => left.localeCompare(right)),
-    ]);
+    ]).pipe(Effect.orDie);
     const cacheKey = (attempt: Attempt) =>
       Option.map(Option.fromUndefinedOr(workerActors.get(attempt.worker)), (actor) =>
-        JSON.stringify([attempt.id, actor, identityKey]),
+        stringifyJson([attempt.id, actor, identityKey]),
       );
     const stored = yield* Ref.get(cache);
     const cached = new Map(
@@ -495,6 +499,6 @@ export class RunGitHubChanges extends Context.Service<
       runId: RunId,
     ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
   }
->()("@usine/orchestrator/RunGitHubChanges") {
+>()("@usine/orchestrator/operator/github-changes/RunGitHubChanges") {
   static readonly layer = Layer.effect(RunGitHubChanges, makeRunGitHubChanges);
 }

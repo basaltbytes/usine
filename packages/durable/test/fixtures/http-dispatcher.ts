@@ -1,8 +1,16 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { strict as assert } from "node:assert";
 import { once } from "node:events";
-import { mkdir, writeFile } from "node:fs/promises";
+// The standalone SDK fixture writes its bootstrap files synchronously before opening the harness.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { mkdirSync, writeFileSync } from "node:fs";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
 import { connect } from "node:net";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -11,23 +19,31 @@ import { EnvHttpProxyAgent, fetch as undiciFetch, getGlobalDispatcher } from "un
 import { DurableHarness } from "../../src/harness.ts";
 import { harnessLayer } from "../../src/live.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 assert(process.argv[2]);
 const directory = InstanceDirectory.make(process.argv[2]);
 const scenario = process.argv[3];
 const initialDispatcher = getGlobalDispatcher();
 const initialFetch = globalThis.fetch;
-const customFetch: typeof fetch = (...args) => initialFetch(...args);
+// This fixture intercepts the fetch function installed by the vendor SDK.
+// @effect-diagnostics-next-line globalFetch:off
+const customFetch: typeof globalThis.fetch = (...args) => initialFetch(...args);
 if (scenario === "custom") globalThis.fetch = customFetch;
 
 const origin = createServer((request, response) => {
   if (request.url === "/broken") {
     response.writeHead(200, { "content-length": "1000" });
     response.write("partial");
+    // The native fault-injection callback destroys a partially written response after one tick.
+    // @effect-diagnostics-next-line globalTimers:off
     setTimeout(() => response.destroy(), 20);
     return;
   }
   response.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip" });
-  response.end(gzipSync(JSON.stringify({ ok: true })));
+  response.end(gzipSync(stringifyJson({ ok: true })));
 });
 origin.listen(0, "127.0.0.1");
 await once(origin, "listening");
@@ -60,21 +76,25 @@ const proxyAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finit
 );
 const proxyUrl = `http://127.0.0.1:${proxyAddress.port}`;
 if (scenario === "environment") {
+  // This fixture verifies the SDK bridge’s process-wide environment mutation.
+  // @effect-diagnostics-next-line processEnv:off
   process.env.HTTP_PROXY = proxyUrl;
+  // This fixture verifies the SDK bridge’s process-wide environment mutation.
+  // @effect-diagnostics-next-line processEnv:off
   process.env.HTTPS_PROXY = proxyUrl;
 }
-await mkdir(join(directory, "pi"));
-await writeFile(
+mkdirSync(join(directory, "pi"));
+writeFileSync(
   join(directory, "pi/settings.json"),
-  JSON.stringify({
+  stringifyJson({
     httpProxy: scenario === "environment" ? "invalid-proxy" : `  ${proxyUrl}  `,
   }),
 );
 // Project settings must not control the orchestrator's process-wide proxy.
-await mkdir(join(directory, ".pi"));
-await writeFile(
+mkdirSync(join(directory, ".pi"));
+writeFileSync(
   join(directory, ".pi/settings.json"),
-  JSON.stringify({ httpProxy: "invalid-project-proxy" }),
+  stringifyJson({ httpProxy: "invalid-project-proxy" }),
 );
 
 const openHarness = () =>
@@ -92,7 +112,11 @@ try {
   await openHarness();
   const dispatcher = getGlobalDispatcher();
   assert.notStrictEqual(dispatcher, initialDispatcher);
+  // This fixture verifies the SDK bridge’s process-wide environment mutation.
+  // @effect-diagnostics-next-line processEnv:off
   assert.strictEqual(process.env.HTTP_PROXY, proxyUrl);
+  // This fixture verifies the SDK bridge’s process-wide environment mutation.
+  // @effect-diagnostics-next-line processEnv:off
   assert.strictEqual(process.env.HTTPS_PROXY, proxyUrl);
   if (scenario === "custom") assert.strictEqual(globalThis.fetch, customFetch);
   else {
@@ -102,21 +126,38 @@ try {
   await openHarness();
   assert.strictEqual(getGlobalDispatcher(), dispatcher);
 
+  // This fixture exercises the SDK-installed global fetch override directly.
+  // @effect-diagnostics-next-line globalFetch:off
   const direct = await fetch(`http://127.0.0.1:${originAddress.port}/json`);
   assert.deepStrictEqual(await direct.json(), { ok: true });
   assert.strictEqual(tunnels.length, 0);
+  // This fixture exercises the SDK-installed global fetch override directly.
+  // @effect-diagnostics-next-line globalFetch:off
   const proxied = await fetch(`http://pi.invalid:${originAddress.port}/json`);
   assert.deepStrictEqual(await proxied.json(), { ok: true });
   assert.deepStrictEqual(tunnels, [`pi.invalid:${originAddress.port}`]);
   await assert.rejects(
+    // This fixture exercises the SDK-installed global fetch override directly.
+    // @effect-diagnostics-next-line globalFetch:off
     fetch(`http://127.0.0.1:${originAddress.port}/broken`).then((response) => response.text()),
   );
+  // This fixture exercises the SDK-installed global fetch override directly.
+  // @effect-diagnostics-next-line globalFetch:off
   const recovered = await fetch(`http://127.0.0.1:${originAddress.port}/json`);
   assert.deepStrictEqual(await recovered.json(), { ok: true });
 } finally {
   await getGlobalDispatcher().destroy();
-  await Promise.all([
-    new Promise<void>((resolve) => origin.close(() => resolve())),
-    new Promise<void>((resolve) => proxy.close(() => resolve())),
-  ]);
+  await Effect.runPromise(
+    Effect.all(
+      [
+        Effect.callback<void>((resume) => {
+          origin.close(() => resume(Effect.void));
+        }),
+        Effect.callback<void>((resume) => {
+          proxy.close(() => resume(Effect.void));
+        }),
+      ],
+      { concurrency: "unbounded" },
+    ),
+  );
 }

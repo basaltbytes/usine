@@ -1,6 +1,6 @@
 import { Effect, Layer, Option, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
-import { assert, describe, it } from "vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { ProcessId } from "../../src/instance/record.ts";
 import {
   SystemctlError,
@@ -51,22 +51,27 @@ describe("systemd service detection", () => {
     assert.isUndefined(service("0::/\n"));
   });
 
-  it("fails instead of signaling the process when systemctl can't say who the main process is", async () => {
-    const pid = ProcessId.make(4242);
-    const managed = await Effect.runPromise(
-      supervisingUnit(pid, Option.some(unit)).pipe(Effect.provide(systemctl(0, "4242\n"))),
-    );
-    assert.deepStrictEqual(managed, Option.some(unit));
+  it.live(
+    "fails instead of signaling the process when systemctl can't say who the main process is",
+    () =>
+      Effect.gen(function* () {
+        const pid = ProcessId.make(4242);
+        const managed = yield* supervisingUnit(pid, Option.some(unit)).pipe(
+          Effect.provide(systemctl(0, "4242\n")),
+        );
+        assert.deepStrictEqual(managed, Option.some(unit));
 
-    // Signals would stop the process behind systemd's back, which then restarts it on failure.
-    const error = await Effect.runPromise(
-      supervisingUnit(pid, Option.some(unit)).pipe(
-        Effect.flip,
-        Effect.provide(systemctl(1, "Failed to connect to bus: No such file or directory")),
-      ),
-    );
-    assert.instanceOf(error, SystemctlError);
-    assert.strictEqual(error.command, "systemctl show --property=MainPID --value usine.service");
-    assert.include(error.reason, "Failed to connect to bus");
-  });
+        // Signals would stop the process behind systemd's back, which then restarts it on failure.
+        const error = yield* supervisingUnit(pid, Option.some(unit)).pipe(
+          Effect.flip,
+          Effect.provide(systemctl(1, "Failed to connect to bus: No such file or directory")),
+        );
+        assert.instanceOf(error, SystemctlError);
+        assert.strictEqual(
+          error.command,
+          "systemctl show --property=MainPID --value usine.service",
+        );
+        assert.include(error.reason, "Failed to connect to bus");
+      }),
+  );
 });

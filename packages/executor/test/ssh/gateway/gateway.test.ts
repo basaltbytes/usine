@@ -164,8 +164,14 @@ describe("SSH Worker behind a Gateway", () => {
         assert.strictEqual(given.environment.GH_HOST, "git.gw.test");
         assert.strictEqual(given.environment.GH_CONFIG_DIR, `${WORKER_ROOT}/gh`);
         assert.strictEqual(given.environment.ANTHROPIC_BASE_URL, "http://llm.gw.test/anthropic");
-        assert.notInclude(JSON.stringify(given.environment), callerToken);
-        assert.notInclude(JSON.stringify(given.environment), TOKEN_PREFIX);
+        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          given.environment,
+        ).pipe(Effect.orDie);
+        assert.notInclude(json1, callerToken);
+        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          given.environment,
+        ).pipe(Effect.orDie);
+        assert.notInclude(json2, TOKEN_PREFIX);
 
         const clone = machine.state.calls.find(({ line }) => line.includes("'clone'"));
         assert(clone !== undefined);
@@ -183,7 +189,10 @@ describe("SSH Worker behind a Gateway", () => {
           assert.strictEqual(input, "", "no command reads a secret from its input");
           assert.notInclude(command.args.join(" "), TOKEN_PREFIX);
           assert.notInclude(command.args.join(" "), callerToken);
-          assert.notInclude(JSON.stringify(command.options.env), TOKEN_PREFIX);
+          const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            command.options.env,
+          ).pipe(Effect.orDie);
+          assert.notInclude(json3, TOKEN_PREFIX);
           const sent = new Set(sentVariables(command));
           for (const name of Object.keys(command.options.env ?? {}))
             assert(
@@ -1127,7 +1136,10 @@ describe("SSH Worker behind a Gateway", () => {
         const codexHome = `${WORKER_ROOT}/codex/remote-run_execute_1`;
         assert.strictEqual(given.environment.CODEX_HOME, codexHome);
         assert.isUndefined(given.environment.ANTHROPIC_BASE_URL);
-        assert.notInclude(JSON.stringify(given.environment), callerToken);
+        const json4 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          given.environment,
+        ).pipe(Effect.orDie);
+        assert.notInclude(json4, callerToken);
         const config = machine.state.files.get(`${codexHome}/config.toml`) ?? "";
         assert.include(config, 'model_provider = "usine-gateway"');
         assert.include(config, 'base_url = "http://llm.gw.test/openai/v1"');

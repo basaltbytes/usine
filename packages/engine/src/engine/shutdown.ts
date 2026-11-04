@@ -8,4 +8,4 @@ import { Context, Deferred } from "effect";
 export class RunEngineShutdown extends Context.Service<
   RunEngineShutdown,
   Deferred.Deferred<void>
->()("@usine/engine/RunEngineShutdown") {}
+>()("@usine/engine/engine/shutdown/RunEngineShutdown") {}

@@ -1,3 +1,4 @@
+import { webRequest } from "../../../../tooling/test/http.mts";
 import { idleCiMonitor } from "../support/ci.ts";
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -36,6 +37,8 @@ import {
   Redacted,
   Schema,
   Scope,
+  Clock,
+  Crypto,
 } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { LabelReconciler } from "../../src/label-reconciler.ts";
@@ -52,19 +55,15 @@ const request = Effect.fn("integration.request")(function* (
   init: RequestInit,
   expectedStatus: number,
 ) {
-  const response = yield* Effect.tryPromise({
-    try: () =>
-      fetch(url, {
-        ...init,
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-          "x-github-api-version": "2026-03-10",
-        },
-      }),
-    catch: (cause) => RequestFailed.make({ cause }),
-  });
+  const response = yield* webRequest(url, {
+    ...init,
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      "x-github-api-version": "2026-03-10",
+    },
+  }).pipe(Effect.mapError((cause) => RequestFailed.make({ cause })));
   if (response.status !== expectedStatus) {
     return yield* Effect.die(
       `GitHub returned ${response.status} for ${init.method ?? "GET"} ${url}`,
@@ -197,7 +196,8 @@ describe("live GitHub polling", () => {
         issueNumber: Config.schema(PositiveIntFromString, "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER"),
       });
       const repository = RepositoryName.make(settings.repository);
-      const label = `usine-poll-${globalThis.crypto.randomUUID()}`;
+      const uuid1 = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+      const label = `usine-poll-${uuid1}`;
       const instance = yield* makeInstance(repository, label);
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
@@ -213,13 +213,11 @@ describe("live GitHub polling", () => {
         Layer.provide(credentialsLayer),
         Layer.provide(FetchHttpClient.layer),
       );
-
       yield* Effect.gen(function* () {
         const app = yield* GitHubApp;
         const installationToken = yield* app.installationToken;
         const token = Redacted.value(installationToken.value);
         const api = repositoryApi(repository);
-
         yield* Effect.acquireUseRelease(
           request(
             token,
@@ -251,16 +249,18 @@ describe("live GitHub polling", () => {
                       },
                       200,
                     );
-
-                    const deadline = Date.now() + instance.config.settings.pollInterval * 1_000;
+                    const deadline =
+                      (yield* Clock.currentTimeMillis) +
+                      instance.config.settings.pollInterval * 1000;
                     let originalRun = Option.none<RunId>();
-                    while (Option.isNone(originalRun) && Date.now() <= deadline) {
+                    while (
+                      Option.isNone(originalRun) &&
+                      (yield* Clock.currentTimeMillis) <= deadline
+                    ) {
                       const cycle = yield* polling.poll(instance);
                       if (cycle.failures.length > 0) {
                         return yield* Effect.die(
-                          `polling failed: ${cycle.failures
-                            .map(({ errorTag, message }) => `${errorTag}: ${message}`)
-                            .join("; ")}`,
+                          `polling failed: ${cycle.failures.map(({ errorTag, message }) => `${errorTag}: ${message}`).join("; ")}`,
                         );
                       }
                       originalRun = runIdFrom(cycle.submissions);
@@ -273,11 +273,8 @@ describe("live GitHub polling", () => {
                       snapshot.event.payload,
                     );
                     assert(eventPayload.labels.nodes.some(({ name }) => name === label));
-
                     const unchanged = yield* polling.poll(instance);
                     const unchangedRun = runIdFrom(unchanged.submissions);
-                    // An unchanged state either submits nothing (304 or empty
-                    // page) or resolves to the same run, never a second one.
                     assert(
                       Option.isNone(unchangedRun) || unchangedRun.value === runId,
                       "an unchanged state must not open a second run",
@@ -286,20 +283,16 @@ describe("live GitHub polling", () => {
                   }),
                 closeRuntime,
               );
-
               yield* Effect.acquireUseRelease(
                 openRuntime(runtimeDirectory, app),
                 ({ engine, polling }) =>
                   Effect.gen(function* () {
                     const afterRestart = yield* polling.poll(instance);
                     const restartedRun = runIdFrom(afterRestart.submissions);
-                    // The same applies across a restart: the durable ledger, not the lost in-memory
-                    // state, prevents a second Run.
                     assert(
                       Option.isNone(restartedRun) || restartedRun.value === first.runId,
                       "a restart must not open a second run for the same state",
                     );
-
                     assert.strictEqual(
                       (yield* engine.inspect(first.runId)).event.id,
                       first.eventId,
@@ -312,7 +305,11 @@ describe("live GitHub polling", () => {
             request(token, `${api}/labels/${encodeURIComponent(label)}`, { method: "DELETE" }, 204),
         );
       }).pipe(Effect.provide(appLayer));
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    }).pipe(
+      Effect.provide(NodeServices.layer),
+      Effect.scoped,
+      Effect.provide(FetchHttpClient.layer),
+    ),
   );
 });
 

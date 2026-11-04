@@ -21,6 +21,10 @@ import {
 } from "../../runtime.ts";
 import { type CodexClient, operationError } from "./app-server.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 type CodexRequestPayload =
   | ModelListParams
   | ThreadStartParams
@@ -30,9 +34,7 @@ type CodexRequestPayload =
 
 /** Returns typed Codex request parameters as JSON for the app-server transport. */
 export const json = (value: CodexRequestPayload): Schema.Json => {
-  // The request parameters are already validated.
-  // @effect-diagnostics-next-line schemaSync:off
-  const encoded = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(value);
+  const encoded = stringifyJson(value);
   // The serialized request contains already validated values.
   // @effect-diagnostics-next-line schemaSync:off
   return Schema.decodeSync(Schema.fromJsonString(Schema.Json))(encoded);

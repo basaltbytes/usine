@@ -1,6 +1,17 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Context, DateTime, Effect, Layer, Logger, Option, Redacted, Ref, Stream } from "effect";
+import {
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Logger,
+  Option,
+  Redacted,
+  Ref,
+  Stream,
+  Schema,
+} from "effect";
 import { Base64 } from "effect/encoding";
 import {
   Headers,
@@ -38,6 +49,10 @@ import {
   secret,
   settingsLayer,
 } from "./fixtures.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const INSTALLATION_TOKEN = "ghs_installationTokenForTests0123456789";
 const ANTHROPIC_KEY = "sk-ant-api03-keyForTests0123456789";
@@ -88,7 +103,7 @@ const renamedRepository =
 class Upstream extends Context.Service<
   Upstream,
   { readonly sent: Ref.Ref<ReadonlyArray<Sent>>; readonly answer: Answer }
->()("test/Upstream") {
+>()("@usine/gateway/test/proxy.test/Upstream") {
   static readonly answering = (answer: Answer) =>
     Layer.effect(
       Upstream,
@@ -119,7 +134,7 @@ const fakeClient = Layer.effect(
 const lines: Array<string> = [];
 const captureLogs = Logger.layer([
   Logger.make(({ message }) => {
-    lines.push(JSON.stringify(message));
+    lines.push(stringifyJson(message));
   }),
 ]);
 
@@ -215,7 +230,10 @@ describe("GatewayProxy", () => {
       yield* send("http://git.gw.test/api/v3/repos/acme/demo/pulls", {
         authorization: `token ${caller}`,
       });
-      const query = JSON.stringify({ query: "{ viewer { login } }" });
+      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        query: "{ viewer { login } }",
+      }).pipe(Effect.orDie);
+      const query = json1;
       yield* send(
         "http://git.gw.test/api/graphql",
         {

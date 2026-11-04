@@ -1,4 +1,6 @@
 import { localActor } from "@usine/core/operator";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { resolve } from "node:path";
 import {
   StaleRevision,

@@ -353,6 +353,6 @@ const makeRunUsageReader = Effect.gen(function* () {
 export class RunUsageReader extends Context.Service<
   RunUsageReader,
   { readonly read: (run: RunUsageSource) => Effect.Effect<RunUsageView, RunStoreError> }
->()("@usine/orchestrator/RunUsageReader") {
+>()("@usine/orchestrator/operator/usage/RunUsageReader") {
   static readonly layer = Layer.effect(RunUsageReader, makeRunUsageReader);
 }

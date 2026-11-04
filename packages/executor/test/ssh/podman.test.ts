@@ -10,6 +10,7 @@ import { fakeGateway, gatewayRuntime } from "./gateway/support.ts";
 import {
   aloneOnItem,
   capturedLogs,
+  CapturedLog,
   fails,
   fakeContainerId,
   fakeMachine,
@@ -21,6 +22,10 @@ import {
   TEST_AGENT,
   WORKER,
 } from "./support.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const CONTAINER = "usine-remote-run_execute_1";
 const info = () => ({
@@ -37,7 +42,7 @@ const info = () => ({
 });
 const podmanMachine = () => {
   const machine = fakeMachine();
-  machine.state.podmanInfo = JSON.stringify(info());
+  machine.state.podmanInfo = stringifyJson(info());
   return machine;
 };
 const sink = {
@@ -69,7 +74,8 @@ describe("rootless Podman", () => {
         assert.include(inspections[0] ?? "", '"status":"absent"');
         const pulls = logs.lines.filter((line) => line.includes("Pulled the attempt image"));
         assert.lengthOf(pulls, 1);
-        assert.deepInclude(JSON.parse(pulls[0] ?? "")[1], {
+        const json1 = yield* Schema.decodeEffect(CapturedLog)(pulls[0] ?? "").pipe(Effect.orDie);
+        assert.deepInclude(json1[1], {
           image: ATTEMPT_IMAGE,
           runtime: "podman",
           downloaded: true,
@@ -162,7 +168,7 @@ describe("rootless Podman", () => {
     const machine = podmanMachine();
     const value = info();
     change(value);
-    machine.state.podmanInfo = JSON.stringify(value);
+    machine.state.podmanInfo = stringifyJson(value);
     return Effect.gen(function* () {
       const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
       assert.strictEqual(error._tag, "WorkerCapabilityError");

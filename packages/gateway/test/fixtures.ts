@@ -1,3 +1,4 @@
+import { NodeCrypto } from "@effect/platform-node";
 import { createServer, type Server } from "node:net";
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayDomain, WorkerName } from "@usine/core/worker";
@@ -8,6 +9,14 @@ import { parseEgressAllowlist } from "../src/egress/egress.ts";
 import { GITHUB_ORIGINS, type GitHubOrigins } from "../src/github/github.ts";
 import type { LlmProviders } from "../src/llm/llm.ts";
 import { AdminToken, CallerKey, GatewaySettings, SettingsInForce } from "../src/settings.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const prettyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }));
 
 const DOMAIN = GatewayDomain.make("gw.test");
 export const WORKER = WorkerName.make("worker-one");
@@ -29,6 +38,7 @@ export const settingsLayer = (
   github: GitHubOrigins = GITHUB_ORIGINS,
 ) =>
   SettingsInForce.layer.pipe(
+    Layer.provideMerge(NodeCrypto.layer),
     Layer.provideMerge(
       Layer.effect(
         GatewaySettings,
@@ -51,8 +61,8 @@ export const NO_PROVIDERS: LlmProviders = { anthropic: Option.none(), openai: Op
 /** Returns an unsigned JWT with `claims`, which is all the Gateway reads of a ChatGPT token. */
 export const fakeJwt = (claims: Schema.Json) =>
   [
-    Base64Url.encode(JSON.stringify({ alg: "none", typ: "JWT" })),
-    Base64Url.encode(JSON.stringify(claims)),
+    Base64Url.encode(stringifyJson({ alg: "none", typ: "JWT" })),
+    Base64Url.encode(stringifyJson(claims)),
     Base64Url.encode("signature"),
   ].join(".");
 
@@ -76,24 +86,20 @@ export const CHATGPT_ACCOUNT = "account-for-tests-0123";
 
 /** Returns the text of a Codex `auth.json` with a ChatGPT login, as `codex login` writes it. */
 export const authFileText = (tokens: { readonly access: string; readonly refresh: string }) =>
-  `${JSON.stringify(
-    {
-      auth_mode: "chatgpt",
-      OPENAI_API_KEY: null,
-      tokens: {
-        id_token: fakeJwt({
-          email: "operator@example.com",
-          "https://api.openai.com/auth": { chatgpt_account_id: CHATGPT_ACCOUNT },
-        }),
-        access_token: tokens.access,
-        refresh_token: tokens.refresh,
-        account_id: CHATGPT_ACCOUNT,
-      },
-      last_refresh: "2026-10-01T00:00:00.000000Z",
+  `${prettyJson({
+    auth_mode: "chatgpt",
+    OPENAI_API_KEY: null,
+    tokens: {
+      id_token: fakeJwt({
+        email: "operator@example.com",
+        "https://api.openai.com/auth": { chatgpt_account_id: CHATGPT_ACCOUNT },
+      }),
+      access_token: tokens.access,
+      refresh_token: tokens.refresh,
+      account_id: CHATGPT_ACCOUNT,
     },
-    null,
-    2,
-  )}\n`;
+    last_refresh: "2026-10-01T00:00:00.000000Z",
+  })}\n`;
 
 export const secret = (value: string) => Redacted.make(value);
 

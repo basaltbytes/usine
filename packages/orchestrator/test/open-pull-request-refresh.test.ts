@@ -20,6 +20,10 @@ import { DateTime, Effect, Logger, Option, Schema, Layer } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { baseBranches, memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const repository = RepositoryName.make("basaltbytes/usine");
 const instance = Effect.gen(function* () {
   const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
@@ -409,7 +413,7 @@ describe("open pull request refresh", () => {
       const readable = baseBranches();
       const warnings: Array<string> = [];
       const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+        if (logLevel === "Warn") warnings.push(stringifyJson(message));
       });
       const { github, poll } = fakeRepository(
         new Map([

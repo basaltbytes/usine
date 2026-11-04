@@ -50,6 +50,10 @@ import {
   unmovedBaseRefHead,
 } from "./support/polling.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const repository = RepositoryName.make("basaltbytes/usine");
 const updatedAt = DateTime.makeUnsafe("2026-10-17T10:00:00Z");
 const config = Schema.decodeEffect(UsineConfig)({
@@ -211,7 +215,10 @@ const processLayer = (github: GitHubPolling["Service"], cursors: CursorStore["Se
 const capturedLogs = () => {
   const lines: Array<{ readonly level: string; readonly text: string }> = [];
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-    lines.push({ level: logLevel, text: JSON.stringify(message) });
+    lines.push({
+      level: logLevel,
+      text: stringifyJson(message),
+    });
   });
   return {
     logger,

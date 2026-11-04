@@ -31,7 +31,7 @@ export class AppCredentials extends Schema.Class<
 
 /** The service that provides `AppCredentials`. */
 export class GitHubCredentials extends Context.Service<GitHubCredentials, AppCredentials>()(
-  "@usine/github/GitHubCredentials",
+  "@usine/github/credentials/GitHubCredentials",
 ) {}
 
 /** The error when the App private key can't sign, raised once when the App layer is built. */

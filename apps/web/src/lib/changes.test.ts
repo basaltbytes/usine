@@ -124,7 +124,7 @@ it("uses each query's declared dependencies even when its cache key changes", as
         ChangeNotice.make({ revision: 1, reset: false, changes: targets }),
       );
       const invalidated = entries.flatMap(([name]) =>
-        client.getQueryState(["renamed", name])?.isInvalidated ? [name] : [],
+        client.getQueryState(["renamed", name])?.isInvalidated === true ? [name] : [],
       );
       expect(invalidated.sort()).toEqual([...expected].sort());
     }

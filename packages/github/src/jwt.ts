@@ -1,5 +1,9 @@
-import { Clock, Effect, Redacted } from "effect";
+import { Clock, Effect, Redacted, Schema } from "effect";
 import { AppAuthenticationError, type AppCredentials } from "./credentials.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 interface JwtHeader {
   readonly alg: "RS256";
@@ -59,7 +63,7 @@ const base64Url = (value: Uint8Array): string => {
 };
 
 const encodeJson = (value: JwtHeader | JwtClaims): string =>
-  base64Url(encoder.encode(JSON.stringify(value)));
+  base64Url(encoder.encode(stringifyJson(value)));
 
 const toArrayBuffer = (value: Uint8Array): ArrayBuffer => {
   const buffer = new ArrayBuffer(value.byteLength);
@@ -76,7 +80,7 @@ type AppJwtSigner = () => Effect.Effect<Redacted.Redacted<string>>;
  */
 export const appJwtSigner = Effect.fn("AppJwt.import")(function* (credentials: AppCredentials) {
   const key = yield* Effect.tryPromise({
-    try: async () =>
+    try: () =>
       crypto.subtle.importKey(
         "pkcs8",
         toArrayBuffer(decodePem(Redacted.value(credentials.privateKey))),

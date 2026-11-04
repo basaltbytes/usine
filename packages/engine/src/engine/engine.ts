@@ -415,7 +415,7 @@ export class RunEngine extends Context.Service<
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunEngineError>;
   }
->()("@usine/engine/RunEngine") {}
+>()("@usine/engine/engine/engine/RunEngine") {}
 
 /**
  * Returns the engine layers on `database`, which stores all durable Run state. Requires `Crypto`

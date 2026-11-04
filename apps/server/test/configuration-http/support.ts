@@ -35,6 +35,10 @@ import { FactoryBackend } from "../../src/backend.ts";
 import { apiRoutes } from "../../src/http.ts";
 import { configurationLoopControlLayer } from "../../src/configuration/store.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const parserLayer = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
 export const unused = Effect.die("unused test service operation");
 export const agentText = "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement.\n";
@@ -261,13 +265,13 @@ export const harness = (
     );
     yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
     const request = (method: string, path: string, body?: Schema.Json) =>
-      Effect.promise(async () => {
+      Effect.gen(function* () {
         const options: RequestInit = { method };
-        if (body !== undefined) options.body = JSON.stringify(body);
-        const response = await app.handler(
-          new Request(`http://localhost/api/configuration${path}`, options),
+        if (body !== undefined) options.body = stringifyJson(body);
+        const response = yield* Effect.promise(() =>
+          app.handler(new Request(`http://localhost/api/configuration${path}`, options)),
         );
-        const value: unknown = await response.json();
+        const value: unknown = yield* Effect.promise(() => response.json());
         return { status: response.status, body: value };
       });
     return {

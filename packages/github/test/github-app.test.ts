@@ -1,3 +1,5 @@
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
@@ -7,6 +9,14 @@ import { GitHubApp, isRefusal, WebhookDeliveryId } from "../src/github-app.ts";
 import { AppCredentials, AppId, GitHubCredentials, PrivateKey } from "../src/credentials.ts";
 import { CoveredProject, REQUIRED_REPOSITORY_PERMISSIONS } from "../src/access.ts";
 import { InstallationId, RepositoryId } from "../src/installation.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const privatePem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
@@ -44,7 +54,7 @@ const jsonResponse = (
 ) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(JSON.stringify(body), {
+    new Response(stringifyJson(body), {
       status,
       headers: { "content-type": "application/json" },
     }),
@@ -84,7 +94,7 @@ describe("GitHubApp", () => {
         assert.match(request.headers.authorization ?? "", /^Bearer [^.]+\.[^.]+\.[^.]+$/u);
         assert.strictEqual(request.body._tag, "Uint8Array");
         if (request.body._tag === "Uint8Array") {
-          assert.deepStrictEqual(JSON.parse(new TextDecoder().decode(request.body.body)), {
+          assert.deepStrictEqual(parseJson(new TextDecoder().decode(request.body.body)), {
             url: "https://usine.example/webhooks/github",
             content_type: "json",
           });
@@ -109,7 +119,9 @@ describe("GitHubApp", () => {
     "mints installation-wide and exactly-one-repo tokens while isolating registry drift",
     () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-      const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
+      const expiresAt = DateTime.formatIso(
+        DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 50 * 60 * 1_000),
+      );
       const client = HttpClient.make((request) =>
         Effect.gen(function* () {
           requests.push(request);
@@ -236,7 +248,9 @@ describe("GitHubApp", () => {
   );
 
   it.live("reads the App's bot account with the installation token and keeps it once read", () => {
-    const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
+    const expiresAt = DateTime.formatIso(
+      DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 50 * 60 * 1_000),
+    );
     const lookups: Array<HttpClientRequest.HttpClientRequest> = [];
     const client = HttpClient.make((request) =>
       Effect.sync(() => {
@@ -278,7 +292,9 @@ describe("GitHubApp", () => {
   });
 
   it.live("mints a worker token that can push only for a write Loop", () => {
-    const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
+    const expiresAt = DateTime.formatIso(
+      DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 50 * 60 * 1_000),
+    );
     const bodies: Array<typeof TokenRequestBody.Type> = [];
     const client = HttpClient.make((request) =>
       Effect.gen(function* () {
@@ -335,7 +351,9 @@ describe("GitHubApp", () => {
   });
 
   it.live("renews the shared lease once its token is about to expire", () => {
-    const expiresAt = new Date(Date.now() + 3 * 60 * 1_000).toISOString();
+    const expiresAt = DateTime.formatIso(
+      DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3 * 60 * 1_000),
+    );
     let mints = 0;
     const client = HttpClient.make((request) =>
       Effect.sync(() => {
@@ -357,7 +375,9 @@ describe("GitHubApp", () => {
   });
 
   it.live("rejects a worker token when GitHub does not confirm its single-repo scope", () => {
-    const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
+    const expiresAt = DateTime.formatIso(
+      DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 50 * 60 * 1_000),
+    );
     const client = HttpClient.make((request) =>
       Effect.succeed(
         jsonResponse(request, {
@@ -394,7 +414,9 @@ describe("GitHubApp", () => {
 
         return jsonResponse(request, {
           token: "skewed-token",
-          expires_at: new Date((yield* Clock.currentTimeMillis) + 62 * 60_000).toISOString(),
+          expires_at: DateTime.formatIso(
+            DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 62 * 60_000),
+          ),
           repositories: [{ id: 99, full_name: "basaltbytes/usine" }],
         });
       }).pipe(
@@ -424,7 +446,9 @@ describe("GitHubApp", () => {
   });
 
   it.live.each([-1, 0, 70])("rejects an invalid token with %s minutes left", (minutes) => {
-    const expiresAt = new Date(Date.now() + minutes * 60 * 1_000).toISOString();
+    const expiresAt = DateTime.formatIso(
+      DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + minutes * 60 * 1_000),
+    );
     const client = HttpClient.make((request) =>
       Effect.succeed(
         jsonResponse(request, {
@@ -457,16 +481,21 @@ describe("GitHubApp", () => {
   it.live("keeps GitHub's reason for a refused mint and tells a refusal from an outage", () => {
     const answers: Array<Response> = [
       new Response(
-        JSON.stringify({
+        stringifyJson({
           message: "The permissions requested are not granted to this installation.",
         }),
         { status: 422, headers: { "content-type": "application/json" } },
       ),
       new Response("upstream timeout", { status: 503 }),
-      new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
-        status: 429,
-        headers: { "content-type": "application/json", "retry-after": "60" },
-      }),
+      new Response(
+        stringifyJson({
+          message: "API rate limit exceeded",
+        }),
+        {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "60" },
+        },
+      ),
     ];
     const client = HttpClient.make((request) =>
       Effect.sync(() => {

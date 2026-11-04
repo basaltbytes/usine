@@ -1,7 +1,7 @@
+import { Migrator, SqlClient } from "effect/sql";
 import { PermissionGrant } from "@usine/core/access";
 import { Clock, Effect, Layer, Option, Schema } from "effect";
-import { SqlClient } from "effect/sql";
-import { make as makeMigrator, fromRecord } from "effect/sql/Migrator";
+
 import { AuthError, authFailure, InstanceToken, Member } from "./model.ts";
 import { AuthStore } from "./store.ts";
 
@@ -23,9 +23,9 @@ export const sqliteAuthLayer = Layer.effect(
       Effect.logError("Member store operation failed", { operation, cause }).pipe(
         Effect.andThen(authFailure("The member store is unavailable.", 500)),
       );
-    yield* makeMigrator({})({
+    yield* Migrator.make({})({
       table: "usine_auth_migrations",
-      loader: fromRecord({
+      loader: Migrator.fromRecord({
         "0001_members": Effect.gen(function* () {
           yield* sql`CREATE TABLE usine_members (id INTEGER PRIMARY KEY, login TEXT NOT NULL COLLATE NOCASE UNIQUE, value TEXT NOT NULL)`;
           yield* sql`CREATE TABLE usine_instance_tokens (id TEXT PRIMARY KEY, member_id INTEGER NOT NULL REFERENCES usine_members(id) ON DELETE CASCADE, hash TEXT NOT NULL UNIQUE, expires_at REAL NOT NULL, value TEXT NOT NULL)`;

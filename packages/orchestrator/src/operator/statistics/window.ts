@@ -30,12 +30,14 @@ export const spanBucket = (from: number, to: number): StatisticsBucket =>
   (startOfUtcDay(to) - from) / DAY + 1 <= DAILY_SPAN_DAYS ? "day" : "week";
 
 export const utcDay = (epochMillis: number): string =>
-  new Date(epochMillis).toISOString().slice(0, 10);
+  DateTime.formatIso(DateTime.makeUnsafe(epochMillis)).slice(0, 10);
 
 /** Returns the start of the period that holds `epochMillis`. Weeks start on Monday. */
 export const periodStart = (bucket: StatisticsBucket, epochMillis: number): number => {
   const day = startOfUtcDay(epochMillis);
-  return bucket === "day" ? day : day - ((new Date(day).getUTCDay() + 6) % 7) * DAY;
+  return bucket === "day"
+    ? day
+    : day - ((DateTime.getPartUtc(DateTime.makeUnsafe(day), "weekDay") + 6) % 7) * DAY;
 };
 
 /** Returns the start of each period from `from` to `to`, oldest first. */

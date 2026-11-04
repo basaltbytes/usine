@@ -13,6 +13,10 @@ import {
 import type { StepResultFact } from "../src/step/result.ts";
 import { BotLogin } from "../src/worker.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const BASE = CommitSha.make("a".repeat(40));
 const HEAD = CommitSha.make("b".repeat(40));
 const OTHER = CommitSha.make("c".repeat(40));
@@ -98,7 +102,7 @@ const harvest = (
     Effect.provide(
       Logger.layer([
         Logger.make(({ logLevel, message }) => {
-          if (logLevel === "Warn" || logLevel === "Error") warnings.push(JSON.stringify(message));
+          if (logLevel === "Warn" || logLevel === "Error") warnings.push(stringifyJson(message));
           if (logLevel === "Info") infos.push(message);
         }),
       ]),
@@ -111,8 +115,7 @@ const BOT = "usine-test[bot]";
 const SINCE = "2026-10-19T12:00:00Z";
 const VIEWER = "gh api graphql -f query=query { viewer { login } }";
 const ISSUE_COMMENTS = `gh api repos/acme/demo/issues/12/comments?since=${SINCE}&per_page=100 --paginate --slurp`;
-const pages = (...items: ReadonlyArray<object>): Answer =>
-  Effect.succeed([JSON.stringify([items])]);
+const pages = (...items: ReadonlyArray<object>): Answer => Effect.succeed([stringifyJson([items])]);
 /** Returns `text` with the developer Agent's signature and a trailing newline. */
 const signed = (text: string) => `${text}\n\n— usine agent: developer\n`;
 const comments = (facts: ReadonlyArray<StepResultFact>) =>
@@ -142,16 +145,15 @@ describe("harvesting an Attempt's facts", () => {
 
   it.effect("records the pull request whose head is the pushed final commit", () =>
     Effect.gen(function* () {
+      const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+        [
+          { number: 71, html_url: "https://github.com/acme/demo/pull/71", head: { sha: HEAD } },
+          { number: 5, html_url: "https://github.com/acme/demo/pull/5", head: { sha: OTHER } },
+        ],
+      ]).pipe(Effect.orDie);
       const { facts, warnings } = yield* harvest(
         [`${OTHER}\trefs/heads/main`, `${HEAD}\trefs/heads/usine/fix`],
-        Effect.succeed([
-          JSON.stringify([
-            [
-              { number: 71, html_url: "https://github.com/acme/demo/pull/71", head: { sha: HEAD } },
-              { number: 5, html_url: "https://github.com/acme/demo/pull/5", head: { sha: OTHER } },
-            ],
-          ]),
-        ]),
+        Effect.succeed([json1]),
       );
       assert.deepStrictEqual(
         facts.flatMap((fact) => (fact._tag === "PullRequest" ? [fact.number] : [])),
@@ -167,10 +169,10 @@ describe("harvesting an Attempt's facts", () => {
 
   it.effect("finds a pushed final commit by its pull request ref once its branch is gone", () =>
     Effect.gen(function* () {
-      const { commands } = yield* harvest(
-        [`${HEAD}\trefs/pull/71/head`],
-        Effect.succeed([JSON.stringify([[]])]),
+      const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([[]]).pipe(
+        Effect.orDie,
       );
+      const { commands } = yield* harvest([`${HEAD}\trefs/pull/71/head`], Effect.succeed([json2]));
       assert.include(commands, PULL_REQUESTS);
     }),
   );
@@ -690,14 +692,14 @@ describe("harvesting an Attempt's facts", () => {
       Effect.gen(function* () {
         const integration = "exe-dev-github-integration[bot]";
         const comment = "https://github.com/acme/demo/issues/12#issuecomment-42";
+        const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          data: { viewer: { login: integration } },
+        }).pipe(Effect.orDie);
         const { facts, commands } = yield* harvest(
           [],
           NEVER_ASKED,
           [
-            [
-              VIEWER,
-              Effect.succeed([JSON.stringify({ data: { viewer: { login: integration } } })]),
-            ],
+            [VIEWER, Effect.succeed([json3])],
             [
               ISSUE_COMMENTS,
               pages(

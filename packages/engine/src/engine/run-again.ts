@@ -8,6 +8,10 @@ import { type Brand, type DateTime, Schema } from "effect";
 import type { RunSnapshot } from "../run-reader/model.ts";
 import { Claimed, CycleBlocked, Submission } from "./submission.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /**
  * An operator request to run a succeeded or canceled Run again with the Loop's current settings
  * (#152). `requestedBy` is `None` if `usine.yaml` sets no operator login.
@@ -62,7 +66,7 @@ export const runAgainSubmission = (
   identity: RunAgainIdentity,
 ): Submission => {
   const dedupKey = DedupKey.make(
-    JSON.stringify(["operator-run-again", identity.reopening, identity.trigger]),
+    stringifyJson(["operator-run-again", identity.reopening, identity.trigger]),
   );
   return Submission.make({
     event: Event.make({

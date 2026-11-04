@@ -1,4 +1,6 @@
 import { ChildProcessSpawner } from "effect/process";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { InstanceDirectory } from "@usine/core/instance";
@@ -132,11 +134,10 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
       .map(([key, value]) => `${key}=${quote(value)}`)
       .join("\n");
     yield* fs.writeFileString(join(folder, "run.sh"), `${variables}\n${helper}`, { mode: 0o700 });
-    yield* fs.writeFileString(
-      resultPath,
-      JSON.stringify(UpgradeRecord.make({ previous, target, status: "installing" })),
-      { mode: 0o600 },
-    );
+    const serializedRecord = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+      UpgradeRecord.make({ previous, target, status: "installing" }),
+    ).pipe(Effect.orDie);
+    yield* fs.writeFileString(resultPath, serializedRecord, { mode: 0o600 });
     yield* systemctl(helperUnit, ["start", "--no-block"]);
     yield* Effect.logInfo("Started the independent upgrade helper", {
       previous,

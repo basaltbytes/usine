@@ -1,15 +1,20 @@
 import { GitHubAppSecretsFromJson } from "@usine/github/local-secrets";
 import { ConfigProvider, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
-import { assert, it } from "vitest";
+import { assert, it } from "@effect/vitest";
 import { GitHubSignIn, githubSignInLayer } from "../../src/auth/github.ts";
 import { alice } from "./fixture.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 for (const flow of ["web", "device"] as const)
   for (const identityStatus of [200, 503])
     for (const revokeStatus of [204, 503])
-      it(`${flow} preserves identity status ${identityStatus} after revocation status ${revokeStatus}`, async () =>
-        Effect.runPromise(
+      it.live(
+        `${flow} preserves identity status ${identityStatus} after revocation status ${revokeStatus}`,
+        () =>
           Effect.gen(function* () {
             const requests: Array<string> = [];
             const client = HttpClient.make((request) => {
@@ -36,7 +41,7 @@ for (const flow of ["web", "device"] as const)
               );
               assert.equal(request.body._tag, "Uint8Array");
               if (request.body._tag === "Uint8Array")
-                assert.deepEqual(JSON.parse(new TextDecoder().decode(request.body.body)), {
+                assert.deepEqual(parseJson(new TextDecoder().decode(request.body.body)), {
                   access_token: "temporary-user-token",
                 });
               return Effect.succeed(
@@ -71,21 +76,20 @@ for (const flow of ["web", "device"] as const)
               "DELETE https://api.github.com/applications/Iv1.test/token",
             ]);
           }),
-        ));
+      );
 
 it.each(["none", "id", "secret", "both"] as const)(
   "uses per-field OAuth environment overrides (%s) over the runtime file",
   (override) =>
     Effect.runPromise(
       Effect.gen(function* () {
-        const fromFile = yield* Schema.decodeEffect(GitHubAppSecretsFromJson)(
-          JSON.stringify({
-            app_id: 123,
-            private_key: "-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----",
-            client_id: "Iv1.file",
-            client_secret: "file-secret",
-          }),
-        );
+        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          app_id: 123,
+          private_key: "-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----",
+          client_id: "Iv1.file",
+          client_secret: "file-secret",
+        }).pipe(Effect.orDie);
+        const fromFile = yield* Schema.decodeEffect(GitHubAppSecretsFromJson)(json1);
         const env: Record<string, string> = {};
         if (override === "id" || override === "both") env.USINE_GITHUB_CLIENT_ID = "Iv1.env";
         if (override === "secret" || override === "both")

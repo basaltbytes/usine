@@ -17,7 +17,7 @@ export class RegistryStorage extends Context.Service<
     readonly put: (sandbox: SandboxSummary) => Effect.Effect<void>;
     readonly remove: (name: SandboxName) => Effect.Effect<void>;
   }
->()("@usine/cloudflare/RegistryStorage") {}
+>()("@usine/cloudflare/registry/RegistryStorage") {}
 
 /** A sandbox's Durable Object didn't answer with its summary or a 404. */
 export class SandboxLookupFailed extends Schema.TaggedError<
@@ -34,7 +34,7 @@ export class SandboxLookup extends Context.Service<
       name: SandboxName,
     ) => Effect.Effect<Option.Option<SandboxSummary>, SandboxLookupFailed>;
   }
->()("@usine/cloudflare/SandboxLookup") {}
+>()("@usine/cloudflare/registry/SandboxLookup") {}
 
 /** The number of sandboxes whose summary a listing reads at once. */
 const LOOKUP_CONCURRENCY = 8;

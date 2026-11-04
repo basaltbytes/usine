@@ -30,7 +30,7 @@ const ChartContext = React.createContext<ChartContextProps | null>(null);
 function useChart() {
   const context = React.useContext(ChartContext);
 
-  if (!context) {
+  if (context === null) {
     throw new Error("useChart must be used within a <ChartContainer />");
   }
 
@@ -78,7 +78,7 @@ function ChartContainer({
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(([, config]) => config.theme ?? config.color);
 
-  if (!colorConfig.length) {
+  if (colorConfig.length === 0) {
     return null;
   }
 
@@ -92,7 +92,7 @@ ${prefix} [data-chart=${id}] {
 ${colorConfig
   .map(([key, itemConfig]) => {
     const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ?? itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
+    return color !== undefined && color !== "" ? `  --color-${key}: ${color};` : null;
   })
   .join("\n")}
 }
@@ -134,7 +134,7 @@ function ChartTooltipContent({
   const { config } = useChart();
 
   const tooltipLabel = React.useMemo(() => {
-    if (hideLabel || !payload?.length) {
+    if (hideLabel || payload === undefined || payload.length === 0) {
       return null;
     }
 
@@ -142,22 +142,25 @@ function ChartTooltipContent({
     const key = `${labelKey ?? item?.dataKey ?? item?.name ?? "value"}`;
     const itemConfig = getPayloadConfigFromPayload(config, item, key);
     const value =
-      !labelKey && typeof label === "string" ? (config[label]?.label ?? label) : itemConfig?.label;
+      (labelKey === undefined || labelKey === "") && typeof label === "string"
+        ? (config[label]?.label ?? label)
+        : itemConfig?.label;
 
-    if (labelFormatter) {
+    if (labelFormatter !== undefined) {
       return (
         <div className={cn("font-medium", labelClassName)}>{labelFormatter(value, payload)}</div>
       );
     }
 
-    if (!value) {
+    const hasLabel = Boolean(value);
+    if (!hasLabel) {
       return null;
     }
 
     return <div className={cn("font-medium", labelClassName)}>{value}</div>;
   }, [label, labelFormatter, payload, hideLabel, labelClassName, config, labelKey]);
 
-  if (!active || !payload?.length) {
+  if (active !== true || payload === undefined || payload.length === 0) {
     return null;
   }
 
@@ -187,11 +190,11 @@ function ChartTooltipContent({
                   indicator === "dot" && "items-center",
                 )}
               >
-                {formatter && item?.value !== undefined && item.name ? (
+                {formatter !== undefined && item?.value !== undefined && Boolean(item.name) ? (
                   formatter(item.value, item.name, item, index, item.payload)
                 ) : (
                   <>
-                    {itemConfig?.icon ? (
+                    {itemConfig?.icon !== undefined ? (
                       <itemConfig.icon />
                     ) : (
                       !hideIndicator && (
@@ -259,7 +262,7 @@ function ChartLegendContent({
 } & RechartsPrimitive.DefaultLegendContentProps) {
   const { config } = useChart();
 
-  if (!payload?.length) {
+  if (payload === undefined || payload.length === 0) {
     return null;
   }
 
@@ -284,7 +287,7 @@ function ChartLegendContent({
                 "flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground",
               )}
             >
-              {itemConfig?.icon && !hideIcon ? (
+              {itemConfig?.icon !== undefined && !hideIcon ? (
                 <itemConfig.icon />
               ) : (
                 <div
@@ -317,7 +320,7 @@ function getPayloadConfigFromPayload(config: ChartConfig, payload: unknown, key:
   if (key in payload && typeof payload[key as keyof typeof payload] === "string") {
     configLabelKey = payload[key as keyof typeof payload] as string;
   } else if (
-    payloadPayload &&
+    payloadPayload !== undefined &&
     key in payloadPayload &&
     typeof payloadPayload[key as keyof typeof payloadPayload] === "string"
   ) {

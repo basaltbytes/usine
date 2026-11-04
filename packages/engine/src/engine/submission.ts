@@ -17,6 +17,10 @@ import { StepName } from "@usine/core/step";
 import { type Brand, Crypto, Effect, Schema } from "effect";
 import { Hex } from "effect/encoding";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** A matched Event with its Loop, Item, and Run settings. */
 export class Submission extends Schema.Class<
   Submission,
@@ -103,7 +107,7 @@ export const reopeningOf = (
   original: DedupKey,
   reopening: number,
 ): Submission => {
-  const dedupKey = DedupKey.make(JSON.stringify(["reopened", reopening, original]));
+  const dedupKey = DedupKey.make(stringifyJson(["reopened", reopening, original]));
   return Submission.make({
     ...submission,
     event: Event.make({ ...submission.event, id: EventId.make(dedupKey), dedupKey }),

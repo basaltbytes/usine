@@ -19,6 +19,10 @@ import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT } from "./need.ts";
 import type { RunSummaryView } from "./run.ts";
 import { ProjectView, ReadyOverview } from "./overview.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 // The need is already validated; attention keys are derived synchronously.
 // @effect-diagnostics-next-line schemaSync:off
 const encodeNeed = Schema.encodeSync(NeedView);
@@ -39,7 +43,7 @@ export const attentionKey = (need: NeedView): AttentionKey => {
       : encodeNeed(need);
   return AttentionKey.make({
     id: need.id,
-    revision: AttentionRevision.make(JSON.stringify(content)),
+    revision: AttentionRevision.make(stringifyJson(content)),
   });
 };
 
@@ -122,13 +126,13 @@ export const partitionNeeds = (
   acknowledgements: ReadonlyArray<Pick<AttentionKey, "id" | "revision">>,
 ) => {
   const dismissed = new Set(
-    acknowledgements.map(({ id, revision }) => JSON.stringify([id, revision])),
+    acknowledgements.map(({ id, revision }) => stringifyJson([id, revision])),
   );
   const needsYou: Array<NeedView> = [];
   const dismissedNeeds: Array<NeedView> = [];
   for (const need of needs) {
     const { id, revision } = attentionKey(need);
-    (dismissed.has(JSON.stringify([id, revision])) ? dismissedNeeds : needsYou).push(need);
+    (dismissed.has(stringifyJson([id, revision])) ? dismissedNeeds : needsYou).push(need);
   }
   return { needsYou, dismissedNeeds };
 };

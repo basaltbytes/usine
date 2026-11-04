@@ -8,8 +8,8 @@ import {
   type SshPort,
   type WorkerName,
 } from "@usine/core/worker";
-import type { Brand, DateTime, Effect } from "effect";
-import { Option, Schema } from "effect";
+import { type Brand, type DateTime, type Effect, Option, Schema } from "effect";
+
 import type { MachineUnavailableError, WorkerCapabilityError } from "../../executor.ts";
 
 /**

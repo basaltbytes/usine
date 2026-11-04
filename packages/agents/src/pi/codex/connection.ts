@@ -65,7 +65,7 @@ export class CodexAppServer extends Context.Service<
       request: CodexClient,
     ) => Effect.Effect<CodexConnection, SessionOperationError, Scope.Scope>;
   }
->()("@usine/agents/pi/CodexAppServer") {}
+>()("@usine/agents/pi/codex/connection/CodexAppServer") {}
 
 export const operationError = (
   operation: SessionOperationError["operation"],

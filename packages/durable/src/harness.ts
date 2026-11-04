@@ -20,6 +20,8 @@ import {
   Result,
   Schema,
   type Scope,
+  DateTime,
+  Clock,
 } from "effect";
 
 /** A failed pi-durable call. */
@@ -117,7 +119,7 @@ export class DurableHarness extends Context.Service<
     /** Registers `listener` until the scope closes. */
     readonly subscribe: (listener: HarnessListener) => Effect.Effect<void, never, Scope.Scope>;
   }
->()("@usine/durable/DurableHarness") {}
+>()("@usine/durable/harness/DurableHarness") {}
 
 /** The interval in which repeats of a reported failure are counted and then logged once. */
 const REPORT_LOG_INTERVAL_MILLIS = 5_000;
@@ -128,7 +130,11 @@ const REFAIL_MILLIS = 60_000;
 const RESUME_OPERATION = "resume the durable tasks";
 
 const messageOf = (cause: unknown): string =>
-  cause instanceof Error && cause.message.length > 0 ? cause.message : String(cause) || "unknown";
+  cause instanceof Error && cause.message.length > 0
+    ? cause.message
+    : String(cause).length > 0
+      ? String(cause)
+      : "unknown";
 
 /**
  * Returns a `DurableHarnessError` with the message of `cause`. For a `SessionFailed`, uses the
@@ -192,7 +198,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
       }),
     );
     repeats.unlogged = 0;
-    repeats.loggedAt = Date.now();
+    repeats.loggedAt = DateTime.toEpochMillis(DateTime.nowUnsafe());
   };
 
   // Called synchronously from inside pi-durable.
@@ -210,7 +216,10 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
     }
     const repeats = generation.reports.get(message);
     if (repeats === undefined) {
-      generation.reports.set(message, { unlogged: 0, loggedAt: Date.now() });
+      generation.reports.set(message, {
+        unlogged: 0,
+        loggedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      });
       fork(
         Effect.logWarning("pi-durable reported a failure that did not fail its caller", {
           generation: generation.number,
@@ -220,7 +229,10 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
       return;
     }
     repeats.unlogged += 1;
-    if (Date.now() - repeats.loggedAt >= REPORT_LOG_INTERVAL_MILLIS) {
+    if (
+      DateTime.toEpochMillis(DateTime.nowUnsafe()) - repeats.loggedAt >=
+      REPORT_LOG_INTERVAL_MILLIS
+    ) {
       logRepeats(generation.number, message, repeats);
     }
   }
@@ -249,7 +261,12 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
         ),
       catch: (cause) => durableError("open the durable harness", cause),
     });
-    const opened: Opened = { generation, harness, storage, openedAt: Date.now() };
+    const opened: Opened = {
+      generation,
+      harness,
+      storage,
+      openedAt: yield* Clock.currentTimeMillis,
+    };
     harness.subscribeClose(() => {
       if (generation.closing) return;
       generation.failing = true;
@@ -369,7 +386,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
       );
       return yield* Deferred.fail(ready, failure);
     }
-    if (number > 1 && Date.now() - opened.openedAt < REFAIL_MILLIS) {
+    if (number > 1 && (yield* Clock.currentTimeMillis) - opened.openedAt < REFAIL_MILLIS) {
       return yield* stop(failure, ready);
     }
     yield* reopen(opened, ready);
@@ -442,7 +459,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
       yield* Effect.logInfo("Closed the durable harness", {
         generation: current.generation.number,
       });
-    }),
+    }).pipe(Effect.orDie),
   );
 
   return DurableHarness.of({

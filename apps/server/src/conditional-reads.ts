@@ -1,3 +1,5 @@
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createHash } from "node:crypto";
 import { Effect } from "effect";
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -29,7 +31,7 @@ export const conditionalReads = HttpRouter.middleware((handler) =>
               candidate.trim().replace(/^W\//u, "") === etag || candidate.trim() === "*",
           );
         return Effect.succeed(
-          matches
+          matches === true
             ? HttpServerResponse.empty({ status: 304, headers })
             : HttpServerResponse.setHeaders(response, headers),
         );

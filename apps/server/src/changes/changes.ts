@@ -4,8 +4,12 @@ import type { PermissionGrant } from "@usine/core/access";
 import { ChangeBus, type ScopedChange, type ChangeTarget } from "@usine/core/changes";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
 import { ChangeNotice } from "@usine/orchestrator/operator/http";
-import { Context, Effect, Layer, Option, Ref, Schedule, Stream } from "effect";
+import { Context, Effect, Layer, Option, Ref, Schedule, Stream, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const makeChanges = Effect.gen(function* () {
   const bus = yield* ChangeBus;
@@ -42,7 +46,7 @@ const makeChanges = Effect.gen(function* () {
           suppliedCursor < oldest - 1 ||
           suppliedCursor > revision;
         const frame = (notice: ChangeNotice) =>
-          `id: ${notice.revision}\nevent: change\ndata: ${JSON.stringify(notice)}\n\n`;
+          `id: ${notice.revision}\nevent: change\ndata: ${stringifyJson(notice)}\n\n`;
         const send = Effect.fn("Http.changes.send")(function* (notice: (typeof history)[number]) {
           const previous = yield* Ref.get(cursor);
           if (notice.revision <= previous) return "";
@@ -103,7 +107,7 @@ const makeChanges = Effect.gen(function* () {
 });
 
 export class Changes extends Context.Service<Changes, Effect.Success<typeof makeChanges>>()(
-  "@usine/server/Changes",
+  "@usine/server/changes/changes",
 ) {
   static readonly layer = Layer.effect(Changes, makeChanges);
 }

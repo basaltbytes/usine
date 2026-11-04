@@ -19,7 +19,7 @@ import { GitHubChecks } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { ChangedPullRequest, GitHubPolling } from "@usine/github/polling";
-import { Context, DateTime, Effect, Layer, Option, Result } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 import { resolveTriggerLoops, triggerSubmission } from "./trigger-submission.ts";
 import {
   RepositoryPollFailure,
@@ -47,7 +47,7 @@ export class CiMonitor extends Context.Service<
       EnginePersistenceError
     >;
   }
->()("@usine/orchestrator/CiMonitor") {
+>()("@usine/orchestrator/ci/CiMonitor") {
   static readonly layer = Layer.effect(
     CiMonitor,
     Effect.gen(function* () {
@@ -80,7 +80,12 @@ export class CiMonitor extends Context.Service<
         if (endedAt === undefined || Option.isNone(endedAt))
           return yield* Effect.die("A CI wait has no ended attempt");
         const observed = yield* checks.snapshot(wait.repository, pullRequest);
-        const dedupKey = DedupKey.make(JSON.stringify(["ci-failure", runId, head]));
+        const dedupKeyJson = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+          "ci-failure",
+          runId,
+          head,
+        ]).pipe(Effect.orDie);
+        const dedupKey = DedupKey.make(dedupKeyJson);
         const admitted = yield* reader.runForEvent(dedupKey);
         if (Option.isSome(admitted)) {
           yield* Effect.logInfo("CI fix event admitted; source hands off to its recorded run", {

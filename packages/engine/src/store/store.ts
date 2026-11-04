@@ -1281,6 +1281,6 @@ export class RunStore extends Context.Service<
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;
   }
->()("@usine/engine/internal/RunStore") {
+>()("@usine/engine/store/store/RunStore") {
   static readonly layer = Layer.effect(RunStore, makeRunStore);
 }

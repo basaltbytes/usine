@@ -1,3 +1,4 @@
+import { webRequest } from "../../../../tooling/test/http.mts";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
@@ -25,19 +26,15 @@ const fetchJson = Effect.fn("integration.fetchJson")(function* <S extends Schema
   init: RequestInit,
   schema: S,
 ) {
-  const response = yield* Effect.tryPromise({
-    try: () =>
-      fetch(url, {
-        ...init,
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-          "x-github-api-version": API_VERSION,
-        },
-      }),
-    catch: (cause) => RequestFailed.make({ cause }),
-  });
+  const response = yield* webRequest(url, {
+    ...init,
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      "x-github-api-version": API_VERSION,
+    },
+  }).pipe(Effect.mapError((cause) => RequestFailed.make({ cause })));
   if (!response.ok) return yield* Effect.die(`GitHub returned ${response.status}`);
   const responseBody = yield* Effect.promise(() => response.json());
   return yield* Schema.decodeUnknownEffect(schema)(responseBody);
@@ -48,18 +45,17 @@ const deleteComment = Effect.fn("integration.deleteComment")(function* (
   commentId: number,
   token: string,
 ) {
-  const response = yield* Effect.tryPromise({
-    try: () =>
-      fetch(`https://api.github.com/repos/${repository}/issues/comments/${commentId}`, {
-        method: "DELETE",
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${token}`,
-          "x-github-api-version": API_VERSION,
-        },
-      }),
-    catch: (cause) => RequestFailed.make({ cause }),
-  });
+  const response = yield* webRequest(
+    `https://api.github.com/repos/${repository}/issues/comments/${commentId}`,
+    {
+      method: "DELETE",
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "x-github-api-version": API_VERSION,
+      },
+    },
+  ).pipe(Effect.mapError((cause) => RequestFailed.make({ cause })));
   if (response.status !== 204) return yield* Effect.die(`GitHub returned ${response.status}`);
 });
 
@@ -95,15 +91,16 @@ describe("operator-created GitHub App", () => {
 
         const bot = yield* app.botAccount;
         const token = Redacted.value(workerToken.value);
+        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          body: "usine @usine/github integration check; this comment is removed automatically.",
+        }).pipe(Effect.orDie);
         yield* Effect.acquireUseRelease(
           fetchJson(
             `https://api.github.com/repos/${repository}/issues/${settings.issueNumber}/comments`,
             token,
             {
               method: "POST",
-              body: JSON.stringify({
-                body: "usine @usine/github integration check; this comment is removed automatically.",
-              }),
+              body: json1,
             },
             Comment,
           ),
@@ -118,7 +115,7 @@ describe("operator-created GitHub App", () => {
           (comment) => deleteComment(repository, comment.id, token),
         );
       }).pipe(Effect.provide(githubLayer));
-    }),
+    }).pipe(Effect.provide(FetchHttpClient.layer)),
   );
 });
 

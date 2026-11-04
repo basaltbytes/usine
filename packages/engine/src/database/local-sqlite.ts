@@ -1,3 +1,4 @@
+import { type SqlError, SqlClient } from "effect/sql";
 import { AttentionAcknowledgements } from "../attention/attention.ts";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
@@ -16,8 +17,7 @@ import {
   Schema,
   Tracer,
 } from "effect";
-import { SqlClient } from "effect/sql";
-import type { SqlError } from "effect/sql/SqlError";
+
 import { CursorStore } from "../cursor/cursor.ts";
 import { ItemProjectionReader, ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import {
@@ -65,7 +65,7 @@ const withExternalParentSpan = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 /** Returns `SqliteClient.layer`, failing with `onError` when the database can't be opened. */
 const openSqliteLayer = <E>(
   config: SqliteClient.SqliteClientConfig,
-  onError: (cause: SqlError) => E,
+  onError: (cause: SqlError.SqlError) => E,
 ) =>
   Layer.effectContext(
     Effect.gen(function* () {
@@ -218,7 +218,7 @@ const readableRuntimeStore = Effect.fn("LocalSqlite.readableRuntimeStore")(funct
     });
 });
 
-const readOnlySqliteLayer = <E>(filename: string, onError: (cause: SqlError) => E) =>
+const readOnlySqliteLayer = <E>(filename: string, onError: (cause: SqlError.SqlError) => E) =>
   openSqliteLayer({ filename, readonly: true, disableWAL: true }, onError);
 
 const existingSqliteLayer = (instanceDirectory: InstanceDirectory) =>
@@ -267,7 +267,7 @@ export class RuntimeStoreBackupError extends Schema.TaggedError<
 const vendorMessage = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }));
 const errnoCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.NonEmptyString }));
 
-const failureReason = (cause: PlatformError.PlatformError | SqlError): string => {
+const failureReason = (cause: PlatformError.PlatformError | SqlError.SqlError): string => {
   if (cause._tag === "SqlError")
     return Option.match(vendorMessage(cause.reason.cause), {
       onNone: () => cause.reason._tag,
@@ -294,7 +294,7 @@ export const backup = Effect.fn("LocalSqlite.backup")(
     const source = runtimeStorePath(path, instanceDirectory);
     const failure =
       (operation: RuntimeStoreBackupError["operation"]) =>
-      (cause: PlatformError.PlatformError | SqlError) =>
+      (cause: PlatformError.PlatformError | SqlError.SqlError) =>
         RuntimeStoreBackupError.make({
           operation,
           source,

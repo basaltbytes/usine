@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
 import { ChildBackend } from "@usine/agents/runtime";
 import type { AttemptId } from "@usine/core/attempt";
@@ -141,7 +143,10 @@ const makeAttemptRuntime = Effect.gen(function* () {
       );
       const outcome = task?.state.outcome?.status;
       const live =
-        task !== undefined && outcome !== "aborted" && !record.terminalRelayed && !record.settled;
+        task !== undefined &&
+        outcome !== "aborted" &&
+        !record.terminalRelayed &&
+        record.settled !== true;
       yield* Effect.logDebug("Checked whether the Attempt is live", {
         attemptId,
         taskId,

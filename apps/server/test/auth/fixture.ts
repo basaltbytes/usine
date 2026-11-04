@@ -1,3 +1,4 @@
+import { NodeCrypto } from "@effect/platform-node";
 import { MemberAccess } from "../../src/auth/access.ts";
 import { administratorPermissions, type PermissionGrant } from "@usine/core/access";
 import { UiOrigin } from "@usine/config/factory";
@@ -69,6 +70,7 @@ export const authFixture = (
         origins: [UiOrigin.make("https://client.example")],
         localToken: Redacted.make(localSecret),
       }).pipe(
+        Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.succeed(AuthStore, store)),
         Layer.provide(
           Layer.succeed(MemberAccess, {

@@ -1,3 +1,4 @@
+import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -18,9 +19,8 @@ import {
 import { CheckoutRequest, claudeLoginLockLayer } from "../../src/executor.ts";
 import { layer as exeDevLayer } from "../../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
-import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
-import { ChildProcessSpawner } from "effect/process";
-import type { StandardCommand } from "effect/process/ChildProcess";
+import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream, Schema } from "effect";
+
 import { claudeVersionOutput } from "../claude-code.ts";
 
 export const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
@@ -96,7 +96,7 @@ export const SSH_ENVIRONMENT_ALLOWLIST = new Set([
 type SweepMode = "valid" | "invalid-path";
 
 interface FakeSshState {
-  readonly commands: Array<StandardCommand>;
+  readonly commands: Array<ChildProcess.StandardCommand>;
   /** Whether the next `rm -rf` on the Attempt worktree exits non-zero. */
   failWorktreeRm: boolean;
   /** Whether the VM's Claude Code reports a subscription login. */
@@ -160,7 +160,7 @@ const hangingHandle = Effect.gen(function* () {
 });
 
 /** Returns the remote command line after `--` in an SSH invocation. */
-export const remoteLine = (command: StandardCommand): string => {
+export const remoteLine = (command: ChildProcess.StandardCommand): string => {
   const separator = command.args.indexOf("--");
   return separator < 0 ? "" : (command.args[separator + 1] ?? "");
 };
@@ -212,19 +212,17 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         return oneShotHandle("", 1, "rm: cannot remove: device or resource busy");
       }
       if (command.args.includes("exe.dev") && command.args.includes("ls")) {
-        return oneShotHandle(
-          JSON.stringify({
-            vms: [
-              {
-                vm_name: WORKER,
-                ssh_dest: `${WORKER}.exe.xyz`,
-                status: "running",
-                region: "fra",
-              },
-            ],
-          }),
-          0,
-        );
+        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          vms: [
+            {
+              vm_name: WORKER,
+              ssh_dest: `${WORKER}.exe.xyz`,
+              status: "running",
+              region: "fra",
+            },
+          ],
+        }).pipe(Effect.orDie);
+        return oneShotHandle(json1, 0);
       }
       if (line === "exec 'printenv' 'HOME'") return oneShotHandle("/home/exedev\n", 0);
       if (line === "exec 'git' '--version'") {
@@ -234,14 +232,12 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         return oneShotHandle("MemTotal:        8074035 kB\nSwapTotal:       2097148 kB\n", 0);
       if (line === "exec 'claude' '--version'") return oneShotHandle(claudeVersionOutput, 0);
       if (line === "exec 'claude' 'auth' 'status' '--json'") {
-        return oneShotHandle(
-          JSON.stringify({
-            loggedIn: state.claudeLoggedIn,
-            authMethod: state.claudeLoggedIn ? "claude.ai" : "none",
-            apiProvider: "firstParty",
-          }),
-          state.claudeLoggedIn ? 0 : 1,
-        );
+        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          loggedIn: state.claudeLoggedIn,
+          authMethod: state.claudeLoggedIn ? "claude.ai" : "none",
+          apiProvider: "firstParty",
+        }).pipe(Effect.orDie);
+        return oneShotHandle(json2, state.claudeLoggedIn ? 0 : 1);
       }
       if (line.startsWith("exec 'sh' '-c'")) return oneShotHandle("no-children\n", 0);
       if (line.includes("&& exec 'gh' 'api' 'repos/acme/demo/issues/42/comments?")) {

@@ -114,7 +114,7 @@ export const EditAndRetry = ({ run, intent, close, openRun, className }: EditAnd
         onChange={(event) => setAgent(event.target.value)}
         disabled={mutation.isPending || roster.isPending}
       >
-        {!roster.data?.includes(run.agent) && (
+        {roster.data?.includes(run.agent) !== true && (
           <NativeSelectOption value={run.agent} disabled>
             {run.agent} · unavailable
           </NativeSelectOption>

@@ -25,6 +25,11 @@ import {
   type CodexNotification,
   operationError,
 } from "./connection.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 export {
   CodexAppServer,
   type CodexClient,
@@ -64,7 +69,7 @@ interface PendingRequest {
 }
 
 const repositoryTrustOverride = (cwd: string): string =>
-  `projects.${JSON.stringify(cwd)}.trust_level="untrusted"`;
+  `projects.${stringifyJson(cwd)}.trust_level="untrusted"`;
 /** Command-line overrides for every Codex invocation: disable nested agents, plugins, apps, startup update checks, and analytics. */
 export const codexConfigArgs: ReadonlyArray<string> = [
   "features.multi_agent=false",
@@ -163,7 +168,7 @@ const makeCodexAppServer = Effect.gen(function* () {
       );
 
       const write = (message: Schema.Json, operation: SessionOperationError["operation"]) =>
-        Queue.offer(input, encoder.encode(`${JSON.stringify(message)}\n`)).pipe(
+        Queue.offer(input, encoder.encode(`${stringifyJson(message)}\n`)).pipe(
           Effect.flatMap((accepted) =>
             accepted
               ? Effect.void

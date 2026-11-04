@@ -1,6 +1,8 @@
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { DatabaseSync } from "node:sqlite";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
@@ -163,8 +165,12 @@ describe("Item cycle budgets", () => {
           const legacy = (round: number) =>
             Submission.make({ ...submission("review", round), cycleLimit: Option.none() });
           const third = legacy(3);
+          const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+            "github",
+            "basaltbytes/usine",
+          ]).pipe(Effect.orDie);
           const scheduled = Submission.make({
-            ...submission("schedule", 1, JSON.stringify(["github", "basaltbytes/usine"])),
+            ...submission("schedule", 1, json1),
             cycleLimit: Option.none(),
           });
           yield* inDatabase(
@@ -405,7 +411,10 @@ describe("Item cycle budgets", () => {
         assert.strictEqual(closures[0]?.["item_key"], "pr-72");
         assert.strictEqual(closures[0]?.["reason"], "ItemClosed");
         const decodedValue8 = yield* Schema.encodeEffect(CycleBudgetAsk)(ask);
-        assert.deepStrictEqual(JSON.parse(String(closures[0]?.["ask_json"])), decodedValue8);
+        const json2 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          String(closures[0]?.["ask_json"]),
+        ).pipe(Effect.orDie);
+        assert.deepStrictEqual(json2, decodedValue8);
         yield* inDatabase(
           directory,
           Effect.gen(function* () {
@@ -458,7 +467,10 @@ describe("Item cycle budgets", () => {
         assert.strictEqual(closures[0]?.["ask_id"], first.id);
         assert.strictEqual(closures[0]?.["reason"], "ItemClosed");
         const decodedValue9 = yield* Schema.encodeEffect(CycleBudgetAsk)(second);
-        assert.deepStrictEqual(JSON.parse(String(closures[0]?.["ask_json"])), decodedValue9);
+        const json3 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          String(closures[0]?.["ask_json"]),
+        ).pipe(Effect.orDie);
+        assert.deepStrictEqual(json3, decodedValue9);
         assert.isAbove(
           Date.parse(String(closures[0]?.["closed_at"])),
           Date.parse(String(closed?.["closed_at"])),

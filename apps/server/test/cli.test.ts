@@ -1,9 +1,10 @@
+import { HttpServerError } from "effect/http";
 import { createServer } from "node:net";
 import { NodeServices } from "@effect/platform-node";
 import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { ServeError } from "effect/http/HttpServerError";
-import { assert, describe, it } from "vitest";
+
+import { assert, describe, it } from "@effect/vitest";
 import {
   CLI_USAGE,
   BrowserOpenError,
@@ -28,115 +29,120 @@ const noEnvironment = {
 };
 
 describe("usine CLI", () => {
-  it.each([
+  it.live.each([
     ["config"],
     ["config", "export", ""],
     ["config", "import", ""],
     ["config", "import", "folder", "--message"],
     ["config", "edit", "unknown", "name"],
     ["config", "log", "agent"],
-  ])("rejects malformed configuration operands: %j", async (...args) => {
-    const failure = await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip));
-    assert.instanceOf(failure, CliUsageError);
-  });
+  ])("rejects malformed configuration operands: %j", (args) =>
+    Effect.gen(function* () {
+      const failure = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
+      assert.instanceOf(failure, CliUsageError);
+    }),
+  );
 
-  it("parses backup independently of server settings and provides help", async () => {
-    const command = await Effect.runPromise(
-      parseCli(["backup", "evidence.sqlite"], {
+  it.live("parses backup independently of server settings and provides help", () =>
+    Effect.gen(function* () {
+      const command = yield* parseCli(["backup", "evidence.sqlite"], {
         ...noEnvironment,
         port: Option.some("invalid"),
-      }),
-    );
-    assert(command._tag === "BackupCommand");
-    assert.strictEqual(command.output, "evidence.sqlite");
-    assert.strictEqual(
-      (await Effect.runPromise(parseCli(["backup", "--help"], noEnvironment)))._tag,
-      "HelpCommand",
-    );
-  });
+      });
+      assert(command._tag === "BackupCommand");
+      assert.strictEqual(command.output, "evidence.sqlite");
+      assert.strictEqual(
+        (yield* parseCli(["backup", "--help"], noEnvironment))._tag,
+        "HelpCommand",
+      );
+    }),
+  );
 
-  it.each([
+  it.live.each([
     { args: ["backup"] },
     { args: ["backup", ""] },
     { args: ["backup", "--unknown"] },
     { args: ["backup", "copy.sqlite", "extra"] },
-  ])("rejects incomplete or unsupported backup arguments: $args", async ({ args }) => {
-    assert.instanceOf(
-      await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip)),
-      CliUsageError,
-    );
-  });
+  ])("rejects incomplete or unsupported backup arguments: $args", ({ args }) =>
+    Effect.gen(function* () {
+      const actual1 = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
+      assert.instanceOf(actual1, CliUsageError);
+    }),
+  );
 
-  it.each([
+  it.live.each([
     { flags: [], output: Option.none<string>() },
     { flags: ["--output", "evidence.json"], output: Option.some("evidence.json") },
     { flags: ["-o", "evidence.json"], output: Option.some("evidence.json") },
-  ])(
-    "parses Run export flags $flags independently of server settings",
-    async ({ flags, output }) => {
+  ])("parses Run export flags $flags independently of server settings", ({ flags, output }) =>
+    Effect.gen(function* () {
       const environment = { ...noEnvironment, port: Option.some("invalid-server-port") };
-      const command = await Effect.runPromise(
-        parseCli(["export-run", "run/1", ...flags], environment),
-      );
+      const command = yield* parseCli(["export-run", "run/1", ...flags], environment);
       assert(command._tag === "ExportRunCommand");
       assert.strictEqual(command.runId, "run/1");
       assert.deepStrictEqual(command.output, output);
-    },
+    }),
   );
 
-  it("shows Run export help without requiring a Run id", async () => {
-    assert.strictEqual(
-      (await Effect.runPromise(parseCli(["export-run", "--help"], noEnvironment)))._tag,
-      "HelpCommand",
-    );
-  });
+  it.live("shows Run export help without requiring a Run id", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(
+        (yield* parseCli(["export-run", "--help"], noEnvironment))._tag,
+        "HelpCommand",
+      );
+    }),
+  );
 
-  it.each([
+  it.live.each([
     { args: ["export-run"] },
     { args: ["export-run", ""] },
     { args: ["export-run", "--unknown"] },
     { args: ["export-run", "run/1", "--output"] },
     { args: ["export-run", "run/1", "--output", ""] },
     { args: ["export-run", "run/1", "--port", "7331"] },
-  ])("rejects incomplete or unsupported Run export arguments: $args", async ({ args }) => {
-    const error = await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip));
-    assert.instanceOf(error, CliUsageError);
-  });
+  ])("rejects incomplete or unsupported Run export arguments: $args", ({ args }) =>
+    Effect.gen(function* () {
+      const error = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
+      assert.instanceOf(error, CliUsageError);
+    }),
+  );
 
-  it("parses the lifecycle commands with their timeout, force, and check flags", async () => {
-    const parse = (args: ReadonlyArray<string>) =>
-      Effect.runPromise(parseCli(args, { ...noEnvironment, port: Option.some("invalid") }));
-    const status = await parse(["status"]);
-    const stop = await parse(["stop"]);
-    const restart = await parse(["restart", "--timeout", "30", "--force"]);
-    const upgrade = await parse(["upgrade", "0.4.0", "--check", "--timeout=5"]);
-    const latest = await parse(["upgrade"]);
-    const detached = await Effect.runPromise(parseCli(["up", "--detach"], noEnvironment));
+  it.live("parses the lifecycle commands with their timeout, force, and check flags", () =>
+    Effect.gen(function* () {
+      const parse = (args: ReadonlyArray<string>) =>
+        parseCli(args, { ...noEnvironment, port: Option.some("invalid") });
+      const status = yield* parse(["status"]);
+      const stop = yield* parse(["stop"]);
+      const restart = yield* parse(["restart", "--timeout", "30", "--force"]);
+      const upgrade = yield* parse(["upgrade", "0.4.0", "--check", "--timeout=5"]);
+      const latest = yield* parse(["upgrade"]);
+      const detached = yield* parseCli(["up", "--detach"], noEnvironment);
 
-    assert.strictEqual(status._tag, "StatusCommand");
-    assert(stop._tag === "StopCommand");
-    assert.strictEqual(Duration.toSeconds(stop.options.timeout), 120);
-    assert.isFalse(stop.options.force);
-    assert(restart._tag === "RestartCommand");
-    assert.strictEqual(Duration.toSeconds(restart.options.timeout), 30);
-    assert.isTrue(restart.options.force);
-    assert(upgrade._tag === "UpgradeCommand");
-    assert.deepStrictEqual(upgrade.version, Option.some("0.4.0"));
-    assert.isTrue(upgrade.check);
-    const next = await parse(["upgrade", "--channel", "next"]);
-    assert(next._tag === "UpgradeCommand");
-    assert.deepStrictEqual(next.version, Option.some("next"));
-    assert.strictEqual(Duration.toSeconds(upgrade.options.timeout), 5);
-    assert(latest._tag === "UpgradeCommand");
-    assert.deepStrictEqual(latest.version, Option.none());
-    assert(detached._tag === "UpCommand");
-    assert.isTrue(detached.detach);
-    for (const command of ["status", "stop", "restart", "upgrade"]) {
-      assert.strictEqual((await parse([command, "--help"]))._tag, "HelpCommand");
-    }
-  });
+      assert.strictEqual(status._tag, "StatusCommand");
+      assert(stop._tag === "StopCommand");
+      assert.strictEqual(Duration.toSeconds(stop.options.timeout), 120);
+      assert.isFalse(stop.options.force);
+      assert(restart._tag === "RestartCommand");
+      assert.strictEqual(Duration.toSeconds(restart.options.timeout), 30);
+      assert.isTrue(restart.options.force);
+      assert(upgrade._tag === "UpgradeCommand");
+      assert.deepStrictEqual(upgrade.version, Option.some("0.4.0"));
+      assert.isTrue(upgrade.check);
+      const next = yield* parse(["upgrade", "--channel", "next"]);
+      assert(next._tag === "UpgradeCommand");
+      assert.deepStrictEqual(next.version, Option.some("next"));
+      assert.strictEqual(Duration.toSeconds(upgrade.options.timeout), 5);
+      assert(latest._tag === "UpgradeCommand");
+      assert.deepStrictEqual(latest.version, Option.none());
+      assert(detached._tag === "UpCommand");
+      assert.isTrue(detached.detach);
+      for (const command of ["status", "stop", "restart", "upgrade"]) {
+        assert.strictEqual((yield* parse([command, "--help"]))._tag, "HelpCommand");
+      }
+    }),
+  );
 
-  it.each([
+  it.live.each([
     { args: ["status", "--force"] },
     { args: ["stop", "--check"] },
     { args: ["stop", "extra"] },
@@ -145,34 +151,36 @@ describe("usine CLI", () => {
     { args: ["restart", "--timeout", "1.5"] },
     { args: ["upgrade", "0.4.0", "0.5.0"] },
     { args: ["upgrade", "--port", "7331"] },
-  ])("rejects unsupported lifecycle arguments: $args", async ({ args }) => {
-    assert.instanceOf(
-      await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip)),
-      CliUsageError,
-    );
-  });
+  ])("rejects unsupported lifecycle arguments: $args", ({ args }) =>
+    Effect.gen(function* () {
+      const actual2 = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
+      assert.instanceOf(actual2, CliUsageError);
+    }),
+  );
 
-  it("accepts the volatile-instance override from the flag or the environment", async () => {
-    const flag = await Effect.runPromise(
-      parseCli(["up", "--allow-volatile-instance", "--port=8125"], noEnvironment),
-    );
-    const environment = await Effect.runPromise(
-      parseCli(["up"], { ...noEnvironment, allowVolatileInstance: Option.some("1") }),
-    );
-    const plain = await Effect.runPromise(parseCli(["up"], noEnvironment));
-    const unknown = await Effect.runPromise(
-      parseCli(["up", "--allow-anything"], noEnvironment).pipe(Effect.flip),
-    );
-    assert(
-      flag._tag === "UpCommand" && environment._tag === "UpCommand" && plain._tag === "UpCommand",
-    );
-    assert.strictEqual(flag.allowVolatileInstance, true);
-    assert.strictEqual(flag.port, 8_125);
-    assert.strictEqual(environment.allowVolatileInstance, true);
-    assert.strictEqual(plain.allowVolatileInstance, false);
-    const matchesUnknown = Schema.is(CliUsageError)(unknown);
-    assert(matchesUnknown);
-  });
+  it.live("accepts the volatile-instance override from the flag or the environment", () =>
+    Effect.gen(function* () {
+      const flag = yield* parseCli(
+        ["up", "--allow-volatile-instance", "--port=8125"],
+        noEnvironment,
+      );
+      const environment = yield* parseCli(["up"], {
+        ...noEnvironment,
+        allowVolatileInstance: Option.some("1"),
+      });
+      const plain = yield* parseCli(["up"], noEnvironment);
+      const unknown = yield* parseCli(["up", "--allow-anything"], noEnvironment).pipe(Effect.flip);
+      assert(
+        flag._tag === "UpCommand" && environment._tag === "UpCommand" && plain._tag === "UpCommand",
+      );
+      assert.strictEqual(flag.allowVolatileInstance, true);
+      assert.strictEqual(flag.port, 8_125);
+      assert.strictEqual(environment.allowVolatileInstance, true);
+      assert.strictEqual(plain.allowVolatileInstance, false);
+      const matchesUnknown = Schema.is(CliUsageError)(unknown);
+      assert(matchesUnknown);
+    }),
+  );
 
   it("recognises instance folders under temp roots and leaves others alone", () => {
     const roots = volatileRoots(Option.some("/var/folders/ab/T"));
@@ -189,120 +197,134 @@ describe("usine CLI", () => {
     assert.deepStrictEqual(volatileRoot("/Users/me/Code/usine-factory", roots), Option.none());
   });
 
-  it("parses help, version, flag ports, and the environment fallback", async () => {
-    const help = await Effect.runPromise(parseCli(["--help"], noEnvironment));
-    const upHelp = await Effect.runPromise(parseCli(["up", "-h"], noEnvironment));
-    const version = await Effect.runPromise(parseCli(["--version"], noEnvironment));
-    const flagged = await Effect.runPromise(
-      parseCli(["up", "--port", "8123"], { ...noEnvironment, port: Option.some("9000") }),
-    );
-    const environment = await Effect.runPromise(
-      parseCli(["up"], { ...noEnvironment, port: Option.some("8124") }),
-    );
+  it.live("parses help, version, flag ports, and the environment fallback", () =>
+    Effect.gen(function* () {
+      const help = yield* parseCli(["--help"], noEnvironment);
+      const upHelp = yield* parseCli(["up", "-h"], noEnvironment);
+      const version = yield* parseCli(["--version"], noEnvironment);
+      const flagged = yield* parseCli(["up", "--port", "8123"], {
+        ...noEnvironment,
+        port: Option.some("9000"),
+      });
+      const environment = yield* parseCli(["up"], { ...noEnvironment, port: Option.some("8124") });
 
-    assert.strictEqual(help._tag, "HelpCommand");
-    assert.strictEqual(upHelp._tag, "HelpCommand");
-    assert.strictEqual(version._tag, "VersionCommand");
-    assert.strictEqual(flagged._tag, "UpCommand");
-    assert.strictEqual(flagged._tag === "UpCommand" ? flagged.port : 0, 8_123);
-    assert.strictEqual(environment._tag, "UpCommand");
-    assert.strictEqual(environment._tag === "UpCommand" ? environment.port : 0, 8_124);
-    assert.match(CLI_USAGE, /usine up \[--port <port>\]/);
-  });
+      assert.strictEqual(help._tag, "HelpCommand");
+      assert.strictEqual(upHelp._tag, "HelpCommand");
+      assert.strictEqual(version._tag, "VersionCommand");
+      assert.strictEqual(flagged._tag, "UpCommand");
+      assert.strictEqual(flagged._tag === "UpCommand" ? flagged.port : 0, 8_123);
+      assert.strictEqual(environment._tag, "UpCommand");
+      assert.strictEqual(environment._tag === "UpCommand" ? environment.port : 0, 8_124);
+      assert.match(CLI_USAGE, /usine up \[--port <port>\]/);
+    }),
+  );
 
-  it("rejects invalid ports at the CLI boundary", async () => {
-    const flagError = await Effect.runPromise(
-      parseCli(["up", "--port", "70000"], noEnvironment).pipe(Effect.flip),
-    );
-    const environmentError = await Effect.runPromise(
-      parseCli(["up"], { ...noEnvironment, port: Option.some("not-a-port") }).pipe(Effect.flip),
-    );
-    const matchesFlagError = Schema.is(CliUsageError)(flagError);
-    assert(matchesFlagError);
-    assert.match(flagError.message, /between 1 and 65535/);
-    const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
-    assert(matchesEnvironmentError);
-    assert.match(environmentError.message, /^USINE_PORT/);
-  });
+  it.live("rejects invalid ports at the CLI boundary", () =>
+    Effect.gen(function* () {
+      const flagError = yield* parseCli(["up", "--port", "70000"], noEnvironment).pipe(Effect.flip);
+      const environmentError = yield* parseCli(["up"], {
+        ...noEnvironment,
+        port: Option.some("not-a-port"),
+      }).pipe(Effect.flip);
+      const matchesFlagError = Schema.is(CliUsageError)(flagError);
+      assert(matchesFlagError);
+      assert.match(flagError.message, /between 1 and 65535/);
+      const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
+      assert(matchesEnvironmentError);
+      assert.match(environmentError.message, /^USINE_PORT/);
+    }),
+  );
 
-  it("reads the log level from the flag, then the environment, ignoring case", async () => {
-    const level = async (args: ReadonlyArray<string>, environment = Option.none<string>()) => {
-      const command = await Effect.runPromise(
-        parseCli(["up", ...args], { ...noEnvironment, logLevel: environment }),
+  it.live("reads the log level from the flag, then the environment, ignoring case", () =>
+    Effect.gen(function* () {
+      const level = (args: ReadonlyArray<string>, environment = Option.none<string>()) =>
+        Effect.gen(function* () {
+          const command = yield* parseCli(["up", ...args], {
+            ...noEnvironment,
+            logLevel: environment,
+          });
+          assert(command._tag === "UpCommand");
+          return command.logLevel;
+        });
+      const actual3 = yield* level([]);
+      assert.strictEqual(actual3, "Info");
+      const actual4 = yield* level([], Option.some("DEBUG"));
+      assert.strictEqual(actual4, "Debug");
+      const actual5 = yield* level(["--log-level", "warn"], Option.some("debug"));
+      assert.strictEqual(actual5, "Warn");
+      const actual6 = yield* level(["--log-level=trace"]);
+      assert.strictEqual(actual6, "Trace");
+      const flagError = yield* parseCli(["up", "--log-level", "verbose"], noEnvironment).pipe(
+        Effect.flip,
       );
-      assert(command._tag === "UpCommand");
-      return command.logLevel;
-    };
-    assert.strictEqual(await level([]), "Info");
-    assert.strictEqual(await level([], Option.some("DEBUG")), "Debug");
-    assert.strictEqual(await level(["--log-level", "warn"], Option.some("debug")), "Warn");
-    assert.strictEqual(await level(["--log-level=trace"]), "Trace");
-    const flagError = await Effect.runPromise(
-      parseCli(["up", "--log-level", "verbose"], noEnvironment).pipe(Effect.flip),
-    );
-    const environmentError = await Effect.runPromise(
-      parseCli(["up"], { ...noEnvironment, logLevel: Option.some("") }).pipe(Effect.flip),
-    );
-    const matchesFlagError = Schema.is(CliUsageError)(flagError);
-    assert(matchesFlagError);
-    assert.match(flagError.message, /^--log-level must be trace, debug, info, warn, or error/);
-    const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
-    assert(matchesEnvironmentError);
-    assert.match(environmentError.message, /^USINE_LOG_LEVEL/);
-  });
+      const environmentError = yield* parseCli(["up"], {
+        ...noEnvironment,
+        logLevel: Option.some(""),
+      }).pipe(Effect.flip);
+      const matchesFlagError = Schema.is(CliUsageError)(flagError);
+      assert(matchesFlagError);
+      assert.match(flagError.message, /^--log-level must be trace, debug, info, warn, or error/);
+      const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
+      assert(matchesEnvironmentError);
+      assert.match(environmentError.message, /^USINE_LOG_LEVEL/);
+    }),
+  );
 
-  it("reads the UI origin from the flag, then the environment, and refuses a URL with a path or another scheme", async () => {
-    const origin = async (args: ReadonlyArray<string>, environment = Option.none<string>()) => {
-      const command = await Effect.runPromise(
-        parseCli(["up", ...args], { ...noEnvironment, origin: environment }),
-      );
-      assert(command._tag === "UpCommand");
-      return command.origin;
-    };
-    const serve = "https://usine-orchestrator.tail1234.ts.net";
-    assert.deepStrictEqual(await origin([]), Option.none());
-    assert.deepStrictEqual(await origin([], Option.some(serve)), Option.some(serve));
-    // As a browser writes it in the Origin header: no slash, no default port, and lower case.
-    assert.deepStrictEqual(
-      await origin(
-        ["--origin", "https://Usine-Orchestrator.tail1234.ts.net:443/"],
-        Option.some("https://other.tail1234.ts.net"),
-      ),
-      Option.some(serve),
-    );
-    assert.deepStrictEqual(
-      await origin(["--origin=http://127.0.0.1:8080"]),
-      Option.some("http://127.0.0.1:8080"),
-    );
-    for (const value of [
-      "usine-orchestrator.tail1234.ts.net",
-      `${serve}/ui`,
-      `${serve}/?tab=runs`,
-      "https://operator@usine-orchestrator.tail1234.ts.net",
-      "ftp://usine-orchestrator.tail1234.ts.net",
-      "file:///home/usine",
-      "http://100.64.0.20:8080",
-    ]) {
-      const error = await Effect.runPromise(
-        parseCli(["up", "--origin", value], noEnvironment).pipe(Effect.flip),
-      );
-      assert(Schema.is(CliUsageError)(error), value);
-      assert.match(error.message, /^--origin must be the http or https URL of the UI/u);
-    }
-    const environmentError = await Effect.runPromise(
-      parseCli(["up"], { ...noEnvironment, origin: Option.some(`${serve}/ui`) }).pipe(Effect.flip),
-    );
-    const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
-    assert(matchesEnvironmentError);
-    assert.match(environmentError.message, /^USINE_ORIGIN/u);
-  });
+  it.live(
+    "reads the UI origin from the flag, then the environment, and refuses a URL with a path or another scheme",
+    () =>
+      Effect.gen(function* () {
+        const origin = (args: ReadonlyArray<string>, environment = Option.none<string>()) =>
+          Effect.gen(function* () {
+            const command = yield* parseCli(["up", ...args], {
+              ...noEnvironment,
+              origin: environment,
+            });
+            assert(command._tag === "UpCommand");
+            return command.origin;
+          });
+        const serve = "https://usine-orchestrator.tail1234.ts.net";
+        const actual7 = yield* origin([]);
+        assert.deepStrictEqual(actual7, Option.none());
+        const actual8 = yield* origin([], Option.some(serve));
+        assert.deepStrictEqual(actual8, Option.some(serve));
+        // As a browser writes it in the Origin header: no slash, no default port, and lower case.
+        const actual9 = yield* origin(
+          ["--origin", "https://Usine-Orchestrator.tail1234.ts.net:443/"],
+          Option.some("https://other.tail1234.ts.net"),
+        );
+        assert.deepStrictEqual(actual9, Option.some(serve));
+        const actual10 = yield* origin(["--origin=http://127.0.0.1:8080"]);
+        assert.deepStrictEqual(actual10, Option.some("http://127.0.0.1:8080"));
+        for (const value of [
+          "usine-orchestrator.tail1234.ts.net",
+          `${serve}/ui`,
+          `${serve}/?tab=runs`,
+          "https://operator@usine-orchestrator.tail1234.ts.net",
+          "ftp://usine-orchestrator.tail1234.ts.net",
+          "file:///home/usine",
+          "http://100.64.0.20:8080",
+        ]) {
+          const error = yield* parseCli(["up", "--origin", value], noEnvironment).pipe(Effect.flip);
+          assert(Schema.is(CliUsageError)(error), value);
+          assert.match(error.message, /^--origin must be the http or https URL of the UI/u);
+        }
+        const environmentError = yield* parseCli(["up"], {
+          ...noEnvironment,
+          origin: Option.some(`${serve}/ui`),
+        }).pipe(Effect.flip);
+        const matchesEnvironmentError = Schema.is(CliUsageError)(environmentError);
+        assert(matchesEnvironmentError);
+        assert.match(environmentError.message, /^USINE_ORIGIN/u);
+      }),
+  );
 
-  it("reads the version pinned in the installed server package", async () => {
-    const version = await Effect.runPromise(
-      packageVersion().pipe(Effect.provide(NodeServices.layer)),
-    );
-    assert.match(version, /^\d+\.\d+\.\d+(?:-.+)?$/u);
-  });
+  it.live("reads the version pinned in the installed server package", () =>
+    Effect.gen(function* () {
+      const version = yield* packageVersion().pipe(Effect.provide(NodeServices.layer));
+      assert.match(version, /^\d+\.\d+\.\d+(?:-.+)?$/u);
+    }),
+  );
 
   it("names an occupied port instead of leaking the low-level bind failure", () => {
     const port = Port.make(7_331);
@@ -311,7 +333,7 @@ describe("usine CLI", () => {
     });
     const error = serverStartError(
       port,
-      new ServeError({
+      new HttpServerError.ServeError({
         cause: bindFailure,
       }),
     );
@@ -321,47 +343,56 @@ describe("usine CLI", () => {
     assert.strictEqual(error.port, port);
   });
 
-  it("refuses a port another process listens on before startup and names that process", async () => {
-    const listener = createServer();
-    await new Promise<void>((resolve) => listener.listen({ host: SERVER_HOST, port: 0 }, resolve));
-    const { port } = await Effect.runPromise(
-      Schema.decodeUnknownEffect(Schema.Struct({ port: Port }))(listener.address()),
-    );
+  it.live("refuses a port another process listens on before startup and names that process", () =>
+    Effect.gen(function* () {
+      const listener = createServer();
+      yield* Effect.callback<void>((resume) => {
+        const resolve = (value: void) => resume(Effect.succeed(value));
+        listener.listen({ host: SERVER_HOST, port: 0 }, resolve);
+      });
+      const { port } = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Port }))(
+        listener.address(),
+      );
 
-    const refused = await Effect.runPromise(
-      refuseTakenPort(port).pipe(Effect.flip, Effect.provide(NodeServices.layer)),
-    );
-    const matchesRefused = Schema.is(PortInUseError)(refused);
-    assert(matchesRefused);
-    assert.deepStrictEqual(refused.holder, Option.some(process.pid));
+      const refused = yield* refuseTakenPort(port).pipe(
+        Effect.flip,
+        Effect.provide(NodeServices.layer),
+      );
+      const matchesRefused = Schema.is(PortInUseError)(refused);
+      assert(matchesRefused);
+      assert.deepStrictEqual(refused.holder, Option.some(process.pid));
 
-    await new Promise((resolve) => listener.close(resolve));
-    await Effect.runPromise(refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer)));
-  });
+      yield* Effect.callback<void>((resume) => {
+        const resolve = () => resume(Effect.void);
+        listener.close(resolve);
+      });
+      yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
+    }),
+  );
 
-  it("bounds a browser opener that never exits and configures forced cleanup", async () => {
-    let observed: ChildProcess.Command | undefined;
-    const hangingSpawner = Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make((command) => {
-        observed = command;
-        return Effect.never;
-      }),
-    );
-    const error = await Effect.runPromise(
-      openBrowser("http://127.0.0.1:7331", "10 millis").pipe(
+  it.live("bounds a browser opener that never exits and configures forced cleanup", () =>
+    Effect.gen(function* () {
+      let observed: ChildProcess.Command | undefined;
+      const hangingSpawner = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          observed = command;
+          return Effect.never;
+        }),
+      );
+      const error = yield* openBrowser("http://127.0.0.1:7331", "10 millis").pipe(
         Effect.provide(hangingSpawner),
         Effect.flip,
-      ),
-    );
+      );
 
-    const matchesError = Schema.is(BrowserOpenError)(error);
-    assert(matchesError);
-    assert(observed !== undefined && observed._tag === "StandardCommand");
-    assert.strictEqual(observed.options.detached, false);
-    assert.strictEqual(observed.options.forceKillAfter, "1 second");
-    assert.strictEqual(observed.options.stdin, "ignore");
-    assert.strictEqual(observed.options.stdout, "ignore");
-    assert.strictEqual(observed.options.stderr, "ignore");
-  });
+      const matchesError = Schema.is(BrowserOpenError)(error);
+      assert(matchesError);
+      assert(observed !== undefined && observed._tag === "StandardCommand");
+      assert.strictEqual(observed.options.detached, false);
+      assert.strictEqual(observed.options.forceKillAfter, "1 second");
+      assert.strictEqual(observed.options.stdin, "ignore");
+      assert.strictEqual(observed.options.stdout, "ignore");
+      assert.strictEqual(observed.options.stderr, "ignore");
+    }),
+  );
 });

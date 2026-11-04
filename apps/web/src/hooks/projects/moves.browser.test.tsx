@@ -109,7 +109,7 @@ type BoardProps = Readonly<{ readonly selected?: RepositoryName }>;
 const Board = ({ selected = repository }: BoardProps) => {
   const { data } = useSuspenseQuery(overviewQuery());
   const project = data.projects.find(({ repository }) => repository === selected);
-  if (!project) return null;
+  if (project === undefined) return null;
   return (
     <ProjectBoard project={project} loops={[]} stalled={[]} disabled={false} openRun={() => {}} />
   );

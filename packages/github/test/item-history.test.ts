@@ -8,6 +8,10 @@ import { GitHubApp } from "../src/github-app.ts";
 import { InstallationToken, InstallationWide } from "../src/installation.ts";
 import { GitHubItemHistory } from "../src/item-history.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const repository = RepositoryName.make("basaltbytes/usine");
 const appLayer = Layer.succeed(GitHubApp)({
   installation: Effect.die("the caller selects the actor"),
@@ -52,7 +56,9 @@ const variablesOf = (request: HttpClientRequest.HttpClientRequest) =>
 const respond = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }),
+    new Response(stringifyJson(body), {
+      headers: { "content-type": "application/json" },
+    }),
   );
 
 const label = (name: string, color: string) => ({ name, color, description: null });

@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
   AgentDoc,

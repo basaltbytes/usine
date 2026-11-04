@@ -49,7 +49,7 @@ export class GitHubLabelWriter extends Context.Service<
       label: NewRepositoryLabel,
     ) => Effect.Effect<RepositoryLabel, GitHubAppError>;
   }
->()("@usine/github/GitHubLabelWriter") {
+>()("@usine/github/label-writer/GitHubLabelWriter") {
   /** Provides repository label creation through the HTTP client with the App's shared token. */
   static readonly layer: Layer.Layer<GitHubLabelWriter, never, GitHubApp | HttpClient.HttpClient> =
     Layer.effect(

@@ -6,7 +6,7 @@ import {
   ProvisionerReuse,
   WorkerRoot,
 } from "@usine/core/worker";
-import { Effect, Fiber, Option } from "effect";
+import { Effect, Fiber, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { Executor, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
@@ -15,6 +15,10 @@ import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
 import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const policy = ProvisionerReuse.make({
   attempts: MachineAttemptLimit.make(2),
@@ -49,7 +53,7 @@ for (const address of [hetznerAddress, boatAddress]) {
         const machine = machineFixture();
         if (containerRuntime === "podman") {
           machine.state.docker = "absent";
-          machine.state.podmanInfo = JSON.stringify({
+          machine.state.podmanInfo = stringifyJson({
             version: { Version: "5.4.2" },
             host: {
               security: { rootless: true },
@@ -91,7 +95,10 @@ for (const address of [hetznerAddress, boatAddress]) {
           const assignment = providers.calls.find(
             ({ method }) => method === (provider === "boat" ? "PATCH" : "PUT"),
           );
-          assert.include(JSON.stringify(assignment?.body), attemptTag(second));
+          const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            assignment?.body,
+          ).pipe(Effect.orDie);
+          assert.include(json1, attemptTag(second));
           yield* machines.release(first.hold);
           assert.strictEqual(
             (yield* machines.machines)[0]?.state,

@@ -84,7 +84,7 @@ export const CommandPalette = ({ overview }: CommandPaletteProps) => {
           if (opened) return;
           const action = selected.current;
           selected.current = null;
-          if (returnFocus.current?.isConnected) returnFocus.current.focus();
+          if (returnFocus.current?.isConnected === true) returnFocus.current.focus();
           action?.();
         }}
       >

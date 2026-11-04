@@ -61,7 +61,9 @@ export const TokensPage = () => {
                 <p>
                   {token.kind === "session"
                     ? scopeCopy.session
-                    : token.scopes.map(scopeLabel).join(", ") || scopeCopy.none}
+                    : token.scopes.length > 0
+                      ? token.scopes.map(scopeLabel).join(", ")
+                      : scopeCopy.none}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {created} {new Date(token.createdAt).toLocaleDateString()} · {lastUsed}{" "}

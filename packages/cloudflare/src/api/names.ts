@@ -1,6 +1,4 @@
-// Imports Schema alone, not the whole `effect` index: the executor's sandbox shell loads this
-// module once per command, through `stream.ts`.
-import * as Schema from "effect/Schema";
+import { Schema } from "effect";
 
 /**
  * The request headers with the Cloudflare Access service token. The Worker refuses every request

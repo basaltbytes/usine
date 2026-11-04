@@ -1,6 +1,6 @@
+import { type HttpClientError, HttpClientRequest, type HttpClientResponse } from "effect/http";
 import { DateTime, Effect, Option, Redacted, Schema } from "effect";
-import { HttpClientRequest, type HttpClientResponse } from "effect/http";
-import type { HttpClientError } from "effect/http/HttpClientError";
+
 import {
   GitHubApiError,
   GitHubRateLimitError,
@@ -19,7 +19,10 @@ export const authorized = (credential: Redacted.Redacted<string>) =>
     "x-github-api-version": API_VERSION,
   });
 
-export const transportError = (operation: GitHubOperation, error: HttpClientError) =>
+export const transportError = (
+  operation: GitHubOperation,
+  error: HttpClientError.HttpClientError,
+) =>
   GitHubApiError.make({
     operation,
     status: error.response === undefined ? Option.none() : Option.some(error.response.status),

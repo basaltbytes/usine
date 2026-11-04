@@ -1,10 +1,15 @@
+import { NodeFileSystem } from "@effect/platform-node";
+import { Effect, Config, Option, FileSystem } from "effect";
 import { it } from "@effect/vitest";
 import { strict as assert } from "node:assert";
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, stat, writeFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
 import { promisify } from "node:util";
-import { onTestFinished } from "vitest";
+import {} from "@effect/vitest";
 import { PREPARE_CACHE_SCRIPT } from "../../src/remote/container.ts";
 
 const run = promisify(execFile);
@@ -29,7 +34,7 @@ shift 2
 exec "$entrypoint" "$@"
 `;
 
-it.each(
+it.live.each(
   ["usine-pnpm-store", "usine-turbo-cache"].flatMap((volume) =>
     ["1000", "2345"].flatMap((imageUid) =>
       ["docker", "podman"].map((runtimeName) => ({ volume, imageUid, runtimeName })),
@@ -37,67 +42,133 @@ it.each(
   ),
 )(
   "initializes and reuses $volume with $runtimeName for image UID $imageUid without changing another owner",
-  async ({ volume, imageUid, runtimeName }) => {
-    const directory = await mkdtemp("/tmp/usine-shared-cache-");
-    onTestFinished(() => rm(directory, { recursive: true, force: true }));
-    const store = join(directory, "store");
-    const docker = join(directory, runtimeName);
-    await writeFile(docker, runtime, { mode: 0o755 });
-    await writeFile(
-      join(directory, "id"),
-      '#!/bin/sh\n[ "$1" = -u ] && [ "$2" = usine ]\necho "$IMAGE_UID"\n',
-      { mode: 0o755 },
-    );
-    // Simulates ownership changes without root privileges.
-    await writeFile(
-      join(directory, "chown"),
-      '#!/bin/sh\nset -eu\n[ "$1" = -h ] && [ "$2" = "$IMAGE_UID" ] && [ "$3" = "$STORE" ]\necho "$2" > "$OWNER_FILE"\n',
-      { mode: 0o755 },
-    );
-    const clockFile = join(directory, "clock");
-    await writeFile(clockFile, "0");
-    await writeFile(join(directory, "date"), '#!/bin/sh\ncat "$CLOCK_FILE"\n', { mode: 0o755 });
-    const ownerFile = join(directory, "owner");
-    await writeFile(ownerFile, "0");
-    await writeFile(
-      join(directory, "stat"),
-      '#!/bin/sh\n[ "$1" = -c ] && [ "$2" = %u ] && [ "$3" = "$STORE" ]\ncat "$OWNER_FILE"\n',
-      { mode: 0o755 },
-    );
-    const prepare = (uid = imageUid, failStage = "none") =>
-      run("sh", ["-c", PREPARE_CACHE_SCRIPT, "sh", runtimeName, "image", volume, "mount", store], {
-        env: {
-          PATH: `${directory}:${process.env.PATH}`,
-          STORE: store,
-          RUNTIME_NAME: runtimeName,
-          IMAGE_UID: uid,
-          OWNER_FILE: ownerFile,
-          CLOCK_FILE: clockFile,
-          FAIL_STAGE: failStage,
-        },
-      });
+  ({ volume, imageUid, runtimeName }) =>
+    Effect.gen(function* () {
+      const actual2 = yield* Config.option(Config.String("PATH"));
+      const environmentPATH1 = Option.getOrUndefined(actual2);
+      const directory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeTempDirectory({
+          directory: dirname("/tmp/usine-shared-cache-"),
+          prefix: basename("/tmp/usine-shared-cache-"),
+        }),
+      );
+      yield* Effect.addFinalizer(() =>
+        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.remove(directory, { recursive: true, force: true }),
+        ).pipe(Effect.orDie),
+      );
+      const store = join(directory, "store");
+      const docker = join(directory, runtimeName);
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(docker, runtime, { mode: 0o755 }),
+      );
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(
+          join(directory, "id"),
+          '#!/bin/sh\n[ "$1" = -u ] && [ "$2" = usine ]\necho "$IMAGE_UID"\n',
+          { mode: 0o755 },
+        ),
+      );
+      // Simulates ownership changes without root privileges.
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(
+          join(directory, "chown"),
+          '#!/bin/sh\nset -eu\n[ "$1" = -h ] && [ "$2" = "$IMAGE_UID" ] && [ "$3" = "$STORE" ]\necho "$2" > "$OWNER_FILE"\n',
+          { mode: 0o755 },
+        ),
+      );
+      const clockFile = join(directory, "clock");
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(clockFile, "0"),
+      );
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(join(directory, "date"), '#!/bin/sh\ncat "$CLOCK_FILE"\n', {
+          mode: 0o755,
+        }),
+      );
+      const ownerFile = join(directory, "owner");
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(ownerFile, "0"),
+      );
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(
+          join(directory, "stat"),
+          '#!/bin/sh\n[ "$1" = -c ] && [ "$2" = %u ] && [ "$3" = "$STORE" ]\ncat "$OWNER_FILE"\n',
+          { mode: 0o755 },
+        ),
+      );
+      const prepare = (uid = imageUid, failStage = "none") =>
+        run(
+          "sh",
+          ["-c", PREPARE_CACHE_SCRIPT, "sh", runtimeName, "image", volume, "mount", store],
+          {
+            env: {
+              PATH: `${directory}:${environmentPATH1}`,
+              STORE: store,
+              RUNTIME_NAME: runtimeName,
+              IMAGE_UID: uid,
+              OWNER_FILE: ownerFile,
+              CLOCK_FILE: clockFile,
+              FAIL_STAGE: failStage,
+            },
+          },
+        );
 
-    await assert.rejects(prepare(imageUid, "volume"), /volume create failed/u);
-    await assert.rejects(stat(store), /ENOENT/u);
-    const first = await prepare();
-    assert.strictEqual(first.stdout, "37\n", "the run duration excludes volume creation");
-    assert.strictEqual((await readFile(ownerFile, "utf8")).trim(), imageUid);
-    assert.strictEqual((await stat(store)).mode & 0o777, 0o755);
-    await mkdir(join(store, "v11"));
-    await writeFile(join(store, "v11", "package"), "cached package");
-    for (const timestamp of ["1793637391N", "17936373913N", ""]) {
-      await writeFile(join(directory, "date"), `#!/bin/sh\necho '${timestamp}'\n`, {
-        mode: 0o755,
-      });
-      const prepared = await prepare();
-      assert.strictEqual(prepared.stdout, `${timestamp}:${timestamp}\n`);
-      assert.strictEqual(prepared.stderr, "");
-    }
-    await Promise.all([prepare(), prepare()]);
-    await assert.rejects(prepare("7001"), new RegExp(`${runtimeName} volume rm ${volume}`, "u"));
-    assert.strictEqual((await readFile(ownerFile, "utf8")).trim(), imageUid);
-    await writeFile(ownerFile, "0");
-    await assert.rejects(prepare(), new RegExp(`${runtimeName} volume rm ${volume}`, "u"));
-    assert.strictEqual(await readFile(join(store, "v11", "package"), "utf8"), "cached package");
-  },
+      yield* Effect.promise(() =>
+        assert.rejects(prepare(imageUid, "volume"), /volume create failed/u),
+      );
+      const missingStore = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.stat(store),
+      ).pipe(Effect.flip);
+      assert.match(String(missingStore.reason.cause), /ENOENT/u);
+      const first = yield* Effect.promise(() => prepare());
+      assert.strictEqual(first.stdout, "37\n", "the run duration excludes volume creation");
+      assert.strictEqual(
+        (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFileString(ownerFile),
+        )).trim(),
+        imageUid,
+      );
+      assert.strictEqual(
+        (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.stat(store)))
+          .mode & 0o777,
+        0o755,
+      );
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeDirectory(join(store, "v11")),
+      );
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(join(store, "v11", "package"), "cached package"),
+      );
+      for (const timestamp of ["1793637391N", "17936373913N", ""]) {
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.writeFileString(join(directory, "date"), `#!/bin/sh\necho '${timestamp}'\n`, {
+            mode: 0o755,
+          }),
+        );
+        const prepared = yield* Effect.promise(() => prepare());
+        assert.strictEqual(prepared.stdout, `${timestamp}:${timestamp}\n`);
+        assert.strictEqual(prepared.stderr, "");
+      }
+      yield* Effect.promise(() => Promise.all([prepare(), prepare()]));
+      yield* Effect.promise(() =>
+        assert.rejects(prepare("7001"), new RegExp(`${runtimeName} volume rm ${volume}`, "u")),
+      );
+      assert.strictEqual(
+        (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFileString(ownerFile),
+        )).trim(),
+        imageUid,
+      );
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(ownerFile, "0"),
+      );
+      yield* Effect.promise(() =>
+        assert.rejects(prepare(), new RegExp(`${runtimeName} volume rm ${volume}`, "u")),
+      );
+      const actual1 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFileString(join(store, "v11", "package")),
+      );
+      assert.strictEqual(actual1, "cached package");
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
 );

@@ -1,3 +1,4 @@
+import { NodeCrypto } from "@effect/platform-node";
 import {
   GatewayAdminPort,
   GatewayDomain,
@@ -22,7 +23,6 @@ import {
   UpstreamBase,
 } from "@usine/gateway";
 import {
-  type Duration,
   Effect,
   FileSystem,
   Latch,
@@ -31,6 +31,8 @@ import {
   Redacted,
   Result,
   Schema,
+  Clock,
+  Duration,
 } from "effect";
 import { TestClock } from "effect/testing";
 import {
@@ -172,6 +174,7 @@ export const fakeGateway = (
   const services = gatewayServices.pipe(
     Layer.provideMerge(settings),
     Layer.provide(noChatGptLogin),
+    Layer.provide(NodeCrypto.layer),
   );
   const client = Layer.effect(
     HttpClient.HttpClient,
@@ -282,7 +285,7 @@ export const eventually = Effect.fn("GatewayTest.eventually")(function* (
 ) {
   for (let turn = 0; turn < 400; turn += 1) {
     if (holds()) return;
-    yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 5)));
+    yield* Clock.Clock.defaultValue().sleep(Duration.millis(5));
     if (step !== undefined) yield* TestClock.adjust(step);
   }
   return yield* Effect.die(new Error("The awaited condition never held"));

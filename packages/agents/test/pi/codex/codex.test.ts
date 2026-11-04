@@ -45,6 +45,10 @@ import {
 import { RemoteCodexProcessLost } from "../../../src/pi/codex/remote.ts";
 import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const noDelivery: OnDelivery = () => Effect.void;
 
 const request = (
@@ -351,10 +355,16 @@ describe("Codex child backend", () => {
               noDelivery,
             );
             assert.strictEqual(messages.length, 2);
-            assert.include(JSON.stringify(messages[1]), "Continue with my correction");
+            const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+              messages[1],
+            ).pipe(Effect.orDie);
+            assert.include(json1, "Continue with my correction");
           }
           if (state !== "idle") {
-            const recoveredInput = JSON.stringify(messages[1]);
+            const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+              messages[1],
+            ).pipe(Effect.orDie);
+            const recoveredInput = json2;
             for (const message of guidance) assert.include(recoveredInput, message);
             assert(recoveredInput.indexOf(guidance[0]) < recoveredInput.indexOf(guidance[1]));
           }
@@ -394,8 +404,14 @@ describe("Codex child backend", () => {
               noDelivery,
             );
             assert.strictEqual(messages.length, 3);
-            assert.include(JSON.stringify(messages[2]), "Continue again");
-            for (const message of guidance) assert.notInclude(JSON.stringify(messages[2]), message);
+            const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+              messages[2],
+            ).pipe(Effect.orDie);
+            assert.include(json3, "Continue again");
+            const json4 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+              messages[2],
+            ).pipe(Effect.orDie);
+            for (const message of guidance) assert.notInclude(json4, message);
             assert.strictEqual(reads.length, guidance.length, "guidance is delivered only once");
             finalTurn = "turn-3";
           }
@@ -718,7 +734,7 @@ describe("Codex child backend", () => {
       ];
       const warnings: Array<string> = [];
       const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+        if (logLevel === "Warn") warnings.push(stringifyJson(message));
       });
       const server = connectionLayer(
         successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),

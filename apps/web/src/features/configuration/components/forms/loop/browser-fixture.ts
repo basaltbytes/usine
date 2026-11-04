@@ -97,7 +97,7 @@ export const loopEditorResponses = async (
     const draft = Schema.decodeUnknownSync(
       Schema.Struct({ itemKey: Schema.optionalKey(Schema.String) }),
     )(route.request().postDataJSON());
-    const number = draft.itemKey?.endsWith("#2") ? 2 : 1;
+    const number = draft.itemKey?.endsWith("#2") === true ? 2 : 1;
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({

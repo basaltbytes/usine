@@ -161,6 +161,10 @@ import {
 } from "../worker-status.ts";
 import { workerAttentionFor } from "./worker-attention.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** A refused board move, failed label write, or failure to read or record the move. */
 export type BoardMoveError =
   | AccessDenied
@@ -545,7 +549,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     pollFailures.forEach((failure) => {
       needsYou.push(
         PollFailureNeed.make({
-          id: `poll-failure:${JSON.stringify([failure.repository, failure.errorTag, failure.message])}`,
+          id: `poll-failure:${stringifyJson([failure.repository, failure.errorTag, failure.message])}`,
           failure,
         }),
       );
@@ -561,7 +565,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     scheduleFailures.forEach((failure) => {
       needsYou.push(
         ScheduleFailureNeed.make({
-          id: `schedule-failure:${JSON.stringify([
+          id: `schedule-failure:${stringifyJson([
             failure.loop,
             failure._tag,
             failure._tag === "ScheduleTickFailure" ? failure.repository : null,
@@ -701,7 +705,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         // Without the invalidation singleton, staleness can't be detected, so the cache is
         // bypassed.
         const token = Option.map(revision, (value) =>
-          JSON.stringify([
+          stringifyJson([
             value,
             instance.config.repos,
             instance.config.projects,
@@ -976,7 +980,7 @@ export class OperatorObservation extends Context.Service<
       window: StatisticsWindow,
     ) => Effect.Effect<RunStatisticsView, OperatorObservationError>;
   }
->()("@usine/orchestrator/OperatorObservation") {
+>()("@usine/orchestrator/operator/operator/OperatorObservation") {
   /**
    * Provides read-only operator views from stored runs, configuration, trigger status, and worker
    * status.
@@ -1059,7 +1063,11 @@ const makeOperator = Effect.gen(function* () {
       });
     }
     const receivedAt = yield* DateTime.now;
-    const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", runId]));
+    const dedupKeyJson = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+      "operator-approval",
+      runId,
+    ]).pipe(Effect.orDie);
+    const dedupKey = DedupKey.make(dedupKeyJson);
 
     yield* runs.approve(
       runId,
@@ -1494,7 +1502,7 @@ export class Operator extends Context.Service<
       loop: LoopName,
     ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError | AccessDenied>;
   }
->()("@usine/orchestrator/Operator") {
+>()("@usine/orchestrator/operator/operator") {
   /** Provides operator observations and mutations using the run engine and GitHub writers. */
   static readonly layer = Layer.effect(Operator, makeOperator).pipe(
     Layer.provide(Layer.merge(OperatorObservation.layer, RunGitHubChanges.layer)),

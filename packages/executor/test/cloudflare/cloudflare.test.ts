@@ -257,9 +257,18 @@ describe("cloudflare Worker", () => {
         );
         const currentGatewayCredential = yield* given.gatewayCredential;
         assert.isTrue(Option.contains(currentGatewayCredential, "api-key"));
-        assert.notInclude(JSON.stringify(given.environment), TOKEN_PREFIX);
-        assert.notInclude(JSON.stringify(given.environment), "sk-ant-test-key");
-        assert.notInclude(JSON.stringify([...worker.state.sandboxes.values()]), "sk-ant");
+        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          given.environment,
+        ).pipe(Effect.orDie);
+        assert.notInclude(json1, TOKEN_PREFIX);
+        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          given.environment,
+        ).pipe(Effect.orDie);
+        assert.notInclude(json2, "sk-ant-test-key");
+        const json3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+          ...worker.state.sandboxes.values(),
+        ]).pipe(Effect.orDie);
+        assert.notInclude(json3, "sk-ant");
       }).pipe(Effect.scoped),
   );
 

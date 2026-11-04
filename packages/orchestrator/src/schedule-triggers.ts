@@ -47,6 +47,10 @@ import {
   triggerSubmission,
 } from "./trigger-submission.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** The maximum concurrent submissions, kept small to avoid piling up SQLite write transactions. */
 const FANOUT_CONCURRENCY = 4;
 /** The wake interval when no schedule has a next boundary. */
@@ -210,11 +214,11 @@ const earliest = (values: ReadonlyArray<DateTime.Utc>): Option.Option<DateTime.U
 };
 
 const itemKey = (repository: ManagedRepo): ItemKey =>
-  ItemKey.make(JSON.stringify(["github", canonicalRepositoryName(repository.name)]));
+  ItemKey.make(stringifyJson(["github", canonicalRepositoryName(repository.name)]));
 
 const eventKey = (loop: LoopFile, repository: ManagedRepo, scheduledAt: DateTime.Utc): DedupKey =>
   DedupKey.make(
-    JSON.stringify([
+    stringifyJson([
       loop.name,
       canonicalRepositoryName(repository.name),
       DateTime.formatIso(scheduledAt),
@@ -250,7 +254,7 @@ export class ScheduleTriggers extends Context.Service<
     /** The most recent completed cycle, or `None` before the first evaluation. */
     readonly latest: Effect.Effect<Option.Option<ScheduleCycle>>;
   }
->()("@usine/orchestrator/ScheduleTriggers") {
+>()("@usine/orchestrator/schedule-triggers/ScheduleTriggers") {
   /**
    * Provides schedule evaluation and submission with in-memory fired-tick tracking and durable
    * event deduplication.
@@ -521,10 +525,15 @@ export class ScheduleTriggers extends Context.Service<
           nextTickAt: earliest(nexts),
         });
         const previous = yield* Ref.getAndSet(latestCycle, Option.some(cycle));
-        if (
+        const failuresChanged =
           Option.isNone(previous) ||
-          JSON.stringify(previous.value.failures) !== JSON.stringify(cycle.failures)
-        ) {
+          (yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            previous.value.failures,
+          ).pipe(Effect.orDie)) !==
+            (yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(cycle.failures).pipe(
+              Effect.orDie,
+            ));
+        if (failuresChanged) {
           const affected = [
             ...new Set(
               [

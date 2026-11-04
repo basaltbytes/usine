@@ -1,9 +1,13 @@
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { Effect, Schema } from "effect";
-import { afterEach, assert, describe, it } from "vitest";
+import { afterEach, assert, describe, it } from "@effect/vitest";
 import { InstanceIdError, instanceIdOf } from "../../src/instance/id.ts";
 import { instanceFiles } from "../../src/instance/record.ts";
 
@@ -26,28 +30,36 @@ const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effe
 
 describe("instance ID", () => {
   // A new ID at each start would leave every earlier process's attempt containers on the workers.
-  it("creates the ID at the first start and returns the same one at every later start", async () => {
-    const files = lockedFolderFiles();
+  it.live("creates the ID at the first start and returns the same one at every later start", () =>
+    Effect.gen(function* () {
+      const files = lockedFolderFiles();
 
-    const first = await run(instanceIdOf(files).pipe(Effect.provide(NodeServices.layer)));
-    const second = await run(instanceIdOf(files).pipe(Effect.provide(NodeServices.layer)));
+      const first = yield* Effect.promise(() =>
+        run(instanceIdOf(files).pipe(Effect.provide(NodeServices.layer))),
+      );
+      const second = yield* Effect.promise(() =>
+        run(instanceIdOf(files).pipe(Effect.provide(NodeServices.layer))),
+      );
 
-    assert.strictEqual(second, first);
-    assert.strictEqual(readFileSync(files.id, "utf8"), `${first}\n`);
-  });
+      assert.strictEqual(second, first);
+      assert.strictEqual(readFileSync(files.id, "utf8"), `${first}\n`);
+    }),
+  );
 
-  it("refuses a file without an instance ID instead of replacing it", async () => {
-    const files = lockedFolderFiles();
-    writeFileSync(files.id, "github-app-4242\n");
+  it.live("refuses a file without an instance ID instead of replacing it", () =>
+    Effect.gen(function* () {
+      const files = lockedFolderFiles();
+      writeFileSync(files.id, "github-app-4242\n");
 
-    const error = await run(
-      instanceIdOf(files).pipe(Effect.flip, Effect.provide(NodeServices.layer)),
-    );
+      const error = yield* Effect.promise(() =>
+        run(instanceIdOf(files).pipe(Effect.flip, Effect.provide(NodeServices.layer))),
+      );
 
-    const matchesError = Schema.is(InstanceIdError)(error);
-    assert(matchesError);
-    assert.strictEqual(error.operation, "read");
-    assert.strictEqual(error.path, files.id);
-    assert.strictEqual(readFileSync(files.id, "utf8"), "github-app-4242\n");
-  });
+      const matchesError = Schema.is(InstanceIdError)(error);
+      assert(matchesError);
+      assert.strictEqual(error.operation, "read");
+      assert.strictEqual(error.path, files.id);
+      assert.strictEqual(readFileSync(files.id, "utf8"), "github-app-4242\n");
+    }),
+  );
 });

@@ -1,7 +1,7 @@
 import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
-import { Array as Arr, Option, Result } from "effect";
+import { Array as Arr, Option, Result, Schema } from "effect";
 import { ManagedRepo, UsineConfig } from "../factory.ts";
 import { LoadedInstance } from "../instance/instance.ts";
 import { LoopFile } from "../loop.ts";
@@ -10,6 +10,10 @@ import { ConfigurationInvalid } from "../configuration/model.ts";
 import { ConfigFileError, InstancePath } from "../file.ts";
 import { matchesSelector } from "../selector.ts";
 import { Project } from "./project.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 export { Project } from "./project.ts";
 
@@ -70,7 +74,7 @@ export const migrateProjects = (
         file: InstancePath.make(`loops/${loop.name}.md`),
         stage: "reference",
         expression: Option.none(),
-        message: `Cannot migrate loop ${loop.name}: selector ${JSON.stringify(
+        message: `Cannot migrate loop ${loop.name}: selector ${stringifyJson(
           Option.match(loop.selector, {
             onNone: () => null,
             onSome: ({ repos, tags }) => ({

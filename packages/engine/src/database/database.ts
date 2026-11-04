@@ -1,7 +1,7 @@
+import type { SqlError } from "effect/sql";
 import type { EffectDrizzleQueryError, QueryEffectHKTBase } from "drizzle-orm/effect-core";
 import type { SQLiteEffectDatabase } from "drizzle-orm/sqlite-core/effect";
 import { Context, type Effect, Layer } from "effect";
-import type { SqlError } from "effect/sql/SqlError";
 
 interface RunDatabaseEffect extends QueryEffectHKTBase {
   readonly context: never;
@@ -16,7 +16,7 @@ export const ReadSnapshot = Context.Reference<{
   readonly run: <A, E, R>(
     database: RunDatabaseClient,
     effect: Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E | EffectDrizzleQueryError | SqlError, R>;
+  ) => Effect.Effect<A, E | EffectDrizzleQueryError | SqlError.SqlError, R>;
 }>("@usine/engine/ReadSnapshot", {
   defaultValue: () => ({ run: (database, effect) => database.transaction(() => effect) }),
 });
@@ -26,7 +26,7 @@ export const ReadSnapshot = Context.Reference<{
  * applied before use. Other dialects implement the domain ports directly (ADR 0020).
  */
 export class RunDatabase extends Context.Service<RunDatabase, RunDatabaseClient>()(
-  "@usine/engine/internal/RunDatabase",
+  "@usine/engine/database/database/RunDatabase",
 ) {
   /** Provides an already initialized database client without opening, migrating, or closing it. */
   static readonly layer = (database: RunDatabaseClient) => Layer.succeed(RunDatabase)(database);

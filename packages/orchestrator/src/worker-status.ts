@@ -305,7 +305,7 @@ export class WorkerStatus extends Context.Service<
     /** The provisioned Workers whose last machine creation failed. */
     readonly provisioning: Effect.Effect<ReadonlyArray<ProvisioningPause>>;
   }
->()("@usine/orchestrator/WorkerStatus") {
+>()("@usine/orchestrator/worker-status/WorkerStatus") {
   /** A status with no Workers, no queued Runs, and no preflights, as in setup mode. */
   static readonly idle = Layer.succeed(WorkerStatus)({
     slots: Effect.succeed([]),

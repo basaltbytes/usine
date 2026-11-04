@@ -1,3 +1,5 @@
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { readFileSync } from "node:fs";
 import { assert, it } from "@effect/vitest";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
@@ -15,6 +17,10 @@ import {
   InstallationToken,
   InstallationWide,
 } from "../src/installation.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const token = InstallationToken.make({
@@ -55,7 +61,9 @@ const withClient = (respond: (url: string) => Response) =>
     ),
   );
 const json = (value: Schema.Json) =>
-  new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  new Response(stringifyJson(value), {
+    headers: { "content-type": "application/json" },
+  });
 it.effect.each([
   { mergeable: "CONFLICTING", rollup: null, expected: "conflict" },
   { mergeable: "UNKNOWN", rollup: null, expected: "pending" },

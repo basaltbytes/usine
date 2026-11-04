@@ -208,7 +208,7 @@ export class ItemProjectionReader extends Context.Service<
       repository: RepositoryName,
     ) => Effect.Effect<ReadonlyArray<ItemNumber>, EnginePersistenceError>;
   }
->()("@usine/engine/ItemProjectionReader") {
+>()("@usine/engine/item-projection/item-projection/ItemProjectionReader") {
   /** Reads item snapshots from the supplied runtime database. */
   static readonly layer = Layer.effect(ItemProjectionReader, makeReader);
 }
@@ -231,7 +231,7 @@ export class ItemProjectionWriter extends Context.Service<
       goneAt: DateTime.Utc,
     ) => Effect.Effect<boolean, EnginePersistenceError>;
   }
->()("@usine/engine/ItemProjectionWriter") {
+>()("@usine/engine/item-projection/item-projection/ItemProjectionWriter") {
   /**
    * Writes item snapshots to the supplied runtime database, invalidating operator projections on
    * changes.

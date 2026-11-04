@@ -1,4 +1,6 @@
 import { requestSystemUpgrade } from "./client.ts";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join, sep } from "node:path";
 import type { InstanceDirectory } from "@usine/core/instance";
 import {

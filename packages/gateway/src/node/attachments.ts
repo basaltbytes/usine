@@ -1,7 +1,11 @@
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
-import { NodeFileSystem } from "@effect/platform-node";
-import { Effect, Exit, FileSystem, Layer, Option, Redacted, Schema } from "effect";
+import { NodeFileSystem, NodeCrypto } from "@effect/platform-node";
+import { Effect, Exit, FileSystem, Layer, Option, Redacted, Schema, Crypto } from "effect";
 import { AttachmentPersistenceError, LiveAttachment } from "../attachment/attachment.ts";
 import { Attachments, type AttachmentPersistence } from "../attachment/store.ts";
 import { GatewaySettings } from "../settings.ts";
@@ -22,6 +26,7 @@ export const fileAttachmentsLayer = (directory: string) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
+      const crypto = yield* Crypto.Crypto;
       const { callerKey } = yield* GatewaySettings;
       const path = join(directory, "attachments.enc");
       const key = createHash("sha256")
@@ -74,7 +79,8 @@ export const fileAttachmentsLayer = (directory: string) =>
         const cipher = createCipheriv("aes-256-gcm", key, nonce);
         const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
         const bytes = Buffer.concat([nonce, cipher.getAuthTag(), ciphertext]);
-        const temporary = `${path}.${crypto.randomUUID()}.tmp`;
+        const suffix = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+        const temporary = `${path}.${suffix}.tmp`;
         yield* fs.writeFile(temporary, bytes, { mode: 0o600, flag: "wx" }).pipe(
           Effect.andThen(fs.rename(temporary, path)),
           Effect.onExit((exit) =>
@@ -114,4 +120,4 @@ export const fileAttachmentsLayer = (directory: string) =>
       };
       return Attachments.layerWithPersistence(persistence);
     }),
-  ).pipe(Layer.provide(NodeFileSystem.layer));
+  ).pipe(Layer.provide(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer)));

@@ -148,6 +148,10 @@ import { type ProvisioningPause, WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const now = DateTime.makeUnsafe("2026-08-31T12:00:00.000Z");
 const runId = RunId.make("run-operator-test");
 const attemptId = AttemptId.make("attempt-operator-test");
@@ -1293,7 +1297,7 @@ describe("Operator", () => {
             HttpClientResponse.fromWeb(
               request,
               new Response(
-                JSON.stringify(
+                stringifyJson(
                   request.url.includes("/labels") === (operation === "list-repository-labels")
                     ? [{ unexpected: true }]
                     : [],
@@ -1325,7 +1329,7 @@ describe("Operator", () => {
         );
         const lines: Array<string> = [];
         const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-          if (logLevel === "Error") lines.push(JSON.stringify(message));
+          if (logLevel === "Error") lines.push(stringifyJson(message));
         });
         const cycle = yield* Effect.gen(function* () {
           const polling = yield* PollingTriggers;
@@ -1350,7 +1354,7 @@ describe("Operator", () => {
           lines.some(
             (line) =>
               line.includes(`"operation":"${operation}"`) &&
-              line.includes(`"detail":${JSON.stringify(detail)}`),
+              line.includes(`"detail":${stringifyJson(detail)}`),
           ),
         );
 

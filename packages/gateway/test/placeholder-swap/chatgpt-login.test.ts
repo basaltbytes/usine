@@ -1,11 +1,29 @@
+import { NodeFileSystem } from "@effect/platform-node";
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { execFile } from "node:child_process";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Effect, Layer, Option, Predicate, Redacted, Schema } from "effect";
+import {
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Redacted,
+  Schema,
+  FileSystem,
+  Config,
+} from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
@@ -24,6 +42,10 @@ import {
   settingsLayer,
 } from "../fixtures.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /*
  * Checks that Codex works when the Worker has only the Gateway's caller token and the Gateway
  * holds the ChatGPT login. Run with `pnpm --filter @usine/gateway test:placeholder-swap`;
@@ -36,6 +58,8 @@ import {
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
 const installed = (command: string) =>
+  // The SDK test deliberately changes the host environment to verify tool isolation.
+  // @effect-diagnostics-next-line processEnv:off
   (process.env.PATH ?? "").split(":").some((directory) => existsSync(join(directory, command)));
 
 interface Seen {
@@ -50,7 +74,7 @@ interface Seen {
 /** Returns a Responses API event stream; each event's `type` is also its SSE event name. */
 const sse = (
   events: ReadonlyArray<{ readonly type: string; readonly [field: string]: Schema.Json }>,
-) => events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+) => events.map((event) => `event: ${event.type}\ndata: ${stringifyJson(event)}\n\n`).join("");
 
 const ANSWER = sse([
   { type: "response.created", response: { id: "resp_stand_in" } },
@@ -106,7 +130,10 @@ const chatGptStandIn = Effect.acquireRelease(
         if (request.url === "/oauth/token") {
           response.writeHead(200, { "content-type": "application/json" });
           response.end(
-            JSON.stringify({ access_token: refreshedAccess, refresh_token: "rt-rotated" }),
+            stringifyJson({
+              access_token: refreshedAccess,
+              refresh_token: "rt-rotated",
+            }),
           );
           return;
         }
@@ -116,7 +143,7 @@ const chatGptStandIn = Effect.acquireRelease(
           return;
         }
         response.writeHead(404, { "content-type": "application/json" });
-        response.end(JSON.stringify({ detail: "stand-in" }));
+        response.end(stringifyJson({ detail: "stand-in" }));
       });
     });
     server.listen(0, "127.0.0.1", () => {
@@ -195,14 +222,25 @@ describe("ChatGPT login at the gateway", () => {
       Effect.gen(function* () {
         const standIn = yield* chatGptStandIn;
         const directory = yield* Effect.acquireRelease(
-          Effect.promise(() => mkdtemp(join(tmpdir(), "usine-chatgpt-swap-"))),
-          (path) => Effect.promise(() => rm(path, { recursive: true, force: true })),
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.makeTempDirectory({
+              directory: dirname(join(tmpdir(), "usine-chatgpt-swap-")),
+              prefix: basename(join(tmpdir(), "usine-chatgpt-swap-")),
+            }),
+          ),
+          (path) =>
+            Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+              fileSystem.remove(path, { recursive: true, force: true }),
+            ).pipe(Effect.orDie),
         );
         const authFile = join(directory, "auth.json");
         const currentNow = yield* DateTime.now;
         const expiring = chatGptAccessToken(DateTime.add(currentNow, { minutes: 1 }));
-        yield* Effect.promise(() =>
-          writeFile(authFile, authFileText({ access: expiring, refresh: "rt-first" })),
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.writeFileString(
+            authFile,
+            authFileText({ access: expiring, refresh: "rt-first" }),
+          ),
         );
         const providers = {
           ...NO_PROVIDERS,
@@ -218,6 +256,8 @@ describe("ChatGPT login at the gateway", () => {
         };
 
         const result = yield* Effect.gen(function* () {
+          const actual1 = yield* Config.option(Config.String("PATH"));
+          const environmentPATH1 = Option.getOrUndefined(actual1);
           const { proxy, egress, admin } = yield* GatewayAddresses;
           const client = yield* HttpApiClient.make(GatewayAdminApi, {
             baseUrl: `http://${admin.host}:${admin.port}`,
@@ -236,13 +276,19 @@ describe("ChatGPT login at the gateway", () => {
           });
           const home = join(directory, "home");
           const codexHome = join(directory, "codex");
-          yield* Effect.promise(() => mkdir(home, { recursive: true }));
-          yield* Effect.promise(() => mkdir(codexHome, { recursive: true }));
-          yield* Effect.promise(() => writeFile(join(codexHome, "config.toml"), CODEX_CONFIG));
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.makeDirectory(home, { recursive: true }),
+          );
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.makeDirectory(codexHome, { recursive: true }),
+          );
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.writeFileString(join(codexHome, "config.toml"), CODEX_CONFIG),
+          );
           const caller = Redacted.value(attached.callerToken);
           const run = yield* runCodex(
             {
-              PATH: process.env.PATH ?? "/usr/bin:/bin",
+              PATH: environmentPATH1 ?? "/usr/bin:/bin",
               HOME: home,
               CODEX_HOME: codexHome,
               USINE_GATEWAY_TOKEN: caller,
@@ -290,12 +336,12 @@ describe("ChatGPT login at the gateway", () => {
           assert.strictEqual(request.account, CHATGPT_ACCOUNT);
           assert.notInclude(request.body, result.caller);
         }
-        const rotated = yield* Effect.promise(() => readFile(authFile, "utf8")).pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(RotatedAuthFile)),
-        );
+        const rotated = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFileString(authFile),
+        ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(RotatedAuthFile)));
         assert.strictEqual(rotated.tokens.refresh_token, "rt-rotated");
         assert.strictEqual(rotated.tokens.access_token, standIn.refreshedAccess);
-      }),
+      }).pipe(Effect.provide(NodeFileSystem.layer)),
     240_000,
   );
 });

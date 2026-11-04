@@ -1,3 +1,9 @@
+import { Schema } from "effect";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** Remote Node program: a detached app-server supervisor and a replaceable SSH relay. */
 const source = String.raw`
 const fs = require('node:fs');
@@ -140,5 +146,5 @@ if (mode === 'stop') {
 `;
 
 export const CODEX_SUPERVISOR = source.replace("null /* supervisor source */", () =>
-  JSON.stringify(source),
+  stringifyJson(source),
 );

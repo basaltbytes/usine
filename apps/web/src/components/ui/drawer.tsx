@@ -17,7 +17,7 @@ const DrawerContext = React.createContext<DrawerContextProps | null>(null);
 function useDrawer() {
   const context = React.useContext(DrawerContext);
 
-  if (!context) {
+  if (context === null) {
     throw new Error("useDrawer must be used within a Drawer.");
   }
 

@@ -1,4 +1,8 @@
-import { mkdir } from "node:fs/promises";
+// Screenshot setup creates its output directory synchronously before calling Playwright.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { mkdirSync } from "node:fs";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { resolve } from "node:path";
 import type { Page, Route } from "playwright";
 
@@ -217,7 +221,7 @@ export const configurationEditorScreenshot = async (
   { page }: { readonly page: Page },
   name: string,
 ) => {
-  await mkdir(resolve("../../.impeccable/review"), { recursive: true });
+  mkdirSync(resolve("../../.impeccable/review"), { recursive: true });
   await page.screenshot({
     path: resolve(`../../.impeccable/review/${name}.png`),
     fullPage: true,

@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -70,11 +72,18 @@ import {
   workerEnvironment,
 } from "./support.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** Captures each log line as its level and JSON-encoded message. */
 const capturedLogs = () => {
   const lines: Array<{ readonly level: string; readonly text: string }> = [];
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-    lines.push({ level: logLevel, text: JSON.stringify(message) });
+    lines.push({
+      level: logLevel,
+      text: stringifyJson(message),
+    });
   });
   const matching = (pattern: RegExp) => lines.filter(({ text }) => pattern.test(text));
   return {
@@ -446,7 +455,10 @@ describe("durable AttemptRuntime", () => {
         );
         assert.strictEqual(finished.length, 1);
         assert.isTrue(finished[0]?.isError);
-        const output = JSON.stringify(finished[0]?.output);
+        const json1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          finished[0]?.output,
+        ).pipe(Effect.orDie);
+        const output = json1;
         assert.match(output, /Half way there/u);
         assert.match(output, /interrupted/u);
       }).pipe(Effect.scoped),
@@ -761,7 +773,7 @@ describe("durable AttemptRuntime", () => {
         const steered: ParentStep = (context) => {
           for (const message of context.messages) {
             if (message.role !== "user") continue;
-            seen.push(JSON.stringify(message.content));
+            seen.push(stringifyJson(message.content));
           }
           return answer("Used pnpm as asked.");
         };
@@ -821,7 +833,7 @@ describe("durable AttemptRuntime", () => {
       Effect.gen(function* () {
         const database = yield* temporaryDatabase;
         const actOnSteer: ParentStep = (context) => {
-          assert.include(JSON.stringify(context.messages.at(-1)), "Fix the third finding.");
+          assert.include(stringifyJson(context.messages.at(-1)), "Fix the third finding.");
           return delegate("Fix the third finding.");
         };
         const backend = delivery === "unread" ? stubChildBackendLayer : refusingSteerBackend;
@@ -915,7 +927,7 @@ describe("durable AttemptRuntime", () => {
         }),
       );
       const actOnSteer: ParentStep = (context) => {
-        assert.include(JSON.stringify(context.messages.at(-1)), "Fix the third finding.");
+        assert.include(stringifyJson(context.messages.at(-1)), "Fix the third finding.");
         return delegate("Fix the third finding.");
       };
       yield* Effect.gen(function* () {
@@ -1198,7 +1210,7 @@ describe("durable AttemptRuntime", () => {
         const resumedWith: Array<string> = [];
         const afterRelease: ParentStep = (context) => {
           const last = context.messages.at(-1);
-          if (last?.role === "user") resumedWith.push(JSON.stringify(last.content));
+          if (last?.role === "user") resumedWith.push(stringifyJson(last.content));
           return delegate("Open the pull request");
         };
         yield* Effect.gen(function* () {

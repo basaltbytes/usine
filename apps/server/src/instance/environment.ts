@@ -1,3 +1,5 @@
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { type Brand, ConfigProvider, Effect, FileSystem, Option, Schema } from "effect";

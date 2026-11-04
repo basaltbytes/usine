@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { webRequest } from "../../../tooling/test/http.mts";
 import { RunSummaryView, AttemptSummaryView } from "@usine/orchestrator/operator";
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import {
@@ -28,11 +30,12 @@ import {
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { TokenCount } from "@usine/core/agent/session";
 import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
+import { NodeHttpPlatform, NodeHttpServer, NodeFileSystem } from "@effect/platform-node";
 import { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/config/label";
 import { LaneName, StateLaneSource } from "@usine/config/board";
@@ -114,13 +117,17 @@ import {
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
-import { Context, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
-import { HttpRouter } from "effect/http";
+import { Context, DateTime, Effect, Layer, Option, Redacted, Schema, FileSystem } from "effect";
+import { HttpRouter, FetchHttpClient } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
-import { beforeAll, afterAll, assert, describe, it } from "vitest";
+import { beforeAll, afterAll, assert, describe, it } from "@effect/vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
 import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const runId = RunId.make("run-1");
 const loopName = LoopName.make("review-issue");
@@ -442,8 +449,9 @@ beforeAll(() =>
 
 afterAll(() => app.dispose());
 
-it("publishes a valid OpenAPI document for every API route and protects non-public routes", async () => {
-  await Effect.runPromise(
+it.live(
+  "publishes a valid OpenAPI document for every API route and protects non-public routes",
+  () =>
     Effect.gen(function* () {
       const fixtureBackend = backend;
       const services = yield* authFixture();
@@ -483,7 +491,9 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       assert(validator !== null);
       const unauthorizedRead = yield* Effect.promise(() =>
         secured.handler(
-          new Request("http://127.0.0.1/api/overview", { headers: { "if-none-match": validator } }),
+          new Request("http://127.0.0.1/api/overview", {
+            headers: { "if-none-match": validator },
+          }),
         ),
       );
       assert.equal(unauthorizedRead.status, 401);
@@ -496,7 +506,6 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       );
       assert.equal(sessionRead.headers.get("cache-control"), "no-store");
       assert.equal(sessionRead.headers.get("etag"), null);
-
       const publicRoutes = new Set([
         "GET /api/health",
         "GET /api/version",
@@ -531,10 +540,15 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       assert.isTrue(validation.valid, decodedValue1);
       const generated = operatorOpenApi();
       assert.deepEqual(document, generated);
-      const committed = yield* Effect.promise(() =>
-        readFile(new URL("../../docs/public/openapi.json", import.meta.url), "utf8"),
+      const committed = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFileString(
+          fileURLToPath(new URL("../../docs/public/openapi.json", import.meta.url)),
+        ),
       );
-      assert.deepEqual(document, JSON.parse(committed));
+      const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        committed,
+      ).pipe(Effect.orDie);
+      assert.deepEqual(document, json1);
       const documentedRoutes = Object.entries(generated.paths).flatMap(([path, methods]) =>
         Object.entries(methods).map(([method, operation]) => {
           assert.property(operation, "summary", `${method} ${path}`);
@@ -637,9 +651,8 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
         }),
       );
       assert.isTrue(crossSite.valid);
-    }).pipe(Effect.scoped),
-  );
-});
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+);
 
 it("publishes optional transcript cursor parameters with their domain constraints", () => {
   const parameters = operatorOpenApi().paths["/api/runs/{runId}"]?.get?.parameters;
@@ -665,1069 +678,1219 @@ it("publishes optional transcript cursor parameters with their domain constraint
 });
 
 describe("operator HTTP API", () => {
-  it("reports the running release and validates upgrade requests before accepting them", async () => {
-    const requested: Array<string> = [];
-    const upgradeBackend = Layer.succeed(ServerUpgrades, {
-      cancel: Effect.sync(() => {
-        requested.push("cancel");
-      }),
-      polling: Effect.never,
-      status: Effect.succeed(
-        UpgradeView.make({
-          running: "1.0.0",
-          channel: "next",
-          mode: "propose",
-          supported: true,
-          available: null,
-          phase: "idle",
-          message: null,
-          outcome: null,
+  it.live("reports the running release and validates upgrade requests before accepting them", () =>
+    Effect.gen(function* () {
+      const requested: Array<string> = [];
+      const upgradeBackend = Layer.succeed(ServerUpgrades, {
+        cancel: Effect.sync(() => {
+          requested.push("cancel");
         }),
-      ),
-      request: (input) =>
-        Effect.sync(() => {
-          requested.push(input.timing);
-        }),
-    });
-    const auth = await Effect.runPromise(authFixture().pipe(Effect.scoped));
-    const upgradeApp = HttpRouter.toWebHandler(
-      apiRoutes.pipe(
-        Layer.provide(authenticatedRoutes(auth).guard.layer),
-        HttpRouter.provideRequest(Layer.merge(backend, upgradeBackend)),
-      ),
-      { disableLogger: true },
-    );
-    const authorization = { authorization: `Bearer ${localSecret}` };
-    try {
-      for (const path of ["/api/version", "/API/version", "//api/version", "/%61pi/version"]) {
-        const version = await upgradeApp.handler(new Request(`http://localhost${path}`));
-        assert.strictEqual(version.status, 200);
-        assert.strictEqual(await version.json(), "1.0.0");
-      }
-      const status = await upgradeApp.handler(
-        new Request("http://localhost/api/upgrade", { headers: authorization }),
-      );
-      assert.strictEqual(
-        (await Effect.runPromise(Schema.decodeUnknownEffect(UpgradeView)(await status.json())))
-          .channel,
-        "next",
-      );
-      const invalid = await upgradeApp.handler(
-        new Request("http://localhost/api/upgrade", {
-          headers: authorization,
-          method: "POST",
-          body: JSON.stringify({ timing: "tomorrow" }),
-        }),
-      );
-      assert.strictEqual(invalid.status, 400);
-      const invalidVersion = await upgradeApp.handler(
-        new Request("http://localhost/api/upgrade", {
-          headers: authorization,
-          method: "POST",
-          body: JSON.stringify({ timing: "now", version: "1.0.0-01" }),
-        }),
-      );
-      assert.strictEqual(invalidVersion.status, 400);
-
-      assert.deepStrictEqual(requested, []);
-      const accepted = await upgradeApp.handler(
-        new Request("http://localhost/api/upgrade", {
-          headers: authorization,
-          method: "POST",
-          body: JSON.stringify({ timing: "idle" }),
-        }),
-      );
-      assert.strictEqual(accepted.status, 200);
-      assert.deepStrictEqual(requested, ["idle"]);
-      const canceled = await upgradeApp.handler(
-        new Request("http://localhost/api/upgrade", {
-          headers: authorization,
-          method: "DELETE",
-        }),
-      );
-      assert.strictEqual(canceled.status, 200);
-      assert.deepStrictEqual(requested, ["idle", "cancel"]);
-    } finally {
-      await upgradeApp.dispose();
-    }
-  });
-
-  it("records dismissals and undo during setup without accepting client-supplied operator identity", async () => {
-    const payload = { id: "config-file:loop", revision: "invalid agent" };
-    const send = (path: string, body: Schema.Json) =>
-      app.handler(
-        new Request(`http://localhost/api/attention/${path}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }),
-      );
-    const invalid = await send("dismiss", { ...payload, dismissedBy: "someone-else" });
-    assert.strictEqual(invalid.status, 400);
-    assert.strictEqual(dismissed.length, 0);
-    const response = await send("dismiss", payload);
-    assert.strictEqual(response.status, 200);
-    const saved = dismissed[0];
-    assert(saved !== undefined);
-    assert.strictEqual(saved.id, payload.id);
-    assert.strictEqual(saved.revision, payload.revision);
-    assert.deepStrictEqual(saved.dismissedBy, (await Effect.runPromise(instance)).config.operator);
-    assert(DateTime.toEpochMillis(saved.dismissedAt) > 0);
-    const undo = await send("undo", payload);
-    assert.strictEqual(undo.status, 200);
-    assert.strictEqual(dismissed.length, 0);
-  });
-
-  it("preserves durable observation in needs-setup mode while intervention remains unavailable", async () => {
-    const response = await app.handler(new Request("http://localhost/api/overview"));
-    assert.strictEqual(response.status, 200);
-    const body = await Effect.runPromise(
-      Schema.decodeUnknownEffect(FactoryOverview)(await response.json()),
-    );
-    assert.strictEqual(body._tag, "NeedsSetup");
-    assert.strictEqual(body.projects[0]?.runs[0]?.id, runId);
-    assert.strictEqual(body.loops[0]?.paused, true);
-
-    const deskResponse = await app.handler(new Request("http://localhost/api/desk"));
-    assert.strictEqual(deskResponse.status, 200);
-    const deskBody = await Effect.runPromise(
-      Schema.decodeUnknownEffect(DeskView)(await deskResponse.json()),
-    );
-    assert.deepStrictEqual(
-      deskBody.polls.map(({ polledAt }) => polledAt),
-      [null],
-    );
-
-    const runResponse = await app.handler(new Request(`http://localhost/api/runs/${runId}`));
-    assert.strictEqual(runResponse.status, 200);
-    assert.strictEqual((await runResponse.json()).eventDedupKey, "issue:31");
-
-    const taskResponse = await app.handler(
-      new Request("http://localhost/api/projects/basaltbytes/usine/tasks/31"),
-    );
-    assert.strictEqual(taskResponse.status, 200);
-    assert.deepStrictEqual(
-      await Effect.runPromise(Schema.decodeUnknownEffect(TaskView)(await taskResponse.json())),
-      task,
-    );
-
-    for (const [search, window] of [
-      ["?window=7d", "7d"],
-      ["", "30d"],
-      ["?window=all&window=7d", "all"],
-    ] as const) {
-      const statisticsResponse = await app.handler(
-        new Request(`http://localhost/api/statistics${search}`),
-      );
-      assert.strictEqual(statisticsResponse.status, 200, search);
-      assert.strictEqual(
-        (
-          await Effect.runPromise(
-            Schema.decodeUnknownEffect(StatisticsView)(await statisticsResponse.json()),
-          )
-        ).window,
-        window,
-      );
-      const runStatisticsResponse = await app.handler(
-        new Request(`http://localhost/api/statistics/runs${search}`),
-      );
-      assert.strictEqual(runStatisticsResponse.status, 200, search);
-      assert.strictEqual(
-        (
-          await Effect.runPromise(
-            Schema.decodeUnknownEffect(RunStatisticsView)(await runStatisticsResponse.json()),
-          )
-        ).window,
-        window,
-      );
-    }
-    const unknownWindow = await app.handler(
-      new Request("http://localhost/api/statistics?window=90d"),
-    );
-    assert.strictEqual(unknownWindow.status, 400);
-
-    for (const search of [
-      "after=2&after=0",
-      "attempt=a&attempt=b&before=2",
-      "after=2&unrelated=x",
-    ]) {
-      const repeated = await app.handler(
-        new Request(`http://localhost/api/runs/${runId}?${search}`),
-      );
-      assert.strictEqual(repeated.status, 200, search);
-    }
-
-    const action = await app.handler(
-      new Request(`http://localhost/api/runs/${runId}/approve`, { method: "POST" }),
-    );
-    assert.strictEqual(action.status, 503);
-    assert.deepStrictEqual(await action.json(), {
-      error: "BackendUnavailableError",
-      message: "The GitHub App is not set up. Set it up to use operator actions.",
-    });
-
-    const configurationResponse = await app.handler(
-      new Request("http://localhost/api/configuration"),
-    );
-    assert.strictEqual(configurationResponse.status, 200);
-    assert.deepStrictEqual(
-      await Effect.runPromise(
-        Schema.decodeUnknownEffect(ConfigurationView)(await configurationResponse.json()),
-      ),
-      configurationView,
-    );
-
-    const invalidCursor = await app.handler(
-      new Request(`http://localhost/api/runs/${runId}?after=0`),
-    );
-    assert.strictEqual(invalidCursor.status, 400);
-    assert.strictEqual((await invalidCursor.json()).error, "SchemaError");
-
-    for (const search of [
-      "before=2",
-      "attempt=a",
-      "after=2&before=3",
-      "after=2&attempt=a",
-      "after=2&attempt=a&before=3",
-    ]) {
-      const invalid = await app.handler(
-        new Request(`http://localhost/api/runs/${runId}?${search}`),
-      );
-      assert.strictEqual(invalid.status, 400, search);
-      assert.strictEqual((await invalid.json()).error, "SchemaError");
-    }
-  });
-
-  it("maps typed engine errors onto operator-readable statuses", async () => {
-    let moved: BoardMove | undefined;
-    const rejecting = Layer.succeed(FactoryBackend)({
-      runWorkerPreflight: () => Effect.die("unused"),
-      resolveFailure: () => Effect.void,
-      agents: Effect.succeed([]),
-      editAndRetry: () => Effect.void,
-      runAgain: (id) =>
-        id === runId
-          ? Effect.fail(
-              RunOperationRejectedError.make({
-                runId: id,
-                operation: "runAgain",
-                state: "Running",
-              }),
-            )
-          : Effect.fail(
-              LoopNotFoundError.make({
-                loop: loopName,
-                message: `Run ${id} cannot run again: loop "${loopName}" is not loaded.`,
-              }),
-            ),
-      intervene: () => Effect.void,
-      overview: Effect.succeed(overview),
-      detail: (id, request) =>
-        request._tag === "EarlierTranscriptRequest"
-          ? Effect.fail(
-              TranscriptAttemptNotFoundError.make({ runId: id, attemptId: request.attemptId }),
-            )
-          : Effect.fail(RunNotFoundError.make({ runId: id })),
-      githubChanges: () =>
-        Effect.fail(
-          GitHubItemNotFoundError.make({
-            operation: "fetch-item-timeline",
-            item: 247,
-            message:
-              "Issue or pull request basaltbytes/usine#247 was not found on GitHub. It was deleted or transferred, or the GitHub App can no longer read it.",
+        polling: Effect.never,
+        status: Effect.succeed(
+          UpgradeView.make({
+            running: "1.0.0",
+            channel: "next",
+            mode: "propose",
+            supported: true,
+            available: null,
+            phase: "idle",
+            message: null,
+            outcome: null,
           }),
         ),
-      approve: (id: RunId) =>
-        Effect.fail(
-          RunOperationRejectedError.make({ runId: id, operation: "approve", state: "Running" }),
-        ),
-      dismissNeed: () => Effect.void,
-      undoDismissNeed: () => Effect.void,
-      resetCycleBudget: () => Effect.void,
-      retry: (id: RunId) =>
-        Effect.fail(
-          RunRetryBlockedError.make({
-            runId: id,
-            openRunId: RunId.make("run-open"),
-            message: `Cannot retry run ${id}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
+        request: (input) =>
+          Effect.sync(() => {
+            requested.push(input.timing);
           }),
+      });
+      const auth = yield* authFixture().pipe(Effect.scoped);
+      const upgradeApp = HttpRouter.toWebHandler(
+        apiRoutes.pipe(
+          Layer.provide(authenticatedRoutes(auth).guard.layer),
+          HttpRouter.provideRequest(Layer.merge(backend, upgradeBackend)),
         ),
-      cancel: (id) =>
-        Effect.fail(
-          RunOperationRejectedError.make({ runId: id, operation: "cancel", state: "Failed" }),
-        ),
-      discardLeftovers: () => Effect.void,
-      moveBoardItem: (move) => {
-        if (move.toLane === "Ready")
-          return Effect.fail(
-            BoardLaneNotFoundError.make({ repository: move.repository, lane: move.toLane }),
+        { disableLogger: true },
+      );
+      const authorization = { authorization: `Bearer ${localSecret}` };
+      try {
+        for (const path of ["/api/version", "/API/version", "//api/version", "/%61pi/version"]) {
+          const version = yield* Effect.promise(() =>
+            upgradeApp.handler(new Request(`http://localhost${path}`)),
           );
-        if (move.toLane === "proposed:ready")
-          return Effect.fail(
-            BoardLaneReadOnlyError.make({ repository: move.repository, lane: move.toLane }),
-          );
-        return Effect.sync(() => void (moved = move));
-      },
-      pause: () => Effect.void,
-      unpause: () => Effect.void,
-      task: (repository, item) => Effect.fail(BoardItemNotFoundError.make({ repository, item })),
-      configuration: Effect.succeed(configurationView),
-      desk: Effect.succeed(desk),
-      statistics: (window) => Effect.succeed(statisticsOf(window)),
-      runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
-    });
-    const rejectingApp = HttpRouter.toWebHandler(
-      apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
-      { disableLogger: true },
-    );
-    try {
-      const missing = await rejectingApp.handler(new Request("http://localhost/api/runs/run-2"));
-      assert.strictEqual(missing.status, 404);
-      assert.deepStrictEqual(await missing.json(), {
-        error: "RunNotFoundError",
-        message: "Run run-2 was not found.",
-      });
-
-      const offBoard = await rejectingApp.handler(
-        new Request("http://localhost/api/projects/basaltbytes/usine/tasks/9999"),
-      );
-      assert.strictEqual(offBoard.status, 404);
-      assert.deepStrictEqual(await offBoard.json(), {
-        error: "BoardItemNotFoundError",
-        message: "Item basaltbytes/usine#9999 was not found on the board.",
-      });
-
-      const gone = await rejectingApp.handler(
-        new Request(`http://localhost/api/runs/${runId}/github-changes`),
-      );
-      assert.strictEqual(gone.status, 404);
-      assert.deepStrictEqual(await gone.json(), {
-        error: "GitHubItemNotFoundError",
-        message:
-          "Issue or pull request basaltbytes/usine#247 was not found on GitHub. It was deleted or transferred, or the GitHub App can no longer read it.",
-      });
-
-      const rejected = await rejectingApp.handler(
-        new Request(`http://localhost/api/runs/${runId}/approve`, { method: "POST" }),
-      );
-      assert.strictEqual(rejected.status, 409);
-      assert.deepStrictEqual(await rejected.json(), {
-        error: "RunOperationRejectedError",
-        message: `Cannot approve run ${runId} while it is running.`,
-      });
-
-      const cancel = await rejectingApp.handler(
-        new Request(`http://localhost/api/runs/${runId}/cancel`, { method: "POST" }),
-      );
-      assert.strictEqual(cancel.status, 409);
-      assert.deepStrictEqual(await cancel.json(), {
-        error: "RunOperationRejectedError",
-        message: `Cannot cancel run ${runId} while it is failed.`,
-      });
-
-      const blocked = await rejectingApp.handler(
-        new Request(`http://localhost/api/runs/${runId}/retry`, { method: "POST" }),
-      );
-      assert.strictEqual(blocked.status, 409);
-      assert.deepStrictEqual(await blocked.json(), {
-        error: "RunRetryBlockedError",
-        message: `Cannot retry run ${runId}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
-      });
-
-      const edit = JSON.stringify({ task: "Look again", agent: agentName });
-      const open = await rejectingApp.handler(
-        new Request(`http://localhost/api/runs/${runId}/run-again`, { method: "POST", body: edit }),
-      );
-      assert.strictEqual(open.status, 409);
-      assert.deepStrictEqual(await open.json(), {
-        error: "RunOperationRejectedError",
-        message: `Run ${runId} is running. Only a succeeded or canceled run can run again.`,
-      });
-      const retired = await rejectingApp.handler(
-        new Request("http://localhost/api/runs/run-3/run-again", { method: "POST", body: edit }),
-      );
-      assert.strictEqual(retired.status, 404);
-      assert.deepStrictEqual(await retired.json(), {
-        error: "LoopNotFoundError",
-        message: `Run run-3 cannot run again: loop "${loopName}" is not loaded.`,
-      });
-
-      const wrongAttempt = AttemptId.make("attempt-from-another-run");
-      const earlier = await rejectingApp.handler(
-        new Request(`http://localhost/api/runs/${runId}?attempt=${wrongAttempt}&before=2`),
-      );
-      assert.strictEqual(earlier.status, 404);
-      assert.deepStrictEqual(await earlier.json(), {
-        error: "TranscriptAttemptNotFoundError",
-        message: `Attempt ${wrongAttempt} does not belong to run ${runId}.`,
-      });
-
-      const move = await rejectingApp.handler(
-        new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ toLane: BoardLaneId.make("authored:Review") }),
-        }),
-      );
-      assert.strictEqual(move.status, 200);
-      assert.strictEqual(moved?.repository, repositoryName);
-      assert.strictEqual(moved?.item, 31);
-      assert.strictEqual(moved?.toLane, "authored:Review");
-      const unknownLane = await rejectingApp.handler(
-        new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ toLane: "Ready" }),
-        }),
-      );
-      assert.strictEqual(unknownLane.status, 404);
-      assert.deepStrictEqual(await unknownLane.json(), {
-        error: "BoardLaneNotFoundError",
-        message: 'Lane "Ready" was not found on the board.',
-      });
-      const proposed = await rejectingApp.handler(
-        new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ toLane: "proposed:ready" }),
-        }),
-      );
-      assert.strictEqual(proposed.status, 409);
-      const refusal = await Effect.runPromise(
-        Schema.decodeUnknownEffect(OperatorHttpError)(await proposed.json()),
-      );
-      assert.strictEqual(refusal.error, "BoardLaneReadOnlyError");
-      assert.match(refusal.message, /read-only/i);
-      assert.match(refusal.message, /usine\.yaml/);
-
-      // Authored fields are validated strictly, although JSON is accepted regardless of
-      // Content-Type.
-      for (const body of ["{", '{"toLane":"authored:Review","typo":true}', '{"toLane":42}']) {
-        const invalid = await rejectingApp.handler(
-          new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
-            method: "POST",
-            body,
-          }),
+          assert.strictEqual(version.status, 200);
+          const actual1 = yield* Effect.promise(() => version.json());
+          assert.strictEqual(actual1, "1.0.0");
+        }
+        const status = yield* Effect.promise(() =>
+          upgradeApp.handler(
+            new Request("http://localhost/api/upgrade", { headers: authorization }),
+          ),
+        );
+        const actual2 = yield* Effect.promise(() => status.json());
+        assert.strictEqual(
+          (yield* Schema.decodeUnknownEffect(UpgradeView)(actual2)).channel,
+          "next",
+        );
+        const invalid = yield* Effect.promise(() =>
+          upgradeApp.handler(
+            new Request("http://localhost/api/upgrade", {
+              headers: authorization,
+              method: "POST",
+              body: stringifyJson({ timing: "tomorrow" }),
+            }),
+          ),
         );
         assert.strictEqual(invalid.status, 400);
-        assert.strictEqual((await invalid.json()).error, "InvalidRequestError");
-      }
-      const simplePost = await rejectingApp.handler(
-        new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
-          method: "POST",
-          body: '{"toLane":"authored:Done"}',
-        }),
-      );
-      assert.strictEqual(simplePost.status, 200);
-      assert.strictEqual(moved?.toLane, "authored:Done");
-    } finally {
-      await rejectingApp.dispose();
-    }
-  });
+        const invalidVersion = yield* Effect.promise(() =>
+          upgradeApp.handler(
+            new Request("http://localhost/api/upgrade", {
+              headers: authorization,
+              method: "POST",
+              body: stringifyJson({ timing: "now", version: "1.0.0-01" }),
+            }),
+          ),
+        );
+        assert.strictEqual(invalidVersion.status, 400);
 
-  it("round-trips the derived client through a listening server for reads, interventions, cursors, and typed failures", async () => {
-    const observed: Array<TranscriptRequest> = [];
-    const interventions: Array<string> = [];
-    const record = (operation: string) => Effect.sync(() => void interventions.push(operation));
-    const edits: Array<EditAndRetry> = [];
-    const againEdits: Array<EditAndRetry> = [];
-    const opened = Claimed.make({
-      eventId: EventId.make("run-again-event"),
-      runId: RunId.make("run-2"),
-    });
-    const inputs: Array<SessionIntervention> = [];
-    const live = Layer.succeed(FactoryBackend)({
-      runWorkerPreflight: () => Effect.die("unused"),
-      resolveFailure: (id, attemptId) =>
-        attemptId === "attempt/1"
-          ? record(`resolve:${id}:${attemptId}`)
-          : Effect.fail(
-              RunOperationRejectedError.make({
-                runId: id,
-                operation: "resolveFailure",
-                state: "Failed",
+        assert.deepStrictEqual(requested, []);
+        const accepted = yield* Effect.promise(() =>
+          upgradeApp.handler(
+            new Request("http://localhost/api/upgrade", {
+              headers: authorization,
+              method: "POST",
+              body: stringifyJson({ timing: "idle" }),
+            }),
+          ),
+        );
+        assert.strictEqual(accepted.status, 200);
+        assert.deepStrictEqual(requested, ["idle"]);
+        const canceled = yield* Effect.promise(() =>
+          upgradeApp.handler(
+            new Request("http://localhost/api/upgrade", {
+              headers: authorization,
+              method: "DELETE",
+            }),
+          ),
+        );
+        assert.strictEqual(canceled.status, 200);
+        assert.deepStrictEqual(requested, ["idle", "cancel"]);
+      } finally {
+        yield* Effect.promise(() => upgradeApp.dispose());
+      }
+    }),
+  );
+
+  it.live(
+    "records dismissals and undo during setup without accepting client-supplied operator identity",
+    () =>
+      Effect.gen(function* () {
+        const payload = { id: "config-file:loop", revision: "invalid agent" };
+        const send = (path: string, body: Schema.Json) =>
+          app.handler(
+            new Request(`http://localhost/api/attention/${path}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: stringifyJson(body),
+            }),
+          );
+        const invalid = yield* Effect.promise(() =>
+          send("dismiss", { ...payload, dismissedBy: "someone-else" }),
+        );
+        assert.strictEqual(invalid.status, 400);
+        assert.strictEqual(dismissed.length, 0);
+        const response = yield* Effect.promise(() => send("dismiss", payload));
+        assert.strictEqual(response.status, 200);
+        const saved = dismissed[0];
+        assert(saved !== undefined);
+        assert.strictEqual(saved.id, payload.id);
+        assert.strictEqual(saved.revision, payload.revision);
+        assert.deepStrictEqual(saved.dismissedBy, (yield* instance).config.operator);
+        assert(DateTime.toEpochMillis(saved.dismissedAt) > 0);
+        const undo = yield* Effect.promise(() => send("undo", payload));
+        assert.strictEqual(undo.status, 200);
+        assert.strictEqual(dismissed.length, 0);
+      }),
+  );
+
+  it.live(
+    "preserves durable observation in needs-setup mode while intervention remains unavailable",
+    () =>
+      Effect.gen(function* () {
+        const response = yield* Effect.promise(() =>
+          app.handler(new Request("http://localhost/api/overview")),
+        );
+        assert.strictEqual(response.status, 200);
+        const actual3 = yield* Effect.promise(() => response.json());
+        const body = yield* Schema.decodeUnknownEffect(FactoryOverview)(actual3);
+        assert.strictEqual(body._tag, "NeedsSetup");
+        assert.strictEqual(body.projects[0]?.runs[0]?.id, runId);
+        assert.strictEqual(body.loops[0]?.paused, true);
+
+        const deskResponse = yield* Effect.promise(() =>
+          app.handler(new Request("http://localhost/api/desk")),
+        );
+        assert.strictEqual(deskResponse.status, 200);
+        const actual4 = yield* Effect.promise(() => deskResponse.json());
+        const deskBody = yield* Schema.decodeUnknownEffect(DeskView)(actual4);
+        assert.deepStrictEqual(
+          deskBody.polls.map(({ polledAt }) => polledAt),
+          [null],
+        );
+
+        const runResponse = yield* Effect.promise(() =>
+          app.handler(new Request(`http://localhost/api/runs/${runId}`)),
+        );
+        assert.strictEqual(runResponse.status, 200);
+        assert.strictEqual(
+          (yield* Effect.promise(() => runResponse.json())).eventDedupKey,
+          "issue:31",
+        );
+
+        const taskResponse = yield* Effect.promise(() =>
+          app.handler(new Request("http://localhost/api/projects/basaltbytes/usine/tasks/31")),
+        );
+        assert.strictEqual(taskResponse.status, 200);
+        const actual5 = yield* Effect.promise(() => taskResponse.json());
+        const actual28 = yield* Schema.decodeUnknownEffect(TaskView)(actual5);
+        assert.deepStrictEqual(actual28, task);
+
+        for (const [search, window] of [
+          ["?window=7d", "7d"],
+          ["", "30d"],
+          ["?window=all&window=7d", "all"],
+        ] as const) {
+          const statisticsResponse = yield* Effect.promise(() =>
+            app.handler(new Request(`http://localhost/api/statistics${search}`)),
+          );
+          assert.strictEqual(statisticsResponse.status, 200, search);
+          const actual6 = yield* Effect.promise(() => statisticsResponse.json());
+          assert.strictEqual(
+            (yield* Schema.decodeUnknownEffect(StatisticsView)(actual6)).window,
+            window,
+          );
+          const runStatisticsResponse = yield* Effect.promise(() =>
+            app.handler(new Request(`http://localhost/api/statistics/runs${search}`)),
+          );
+          assert.strictEqual(runStatisticsResponse.status, 200, search);
+          const actual7 = yield* Effect.promise(() => runStatisticsResponse.json());
+          assert.strictEqual(
+            (yield* Schema.decodeUnknownEffect(RunStatisticsView)(actual7)).window,
+            window,
+          );
+        }
+        const unknownWindow = yield* Effect.promise(() =>
+          app.handler(new Request("http://localhost/api/statistics?window=90d")),
+        );
+        assert.strictEqual(unknownWindow.status, 400);
+
+        for (const search of [
+          "after=2&after=0",
+          "attempt=a&attempt=b&before=2",
+          "after=2&unrelated=x",
+        ]) {
+          const repeated = yield* Effect.promise(() =>
+            app.handler(new Request(`http://localhost/api/runs/${runId}?${search}`)),
+          );
+          assert.strictEqual(repeated.status, 200, search);
+        }
+
+        const action = yield* Effect.promise(() =>
+          app.handler(
+            new Request(`http://localhost/api/runs/${runId}/approve`, { method: "POST" }),
+          ),
+        );
+        assert.strictEqual(action.status, 503);
+        const actual8 = yield* Effect.promise(() => action.json());
+        assert.deepStrictEqual(actual8, {
+          error: "BackendUnavailableError",
+          message: "The GitHub App is not set up. Set it up to use operator actions.",
+        });
+
+        const configurationResponse = yield* Effect.promise(() =>
+          app.handler(new Request("http://localhost/api/configuration")),
+        );
+        assert.strictEqual(configurationResponse.status, 200);
+        const actual9 = yield* Effect.promise(() => configurationResponse.json());
+        const actual29 = yield* Schema.decodeUnknownEffect(ConfigurationView)(actual9);
+        assert.deepStrictEqual(actual29, configurationView);
+
+        const invalidCursor = yield* Effect.promise(() =>
+          app.handler(new Request(`http://localhost/api/runs/${runId}?after=0`)),
+        );
+        assert.strictEqual(invalidCursor.status, 400);
+        assert.strictEqual(
+          (yield* Effect.promise(() => invalidCursor.json())).error,
+          "SchemaError",
+        );
+
+        for (const search of [
+          "before=2",
+          "attempt=a",
+          "after=2&before=3",
+          "after=2&attempt=a",
+          "after=2&attempt=a&before=3",
+        ]) {
+          const invalid = yield* Effect.promise(() =>
+            app.handler(new Request(`http://localhost/api/runs/${runId}?${search}`)),
+          );
+          assert.strictEqual(invalid.status, 400, search);
+          assert.strictEqual((yield* Effect.promise(() => invalid.json())).error, "SchemaError");
+        }
+      }),
+  );
+
+  it.live("maps typed engine errors onto operator-readable statuses", () =>
+    Effect.gen(function* () {
+      let moved: BoardMove | undefined;
+      const rejecting = Layer.succeed(FactoryBackend)({
+        runWorkerPreflight: () => Effect.die("unused"),
+        resolveFailure: () => Effect.void,
+        agents: Effect.succeed([]),
+        editAndRetry: () => Effect.void,
+        runAgain: (id) =>
+          id === runId
+            ? Effect.fail(
+                RunOperationRejectedError.make({
+                  runId: id,
+                  operation: "runAgain",
+                  state: "Running",
+                }),
+              )
+            : Effect.fail(
+                LoopNotFoundError.make({
+                  loop: loopName,
+                  message: `Run ${id} cannot run again: loop "${loopName}" is not loaded.`,
+                }),
+              ),
+        intervene: () => Effect.void,
+        overview: Effect.succeed(overview),
+        detail: (id, request) =>
+          request._tag === "EarlierTranscriptRequest"
+            ? Effect.fail(
+                TranscriptAttemptNotFoundError.make({ runId: id, attemptId: request.attemptId }),
+              )
+            : Effect.fail(RunNotFoundError.make({ runId: id })),
+        githubChanges: () =>
+          Effect.fail(
+            GitHubItemNotFoundError.make({
+              operation: "fetch-item-timeline",
+              item: 247,
+              message:
+                "Issue or pull request basaltbytes/usine#247 was not found on GitHub. It was deleted or transferred, or the GitHub App can no longer read it.",
+            }),
+          ),
+        approve: (id: RunId) =>
+          Effect.fail(
+            RunOperationRejectedError.make({ runId: id, operation: "approve", state: "Running" }),
+          ),
+        dismissNeed: () => Effect.void,
+        undoDismissNeed: () => Effect.void,
+        resetCycleBudget: () => Effect.void,
+        retry: (id: RunId) =>
+          Effect.fail(
+            RunRetryBlockedError.make({
+              runId: id,
+              openRunId: RunId.make("run-open"),
+              message: `Cannot retry run ${id}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
+            }),
+          ),
+        cancel: (id) =>
+          Effect.fail(
+            RunOperationRejectedError.make({ runId: id, operation: "cancel", state: "Failed" }),
+          ),
+        discardLeftovers: () => Effect.void,
+        moveBoardItem: (move) => {
+          if (move.toLane === "Ready")
+            return Effect.fail(
+              BoardLaneNotFoundError.make({ repository: move.repository, lane: move.toLane }),
+            );
+          if (move.toLane === "proposed:ready")
+            return Effect.fail(
+              BoardLaneReadOnlyError.make({ repository: move.repository, lane: move.toLane }),
+            );
+          return Effect.sync(() => void (moved = move));
+        },
+        pause: () => Effect.void,
+        unpause: () => Effect.void,
+        task: (repository, item) => Effect.fail(BoardItemNotFoundError.make({ repository, item })),
+        configuration: Effect.succeed(configurationView),
+        desk: Effect.succeed(desk),
+        statistics: (window) => Effect.succeed(statisticsOf(window)),
+        runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
+      });
+      const rejectingApp = HttpRouter.toWebHandler(
+        apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
+        { disableLogger: true },
+      );
+      try {
+        const missing = yield* Effect.promise(() =>
+          rejectingApp.handler(new Request("http://localhost/api/runs/run-2")),
+        );
+        assert.strictEqual(missing.status, 404);
+        const actual10 = yield* Effect.promise(() => missing.json());
+        assert.deepStrictEqual(actual10, {
+          error: "RunNotFoundError",
+          message: "Run run-2 was not found.",
+        });
+
+        const offBoard = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request("http://localhost/api/projects/basaltbytes/usine/tasks/9999"),
+          ),
+        );
+        assert.strictEqual(offBoard.status, 404);
+        const actual11 = yield* Effect.promise(() => offBoard.json());
+        assert.deepStrictEqual(actual11, {
+          error: "BoardItemNotFoundError",
+          message: "Item basaltbytes/usine#9999 was not found on the board.",
+        });
+
+        const gone = yield* Effect.promise(() =>
+          rejectingApp.handler(new Request(`http://localhost/api/runs/${runId}/github-changes`)),
+        );
+        assert.strictEqual(gone.status, 404);
+        const actual12 = yield* Effect.promise(() => gone.json());
+        assert.deepStrictEqual(actual12, {
+          error: "GitHubItemNotFoundError",
+          message:
+            "Issue or pull request basaltbytes/usine#247 was not found on GitHub. It was deleted or transferred, or the GitHub App can no longer read it.",
+        });
+
+        const rejected = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request(`http://localhost/api/runs/${runId}/approve`, { method: "POST" }),
+          ),
+        );
+        assert.strictEqual(rejected.status, 409);
+        const actual13 = yield* Effect.promise(() => rejected.json());
+        assert.deepStrictEqual(actual13, {
+          error: "RunOperationRejectedError",
+          message: `Cannot approve run ${runId} while it is running.`,
+        });
+
+        const cancel = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request(`http://localhost/api/runs/${runId}/cancel`, { method: "POST" }),
+          ),
+        );
+        assert.strictEqual(cancel.status, 409);
+        const actual14 = yield* Effect.promise(() => cancel.json());
+        assert.deepStrictEqual(actual14, {
+          error: "RunOperationRejectedError",
+          message: `Cannot cancel run ${runId} while it is failed.`,
+        });
+
+        const blocked = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request(`http://localhost/api/runs/${runId}/retry`, { method: "POST" }),
+          ),
+        );
+        assert.strictEqual(blocked.status, 409);
+        const actual15 = yield* Effect.promise(() => blocked.json());
+        assert.deepStrictEqual(actual15, {
+          error: "RunRetryBlockedError",
+          message: `Cannot retry run ${runId}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
+        });
+
+        const json2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          task: "Look again",
+          agent: agentName,
+        }).pipe(Effect.orDie);
+        const edit = json2;
+        const open = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request(`http://localhost/api/runs/${runId}/run-again`, {
+              method: "POST",
+              body: edit,
+            }),
+          ),
+        );
+        assert.strictEqual(open.status, 409);
+        const actual16 = yield* Effect.promise(() => open.json());
+        assert.deepStrictEqual(actual16, {
+          error: "RunOperationRejectedError",
+          message: `Run ${runId} is running. Only a succeeded or canceled run can run again.`,
+        });
+        const retired = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request("http://localhost/api/runs/run-3/run-again", {
+              method: "POST",
+              body: edit,
+            }),
+          ),
+        );
+        assert.strictEqual(retired.status, 404);
+        const actual17 = yield* Effect.promise(() => retired.json());
+        assert.deepStrictEqual(actual17, {
+          error: "LoopNotFoundError",
+          message: `Run run-3 cannot run again: loop "${loopName}" is not loaded.`,
+        });
+
+        const wrongAttempt = AttemptId.make("attempt-from-another-run");
+        const earlier = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request(`http://localhost/api/runs/${runId}?attempt=${wrongAttempt}&before=2`),
+          ),
+        );
+        assert.strictEqual(earlier.status, 404);
+        const actual18 = yield* Effect.promise(() => earlier.json());
+        assert.deepStrictEqual(actual18, {
+          error: "TranscriptAttemptNotFoundError",
+          message: `Attempt ${wrongAttempt} does not belong to run ${runId}.`,
+        });
+
+        const move = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: stringifyJson({ toLane: BoardLaneId.make("authored:Review") }),
+            }),
+          ),
+        );
+        assert.strictEqual(move.status, 200);
+        assert.strictEqual(moved?.repository, repositoryName);
+        assert.strictEqual(moved?.item, 31);
+        assert.strictEqual(moved?.toLane, "authored:Review");
+        const unknownLane = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: stringifyJson({ toLane: "Ready" }),
+            }),
+          ),
+        );
+        assert.strictEqual(unknownLane.status, 404);
+        const actual19 = yield* Effect.promise(() => unknownLane.json());
+        assert.deepStrictEqual(actual19, {
+          error: "BoardLaneNotFoundError",
+          message: 'Lane "Ready" was not found on the board.',
+        });
+        const proposed = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: stringifyJson({ toLane: "proposed:ready" }),
+            }),
+          ),
+        );
+        assert.strictEqual(proposed.status, 409);
+        const actual20 = yield* Effect.promise(() => proposed.json());
+        const refusal = yield* Schema.decodeUnknownEffect(OperatorHttpError)(actual20);
+        assert.strictEqual(refusal.error, "BoardLaneReadOnlyError");
+        assert.match(refusal.message, /read-only/i);
+        assert.match(refusal.message, /usine\.yaml/);
+
+        // Authored fields are validated strictly, although JSON is accepted regardless of
+        // Content-Type.
+        for (const body of ["{", '{"toLane":"authored:Review","typo":true}', '{"toLane":42}']) {
+          const invalid = yield* Effect.promise(() =>
+            rejectingApp.handler(
+              new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+                method: "POST",
+                body,
               }),
             ),
-      agents: Effect.succeed([agentName]),
-      editAndRetry: (_id, edit) =>
-        Effect.sync(() => {
-          edits.push(edit);
-        }),
-      runAgain: (_id, edit) =>
-        Effect.sync(() => {
-          againEdits.push(edit);
-          return opened;
-        }),
-      intervene: (_id, input) =>
-        Effect.sync(() => {
-          inputs.push(input);
-        }),
-      overview: Effect.succeed(overview),
-      detail: (id, request) => {
-        if (id !== runId) return Effect.fail(RunNotFoundError.make({ runId: id }));
-        if (request._tag === "EarlierTranscriptRequest" && request.attemptId !== "attempt/1") {
-          return Effect.fail(
-            TranscriptAttemptNotFoundError.make({ runId: id, attemptId: request.attemptId }),
+          );
+          assert.strictEqual(invalid.status, 400);
+          assert.strictEqual(
+            (yield* Effect.promise(() => invalid.json())).error,
+            "InvalidRequestError",
           );
         }
-        return Effect.sync(() => {
-          observed.push(request);
-          return detail;
-        });
-      },
-      githubChanges: () => Effect.succeed(githubChanges),
-      approve: (id) =>
-        id === runId
-          ? record(`approve:${id}`)
-          : Effect.fail(
-              RunOperationRejectedError.make({ runId: id, operation: "approve", state: "Running" }),
-            ),
-      dismissNeed: (key) => record(`dismiss:${key.id}:${key.revision}`),
-      undoDismissNeed: (key) => record(`undo:${key.id}:${key.revision}`),
-      resetCycleBudget: (id) =>
-        id === "current-ask"
-          ? record(`reset:${id}`)
-          : Effect.fail(CycleBudgetResetRejectedError.make({ askId: id })),
-      retry: (id) => record(`retry:${id}`),
-      cancel: (id) => record(`cancel:${id}`),
-      discardLeftovers: (worker) =>
-        Effect.fail(LeftoversDiscardRejectedError.make({ worker, running: 2 })),
-      pause: (loop) =>
-        loop === loopName
-          ? record(`pause:${loop}`)
-          : Effect.fail(BackendUnavailableError.make({ message: "Setup is required." })),
-      unpause: (loop) => record(`unpause:${loop}`),
-      moveBoardItem: (move) => record(`move:${move.repository}#${move.item}:${move.toLane}`),
-      task: (repository, item) =>
-        repository === repositoryName && item === 31
-          ? Effect.succeed(task)
-          : Effect.fail(BoardItemNotFoundError.make({ repository, item })),
-      configuration: Effect.succeed(configurationView),
-      desk: Effect.succeed(desk),
-      statistics: (window) => Effect.succeed(statisticsOf(window)),
-      runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
-    });
-    const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
-      Layer.provideMerge(NodeHttpServer.layerTest),
-    );
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const { operator: client } = yield* HttpApiClient.make(OperatorApi);
-        const currentOverview = yield* client.overview();
-        assert.deepStrictEqual(currentOverview, overview);
-        const currentAgents = yield* client.agents();
-        assert.deepStrictEqual(currentAgents, [agentName]);
-        const currentConfiguration = yield* client.configuration();
-        assert.deepStrictEqual(currentConfiguration, configurationView);
-        const edit = EditAndRetry.make({
-          task: AttemptTask.make("Fix the reviewed behavior"),
-          agent: agentName,
-        });
-        yield* client.editAndRetry({ params: { runId }, payload: edit });
-        const runAgainResult = yield* client.runAgain({ params: { runId }, payload: edit });
-        assert.deepStrictEqual(runAgainResult, opened);
-        assert.deepStrictEqual(againEdits, [edit]);
-        const input = SessionIntervention.make({
-          attemptId: AttemptId.make("attempt/1"),
-          target: ParentTarget.make(),
-          action: OperatorMessage.make({ message: "Continue carefully" }),
-        });
-        yield* client.intervene({ params: { runId }, payload: input });
-        assert.deepStrictEqual(edits, [edit]);
-        assert.deepStrictEqual(inputs, [input]);
-        const requests = [
-          ColdTranscriptRequest.make(),
-          TailTranscriptRequest.make({ after: TranscriptSequence.make(7) }),
-          EarlierTranscriptRequest.make({
-            attemptId: AttemptId.make("attempt/1"),
-            before: TranscriptSequence.make(4),
-          }),
-        ];
-        for (const query of requests) {
-          const runDetail = yield* client.detail({ params: { runId }, query });
-          assert.deepStrictEqual(runDetail, detail);
-        }
-        assert.deepStrictEqual(observed, requests);
-        const currentGithubChanges = yield* client.githubChanges({ params: { runId } });
-        assert.deepStrictEqual(currentGithubChanges, githubChanges);
-        const currentTask = yield* client.task({
-          params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
-        });
-        assert.deepStrictEqual(currentTask, task);
-        const currentProject = yield* client.project({
-          params: { project: ProjectId.make("workspace") },
-        });
-        assert.deepStrictEqual(currentProject, overview.projects[0]);
-        const nextTask = yield* client.projectTask({
-          params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
-          query: { repository: repositoryName },
-        });
-        assert.deepStrictEqual(nextTask, task);
-        const unrelatedProject = yield* client
-          .projectTask({
-            params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
-            query: { repository: RepositoryName.make("other/repository") },
-          })
-          .pipe(Effect.flip);
-        assert.instanceOf(unrelatedProject, OperatorHttpError);
-        assert.strictEqual(unrelatedProject.error, "BoardProjectNotFoundError");
-        for (const action of ["dismissNeed", "undoDismissNeed"] as const) {
-          const actionResult = yield* client[action]({
-            payload: AttentionKey.make({
-              id: "finding",
-              revision: AttentionRevision.make("revision"),
+        const simplePost = yield* Effect.promise(() =>
+          rejectingApp.handler(
+            new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+              method: "POST",
+              body: '{"toLane":"authored:Done"}',
             }),
-          });
-          assert.deepStrictEqual(actionResult, { ok: true });
-        }
-        const resetResult = yield* client.resetCycleBudget({
-          payload: { askId: CycleBudgetAskId.make("current-ask") },
-        });
-        assert.deepStrictEqual(resetResult, { ok: true });
-        const resolution = yield* client.resolveFailure({
-          params: { runId },
-          payload: { attemptId: AttemptId.make("attempt/1") },
-        });
-        assert.deepStrictEqual(resolution, { ok: true });
-        const staleResolution = yield* Effect.flip(
-          client.resolveFailure({
-            params: { runId },
-            payload: { attemptId: AttemptId.make("older-attempt") },
-          }),
+          ),
         );
-        assert.instanceOf(staleResolution, OperatorHttpError);
-        assert.strictEqual(staleResolution.status, 409);
-        for (const action of ["approve", "retry", "cancel"] as const) {
-          const currentActionResult = yield* client[action]({ params: { runId } });
-          assert.deepStrictEqual(currentActionResult, { ok: true });
-        }
-        for (const action of ["pause", "unpause"] as const) {
-          const nextActionResult = yield* client[action]({ params: { loop: loopName } });
-          assert.deepStrictEqual(nextActionResult, {
-            ok: true,
-          });
-        }
-        const moveResult = yield* client.moveBoardItem({
-          params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
-          payload: { toLane: BoardLaneId.make("authored:Review") },
-        });
-        assert.deepStrictEqual(moveResult, { ok: true });
-        const kept = yield* Effect.flip(
-          client.discardLeftovers({ params: { worker: WorkerName.make("local") } }),
-        );
-        assert.instanceOf(kept, OperatorHttpError);
-        assert.strictEqual(kept.status, 409);
-        assert.strictEqual(
-          kept.message,
-          '2 attempts are still running on worker "local". Discard its leftovers after they end.',
-        );
-        assert.deepStrictEqual(interventions, [
-          "dismiss:finding:revision",
-          "undo:finding:revision",
-          "reset:current-ask",
-          `resolve:${runId}:attempt/1`,
-          `approve:${runId}`,
-          `retry:${runId}`,
-          `cancel:${runId}`,
-          `pause:${loopName}`,
-          `unpause:${loopName}`,
-          "move:basaltbytes/usine#31:authored:Review",
-        ]);
+        assert.strictEqual(simplePost.status, 200);
+        assert.strictEqual(moved?.toLane, "authored:Done");
+      } finally {
+        yield* Effect.promise(() => rejectingApp.dispose());
+      }
+    }),
+  );
 
-        const missingId = RunId.make("missing/run");
-        const staleReset = yield* Effect.flip(
-          client.resetCycleBudget({ payload: { askId: CycleBudgetAskId.make("stale-ask") } }),
+  it.live(
+    "round-trips the derived client through a listening server for reads, interventions, cursors, and typed failures",
+    () =>
+      Effect.gen(function* () {
+        const observed: Array<TranscriptRequest> = [];
+        const interventions: Array<string> = [];
+        const record = (operation: string) => Effect.sync(() => void interventions.push(operation));
+        const edits: Array<EditAndRetry> = [];
+        const againEdits: Array<EditAndRetry> = [];
+        const opened = Claimed.make({
+          eventId: EventId.make("run-again-event"),
+          runId: RunId.make("run-2"),
+        });
+        const inputs: Array<SessionIntervention> = [];
+        const live = Layer.succeed(FactoryBackend)({
+          runWorkerPreflight: () => Effect.die("unused"),
+          resolveFailure: (id, attemptId) =>
+            attemptId === "attempt/1"
+              ? record(`resolve:${id}:${attemptId}`)
+              : Effect.fail(
+                  RunOperationRejectedError.make({
+                    runId: id,
+                    operation: "resolveFailure",
+                    state: "Failed",
+                  }),
+                ),
+          agents: Effect.succeed([agentName]),
+          editAndRetry: (_id, edit) =>
+            Effect.sync(() => {
+              edits.push(edit);
+            }),
+          runAgain: (_id, edit) =>
+            Effect.sync(() => {
+              againEdits.push(edit);
+              return opened;
+            }),
+          intervene: (_id, input) =>
+            Effect.sync(() => {
+              inputs.push(input);
+            }),
+          overview: Effect.succeed(overview),
+          detail: (id, request) => {
+            if (id !== runId) return Effect.fail(RunNotFoundError.make({ runId: id }));
+            if (request._tag === "EarlierTranscriptRequest" && request.attemptId !== "attempt/1") {
+              return Effect.fail(
+                TranscriptAttemptNotFoundError.make({ runId: id, attemptId: request.attemptId }),
+              );
+            }
+            return Effect.sync(() => {
+              observed.push(request);
+              return detail;
+            });
+          },
+          githubChanges: () => Effect.succeed(githubChanges),
+          approve: (id) =>
+            id === runId
+              ? record(`approve:${id}`)
+              : Effect.fail(
+                  RunOperationRejectedError.make({
+                    runId: id,
+                    operation: "approve",
+                    state: "Running",
+                  }),
+                ),
+          dismissNeed: (key) => record(`dismiss:${key.id}:${key.revision}`),
+          undoDismissNeed: (key) => record(`undo:${key.id}:${key.revision}`),
+          resetCycleBudget: (id) =>
+            id === "current-ask"
+              ? record(`reset:${id}`)
+              : Effect.fail(CycleBudgetResetRejectedError.make({ askId: id })),
+          retry: (id) => record(`retry:${id}`),
+          cancel: (id) => record(`cancel:${id}`),
+          discardLeftovers: (worker) =>
+            Effect.fail(LeftoversDiscardRejectedError.make({ worker, running: 2 })),
+          pause: (loop) =>
+            loop === loopName
+              ? record(`pause:${loop}`)
+              : Effect.fail(BackendUnavailableError.make({ message: "Setup is required." })),
+          unpause: (loop) => record(`unpause:${loop}`),
+          moveBoardItem: (move) => record(`move:${move.repository}#${move.item}:${move.toLane}`),
+          task: (repository, item) =>
+            repository === repositoryName && item === 31
+              ? Effect.succeed(task)
+              : Effect.fail(BoardItemNotFoundError.make({ repository, item })),
+          configuration: Effect.succeed(configurationView),
+          desk: Effect.succeed(desk),
+          statistics: (window) => Effect.succeed(statisticsOf(window)),
+          runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
+        });
+        const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
+          Layer.provideMerge(NodeHttpServer.layerTest),
         );
-        assert.instanceOf(staleReset, OperatorHttpError);
-        assert.strictEqual(staleReset.status, 409);
-        assert.strictEqual(staleReset.error, "CycleBudgetResetRejectedError");
-        const missing = yield* Effect.flip(
-          client.detail({ params: { runId: missingId }, query: ColdTranscriptRequest.make() }),
-        );
-        assert.instanceOf(missing, OperatorHttpError);
-        assert.strictEqual(missing.error, "RunNotFoundError");
-        assert.strictEqual(missing.status, 404);
-        assert.strictEqual(missing.message, `Run ${missingId} was not found.`);
-        const wrongAttempt = yield* Effect.flip(
-          client.detail({
-            params: { runId },
-            query: EarlierTranscriptRequest.make({
-              attemptId: AttemptId.make("other-attempt"),
+        yield* Effect.gen(function* () {
+          const { operator: client } = yield* HttpApiClient.make(OperatorApi);
+          const currentOverview = yield* client.overview();
+          assert.deepStrictEqual(currentOverview, overview);
+          const currentAgents = yield* client.agents();
+          assert.deepStrictEqual(currentAgents, [agentName]);
+          const currentConfiguration = yield* client.configuration();
+          assert.deepStrictEqual(currentConfiguration, configurationView);
+          const edit = EditAndRetry.make({
+            task: AttemptTask.make("Fix the reviewed behavior"),
+            agent: agentName,
+          });
+          yield* client.editAndRetry({ params: { runId }, payload: edit });
+          const runAgainResult = yield* client.runAgain({ params: { runId }, payload: edit });
+          assert.deepStrictEqual(runAgainResult, opened);
+          assert.deepStrictEqual(againEdits, [edit]);
+          const input = SessionIntervention.make({
+            attemptId: AttemptId.make("attempt/1"),
+            target: ParentTarget.make(),
+            action: OperatorMessage.make({ message: "Continue carefully" }),
+          });
+          yield* client.intervene({ params: { runId }, payload: input });
+          assert.deepStrictEqual(edits, [edit]);
+          assert.deepStrictEqual(inputs, [input]);
+          const requests = [
+            ColdTranscriptRequest.make(),
+            TailTranscriptRequest.make({ after: TranscriptSequence.make(7) }),
+            EarlierTranscriptRequest.make({
+              attemptId: AttemptId.make("attempt/1"),
               before: TranscriptSequence.make(4),
             }),
-          }),
-        );
-        assert.instanceOf(wrongAttempt, OperatorHttpError);
-        assert.strictEqual(wrongAttempt.error, "TranscriptAttemptNotFoundError");
-        assert.strictEqual(wrongAttempt.status, 404);
-
-        const rejected = yield* Effect.flip(client.approve({ params: { runId: missingId } }));
-        assert.instanceOf(rejected, OperatorHttpError);
-        assert.strictEqual(rejected.error, "RunOperationRejectedError");
-        assert.strictEqual(rejected.status, 409);
-        const unavailable = yield* Effect.flip(
-          client.pause({ params: { loop: LoopName.make("setup-required") } }),
-        );
-        assert.instanceOf(unavailable, OperatorHttpError);
-        assert.strictEqual(unavailable.error, "BackendUnavailableError");
-        assert.strictEqual(unavailable.status, 503);
-        assert.strictEqual(unavailable.message, "Setup is required.");
-      }).pipe(Effect.provide(server)),
-    );
-  });
-
-  it("serves client routes without masking missing API routes or static files", async () => {
-    const webRoot = await mkdtemp(join(tmpdir(), "usine-web-"));
-    const assets = join(webRoot, "assets");
-    await mkdir(assets);
-    await Promise.all([
-      writeFile(join(webRoot, "index.html"), "<main>usine operator</main>"),
-      writeFile(join(assets, "app.css"), ":root { color-scheme: dark; }"),
-    ]);
-    const web = HttpRouter.toWebHandler(
-      Layer.mergeAll(apiRoutes, staticRoutes(webRoot)).pipe(
-        HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer)),
-      ),
-      { disableLogger: true },
-    );
-    try {
-      const api = await web.handler(new Request("http://localhost/api/overview"));
-      assert.strictEqual(api.status, 200);
-
-      const shell = await web.handler(new Request("http://localhost/"));
-      assert.strictEqual(shell.status, 200);
-      assert.strictEqual(await shell.text(), "<main>usine operator</main>");
-
-      const configuration = await web.handler(new Request("http://localhost/configuration/loops"));
-      assert.strictEqual(configuration.status, 200);
-      assert.deepStrictEqual(
-        Object.fromEntries(configuration.headers),
-        Object.fromEntries(shell.headers),
-      );
-      assert.strictEqual(await configuration.text(), "<main>usine operator</main>");
-
-      const project = await web.handler(
-        new Request("http://localhost/projects/basaltbytes/usine?run=run-1"),
-      );
-      assert.strictEqual(project.status, 200);
-      assert.strictEqual(await project.text(), "<main>usine operator</main>");
-
-      const missingApi = await web.handler(new Request("http://localhost/api/does-not-exist"));
-      assert.strictEqual(missingApi.status, 404);
-
-      const asset = await web.handler(new Request("http://localhost/assets/app.css"));
-      assert.strictEqual(asset.status, 200);
-      assert.strictEqual(await asset.text(), ":root { color-scheme: dark; }");
-
-      const missing = await web.handler(new Request("http://localhost/assets/missing.js"));
-      assert.strictEqual(missing.status, 404);
-
-      // Encoded traversal must never escape the assets root.
-      const traversal = await web.handler(new Request("http://localhost/assets/%2e%2e/index.html"));
-      assert.strictEqual(traversal.status, 404);
-
-      const missingFile = await web.handler(new Request("http://localhost/favicon.ico"));
-      assert.strictEqual(missingFile.status, 404);
-    } finally {
-      await web.dispose();
-      await rm(webRoot, { recursive: true });
-    }
-  });
-  // Linux routes all of 127.0.0.0/8 to the loopback interface; macOS has only 127.0.0.1.
-  it.skipIf(process.platform !== "linux")(
-    "listens on 127.0.0.1 only and applies security headers to the assembled server",
-    async () => {
-      const port = await new Promise<Port>((resolve) => {
-        const probe = createServer();
-        probe.listen({ host: SERVER_HOST, port: 0 }, () => {
-          // Node event callbacks decode their arguments synchronously.
-          // @effect-diagnostics-next-line schemaSync:off
-          const { port: free } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(
-            probe.address(),
+          ];
+          for (const query of requests) {
+            const runDetail = yield* client.detail({ params: { runId }, query });
+            assert.deepStrictEqual(runDetail, detail);
+          }
+          assert.deepStrictEqual(observed, requests);
+          const currentGithubChanges = yield* client.githubChanges({ params: { runId } });
+          assert.deepStrictEqual(currentGithubChanges, githubChanges);
+          const currentTask = yield* client.task({
+            params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
+          });
+          assert.deepStrictEqual(currentTask, task);
+          const currentProject = yield* client.project({
+            params: { project: ProjectId.make("workspace") },
+          });
+          assert.deepStrictEqual(currentProject, overview.projects[0]);
+          const nextTask = yield* client.projectTask({
+            params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
+            query: { repository: repositoryName },
+          });
+          assert.deepStrictEqual(nextTask, task);
+          const unrelatedProject = yield* client
+            .projectTask({
+              params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
+              query: { repository: RepositoryName.make("other/repository") },
+            })
+            .pipe(Effect.flip);
+          assert.instanceOf(unrelatedProject, OperatorHttpError);
+          assert.strictEqual(unrelatedProject.error, "BoardProjectNotFoundError");
+          for (const action of ["dismissNeed", "undoDismissNeed"] as const) {
+            const actionResult = yield* client[action]({
+              payload: AttentionKey.make({
+                id: "finding",
+                revision: AttentionRevision.make("revision"),
+              }),
+            });
+            assert.deepStrictEqual(actionResult, { ok: true });
+          }
+          const resetResult = yield* client.resetCycleBudget({
+            payload: { askId: CycleBudgetAskId.make("current-ask") },
+          });
+          assert.deepStrictEqual(resetResult, { ok: true });
+          const resolution = yield* client.resolveFailure({
+            params: { runId },
+            payload: { attemptId: AttemptId.make("attempt/1") },
+          });
+          assert.deepStrictEqual(resolution, { ok: true });
+          const staleResolution = yield* Effect.flip(
+            client.resolveFailure({
+              params: { runId },
+              payload: { attemptId: AttemptId.make("older-attempt") },
+            }),
           );
-          probe.close(() => resolve(free));
-        });
-      });
-      const webRoot = await mkdtemp(join(tmpdir(), "usine-web-"));
-      const overview = (host: string) =>
-        Effect.tryPromise({
-          try: () => fetch(`http://${host}:${port}/api/overview`),
-          catch: (cause) => RequestFailed.make({ cause }),
-        }).pipe(
-          Effect.map((response) => {
-            assert.equal(response.headers.get("x-frame-options"), "DENY");
-            assert.equal(response.headers.get("strict-transport-security"), "max-age=31536000");
-            return response.status;
-          }),
-          Effect.orElseSucceed(() => "unreachable"),
-        );
+          assert.instanceOf(staleResolution, OperatorHttpError);
+          assert.strictEqual(staleResolution.status, 409);
+          for (const action of ["approve", "retry", "cancel"] as const) {
+            const currentActionResult = yield* client[action]({ params: { runId } });
+            assert.deepStrictEqual(currentActionResult, { ok: true });
+          }
+          for (const action of ["pause", "unpause"] as const) {
+            const nextActionResult = yield* client[action]({ params: { loop: loopName } });
+            assert.deepStrictEqual(nextActionResult, {
+              ok: true,
+            });
+          }
+          const moveResult = yield* client.moveBoardItem({
+            params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
+            payload: { toLane: BoardLaneId.make("authored:Review") },
+          });
+          assert.deepStrictEqual(moveResult, { ok: true });
+          const kept = yield* Effect.flip(
+            client.discardLeftovers({ params: { worker: WorkerName.make("local") } }),
+          );
+          assert.instanceOf(kept, OperatorHttpError);
+          assert.strictEqual(kept.status, 409);
+          assert.strictEqual(
+            kept.message,
+            '2 attempts are still running on worker "local". Discard its leftovers after they end.',
+          );
+          assert.deepStrictEqual(interventions, [
+            "dismiss:finding:revision",
+            "undo:finding:revision",
+            "reset:current-ask",
+            `resolve:${runId}:attempt/1`,
+            `approve:${runId}`,
+            `retry:${runId}`,
+            `cancel:${runId}`,
+            `pause:${loopName}`,
+            `unpause:${loopName}`,
+            "move:basaltbytes/usine#31:authored:Review",
+          ]);
+
+          const missingId = RunId.make("missing/run");
+          const staleReset = yield* Effect.flip(
+            client.resetCycleBudget({ payload: { askId: CycleBudgetAskId.make("stale-ask") } }),
+          );
+          assert.instanceOf(staleReset, OperatorHttpError);
+          assert.strictEqual(staleReset.status, 409);
+          assert.strictEqual(staleReset.error, "CycleBudgetResetRejectedError");
+          const missing = yield* Effect.flip(
+            client.detail({ params: { runId: missingId }, query: ColdTranscriptRequest.make() }),
+          );
+          assert.instanceOf(missing, OperatorHttpError);
+          assert.strictEqual(missing.error, "RunNotFoundError");
+          assert.strictEqual(missing.status, 404);
+          assert.strictEqual(missing.message, `Run ${missingId} was not found.`);
+          const wrongAttempt = yield* Effect.flip(
+            client.detail({
+              params: { runId },
+              query: EarlierTranscriptRequest.make({
+                attemptId: AttemptId.make("other-attempt"),
+                before: TranscriptSequence.make(4),
+              }),
+            }),
+          );
+          assert.instanceOf(wrongAttempt, OperatorHttpError);
+          assert.strictEqual(wrongAttempt.error, "TranscriptAttemptNotFoundError");
+          assert.strictEqual(wrongAttempt.status, 404);
+
+          const rejected = yield* Effect.flip(client.approve({ params: { runId: missingId } }));
+          assert.instanceOf(rejected, OperatorHttpError);
+          assert.strictEqual(rejected.error, "RunOperationRejectedError");
+          assert.strictEqual(rejected.status, 409);
+          const unavailable = yield* Effect.flip(
+            client.pause({ params: { loop: LoopName.make("setup-required") } }),
+          );
+          assert.instanceOf(unavailable, OperatorHttpError);
+          assert.strictEqual(unavailable.error, "BackendUnavailableError");
+          assert.strictEqual(unavailable.status, 503);
+          assert.strictEqual(unavailable.message, "Setup is required.");
+        }).pipe(Effect.provide(server));
+      }),
+  );
+
+  it.live("serves client routes without masking missing API routes or static files", () =>
+    Effect.gen(function* () {
+      const webRoot = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeTempDirectory({
+          directory: dirname(join(tmpdir(), "usine-web-")),
+          prefix: basename(join(tmpdir(), "usine-web-")),
+        }),
+      );
+      const assets = join(webRoot, "assets");
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeDirectory(assets),
+      );
+      yield* Effect.all(
+        [
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.writeFileString(join(webRoot, "index.html"), "<main>usine operator</main>"),
+          ),
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.writeFileString(join(assets, "app.css"), ":root { color-scheme: dark; }"),
+          ),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const web = HttpRouter.toWebHandler(
+        Layer.mergeAll(apiRoutes, staticRoutes(webRoot)).pipe(
+          HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer)),
+        ),
+        { disableLogger: true },
+      );
       try {
-        const statuses = await Effect.runPromise(
-          Effect.gen(function* () {
+        const api = yield* Effect.promise(() =>
+          web.handler(new Request("http://localhost/api/overview")),
+        );
+        assert.strictEqual(api.status, 200);
+
+        const shell = yield* Effect.promise(() => web.handler(new Request("http://localhost/")));
+        assert.strictEqual(shell.status, 200);
+        const actual21 = yield* Effect.promise(() => shell.text());
+        assert.strictEqual(actual21, "<main>usine operator</main>");
+
+        const configuration = yield* Effect.promise(() =>
+          web.handler(new Request("http://localhost/configuration/loops")),
+        );
+        assert.strictEqual(configuration.status, 200);
+        assert.deepStrictEqual(
+          Object.fromEntries(configuration.headers),
+          Object.fromEntries(shell.headers),
+        );
+        const actual22 = yield* Effect.promise(() => configuration.text());
+        assert.strictEqual(actual22, "<main>usine operator</main>");
+
+        const project = yield* Effect.promise(() =>
+          web.handler(new Request("http://localhost/projects/basaltbytes/usine?run=run-1")),
+        );
+        assert.strictEqual(project.status, 200);
+        const actual23 = yield* Effect.promise(() => project.text());
+        assert.strictEqual(actual23, "<main>usine operator</main>");
+
+        const missingApi = yield* Effect.promise(() =>
+          web.handler(new Request("http://localhost/api/does-not-exist")),
+        );
+        assert.strictEqual(missingApi.status, 404);
+
+        const asset = yield* Effect.promise(() =>
+          web.handler(new Request("http://localhost/assets/app.css")),
+        );
+        assert.strictEqual(asset.status, 200);
+        const actual24 = yield* Effect.promise(() => asset.text());
+        assert.strictEqual(actual24, ":root { color-scheme: dark; }");
+
+        const missing = yield* Effect.promise(() =>
+          web.handler(new Request("http://localhost/assets/missing.js")),
+        );
+        assert.strictEqual(missing.status, 404);
+
+        // Encoded traversal must never escape the assets root.
+        const traversal = yield* Effect.promise(() =>
+          web.handler(new Request("http://localhost/assets/%2e%2e/index.html")),
+        );
+        assert.strictEqual(traversal.status, 404);
+
+        const missingFile = yield* Effect.promise(() =>
+          web.handler(new Request("http://localhost/favicon.ico")),
+        );
+        assert.strictEqual(missingFile.status, 404);
+      } finally {
+        yield* Effect.promise(() => web.dispose());
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.remove(webRoot, { recursive: true }),
+        );
+      }
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+  // Linux routes all of 127.0.0.0/8 to the loopback interface; macOS has only 127.0.0.1.
+  it.live.skipIf(process.platform !== "linux")(
+    "listens on 127.0.0.1 only and applies security headers to the assembled server",
+    () =>
+      Effect.gen(function* () {
+        const port = yield* Effect.callback<Port>((resume) => {
+          const resolve = (value: Port) => resume(Effect.succeed(value));
+          const probe = createServer();
+          probe.listen({ host: SERVER_HOST, port: 0 }, () => {
+            // Node event callbacks decode their arguments synchronously.
+            // @effect-diagnostics-next-line schemaSync:off
+            const { port: free } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(
+              probe.address(),
+            );
+            probe.close(() => resolve(free));
+          });
+        });
+        const webRoot = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.makeTempDirectory({
+            directory: dirname(join(tmpdir(), "usine-web-")),
+            prefix: basename(join(tmpdir(), "usine-web-")),
+          }),
+        );
+        const overview = (host: string) =>
+          webRequest(`http://${host}:${port}/api/overview`).pipe(
+            Effect.mapBoth({
+              onFailure: (cause) => RequestFailed.make({ cause }),
+              onSuccess: (response) => {
+                assert.equal(response.headers.get("x-frame-options"), "DENY");
+                assert.equal(response.headers.get("strict-transport-security"), "max-age=31536000");
+                return response.status;
+              },
+            }),
+            Effect.orElseSucceed(() => "unreachable"),
+          );
+        try {
+          const statuses = yield* Effect.gen(function* () {
             const fixtureBackend = backend;
             const authentication = yield* authFixture();
 
             yield* Layer.build(serverLayer(fixtureBackend, webRoot, port, authentication));
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
-          }).pipe(Effect.scoped),
-        );
-        assert.deepStrictEqual(statuses, [401, "unreachable"]);
-      } finally {
-        await rm(webRoot, { recursive: true });
-      }
-    },
-  );
-});
-
-it("returns a typed server error when statistics cannot read worker configuration history", async () => {
-  const failing = HttpRouter.toWebHandler(
-    apiRoutes.pipe(
-      HttpRouter.provideRequest(
-        Layer.mock(FactoryBackend)({
-          runStatistics: () =>
-            Effect.fail(
-              ConfigurationStoreError.make({
-                operation: "read revisions",
-                cause: "private database details",
-              }),
-            ),
-        }),
-      ),
-    ),
-    { disableLogger: true },
-  );
-  try {
-    const response = await failing.handler(new Request("http://localhost/api/statistics/runs"));
-    assert.strictEqual(response.status, 500);
-    assert.deepStrictEqual(await response.json(), {
-      error: "ConfigurationStoreError",
-      message: "Configuration store error: could not read revisions.",
-    });
-  } finally {
-    await failing.dispose();
-  }
-});
-
-it("checks the declared permission for every operator route and each role", async () => {
-  const roles = ["viewer", "operator", "maintainer", "admin"] as const;
-  for (const role of roles) {
-    const binding = RoleBinding.make({
-      name: role,
-      member: GitHubUserId.make(1),
-      role,
-      scope:
-        role === "admin"
-          ? InstanceScope.make()
-          : ProjectScope.make({ project: ProjectId.make("alpha") }),
-    });
-    const secured = HttpRouter.toWebHandler(
-      apiRoutes.pipe(
-        HttpRouter.provideRequest(
-          Layer.merge(backend, Layer.succeed(RequestPermissions, binding.permissions)),
-        ),
-      ),
-      { disableLogger: true },
-    );
-    try {
-      for (const endpoint of Object.values(OperatorApi.groups.operator.endpoints)) {
-        const permission = operatorPermissions[endpoint.identifier];
-        const allowed =
-          permission === "public" ||
-          role === "admin" ||
-          binding.permissions.some((grant) => grant.permission === permission);
-        const path = endpoint.path.replace(/:project\b/g, "alpha").replace(/:[A-Za-z]+/g, "sample");
-        const request: RequestInit = { method: endpoint.method };
-        if (endpoint.method !== "GET") {
-          request.body = "{}";
-          request.headers = { "content-type": "application/json" };
+          }).pipe(Effect.scoped);
+          assert.deepStrictEqual(statuses, [401, "unreachable"]);
+        } finally {
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.remove(webRoot, { recursive: true }),
+          );
         }
-        const response = await secured.handler(new Request(`http://localhost${path}`, request));
-        assert.equal(
-          response.status === 403,
-          !allowed,
-          `${role}: ${endpoint.method} ${endpoint.path} returned ${response.status}`,
+      }).pipe(Effect.provide(Layer.provideMerge(NodeFileSystem.layer, FetchHttpClient.layer))),
+  );
+});
+
+it.live(
+  "returns a typed server error when statistics cannot read worker configuration history",
+  () =>
+    Effect.gen(function* () {
+      const failing = HttpRouter.toWebHandler(
+        apiRoutes.pipe(
+          HttpRouter.provideRequest(
+            Layer.mock(FactoryBackend)({
+              runStatistics: () =>
+                Effect.fail(
+                  ConfigurationStoreError.make({
+                    operation: "read revisions",
+                    cause: "private database details",
+                  }),
+                ),
+            }),
+          ),
+        ),
+        { disableLogger: true },
+      );
+      try {
+        const response = yield* Effect.promise(() =>
+          failing.handler(new Request("http://localhost/api/statistics/runs")),
         );
+        assert.strictEqual(response.status, 500);
+        const actual25 = yield* Effect.promise(() => response.json());
+        assert.deepStrictEqual(actual25, {
+          error: "ConfigurationStoreError",
+          message: "Configuration store error: could not read revisions.",
+        });
+      } finally {
+        yield* Effect.promise(() => failing.dispose());
       }
-    } finally {
-      await secured.dispose();
+    }),
+);
+
+it.live("checks the declared permission for every operator route and each role", () =>
+  Effect.gen(function* () {
+    const roles = ["viewer", "operator", "maintainer", "admin"] as const;
+    for (const role of roles) {
+      const binding = RoleBinding.make({
+        name: role,
+        member: GitHubUserId.make(1),
+        role,
+        scope:
+          role === "admin"
+            ? InstanceScope.make()
+            : ProjectScope.make({ project: ProjectId.make("alpha") }),
+      });
+      const secured = HttpRouter.toWebHandler(
+        apiRoutes.pipe(
+          HttpRouter.provideRequest(
+            Layer.merge(backend, Layer.succeed(RequestPermissions, binding.permissions)),
+          ),
+        ),
+        { disableLogger: true },
+      );
+      try {
+        for (const endpoint of Object.values(OperatorApi.groups.operator.endpoints)) {
+          const permission = operatorPermissions[endpoint.identifier];
+          const allowed =
+            permission === "public" ||
+            role === "admin" ||
+            binding.permissions.some((grant) => grant.permission === permission);
+          const path = endpoint.path
+            .replace(/:project\b/g, "alpha")
+            .replace(/:[A-Za-z]+/g, "sample");
+          const request: RequestInit = { method: endpoint.method };
+          if (endpoint.method !== "GET") {
+            request.body = "{}";
+            request.headers = { "content-type": "application/json" };
+          }
+          const response = yield* Effect.promise(() =>
+            secured.handler(new Request(`http://localhost${path}`, request)),
+          );
+          assert.equal(
+            response.status === 403,
+            !allowed,
+            `${role}: ${endpoint.method} ${endpoint.path} returned ${response.status}`,
+          );
+        }
+      } finally {
+        yield* Effect.promise(() => secured.dispose());
+      }
     }
-  }
-});
+  }),
+);
 
-it("returns a private validator and an empty 304 for unchanged authorized reads", async () => {
-  const request = (headers: Record<string, string> = {}) =>
-    app.handler(new Request("http://localhost/api/overview", { headers }));
-  const first = await request();
-  assert.strictEqual(first.status, 200);
-  const etag = first.headers.get("etag");
-  assert(etag !== null);
-  assert.strictEqual(first.headers.get("cache-control"), "private, no-cache");
-  const second = await request({ "if-none-match": `W/${etag}` });
-  assert.strictEqual(second.status, 304);
-  assert.strictEqual(await second.text(), "");
-  const shell = await request({ "x-usine-view": "shell", "if-none-match": etag });
-  assert.strictEqual(shell.status, 200);
-  assert.include(shell.headers.get("vary") ?? "", "x-usine-view");
-});
+it.live("returns a private validator and an empty 304 for unchanged authorized reads", () =>
+  Effect.gen(function* () {
+    const request = (headers: Record<string, string> = {}) =>
+      app.handler(new Request("http://localhost/api/overview", { headers }));
+    const first = yield* Effect.promise(() => request());
+    assert.strictEqual(first.status, 200);
+    const etag = first.headers.get("etag");
+    assert(etag !== null);
+    assert.strictEqual(first.headers.get("cache-control"), "private, no-cache");
+    const second = yield* Effect.promise(() => request({ "if-none-match": `W/${etag}` }));
+    assert.strictEqual(second.status, 304);
+    const actual26 = yield* Effect.promise(() => second.text());
+    assert.strictEqual(actual26, "");
+    const shell = yield* Effect.promise(() =>
+      request({ "x-usine-view": "shell", "if-none-match": etag }),
+    );
+    assert.strictEqual(shell.status, 200);
+    assert.include(shell.headers.get("vary") ?? "", "x-usine-view");
+  }),
+);
 
-it("retains all linked card membership when the board read omits settled cards", async () => {
-  const item = task.items[0];
-  const original = overview.projects[0];
-  assert(item !== undefined && original !== undefined);
-  const member = BoardItemLink.make(item);
-  const current = BoardItemLink.make({
-    ...member,
-    itemKey: ItemKey.make("github:basaltbytes/usine:42"),
-    kind: "pr",
-    number: ItemNumber.make(42),
-    state: "pr-merged",
-  });
-  const card = BoardTaskView.make({
-    ...current,
-    repository: repositoryName,
-    items: [member, current],
-    ...boardRunSummary(
-      [
+it.live("retains all linked card membership when the board read omits settled cards", () =>
+  Effect.gen(function* () {
+    const item = task.items[0];
+    const original = overview.projects[0];
+    assert(item !== undefined && original !== undefined);
+    const member = BoardItemLink.make(item);
+    const current = BoardItemLink.make({
+      ...member,
+      itemKey: ItemKey.make("github:basaltbytes/usine:42"),
+      kind: "pr",
+      number: ItemNumber.make(42),
+      state: "pr-merged",
+    });
+    const card = BoardTaskView.make({
+      ...current,
+      repository: repositoryName,
+      items: [member, current],
+      ...boardRunSummary(
+        [
+          RunSummaryView.make({
+            ...run,
+            attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+          }),
+        ],
         RunSummaryView.make({
           ...run,
           attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
         }),
-      ],
-      RunSummaryView.make({
+        [member, current],
+      ),
+      run: RunSummaryView.make({
         ...run,
         attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
       }),
-      [member, current],
-    ),
-    run: RunSummaryView.make({
-      ...run,
-      attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
-    }),
-    pullRequest: null,
-    needsYou: false,
-    loops: [],
-    usage: TaskUsageView.make({
-      durationMillis: 0,
-      runningSince: [],
-      unmeasured: 0,
-      tokens: TokenCount.make(0),
-      pools: [],
-      cost: null,
-    }),
-  });
-  const project = ProjectView.make({
-    ...original,
-    board: BoardView.make({
-      failures: [],
-      lanes: [
-        ReadOnlyBoardLaneView.make({
-          id: BoardLaneId.make("Done"),
-          name: LaneName.make("Done"),
-          origin: "authored",
-          sources: [StateLaneSource.make({ state: "pr-merged" })],
-          items: [card],
-        }),
-      ],
-    }),
-  });
-  const read = Layer.effect(
-    FactoryBackend,
-    Effect.map(FactoryBackend, (service) => ({
-      ...service,
-      overview: Effect.succeed(ReadyOverview.make({ ...overview, projects: [project] })),
-    })),
-  ).pipe(Layer.provide(backend));
-  const boardApp = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(read)), {
-    disableLogger: true,
-  });
-  try {
-    const response = await boardApp.handler(
-      new Request("http://localhost/api/projects/workspace", {
-        headers: { "x-usine-view": "board" },
+      pullRequest: null,
+      needsYou: false,
+      loops: [],
+      usage: TaskUsageView.make({
+        durationMillis: 0,
+        runningSince: [],
+        unmeasured: 0,
+        tokens: TokenCount.make(0),
+        pools: [],
+        cost: null,
       }),
-    );
-    assert.strictEqual(response.status, 200);
-    const paged = await Effect.runPromise(
-      Schema.decodeUnknownEffect(ProjectView)(await response.json()),
-    );
-    assert.deepStrictEqual(paged.board.cardedItemKeys, [member.itemKey, current.itemKey]);
-    assert.deepStrictEqual(paged.board.lanes[0]?.items, []);
-    assert.strictEqual(paged.board.lanes[0]?.totalItems, 1);
-    assert.deepStrictEqual(
-      paged.runs.map(({ id }) => id),
-      project.runs.map(({ id }) => id),
-    );
-  } finally {
-    await boardApp.dispose();
-  }
-});
+    });
+    const project = ProjectView.make({
+      ...original,
+      board: BoardView.make({
+        failures: [],
+        lanes: [
+          ReadOnlyBoardLaneView.make({
+            id: BoardLaneId.make("Done"),
+            name: LaneName.make("Done"),
+            origin: "authored",
+            sources: [StateLaneSource.make({ state: "pr-merged" })],
+            items: [card],
+          }),
+        ],
+      }),
+    });
+    const read = Layer.effect(
+      FactoryBackend,
+      Effect.map(FactoryBackend, (service) => ({
+        ...service,
+        overview: Effect.succeed(ReadyOverview.make({ ...overview, projects: [project] })),
+      })),
+    ).pipe(Layer.provide(backend));
+    const boardApp = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(read)), {
+      disableLogger: true,
+    });
+    try {
+      const response = yield* Effect.promise(() =>
+        boardApp.handler(
+          new Request("http://localhost/api/projects/workspace", {
+            headers: { "x-usine-view": "board" },
+          }),
+        ),
+      );
+      assert.strictEqual(response.status, 200);
+      const actual27 = yield* Effect.promise(() => response.json());
+      const paged = yield* Schema.decodeUnknownEffect(ProjectView)(actual27);
+      assert.deepStrictEqual(paged.board.cardedItemKeys, [member.itemKey, current.itemKey]);
+      assert.deepStrictEqual(paged.board.lanes[0]?.items, []);
+      assert.strictEqual(paged.board.lanes[0]?.totalItems, 1);
+      assert.deepStrictEqual(
+        paged.runs.map(({ id }) => id),
+        project.runs.map(({ id }) => id),
+      );
+    } finally {
+      yield* Effect.promise(() => boardApp.dispose());
+    }
+  }),
+);
 
-it("streams small changes and replays missed revisions without payloads", async () => {
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const effectContext = yield* Effect.context<never>();
-
-        const context = yield* Layer.build(changeBusLayer);
-        const bus = Context.get(context, ChangeBus);
-        yield* Effect.promise(async () => {
-          const streamApp = HttpRouter.toWebHandler(
-            apiRoutes.pipe(
-              Layer.provide(Layer.succeed(ChangeBus, bus)),
-              HttpRouter.provideRequest(backend),
-            ),
-            {
-              disableLogger: true,
-            },
+it.live("streams small changes and replays missed revisions without payloads", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(changeBusLayer);
+      const bus = Context.get(context, ChangeBus);
+      {
+        const streamApp = HttpRouter.toWebHandler(
+          apiRoutes.pipe(
+            Layer.provide(Layer.succeed(ChangeBus, bus)),
+            HttpRouter.provideRequest(backend),
+          ),
+          {
+            disableLogger: true,
+          },
+        );
+        const open = (last?: string) =>
+          streamApp.handler(
+            new Request("http://localhost/api/changes", {
+              headers: last === undefined ? {} : { "last-event-id": last },
+            }),
           );
-          const open = (last?: string) =>
-            streamApp.handler(
-              new Request("http://localhost/api/changes", {
-                headers: last === undefined ? {} : { "last-event-id": last },
-              }),
+        try {
+          const response = yield* Effect.promise(() => open());
+          assert.strictEqual(response.headers.get("content-type"), "text/event-stream");
+          const reader = response.body?.getReader();
+          assert(reader !== undefined);
+          const first = new TextDecoder().decode(
+            (yield* Effect.promise(() => reader.read())).value,
+          );
+          assert.include(first, ": heartbeat");
+          const cursor = /id: (\d+)/u.exec(first)?.[1];
+          assert(cursor !== undefined);
+          yield* bus.publish([
+            { audience: InstanceScope.make(), target: { kind: "project", id: "workspace" } },
+          ]);
+          const changed = new TextDecoder().decode(
+            (yield* Effect.promise(() => reader.read())).value,
+          );
+          assert.include(changed, '"kind":"project","id":"workspace"');
+          assert.notInclude(changed, "Renamed workspace");
+          assert.isBelow(changed.length, 1_024);
+          yield* Effect.promise(() => reader.cancel());
+          const resumed = yield* Effect.promise(() => open(cursor));
+          const replayReader = resumed.body?.getReader();
+          assert(replayReader !== undefined);
+          const replay = new TextDecoder().decode(
+            (yield* Effect.promise(() => replayReader.read())).value,
+          );
+          assert.include(replay, '"reset":false');
+          assert.include(replay, '"kind":"project","id":"workspace"');
+          yield* Effect.promise(() => replayReader.cancel());
+          for (const invalidCursor of ["not-a-revision", "0", String(Number.MAX_SAFE_INTEGER)]) {
+            const reset = yield* Effect.promise(() => open(invalidCursor));
+            const resetReader = reset.body?.getReader();
+            assert(resetReader !== undefined);
+            const frame = new TextDecoder().decode(
+              (yield* Effect.promise(() => resetReader.read())).value,
             );
-          try {
-            const response = await open();
-            assert.strictEqual(response.headers.get("content-type"), "text/event-stream");
-            const reader = response.body?.getReader();
-            assert(reader !== undefined);
-            const first = new TextDecoder().decode((await reader.read()).value);
-            assert.include(first, ": heartbeat");
-            const cursor = /id: (\d+)/u.exec(first)?.[1];
-            assert(cursor !== undefined);
-            await Effect.runPromiseWith(effectContext)(
-              bus.publish([
-                { audience: InstanceScope.make(), target: { kind: "project", id: "workspace" } },
-              ]),
-            );
-            const changed = new TextDecoder().decode((await reader.read()).value);
-            assert.include(changed, '"kind":"project","id":"workspace"');
-            assert.notInclude(changed, "Renamed workspace");
-            assert.isBelow(changed.length, 1_024);
-            await reader.cancel();
-            const resumed = await open(cursor);
-            const replayReader = resumed.body?.getReader();
-            assert(replayReader !== undefined);
-            const replay = new TextDecoder().decode((await replayReader.read()).value);
-            assert.include(replay, '"reset":false');
-            assert.include(replay, '"kind":"project","id":"workspace"');
-            await replayReader.cancel();
-            for (const invalidCursor of ["not-a-revision", "0", String(Number.MAX_SAFE_INTEGER)]) {
-              const reset = await open(invalidCursor);
-              const resetReader = reset.body?.getReader();
-              assert(resetReader !== undefined);
-              const frame = new TextDecoder().decode((await resetReader.read()).value);
-              assert.include(frame, '"reset":true');
-              await resetReader.cancel();
-            }
-          } finally {
-            await streamApp.dispose();
+            assert.include(frame, '"reset":true');
+            yield* Effect.promise(() => resetReader.cancel());
           }
-        });
-      }),
-    ),
-  );
-});
+        } finally {
+          yield* Effect.promise(() => streamApp.dispose());
+        }
+      }
+    }),
+  ),
+);
 
 class RequestFailed extends Schema.TaggedError<RequestFailed, { readonly Brand: unique symbol }>()(
   "RequestFailed",

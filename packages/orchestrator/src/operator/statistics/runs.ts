@@ -5,7 +5,7 @@ import type { RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import type { WorkerName } from "@usine/core/worker";
 import type { RunSummary } from "@usine/engine/run-reader";
-import { Array as EffectArray, DateTime, Option } from "effect";
+import { Array as EffectArray, DateTime, Option, Schema } from "effect";
 import { type WorkerCapacity, workerSlotMillis } from "./workers.ts";
 import type { RunUsageView, SessionUsageView } from "../usage.ts";
 import {
@@ -39,6 +39,10 @@ import {
   utcDay,
   windowStart,
 } from "./window.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan"];
 
@@ -200,7 +204,7 @@ const brainGroups = (
       })),
   );
   const groups = EffectArray.groupBy(ended, ({ attempt: { brain } }) =>
-    JSON.stringify([brain.harness, brain.model, brain.effort]),
+    stringifyJson([brain.harness, brain.model, brain.effort]),
   );
   return Object.values(groups)
     .map((members) =>
@@ -408,7 +412,7 @@ export const runStatisticsView = ({
 
   return RunStatisticsView.make({
     window,
-    from: new Date(from).toISOString(),
+    from: DateTime.formatIso(DateTime.makeUnsafe(from)),
     to: DateTime.formatIso(now),
     bucket,
     runs: outcomeCounts(closed.map(runOutcome)),

@@ -72,6 +72,10 @@ import { ItemHints, type ItemHint } from "./hints.ts";
 import { checkOpenIssues, NO_OPEN_ISSUE_CHECK, OPEN_ISSUE_CHECK_INTERVAL } from "./open-issues.ts";
 import { OpenPullRequest, openPullRequest, openPullRequestRefresh } from "./open-pull-requests.ts";
 
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** The number of repositories polled in parallel, kept low for GitHub's per-token limits. */
 const REPOSITORY_CONCURRENCY = 4;
 
@@ -124,7 +128,7 @@ const cursorKey = (repository: ManagedRepo): CursorKey =>
   CursorKey.make(`github-poll:${canonicalRepositoryName(repository.name)}`);
 
 const watchKey = ({ loop }: ResolvedLoop): WatchKey =>
-  WatchKey.make(JSON.stringify([loop.name, loop.trigger.on, loop.trigger.if]));
+  WatchKey.make(stringifyJson([loop.name, loop.trigger.on, loop.trigger.if]));
 
 const watchedRepositories = (
   instance: LoadedInstance,
@@ -185,7 +189,7 @@ export class PollingTriggers extends Context.Service<
     /** The last received hint in this process, including coalesced or dropped hints. */
     readonly lastHint: Effect.Effect<Option.Option<DateTime.Utc>>;
   }
->()("@usine/orchestrator/PollingTriggers") {
+>()("@usine/orchestrator/polling/polling/PollingTriggers") {
   /**
    * Provides polling, hint handling, and trigger submission using the supplied GitHub and engine
    * services.
@@ -649,7 +653,7 @@ export class PollingTriggers extends Context.Service<
             watched.flatMap(({ repository }) => {
               const audience = { _tag: "Repository", repository: repository.name } as const;
               const findings = (value: PollCycle | undefined) =>
-                JSON.stringify([
+                stringifyJson([
                   (value?.failures ?? []).filter(
                     (failure) =>
                       canonicalRepositoryName(failure.repository) ===

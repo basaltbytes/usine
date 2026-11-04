@@ -20,6 +20,7 @@ import {
   Schedule,
   Scope,
   TxRef,
+  Schema,
 } from "effect";
 import {
   LeftoversDiscardRejectedError,
@@ -44,6 +45,10 @@ import {
   waitFor,
   withInstance,
 } from "./support.ts";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const POSTED_COMMENT = "https://github.com/acme/demo/issues/57#issuecomment-1";
 
@@ -1312,7 +1317,7 @@ describe("engine restart", () => {
           >([]);
           const warnings: Array<string> = [];
           const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-            if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+            if (logLevel === "Warn") warnings.push(stringifyJson(message));
           });
 
           // `usine.yaml` now declares only `usine-worker-1`.

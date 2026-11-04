@@ -47,7 +47,7 @@ export class AttentionAcknowledgements extends Context.Service<
       current: ReadonlyArray<AttentionKey>,
     ) => Effect.Effect<void, EnginePersistenceError>;
   }
->()("@usine/engine/AttentionAcknowledgements") {
+>()("@usine/engine/attention/attention/AttentionAcknowledgements") {
   /**
    * Persists dismissals in the supplied runtime database; changes invalidate operator projections.
    */
@@ -75,10 +75,13 @@ export class AttentionAcknowledgements extends Context.Service<
           current: ReadonlyArray<AttentionKey>,
         ) {
           yield* Effect.annotateCurrentSpan({ currentEntries: current.length });
+          const currentKeys = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            current,
+          ).pipe(Effect.orDie);
           const removed = yield* database
             .delete(attentionAcknowledgements)
             .where(sql`not exists (
-              select 1 from ${jsonEach(sql`${JSON.stringify(current)}`)} as current
+              select 1 from ${jsonEach(sql`${currentKeys}`)} as current
               where ${jsonExtract(sql`current.value`, "$.id")} = ${attentionAcknowledgements.id}
                 and ${jsonExtract(sql`current.value`, "$.revision")} = ${attentionAcknowledgements.revision}
             )`)

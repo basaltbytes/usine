@@ -1,3 +1,6 @@
+import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
+// The test fixture uses native subprocess handles and synchronous process operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { execFile, spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -11,20 +14,31 @@ import {
   symlinkSync,
   utimesSync,
   writeFileSync,
+  // The synchronous fixture filesystem has no Effect FileSystem equivalent.
+  // @effect-diagnostics-next-line nodeBuiltinImport:off
 } from "node:fs";
-import { createServer } from "node:http";
+import {
+  createServer, // The Node server adapter requires native HTTP server and connection types.
+  // @effect-diagnostics-next-line nodeBuiltinImport:off
+} from "node:http";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { UpgradeRecord } from "@usine/core/upgrade";
-import { Effect, Layer, Redacted, Schema } from "effect";
+
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { authFixture, localSecret } from "../auth/fixture.ts";
-import { assert, expect, it } from "vitest";
+import { assert, expect, it } from "@effect/vitest";
+
+// Pure serializers and synchronous callbacks return JSON values directly.
+// @effect-diagnostics-next-line schemaSync:off
+const stringifyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const helper = readFileSync(new URL("../../src/upgrade/helper.sh", import.meta.url), "utf8");
 
@@ -84,7 +98,7 @@ const run = (
     fileURLToPath(new URL("../../dist/main.js", import.meta.url)),
     join(packageFolder, "dist/main.js"),
   );
-  writeFileSync(join(packageFolder, "package.json"), JSON.stringify({ version: "1.0.0" }));
+  writeFileSync(join(packageFolder, "package.json"), stringifyJson({ version: "1.0.0" }));
   writeFileSync(join(folder, "installed"), "@usine/server@1.0.0");
   writeFileSync(join(folder, "running"), "@usine/server@1.0.0");
   writeFileSync(join(folder, "commands"), "");
@@ -144,7 +158,9 @@ printf 'Avail\\n%s\\n' "$available"`,
       for (let backup = 0; backup < 3; backup++) {
         const old = join(backupRoot, `backup.old0000${backup}`);
         mkdirSync(old);
-        const modified = new Date(2100, 0, backup + 1);
+        const modified = DateTime.toDate(
+          DateTime.makeUnsafe({ year: 2100, month: 1, day: backup + 1 }),
+        );
         utimesSync(old, modified, modified);
       }
     }
@@ -293,6 +309,8 @@ ${helper}`,
     );
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
+      // Native command fixtures and test registration inspect the host environment synchronously.
+      // @effect-diagnostics-next-line processEnv:off
       PATH: `${executables}:${process.env.PATH}`,
       folder,
       scenario,
@@ -324,7 +342,9 @@ ${helper}`,
         const current = result.stdout.match(/snapshot=(.*)/u)?.[1];
         assert(current !== undefined);
         created.push(current);
-        const modified = new Date(2020, 0, upgrade + 1);
+        const modified = DateTime.toDate(
+          DateTime.makeUnsafe({ year: 2020, month: 1, day: upgrade + 1 }),
+        );
         utimesSync(current, modified, modified);
       }
     }
@@ -695,13 +715,13 @@ it.each(["missing-target", "missing-404"] as const)(
   },
 );
 
-it.each(["legacy", "current"])("supports %s upgrade health checks", async (generation) => {
-  const root = mkdtempSync(join(tmpdir(), "usine-upgrade-auth-"));
-  const folder = join(root, "upgrade");
-  mkdirSync(folder);
-  try {
-    await Effect.runPromise(
-      Effect.gen(function* () {
+it.live.each(["legacy", "current"])("supports %s upgrade health checks", (generation) =>
+  Effect.gen(function* () {
+    const root = mkdtempSync(join(tmpdir(), "usine-upgrade-auth-"));
+    const folder = join(root, "upgrade");
+    mkdirSync(folder);
+    try {
+      yield* Effect.gen(function* () {
         const services = yield* authFixture();
         const started = yield* services.authentication.startWeb(false);
         const session = yield* services.authentication.finishWeb(
@@ -724,6 +744,8 @@ it.each(["legacy", "current"])("supports %s upgrade health checks", async (gener
         yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
         const statuses: Array<number> = [];
         const authorizations: Array<string | undefined> = [];
+        // The native HTTP test adapter forwards a Promise-based Web handler.
+        // @effect-diagnostics-next-line asyncFunction:off
         const server = createServer(async (request, response) => {
           authorizations.push(request.headers.authorization);
           const result = await app.handler(
@@ -734,16 +756,16 @@ it.each(["legacy", "current"])("supports %s upgrade health checks", async (gener
           statuses.push(result.status);
           response.writeHead(result.status).end(await result.text());
         });
-        yield* Effect.promise(
-          () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
-        );
+        yield* Effect.callback<void>((resume) => {
+          const resolve = (value: void) => resume(Effect.succeed(value));
+          server.listen(0, "127.0.0.1", resolve);
+        });
         yield* Effect.addFinalizer(() =>
-          Effect.promise(
-            () =>
-              new Promise<void>((resolve, reject) =>
-                server.close((error) => (error ? reject(error) : resolve())),
-              ),
-          ),
+          Effect.callback<void>((resume) => {
+            const resolve = (value: void) => resume(Effect.succeed(value));
+            const reject = (error: Error) => resume(Effect.die(error));
+            server.close((error) => (error !== undefined ? reject(error) : resolve()));
+          }),
         );
         const { port } = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(
           server.address(),
@@ -775,9 +797,9 @@ healthy 1.0.0 version
         );
         assert.notInclude(output.stdout + output.stderr, localSecret);
         assert.notInclude(output.stdout + output.stderr, Redacted.value(session.secret));
-      }).pipe(Effect.scoped),
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+      }).pipe(Effect.scoped);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }),
+);

@@ -1,6 +1,6 @@
+import { SqlError, SqlClient } from "effect/sql";
 import { Deferred, Effect, Option, Ref, Schema, Semaphore, type Scope } from "effect";
-import { SqlClient } from "effect/sql";
-import { ConnectionError, SqlError, classifySqliteError } from "effect/sql/SqlError";
+
 import { Worker } from "node:worker_threads";
 import { type Command, Response } from "./protocol.ts";
 
@@ -14,8 +14,8 @@ export const spawnWorker = (filename: string) =>
   );
 
 export const connectionError = (cause: unknown) =>
-  SqlError.make({
-    reason: ConnectionError.make({
+  SqlError.SqlError.make({
+    reason: SqlError.ConnectionError.make({
       cause,
       message: "SQLite read worker stopped",
       operation: "read",
@@ -28,32 +28,32 @@ export interface ReadQueries {
   readonly rows: (
     sql: string,
     params: ReadonlyArray<unknown>,
-  ) => Effect.Effect<typeof Rows.Type, SqlError>;
+  ) => Effect.Effect<typeof Rows.Type, SqlError.SqlError>;
   readonly values: (
     sql: string,
     params: ReadonlyArray<unknown>,
-  ) => Effect.Effect<typeof Values.Type, SqlError>;
+  ) => Effect.Effect<typeof Values.Type, SqlError.SqlError>;
 }
 
 export interface ReadConnection extends ReadQueries {
   readonly snapshot: <A, E, R>(
     use: (queries: ReadQueries) => Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E | SqlError, R>;
-  readonly failure: Effect.Effect<never, SqlError>;
+  ) => Effect.Effect<A, E | SqlError.SqlError, R>;
+  readonly failure: Effect.Effect<never, SqlError.SqlError>;
 }
 
 export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* (
   filename: string,
   spawn: typeof spawnWorker,
   onStopped: Effect.Effect<void>,
-): Effect.fn.Return<ReadConnection, SqlError, Scope.Scope> {
+): Effect.fn.Return<ReadConnection, SqlError.SqlError, Scope.Scope> {
   yield* Effect.annotateCurrentSpan({ filename });
   const readerContext = yield* Effect.context<never>();
   const run = Effect.runForkWith(readerContext);
-  const pending = new Map<number, (result: Effect.Effect<unknown, SqlError>) => void>();
-  const stopped = yield* Ref.make(Option.none<SqlError>());
+  const pending = new Map<number, (result: Effect.Effect<unknown, SqlError.SqlError>) => void>();
+  const stopped = yield* Ref.make(Option.none<SqlError.SqlError>());
   const access = yield* Semaphore.make(1);
-  const failure = yield* Deferred.make<never, SqlError>();
+  const failure = yield* Deferred.make<never, SqlError.SqlError>();
   const sequence = yield* Ref.make(0);
   const stop = (cause: unknown) => {
     if (Option.isSome(Ref.getUnsafe(stopped))) return;
@@ -74,7 +74,7 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
       Effect.gen(function* () {
         stop("SQLite reader scope closed");
         yield* Effect.promise(() => worker.terminate());
-      }),
+      }).pipe(Effect.orDie),
   );
   worker.on("error", stop);
   worker.on("exit", (code) => stop(`SQLite reader exited with code ${code}`));
@@ -91,8 +91,8 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
       response.ok
         ? Effect.succeed(response.result)
         : Effect.fail(
-            SqlError.make({
-              reason: classifySqliteError(response.cause, {
+            SqlError.SqlError.make({
+              reason: SqlError.classifySqliteError(response.cause, {
                 message: response.cause.message,
                 operation: "execute",
               }),
@@ -104,7 +104,7 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
     Effect.flatMap(
       Ref.updateAndGet(sequence, (id) => id + 1),
       (id) =>
-        Effect.callback<unknown, SqlError>((resume) => {
+        Effect.callback<unknown, SqlError.SqlError>((resume) => {
           const unavailable = Ref.getUnsafe(stopped);
           if (Option.isSome(unavailable)) {
             resume(Effect.fail(unavailable.value));
@@ -177,7 +177,7 @@ export const readConnection = Effect.fn("LocalSqlite.readConnection")(function* 
                     }),
                   ),
                 );
-              }),
+              }).pipe(Effect.orDie),
           );
           yield* Effect.annotateCurrentSpan({ filename, session });
           yield* Effect.logDebug("SQLite read snapshot opened", { filename, session });
