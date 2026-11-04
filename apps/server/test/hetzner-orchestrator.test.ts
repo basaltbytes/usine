@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Exit, Runtime, Schema } from "effect";
+import { Exit, Runtime, Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { parse } from "yaml";
 import { DEFAULT_PORT } from "../src/cli.ts";
@@ -64,7 +64,9 @@ const interruptedStatus = () => {
 
 describe("the orchestrator's Hetzner server", () => {
   const text = rendered();
-  const userData = Effect.runSync(Schema.decodeUnknownEffect(UserData)(parse(text)));
+  // Vitest registers these infrastructure fixtures synchronously.
+  // @effect-diagnostics-next-line schemaSync:off
+  const userData = Schema.decodeUnknownSync(UserData)(parse(text));
 
   it("renders a cloud-config with the usine user's keys, the attempt image's Node.js, and the gateway's settings", () => {
     assert.strictEqual(text.split("\n")[0], "#cloud-config");

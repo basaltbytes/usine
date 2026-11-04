@@ -74,13 +74,13 @@ test(
         .all()
         .map(
           (row) =>
-            Effect.runSync(
-              Schema.decodeUnknownEffect(
-                Schema.Struct({
-                  value: Schema.fromJsonString(Schema.toCodecJson(ConfigurationEntity)),
-                }),
-              )(row),
-            ).value,
+            // The SQLite fixture mapper returns decoded rows synchronously.
+            // @effect-diagnostics-next-line schemaSync:off
+            Schema.decodeUnknownSync(
+              Schema.Struct({
+                value: Schema.fromJsonString(Schema.toCodecJson(ConfigurationEntity)),
+              }),
+            )(row).value,
         );
       expect(new Set(stored.map(({ key }) => key.kind))).toEqual(
         new Set(["settings", "worker", "repository", "project", "label", "loop", "agent"]),

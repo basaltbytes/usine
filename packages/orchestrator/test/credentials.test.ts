@@ -26,52 +26,55 @@ const config = Schema.decodeEffect(UsineConfig)({
 });
 
 describe("GitHub credential provider", () => {
-  it.effect("mints each Attempt's token at its Loop's permission level", () => {
-    const requested: Array<LoopPermissions> = [];
-    const project = CoveredProject.make({
-      installationId: InstallationId.make(77),
-      repository,
-      repositoryId: RepositoryId.make(99),
-    });
-    const app = Layer.succeed(GitHubApp)({
-      installation: Effect.die("unused"),
-      repositories: Effect.die("unused installation repositories"),
-      installationToken: Effect.die("unused"),
-      botAccount: Effect.die("unused"),
-      projectAccess: () => Effect.succeed([project]),
-      installationUrl: Effect.die("unused installation URL"),
-      configureWebhook: () => Effect.die("unused webhook configuration"),
-      deliveries: () => Effect.die("unused webhook deliveries"),
-      workerToken: (_project, permissions) =>
-        Effect.sync(() => {
-          requested.push(permissions);
-          return InstallationToken.make({
-            value: Redacted.make(`ghs_${permissions}`),
-            expiresAt: DateTime.makeUnsafe(3600000),
-            scope: SingleRepository.make({
-              repository,
-              repositoryId: project.repositoryId,
-              permissions,
-            }),
-          });
-        }),
-    });
-    return Effect.gen(function* () {
-      const provider = yield* CredentialProvider;
-      const read = yield* provider.issue(repository, AttemptId.make("review/1"), "read");
-      const write = yield* provider.issue(repository, AttemptId.make("implement/1"), "write");
-      assert.deepStrictEqual(requested, ["read", "write"]);
-      assert.strictEqual(Redacted.value(read.value), "ghs_read");
-      assert.strictEqual(Redacted.value(write.value), "ghs_write");
-    }).pipe(
-      Effect.provide(
-        gitHubCredentialLayer.pipe(
-          Layer.provide(app),
-          Layer.provide(fixedConfigLayer(Effect.runSync(config))),
+  it.effect("mints each Attempt's token at its Loop's permission level", () =>
+    Effect.gen(function* () {
+      const requested: Array<LoopPermissions> = [];
+      const project = CoveredProject.make({
+        installationId: InstallationId.make(77),
+        repository,
+        repositoryId: RepositoryId.make(99),
+      });
+      const app = Layer.succeed(GitHubApp)({
+        installation: Effect.die("unused"),
+        repositories: Effect.die("unused installation repositories"),
+        installationToken: Effect.die("unused"),
+        botAccount: Effect.die("unused"),
+        projectAccess: () => Effect.succeed([project]),
+        installationUrl: Effect.die("unused installation URL"),
+        configureWebhook: () => Effect.die("unused webhook configuration"),
+        deliveries: () => Effect.die("unused webhook deliveries"),
+        workerToken: (_project, permissions) =>
+          Effect.sync(() => {
+            requested.push(permissions);
+            return InstallationToken.make({
+              value: Redacted.make(`ghs_${permissions}`),
+              expiresAt: DateTime.makeUnsafe(3600000),
+              scope: SingleRepository.make({
+                repository,
+                repositoryId: project.repositoryId,
+                permissions,
+              }),
+            });
+          }),
+      });
+      const decodedValue5 = yield* config;
+      return yield* Effect.gen(function* () {
+        const provider = yield* CredentialProvider;
+        const read = yield* provider.issue(repository, AttemptId.make("review/1"), "read");
+        const write = yield* provider.issue(repository, AttemptId.make("implement/1"), "write");
+        assert.deepStrictEqual(requested, ["read", "write"]);
+        assert.strictEqual(Redacted.value(read.value), "ghs_read");
+        assert.strictEqual(Redacted.value(write.value), "ghs_write");
+      }).pipe(
+        Effect.provide(
+          gitHubCredentialLayer.pipe(
+            Layer.provide(app),
+            Layer.provide(fixedConfigLayer(decodedValue5)),
+          ),
         ),
-      ),
-    );
-  });
+      );
+    }),
+  );
 });
 
 describe("GitHub credential provider failures", () => {
@@ -81,90 +84,90 @@ describe("GitHub credential provider failures", () => {
     repositoryId: RepositoryId.make(99),
   });
   const provider = (projects: ReadonlyArray<CoveredProject>, mint: GitHubAppError) =>
-    gitHubCredentialLayer.pipe(
-      Layer.provide(
-        Layer.succeed(GitHubApp)({
-          installation: Effect.die("unused"),
-          repositories: Effect.die("unused installation repositories"),
-          installationToken: Effect.die("unused"),
-          botAccount: Effect.die("unused"),
-          projectAccess: () => Effect.succeed(projects),
-          installationUrl: Effect.die("unused installation URL"),
-          configureWebhook: () => Effect.die("unused webhook configuration"),
-          deliveries: () => Effect.die("unused webhook deliveries"),
-          workerToken: () => Effect.fail(mint),
-        }),
-      ),
-      Layer.provide(fixedConfigLayer(Effect.runSync(config))),
-    );
+    Effect.gen(function* () {
+      const decodedValue4 = yield* config;
+      return gitHubCredentialLayer.pipe(
+        Layer.provide(
+          Layer.succeed(GitHubApp)({
+            installation: Effect.die("unused"),
+            repositories: Effect.die("unused installation repositories"),
+            installationToken: Effect.die("unused"),
+            botAccount: Effect.die("unused"),
+            projectAccess: () => Effect.succeed(projects),
+            installationUrl: Effect.die("unused installation URL"),
+            configureWebhook: () => Effect.die("unused webhook configuration"),
+            deliveries: () => Effect.die("unused webhook deliveries"),
+            workerToken: () => Effect.fail(mint),
+          }),
+        ),
+        Layer.provide(fixedConfigLayer(decodedValue4)),
+      );
+    });
   const issue = CredentialProvider.use((credentials) =>
     credentials.issue(repository, AttemptId.make("implement/1"), "write"),
   ).pipe(Effect.flip);
 
   it.effect("reports a mint GitHub refuses as refused, with GitHub's reason", () =>
     Effect.gen(function* () {
-      const failure = yield* issue;
-      assert.strictEqual(failure.reason, "refused");
-      assert.strictEqual(
-        failure.message,
-        'Could not create a worker token for "acme/demo": GitHub returned HTTP status 422: The permissions requested are not granted to this installation.',
+      const decodedValue3 = yield* provider(
+        [project],
+        GitHubApiError.make({
+          operation: "mint-worker-token",
+          status: Option.some(422),
+          message:
+            "GitHub returned HTTP status 422: The permissions requested are not granted to this installation.",
+        }),
       );
-    }).pipe(
-      Effect.provide(
-        provider(
-          [project],
-          GitHubApiError.make({
-            operation: "mint-worker-token",
-            status: Option.some(422),
-            message:
-              "GitHub returned HTTP status 422: The permissions requested are not granted to this installation.",
-          }),
-        ),
-      ),
-    ),
+      return yield* Effect.gen(function* () {
+        const failure = yield* issue;
+        assert.strictEqual(failure.reason, "refused");
+        assert.strictEqual(
+          failure.message,
+          'Could not create a worker token for "acme/demo": GitHub returned HTTP status 422: The permissions requested are not granted to this installation.',
+        );
+      }).pipe(Effect.provide(decodedValue3));
+    }),
   );
 
   it.effect("reports a repository the installation does not cover as refused", () =>
     Effect.gen(function* () {
-      const failure = yield* issue;
-      assert.strictEqual(failure.reason, "refused");
-      assert.strictEqual(
-        failure.message,
-        'The GitHub App installation has no access to "acme/demo"',
+      const decodedValue2 = yield* provider(
+        [],
+        GitHubApiError.make({
+          operation: "mint-worker-token",
+          status: Option.none(),
+          message: "unused",
+        }),
       );
-    }).pipe(
-      Effect.provide(
-        provider(
-          [],
-          GitHubApiError.make({
-            operation: "mint-worker-token",
-            status: Option.none(),
-            message: "unused",
-          }),
-        ),
-      ),
-    ),
+      return yield* Effect.gen(function* () {
+        const failure = yield* issue;
+        assert.strictEqual(failure.reason, "refused");
+        assert.strictEqual(
+          failure.message,
+          'The GitHub App installation has no access to "acme/demo"',
+        );
+      }).pipe(Effect.provide(decodedValue2));
+    }),
   );
 
   it.effect("reports a mint GitHub could not answer as unreachable", () =>
     Effect.gen(function* () {
-      const failure = yield* issue;
-      assert.strictEqual(failure.reason, "unreachable");
-      assert.strictEqual(
-        failure.message,
-        'Could not create a worker token for "acme/demo": Could not send the request to GitHub',
+      const decodedValue1 = yield* provider(
+        [project],
+        GitHubApiError.make({
+          operation: "mint-worker-token",
+          status: Option.none(),
+          message: "Could not send the request to GitHub",
+        }),
       );
-    }).pipe(
-      Effect.provide(
-        provider(
-          [project],
-          GitHubApiError.make({
-            operation: "mint-worker-token",
-            status: Option.none(),
-            message: "Could not send the request to GitHub",
-          }),
-        ),
-      ),
-    ),
+      return yield* Effect.gen(function* () {
+        const failure = yield* issue;
+        assert.strictEqual(failure.reason, "unreachable");
+        assert.strictEqual(
+          failure.message,
+          'Could not create a worker token for "acme/demo": Could not send the request to GitHub',
+        );
+      }).pipe(Effect.provide(decodedValue1));
+    }),
   );
 });

@@ -28,7 +28,7 @@ import {
   RepositoryNotModified,
   GitHubPolling,
 } from "@usine/github/polling";
-import { flow, DateTime, Effect, Option, Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { memoryCursorStore, pollingTestLayer, unmovedBaseRefHead } from "./support/polling.ts";
 
@@ -73,15 +73,12 @@ const emptyCatalog = RepositoryLabelCatalog.make({
 });
 const catalogEntityTag = EntityTag.make('W/"labels"');
 const StoredCatalogEntityTag = Schema.Struct({ labelEntityTag: Schema.NullOr(Schema.String) });
-const decodeStoredCatalogEntityTag = flow(
-  Schema.decodeUnknownEffect(StoredCatalogEntityTag),
-  Effect.runSync,
-);
+const decodeStoredCatalogEntityTag = Schema.decodeUnknownEffect(StoredCatalogEntityTag);
 /** Returns the catalog ETag each stored poll cursor sends next cycle. */
-const storedCatalogEntityTags = (
-  stored: ReadonlyMap<string, Schema.Json>,
-): ReadonlyArray<string | null> =>
-  [...stored.values()].map((cursor) => decodeStoredCatalogEntityTag(cursor).labelEntityTag);
+const storedCatalogEntityTags = (stored: ReadonlyMap<string, Schema.Json>) =>
+  Effect.forEach([...stored.values()], (cursor) =>
+    Effect.map(decodeStoredCatalogEntityTag(cursor), ({ labelEntityTag }) => labelEntityTag),
+  );
 
 describe("PollingTriggers label preflight", () => {
   it.effect("creates declarations before the first repository change poll", () => {
@@ -342,7 +339,8 @@ describe("PollingTriggers label preflight", () => {
 
       assert.deepStrictEqual(cycle.preflightFindings, []);
       // The creation invalidated GitHub's ETag: the next cycle must refetch the catalog.
-      assert.deepStrictEqual(storedCatalogEntityTags(cursors.stored), [null]);
+      const decodedValue6 = yield* storedCatalogEntityTags(cursors.stored);
+      assert.deepStrictEqual(decodedValue6, [null]);
     }).pipe(Effect.provide(pollingTestLayer(github, [], writer, undefined, cursors.store)));
   });
 
@@ -384,7 +382,8 @@ describe("PollingTriggers label preflight", () => {
         const polling = yield* PollingTriggers;
 
         yield* polling.poll(fixtureInstance);
-        assert.deepStrictEqual(storedCatalogEntityTags(cursors.stored), [catalogEntityTag]);
+        const decodedValue5 = yield* storedCatalogEntityTags(cursors.stored);
+        assert.deepStrictEqual(decodedValue5, [catalogEntityTag]);
 
         // The stored catalog is gone while the cursor still has its ETag.
         const cycle = yield* polling.poll(fixtureInstance);
@@ -392,7 +391,8 @@ describe("PollingTriggers label preflight", () => {
         assert.deepStrictEqual(catalogRequests, ["none", catalogEntityTag]);
         assert.deepStrictEqual(cycle.preflightFindings, []);
         assert.deepStrictEqual(cycle.failures, []);
-        assert.deepStrictEqual(storedCatalogEntityTags(cursors.stored), [null]);
+        const decodedValue4 = yield* storedCatalogEntityTags(cursors.stored);
+        assert.deepStrictEqual(decodedValue4, [null]);
 
         yield* polling.poll(fixtureInstance);
         assert.deepStrictEqual(catalogRequests, ["none", catalogEntityTag, "none"]);

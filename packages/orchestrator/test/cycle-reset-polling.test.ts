@@ -110,13 +110,7 @@ describe("cycle reset polling", () => {
         entityTag: Option.some(EntityTag.make('"fresh"')),
         watermark: Option.some(DateTime.makeUnsafe("2026-09-05T00:00:00Z")),
       });
-      const reset = Effect.runSync(
-        Schema.decodeEffect(CycleBudgetReset)({
-          itemKey: ItemKey.make("pr-72"),
-          repository,
-          generation: 1,
-        }),
-      );
+
       let pending: ReadonlyArray<CycleBudgetReset> = [];
       let fails = false;
       const seen: Array<PollCursor> = [];
@@ -156,6 +150,11 @@ describe("cycle reset polling", () => {
           }),
       };
       return Effect.gen(function* () {
+        const reset = yield* Schema.decodeEffect(CycleBudgetReset)({
+          itemKey: ItemKey.make("pr-72"),
+          repository,
+          generation: 1,
+        });
         const fixtureInstance = yield* instance;
         const polling = yield* PollingTriggers;
 
@@ -187,13 +186,7 @@ describe("cycle reset polling", () => {
 
   it.effect("refreshes only the reset Item and normal changes, keeping the stored cursor", () => {
     const cursors = memoryCursorStore();
-    const reset = Effect.runSync(
-      Schema.decodeEffect(CycleBudgetReset)({
-        itemKey: storedIssue(72).itemKey,
-        repository,
-        generation: 1,
-      }),
-    );
+
     let pending: ReadonlyArray<CycleBudgetReset> = [];
     let changed: ReadonlyArray<number> = [];
     const seen: Array<PollCursor> = [];
@@ -240,6 +233,11 @@ describe("cycle reset polling", () => {
         }),
     };
     return Effect.gen(function* () {
+      const reset = yield* Schema.decodeEffect(CycleBudgetReset)({
+        itemKey: storedIssue(72).itemKey,
+        repository,
+        generation: 1,
+      });
       const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
       changed = [80, 81];
@@ -282,14 +280,8 @@ describe("cycle reset polling", () => {
 
   it.effect("keeps a reset pending while GitHub returns a server error for its Item", () => {
     const cursors = memoryCursorStore();
-    const reset = Effect.runSync(
-      Schema.decodeEffect(CycleBudgetReset)({
-        itemKey: storedIssue(72).itemKey,
-        repository,
-        generation: 1,
-      }),
-    );
-    let pending: ReadonlyArray<CycleBudgetReset> = [reset];
+
+    let pending: ReadonlyArray<CycleBudgetReset> = [];
     let unavailable = true;
     const fetched: Array<number> = [];
     const acknowledgements: Array<CycleBudgetReset> = [];
@@ -325,6 +317,12 @@ describe("cycle reset polling", () => {
         Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
     };
     return Effect.gen(function* () {
+      const reset = yield* Schema.decodeEffect(CycleBudgetReset)({
+        itemKey: storedIssue(72).itemKey,
+        repository,
+        generation: 1,
+      });
+      pending = [reset];
       const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
 
@@ -361,9 +359,6 @@ it.live(
   "refreshes dismissed cycle blocks and discards pre-reset polling with current configuration afterward",
   () =>
     Effect.gen(function* () {
-      const fixtureValue1 = yield* Effect.context<never>();
-      const runFixture = Effect.runSyncWith(fixtureValue1);
-
       const fs = yield* FileSystem.FileSystem;
       const currentDirectory = yield* fs.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),
@@ -387,7 +382,9 @@ it.live(
         persona: "Review this Item.",
       });
       const withLoop = (loop: LoopFile) =>
-        LoadedInstance.make({ ...runFixture(instance), agents: [agent], loops: [loop] });
+        Effect.gen(function* () {
+          return LoadedInstance.make({ ...(yield* instance), agents: [agent], loops: [loop] });
+        });
       const entered = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
       let shouldPause = false;
@@ -483,7 +480,8 @@ it.live(
         const polling = yield* PollingTriggers;
         const engine = yield* RunEngine;
         const budgets = yield* CycleBudgets;
-        const initial = yield* polling.poll(withLoop(loop));
+        const decodedValue10 = yield* withLoop(loop);
+        const initial = yield* polling.poll(decodedValue10);
         const first = initial.submissions[0];
         assert(first?._tag === "Claimed");
         for (let attempt = 0; attempt < 500; attempt += 1) {
@@ -493,7 +491,8 @@ it.live(
 
         assert.strictEqual((yield* engine.inspect(first.runId)).run.state._tag, "Succeeded");
         hash = "b";
-        const exhausted = yield* polling.poll(withLoop(loop));
+        const decodedValue9 = yield* withLoop(loop);
+        const exhausted = yield* polling.poll(decodedValue9);
         const blocked = exhausted.submissions[0];
         assert(blocked?._tag === "CycleBlocked");
         const acknowledgements = yield* AttentionAcknowledgements;
@@ -518,11 +517,13 @@ it.live(
           return partitionNeeds(asks.map(needFor), dismissed);
         });
         yield* dismiss(blocked.ask);
-        yield* polling.poll(withLoop(loop));
+        const decodedValue8 = yield* withLoop(loop);
+        yield* polling.poll(decodedValue8);
 
         assert.deepStrictEqual((yield* attention).needsYou, []);
         const sibling = LoopFile.make({ ...loop, name: LoopName.make("fix") });
-        const refused = (yield* polling.poll(withLoop(sibling))).submissions[0];
+        const decodedValue7 = yield* withLoop(sibling);
+        const refused = (yield* polling.poll(decodedValue7)).submissions[0];
         assert(refused?._tag === "CycleBlocked");
         assert.strictEqual(refused.ask.id, blocked.ask.id);
 
@@ -532,19 +533,24 @@ it.live(
         assert.strictEqual(refused.ask.blockedLoop, sibling.name);
         assert.strictEqual(refused.ask.loop, loop.name);
         yield* dismiss(refused.ask);
-        for (const unchanged of [loop, sibling]) yield* polling.poll(withLoop(unchanged));
+        for (const unchanged of [loop, sibling]) {
+          const loaded = yield* withLoop(unchanged);
+          yield* polling.poll(loaded);
+        }
 
         assert.deepStrictEqual((yield* attention).needsYou, []);
 
         assert.deepStrictEqual((yield* attention).dismissedNeeds, [needFor(refused.ask)]);
         hash = "c";
-        const changed = (yield* polling.poll(withLoop(sibling))).submissions[0];
+        const decodedValue6 = yield* withLoop(sibling);
+        const changed = (yield* polling.poll(decodedValue6)).submissions[0];
         assert(changed?._tag === "CycleBlocked");
 
         assert.deepStrictEqual((yield* attention).needsYou, [needFor(changed.ask)]);
         assert.strictEqual(changed.ask.blockedLoop, sibling.name);
         shouldPause = true;
-        const inFlight = yield* polling.poll(withLoop(loop)).pipe(Effect.forkChild);
+        const decodedValue5 = yield* withLoop(loop);
+        const inFlight = yield* polling.poll(decodedValue5).pipe(Effect.forkChild);
         yield* Deferred.await(entered);
         ready = false;
 
@@ -564,10 +570,12 @@ it.live(
 
         assert.strictEqual((yield* budgets.pendingResets).length, 1);
         const updated = yield* makeLoop("Updated task {{ item.number }}.", "required");
-        const noMatch = yield* polling.poll(withLoop(updated));
+        const decodedValue4 = yield* withLoop(updated);
+        const noMatch = yield* polling.poll(decodedValue4);
         assert.deepStrictEqual(noMatch.submissions, []);
         ready = true;
-        const refreshed = yield* polling.poll(withLoop(updated));
+        const decodedValue3 = yield* withLoop(updated);
+        const refreshed = yield* polling.poll(decodedValue3);
         const admitted = refreshed.submissions[0];
         assert(admitted?._tag === "Claimed");
         const saved = yield* engine.inspect(admitted.runId);

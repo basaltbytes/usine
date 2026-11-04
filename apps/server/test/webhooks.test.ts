@@ -26,9 +26,9 @@ import { authFixture } from "./auth/fixture.ts";
 const secret = "webhook-test-secret";
 const repository = RepositoryName.make("test/repo");
 const instance = (mode: "off" | "deliveries" | "endpoint") =>
-  LoadedInstance.make({
-    config: Effect.runSync(
-      Schema.decodeEffect(UsineConfig)({
+  Effect.gen(function* () {
+    return LoadedInstance.make({
+      config: yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
         webhooks:
@@ -36,12 +36,12 @@ const instance = (mode: "off" | "deliveries" | "endpoint") =>
             ? { mode, public_url: "https://usine.example/webhooks/github" }
             : { mode },
       }),
-    ),
-    agents: [],
-    loops: [],
-    invalidAgents: [],
-    quarantinedLoops: [],
-    warnings: [],
+      agents: [],
+      loops: [],
+      invalidAgents: [],
+      quarantinedLoops: [],
+      warnings: [],
+    });
   });
 const signature = (body: string) =>
   `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
@@ -78,7 +78,8 @@ const endpoint = (
 it("verifies the raw body outside operator authentication and hints only current registered repositories", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const current = yield* Ref.make(instance("endpoint"));
+      const decodedValue8 = yield* instance("endpoint");
+      const current = yield* Ref.make(decodedValue8);
       const hints: RepositoryName[] = [];
       const urls: string[] = [];
       const health = yield* WebhookHealth;
@@ -174,7 +175,8 @@ it("requires a nonempty secret only in endpoint mode and keeps the endpoint avai
       const health = yield* WebhookHealth;
       const polling = { hint: () => Effect.void };
       for (const mode of ["off", "deliveries"] as const) {
-        const routes = yield* endpoint({ get: Effect.succeed(instance(mode)) }, polling, health, {
+        const decodedValue7 = yield* instance(mode);
+        const routes = yield* endpoint({ get: Effect.succeed(decodedValue7) }, polling, health, {
           configureWebhook: () => Effect.die("Disabled endpoint must not configure the App"),
         }).pipe(
           Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({})),
@@ -195,8 +197,9 @@ it("requires a nonempty secret only in endpoint mode and keeps the endpoint avai
           ),
       };
       for (const values of [{}, { USINE_GITHUB_WEBHOOK_SECRET: "" }]) {
+        const decodedValue6 = yield* instance("endpoint");
         const failure = yield* endpoint(
-          { get: Effect.succeed(instance("endpoint")) },
+          { get: Effect.succeed(decodedValue6) },
           polling,
           health,
           app,
@@ -206,12 +209,8 @@ it("requires a nonempty secret only in endpoint mode and keeps the endpoint avai
         );
         assert.equal(failure._tag, "WebhookConfigurationError");
       }
-      const routes = yield* endpoint(
-        { get: Effect.succeed(instance("endpoint")) },
-        polling,
-        health,
-        app,
-      );
+      const decodedValue5 = yield* instance("endpoint");
+      const routes = yield* endpoint({ get: Effect.succeed(decodedValue5) }, polling, health, app);
       const web = HttpRouter.toWebHandler(routes, { disableLogger: true });
       yield* Effect.addFinalizer(() => Effect.promise(() => web.dispose()));
 
@@ -227,8 +226,9 @@ it("bounds startup hook configuration and request bodies on the Node HTTP server
   Effect.runPromise(
     Effect.gen(function* () {
       const health = yield* WebhookHealth;
+      const decodedValue4 = yield* instance("endpoint");
       const starting = yield* endpoint(
-        { get: Effect.succeed(instance("endpoint")) },
+        { get: Effect.succeed(decodedValue4) },
         { hint: () => Effect.void },
         health,
         { configureWebhook: () => Effect.never },
@@ -238,7 +238,9 @@ it("bounds startup hook configuration and request bodies on the Node HTTP server
       const server = HttpRouter.serve(routes).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
       yield* Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient;
-        const oversized = JSON.stringify({ unused: "x".repeat(25 * 1024 * 1024) });
+        const oversized = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          unused: "x".repeat(25 * 1024 * 1024),
+        });
         for (const [body, status] of [
           [oversized, 400],
           ["{}", 204],
@@ -265,7 +267,8 @@ it("bounds startup hook configuration and request bodies on the Node HTTP server
 it("switches a running endpoint between modes and public URLs without rebuilding the server", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const current = yield* SubscriptionRef.make(instance("off"));
+      const decodedValue3 = yield* instance("off");
+      const current = yield* SubscriptionRef.make(decodedValue3);
       const hints: RepositoryName[] = [];
       const urls: string[] = [];
       const health = yield* WebhookHealth;
@@ -287,11 +290,14 @@ it("switches a running endpoint between modes and public URLs without rebuilding
       );
       const web = HttpRouter.toWebHandler(routes, { disableLogger: true });
       yield* Effect.addFinalizer(() => Effect.promise(() => web.dispose()));
-      const body = JSON.stringify({ repository: { full_name: repository } });
+      const body = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+        repository: { full_name: repository },
+      });
 
       assert.equal((yield* send(web.handler, body)).status, 404);
       yield* TestClock.adjust("1 day");
-      yield* SubscriptionRef.set(current, instance("endpoint"));
+      const decodedValue2 = yield* instance("endpoint");
+      yield* SubscriptionRef.set(current, decodedValue2);
       yield* TestClock.adjust("1 millis");
       const currentSilent = yield* health.silent;
       assert.isFalse(currentSilent);
@@ -316,7 +322,8 @@ it("switches a running endpoint between modes and public URLs without rebuilding
         "https://new.example/webhooks/github",
       ]);
       for (const mode of ["deliveries", "off"] as const) {
-        yield* SubscriptionRef.set(current, instance(mode));
+        const decodedValue1 = yield* instance(mode);
+        yield* SubscriptionRef.set(current, decodedValue1);
         yield* TestClock.adjust("1 millis");
 
         assert.equal((yield* send(web.handler, body)).status, 404);

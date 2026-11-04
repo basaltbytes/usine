@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { flow, Effect, Result, Schema } from "effect";
+import { Effect, Result } from "effect";
 import { ExpressionEngine, Source } from "../src/expression-engine.ts";
 import { MarcbachmannCelLayer } from "../src/marcbachmann-cel.ts";
 import {
@@ -10,8 +10,8 @@ import {
   Variable,
 } from "../src/environment.ts";
 
-const typeReference = flow(Schema.decodeUnknownEffect(TypeReference), Effect.runSync);
-const source = flow(Schema.decodeUnknownEffect(Source), Effect.runSync);
+const typeReference = TypeReference.make;
+const source = Source.make;
 
 const issueEnvironment = Environment.make({
   types: [

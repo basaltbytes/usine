@@ -44,29 +44,27 @@ const POOL = WorkerName.make("pool");
 const unused = () => Effect.die("unused");
 
 const configWithTimings = (timings: Record<string, number>, slots = 1) =>
-  Effect.runSync(
-    Schema.decodeEffect(UsineConfig)({
-      version: 1,
-      repos: [{ name: "acme/demo" }],
-      workers: [
-        {
-          name: "pool",
-          kind: "ssh",
-          max_concurrent_attempts: slots,
-          root: "/srv/usine",
-          provisioner: {
-            provider: "hetzner",
-            token_env: "TOKEN",
-            server_type: "cx33",
-            location: "nbg1",
-            image: "image",
-            ssh_key: "key",
-            timings,
-          },
+  Schema.decodeEffect(UsineConfig)({
+    version: 1,
+    repos: [{ name: "acme/demo" }],
+    workers: [
+      {
+        name: "pool",
+        kind: "ssh",
+        max_concurrent_attempts: slots,
+        root: "/srv/usine",
+        provisioner: {
+          provider: "hetzner",
+          token_env: "TOKEN",
+          server_type: "cx33",
+          location: "nbg1",
+          image: "image",
+          ssh_key: "key",
+          timings,
         },
-      ],
-    }),
-  );
+      },
+    ],
+  });
 
 /**
  * A fake `WorkerMachines` that records each call, fails the creations in `failures`, and gives
@@ -154,23 +152,26 @@ const executor = Layer.succeed(Executor)({
 
 const scheduler = (
   machines: WorkerMachines["Service"],
-  config = configWithTimings({}),
-  instances = fixedConfigLayer(config),
+  config?: UsineConfig,
+  instances?: Layer.Layer<CurrentInstance>,
   workers: ExecutorWorkers = { add: () => Effect.void, remove: () => Effect.void },
 ) =>
-  Layer.build(
-    stepExecutorLayer(config, [], {
-      machines,
-      workers,
-      discard: (worker, attempts) =>
-        Effect.sync(() => void discarded.push(`${worker} ${attempts.join(",")}`)),
-    }).pipe(
-      Layer.provide(MarcbachmannCelLayer),
-      Layer.provide(executor),
-      Layer.provide(instances),
-      Layer.provide(testAppLayer),
-    ),
-  );
+  Effect.gen(function* () {
+    const fixtureConfig = config ?? (yield* configWithTimings({}));
+    return yield* Layer.build(
+      stepExecutorLayer(fixtureConfig, [], {
+        machines,
+        workers,
+        discard: (worker, attempts) =>
+          Effect.sync(() => void discarded.push(`${worker} ${attempts.join(",")}`)),
+      }).pipe(
+        Layer.provide(MarcbachmannCelLayer),
+        Layer.provide(executor),
+        Layer.provide(instances ?? fixedConfigLayer(fixtureConfig)),
+        Layer.provide(testAppLayer),
+      ),
+    );
+  });
 
 const executionOf = (runId: RunId, attemptId: AttemptId, reattach = false) => {
   const selected = submission(1);
@@ -345,7 +346,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
               message: "quota exhausted",
             }),
           );
-          const config = configWithTimings({});
+          const config = yield* configWithTimings({});
           const initial = yield* CurrentInstance.pipe(
             Effect.flatMap((instances) => instances.get),
             Effect.provide(fixedConfigLayer(config)),
@@ -482,7 +483,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
           message: "quota exhausted",
         }),
       );
-      const config = configWithTimings({});
+      const config = yield* configWithTimings({});
       const initial = yield* CurrentInstance.pipe(
         Effect.flatMap((instances) => instances.get),
         Effect.provide(fixedConfigLayer(config)),
@@ -563,7 +564,8 @@ describe("Worker scheduler on a provisioned Worker", () => {
         const bus = yield* ChangeBus;
         const fake = yield* fakeMachines();
         const message = "shared core limit exceeded";
-        const context = yield* scheduler(fake.machines, configWithTimings({}, 2));
+        const decodedValue2 = yield* configWithTimings({}, 2);
+        const context = yield* scheduler(fake.machines, decodedValue2);
         const steps = Context.get(context, StepExecutor);
         const status = Context.get(context, WorkerStatus);
         const readyRun = RunId.make("ready-run");
@@ -739,10 +741,11 @@ describe("Worker scheduler on a provisioned Worker", () => {
         message: "project limit exceeded",
       });
       fake.failures.push(quota, quota, quota);
-      const context = yield* scheduler(
-        fake.machines,
-        configWithTimings({ creation_backoff_min: 2, creation_backoff_max: 3 }),
-      );
+      const decodedValue1 = yield* configWithTimings({
+        creation_backoff_min: 2,
+        creation_backoff_max: 3,
+      });
+      const context = yield* scheduler(fake.machines, decodedValue1);
       const steps = Context.get(context, StepExecutor);
       const status = Context.get(context, WorkerStatus);
       yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());

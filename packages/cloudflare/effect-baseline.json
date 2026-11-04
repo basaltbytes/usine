@@ -35,12 +35,9 @@
     "nodeBuiltinImport": 3,
     "processEnv": 1
   },
-  "test/registry.test.ts": {
-    "asyncFunction": 2
-  },
   "test/sandbox.test.ts": {
-    "asyncFunction": 15,
-    "globalJson": 7,
+    "asyncFunction": 2,
+    "globalJson": 3,
     "globalTimers": 2,
     "newPromise": 6
   },

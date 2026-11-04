@@ -1,3 +1,4 @@
+import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -52,37 +53,35 @@ const payload = (
     statusCheckRollup = null,
   }: RemotePullRequest,
 ) =>
-  Effect.runSync(
-    Schema.decodeEffect(PullRequestPayload)({
-      number,
-      title: "Track base branch heads",
-      body: "",
-      url: `https://github.com/basaltbytes/usine/pull/${number}`,
-      state: "OPEN",
-      isDraft: false,
-      merged: false,
-      createdAt: "2026-10-24T09:00:00Z",
-      updatedAt: "2026-10-24T10:00:00Z",
-      mergedAt: null,
-      author: null,
-      baseRefName,
-      headRefName: `feature-${number}`,
-      headRefOid: "a".repeat(40),
-      additions: 1,
-      deletions: 0,
-      changedFiles: 1,
-      reviewDecision: null,
-      mergeable,
-      mergeStateStatus,
-      statusCheckRollup,
-      labels: { totalCount: 0, nodes: [] },
-      reviewRequests: { totalCount: 0, nodes: [] },
-      reviews: { totalCount: 0, nodes: [] },
-      reviewThreads: { totalCount: 0, nodes: [] },
-      comments: { totalCount: 0, nodes: [] },
-      closingIssuesReferences: { totalCount: 0, nodes: [] },
-    }),
-  );
+  Schema.decodeEffect(PullRequestPayload)({
+    number,
+    title: "Track base branch heads",
+    body: "",
+    url: `https://github.com/basaltbytes/usine/pull/${number}`,
+    state: "OPEN",
+    isDraft: false,
+    merged: false,
+    createdAt: "2026-10-24T09:00:00Z",
+    updatedAt: "2026-10-24T10:00:00Z",
+    mergedAt: null,
+    author: null,
+    baseRefName,
+    headRefName: `feature-${number}`,
+    headRefOid: "a".repeat(40),
+    additions: 1,
+    deletions: 0,
+    changedFiles: 1,
+    reviewDecision: null,
+    mergeable,
+    mergeStateStatus,
+    statusCheckRollup,
+    labels: { totalCount: 0, nodes: [] },
+    reviewRequests: { totalCount: 0, nodes: [] },
+    reviews: { totalCount: 0, nodes: [] },
+    reviewThreads: { totalCount: 0, nodes: [] },
+    comments: { totalCount: 0, nodes: [] },
+    closingIssuesReferences: { totalCount: 0, nodes: [] },
+  });
 
 /**
  * Returns a repository whose change detection reports `pullRequests` on the first poll only, and a
@@ -123,16 +122,26 @@ const fakeRepository = (
       return baseRefHead(repository, baseRefName, known);
     },
     snapshot: (_repository, item) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         snapshots.push(item.number);
         return PullRequestSnapshot.make({
           contentHash: ContentHash.make("a".repeat(64)),
-          payload: payload(
+          payload: yield* payload(
             item.number,
             pullRequests.get(item.number) ?? assert.fail(`no pull request #${item.number}`),
           ),
         });
-      }),
+      }).pipe(
+        Effect.mapError((cause) =>
+          Schema.isSchemaError(cause)
+            ? InvalidGitHubResponseError.make({
+                operation: "fetch-pull-request-snapshot",
+                message: "Invalid snapshot fixture",
+                detail: cause.message,
+              })
+            : cause,
+        ),
+      ),
   };
   const poll = Effect.gen(function* () {
     const fixtureInstance = yield* instance;

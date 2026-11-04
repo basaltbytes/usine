@@ -87,21 +87,14 @@
   "test/approval.test.ts": {
     "globalJson": 1
   },
-  "test/board.test.ts": {
-    "globalJsonInEffect": 1
-  },
   "test/ci.test.ts": {
     "globalJson": 2,
-    "globalJsonInEffect": 1,
     "nodeBuiltinImport": 1,
     "strictBooleanExpressions": 1
   },
   "test/closed-items.test.ts": {
     "globalJson": 1,
     "nodeBuiltinImport": 1
-  },
-  "test/configuration.test.ts": {
-    "globalJsonInEffect": 1
   },
   "test/cycle-reset-polling.test.ts": {
     "globalJson": 1
@@ -115,9 +108,7 @@
   },
   "test/integration/agent-run.test.ts": {
     "cryptoRandomUUIDInEffect": 2,
-    "globalFetchInEffect": 2,
-    "globalJson": 1,
-    "globalJsonInEffect": 1
+    "globalFetchInEffect": 2
   },
   "test/integration/exe-dev-worker.test.ts": {
     "cryptoRandomUUIDInEffect": 2
@@ -125,13 +116,10 @@
   "test/integration/polling-triggers.test.ts": {
     "cryptoRandomUUIDInEffect": 1,
     "globalDateInEffect": 2,
-    "globalFetchInEffect": 1,
-    "globalJson": 1,
-    "globalJsonInEffect": 2
+    "globalFetchInEffect": 1
   },
   "test/integration/ssh-worker.test.ts": {
     "cryptoRandomUUIDInEffect": 5,
-    "globalJsonInEffect": 2,
     "processEnv": 2
   },
   "test/local-worker/local-worker.test.ts": {
@@ -155,18 +143,10 @@
     "globalJson": 1
   },
   "test/operator.test.ts": {
-    "globalJson": 4,
-    "globalJsonInEffect": 1
+    "globalJson": 3
   },
   "test/polling-triggers.test.ts": {
-    "globalJsonInEffect": 3,
     "nodeBuiltinImport": 1
-  },
-  "test/schedule-triggers.test.ts": {
-    "globalJsonInEffect": 1
-  },
-  "test/ssh-addresses.test.ts": {
-    "globalJsonInEffect": 1
   },
   "test/statistics/cache.test.ts": {
     "globalJsonInEffect": 3

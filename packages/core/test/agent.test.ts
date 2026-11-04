@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { flow, Effect, Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import {
   Agent,
   AgentPersona,
@@ -9,20 +9,30 @@ import {
 } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 
-const decodeBrain = flow(Schema.decodeUnknownEffect(BrainSpec), Effect.runSync);
+const decodeBrain = Schema.decodeUnknownEffect(BrainSpec);
 
 describe("Agent brain specs", () => {
-  it("validates usine harness and effort shapes while passing model ids through", () => {
-    const brain = decodeBrain({
-      harness: "claude",
-      model: "vendor/model-from-tomorrow",
-      effort: "xhigh",
-    });
-    expect(brain.model).toBe("vendor/model-from-tomorrow");
-    expect(() => decodeBrain({ harness: "unknown", model: "model", effort: "high" })).toThrow();
-    expect(() => decodeBrain({ harness: "claude", model: "model", effort: "extreme" })).toThrow();
-    expect(() => decodeBrain({ harness: "claude", model: " ", effort: "high" })).toThrow();
-  });
+  it.effect("validates usine harness and effort shapes while passing model ids through", () =>
+    Effect.gen(function* () {
+      const brain = yield* decodeBrain({
+        harness: "claude",
+        model: "vendor/model-from-tomorrow",
+        effort: "xhigh",
+      });
+      expect(brain.model).toBe("vendor/model-from-tomorrow");
+      expect(
+        (yield* Effect.flip(decodeBrain({ harness: "unknown", model: "model", effort: "high" })))
+          ._tag,
+      ).toBe("SchemaError");
+      expect(
+        (yield* Effect.flip(decodeBrain({ harness: "claude", model: "model", effort: "extreme" })))
+          ._tag,
+      ).toBe("SchemaError");
+      expect(
+        (yield* Effect.flip(decodeBrain({ harness: "claude", model: " ", effort: "high" })))._tag,
+      ).toBe("SchemaError");
+    }),
+  );
 
   it("uses the roster override before the instance-level parent model", () => {
     const inherited = ModelId.make("anthropic/instance-parent");
@@ -71,16 +81,16 @@ describe("Agent brain specs", () => {
     expect(resolveParentEffort(overridden, Option.some("medium"))).toBe("low");
   });
 
-  it("decodes a stored Agent without a parent effort as inheriting", () => {
-    const stored = Effect.runSync(
-      Schema.decodeEffect(Agent)({
+  it.effect("decodes a stored Agent without a parent effort as inheriting", () =>
+    Effect.gen(function* () {
+      const stored = yield* Schema.decodeEffect(Agent)({
         name: "developer",
         brain: { harness: "codex", model: "gpt-5.6-sol", effort: "xhigh" },
         parentModel: null,
         persona: "Implement the issue.",
-      }),
-    );
-    expect(Option.isNone(stored.parentEffort)).toBe(true);
-    expect("parentEffort" in Effect.runSync(Schema.encodeEffect(Agent)(stored))).toBe(false);
-  });
+      });
+      expect(Option.isNone(stored.parentEffort)).toBe(true);
+      expect("parentEffort" in (yield* Schema.encodeEffect(Agent)(stored))).toBe(false);
+    }),
+  );
 });

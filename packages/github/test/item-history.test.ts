@@ -3,7 +3,7 @@ import { ItemNumber } from "@usine/core/item";
 import { BotLogin } from "@usine/core/worker";
 import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../src/github-app.ts";
 import { InstallationToken, InstallationWide } from "../src/installation.ts";
 import { GitHubItemHistory } from "../src/item-history.ts";
@@ -41,14 +41,13 @@ const TimelineRequest = Schema.Struct({
   }),
 });
 
-const variablesOf = (request: HttpClientRequest.HttpClientRequest) => {
-  if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
-  return Effect.runSync(
-    Schema.decodeUnknownEffect(TimelineRequest)(
-      JSON.parse(new TextDecoder().decode(request.body.body)),
-    ),
-  ).variables;
-};
+const variablesOf = (request: HttpClientRequest.HttpClientRequest) =>
+  Effect.gen(function* () {
+    if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
+    return (yield* Schema.decodeEffect(Schema.fromJsonString(TimelineRequest))(
+      new TextDecoder().decode(request.body.body),
+    )).variables;
+  });
 
 const respond = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json) =>
   HttpClientResponse.fromWeb(
@@ -74,9 +73,9 @@ describe("GitHubItemHistory", () => {
       const app = { __typename: "Bot", login };
       const requests: Array<HttpClientRequest.HttpClientRequest> = [];
       const client = HttpClient.make((request) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           requests.push(request);
-          const { after } = variablesOf(request);
+          const { after } = yield* variablesOf(request);
           if (after === null)
             return respond(
               request,
@@ -150,7 +149,14 @@ describe("GitHubItemHistory", () => {
               null,
             ),
           );
-        }),
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.EncodeError({ request: request, cause }),
+              }),
+          ),
+        ),
       );
 
       return Effect.gen(function* () {
@@ -178,7 +184,8 @@ describe("GitHubItemHistory", () => {
           added.label.description,
           Option.some("An usine development run is working this issue"),
         );
-        assert.deepStrictEqual(requests.map(variablesOf), [
+        const decodedValue1 = yield* Effect.forEach(requests, variablesOf);
+        assert.deepStrictEqual(decodedValue1, [
           { number: 247, since: "2026-10-15T19:30:39.000Z", after: null },
           { number: 247, since: "2026-10-15T19:30:39.000Z", after: "cursor-1" },
         ]);

@@ -30,48 +30,45 @@ import {
 } from "../src/runtime.ts";
 
 describe("agent runtime contract", () => {
-  it("round-trips one explicitly first-level child request", () => {
-    const parent = ParentSession.make({
-      id: AgentSessionId.make("parent-1"),
-      agent: AgentName.make("developer"),
-      brain: BrainSpec.make({
-        harness: "pi",
-        model: ModelId.make("anthropic/claude-opus-4-6"),
-        effort: "high",
-      }),
-    });
-    const request = ChildRequest.make({
-      worker: WorkerName.make("worker-1"),
-      machine: Option.none(),
-      environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
-      session: ChildSession.make({
-        id: AgentSessionId.make("child-1"),
-        parentId: parent.id,
-        agent: parent.agent,
+  it.effect("round-trips one explicitly first-level child request", () =>
+    Effect.gen(function* () {
+      const parent = ParentSession.make({
+        id: AgentSessionId.make("parent-1"),
+        agent: AgentName.make("developer"),
         brain: BrainSpec.make({
-          harness: "claude",
-          model: ModelId.make("claude-sonnet-4-6"),
+          harness: "pi",
+          model: ModelId.make("anthropic/claude-opus-4-6"),
           effort: "high",
         }),
-      }),
-      cwd: WorkingDirectory.make("/workspace/repo"),
-      host: RemoteShell.make({
-        ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
-        sshEnvironment: { HOME: "/home/orchestrator" },
-        destination: "worker.exe.xyz",
-      }),
-      prompt: "Implement the focused change.",
-    });
+      });
+      const request = ChildRequest.make({
+        worker: WorkerName.make("worker-1"),
+        machine: Option.none(),
+        environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
+        session: ChildSession.make({
+          id: AgentSessionId.make("child-1"),
+          parentId: parent.id,
+          agent: parent.agent,
+          brain: BrainSpec.make({
+            harness: "claude",
+            model: ModelId.make("claude-sonnet-4-6"),
+            effort: "high",
+          }),
+        }),
+        cwd: WorkingDirectory.make("/workspace/repo"),
+        host: RemoteShell.make({
+          ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
+          sshEnvironment: { HOME: "/home/orchestrator" },
+          destination: "worker.exe.xyz",
+        }),
+        prompt: "Implement the focused change.",
+      });
 
-    assert.deepStrictEqual(
-      Effect.runSync(
-        Schema.decodeEffect(ChildRequest)(
-          Effect.runSync(Schema.encodeEffect(ChildRequest)(request)),
-        ),
-      ),
-      request,
-    );
-  });
+      const decodedValue1 = yield* Schema.encodeEffect(ChildRequest)(request);
+      const decodedValue2 = yield* Schema.decodeEffect(ChildRequest)(decodedValue1);
+      assert.deepStrictEqual(decodedValue2, request);
+    }),
+  );
 
   it("retries SDK trouble as infrastructure and parks everything else on the operator", () => {
     const sessionId = Option.some(AgentSessionId.make("child-1"));

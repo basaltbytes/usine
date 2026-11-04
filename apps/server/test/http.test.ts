@@ -525,7 +525,10 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       const validation = yield* Effect.promise(() =>
         validate("https://spec.openapis.org/oas/3.1/schema-base", document, "BASIC"),
       );
-      assert.isTrue(validation.valid, JSON.stringify(validation));
+      const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        validation,
+      );
+      assert.isTrue(validation.valid, decodedValue1);
       const generated = operatorOpenApi();
       assert.deepEqual(document, generated);
       const committed = yield* Effect.promise(() =>
@@ -583,7 +586,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
         );
         assert.isTrue(
           refusedValidation.valid,
-          `${endpoint.method} ${path}: ${JSON.stringify(refusedBody)}`,
+          `${endpoint.method} ${path}: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(refusedBody)}`,
         );
         if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
         for (const spelling of [
@@ -619,7 +622,10 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
             assert.equal(response.status, 403);
             const body = yield* Effect.promise(() => response.json());
             const result = yield* Effect.promise(() => validate(responseSchema, body));
-            assert.isTrue(result.valid, `${endpoint.method} ${path}: ${JSON.stringify(body)}`);
+            assert.isTrue(
+              result.valid,
+              `${endpoint.method} ${path}: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(body)}`,
+            );
           }
         }
       }
@@ -1434,8 +1440,10 @@ describe("operator HTTP API", () => {
       const port = await new Promise<Port>((resolve) => {
         const probe = createServer();
         probe.listen({ host: SERVER_HOST, port: 0 }, () => {
-          const { port: free } = Effect.runSync(
-            Schema.decodeUnknownEffect(Schema.Struct({ port: Port }))(probe.address()),
+          // Node event callbacks decode their arguments synchronously.
+          // @effect-diagnostics-next-line schemaSync:off
+          const { port: free } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(
+            probe.address(),
           );
           probe.close(() => resolve(free));
         });

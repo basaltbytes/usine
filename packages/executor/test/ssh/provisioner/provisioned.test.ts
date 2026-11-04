@@ -495,99 +495,98 @@ describe("Provisioned SSH Worker", () => {
 
   it.effect(
     "reuses checked container limits until the configured machine check interval elapses",
-    () => {
-      const machine = fakeMachine();
-      machine.state.docker = "running";
-      machine.state.memoryGib = 8;
-      const providers = fakeProviders();
-      providers.hetzner.startingReads = 0;
-      const derivingAddress: SshWorkerAddress = {
-        ...hetznerAddress,
-        machine: {
-          _tag: "Provisioned",
-          provisioner: hetznerSettings({
-            timings: Effect.runSync(
-              Schema.decodeEffect(ProvisionerTimings)({ machineCheckInterval: 60 }),
-            ),
-          }),
-        },
-        container: {
-          image: Option.none(),
-          cpus: Option.none(),
-          memoryMib: Option.none(),
-          pids: Option.none(),
-          shmSizeMib: Option.none(),
-          tmpfsSizeMib: Option.none(),
-        },
-      };
-      return Effect.gen(function* () {
-        const executor = yield* Executor;
-        const machines = yield* WorkerMachines;
-        const first = yield* machines.create(
-          WORKER,
-          MACHINE_RUN,
-          AttemptId.make("first/execute/1"),
-          [TEST_AGENT.brain],
-        );
-        const count = (matches: (line: string) => boolean) =>
-          machine.state.calls.filter(({ line }) => matches(line)).length;
-        const memoryChecks = () => count((line) => line === "exec 'cat' '/proc/meminfo'");
-        const resourceReads = () => count((line) => line.includes("nproc"));
-        const cachePreparations = () => count((line) => line.includes("volume create"));
-        assert.strictEqual(cachePreparations(), 2);
-        assert.strictEqual(memoryChecks(), 1);
-        // Each machine runs one Attempt, so the limits are the machine's less the host's reserve.
-        assert.deepStrictEqual(
-          first.checked,
-          Option.some(
-            MachineCheck.make({
-              brains: [TEST_AGENT.brain],
-              containerLimits: Option.some(
-                ContainerLimits.make({
-                  cpus: ContainerCpus.make(4),
-                  memoryMib: ContainerMemoryMib.make(7168),
-                  pids: ContainerPids.make(60976),
-                }),
-              ),
+    () =>
+      Effect.gen(function* () {
+        const machine = fakeMachine();
+        machine.state.docker = "running";
+        machine.state.memoryGib = 8;
+        const providers = fakeProviders();
+        providers.hetzner.startingReads = 0;
+        const derivingAddress: SshWorkerAddress = {
+          ...hetznerAddress,
+          machine: {
+            _tag: "Provisioned",
+            provisioner: hetznerSettings({
+              timings: yield* Schema.decodeEffect(ProvisionerTimings)({ machineCheckInterval: 60 }),
             }),
-          ),
-        );
+          },
+          container: {
+            image: Option.none(),
+            cpus: Option.none(),
+            memoryMib: Option.none(),
+            pids: Option.none(),
+            shmSizeMib: Option.none(),
+            tmpfsSizeMib: Option.none(),
+          },
+        };
+        return yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const machines = yield* WorkerMachines;
+          const first = yield* machines.create(
+            WORKER,
+            MACHINE_RUN,
+            AttemptId.make("first/execute/1"),
+            [TEST_AGENT.brain],
+          );
+          const count = (matches: (line: string) => boolean) =>
+            machine.state.calls.filter(({ line }) => matches(line)).length;
+          const memoryChecks = () => count((line) => line === "exec 'cat' '/proc/meminfo'");
+          const resourceReads = () => count((line) => line.includes("nproc"));
+          const cachePreparations = () => count((line) => line.includes("volume create"));
+          assert.strictEqual(cachePreparations(), 2);
+          assert.strictEqual(memoryChecks(), 1);
+          // Each machine runs one Attempt, so the limits are the machine's less the host's reserve.
+          assert.deepStrictEqual(
+            first.checked,
+            Option.some(
+              MachineCheck.make({
+                brains: [TEST_AGENT.brain],
+                containerLimits: Option.some(
+                  ContainerLimits.make({
+                    cpus: ContainerCpus.make(4),
+                    memoryMib: ContainerMemoryMib.make(7168),
+                    pids: ContainerPids.make(60976),
+                  }),
+                ),
+              }),
+            ),
+          );
 
-        yield* TestClock.adjust("59 seconds");
-        machine.state.cpus = 8;
-        const second = yield* machines.create(
-          WORKER,
-          { ...MACHINE_RUN, id: RunId.make("other-run") },
-          request.attemptId,
-          [TEST_AGENT.brain],
-        );
-        assert.isTrue(Option.isNone(second.checked));
-        assert.strictEqual(memoryChecks(), 1);
-        assert.strictEqual(resourceReads(), 1);
-        assert.strictEqual(cachePreparations(), 4);
-        assert.strictEqual(providers.hetzner.servers.size, 2);
+          yield* TestClock.adjust("59 seconds");
+          machine.state.cpus = 8;
+          const second = yield* machines.create(
+            WORKER,
+            { ...MACHINE_RUN, id: RunId.make("other-run") },
+            request.attemptId,
+            [TEST_AGENT.brain],
+          );
+          assert.isTrue(Option.isNone(second.checked));
+          assert.strictEqual(memoryChecks(), 1);
+          assert.strictEqual(resourceReads(), 1);
+          assert.strictEqual(cachePreparations(), 4);
+          assert.strictEqual(providers.hetzner.servers.size, 2);
 
-        const prepared = yield* executor.prepare(request);
-        yield* prepared.launch(sink);
-        assert.strictEqual(cachePreparations(), 4);
-        const run = machine.state.calls.find(({ line }) =>
-          line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-remote-run_execute_1'"),
-        );
-        assert.include(
-          run?.line,
-          "'--cpus' '4' '--memory' '7168m' '--memory-swap' '7168m' '--pids-limit' '60976'",
-        );
-        yield* TestClock.adjust("1 second");
-        const third = yield* machines.create(
-          WORKER,
-          MACHINE_RUN,
-          AttemptId.make("third/execute/1"),
-          [TEST_AGENT.brain],
-        );
-        assert.isTrue(Option.isSome(third.checked));
-        assert.strictEqual(memoryChecks(), 2);
-      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, derivingAddress)));
-    },
+          const prepared = yield* executor.prepare(request);
+          yield* prepared.launch(sink);
+          assert.strictEqual(cachePreparations(), 4);
+          const run = machine.state.calls.find(({ line }) =>
+            line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-remote-run_execute_1'"),
+          );
+          assert.include(
+            run?.line,
+            "'--cpus' '4' '--memory' '7168m' '--memory-swap' '7168m' '--pids-limit' '60976'",
+          );
+          yield* TestClock.adjust("1 second");
+          const third = yield* machines.create(
+            WORKER,
+            MACHINE_RUN,
+            AttemptId.make("third/execute/1"),
+            [TEST_AGENT.brain],
+          );
+          assert.isTrue(Option.isSome(third.checked));
+          assert.strictEqual(memoryChecks(), 2);
+        }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, derivingAddress)));
+      }),
   );
 
   it.live(

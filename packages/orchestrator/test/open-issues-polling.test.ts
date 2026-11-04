@@ -78,13 +78,15 @@ const loop = LoopFile.make({
   body: PromptTemplate.make("Implement issue {{ item.number }}."),
 });
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
-  LoadedInstance.make({
-    config: Effect.runSync(config),
-    agents: [agent],
-    invalidAgents: [],
-    loops,
-    quarantinedLoops: [],
-    warnings: [],
+  Effect.gen(function* () {
+    return LoadedInstance.make({
+      config: yield* config,
+      agents: [agent],
+      invalidAgents: [],
+      loops,
+      quarantinedLoops: [],
+      warnings: [],
+    });
   });
 const emptyCatalog = RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] });
 const issue28 = IssueSnapshot.make({
@@ -164,7 +166,7 @@ describe("PollingTriggers open-issue check", () => {
           prefix: "usine-open-issues-",
         });
         const directory = InstanceDirectory.make(currentDirectory);
-        const instance = instanceWith([loop]);
+        const instance = yield* instanceWith([loop]);
         let deleted = false;
         const asked: Array<ReadonlyArray<number>> = [];
         const github: GitHubPolling["Service"] = {
@@ -237,89 +239,90 @@ describe("PollingTriggers open-issue check", () => {
 
   it.effect(
     "keeps failed open-issue checks due through rate limits and applies the cooldown after recovery",
-    () => {
-      const instance = instanceWith([]);
-      let requests = 0;
-      const retryAt = DateTime.makeUnsafe(5 * 60_000);
-      const github: GitHubPolling["Service"] = {
-        labels: () => Effect.succeed(emptyCatalog),
-        changes: (_, cursor) =>
-          Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
-        snapshot: () => Effect.die("no Item changed"),
-        baseRefHead: unmovedBaseRefHead,
-        missingIssues: () =>
-          Effect.gen(function* () {
-            requests += 1;
-            if (requests === 4) {
-              return yield* GitHubRateLimitError.make({
-                operation: "find-missing-issues",
-                retryAt,
-                message: "GitHub rate limit reached",
-              });
-            }
-            if (requests <= 3 || (requests >= 6 && requests <= 8)) {
-              return yield* GitHubApiError.make({
-                operation: "find-missing-issues",
-                status: Option.some(502),
-                message: "GitHub returned HTTP status 502",
-              });
-            }
-            return [];
-          }),
-      };
-      const items: ItemProjectionReader["Service"] = {
-        get: () => Effect.succeedNone,
-        list: () => Effect.die("the poll does not list projections"),
-        openIssues: () => Effect.succeed([ItemNumber.make(28)]),
-      };
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* instanceWith([]);
+        let requests = 0;
+        const retryAt = DateTime.makeUnsafe(5 * 60_000);
+        const github: GitHubPolling["Service"] = {
+          labels: () => Effect.succeed(emptyCatalog),
+          changes: (_, cursor) =>
+            Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
+          snapshot: () => Effect.die("no Item changed"),
+          baseRefHead: unmovedBaseRefHead,
+          missingIssues: () =>
+            Effect.gen(function* () {
+              requests += 1;
+              if (requests === 4) {
+                return yield* GitHubRateLimitError.make({
+                  operation: "find-missing-issues",
+                  retryAt,
+                  message: "GitHub rate limit reached",
+                });
+              }
+              if (requests <= 3 || (requests >= 6 && requests <= 8)) {
+                return yield* GitHubApiError.make({
+                  operation: "find-missing-issues",
+                  status: Option.some(502),
+                  message: "GitHub returned HTTP status 502",
+                });
+              }
+              return [];
+            }),
+        };
+        const items: ItemProjectionReader["Service"] = {
+          get: () => Effect.succeedNone,
+          list: () => Effect.die("the poll does not list projections"),
+          openIssues: () => Effect.succeed([ItemNumber.make(28)]),
+        };
 
-      return Effect.gen(function* () {
-        const polling = yield* PollingTriggers;
-        const failed = yield* polling.poll(instance);
-        assert.strictEqual(requests, 1);
-        assert.deepStrictEqual(failed.failures, []);
+        return yield* Effect.gen(function* () {
+          const polling = yield* PollingTriggers;
+          const failed = yield* polling.poll(instance);
+          assert.strictEqual(requests, 1);
+          assert.deepStrictEqual(failed.failures, []);
 
-        yield* TestClock.adjust("1 minute");
-        const failedAgain = yield* polling.poll(instance);
-        assert.strictEqual(requests, 2);
-        assert.deepStrictEqual(failedAgain.failures, []);
+          yield* TestClock.adjust("1 minute");
+          const failedAgain = yield* polling.poll(instance);
+          assert.strictEqual(requests, 2);
+          assert.deepStrictEqual(failedAgain.failures, []);
 
-        yield* TestClock.adjust("1 minute");
-        const sustained = yield* polling.poll(instance);
-        assert.strictEqual(requests, 3);
-        assert.strictEqual(sustained.failures[0]?.errorTag, "GitHubApiError");
-        assert.include(sustained.failures[0]?.message ?? "", "find-missing-issues");
+          yield* TestClock.adjust("1 minute");
+          const sustained = yield* polling.poll(instance);
+          assert.strictEqual(requests, 3);
+          assert.strictEqual(sustained.failures[0]?.errorTag, "GitHubApiError");
+          assert.include(sustained.failures[0]?.message ?? "", "find-missing-issues");
 
-        const paused = yield* polling.poll(instance);
-        assert.strictEqual(requests, 4);
-        assert.deepStrictEqual(paused.failures, sustained.failures);
-        assert.deepStrictEqual(paused.nextPollAt, Option.some(retryAt));
+          const paused = yield* polling.poll(instance);
+          assert.strictEqual(requests, 4);
+          assert.deepStrictEqual(paused.failures, sustained.failures);
+          assert.deepStrictEqual(paused.nextPollAt, Option.some(retryAt));
 
-        yield* TestClock.adjust("3 minutes");
-        const recovered = yield* polling.poll(instance);
-        assert.strictEqual(requests, 5);
-        assert.deepStrictEqual(recovered.failures, []);
+          yield* TestClock.adjust("3 minutes");
+          const recovered = yield* polling.poll(instance);
+          assert.strictEqual(requests, 5);
+          assert.deepStrictEqual(recovered.failures, []);
 
-        yield* TestClock.adjust("9 minutes");
-        const skipped = yield* polling.poll(instance);
-        assert.strictEqual(requests, 5);
-        assert.deepStrictEqual(skipped.failures, []);
+          yield* TestClock.adjust("9 minutes");
+          const skipped = yield* polling.poll(instance);
+          assert.strictEqual(requests, 5);
+          assert.deepStrictEqual(skipped.failures, []);
 
-        yield* TestClock.adjust("1 minute");
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-          const cycle = yield* polling.poll(instance);
-          assert.strictEqual(requests, 5 + attempt);
-          assert.strictEqual(cycle.failures.length, attempt === 3 ? 1 : 0);
-        }
+          yield* TestClock.adjust("1 minute");
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            const cycle = yield* polling.poll(instance);
+            assert.strictEqual(requests, 5 + attempt);
+            assert.strictEqual(cycle.failures.length, attempt === 3 ? 1 : 0);
+          }
 
-        const recoveredAgain = yield* polling.poll(instance);
-        assert.strictEqual(requests, 9);
-        assert.deepStrictEqual(recoveredAgain.failures, []);
-      }).pipe(
-        Effect.provide(
-          pollingTestLayer(github, [], undefined, undefined, undefined, undefined, items),
-        ),
-      );
-    },
+          const recoveredAgain = yield* polling.poll(instance);
+          assert.strictEqual(requests, 9);
+          assert.deepStrictEqual(recoveredAgain.failures, []);
+        }).pipe(
+          Effect.provide(
+            pollingTestLayer(github, [], undefined, undefined, undefined, undefined, items),
+          ),
+        );
+      }),
   );
 });

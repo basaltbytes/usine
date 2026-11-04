@@ -72,9 +72,9 @@ describe("Claude query tokens", () => {
 });
 
 describe("Codex thread tokens", () => {
-  it("ignores cached input so a long conversation does not read as consumption", () => {
-    const usage = Effect.runSync(
-      Schema.decodeUnknownEffect(CodexTokenUsage)({
+  it.effect("ignores cached input so a long conversation does not read as consumption", () =>
+    Effect.gen(function* () {
+      const usage = yield* Schema.decodeUnknownEffect(CodexTokenUsage)({
         threadId: "thread",
         tokenUsage: {
           total: {
@@ -87,19 +87,19 @@ describe("Codex thread tokens", () => {
           },
           last: { totalTokens: 1, inputTokens: 1, cachedInputTokens: 0, outputTokens: 0 },
         },
-      }),
-    );
-    assert.strictEqual(codexThreadTokens(usage.tokenUsage.total), 50_400);
-    assert.strictEqual(
-      codexThreadTokens({
-        inputTokens: 10,
-        cachedInputTokens: 30,
-        cacheWriteInputTokens: 0,
-        outputTokens: 7,
-      }),
-      7,
-    );
-  });
+      });
+      assert.strictEqual(codexThreadTokens(usage.tokenUsage.total), 50_400);
+      assert.strictEqual(
+        codexThreadTokens({
+          inputTokens: 10,
+          cachedInputTokens: 30,
+          cacheWriteInputTokens: 0,
+          outputTokens: 7,
+        }),
+        7,
+      );
+    }),
+  );
 
   it("splits input into cache reads, cache writes, and the rest", () => {
     assert.deepStrictEqual(

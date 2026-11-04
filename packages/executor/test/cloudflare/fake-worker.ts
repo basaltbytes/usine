@@ -7,7 +7,7 @@ import {
 } from "@usine/cloudflare";
 import {
   decodeClientMessage,
-  encodeServerMessage,
+  ServerMessage,
   Exited,
   outputFrame,
   Started,
@@ -128,8 +128,15 @@ const defaultResponse = (
   }
 };
 
-const decodeCreate = Schema.decodeUnknownEffect(Schema.toCodecJson(CreateSandbox));
-const decodeCredentials = Schema.decodeUnknownEffect(Schema.toCodecJson(SandboxCredentials));
+// WebSocket callbacks encode validated server messages synchronously.
+// @effect-diagnostics-next-line schemaSync:off
+const encodeServerMessage = Schema.encodeSync(Schema.fromJsonString(ServerMessage));
+// Node HTTP handlers decode request fixtures synchronously.
+// @effect-diagnostics-next-line schemaSync:off
+const decodeCreate = Schema.decodeUnknownSync(Schema.toCodecJson(CreateSandbox));
+// Node HTTP handlers decode request fixtures synchronously.
+// @effect-diagnostics-next-line schemaSync:off
+const decodeCredentials = Schema.decodeUnknownSync(Schema.toCodecJson(SandboxCredentials));
 
 /**
  * Records `credentials` as `sandbox`'s next publication, or returns the Worker's refusal of
@@ -183,7 +190,7 @@ const serveExec = (state: FakeWorkerState, sandbox: FakeSandbox, socket: ServerS
       defaultResponse(sandbox, words, stdin),
     );
     const process = ProcessId.make("0123456789abcdef0123456789abcdef");
-    socket.send(Effect.runSync(encodeServerMessage(Started.make({ process }))));
+    socket.send(encodeServerMessage(Started.make({ process })));
     if (state.dropOnce.delete(line)) {
       const half = result.stdout.slice(0, Math.floor(result.stdout.length / 2));
       socket.send(outputFrame("stdout", new TextEncoder().encode(half)));
@@ -193,7 +200,7 @@ const serveExec = (state: FakeWorkerState, sandbox: FakeSandbox, socket: ServerS
     }
     socket.send(outputFrame("stdout", new TextEncoder().encode(result.stdout)));
     socket.send(outputFrame("stderr", new TextEncoder().encode(result.stderr ?? "")));
-    socket.send(Effect.runSync(encodeServerMessage(Exited.make({ exitCode: result.exitCode }))));
+    socket.send(encodeServerMessage(Exited.make({ exitCode: result.exitCode })));
     socket.close(1000);
   };
   socket.on("message", (data: Buffer, binary: boolean) => {
@@ -218,9 +225,6 @@ const pendingAttach = new Map<string, { readonly result: CommandResult; readonly
  * behind the Access service token headers. Closes it when the scope closes.
  */
 export const fakeWorker = Effect.gen(function* () {
-  const context = yield* Effect.context<never>();
-  const runPromise = Effect.runPromiseWith(context);
-  const runSync = Effect.runSyncWith(context);
   const state: FakeWorkerState = {
     sandboxes: new Map(),
     requests: [],
@@ -251,7 +255,7 @@ export const fakeWorker = Effect.gen(function* () {
       const sandbox = state.sandboxes.get(name);
       const body = await readBody(request);
       if (request.method === "PUT" && action === undefined) {
-        const created = await runPromise(decodeCreate(JSON.parse(body)));
+        const created = decodeCreate(JSON.parse(body));
         const existing =
           sandbox ??
           ({
@@ -280,7 +284,7 @@ export const fakeWorker = Effect.gen(function* () {
       if (request.method === "PUT" && action === "credentials") {
         if (!sandbox.running)
           return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
-        const refused = publish(sandbox, await runPromise(decodeCredentials(JSON.parse(body))));
+        const refused = publish(sandbox, decodeCredentials(JSON.parse(body)));
         if (Option.isSome(refused)) return json(response, 409, refused.value);
         return json(response, 200, summaryOf(sandbox));
       }
@@ -319,7 +323,7 @@ export const fakeWorker = Effect.gen(function* () {
       client.send(
         outputFrame("stdout", new TextEncoder().encode(pending.result.stdout.slice(offset))),
       );
-      client.send(runSync(encodeServerMessage(Exited.make({ exitCode: pending.result.exitCode }))));
+      client.send(encodeServerMessage(Exited.make({ exitCode: pending.result.exitCode })));
       client.close(1000);
     });
   });

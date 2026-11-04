@@ -67,9 +67,9 @@ const READS = 3;
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = (number: number) =>
-  Effect.runSync(
-    Schema.encodeEffect(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
-  );
+  // The key contains already validated repository and item identifiers.
+  // @effect-diagnostics-next-line schemaSync:off
+  Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]);
 const brain = BrainSpec.make({
   harness: "codex",
   model: ModelId.make("gpt-6-astra"),
@@ -354,7 +354,11 @@ describe("operator read latency", () => {
               })),
             },
           }));
-          const previousBytes = bytes(JSON.stringify({ ...overview, projects: previousProjects }));
+          const decodedValue3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+            ...overview,
+            projects: previousProjects,
+          });
+          const previousBytes = bytes(decodedValue3);
           const measurement = {
             items: initialItems,
             runs: history ? SIZE_RUNS : openRuns,
@@ -373,7 +377,10 @@ describe("operator read latency", () => {
               ),
             })),
           };
-          assert.isBelow(responseBytes, SIZE_BUDGET_BYTES, JSON.stringify(measurement));
+          const decodedValue2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            measurement,
+          );
+          assert.isBelow(responseBytes, SIZE_BUDGET_BYTES, decodedValue2);
           assert.strictEqual(
             overview.projects.flatMap(({ runs }) => runs).length,
             history ? 51 : openRuns,
@@ -440,7 +447,9 @@ describe("operator read latency", () => {
             desk: desk.millis,
           }));
           yield* Effect.logInfo("Operator read latency", { rounds: measurements });
-          const timings = JSON.stringify(measurements);
+          const timings = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            measurements,
+          );
           assert.isBelow(
             fastest(rounds.map(({ overview }) => overview.millis)),
             READ_BUDGET_MILLIS,

@@ -57,19 +57,23 @@ const durableRuntime = (
   steps: ReadonlyArray<ParentStep>,
   credentials: Layer.Layer<CredentialProvider> = credentialLayer,
 ) =>
-  localLayer(instance, Effect.runSync(config), [], {
-    repositoryUrl: () => remote,
-    interruptGrace: "1 second",
-    harnessReadiness: harnessReady,
-  }).pipe(
-    Layer.provide(MarcbachmannCelLayer),
-    Layer.provide(credentials),
-    Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
-    Layer.provide(claudeLoginLockLayer),
-    Layer.provide(alwaysHoldsLayer),
-    Layer.provide(fixedConfigLayer(Effect.runSync(config))),
-    Layer.provide(testAppLayer),
-  );
+  Effect.gen(function* () {
+    const decodedValue7 = yield* config;
+    const decodedValue8 = yield* config;
+    return localLayer(instance, decodedValue8, [], {
+      repositoryUrl: () => remote,
+      interruptGrace: "1 second",
+      harnessReadiness: harnessReady,
+    }).pipe(
+      Layer.provide(MarcbachmannCelLayer),
+      Layer.provide(credentials),
+      Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
+      Layer.provide(claudeLoginLockLayer),
+      Layer.provide(alwaysHoldsLayer),
+      Layer.provide(fixedConfigLayer(decodedValue7)),
+      Layer.provide(testAppLayer),
+    );
+  });
 
 const commitInWorktree = (worktree: string, message: string) =>
   run(
@@ -101,10 +105,10 @@ describe("local worker restart", () => {
         const database = `${root}/durable.sqlite`;
 
         const firstScope = yield* Scope.make();
-        const firstContext = yield* Scope.provide(
-          Layer.build(durableRuntime(instance, remote, database, [delegate("Implement the task")])),
-          firstScope,
-        );
+        const decodedValue6 = yield* durableRuntime(instance, remote, database, [
+          delegate("Implement the task"),
+        ]);
+        const firstContext = yield* Scope.provide(Layer.build(decodedValue6), firstScope);
         const first = Context.get(firstContext, RunEngine);
         const accepted = yield* first.submit(submission(2));
         assert(accepted._tag === "Claimed");
@@ -119,12 +123,10 @@ describe("local worker restart", () => {
         assert(currentExists, "the checkout must survive the restart");
 
         const secondScope = yield* Scope.make();
-        const services = yield* Scope.provide(
-          Layer.build(
-            durableRuntime(instance, remote, database, [answer("Finished after the restart")]),
-          ),
-          secondScope,
-        );
+        const decodedValue5 = yield* durableRuntime(instance, remote, database, [
+          answer("Finished after the restart"),
+        ]);
+        const services = yield* Scope.provide(Layer.build(decodedValue5), secondScope);
         const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");
         assert.deepStrictEqual(
@@ -181,10 +183,10 @@ describe("local worker restart", () => {
         const backups = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-backups-" });
 
         const firstScope = yield* Scope.make();
-        const firstContext = yield* Scope.provide(
-          Layer.build(durableRuntime(instance, remote, database, [delegate("Implement the task")])),
-          firstScope,
-        );
+        const decodedValue4 = yield* durableRuntime(instance, remote, database, [
+          delegate("Implement the task"),
+        ]);
+        const firstContext = yield* Scope.provide(Layer.build(decodedValue4), firstScope);
         const first = Context.get(firstContext, RunEngine);
         const accepted = yield* first.submit(submission(4));
         assert(accepted._tag === "Claimed");
@@ -209,12 +211,10 @@ describe("local worker restart", () => {
         yield* fileSystem.copyFile(`${backups}/backup.durable.sqlite`, database);
 
         const secondScope = yield* Scope.make();
-        const services = yield* Scope.provide(
-          Layer.build(
-            durableRuntime(instance, remote, database, [answer("Finished after the restore")]),
-          ),
-          secondScope,
-        );
+        const decodedValue3 = yield* durableRuntime(instance, remote, database, [
+          answer("Finished after the restore"),
+        ]);
+        const services = yield* Scope.provide(Layer.build(decodedValue3), secondScope);
         const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");
         assert.deepStrictEqual(
@@ -259,18 +259,14 @@ describe("local worker restart", () => {
         });
 
         const firstScope = yield* Scope.make();
-        const firstContext = yield* Scope.provide(
-          Layer.build(
-            durableRuntime(
-              instance,
-              remote,
-              database,
-              [delegate("Implement the task"), answer("Finished before the stop")],
-              holdingCredentials,
-            ),
-          ),
-          firstScope,
+        const decodedValue2 = yield* durableRuntime(
+          instance,
+          remote,
+          database,
+          [delegate("Implement the task"), answer("Finished before the stop")],
+          holdingCredentials,
         );
+        const firstContext = yield* Scope.provide(Layer.build(decodedValue2), firstScope);
         const first = Context.get(firstContext, RunEngine);
         const accepted = yield* first.submit(submission(3));
         assert(accepted._tag === "Claimed");
@@ -289,10 +285,8 @@ describe("local worker restart", () => {
         assert(currentExists, "the unharvested checkout survives the stop");
 
         const secondScope = yield* Scope.make();
-        const services = yield* Scope.provide(
-          Layer.build(durableRuntime(instance, remote, database, [])),
-          secondScope,
-        );
+        const decodedValue1 = yield* durableRuntime(instance, remote, database, []);
+        const services = yield* Scope.provide(Layer.build(decodedValue1), secondScope);
         const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");
         assert.deepStrictEqual(

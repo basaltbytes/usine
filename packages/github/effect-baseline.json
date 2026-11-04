@@ -39,8 +39,8 @@
   "test/github-app.test.ts": {
     "globalDate": 12,
     "globalDateInEffect": 1,
-    "globalJson": 5,
-    "globalJsonInEffect": 2,
+    "globalJson": 3,
+    "globalJsonInEffect": 1,
     "nodeBuiltinImport": 1
   },
   "test/integration/github-app.test.ts": {
@@ -48,11 +48,7 @@
     "globalJsonInEffect": 1
   },
   "test/item-history.test.ts": {
-    "globalJson": 2
-  },
-  "test/item-writer.test.ts": {
-    "globalJson": 2,
-    "globalJsonInEffect": 1
+    "globalJson": 1
   },
   "test/label-writer.test.ts": {
     "globalJson": 1,
@@ -64,8 +60,7 @@
   "test/polling.test.ts": {
     "globalDate": 1,
     "globalDateInEffect": 1,
-    "globalJson": 2,
-    "globalJsonInEffect": 1
+    "globalJson": 1
   },
   "test/request-retry.test.ts": {
     "globalJsonInEffect": 1

@@ -99,7 +99,9 @@ const submissionFor = (loop: LoopName, itemKey: string) =>
 
 const layerWith = (
   github: GitHubPolling["Service"],
-  current: Layer.Layer<CurrentInstance> = fixedInstanceLayer(Effect.runSync(instance)),
+  current: Layer.Layer<CurrentInstance, Schema.SchemaError> = Layer.unwrap(
+    Effect.map(instance, fixedInstanceLayer),
+  ),
 ) =>
   triggerConditionLayer.pipe(
     Layer.provide(Layer.succeed(GitHubPolling, github)),

@@ -1,3 +1,4 @@
+import { EnginePersistenceError } from "@usine/engine/engine";
 import { boardHistory } from "./support/run-reader.ts";
 import { summarizeRun } from "@usine/engine/run-reader";
 import {
@@ -114,18 +115,7 @@ import {
 import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
-import {
-  flow,
-  DateTime,
-  Effect,
-  Layer,
-  Logger,
-  Match,
-  Option,
-  Redacted,
-  Ref,
-  Schema,
-} from "effect";
+import { DateTime, Effect, Layer, Logger, Match, Option, Redacted, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
@@ -610,16 +600,17 @@ const testLayer = (
   });
   const repositoryLabelReader = Layer.succeed(RepositoryLabelProjectionReader)({
     get: () =>
-      Effect.succeedSome(
-        Effect.runSync(
-          Schema.decodeEffect(RepositoryLabelProjection)({
-            repository,
-            labels: ["ready", "ready-for-review", "bug", "documentation"].map((name) => ({
-              name,
-              color: null,
-              description: null,
-            })),
-          }),
+      Schema.decodeEffect(RepositoryLabelProjection)({
+        repository,
+        labels: ["ready", "ready-for-review", "bug", "documentation"].map((name) => ({
+          name,
+          color: null,
+          description: null,
+        })),
+      }).pipe(
+        Effect.asSome,
+        Effect.mapError((cause) =>
+          EnginePersistenceError.make({ operation: "read repository label fixture", cause }),
         ),
       ),
   });
@@ -2793,10 +2784,11 @@ describe("Operator", () => {
         // The approval Event is recorded whole: a deterministic identity for idempotent re-approval
         // and a typed payload.
         assert.strictEqual<string>(recorded.event.id, recorded.event.dedupKey);
-        assert.strictEqual<string>(
-          recorded.event.dedupKey,
-          JSON.stringify(["operator-approval", runId]),
-        );
+        const decodedValue10 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+          "operator-approval",
+          runId,
+        ]);
+        assert.strictEqual<string>(recorded.event.dedupKey, decodedValue10);
         assert.deepStrictEqual(recorded.event.payload, {
           runId,
           decision: "approved",
@@ -2829,21 +2821,21 @@ describe("Operator", () => {
         const overviewReads = yield* Ref.make(0);
         const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         yield* Effect.gen(function* () {
-          const fixtureValue4 = yield* Effect.context<never>();
-          const runFixture = Effect.runSyncWith(fixtureValue4);
-
           const operator = yield* Operator;
           const rejected = (target: RepositoryName, item: number, toLane: string) =>
-            operator
-              .moveBoardItem(
-                runFixture(instance),
-                BoardMove.make({
-                  repository: target,
-                  item: CoreItemNumber.make(item),
-                  toLane: BoardLaneId.make(toLane),
-                }),
-              )
-              .pipe(Effect.flip);
+            Effect.gen(function* () {
+              const decodedValue6 = yield* instance;
+              return yield* operator
+                .moveBoardItem(
+                  decodedValue6,
+                  BoardMove.make({
+                    repository: target,
+                    item: CoreItemNumber.make(item),
+                    toLane: BoardLaneId.make(toLane),
+                  }),
+                )
+                .pipe(Effect.flip);
+            });
           const unknownProject = yield* rejected(
             RepositoryName.make("basaltbytes/elsewhere"),
             31,
@@ -3205,37 +3197,39 @@ describe("Operator", () => {
     assert.throws(() => need(2));
   });
 
-  it("shows an Agent's blocker to the operator as its own failure kind", () => {
-    const encoded = BlockedFailure.make({ message: "The baseline gate fails on main." }).pipe(
-      failureView,
-      flow(Schema.encodeUnknownEffect(FailureView), Effect.runSync),
-    );
-    assert.deepStrictEqual(encoded, {
-      _tag: "BlockedFailure",
-      message: "The baseline gate fails on main.",
-    });
-  });
-
-  it.each([InfraFailure, DefectFailure])(
-    "removes original causes from operator failure schemas: %s",
-    (Failure) => {
-      const secret = "token=super-secret";
-      const view = failureView(
-        Failure.make({
-          message: "The worker connection failed",
-          cause: new Error(secret),
-        }),
-      );
-      const encoded = Effect.runSync(Schema.encodeUnknownEffect(FailureView)(view));
-      const json = JSON.stringify(encoded);
-
+  it.effect("shows an Agent's blocker to the operator as its own failure kind", () =>
+    Effect.gen(function* () {
+      const encoded = yield* BlockedFailure.make({
+        message: "The baseline gate fails on main.",
+      }).pipe(failureView, Schema.encodeUnknownEffect(FailureView));
       assert.deepStrictEqual(encoded, {
-        _tag: Failure === InfraFailure ? "InfraFailure" : "DefectFailure",
-        message: "The worker connection failed",
+        _tag: "BlockedFailure",
+        message: "The baseline gate fails on main.",
       });
-      assert.strictEqual(json.includes("cause"), false);
-      assert.strictEqual(json.includes(secret), false);
-    },
+    }),
+  );
+
+  it.effect.each([InfraFailure, DefectFailure])(
+    "removes original causes from operator failure schemas: %s",
+    (Failure) =>
+      Effect.gen(function* () {
+        const secret = "token=super-secret";
+        const view = failureView(
+          Failure.make({
+            message: "The worker connection failed",
+            cause: new Error(secret),
+          }),
+        );
+        const encoded = yield* Schema.encodeUnknownEffect(FailureView)(view);
+        const json = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(encoded);
+
+        assert.deepStrictEqual(encoded, {
+          _tag: Failure === InfraFailure ? "InfraFailure" : "DefectFailure",
+          message: "The worker connection failed",
+        });
+        assert.strictEqual(json.includes("cause"), false);
+        assert.strictEqual(json.includes(secret), false);
+      }),
   );
 });
 
@@ -3413,9 +3407,6 @@ it.effect("filters cached project lists and refuses actions outside a project bi
 
 it.effect("authorizes historical run actions by current repository ownership", () =>
   Effect.gen(function* () {
-    const fixtureValue5 = yield* Effect.context<never>();
-    const runFixture = Effect.runSyncWith(fixtureValue5);
-
     const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
     const moved = yield* Ref.make<ItemLabelMutation | null>(null);
     const reads = yield* Ref.make(0);
@@ -3425,10 +3416,10 @@ it.effect("authorizes historical run actions by current repository ownership", (
       run: Run.make({ ...snapshot.run, loop: LoopName.make("alpha/review") }),
     });
     const loaded = (owner: "alpha" | "beta" | "removed") =>
-      LoadedInstance.make({
-        ...runFixture(instance),
-        config: runFixture(
-          Schema.decodeEffect(UsineConfig)({
+      Effect.gen(function* () {
+        return LoadedInstance.make({
+          ...(yield* instance),
+          config: yield* Schema.decodeEffect(UsineConfig)({
             version: 2,
             repos: [{ name: repository }, { name: "acme/alpha" }, { name: "acme/beta" }],
             projects: [
@@ -3444,8 +3435,8 @@ it.effect("authorizes historical run actions by current repository ownership", (
               },
             ],
           }),
-        ),
-        loops: [LoopFile.make({ ...loop, name: historical.run.loop })],
+          loops: [LoopFile.make({ ...loop, name: historical.run.loop })],
+        });
       });
     const grants = (project: "alpha" | "beta", role: "operator" | "viewer" = "operator") =>
       RoleBinding.make({
@@ -3488,7 +3479,7 @@ it.effect("authorizes historical run actions by current repository ownership", (
     yield* Effect.gen(function* () {
       const operator = yield* Operator;
       for (const owner of ["alpha", "beta", "removed"] as const) {
-        const current = loaded(owner);
+        const current = yield* loaded(owner);
         for (const project of ["alpha", "beta"] as const) {
           const permissions = grants(project);
           if (owner === project) {
@@ -3534,8 +3525,9 @@ it.effect("authorizes historical run actions by current repository ownership", (
           }
         }
       }
+      const decodedValue5 = yield* loaded("removed");
       yield* operator
-        .cancel(loaded("removed"), runId)
+        .cancel(decodedValue5, runId)
         .pipe(Effect.provideService(RequestPermissions, administratorPermissions));
       assert.deepEqual(actions, [
         "cancel",

@@ -67,7 +67,7 @@ const isSchedulePayload = Schema.is(
 );
 
 const configWith = (repos: ReadonlyArray<{ readonly name: string; readonly tags?: string[] }>) =>
-  Effect.runSync(Schema.decodeEffect(UsineConfig)({ version: 1, repos }));
+  Schema.decodeEffect(UsineConfig)({ version: 1, repos });
 
 const scheduleLoop = (
   config: UsineConfig,
@@ -80,32 +80,34 @@ const scheduleLoop = (
     readonly tz?: string;
   },
 ) =>
-  LoopFile.make({
-    name: LoopName.make(options.name ?? "scheduled-maintenance"),
-    trigger: ScheduleTrigger.make({
-      on: "schedule",
-      if: Source.make(options.expression ?? "true"),
-      cron: Effect.runSync(Schema.decodeEffect(CronExpression)(options.cron)),
-      tz: Effect.runSync(Schema.decodeEffect(TimeZone)(options.tz ?? "UTC")),
-    }),
-    selector:
-      options.selectedTag === undefined
-        ? Option.none()
-        : Option.some(
-            Selector.make({
-              repos: Option.none(),
-              tags: Option.some([
-                config.repos
-                  .flatMap(({ tags }) => tags)
-                  .find((tag) => tag === options.selectedTag) ??
-                  assert.fail("missing selected registry tag"),
-              ]),
-            }),
-          ),
-    approval: "required",
-    step: StepName.make("run"),
-    agent: agent.name,
-    body: PromptTemplate.make(options.body ?? "Run maintenance for {{ repo.name }}."),
+  Effect.gen(function* () {
+    return LoopFile.make({
+      name: LoopName.make(options.name ?? "scheduled-maintenance"),
+      trigger: ScheduleTrigger.make({
+        on: "schedule",
+        if: Source.make(options.expression ?? "true"),
+        cron: yield* Schema.decodeEffect(CronExpression)(options.cron),
+        tz: yield* Schema.decodeEffect(TimeZone)(options.tz ?? "UTC"),
+      }),
+      selector:
+        options.selectedTag === undefined
+          ? Option.none()
+          : Option.some(
+              Selector.make({
+                repos: Option.none(),
+                tags: Option.some([
+                  config.repos
+                    .flatMap(({ tags }) => tags)
+                    .find((tag) => tag === options.selectedTag) ??
+                    assert.fail("missing selected registry tag"),
+                ]),
+              }),
+            ),
+      approval: "required",
+      step: StepName.make("run"),
+      agent: agent.name,
+      body: PromptTemplate.make(options.body ?? "Run maintenance for {{ repo.name }}."),
+    });
   });
 
 const instanceWith = (config: UsineConfig, loops: ReadonlyArray<LoopFile>) =>
@@ -207,8 +209,8 @@ const runtimeLayer = (directory: InstanceDirectory) => {
 describe("ScheduleTriggers", () => {
   it.effect("skips paused schedule Loops and exposes the latest cycle", () =>
     Effect.gen(function* () {
-      const config = configWith([{ name: "basaltbytes/usine" }]);
-      const loop = scheduleLoop(config, { cron: "* * * * *" });
+      const config = yield* configWith([{ name: "basaltbytes/usine" }]);
+      const loop = yield* scheduleLoop(config, { cron: "* * * * *" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       const state = LoopRuntimeState.make({ loop: loop.name, paused: true });
 
@@ -226,18 +228,18 @@ describe("ScheduleTriggers", () => {
 
   it.effect("fans the latest due Tick out once per selected repository in its IANA zone", () =>
     Effect.gen(function* () {
-      const config = configWith([
+      const config = yield* configWith([
         { name: "basaltbytes/one", tags: ["active"] },
         { name: "basaltbytes/two", tags: ["active"] },
         { name: "basaltbytes/idle", tags: ["inactive"] },
       ]);
       const loop = LoopFile.make({
-        ...scheduleLoop(config, {
+        ...(yield* scheduleLoop(config, {
           cron: "0 9 * * *",
           tz: "Europe/Warsaw",
           selectedTag: "active",
           expression: 'item.tick.tz == "Europe/Warsaw" && repo.owner == "basaltbytes"',
-        }),
+        })),
         approval: Source.make('item.tick.tz == "Europe/Warsaw" && repo.name == "basaltbytes/two"'),
       });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
@@ -279,10 +281,11 @@ describe("ScheduleTriggers", () => {
             DateTime.formatIso(submission.event.receivedAt),
             "2026-08-31T08:45:30.000Z",
           );
-          assert.strictEqual(
-            submission.itemKey,
-            JSON.stringify(["github", submission.repository.toLowerCase()]),
-          );
+          const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+            "github",
+            submission.repository.toLowerCase(),
+          ]);
+          assert.strictEqual(submission.itemKey, decodedValue1);
         }
         assert(
           Option.isSome(cycle.nextTickAt) &&
@@ -296,8 +299,8 @@ describe("ScheduleTriggers", () => {
     "includes an exact-boundary Tick and catches up only the latest missed occurrence",
     () =>
       Effect.gen(function* () {
-        const config = configWith([{ name: "basaltbytes/usine" }]);
-        const loop = scheduleLoop(config, { cron: "* * * * *" });
+        const config = yield* configWith([{ name: "basaltbytes/usine" }]);
+        const loop = yield* scheduleLoop(config, { cron: "* * * * *" });
         const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
         yield* TestClock.setTime(Date.parse("2026-08-31T10:00:00.000Z"));
 
@@ -335,8 +338,8 @@ describe("ScheduleTriggers", () => {
 
   it.effect("sleeps to the cron boundary instead of the GitHub poll interval", () =>
     Effect.gen(function* () {
-      const config = configWith([{ name: "basaltbytes/usine" }]);
-      const loop = scheduleLoop(config, { cron: "* * * * *" });
+      const config = yield* configWith([{ name: "basaltbytes/usine" }]);
+      const loop = yield* scheduleLoop(config, { cron: "* * * * *" });
       const instance = instanceWith(config, [loop]);
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       yield* TestClock.setTime(Date.parse("2026-08-31T10:00:30.000Z"));
@@ -386,8 +389,8 @@ describe("ScheduleTriggers", () => {
 
   it.effect("evaluates a schedule Loop that a reload adds without waiting for the sleep", () =>
     Effect.gen(function* () {
-      const config = configWith([{ name: "basaltbytes/usine" }]);
-      const loop = scheduleLoop(config, { cron: "* * * * *" });
+      const config = yield* configWith([{ name: "basaltbytes/usine" }]);
+      const loop = yield* scheduleLoop(config, { cron: "* * * * *" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       yield* TestClock.setTime(Date.parse("2026-08-31T10:00:30.000Z"));
 
@@ -429,8 +432,11 @@ describe("ScheduleTriggers", () => {
 
   it.effect("isolates one selected repository failure from sibling fanout", () =>
     Effect.gen(function* () {
-      const config = configWith([{ name: "basaltbytes/failing" }, { name: "basaltbytes/healthy" }]);
-      const loop = scheduleLoop(config, { cron: "0 0 1 1 *" });
+      const config = yield* configWith([
+        { name: "basaltbytes/failing" },
+        { name: "basaltbytes/healthy" },
+      ]);
+      const loop = yield* scheduleLoop(config, { cron: "0 0 1 1 *" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       yield* TestClock.setTime(Date.parse("2026-08-31T10:00:00.000Z"));
 
@@ -456,13 +462,13 @@ describe("ScheduleTriggers", () => {
 
   it.effect("isolates one loop's prompt rendering failure from sibling schedules", () =>
     Effect.gen(function* () {
-      const config = configWith([{ name: "basaltbytes/usine" }]);
-      const broken = scheduleLoop(config, {
+      const config = yield* configWith([{ name: "basaltbytes/usine" }]);
+      const broken = yield* scheduleLoop(config, {
         cron: "0 0 1 1 *",
         name: "broken-prompt",
         body: "Run {{ item.tick.missing }}.",
       });
-      const healthy = scheduleLoop(config, { cron: "0 0 1 1 *", name: "healthy-prompt" });
+      const healthy = yield* scheduleLoop(config, { cron: "0 0 1 1 *", name: "healthy-prompt" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       const parser = Layer.succeed(ConfigParser)({
         checkLoopDraft: () => Effect.die("unused"),
@@ -506,11 +512,11 @@ describe("ScheduleTriggers", () => {
 
   it.effect("keeps evaluating when a cron minute falls in a DST spring-forward gap", () =>
     Effect.gen(function* () {
-      const config = configWith([{ name: "basaltbytes/usine" }]);
+      const config = yield* configWith([{ name: "basaltbytes/usine" }]);
       // Warsaw skips 02:00-03:00 local on 2026-03-29 (01:00Z), so Cron.prev
       // throws for this instant. The stream must fail only this schedule and
       // keep returning cycles.
-      const loop = scheduleLoop(config, { cron: "30 2 * * *", tz: "Europe/Warsaw" });
+      const loop = yield* scheduleLoop(config, { cron: "30 2 * * *", tz: "Europe/Warsaw" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       yield* TestClock.setTime(Date.parse("2026-03-29T01:30:00.000Z"));
 
@@ -533,9 +539,9 @@ describe("ScheduleTriggers", () => {
 
   it.effect("fires a coarser schedule once, not on every finer-grained cycle", () =>
     Effect.gen(function* () {
-      const config = configWith([{ name: "basaltbytes/usine" }]);
-      const minutely = scheduleLoop(config, { cron: "* * * * *", name: "minutely" });
-      const daily = scheduleLoop(config, { cron: "0 9 * * *", name: "daily" });
+      const config = yield* configWith([{ name: "basaltbytes/usine" }]);
+      const minutely = yield* scheduleLoop(config, { cron: "* * * * *", name: "minutely" });
+      const daily = yield* scheduleLoop(config, { cron: "0 9 * * *", name: "daily" });
       const instance = instanceWith(config, [minutely, daily]);
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       yield* TestClock.setTime(Date.parse("2026-08-31T10:00:00.000Z"));
@@ -562,7 +568,7 @@ describe("ScheduleTriggers", () => {
         // Ticks, as a restart does, so the moved schedule's latest Tick fires.
         const reloaded = instanceWith(config, [
           minutely,
-          scheduleLoop(config, { cron: "30 8 * * *", name: "daily" }),
+          yield* scheduleLoop(config, { cron: "30 8 * * *", name: "daily" }),
         ]);
         yield* TestClock.adjust("60 seconds");
         const third = yield* schedules.tick(reloaded);
@@ -584,8 +590,8 @@ describe("ScheduleTriggers", () => {
         prefix: "usine-schedules-",
       });
       const directory = InstanceDirectory.make(currentDirectory);
-      const config = configWith([{ name: "basaltbytes/usine" }]);
-      const instance = instanceWith(config, [scheduleLoop(config, { cron: "0 0 1 1 *" })]);
+      const config = yield* configWith([{ name: "basaltbytes/usine" }]);
+      const instance = instanceWith(config, [yield* scheduleLoop(config, { cron: "0 0 1 1 *" })]);
 
       const firstScope = yield* Scope.make();
       const firstContext = yield* Scope.provide(Layer.build(runtimeLayer(directory)), firstScope);

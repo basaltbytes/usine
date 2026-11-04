@@ -3,7 +3,7 @@ import { assert, describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { flow, Effect, Layer, Logger, Option, Result, Schema } from "effect";
+import { Effect, Layer, Logger, Option, Result, Schema } from "effect";
 import { InstanceFolder } from "../src/instance-folder.ts";
 import { InstancePath } from "../src/file.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
@@ -255,10 +255,10 @@ describe("ConfigParser", () => {
       });
 
       const encoded = yield* Schema.encodeEffect(UsineConfig)(configured);
-      const reloaded = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        JSON.stringify(encoded),
+      const decodedValue7 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        encoded,
       );
+      const reloaded = yield* parser.parseUsineYaml(InstancePath.make("usine.yaml"), decodedValue7);
       expect(reloaded).toEqual(configured);
 
       const gatewayOf = (lines: ReadonlyArray<string>) => [
@@ -1341,19 +1341,15 @@ describe("InstanceFolder", () => {
       expect(loop).toBeDefined();
       if (loop === undefined) return;
 
-      const repo = flow(Schema.decodeUnknownEffect(ManagedRepo), Effect.runSync);
-      expect(
-        matchesSelector(loop.selector, repo({ name: "basaltbytes/usine", tags: ["active"] })),
-      ).toBe(true);
-      expect(
-        matchesSelector(loop.selector, repo({ name: "basaltbytes/usine", tags: ["dormant"] })),
-      ).toBe(false);
-      expect(
-        matchesSelector(loop.selector, repo({ name: "basaltbytes/other", tags: ["active"] })),
-      ).toBe(false);
-      expect(matchesSelector(Option.none(), repo({ name: "basaltbytes/other", tags: [] }))).toBe(
-        true,
-      );
+      const repo = Schema.decodeUnknownEffect(ManagedRepo);
+      const decodedValue6 = yield* repo({ name: "basaltbytes/usine", tags: ["active"] });
+      expect(matchesSelector(loop.selector, decodedValue6)).toBe(true);
+      const decodedValue5 = yield* repo({ name: "basaltbytes/usine", tags: ["dormant"] });
+      expect(matchesSelector(loop.selector, decodedValue5)).toBe(false);
+      const decodedValue4 = yield* repo({ name: "basaltbytes/other", tags: ["active"] });
+      expect(matchesSelector(loop.selector, decodedValue4)).toBe(false);
+      const decodedValue3 = yield* repo({ name: "basaltbytes/other", tags: [] });
+      expect(matchesSelector(Option.none(), decodedValue3)).toBe(true);
     }).pipe(Effect.provide(instanceFolderLayer)),
   );
 
@@ -1380,9 +1376,11 @@ describe("InstanceFolder", () => {
           warnings: loaded.warnings,
         }),
       ).not.toThrow();
-      const repo = flow(Schema.decodeUnknownEffect(ManagedRepo), Effect.runSync);
-      expect(matchesSelector(loop.selector, repo({ name: "basaltbytes/usine" }))).toBe(true);
-      expect(matchesSelector(loop.selector, repo({ name: "basaltbytes/other" }))).toBe(false);
+      const repo = Schema.decodeUnknownEffect(ManagedRepo);
+      const decodedValue2 = yield* repo({ name: "basaltbytes/usine" });
+      expect(matchesSelector(loop.selector, decodedValue2)).toBe(true);
+      const decodedValue1 = yield* repo({ name: "basaltbytes/other" });
+      expect(matchesSelector(loop.selector, decodedValue1)).toBe(false);
     }).pipe(Effect.provide(Layer.merge(instanceFolderLayer, parserLayer))),
   );
 });

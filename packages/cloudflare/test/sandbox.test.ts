@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "@effect/vitest";
-import { flow, DateTime, Duration, Effect, Option, Redacted, Schema } from "effect";
+import { DateTime, Duration, Effect, Option, Redacted, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { TestClock } from "effect/testing";
 import { ProcessStatus, SandboxSummary } from "../src/api/api.ts";
@@ -27,6 +27,8 @@ const encodeCredentials = (token: string, issued = issuedAt(0)) => ({
   github: token,
   providers: [{ provider: "anthropic", credential: { _tag: "ApiKey", key: "sk-ant-key" } }],
 });
+
+const renewedBody = JSON.stringify(encodeCredentials("ghs_second", issuedAt(1)));
 
 const revocation = (issued: string) => JSON.stringify({ issuedAt: issued, providers: [] });
 
@@ -58,98 +60,118 @@ const served = (allowedHosts?: ReadonlyArray<string>) => {
   return { ...sandbox, call };
 };
 
-const decodeSummary = flow(
-  Schema.decodeUnknownEffect(Schema.toCodecJson(SandboxSummary)),
-  Effect.runSync,
-);
+const decodeSummary = Schema.decodeUnknownEffect(Schema.toCodecJson(SandboxSummary));
 
 describe("sandbox routes", () => {
-  it("starts the container without internet and routes its traffic through the handlers", async () => {
-    const { state, call } = served();
-    const response = await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+  it.live("starts the container without internet and routes its traffic through the handlers", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      const response = yield* Effect.promise(() =>
+        call("PUT", `/v1/sandboxes/${NAME}`, createBody()),
+      );
 
-    expect(response.status).toBe(200);
-    const summary = decodeSummary(await response.json());
-    expect(summary.running).toBe(true);
-    expect(state.started).toEqual([
-      { image: "registry.cloudflare.com/acme/usine@sha256:abc", instanceType: "standard-3" },
-    ]);
-    expect(state.interceptions.map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
-      "GitHub:github.com",
-      "GitHub:api.github.com",
-      "Provider:anthropic.usine.internal",
-      "Denied:openai.usine.internal",
-      "Allowed:registry.npmjs.org",
-    ]);
-    expect(state.recorded.map(({ name }) => name)).toEqual([NAME]);
-    expect(Option.isSome(state.alarm) && state.keepAlives).toBe(1);
-    assert(Option.isSome(state.stored));
-    expect(Option.map(state.stored.value.credentials.github, Redacted.value)).toEqual(
-      Option.some("ghs_first"),
-    );
-  });
+      expect(response.status).toBe(200);
+      const decodedValue15 = yield* Effect.promise(() => response.json());
+      const summary = yield* decodeSummary(decodedValue15);
+      expect(summary.running).toBe(true);
+      expect(state.started).toEqual([
+        { image: "registry.cloudflare.com/acme/usine@sha256:abc", instanceType: "standard-3" },
+      ]);
+      expect(state.interceptions.map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
+        "GitHub:github.com",
+        "GitHub:api.github.com",
+        "Provider:anthropic.usine.internal",
+        "Denied:openai.usine.internal",
+        "Allowed:registry.npmjs.org",
+      ]);
+      expect(state.recorded.map(({ name }) => name)).toEqual([NAME]);
+      expect(Option.isSome(state.alarm) && state.keepAlives).toBe(1);
+      assert(Option.isSome(state.stored));
+      expect(Option.map(state.stored.value.credentials.github, Redacted.value)).toEqual(
+        Option.some("ghs_first"),
+      );
+    }),
+  );
 
-  it("returns the running sandbox when the same Attempt asks again, and refuses another Attempt", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    const again = await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    const other = await call("PUT", `/v1/sandboxes/${NAME}`, createBody("run-2/execute/1"));
+  it.live(
+    "returns the running sandbox when the same Attempt asks again, and refuses another Attempt",
+    () =>
+      Effect.gen(function* () {
+        const { state, call } = served();
+        yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+        const again = yield* Effect.promise(() =>
+          call("PUT", `/v1/sandboxes/${NAME}`, createBody()),
+        );
+        const other = yield* Effect.promise(() =>
+          call("PUT", `/v1/sandboxes/${NAME}`, createBody("run-2/execute/1")),
+        );
 
-    expect(again.status).toBe(200);
-    expect(state.started).toHaveLength(1);
-    expect(other.status).toBe(409);
-    expect(await other.json()).toMatchObject({ _tag: "SandboxConflict", attempt: ATTEMPT });
-  });
+        expect(again.status).toBe(200);
+        expect(state.started).toHaveLength(1);
+        expect(other.status).toBe(409);
+        const decodedValue14 = yield* Effect.promise(() => other.json());
+        expect(decodedValue14).toMatchObject({
+          _tag: "SandboxConflict",
+          attempt: ATTEMPT,
+        });
+      }),
+  );
 
-  it("refuses an image the Worker doesn't have and a body with unknown keys", async () => {
-    const { state, call } = served();
-    const missing = await call(
-      "PUT",
-      `/v1/sandboxes/${NAME}`,
-      createBody().replace('"image":"usine"', '"image":"other"'),
-    );
-    const extra = await call(
-      "PUT",
-      `/v1/sandboxes/${NAME}`,
-      createBody().replace('"owner"', '"secret":"x","owner"'),
-    );
+  it.live("refuses an image the Worker doesn't have and a body with unknown keys", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      const missing = yield* Effect.promise(() =>
+        call(
+          "PUT",
+          `/v1/sandboxes/${NAME}`,
+          createBody().replace('"image":"usine"', '"image":"other"'),
+        ),
+      );
+      const extra = yield* Effect.promise(() =>
+        call(
+          "PUT",
+          `/v1/sandboxes/${NAME}`,
+          createBody().replace('"owner"', '"secret":"x","owner"'),
+        ),
+      );
 
-    expect(missing.status).toBe(422);
-    expect(await missing.json()).toMatchObject({ _tag: "ImageNotFound", images: ["usine"] });
-    expect(extra.status).toBe(400);
-    expect(state.started).toHaveLength(0);
-  });
+      expect(missing.status).toBe(422);
+      const decodedValue13 = yield* Effect.promise(() => missing.json());
+      expect(decodedValue13).toMatchObject({
+        _tag: "ImageNotFound",
+        images: ["usine"],
+      });
+      expect(extra.status).toBe(400);
+      expect(state.started).toHaveLength(0);
+    }),
+  );
 
-  it("replaces the handlers' credentials on renewal and extends the lease", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    assert(Option.isSome(state.stored));
-    const firstLease = state.stored.value.leaseUntil;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    const renewed = await call(
-      "PUT",
-      `/v1/sandboxes/${NAME}/credentials`,
-      JSON.stringify(encodeCredentials("ghs_second", issuedAt(1))),
-    );
+  it.live("replaces the handlers' credentials on renewal and extends the lease", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      assert(Option.isSome(state.stored));
+      const firstLease = state.stored.value.leaseUntil;
+      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 5)));
+      const renewed = yield* Effect.promise(() =>
+        call("PUT", `/v1/sandboxes/${NAME}/credentials`, renewedBody),
+      );
 
-    expect(renewed.status).toBe(200);
-    const github = state.interceptions.filter(({ _tag }) => _tag === "GitHub");
-    expect(
-      github.map(
-        (interception) => interception._tag === "GitHub" && Redacted.value(interception.token),
-      ),
-    ).toEqual(["ghs_first", "ghs_first", "ghs_second", "ghs_second"]);
-    assert(Option.isSome(state.stored));
-    expect(DateTime.isGreaterThan(state.stored.value.leaseUntil, firstLease)).toBe(true);
-  });
+      expect(renewed.status).toBe(200);
+      const github = state.interceptions.filter(({ _tag }) => _tag === "GitHub");
+      expect(
+        github.map(
+          (interception) => interception._tag === "GitHub" && Redacted.value(interception.token),
+        ),
+      ).toEqual(["ghs_first", "ghs_first", "ghs_second", "ghs_second"]);
+      assert(Option.isSome(state.stored));
+      expect(DateTime.isGreaterThan(state.stored.value.leaseUntil, firstLease)).toBe(true);
+    }),
+  );
 
   it.each([
     ["a reattachment's credentials", "", createBody()],
-    [
-      "renewed credentials",
-      "/credentials",
-      JSON.stringify(encodeCredentials("ghs_second", issuedAt(1))),
-    ],
+    ["renewed credentials", "/credentials", renewedBody],
   ])("keeps a hold that completes while it registers %s", async (_, path, body) => {
     const { state, call } = served();
     await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
@@ -173,45 +195,50 @@ describe("sandbox routes", () => {
     expect(state.stored.value.held).toBe(true);
   });
 
-  it("keeps a revocation that arrives while an earlier renewal registers its handlers", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    let registering: () => void = () => undefined;
-    const reached = new Promise<void>((resolve) => (registering = resolve));
-    let register: () => void = () => undefined;
-    const registered = new Promise<void>((resolve) => (register = resolve));
-    state.beforeIntercept = () => {
-      state.beforeIntercept = () => Effect.void;
-      registering();
-      return Effect.promise(() => registered);
-    };
-    const renewal = call(
-      "PUT",
-      `/v1/sandboxes/${NAME}/credentials`,
-      JSON.stringify(encodeCredentials("ghs_second", issuedAt(1))),
-    );
-    await reached;
-    // The executor stopped waiting for the renewal and revokes the credentials.
-    const revoked = call("PUT", `/v1/sandboxes/${NAME}/credentials`, revocation(issuedAt(2)));
-    await Promise.race([revoked, new Promise((resolve) => setTimeout(resolve, 50))]);
-    register();
-    const statuses = (await Promise.all([renewal, revoked])).map(({ status }) => status);
+  it.live("keeps a revocation that arrives while an earlier renewal registers its handlers", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      let registering: () => void = () => undefined;
+      const reached = new Promise<void>((resolve) => (registering = resolve));
+      let register: () => void = () => undefined;
+      const registered = new Promise<void>((resolve) => (register = resolve));
+      state.beforeIntercept = () => {
+        state.beforeIntercept = () => Effect.void;
+        registering();
+        return Effect.promise(() => registered);
+      };
+      const decodedValue16 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        encodeCredentials("ghs_second", issuedAt(1)),
+      );
+      const renewal = call("PUT", `/v1/sandboxes/${NAME}/credentials`, decodedValue16);
+      yield* Effect.promise(() => reached);
+      // The executor stopped waiting for the renewal and revokes the credentials.
+      const revoked = call("PUT", `/v1/sandboxes/${NAME}/credentials`, revocation(issuedAt(2)));
+      yield* Effect.promise(() =>
+        Promise.race([revoked, new Promise((resolve) => setTimeout(resolve, 50))]),
+      );
+      register();
+      const statuses = (yield* Effect.promise(() => Promise.all([renewal, revoked]))).map(
+        ({ status }) => status,
+      );
 
-    expect(statuses).toEqual([200, 200]);
-    assert(Option.isSome(state.stored));
-    expect(Option.isNone(state.stored.value.credentials.github)).toBe(true);
-    expect(state.stored.value.credentials.providers).toEqual([]);
-    expect(state.interceptions.slice(-5).map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
-      "Denied:github.com",
-      "Denied:api.github.com",
-      "Denied:anthropic.usine.internal",
-      "Denied:openai.usine.internal",
-      "Allowed:registry.npmjs.org",
-    ]);
-  });
+      expect(statuses).toEqual([200, 200]);
+      assert(Option.isSome(state.stored));
+      expect(Option.isNone(state.stored.value.credentials.github)).toBe(true);
+      expect(state.stored.value.credentials.providers).toEqual([]);
+      expect(state.interceptions.slice(-5).map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
+        "Denied:github.com",
+        "Denied:api.github.com",
+        "Denied:anthropic.usine.internal",
+        "Denied:openai.usine.internal",
+        "Allowed:registry.npmjs.org",
+      ]);
+    }),
+  );
 
   it.each([
-    ["renewal", "/credentials", JSON.stringify(encodeCredentials("ghs_second", issuedAt(1)))],
+    ["renewal", "/credentials", renewedBody],
     ["reattachment", "", createBody(ATTEMPT, issuedAt(1))],
   ])(
     "refuses a %s issued before a revocation that reached the sandbox first",
@@ -240,113 +267,156 @@ describe("sandbox routes", () => {
     },
   );
 
-  it("refuses to renew the credentials of a sandbox whose container stopped", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    state.running = false;
-    const response = await call(
-      "PUT",
-      `/v1/sandboxes/${NAME}/credentials`,
-      JSON.stringify(encodeCredentials("ghs_second", issuedAt(1))),
-    );
+  it.live("refuses to renew the credentials of a sandbox whose container stopped", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      state.running = false;
+      const response = yield* Effect.promise(() =>
+        call("PUT", `/v1/sandboxes/${NAME}/credentials`, renewedBody),
+      );
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ _tag: "ContainerUnavailable" });
-  });
+      expect(response.status).toBe(503);
+      const decodedValue12 = yield* Effect.promise(() => response.json());
+      expect(decodedValue12).toMatchObject({
+        _tag: "ContainerUnavailable",
+      });
+    }),
+  );
 
-  it("stops the sandbox's commands through the process files", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    state.run = () => finishedProcess("2\n");
-    const response = await call("POST", `/v1/sandboxes/${NAME}/stop`);
+  it.live("stops the sandbox's commands through the process files", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      state.run = () => finishedProcess("2\n");
+      const response = yield* Effect.promise(() => call("POST", `/v1/sandboxes/${NAME}/stop`));
 
-    expect(await response.json()).toEqual({ stopped: 2 });
-    expect(state.execs).toEqual([stopCommand]);
-  });
+      const decodedValue11 = yield* Effect.promise(() => response.json());
+      expect(decodedValue11).toEqual({ stopped: 2 });
+      expect(state.execs).toEqual([stopCommand]);
+    }),
+  );
 
-  it("fails the stop when a process survives the stop script", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    state.run = () => finishedProcess("", 1);
-    const response = await call("POST", `/v1/sandboxes/${NAME}/stop`);
+  it.live("fails the stop when a process survives the stop script", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      state.run = () => finishedProcess("", 1);
+      const response = yield* Effect.promise(() => call("POST", `/v1/sandboxes/${NAME}/stop`));
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ _tag: "ContainerUnavailable" });
-  });
+      expect(response.status).toBe(503);
+      const decodedValue10 = yield* Effect.promise(() => response.json());
+      expect(decodedValue10).toMatchObject({
+        _tag: "ContainerUnavailable",
+      });
+    }),
+  );
 
-  it("destroys the container, its storage, and its registry entry", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    const destroyed = await call("DELETE", `/v1/sandboxes/${NAME}`);
-    const again = await call("DELETE", `/v1/sandboxes/${NAME}`);
-    const missing = await call("GET", `/v1/sandboxes/${NAME}`);
+  it.live("destroys the container, its storage, and its registry entry", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      const destroyed = yield* Effect.promise(() => call("DELETE", `/v1/sandboxes/${NAME}`));
+      const again = yield* Effect.promise(() => call("DELETE", `/v1/sandboxes/${NAME}`));
+      const missing = yield* Effect.promise(() => call("GET", `/v1/sandboxes/${NAME}`));
 
-    expect(await destroyed.json()).toEqual({ destroyed: true });
-    expect(await again.json()).toEqual({ destroyed: false });
-    expect(state.destroyed).toBe(1);
-    expect(Option.isNone(state.stored) && Option.isNone(state.alarm)).toBe(true);
-    expect(state.forgotten).toEqual([NAME, NAME]);
-    expect(missing.status).toBe(404);
-  });
+      const decodedValue9 = yield* Effect.promise(() => destroyed.json());
+      expect(decodedValue9).toEqual({ destroyed: true });
+      const decodedValue8 = yield* Effect.promise(() => again.json());
+      expect(decodedValue8).toEqual({ destroyed: false });
+      expect(state.destroyed).toBe(1);
+      expect(Option.isNone(state.stored) && Option.isNone(state.alarm)).toBe(true);
+      expect(state.forgotten).toEqual([NAME, NAME]);
+      expect(missing.status).toBe(404);
+    }),
+  );
 
-  it("reads a command's state and output size from its process files", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    const process = "0123456789abcdef0123456789abcdef";
-    const files = processFiles(
-      await Effect.runPromise(Schema.decodeEffect(ProcessStatus.fields.process)(process)),
-    );
-    state.files.set(files.pid, text("4242"));
-    state.files.set(files.stdout, text("hello\n"));
-    const running = await call("GET", `/v1/sandboxes/${NAME}/processes/${process}`);
-    state.files.set(files.exit, text("7"));
-    const exited = await call("GET", `/v1/sandboxes/${NAME}/processes/${process}`);
-    const unknown = await call("GET", `/v1/sandboxes/${NAME}/processes/${"f".repeat(32)}`);
+  it.live("reads a command's state and output size from its process files", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      const process = "0123456789abcdef0123456789abcdef";
+      const decodedValue7 = yield* Schema.decodeEffect(ProcessStatus.fields.process)(process);
+      const files = processFiles(decodedValue7);
+      state.files.set(files.pid, text("4242"));
+      state.files.set(files.stdout, text("hello\n"));
+      const running = yield* Effect.promise(() =>
+        call("GET", `/v1/sandboxes/${NAME}/processes/${process}`),
+      );
+      state.files.set(files.exit, text("7"));
+      const exited = yield* Effect.promise(() =>
+        call("GET", `/v1/sandboxes/${NAME}/processes/${process}`),
+      );
+      const unknown = yield* Effect.promise(() =>
+        call("GET", `/v1/sandboxes/${NAME}/processes/${"f".repeat(32)}`),
+      );
 
-    expect(await running.json()).toEqual({
-      process,
-      pid: 4242,
-      state: { _tag: "Running" },
-      stdoutBytes: 6,
-      stderrBytes: 0,
-    });
-    expect(await exited.json()).toMatchObject({ state: { _tag: "Exited", exitCode: 7 } });
-    expect(unknown.status).toBe(404);
-  });
+      const decodedValue6 = yield* Effect.promise(() => running.json());
+      expect(decodedValue6).toEqual({
+        process,
+        pid: 4242,
+        state: { _tag: "Running" },
+        stdoutBytes: 6,
+        stderrBytes: 0,
+      });
+      const decodedValue5 = yield* Effect.promise(() => exited.json());
+      expect(decodedValue5).toMatchObject({
+        state: { _tag: "Exited", exitCode: 7 },
+      });
+      expect(unknown.status).toBe(404);
+    }),
+  );
 
-  it("holds a sandbox past its lease until it's destroyed, through a reattachment", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    const held = await call("POST", `/v1/sandboxes/${NAME}/hold`);
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+  it.live("holds a sandbox past its lease until it's destroyed, through a reattachment", () =>
+    Effect.gen(function* () {
+      const { state, call } = served();
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+      const held = yield* Effect.promise(() => call("POST", `/v1/sandboxes/${NAME}/hold`));
+      yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
 
-    expect(held.status).toBe(200);
-    expect(decodeSummary(await held.json()).held).toBe(true);
-    assert(Option.isSome(state.stored));
-    expect(state.stored.value.held).toBe(true);
+      expect(held.status).toBe(200);
+      const decodedValue4 = yield* Effect.promise(() => held.json());
+      expect((yield* decodeSummary(decodedValue4)).held).toBe(true);
+      assert(Option.isSome(state.stored));
+      expect(state.stored.value.held).toBe(true);
 
-    await call("DELETE", `/v1/sandboxes/${NAME}`);
-    const gone = await call("POST", `/v1/sandboxes/${NAME}/hold`);
-    expect(gone.status).toBe(404);
-  });
+      yield* Effect.promise(() => call("DELETE", `/v1/sandboxes/${NAME}`));
+      const gone = yield* Effect.promise(() => call("POST", `/v1/sandboxes/${NAME}/hold`));
+      expect(gone.status).toBe(404);
+    }),
+  );
 
-  it("reports that the platform is draining the container once its init wrote the marker", async () => {
-    const { state, call } = served();
-    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
-    const before = decodeSummary(await (await call("GET", `/v1/sandboxes/${NAME}`)).json());
-    state.files.set(DRAIN_MARKER, text("2026-10-25T20:00:00Z\n"));
-    const after = decodeSummary(await (await call("GET", `/v1/sandboxes/${NAME}`)).json());
+  it.live(
+    "reports that the platform is draining the container once its init wrote the marker",
+    () =>
+      Effect.gen(function* () {
+        const { state, call } = served();
+        yield* Effect.promise(() => call("PUT", `/v1/sandboxes/${NAME}`, createBody()));
+        const beforeResponse = yield* Effect.promise(() => call("GET", `/v1/sandboxes/${NAME}`));
+        const decodedValue3 = yield* Effect.promise(() => beforeResponse.json());
+        const before = yield* decodeSummary(decodedValue3);
+        state.files.set(DRAIN_MARKER, text("2026-10-25T20:00:00Z\n"));
+        const afterResponse = yield* Effect.promise(() => call("GET", `/v1/sandboxes/${NAME}`));
+        const decodedValue2 = yield* Effect.promise(() => afterResponse.json());
+        const after = yield* decodeSummary(decodedValue2);
 
-    expect(before.draining).toBe(false);
-    expect(after.draining).toBe(true);
-  });
+        expect(before.draining).toBe(false);
+        expect(after.draining).toBe(true);
+      }),
+  );
 
-  it("reports the protocol and the Worker's image names", async () => {
-    const { call } = served();
-    const response = await call("GET", "/v1/health");
+  it.live("reports the protocol and the Worker's image names", () =>
+    Effect.gen(function* () {
+      const { call } = served();
+      const response = yield* Effect.promise(() => call("GET", "/v1/health"));
 
-    expect(await response.json()).toEqual({ protocol: 1, images: ["usine"] });
-  });
+      const decodedValue1 = yield* Effect.promise(() => response.json());
+      expect(decodedValue1).toEqual({
+        protocol: 1,
+        images: ["usine"],
+      });
+    }),
+  );
 });
 
 describe("sandbox keepalive alarm", () => {

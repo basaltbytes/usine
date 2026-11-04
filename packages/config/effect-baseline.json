@@ -16,8 +16,5 @@
   },
   "src/project/operations.ts": {
     "globalJson": 1
-  },
-  "test/config.test.ts": {
-    "globalJsonInEffect": 1
   }
 }

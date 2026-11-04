@@ -655,14 +655,14 @@ describe("Operator desk", () => {
       }).pipe(Effect.provide(deskLayer(polled))),
   );
 
-  it.effect("keeps the ten newest authorized outcomes beyond a full page of hidden runs", () => {
-    const hidden = RepositoryName.make("acme/hidden");
-    const second = RepositoryName.make("acme/second");
-    const loaded = LoadedInstance.make({
-      ...Effect.runSync(instance),
-      loops: [],
-      config: Effect.runSync(
-        Schema.decodeEffect(UsineConfig)({
+  it.effect("keeps the ten newest authorized outcomes beyond a full page of hidden runs", () =>
+    Effect.gen(function* () {
+      const hidden = RepositoryName.make("acme/hidden");
+      const second = RepositoryName.make("acme/second");
+      const loaded = LoadedInstance.make({
+        ...(yield* instance),
+        loops: [],
+        config: yield* Schema.decodeEffect(UsineConfig)({
           version: 2,
           repos: [{ name: repository }, { name: second }, { name: hidden }],
           projects: [
@@ -670,45 +670,45 @@ describe("Operator desk", () => {
             { id: "hidden", name: "Hidden", repositories: [hidden] },
           ],
         }),
-      ),
-    });
-    const closed = Array.from({ length: 122 }, (_, index) => {
-      const repo = index < 110 ? hidden : index % 2 === 0 ? repository : second;
-      return RunSummary.make({
-        ...summary(`recent-${index}`, index + 100, RunState.Succeeded.make(), "12:00:00"),
-        repository: repo,
-        itemKey: gitHubItemKey(repo, index + 100),
-        closedAt: Option.some(DateTime.add(time("13:00:00"), { seconds: -index })),
       });
-    });
-    return Effect.gen(function* () {
-      const observation = yield* OperatorObservation;
-      for (const role of ["viewer", "operator", "maintainer"] as const) {
-        const grants = RoleBinding.make({
-          name: role,
-          member: GitHubUserId.make(1),
-          role,
-          scope: ProjectScope.make({ project: ProjectId.make("visible") }),
-        }).permissions;
-        const desk = yield* observation
+      const closed = Array.from({ length: 122 }, (_, index) => {
+        const repo = index < 110 ? hidden : index % 2 === 0 ? repository : second;
+        return RunSummary.make({
+          ...summary(`recent-${index}`, index + 100, RunState.Succeeded.make(), "12:00:00"),
+          repository: repo,
+          itemKey: gitHubItemKey(repo, index + 100),
+          closedAt: Option.some(DateTime.add(time("13:00:00"), { seconds: -index })),
+        });
+      });
+      return yield* Effect.gen(function* () {
+        const observation = yield* OperatorObservation;
+        for (const role of ["viewer", "operator", "maintainer"] as const) {
+          const grants = RoleBinding.make({
+            name: role,
+            member: GitHubUserId.make(1),
+            role,
+            scope: ProjectScope.make({ project: ProjectId.make("visible") }),
+          }).permissions;
+          const desk = yield* observation
+            .desk(loaded)
+            .pipe(Effect.provideService(RequestPermissions, grants));
+          assert.deepStrictEqual(
+            desk.lastOutcomes.map(({ run }) => run.id),
+            closed.slice(110, 120).map(({ run }) => run.id),
+          );
+        }
+        const empty = yield* observation
           .desk(loaded)
-          .pipe(Effect.provideService(RequestPermissions, grants));
+          .pipe(Effect.provideService(RequestPermissions, []));
+        assert.deepStrictEqual(empty.lastOutcomes, []);
+        const admin = yield* observation.desk(loaded);
         assert.deepStrictEqual(
-          desk.lastOutcomes.map(({ run }) => run.id),
-          closed.slice(110, 120).map(({ run }) => run.id),
+          admin.lastOutcomes.map(({ run }) => run.id),
+          closed.slice(0, 10).map(({ run }) => run.id),
         );
-      }
-      const empty = yield* observation
-        .desk(loaded)
-        .pipe(Effect.provideService(RequestPermissions, []));
-      assert.deepStrictEqual(empty.lastOutcomes, []);
-      const admin = yield* observation.desk(loaded);
-      assert.deepStrictEqual(
-        admin.lastOutcomes.map(({ run }) => run.id),
-        closed.slice(0, 10).map(({ run }) => run.id),
-      );
-    }).pipe(Effect.provide(deskLayer(polled, { runs: closed, unconfirmed: [] })));
-  });
+      }).pipe(Effect.provide(deskLayer(polled, { runs: closed, unconfirmed: [] })));
+    }),
+  );
 
   it.effect(
     "reports each Worker's slots and last preflight, and when each repository was polled",

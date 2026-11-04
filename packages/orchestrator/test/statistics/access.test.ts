@@ -54,9 +54,6 @@ const summary = Effect.gen(function* () {
 
 it.effect("isolates project statistics from cached admin results and hides worker capacity", () =>
   Effect.gen(function* () {
-    const fixtureValue1 = yield* Effect.context<never>();
-    const runFixture = Effect.runSyncWith(fixtureValue1);
-
     const hidden = RepositoryName.make("acme/hidden");
     const decodedValue2 = yield* Schema.decodeEffect(UsineConfig)({
       version: 2,
@@ -88,14 +85,15 @@ it.effect("isolates project statistics from cached admin results and hides worke
       role: "viewer",
       scope: ProjectScope.make({ project: ProjectId.make("alpha") }),
     }).permissions;
+    const fixtureSummary = yield* summary;
     const reader = Layer.mock(RunReader)({
       closedSince: () =>
         Effect.succeed([
-          runFixture(summary),
+          fixtureSummary,
           RunSummary.make({
-            ...runFixture(summary),
+            ...fixtureSummary,
             repository: hidden,
-            run: Run.make({ ...runFixture(summary).run, id: RunId.make("hidden-run") }),
+            run: Run.make({ ...fixtureSummary.run, id: RunId.make("hidden-run") }),
           }),
         ]),
       list: () => Effect.succeed([]),

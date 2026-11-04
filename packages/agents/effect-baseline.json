@@ -68,8 +68,7 @@
   },
   "test/preflight.test.ts": {
     "asyncFunction": 5,
-    "globalJson": 3,
-    "globalJsonInEffect": 1,
+    "globalJson": 2,
     "nodeBuiltinImport": 2
   }
 }

@@ -5,9 +5,9 @@ import { sshWorkerAddressesOf } from "../src/ssh.ts";
 
 it.effect(
   "resolves Boat OAuth variables without LLM API keys and reports a missing secret by variable name",
-  () => {
-    const config = Effect.runSync(
-      Schema.decodeEffect(UsineConfig)({
+  () =>
+    Effect.gen(function* () {
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [],
         workers: [
@@ -34,13 +34,11 @@ it.effect(
             },
           },
         ],
-      }),
-    );
-    const resolve = (env: Record<string, string>) =>
-      sshWorkerAddressesOf(config).pipe(
-        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
-      );
-    return Effect.gen(function* () {
+      });
+      const resolve = (env: Record<string, string>) =>
+        sshWorkerAddressesOf(config).pipe(
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+        );
       const env = { GATEWAY_TOKEN: "admin", BOAT_TOKEN: "boat", TS_CLIENT: "client" };
       const missing = yield* resolve(env).pipe(Effect.flip);
       assert.include(missing.message, "TS_SECRET");
@@ -55,7 +53,9 @@ it.effect(
       assert.isTrue(Option.isNone(provisioner.apiKeys.openai));
       assert(Option.isSome(provisioner.tailnet));
       assert.strictEqual(Redacted.value(provisioner.tailnet.value.clientSecret), "client-secret");
-      assert.notInclude(JSON.stringify(worker), "client-secret");
-    });
-  },
+      const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        worker,
+      );
+      assert.notInclude(decodedValue1, "client-secret");
+    }),
 );

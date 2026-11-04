@@ -642,9 +642,6 @@ describe("Board projection", () => {
 
   it.effect("keeps proposed label lanes read-only and preserves descriptive labels", () =>
     Effect.gen(function* () {
-      const fixtureValue1 = yield* Effect.context<never>();
-      const runFixture = Effect.runSyncWith(fixtureValue1);
-
       const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
@@ -658,15 +655,12 @@ describe("Board projection", () => {
       assert(target !== undefined);
       assert(board.lanes.every((lane) => lane._tag === "ReadOnlyBoardLane"));
       assert.deepStrictEqual(board.lanes.flatMap(({ items }) => items)[0]?.labels, labels);
-      assert.throws(() =>
-        runFixture(
-          Schema.decodeUnknownEffect(WritableBoardLaneView)({
-            ...target,
-            _tag: "WritableBoardLane",
-            labels: [review],
-          }),
-        ),
-      );
+      const failure = yield* Schema.decodeUnknownEffect(WritableBoardLaneView)({
+        ...target,
+        _tag: "WritableBoardLane",
+        labels: [review],
+      }).pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "SchemaError");
     }),
   );
 });
@@ -854,10 +848,15 @@ it.effect("matches a project's label lane by name in both repositories", () =>
     });
     const views: Array<ProjectView> = [];
     for (const managed of boardRepositories(config)) {
+      const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+        "github",
+        managed.name,
+        item.number,
+      ]);
       const projection = ItemProjection.make({
         ...item,
         repository: managed.name,
-        itemKey: ItemKey.make(JSON.stringify(["github", managed.name, item.number])),
+        itemKey: ItemKey.make(decodedValue1),
       });
       const board = yield* projectBoard(managed, [], [projection], []);
       assert.strictEqual(board.lanes[0]?.name, "Ready");

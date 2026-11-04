@@ -14,15 +14,14 @@ import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts"
 import packageJson from "../package.json" with { type: "json" };
 
 /** The Claude Code version that the installed Claude Agent SDK bundles. */
-const { claudeCodeVersion } = Effect.runSync(
-  Schema.decodeEffect(Schema.fromJsonString(Schema.Struct({ claudeCodeVersion: Schema.String })))(
-    readFileSync(
-      new URL("../node_modules/@anthropic-ai/claude-agent-sdk/package.json", import.meta.url),
-      "utf8",
-    ),
+const claudeVersion = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Struct({ claudeCodeVersion: Schema.String })),
+)(
+  readFileSync(
+    new URL("../node_modules/@anthropic-ai/claude-agent-sdk/package.json", import.meta.url),
+    "utf8",
   ),
 );
-const claudeVersionOutput = `${claudeCodeVersion} (Claude Code)`;
 
 const brain = (harness: BrainSpec["harness"]) =>
   BrainSpec.make({ harness, model: ModelId.make("provider/model"), effort: "low" });
@@ -69,6 +68,18 @@ const commands = (
           getOutputFd: () => Stream.empty,
           unref: Effect.succeed(Effect.void),
         });
+      }),
+    ),
+  );
+
+const claudeCommands = (
+  responses: Readonly<Record<string, { readonly stdout: string; readonly exitCode: number }>>,
+) =>
+  Layer.unwrap(
+    Effect.map(claudeVersion, ({ claudeCodeVersion }) =>
+      commands({
+        "claude --version": { stdout: `${claudeCodeVersion} (Claude Code)`, exitCode: 0 },
+        ...responses,
       }),
     ),
   );
@@ -129,11 +140,13 @@ describe("worker harness readiness", () => {
     assert.deepStrictEqual(pins, [CODEX_CLI_VERSION]);
   });
 
-  it("pins the Claude Agent SDK's Claude Code version in the Hetzner worker image", () => {
-    assert.deepStrictEqual(cloudInitPins(/@anthropic-ai\/claude-code@(\S+)/gu), [
-      claudeCodeVersion,
-    ]);
-  });
+  it.effect("pins the Claude Agent SDK's Claude Code version in the Hetzner worker image", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(cloudInitPins(/@anthropic-ai\/claude-code@(\S+)/gu), [
+        (yield* claudeVersion).claudeCodeVersion,
+      ]);
+    }),
+  );
 
   // turbo.json lists the Dockerfile as an input too.
   const argument = (name: string) =>
@@ -190,7 +203,11 @@ describe("worker harness readiness", () => {
           assert(matchesError);
           assert.strictEqual(error.capability, result.capability);
           assert.strictEqual(server.opened(), 0);
-          assert(!JSON.stringify(error).includes("credential-shaped"));
+          assert(
+            !(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(error)).includes(
+              "credential-shaped",
+            ),
+          );
         }).pipe(
           Effect.provide(
             commands({ [codexVersionCommand]: result }).pipe(
@@ -295,8 +312,7 @@ describe("worker harness readiness", () => {
           assert.strictEqual(server.opened(), 0);
         }).pipe(
           Effect.provide(
-            commands({
-              "claude --version": { stdout: claudeVersionOutput, exitCode: 0 },
+            claudeCommands({
               "claude auth status --json": {
                 stdout: JSON.stringify(status.auth),
                 exitCode: status.exitCode,
@@ -329,8 +345,7 @@ describe("worker harness readiness", () => {
           );
         }).pipe(
           Effect.provide(
-            commands({
-              "claude --version": { stdout: claudeVersionOutput, exitCode: 0 },
+            claudeCommands({
               "claude auth status --json": status,
             }).pipe(
               Layer.provideMerge(account(Effect.succeed(null)).layer),
@@ -412,26 +427,31 @@ describe("worker harness readiness", () => {
 
   it.effect("checks Claude on a remote host through one SSH command per probe", () =>
     Effect.gen(function* () {
-      const available = yield* verifyHarness(brain("claude"), remote, {});
-      assert.deepStrictEqual(available, HarnessReady.make({ harness: "claude" }));
-    }).pipe(
-      Effect.provide(
-        commands({
-          [overSsh("exec 'claude' '--version'")]: { stdout: claudeVersionOutput, exitCode: 0 },
-          [overSsh("exec 'claude' 'auth' 'status' '--json'")]: {
-            stdout: JSON.stringify({
-              loggedIn: true,
-              authMethod: "claude.ai",
-              apiProvider: "firstParty",
-            }),
-            exitCode: 0,
-          },
-        }).pipe(
-          Layer.provideMerge(account(Effect.succeed(null)).layer),
-          Layer.provideMerge(unusedPi),
+      return yield* Effect.gen(function* () {
+        const available = yield* verifyHarness(brain("claude"), remote, {});
+        assert.deepStrictEqual(available, HarnessReady.make({ harness: "claude" }));
+      }).pipe(
+        Effect.provide(
+          commands({
+            [overSsh("exec 'claude' '--version'")]: {
+              stdout: `${(yield* claudeVersion).claudeCodeVersion} (Claude Code)`,
+              exitCode: 0,
+            },
+            [overSsh("exec 'claude' 'auth' 'status' '--json'")]: {
+              stdout: yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+                loggedIn: true,
+                authMethod: "claude.ai",
+                apiProvider: "firstParty",
+              }),
+              exitCode: 0,
+            },
+          }).pipe(
+            Layer.provideMerge(account(Effect.succeed(null)).layer),
+            Layer.provideMerge(unusedPi),
+          ),
         ),
-      ),
-    ),
+      );
+    }),
   );
 
   it.effect(

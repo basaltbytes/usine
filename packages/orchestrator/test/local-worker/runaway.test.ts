@@ -76,54 +76,57 @@ const freshExecution = (runId: RunId, attemptId: AttemptId) => {
 describe("local worker runaway guard", () => {
   it.live(
     "stops the parent task when the token ceiling trips instead of leaving it live",
-    () => {
-      const storage = new StubStorage();
-      const spender: StubParent = ({ emit, session }) =>
-        emit(
-          AttemptChannel.SessionEvent.make({
-            event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(150) }),
+    () =>
+      Effect.gen(function* () {
+        const storage = new StubStorage();
+        const spender: StubParent = ({ emit, session }) =>
+          emit(
+            AttemptChannel.SessionEvent.make({
+              event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(150) }),
+            }),
+          ).pipe(Effect.andThen(Effect.never));
+        const fixtureConfig = yield* config;
+        const ceiling = UsineConfig.make({
+          ...fixtureConfig,
+          settings: Settings.make({
+            ...fixtureConfig.settings,
+            maxAttemptTokens: Option.some(100),
           }),
-        ).pipe(Effect.andThen(Effect.never));
-      const fixtureConfig = Effect.runSync(config);
-      const ceiling = UsineConfig.make({
-        ...fixtureConfig,
-        settings: Settings.make({
-          ...fixtureConfig.settings,
-          maxAttemptTokens: Option.some(100),
-        }),
-      });
-      return Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-ceiling-" });
-        const instance = InstanceDirectory.make(root);
-        const remote = yield* makeRemote(root);
-        const runtime = localLayer(instance, ceiling, [], {
-          repositoryUrl: () => remote,
-          interruptGrace: "100 millis",
-          harnessReadiness: harnessReady,
-        }).pipe(
-          Layer.provide(MarcbachmannCelLayer),
-          Layer.provide(credentialLayer),
-          Layer.provide(stubAttemptRuntime(storage, spender)),
-          Layer.provide(claudeLoginLockLayer),
-          Layer.provide(alwaysHoldsLayer),
-          Layer.provide(fixedConfigLayer(ceiling)),
-          Layer.provide(testAppLayer),
-        );
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const accepted = yield* engine.submit(submission(4));
-          assert(accepted._tag === "Claimed");
-          const failed = yield* waitFor(engine, accepted.runId, "Failed");
-          const outcome = Option.getOrUndefined(failed.attempts[0]?.outcome ?? Option.none());
-          assert(outcome?._tag === "Failed");
-          assert.strictEqual(outcome.failure._tag, "RunawayFailure");
-          const attemptId = failed.attempts[0]?.id;
-          assert(attemptId !== undefined);
-          assert.strictEqual(storage.tasks.get(attemptId)?.state._tag, "canceled");
-        }).pipe(Effect.provide(runtime));
-      }).pipe(Effect.provide(NodeServices.layer));
-    },
+        });
+        return yield* Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const root = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "usine-local-ceiling-",
+          });
+          const instance = InstanceDirectory.make(root);
+          const remote = yield* makeRemote(root);
+          const runtime = localLayer(instance, ceiling, [], {
+            repositoryUrl: () => remote,
+            interruptGrace: "100 millis",
+            harnessReadiness: harnessReady,
+          }).pipe(
+            Layer.provide(MarcbachmannCelLayer),
+            Layer.provide(credentialLayer),
+            Layer.provide(stubAttemptRuntime(storage, spender)),
+            Layer.provide(claudeLoginLockLayer),
+            Layer.provide(alwaysHoldsLayer),
+            Layer.provide(fixedConfigLayer(ceiling)),
+            Layer.provide(testAppLayer),
+          );
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const accepted = yield* engine.submit(submission(4));
+            assert(accepted._tag === "Claimed");
+            const failed = yield* waitFor(engine, accepted.runId, "Failed");
+            const outcome = Option.getOrUndefined(failed.attempts[0]?.outcome ?? Option.none());
+            assert(outcome?._tag === "Failed");
+            assert.strictEqual(outcome.failure._tag, "RunawayFailure");
+            const attemptId = failed.attempts[0]?.id;
+            assert(attemptId !== undefined);
+            assert.strictEqual(storage.tasks.get(attemptId)?.state._tag, "canceled");
+          }).pipe(Effect.provide(runtime));
+        }).pipe(Effect.provide(NodeServices.layer));
+      }),
     LIVE_TEST_TIMEOUT,
   );
 

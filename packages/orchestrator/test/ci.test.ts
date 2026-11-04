@@ -145,7 +145,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     ReadonlyArray<{ readonly item: number; readonly mutation: ItemLabelMutation }>
   >([]);
   const result = StepResult.make({
-    message: `[usine:awaiting-ci]\n${JSON.stringify({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`,
+    message: `[usine:awaiting-ci]\n${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: timeoutSeconds, on_green: [{ item: 811, add: ["implemented"], remove: ["agent-in-progress"] }] })}`,
     facts: [
       PullRequest.make({
         number: 815,
@@ -529,10 +529,8 @@ it.live.each(["failure", "conflict"] as const)(
   (initialState) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const fixtureValue1 = yield* Effect.context<never>();
-        const runFixture = Effect.runSyncWith(fixtureValue1);
-
         const fixtureInstance = yield* instance;
+        const fixturePayload = yield* payload;
         const heads = [CommitSha.make("b".repeat(40)), CommitSha.make("c".repeat(40))];
         const completedFixes = yield* Ref.make(0);
 
@@ -547,7 +545,7 @@ it.live.each(["failure", "conflict"] as const)(
                 facts: [
                   PullRequest.make({
                     number: 815,
-                    url: new URL(runFixture(payload).url),
+                    url: new URL(fixturePayload.url),
                     head: Option.some(fixedHead),
                   }),
                 ],

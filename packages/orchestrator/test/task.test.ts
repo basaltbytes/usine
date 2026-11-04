@@ -460,13 +460,14 @@ const readTask = (
   number: number,
   project: RepositoryName = repository,
   runEvents: ReadonlyArray<RunEvent> = [],
-  loaded: LoadedInstance = Effect.runSync(instance),
+  loaded?: LoadedInstance,
 ) =>
   Effect.gen(function* () {
+    const fixtureInstance = loaded ?? (yield* instance);
     const requested = yield* Ref.make<ReadonlyArray<string>>([]);
     const task = yield* Effect.gen(function* () {
       const operator = yield* OperatorObservation;
-      return yield* operator.task(loaded, project, ItemNumber.make(number));
+      return yield* operator.task(fixtureInstance, project, ItemNumber.make(number));
     }).pipe(Effect.provide(observation(requested, runEvents)));
     return { task, requested: yield* Ref.get(requested) };
   });

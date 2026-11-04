@@ -23,9 +23,6 @@ const dependencies = Layer.mergeAll(memoryConfigurationLayer, ConfigurationFolde
 
 it.live("applies committed agent brains and webhook settings live", () =>
   Effect.gen(function* () {
-    const fixtureValue1 = yield* Effect.context<never>();
-    const runFixture = Effect.runSyncWith(fixtureValue1);
-
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
     const root = InstanceDirectory.make(directory);
     yield* writeInstanceFiles(root, [
@@ -73,6 +70,9 @@ it.live("applies committed agent brains and webhook settings live", () =>
     );
     const agent = revision.changes.find(({ key }) => key.kind === "agent");
     if (agent === undefined) return yield* Effect.die("missing agent fixture");
+    const agentAfter = yield* Effect.transposeOption(
+      Option.map(agent.after, Schema.decodeUnknownEffect(Schema.JsonObject)),
+    );
     const changed = yield* store.commit({
       expected: revision.number,
       actor: initial.config.operator,
@@ -81,8 +81,8 @@ it.live("applies committed agent brains and webhook settings live", () =>
         ConfigurationChange.make({
           ...agent,
           before: agent.after,
-          after: Option.map(agent.after, (value) => ({
-            ...runFixture(Schema.decodeUnknownEffect(Schema.JsonObject)(value)),
+          after: Option.map(agentAfter, (value) => ({
+            ...value,
             harness: "claude",
           })),
         }),
@@ -94,6 +94,9 @@ it.live("applies committed agent brains and webhook settings live", () =>
     expect((yield* current.get).agents[0]?.agent.brain.harness).toBe("claude");
     const settings = revision.changes.find(({ key }) => key.kind === "settings");
     if (settings === undefined) return yield* Effect.die("missing settings fixture");
+    const settingsAfter = yield* Effect.transposeOption(
+      Option.map(settings.after, Schema.decodeUnknownEffect(Schema.JsonObject)),
+    );
     yield* store.commit({
       expected: changed.number,
       actor: initial.config.operator,
@@ -102,8 +105,8 @@ it.live("applies committed agent brains and webhook settings live", () =>
         ConfigurationChange.make({
           ...settings,
           before: settings.after,
-          after: Option.map(settings.after, (value) => ({
-            ...runFixture(Schema.decodeUnknownEffect(Schema.JsonObject)(value)),
+          after: Option.map(settingsAfter, (value) => ({
+            ...value,
             webhooks: { mode: "deliveries" },
           })),
         }),

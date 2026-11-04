@@ -15,9 +15,9 @@ import { configurationLayer } from "../support/configuration.ts";
 const HOUR = 3_600_000;
 const at = (hour: number) => DateTime.makeUnsafe(hour * HOUR);
 const instance = (slots: number) =>
-  LoadedInstance.make({
-    config: Effect.runSync(
-      Schema.decodeUnknownEffect(UsineConfig)({
+  Effect.gen(function* () {
+    return LoadedInstance.make({
+      config: yield* Schema.decodeUnknownEffect(UsineConfig)({
         version: 2,
         repos: [],
         projects: [],
@@ -28,12 +28,12 @@ const instance = (slots: number) =>
             : [{ name: "worker", kind: "local", max_concurrent_attempts: slots }]),
         ],
       }),
-    ),
-    agents: [],
-    invalidAgents: [],
-    loops: [],
-    quarantinedLoops: [],
-    warnings: [],
+      agents: [],
+      invalidAgents: [],
+      loops: [],
+      quarantinedLoops: [],
+      warnings: [],
+    });
   });
 
 const commit = (hour: number, slots: number) =>
@@ -41,7 +41,8 @@ const commit = (hour: number, slots: number) =>
     yield* TestClock.setTime(hour * HOUR);
     const store = yield* ConfigurationStore;
     const previous = yield* store.read;
-    const decodedValue1 = yield* configurationEntities(instance(slots));
+    const decodedValue2 = yield* instance(slots);
+    const decodedValue1 = yield* configurationEntities(decodedValue2);
     const fixtureValue1 = yield* Option.match(previous.instance, {
       onNone: () => Effect.succeed([]),
       onSome: configurationEntities,
@@ -98,7 +99,7 @@ describe("Worker slot history", () => {
       const store = yield* ConfigurationStore;
 
       assert.strictEqual((yield* store.read).number, ConfigurationRevisionNumber.make(0));
-      const worker = instance(2).config.workers[1];
+      const worker = (yield* instance(2)).config.workers[1];
       assert(worker !== undefined);
       const history = yield* readWorkerCapacity(store, worker);
       assert.strictEqual(

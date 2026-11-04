@@ -1,3 +1,4 @@
+import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { idleCiMonitor } from "./support/ci.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
@@ -81,13 +82,15 @@ const loop = (name: string, condition: string, body: string, on: "issue" | "pr" 
   });
 
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
-  LoadedInstance.make({
-    config: Effect.runSync(config),
-    agents: [agent],
-    invalidAgents: [],
-    loops,
-    quarantinedLoops: [],
-    warnings: [],
+  Effect.gen(function* () {
+    return LoadedInstance.make({
+      config: yield* config,
+      agents: [agent],
+      invalidAgents: [],
+      loops,
+      quarantinedLoops: [],
+      warnings: [],
+    });
   });
 
 const issuePayload = (number: number, milestone: string | null): IssuePayload => ({
@@ -111,28 +114,26 @@ const issuePayload = (number: number, milestone: string | null): IssuePayload =>
 });
 
 const pullRequestPayload = (number: number) =>
-  Effect.runSync(
-    Schema.decodeEffect(PullRequestPayload)({
-      ...issuePayload(number, null),
-      isDraft: false,
-      merged: false,
-      mergedAt: null,
-      baseRefName: "main",
-      headRefName: "feature",
-      headRefOid: "a".repeat(40),
-      additions: 1,
-      deletions: 0,
-      changedFiles: 1,
-      reviewDecision: null,
-      mergeable: "MERGEABLE",
-      mergeStateStatus: "CLEAN",
-      statusCheckRollup: null,
-      reviewThreads: { totalCount: 0, nodes: [] },
-      reviewRequests: { totalCount: 0, nodes: [] },
-      reviews: { totalCount: 0, nodes: [] },
-      closingIssuesReferences: { totalCount: 0, nodes: [] },
-    }),
-  );
+  Schema.decodeEffect(PullRequestPayload)({
+    ...issuePayload(number, null),
+    isDraft: false,
+    merged: false,
+    mergedAt: null,
+    baseRefName: "main",
+    headRefName: "feature",
+    headRefOid: "a".repeat(40),
+    additions: 1,
+    deletions: 0,
+    changedFiles: 1,
+    reviewDecision: null,
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    statusCheckRollup: null,
+    reviewThreads: { totalCount: 0, nodes: [] },
+    reviewRequests: { totalCount: 0, nodes: [] },
+    reviews: { totalCount: 0, nodes: [] },
+    closingIssuesReferences: { totalCount: 0, nodes: [] },
+  });
 
 const advanced = PollCursor.make({
   entityTag: Option.some(EntityTag.make('W/"advanced"')),
@@ -222,18 +223,18 @@ const capturedLogs = () => {
 const FAILED = /Loop evaluation failed on an Item/u;
 
 const storedUnfetchedItems = (cursors: ReturnType<typeof memoryCursorStore>) =>
-  Effect.runSync(
-    Schema.decodeUnknownEffect(
+  Effect.gen(function* () {
+    return (yield* Schema.decodeUnknownEffect(
       Schema.Struct({ unfetchedItems: Schema.Array(Schema.Struct({ number: Schema.Finite })) }),
-    )(cursors.stored.get(`github-poll:${repository}`)),
-  ).unfetchedItems.map(({ number }) => number);
+    )(cursors.stored.get(`github-poll:${repository}`))).unfetchedItems.map(({ number }) => number);
+  });
 
 const storedFailingItems = (cursors: ReturnType<typeof memoryCursorStore>) =>
-  Effect.runSync(
-    Schema.decodeUnknownEffect(
+  Effect.gen(function* () {
+    return (yield* Schema.decodeUnknownEffect(
       Schema.Struct({ failingItems: Schema.Array(Schema.Struct({ number: Schema.Finite })) }),
-    )(cursors.stored.get(`github-poll:${repository}`)),
-  ).failingItems.map(({ number }) => number);
+    )(cursors.stored.get(`github-poll:${repository}`))).failingItems.map(({ number }) => number);
+  });
 
 describe("Loop evaluation failures", () => {
   it.effect(
@@ -262,7 +263,7 @@ describe("Loop evaluation failures", () => {
               });
             }),
         };
-        const instance = instanceWith([
+        const instance = yield* instanceWith([
           loop("milestone", 'item.milestone.title == "v1"', "Plan {{ item.number }}."),
           loop("ready", 'item.labels.nodes.exists(label, label.name == "ready")', "Do it."),
         ]);
@@ -281,7 +282,8 @@ describe("Loop evaluation failures", () => {
             cursors.stored.get(`github-poll:${repository}`),
           );
           assert.deepStrictEqual(saved.cursor, advanced);
-          assert.deepStrictEqual(storedFailingItems(cursors), [28]);
+          const decodedValue12 = yield* storedFailingItems(cursors);
+          assert.deepStrictEqual(decodedValue12, [28]);
 
           const second = yield* polling.poll(instance);
           assert.deepStrictEqual(second.failures, first.failures);
@@ -312,15 +314,25 @@ describe("Loop evaluation failures", () => {
           Effect.succeed(RepositoryLabelCatalog.make({ entityTag: Option.none(), labels: [] })),
         changes: changesOnce([ChangedPullRequest.make({ number: 12, updatedAt })]),
         snapshot: () =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             fetches += 1;
             return PullRequestSnapshot.make({
-              payload: pullRequestPayload(12),
+              payload: yield* pullRequestPayload(12),
               contentHash: ContentHash.make(contentHash.repeat(64)),
             });
-          }),
+          }).pipe(
+            Effect.mapError((cause) =>
+              Schema.isSchemaError(cause)
+                ? InvalidGitHubResponseError.make({
+                    operation: "fetch-pull-request-snapshot",
+                    message: "Invalid snapshot fixture",
+                    detail: cause.message,
+                  })
+                : cause,
+            ),
+          ),
       };
-      const instance = instanceWith([
+      const instance = yield* instanceWith([
         loop("review", 'item.state == "OPEN"', "Review {{ item.statusCheckRollup.state }}.", "pr"),
       ]);
 
@@ -376,10 +388,13 @@ describe("Loop evaluation failures", () => {
 
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        const broken = instanceWith([loop("plan", condition, "Plan {{ item.milestone.title }}.")]);
+        const broken = yield* instanceWith([
+          loop("plan", condition, "Plan {{ item.milestone.title }}."),
+        ]);
         const first = yield* polling.poll(broken);
         assert.strictEqual(first.failures.length, 1);
-        assert.deepStrictEqual(storedFailingItems(cursors), [28]);
+        const decodedValue11 = yield* storedFailingItems(cursors);
+        assert.deepStrictEqual(decodedValue11, [28]);
         // Within one process the Loop cannot change, so an unchanged Item is not fetched again.
         yield* polling.poll(broken);
         assert.deepStrictEqual(fetched, [28]);
@@ -388,7 +403,7 @@ describe("Loop evaluation failures", () => {
       // The operator fixes the prompt and restarts; detection reports no change.
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        const fixed = instanceWith([
+        const fixed = yield* instanceWith([
           loop(
             "plan",
             condition,
@@ -399,7 +414,8 @@ describe("Loop evaluation failures", () => {
         assert.deepStrictEqual(fetched, [28, 28]);
         assert.deepStrictEqual(retried.failures, []);
         assert.deepStrictEqual(submissions, ["plan"]);
-        assert.deepStrictEqual(storedFailingItems(cursors), []);
+        const decodedValue10 = yield* storedFailingItems(cursors);
+        assert.deepStrictEqual(decodedValue10, []);
       }).pipe(Effect.provide(processLayer(github, cursors.store)));
     }),
   );
@@ -428,13 +444,15 @@ describe("Loop evaluation failures", () => {
 
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        const broken = instanceWith([loop("plan", condition, "Plan {{ item.milestone.title }}.")]);
+        const broken = yield* instanceWith([
+          loop("plan", condition, "Plan {{ item.milestone.title }}."),
+        ]);
         yield* polling.poll(broken);
         yield* polling.poll(broken);
         assert.deepStrictEqual(fetched, [28]);
 
         // The operator fixes the prompt and reloads; detection reports no change.
-        const fixed = instanceWith([
+        const fixed = yield* instanceWith([
           loop(
             "plan",
             condition,
@@ -445,7 +463,8 @@ describe("Loop evaluation failures", () => {
         assert.deepStrictEqual(fetched, [28, 28]);
         assert.deepStrictEqual(retried.failures, []);
         assert.deepStrictEqual(submissions, ["plan"]);
-        assert.deepStrictEqual(storedFailingItems(cursors), []);
+        const decodedValue9 = yield* storedFailingItems(cursors);
+        assert.deepStrictEqual(decodedValue9, []);
       }).pipe(Effect.provide(processLayer(github, cursors.store)));
     }),
   );
@@ -477,14 +496,15 @@ describe("Loop evaluation failures", () => {
                 }),
               ),
       };
-      const instance = instanceWith([
+      const instance = yield* instanceWith([
         loop("plan", 'item.state == "OPEN"', "Plan {{ item.milestone.title }}."),
       ]);
 
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
         yield* polling.poll(instance);
-        assert.deepStrictEqual(storedFailingItems(cursors), [28]);
+        const decodedValue8 = yield* storedFailingItems(cursors);
+        assert.deepStrictEqual(decodedValue8, [28]);
       }).pipe(Effect.provide(processLayer(github, cursors.store)));
 
       deleted = true;
@@ -492,7 +512,8 @@ describe("Loop evaluation failures", () => {
         const polling = yield* PollingTriggers;
         const cycle = yield* polling.poll(instance);
         assert.deepStrictEqual(cycle.failures, []);
-        assert.deepStrictEqual(storedFailingItems(cursors), []);
+        const decodedValue7 = yield* storedFailingItems(cursors);
+        assert.deepStrictEqual(decodedValue7, []);
       }).pipe(Effect.provide(processLayer(github, cursors.store)));
     }),
   );
@@ -527,18 +548,21 @@ describe("Loop evaluation failures", () => {
 
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        yield* polling.poll(
-          instanceWith([loop("plan", 'item.state == "OPEN"', "Plan {{ item.milestone.title }}.")]),
-        );
-        assert.deepStrictEqual(storedFailingItems(cursors), [28]);
+        const decodedValue6 = yield* instanceWith([
+          loop("plan", 'item.state == "OPEN"', "Plan {{ item.milestone.title }}."),
+        ]);
+        yield* polling.poll(decodedValue6);
+        const decodedValue5 = yield* storedFailingItems(cursors);
+        assert.deepStrictEqual(decodedValue5, [28]);
 
         deleted = true;
-        const reloaded = instanceWith([
+        const reloaded = yield* instanceWith([
           loop("plan", 'item.state == "OPEN"', "Plan issue {{ item.milestone.title }}."),
         ]);
         const cycle = yield* polling.poll(reloaded);
         assert.deepStrictEqual(cycle.failures, []);
-        assert.deepStrictEqual(storedFailingItems(cursors), []);
+        const decodedValue4 = yield* storedFailingItems(cursors);
+        assert.deepStrictEqual(decodedValue4, []);
       }).pipe(Effect.provide(processLayer(github, cursors.store)));
     }),
   );
@@ -574,7 +598,7 @@ describe("Loop evaluation failures", () => {
             });
           }),
       };
-      const instance = instanceWith([
+      const instance = yield* instanceWith([
         loop("plan", 'item.state == "OPEN"', "Plan {{ item.number }}."),
       ]);
 
@@ -587,7 +611,8 @@ describe("Loop evaluation failures", () => {
           cursors.stored.get(`github-poll:${repository}`),
         );
         assert.deepStrictEqual(saved.cursor, advanced);
-        assert.deepStrictEqual(storedUnfetchedItems(cursors), [3, 5, 7]);
+        const decodedValue3 = yield* storedUnfetchedItems(cursors);
+        assert.deepStrictEqual(decodedValue3, [3, 5, 7]);
 
         const second = yield* polling.poll(instance);
         assert.deepStrictEqual(second.failures, []);
@@ -595,7 +620,8 @@ describe("Loop evaluation failures", () => {
         assert.strictEqual(third.failures.length, 3);
         assert(third.failures.every(({ errorTag }) => errorTag === "GitHubApiError"));
         assert(third.failures.every(({ message }) => message.includes("fetch-issue-snapshot")));
-        assert.deepStrictEqual(storedUnfetchedItems(cursors), [3, 5, 7]);
+        const decodedValue2 = yield* storedUnfetchedItems(cursors);
+        assert.deepStrictEqual(decodedValue2, [3, 5, 7]);
         assert.strictEqual(third.submissions.length, 0);
 
         unavailable.clear();
@@ -607,7 +633,8 @@ describe("Loop evaluation failures", () => {
           [3, 5, 7],
         );
         assert.strictEqual(recovered.submissions.length, 3);
-        assert.deepStrictEqual(storedUnfetchedItems(cursors), []);
+        const decodedValue1 = yield* storedUnfetchedItems(cursors);
+        assert.deepStrictEqual(decodedValue1, []);
 
         fetched.length = 0;
         yield* polling.poll(instance);
@@ -646,7 +673,7 @@ describe("Loop evaluation failures", () => {
                 }),
               ),
       };
-      const instance = instanceWith([
+      const instance = yield* instanceWith([
         loop("plan", 'item.state == "OPEN"', "Plan {{ item.number }}."),
       ]);
 

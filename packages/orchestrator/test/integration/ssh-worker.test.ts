@@ -73,26 +73,24 @@ const settings = Effect.all({
 });
 
 const configFor = (values: Effect.Success<typeof settings>) =>
-  Effect.runSync(
-    Schema.decodeEffect(UsineConfig)({
-      version: 1,
-      repos: [{ name: values.repository }],
-      workers: [
-        {
-          name: WORKER,
-          kind: "ssh",
-          destination: values.destination,
-          root: values.root,
-          max_concurrent_attempts: 1,
-          ...Option.match(values.identityFile, {
-            onNone: () => ({}),
-            onSome: (file) => ({ identity_file: file }),
-          }),
-          ...Option.match(values.port, { onNone: () => ({}), onSome: (port) => ({ port }) }),
-        },
-      ],
-    }),
-  );
+  Schema.decodeEffect(UsineConfig)({
+    version: 1,
+    repos: [{ name: values.repository }],
+    workers: [
+      {
+        name: WORKER,
+        kind: "ssh",
+        destination: values.destination,
+        root: values.root,
+        max_concurrent_attempts: 1,
+        ...Option.match(values.identityFile, {
+          onNone: () => ({}),
+          onSome: (file) => ({ identity_file: file }),
+        }),
+        ...Option.match(values.port, { onNone: () => ({}), onSome: (port) => ({ port }) }),
+      },
+    ],
+  });
 
 /** Returns the shared SSH options, with a separate known-hosts file if one is set. */
 const sshFor = (values: Effect.Success<typeof settings>) => ({
@@ -184,7 +182,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
     () =>
       Effect.gen(function* () {
         const values = yield* settings;
-        const config = configFor(values);
+        const config = yield* configFor(values);
         const repository = RepositoryName.make(values.repository);
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = yield* fileSystem.makeTempDirectoryScoped({
@@ -307,11 +305,10 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           const finished = yield* waitForTerminal(engine, accepted.runId);
           const attempt = finished.attempts[0];
           assert(attempt !== undefined);
-          assert.strictEqual(
-            finished.run.state._tag,
-            "Succeeded",
-            JSON.stringify(Option.getOrNull(attempt.outcome)),
+          const decodedValue2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            Option.getOrNull(attempt.outcome),
           );
+          assert.strictEqual(finished.run.state._tag, "Succeeded", decodedValue2);
           assert.strictEqual(attempt.worker, WORKER);
           assert.strictEqual(observed.ghRepository, repository);
           assert.match(observed.advertisedHead ?? "", /^[0-9a-f]{40}\tHEAD$/u);
@@ -381,7 +378,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
     () =>
       Effect.gen(function* () {
         const values = yield* settings;
-        const config = configFor(values);
+        const config = yield* configFor(values);
         const unused = Layer.succeed(CredentialProvider)({
           issue: (repository) =>
             Effect.fail(
@@ -458,25 +455,23 @@ const gatewaySettings = Effect.all({
  * use their logins on the machine.
  */
 const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
-  Effect.runSync(
-    Schema.decodeEffect(UsineConfig)({
-      version: 1,
-      repos: [{ name: values.repository }],
-      workers: [
-        {
-          name: GATEWAY_WORKER,
-          kind: "ssh",
-          destination: values.destination,
-          root: values.root,
-          gateway: {
-            domain: values.domain,
-            destination: values.gateway,
-            admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
-          },
+  Schema.decodeEffect(UsineConfig)({
+    version: 1,
+    repos: [{ name: values.repository }],
+    workers: [
+      {
+        name: GATEWAY_WORKER,
+        kind: "ssh",
+        destination: values.destination,
+        root: values.root,
+        gateway: {
+          domain: values.domain,
+          destination: values.gateway,
+          admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
         },
-      ],
-    }),
-  );
+      },
+    ],
+  });
 
 /**
  * Returns the shared SSH options, with the SSH configuration for the Worker and its bastion if one
@@ -551,7 +546,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
     () =>
       Effect.gen(function* () {
         const values = yield* gatewaySettings;
-        const config = gatewayConfigFor(values);
+        const config = yield* gatewayConfigFor(values);
         const repository = RepositoryName.make(values.repository);
         const branch = `usine-gateway-test/${globalThis.crypto.randomUUID()}`;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -691,11 +686,10 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           const finished = yield* waitForTerminal(engine, accepted.runId);
           const attempt = finished.attempts[0];
           assert(attempt !== undefined);
-          assert.strictEqual(
-            finished.run.state._tag,
-            "Succeeded",
-            JSON.stringify(Option.getOrNull(attempt.outcome)),
+          const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            Option.getOrNull(attempt.outcome),
           );
+          assert.strictEqual(finished.run.state._tag, "Succeeded", decodedValue1);
           assert.strictEqual(observed.callerTokenFormat, "ugw1", "the child has a caller token");
           assert.match(observed.advertisedHead ?? "", /^[0-9a-f]{40}\tHEAD$/u);
           assert.strictEqual(observed.ghRepository, repository);
@@ -735,7 +729,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
     () =>
       Effect.gen(function* () {
         const values = yield* gatewaySettings;
-        const config = gatewayConfigFor(values);
+        const config = yield* gatewayConfigFor(values);
         const unused = Layer.succeed(CredentialProvider)({
           issue: (repository) =>
             Effect.fail(

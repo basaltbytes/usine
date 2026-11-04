@@ -359,10 +359,10 @@ ${helper}`,
             }
           : undefined,
       running: readFileSync(join(folder, "running"), "utf8").trim(),
-      record: Effect.runSync(
-        Schema.decodeEffect(Schema.fromJsonString(UpgradeRecord))(
-          readFileSync(join(folder, "result.json"), "utf8"),
-        ),
+      // The synchronous upgrade fixture returns the recorded result with its process output.
+      // @effect-diagnostics-next-line schemaSync:off
+      record: Schema.decodeSync(Schema.fromJsonString(UpgradeRecord))(
+        readFileSync(join(folder, "result.json"), "utf8"),
       ),
       commands: readFileSync(join(folder, "commands"), "utf8"),
     };

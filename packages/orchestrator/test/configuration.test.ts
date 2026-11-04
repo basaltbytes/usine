@@ -1,3 +1,4 @@
+import { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/config/label";
@@ -162,20 +163,21 @@ Nobody runs this.
 
 const labels = Layer.succeed(RepositoryLabelProjectionReader)({
   get: (repository) =>
-    Effect.succeed(
-      repository === usine
-        ? Option.some(
-            Effect.runSync(
-              Schema.decodeEffect(RepositoryLabelProjection)({
-                repository,
-                labels: [
-                  { name: "Ready", color: "0e8a16", description: "Ready for an Agent" },
-                  { name: "review-findings", color: "d93f0b", description: null },
-                ],
-              }),
-            ),
-          )
-        : Option.none(),
+    Effect.gen(function* () {
+      const decodedValue1 = yield* Schema.decodeEffect(RepositoryLabelProjection)({
+        repository,
+        labels: [
+          { name: "Ready", color: "0e8a16", description: "Ready for an Agent" },
+          { name: "review-findings", color: "d93f0b", description: null },
+        ],
+      });
+      return yield* Effect.succeed(
+        repository === usine ? Option.some(decodedValue1) : Option.none(),
+      );
+    }).pipe(
+      Effect.mapError((cause) =>
+        EnginePersistenceError.make({ operation: "read label fixture", cause }),
+      ),
     ),
 });
 
@@ -422,7 +424,7 @@ describe("Configuration view", () => {
       });
       assert.deepStrictEqual(view.removedWorkers, [{ name: "retired", running: 1 }]);
 
-      const encoded = JSON.stringify(view);
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(view);
       assert.include(encoded, "USINE_GATEWAY_ADMIN_TOKEN");
       assert.notInclude(encoded, '"adminToken"');
     }),

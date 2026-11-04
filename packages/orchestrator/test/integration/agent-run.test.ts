@@ -80,7 +80,8 @@ const requestJson = Effect.fn("agentIntegration.requestJson")(function* <A>(opti
     },
   };
   if (options.method !== undefined) init.method = options.method;
-  if (options.body !== undefined) init.body = JSON.stringify(options.body);
+  if (options.body !== undefined)
+    init.body = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(options.body);
   const response = yield* Effect.tryPromise({
     try: () => fetch(options.url, init),
     catch: (cause) => RequestFailed.make({ cause }),
@@ -137,60 +138,59 @@ const makeInstance = (options: {
   readonly marker: string;
   readonly parentModel: ModelId;
   readonly repository: RepositoryName;
-}): LoadedInstance => {
-  const config = Effect.runSync(
-    Schema.decodeEffect(UsineConfig)({
+}) =>
+  Effect.gen(function* () {
+    const config = yield* Schema.decodeEffect(UsineConfig)({
       version: 1,
       repos: [{ name: options.repository, tags: ["integration"] }],
       settings: { parent_model: options.parentModel, poll_interval: 15 },
       workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
-    }),
-  );
-  const agent = AgentFile.make({
-    name: AgentName.make("live-contract-agent"),
-    harness: "claude",
-    model: options.childModel,
-    effort: "low",
-    parentModel: Option.none(),
-    parentEffort: Option.none(),
-    persona: AgentPersona.make(
-      "Act conservatively. Perform only the requested GitHub operation and report its result.",
-    ),
-  });
-  const loop = LoopFile.make({
-    name: LoopName.make("live-agent-contract"),
-    trigger: IssueTrigger.make({
-      on: "issue",
-      if: Source.make(
-        `item.number == ${String(options.issueNumber)} && item.comments.nodes.exists(comment, comment.body == ${JSON.stringify(options.kick)})`,
+    });
+    const agent = AgentFile.make({
+      name: AgentName.make("live-contract-agent"),
+      harness: "claude",
+      model: options.childModel,
+      effort: "low",
+      parentModel: Option.none(),
+      parentEffort: Option.none(),
+      persona: AgentPersona.make(
+        "Act conservatively. Perform only the requested GitHub operation and report its result.",
       ),
-    }),
-    selector: Option.some(
-      Selector.make({ repos: Option.some([options.repository]), tags: Option.none() }),
-    ),
-    approval: "none",
-    step: StepName.make("comment"),
-    agent: agent.name,
-    body: PromptTemplate.make(
-      [
-        "Use the subagent tool exactly once and delegate this entire task to that child.",
-        `The child must use \`gh issue view ${String(options.issueNumber)} --repo ${options.repository}\` to read the issue before acting.`,
-        `Then it must post exactly one comment on issue #${String(options.issueNumber)} containing these two lines:`,
-        options.marker,
-        "Issue title: {{ item.title }}",
-        "Do not modify files, branches, labels, or any other GitHub state.",
-      ].join("\n"),
-    ),
+    });
+    const loop = LoopFile.make({
+      name: LoopName.make("live-agent-contract"),
+      trigger: IssueTrigger.make({
+        on: "issue",
+        if: Source.make(
+          `item.number == ${String(options.issueNumber)} && item.comments.nodes.exists(comment, comment.body == ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(options.kick)})`,
+        ),
+      }),
+      selector: Option.some(
+        Selector.make({ repos: Option.some([options.repository]), tags: Option.none() }),
+      ),
+      approval: "none",
+      step: StepName.make("comment"),
+      agent: agent.name,
+      body: PromptTemplate.make(
+        [
+          "Use the subagent tool exactly once and delegate this entire task to that child.",
+          `The child must use \`gh issue view ${String(options.issueNumber)} --repo ${options.repository}\` to read the issue before acting.`,
+          `Then it must post exactly one comment on issue #${String(options.issueNumber)} containing these two lines:`,
+          options.marker,
+          "Issue title: {{ item.title }}",
+          "Do not modify files, branches, labels, or any other GitHub state.",
+        ].join("\n"),
+      ),
+    });
+    return LoadedInstance.make({
+      config,
+      agents: [agent],
+      invalidAgents: [],
+      loops: [loop],
+      quarantinedLoops: [],
+      warnings: [],
+    });
   });
-  return LoadedInstance.make({
-    config,
-    agents: [agent],
-    invalidAgents: [],
-    loops: [loop],
-    quarantinedLoops: [],
-    warnings: [],
-  });
-};
 
 const runtimeLayer = (
   credentialsDirectory: InstanceDirectory,
@@ -308,7 +308,7 @@ describe("live agent loop", () => {
         const repository = RepositoryName.make(settings.repository);
         const marker = `usine live agent contract ${globalThis.crypto.randomUUID()}`;
         const kick = `usine live agent kick ${globalThis.crypto.randomUUID()}`;
-        const instance = makeInstance({
+        const instance = yield* makeInstance({
           childModel: ModelId.make(settings.childModel),
           issueNumber: settings.issueNumber,
           kick,

@@ -207,8 +207,10 @@ const freePort = () =>
     const listener = createServer();
     listener.on("error", reject);
     listener.listen(0, "127.0.0.1", () => {
-      const address = Effect.runSync(
-        Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(listener.address()),
+      // Node event callbacks decode their arguments synchronously.
+      // @effect-diagnostics-next-line schemaSync:off
+      const address = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
+        listener.address(),
       );
       listener.close(() => resolve(address.port));
     });

@@ -4,7 +4,7 @@ import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp, isServerError } from "../src/github-app.ts";
 import {
   AppSlug,
@@ -77,15 +77,14 @@ const GraphqlRequest = Schema.Struct({
   variables: Schema.Struct({ owner: Schema.String, name: Schema.String, number: Schema.Int }),
 });
 
-const requestBody = (request: HttpClientRequest.HttpClientRequest): typeof GraphqlRequest.Type => {
-  assert.strictEqual(request.body._tag, "Uint8Array");
-  if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
-  return Effect.runSync(
-    Schema.decodeUnknownEffect(GraphqlRequest)(
-      JSON.parse(new TextDecoder().decode(request.body.body)),
-    ),
-  );
-};
+const requestBody = (request: HttpClientRequest.HttpClientRequest) =>
+  Effect.gen(function* () {
+    assert.strictEqual(request.body._tag, "Uint8Array");
+    if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
+    return yield* Schema.decodeEffect(Schema.fromJsonString(GraphqlRequest))(
+      new TextDecoder().decode(request.body.body),
+    );
+  });
 
 const issuePayload = (timestamps: {
   readonly createdAt: string;
@@ -642,18 +641,15 @@ describe("GitHubPolling", () => {
     const gone = new Set([7, 55]);
     const asked: Array<ReadonlyArray<number>> = [];
     const client = HttpClient.make((request) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         assert.strictEqual(request.body._tag, "Uint8Array");
         if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
-        const { query, variables } = Effect.runSync(
-          Schema.decodeUnknownEffect(PresenceRequest)(
-            JSON.parse(new TextDecoder().decode(request.body.body)),
-          ),
-        );
-        const numbers = Object.entries(variables).flatMap(([name, value]) =>
-          /^n\d+$/u.test(name)
-            ? [Effect.runSync(Schema.decodeUnknownEffect(Schema.Int)(value))]
-            : [],
+        const { query, variables } = yield* Schema.decodeEffect(
+          Schema.fromJsonString(PresenceRequest),
+        )(new TextDecoder().decode(request.body.body));
+        const numbers = yield* Effect.forEach(
+          Object.entries(variables).filter(([name]) => /^n\d+$/u.test(name)),
+          ([, value]) => Schema.decodeUnknownEffect(Schema.Int)(value),
         );
         asked.push(numbers);
         assert.include(query, `i${numbers.length - 1}: issue(number: $n${numbers.length - 1})`);
@@ -670,7 +666,14 @@ describe("GitHubPolling", () => {
               message: `Could not resolve to an Issue with the number of ${number}.`,
             })),
         });
-      }),
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.EncodeError({ request: request, cause }),
+            }),
+        ),
+      ),
     );
 
     return Effect.gen(function* () {
@@ -791,7 +794,7 @@ describe("GitHubPolling", () => {
       assert.strictEqual(first.contentHash, second.contentHash);
       assert.notStrictEqual(first.contentHash, changedContent.contentHash);
 
-      const body = requestBody(requests[0] ?? assert.fail("missing GraphQL request"));
+      const body = yield* requestBody(requests[0] ?? assert.fail("missing GraphQL request"));
       assert.strictEqual(body.variables.owner, "basaltbytes");
       assert.strictEqual(body.variables.name, "usine");
       assert.strictEqual(body.variables.number, 28);
@@ -824,7 +827,7 @@ describe("GitHubPolling", () => {
       assert.strictEqual(snapshot.payload.headRefOid, "abc123");
 
       assert(captured !== undefined);
-      const body = requestBody(captured);
+      const body = yield* requestBody(captured);
       assert.match(String(body.query), /reviewThreads\(first: 50\)/u);
       assert.match(String(body.query), /reviews\(last: 20\)/u);
       assert.match(String(body.query), /statusCheckRollup \{ state \}/u);
@@ -901,37 +904,48 @@ describe("GitHubPolling", () => {
       });
       let actor = bot;
       let time = oldTime;
-      const client = HttpClient.make((request) => {
-        const field = requestBody(request).query.includes("UsineIssuePayload")
-          ? "issue"
-          : "pullRequest";
-        return Effect.succeed(
-          response(request, {
-            data: {
-              repository: {
-                [field]: {
-                  ...(field === "issue" ? base : pullRequestPayload),
-                  labels: {
-                    totalCount: 4,
-                    nodes: ["ready", "createdAt", "__proto__", "unknown"].map((name) => ({ name })),
-                  },
-                  timelineItems: {
-                    pageInfo: { hasPreviousPage: false, startCursor: null },
-                    nodes: [
-                      labeled("ready", human, oldTime),
-                      null,
-                      labeled("removed", human, newTime),
-                      labeled("ready", bot, time),
-                      labeled("createdAt", actor, time),
-                      labeled("__proto__", null, time),
-                    ],
+      const client = HttpClient.make((request) =>
+        Effect.gen(function* () {
+          const field = (yield* requestBody(request)).query.includes("UsineIssuePayload")
+            ? "issue"
+            : "pullRequest";
+          return yield* Effect.succeed(
+            response(request, {
+              data: {
+                repository: {
+                  [field]: {
+                    ...(field === "issue" ? base : pullRequestPayload),
+                    labels: {
+                      totalCount: 4,
+                      nodes: ["ready", "createdAt", "__proto__", "unknown"].map((name) => ({
+                        name,
+                      })),
+                    },
+                    timelineItems: {
+                      pageInfo: { hasPreviousPage: false, startCursor: null },
+                      nodes: [
+                        labeled("ready", human, oldTime),
+                        null,
+                        labeled("removed", human, newTime),
+                        labeled("ready", bot, time),
+                        labeled("createdAt", actor, time),
+                        labeled("__proto__", null, time),
+                      ],
+                    },
                   },
                 },
               },
-            },
-          }),
-        );
-      });
+            }),
+          );
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.EncodeError({ request: request, cause }),
+              }),
+          ),
+        ),
+      );
       return Effect.gen(function* () {
         const polling = yield* GitHubPolling;
         const decodedValue4 = yield* Schema.decodeEffect(IssuePayload)(base);
@@ -1023,7 +1037,7 @@ describe("GitHubPolling", () => {
           old: { actor: older.actor, createdAt },
         });
         assert.strictEqual(requests.length, 2);
-        const first = requestBody(requests[0] ?? assert.fail("missing initial query"));
+        const first = yield* requestBody(requests[0] ?? assert.fail("missing initial query"));
         assert.include(first.query, "itemTypes: [LABELED_EVENT]");
         const second = requests[1] ?? assert.fail("missing continuation query");
         if (second.body._tag !== "Uint8Array") return assert.fail("missing request body");
