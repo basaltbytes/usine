@@ -11,6 +11,60 @@ import { output, run, submission, waitFor, withLocalEngine } from "./support.ts"
 const content = { title: "Walkthrough é", text: "first line\nsecond line" };
 
 describe("local step outputs", () => {
+  it.live("succeeds without outputs after git clean removes the output directory", () => {
+    const parent: StubParent = ({ request }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const prepared = yield* fs.exists(`${request.cwd}/.usine/outputs`);
+        assert.isTrue(prepared);
+        yield* run("git", ["clean", "-fdx"], request.cwd);
+        const remaining = yield* fs.exists(`${request.cwd}/.usine/outputs`);
+        assert.isFalse(remaining);
+        return "Completed after checkout cleanup";
+      }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+    return withLocalEngine(
+      { attemptRuntime: stubAttemptRuntime(new StubStorage(), parent) },
+      ({ engine }) =>
+        Effect.gen(function* () {
+          const accepted = yield* engine.submit(submission(5));
+          assert(accepted._tag === "Claimed");
+          const finished = yield* waitFor(engine, accepted.runId, "Succeeded");
+          assert.lengthOf(finished.attempts, 1);
+          assert(Option.isSome(finished.step.result));
+          assert.deepStrictEqual(finished.step.result.value.outputs, []);
+        }),
+    );
+  });
+
+  it.live(
+    "fails with an infrastructure error when the output directory is replaced by a file",
+    () => {
+      const parent: StubParent = ({ request }) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          yield* fs.remove(`${request.cwd}/.usine/outputs`, { recursive: true });
+          yield* fs.writeFileString(`${request.cwd}/.usine/outputs`, "not a directory");
+          return "Completed with an unreadable output directory";
+        }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+      return withLocalEngine(
+        { attemptRuntime: stubAttemptRuntime(new StubStorage(), parent) },
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(6));
+            assert(accepted._tag === "Claimed");
+            const finished = yield* waitFor(engine, accepted.runId, "Failed");
+            assert.isNotEmpty(finished.attempts);
+            for (const attempt of finished.attempts) {
+              assert(Option.isSome(attempt.outcome) && attempt.outcome.value._tag === "Failed");
+              const failure = attempt.outcome.value.failure;
+              assert(failure._tag === "InfraFailure");
+              assert.strictEqual(failure.message, "Can't read step outputs");
+            }
+          }),
+      );
+    },
+  );
+
   it.live("stores a document with its ref and excludes it from the attempt's commit", () => {
     let committed = "";
     const parent: StubParent = ({ request }) =>

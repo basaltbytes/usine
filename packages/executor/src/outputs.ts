@@ -30,7 +30,12 @@ const crypto = require('node:crypto');
 const root = '.usine/outputs/';
 const reject = (file, reason) => { process.stdout.write(JSON.stringify({ error: { file, reason } })); };
 const collect = () => {
-  const files = fs.readdirSync(root).sort();
+  let files;
+  try { files = fs.readdirSync(root).sort(); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    files = [];
+  }
   if (files.length > ${MAX_STEP_OUTPUTS}) return reject(root + files[${MAX_STEP_OUTPUTS}], 'at most ${MAX_STEP_OUTPUTS} outputs are allowed');
   const outputs = [];
   for (const file of files) {
