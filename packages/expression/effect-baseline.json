@@ -1,15 +1,5 @@
 {
-  "src/environment.ts": {
-    "schemaClassMissingBrand": 4
-  },
   "src/expression-engine.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 2
-  },
-  "src/marcbachmann-cel.ts": {
-    "schemaSync": 1
-  },
-  "test/expression.test.ts": {
-    "schemaSync": 2
+    "deterministicKeys": 1
   }
 }

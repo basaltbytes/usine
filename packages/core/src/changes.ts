@@ -32,9 +32,9 @@ export type ChangeTarget = typeof ChangeTarget.Type;
 /** Repository and loop ownership are resolved from configuration when a subscriber reads a notice. */
 export const ChangeAudience = Schema.Union([
   AccessScope,
-  Schema.Struct({ _tag: Schema.Literal("Repository"), repository: RepositoryName }),
-  Schema.Struct({ _tag: Schema.Literal("Loop"), loop: LoopName }),
-  Schema.Struct({ _tag: Schema.Literal("Readers") }),
+  Schema.TaggedStruct("Repository", { repository: RepositoryName }),
+  Schema.TaggedStruct("Loop", { loop: LoopName }),
+  Schema.TaggedStruct("Readers", {}),
 ]);
 export type ChangeAudience = typeof ChangeAudience.Type;
 

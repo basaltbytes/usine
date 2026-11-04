@@ -1,6 +1,6 @@
 import { ProjectId } from "@usine/core/project";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { LaneSource, Lane } from "../board.ts";
 import { canonicalLabelName } from "../label.ts";
 import { nonBlankString, uniqueRepositoryNames } from "../checks.ts";
@@ -26,7 +26,10 @@ export const Lanes = Schema.Array(Lane).check(
 /**
  * A named group of registered repositories with shared lanes and project-scoped loops (ADR 0031).
  */
-export class Project extends Schema.Class<Project>("@usine/config/Project")({
+export class Project extends Schema.Class<
+  Project,
+  Brand.Brand<"@usine/config/project/project/Project">
+>("@usine/config/Project")({
   /** The slug used to qualify loop names and project export paths. */
   id: ProjectId,
   /** The nonblank project display name. */

@@ -93,12 +93,18 @@ export const harness = (
         ),
     });
     const services = Context.add(base, ConfigurationStore, store);
+
+    const decodedValue2 = yield* parser.parseAgentFile(
+      InstancePath.make("agents/developer.md"),
+      agentText,
+    );
+
     const initial = LoadedInstance.make({
       config: yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
         "version: 2\noperator: operator\nprojects: [{ id: acme-project, name: Project, repositories: [acme/project] }, { id: acme-other, name: Other, repositories: [acme/other] }]\nrepos:\n  - name: acme/project\n    tags: [app]\n  - name: acme/other\n    tags: [other]\n",
       ),
-      agents: [yield* parser.parseAgentFile(InstancePath.make("agents/developer.md"), agentText)],
+      agents: [decodedValue2],
       loops: [
         yield* parser.parseLoopFile(
           InstancePath.make("projects/acme-project/loops/implement.md"),
@@ -109,11 +115,12 @@ export const harness = (
       quarantinedLoops: [],
       warnings: [],
     });
+    const decodedValue4 = configurationEntities(initial);
     const first = yield* store.commit({
       expected: ConfigurationRevisionNumber.make(0),
       actor: initial.config.operator,
       message: Option.some("Initial import"),
-      changes: configurationDiff([], configurationEntities(initial)),
+      changes: configurationDiff([], decodedValue4),
     });
     const currentContext = yield* Layer.build(
       CurrentInstance.layer(InstanceDirectory.make("/instance"), initial, first.number).pipe(

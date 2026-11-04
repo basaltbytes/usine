@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import { ChangeBus, type ChangeAudience } from "@usine/core/changes";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
@@ -99,7 +100,7 @@ export class AttentionAcknowledgements extends Context.Service<
         }, persistence("prune attention acknowledgements")),
         dismiss: Effect.fn("AttentionAcknowledgements.dismiss")(function* (
           acknowledgement: AttentionAcknowledgement,
-          audiences: ReadonlyArray<ChangeAudience> = [{ _tag: "Instance" }],
+          audiences: ReadonlyArray<ChangeAudience> = [InstanceScope.make()],
         ) {
           yield* Effect.annotateCurrentSpan({ needId: acknowledgement.id });
           const inserted = yield* database
@@ -120,7 +121,7 @@ export class AttentionAcknowledgements extends Context.Service<
         }, persistence("dismiss attention entry")),
         undo: Effect.fn("AttentionAcknowledgements.undo")(function* (
           key: AttentionKey,
-          audiences: ReadonlyArray<ChangeAudience> = [{ _tag: "Instance" }],
+          audiences: ReadonlyArray<ChangeAudience> = [InstanceScope.make()],
         ) {
           yield* Effect.annotateCurrentSpan({ needId: key.id });
           const removed = yield* database

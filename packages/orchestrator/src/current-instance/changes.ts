@@ -1,3 +1,4 @@
+import { InstanceScope, ProjectScope } from "@usine/core/access";
 import type { ChangeAudience } from "@usine/core/changes";
 import { type AgentFile, InvalidAgent } from "@usine/config/agent";
 import type { Worker as ConfigWorker } from "@usine/config/factory";
@@ -9,7 +10,7 @@ import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Equal, Schema } from "effect";
+import { type Brand, Equal, Schema } from "effect";
 
 const RESTART_BLOCKS = ["workers", "tracing", "auth"] as const;
 
@@ -45,9 +46,10 @@ const nameChanges = <S extends Schema.Top>(name: S) =>
  * The changes of an accepted reload by name, whether `settings` or the `operator` login changed,
  * and the Loop and Agent files that were left out.
  */
-export class InstanceReload extends Schema.Class<InstanceReload>(
-  "@usine/orchestrator/InstanceReload",
-)({
+export class InstanceReload extends Schema.Class<
+  InstanceReload,
+  Brand.Brand<"@usine/orchestrator/current-instance/changes/InstanceReload">
+>("@usine/orchestrator/InstanceReload")({
   /** The loop names added, removed, or changed by the accepted reload. */
   loops: nameChanges(LoopName),
   /** The agent names added, removed, or changed by the accepted reload. */
@@ -260,12 +262,12 @@ export const workersChange = (
 /** Resolves project-local reloads separately from changes to shared definitions and settings. */
 export const reloadAudiences = (changes: InstanceReload): ReadonlyArray<ChangeAudience> => {
   const audiences: ChangeAudience[] = [
-    { _tag: "Instance" },
+    InstanceScope.make(),
     ...[...changes.loops.added, ...changes.loops.removed, ...changes.loops.changed].map(
       (loop): ChangeAudience => ({ _tag: "Loop", loop }),
     ),
     ...[...changes.projects.added, ...changes.projects.removed, ...changes.projects.changed].map(
-      (project): ChangeAudience => ({ _tag: "Project", project }),
+      (project): ChangeAudience => ProjectScope.make({ project }),
     ),
     ...[...changes.repos.added, ...changes.repos.removed, ...changes.repos.changed].map(
       (repository): ChangeAudience => ({ _tag: "Repository", repository }),

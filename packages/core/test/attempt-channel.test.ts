@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Option, Result, Schema } from "effect";
+import { Effect, DateTime, Option, Result, Schema } from "effect";
 import { Agent, AgentPersona, AgentName } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 import {
@@ -54,276 +54,332 @@ const spec = AttemptChannel.RunSpec.make({
 });
 
 describe("attempt channel", () => {
-  it("reads older delivery receipts and round-trips the forwarded child identity", () => {
-    const decode = Schema.decodeUnknownSync(AttemptChannel.InterventionState);
-    assert.isTrue(Option.isNone(decode({ held: false, paused: false }).forwardedTo));
-    const forwarded = decode({ held: false, paused: false, queued: true, forwardedTo: "child-1" });
-    assert.deepStrictEqual(forwarded.forwardedTo, Option.some(AgentSessionId.make("child-1")));
-    const json = Schema.fromJsonString(AttemptChannel.InterventionState);
-    assert.deepStrictEqual(Schema.decodeSync(json)(Schema.encodeSync(json)(forwarded)), forwarded);
-  });
-  it("preserves legacy worker recoveries and round-trips initial confirmations", () => {
-    const notice = {
-      _tag: "WorkerResponsive",
-      worker: "remote",
-      lastAnsweredAt: "2026-10-28T00:00:00Z",
-    };
-    const decode = Schema.decodeUnknownSync(AttemptChannel.WorkerResponsive);
-    assert.isTrue(decode(notice).recovered);
-    const initial = decode({ ...notice, recovered: false });
-    assert.isFalse(initial.recovered);
-    const json = Schema.fromJsonString(AttemptChannel.WorkerResponsive);
-    assert.deepStrictEqual(Schema.decodeSync(json)(Schema.encodeSync(json)(initial)), initial);
-  });
-  it("reads legacy worker notices as one failed probe and rejects invalid probe counts", () => {
-    const notice = {
-      _tag: "WorkerUnresponsive",
-      worker: "remote",
-      lastAnsweredAt: "2026-10-28T00:00:00Z",
-      reason: "SSH timed out",
-    };
-    const decode = Schema.decodeUnknownSync(AttemptChannel.WorkerUnresponsive);
-    assert.strictEqual(decode(notice).unansweredProbes, 1);
-    assert.strictEqual(decode({ ...notice, unansweredProbes: 3 }).unansweredProbes, 3);
-    for (const unansweredProbes of [0, -1, 1.5])
-      assert.throws(() => decode({ ...notice, unansweredProbes }));
-  });
-  it("round-trips a final envelope through JSON", () => {
-    const envelope = AttemptChannel.OutboundEnvelope.make({
-      version: AttemptChannel.PROTOCOL_VERSION,
-      attemptId: spec.attemptId,
-      sequence: AttemptChannel.Sequence.make(1),
-      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
-      payload: AttemptChannel.Final.make({
-        result: StepResult.make({
-          message: "Done",
-          facts: [
-            Commit.make({
-              sha: CommitSha.make("fedcba9876543210fedcba9876543210fedcba98"),
-              summary: "Implement executor",
-            }),
-            PullRequest.make({ number: 71, url: new URL("https://github.com/acme/demo/pull/71") }),
-            Comment.make({
-              url: new URL("https://github.com/acme/demo/pull/71#issuecomment-1"),
-              kind: "issue-comment",
-              at: Option.some(DateTime.makeUnsafe("2026-08-30T11:58:00Z")),
-            }),
-          ],
-        }),
+  it.effect("reads older delivery receipts and round-trips the forwarded child identity", () =>
+    Effect.gen(function* () {
+      const decode = Schema.decodeUnknownEffect(AttemptChannel.InterventionState);
+      assert.isTrue(Option.isNone((yield* decode({ held: false, paused: false })).forwardedTo));
+      const forwarded = yield* decode({
+        held: false,
+        paused: false,
+        queued: true,
+        forwardedTo: "child-1",
+      });
+      assert.deepStrictEqual(forwarded.forwardedTo, Option.some(AgentSessionId.make("child-1")));
+      const json = Schema.fromJsonString(AttemptChannel.InterventionState);
+      const decodedValue6 = yield* Schema.encodeEffect(json)(forwarded);
+      const decodedValue7 = yield* Schema.decodeEffect(json)(decodedValue6);
+      assert.deepStrictEqual(decodedValue7, forwarded);
+    }),
+  );
+  it.effect("preserves legacy worker recoveries and round-trips initial confirmations", () =>
+    Effect.gen(function* () {
+      const notice = {
+        _tag: "WorkerResponsive",
+        worker: "remote",
+        lastAnsweredAt: "2026-10-28T00:00:00Z",
+      };
+      const decode = Schema.decodeUnknownEffect(AttemptChannel.WorkerResponsive);
+      assert.isTrue((yield* decode(notice)).recovered);
+      const initial = yield* decode({ ...notice, recovered: false });
+      assert.isFalse(initial.recovered);
+      const json = Schema.fromJsonString(AttemptChannel.WorkerResponsive);
+      const decodedValue4 = yield* Schema.encodeEffect(json)(initial);
+      const decodedValue5 = yield* Schema.decodeEffect(json)(decodedValue4);
+      assert.deepStrictEqual(decodedValue5, initial);
+    }),
+  );
+  it.effect(
+    "reads legacy worker notices as one failed probe and rejects invalid probe counts",
+    () =>
+      Effect.gen(function* () {
+        const notice = {
+          _tag: "WorkerUnresponsive",
+          worker: "remote",
+          lastAnsweredAt: "2026-10-28T00:00:00Z",
+          reason: "SSH timed out",
+        };
+        const decode = Schema.decodeUnknownEffect(AttemptChannel.WorkerUnresponsive);
+        assert.strictEqual((yield* decode(notice)).unansweredProbes, 1);
+        assert.strictEqual((yield* decode({ ...notice, unansweredProbes: 3 })).unansweredProbes, 3);
+        for (const unansweredProbes of [0, -1, 1.5])
+          assert.strictEqual(
+            (yield* Effect.flip(decode({ ...notice, unansweredProbes })))._tag,
+            "SchemaError",
+          );
       }),
-    });
-
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
-
-    assert.deepStrictEqual(decoded, envelope);
-  });
-
-  it("decodes a Comment fact stored without its time as none", () => {
-    const stored = { _tag: "Comment", url: "https://github.com/acme/demo/pull/71", kind: "review" };
-    const comment = Schema.decodeUnknownSync(Comment)(stored);
-    assert.isTrue(Option.isNone(comment.at));
-    assert.deepStrictEqual(Schema.encodeSync(Comment)(comment), stored);
-  });
-
-  it("round-trips a child-session budget failure through JSON", () => {
-    const envelope = AttemptChannel.OutboundEnvelope.make({
-      version: AttemptChannel.PROTOCOL_VERSION,
-      attemptId: spec.attemptId,
-      sequence: AttemptChannel.Sequence.make(2),
-      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
-      payload: AttemptChannel.Failed.make({
-        failure: ChildSessionBudgetFailure.make({
-          maxChildren: spec.maxChildren,
-          attemptedChildren: ChildSessionCount.make(5),
-        }),
-      }),
-    });
-
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
-    assert.deepStrictEqual(decoded, envelope);
-  });
-
-  it("round-trips a child-addressed operator message through JSON", () => {
-    const envelope = AttemptChannel.InboundEnvelope.make({
-      operator: "operator",
-      version: AttemptChannel.PROTOCOL_VERSION,
-      attemptId: spec.attemptId,
-      sequence: AttemptChannel.Sequence.make(3),
-      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:02Z"),
-      target: AttemptChannel.ChildTarget.make({
-        sessionId: AgentSessionId.make("parent-1:child:1"),
-      }),
-      payload: AttemptChannel.OperatorMessage.make({
-        message: "Rebase onto main before you push.",
-      }),
-    });
-
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
-
-    assert.deepStrictEqual(decoded, envelope);
-  });
-
-  it("defaults an inbound frame to the parent target and round-trips a Release", () => {
-    const envelope = AttemptChannel.InboundEnvelope.make({
-      operator: "operator",
-      version: AttemptChannel.PROTOCOL_VERSION,
-      attemptId: spec.attemptId,
-      sequence: AttemptChannel.Sequence.make(4),
-      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:03Z"),
-      target: AttemptChannel.ParentTarget.make(),
-      payload: AttemptChannel.Release.make(),
-    });
-
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
-
-    assert.deepStrictEqual(decoded, envelope);
-  });
-
-  it("rejects superseded protocol versions on the live channel", () => {
-    const outbound = Schema.encodeSync(AttemptChannel.Envelope)(
-      AttemptChannel.OutboundEnvelope.make({
+  );
+  it.effect("round-trips a final envelope through JSON", () =>
+    Effect.gen(function* () {
+      const envelope = AttemptChannel.OutboundEnvelope.make({
         version: AttemptChannel.PROTOCOL_VERSION,
         attemptId: spec.attemptId,
         sequence: AttemptChannel.Sequence.make(1),
         sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
-        payload: AttemptChannel.Interrupted.make(),
-      }),
-    );
-
-    for (const version of [3, 4, 5] as const) {
-      assert.throws(() =>
-        Schema.decodeUnknownSync(AttemptChannel.Envelope)(
-          { ...outbound, version },
-          { onExcessProperty: "error" },
-        ),
-      );
-    }
-  });
-
-  it("reads older rate limits without a login and round-trips login and reset dates through JSON", () => {
-    const session = ParentSession.make({
-      id: AgentSessionId.make("parent-1"),
-      agent: agent.name,
-      brain: BrainSpec.make({ harness: "pi", model: parentModel, effort: "high" }),
-    });
-    const envelope = AttemptChannel.OutboundEnvelope.make({
-      version: AttemptChannel.PROTOCOL_VERSION,
-      attemptId: spec.attemptId,
-      sequence: AttemptChannel.Sequence.make(1),
-      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
-      payload: AttemptChannel.SessionEvent.make({
-        event: PoolRateLimitsUpdated.make({
-          session,
-          pool: "chatgptPlan",
-          login: Option.some(PoolLogin.make("operator@example.com")),
-          rateLimits: RateLimitsSnapshot.make({
-            limitId: Option.some("codex"),
-            limitName: Option.some("ChatGPT"),
-            primary: Option.some(
-              RateLimitWindow.make({
-                usedPercent: 24,
-                windowDurationMinutes: Option.some(300),
-                resetsAt: Option.some(DateTime.makeUnsafe("2026-09-07T02:25:59Z")),
+        payload: AttemptChannel.Final.make({
+          result: StepResult.make({
+            message: "Done",
+            facts: [
+              Commit.make({
+                sha: CommitSha.make("fedcba9876543210fedcba9876543210fedcba98"),
+                summary: "Implement executor",
               }),
-            ),
-            secondary: Option.some(
-              RateLimitWindow.make({
-                usedPercent: 0,
-                windowDurationMinutes: Option.none(),
-                resetsAt: Option.none(),
+              PullRequest.make({
+                number: 71,
+                url: new URL("https://github.com/acme/demo/pull/71"),
               }),
-            ),
+              Comment.make({
+                url: new URL("https://github.com/acme/demo/pull/71#issuecomment-1"),
+                kind: "issue-comment",
+                at: Option.some(DateTime.makeUnsafe("2026-08-30T11:58:00Z")),
+              }),
+            ],
           }),
         }),
+      });
+
+      const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
+      const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      });
+
+      assert.deepStrictEqual(decoded, envelope);
+    }),
+  );
+
+  it.effect("decodes a Comment fact stored without its time as none", () =>
+    Effect.gen(function* () {
+      const stored = {
+        _tag: "Comment",
+        url: "https://github.com/acme/demo/pull/71",
+        kind: "review",
+      };
+      const comment = yield* Schema.decodeUnknownEffect(Comment)(stored);
+      assert.isTrue(Option.isNone(comment.at));
+      const decodedValue3 = yield* Schema.encodeEffect(Comment)(comment);
+      assert.deepStrictEqual(decodedValue3, stored);
+    }),
+  );
+
+  it.effect("round-trips a child-session budget failure through JSON", () =>
+    Effect.gen(function* () {
+      const envelope = AttemptChannel.OutboundEnvelope.make({
+        version: AttemptChannel.PROTOCOL_VERSION,
+        attemptId: spec.attemptId,
+        sequence: AttemptChannel.Sequence.make(2),
+        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
+        payload: AttemptChannel.Failed.make({
+          failure: ChildSessionBudgetFailure.make({
+            maxChildren: spec.maxChildren,
+            attemptedChildren: ChildSessionCount.make(5),
+          }),
+        }),
+      });
+
+      const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
+      const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      });
+      assert.deepStrictEqual(decoded, envelope);
+    }),
+  );
+
+  it.effect("round-trips a child-addressed operator message through JSON", () =>
+    Effect.gen(function* () {
+      const envelope = AttemptChannel.InboundEnvelope.make({
+        operator: "operator",
+        version: AttemptChannel.PROTOCOL_VERSION,
+        attemptId: spec.attemptId,
+        sequence: AttemptChannel.Sequence.make(3),
+        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:02Z"),
+        target: AttemptChannel.ChildTarget.make({
+          sessionId: AgentSessionId.make("parent-1:child:1"),
+        }),
+        payload: AttemptChannel.OperatorMessage.make({
+          message: "Rebase onto main before you push.",
+        }),
+      });
+
+      const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
+      const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      });
+
+      assert.deepStrictEqual(decoded, envelope);
+    }),
+  );
+
+  it.effect("defaults an inbound frame to the parent target and round-trips a Release", () =>
+    Effect.gen(function* () {
+      const envelope = AttemptChannel.InboundEnvelope.make({
+        operator: "operator",
+        version: AttemptChannel.PROTOCOL_VERSION,
+        attemptId: spec.attemptId,
+        sequence: AttemptChannel.Sequence.make(4),
+        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:03Z"),
+        target: AttemptChannel.ParentTarget.make(),
+        payload: AttemptChannel.Release.make(),
+      });
+
+      const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
+      const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      });
+
+      assert.deepStrictEqual(decoded, envelope);
+    }),
+  );
+
+  it.effect("rejects superseded protocol versions on the live channel", () =>
+    Effect.gen(function* () {
+      const outbound = yield* Schema.encodeEffect(AttemptChannel.Envelope)(
+        AttemptChannel.OutboundEnvelope.make({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId: spec.attemptId,
+          sequence: AttemptChannel.Sequence.make(1),
+          sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+          payload: AttemptChannel.Interrupted.make(),
+        }),
+      );
+
+      for (const version of [3, 4, 5] as const) {
+        assert.strictEqual(
+          (yield* Effect.flip(
+            Schema.decodeUnknownEffect(AttemptChannel.Envelope)(
+              { ...outbound, version },
+              { onExcessProperty: "error" },
+            ),
+          ))._tag,
+          "SchemaError",
+        );
+      }
+    }),
+  );
+
+  it.effect(
+    "reads older rate limits without a login and round-trips login and reset dates through JSON",
+    () =>
+      Effect.gen(function* () {
+        const session = ParentSession.make({
+          id: AgentSessionId.make("parent-1"),
+          agent: agent.name,
+          brain: BrainSpec.make({ harness: "pi", model: parentModel, effort: "high" }),
+        });
+        const envelope = AttemptChannel.OutboundEnvelope.make({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId: spec.attemptId,
+          sequence: AttemptChannel.Sequence.make(1),
+          sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+          payload: AttemptChannel.SessionEvent.make({
+            event: PoolRateLimitsUpdated.make({
+              session,
+              pool: "chatgptPlan",
+              login: Option.some(PoolLogin.make("operator@example.com")),
+              rateLimits: RateLimitsSnapshot.make({
+                limitId: Option.some("codex"),
+                limitName: Option.some("ChatGPT"),
+                primary: Option.some(
+                  RateLimitWindow.make({
+                    usedPercent: 24,
+                    windowDurationMinutes: Option.some(300),
+                    resetsAt: Option.some(DateTime.makeUnsafe("2026-09-07T02:25:59Z")),
+                  }),
+                ),
+                secondary: Option.some(
+                  RateLimitWindow.make({
+                    usedPercent: 0,
+                    windowDurationMinutes: Option.none(),
+                    resetsAt: Option.none(),
+                  }),
+                ),
+              }),
+            }),
+          }),
+        });
+
+        const encoded = yield* Schema.encodeEffect(EnvelopeJson)(envelope);
+        const decoded = yield* Schema.decodeEffect(EnvelopeJson)(encoded, {
+          onExcessProperty: "error",
+        });
+
+        assert.deepStrictEqual(decoded, envelope);
+        assert(envelope.payload._tag === "SessionEvent");
+        assert(envelope.payload.event._tag === "PoolRateLimitsUpdated");
+        const { login: _, ...legacy } = yield* Schema.encodeEffect(PoolRateLimitsUpdated)(
+          envelope.payload.event,
+        );
+        assert(Option.isNone((yield* Schema.decodeEffect(PoolRateLimitsUpdated)(legacy)).login));
+        assert.throws(() => PoolLogin.make(""));
       }),
-    });
+  );
 
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
+  it.effect("rejects credentials smuggled into a RunSpec", () =>
+    Effect.gen(function* () {
+      const raw = yield* Schema.encodeEffect(AttemptChannel.RunSpec)(spec);
 
-    assert.deepStrictEqual(decoded, envelope);
-    assert(envelope.payload._tag === "SessionEvent");
-    assert(envelope.payload.event._tag === "PoolRateLimitsUpdated");
-    const { login: _, ...legacy } = Schema.encodeSync(PoolRateLimitsUpdated)(
-      envelope.payload.event,
-    );
-    assert(Option.isNone(Schema.decodeSync(PoolRateLimitsUpdated)(legacy).login));
-    assert.throws(() => PoolLogin.make(""));
-  });
+      assert.strictEqual(
+        (yield* Effect.flip(
+          Schema.decodeUnknownEffect(AttemptChannel.RunSpec)(
+            { ...raw, githubToken: "must-never-cross-the-channel" },
+            { onExcessProperty: "error" },
+          ),
+        ))._tag,
+        "SchemaError",
+      );
+    }),
+  );
 
-  it("rejects credentials smuggled into a RunSpec", () => {
-    const raw = Schema.encodeSync(AttemptChannel.RunSpec)(spec);
-
-    assert.throws(() =>
-      Schema.decodeUnknownSync(AttemptChannel.RunSpec)(
-        { ...raw, githubToken: "must-never-cross-the-channel" },
-        { onExcessProperty: "error" },
-      ),
-    );
-  });
-
-  it("reads older launch records and round-trips saved harness session metadata", () => {
-    const session = ParentSession.make({
-      id: AgentSessionId.make("parent"),
-      agent: agent.name,
-      brain: agent.brain,
-    });
-    const legacy = Schema.encodeSync(SessionStarted)(SessionStarted.make({ session }));
-    assert(Option.isNone(Schema.decodeSync(SessionStarted)(legacy).harnessSession));
-    assert(Option.isNone(Schema.decodeSync(SessionStarted)(legacy).prompt));
-    const storedSpec = Schema.decodeUnknownSync(AttemptChannel.RunSpec)(
-      Object.fromEntries(
-        Object.entries(Schema.encodeSync(AttemptChannel.RunSpec)(spec)).filter(
-          ([key]) => key !== "preparedAt" && key !== "botLogin",
+  it.effect("reads older launch records and round-trips saved harness session metadata", () =>
+    Effect.gen(function* () {
+      const session = ParentSession.make({
+        id: AgentSessionId.make("parent"),
+        agent: agent.name,
+        brain: agent.brain,
+      });
+      const legacy = yield* Schema.encodeEffect(SessionStarted)(SessionStarted.make({ session }));
+      assert(Option.isNone((yield* Schema.decodeEffect(SessionStarted)(legacy)).harnessSession));
+      assert(Option.isNone((yield* Schema.decodeEffect(SessionStarted)(legacy)).prompt));
+      const decodedValue2 = yield* Schema.encodeEffect(AttemptChannel.RunSpec)(spec);
+      const storedSpec = yield* Schema.decodeUnknownEffect(AttemptChannel.RunSpec)(
+        Object.fromEntries(
+          Object.entries(decodedValue2).filter(
+            ([key]) => key !== "preparedAt" && key !== "botLogin",
+          ),
         ),
-      ),
-    );
-    assert(Option.isNone(storedSpec.preparedAt));
-    assert(Option.isNone(storedSpec.botLogin));
-    const started = SessionStarted.make({
-      session,
-      prompt: Option.some("Exact task\n\n  Preserve whitespace.\n"),
-      harnessSession: Option.some(
+      );
+      assert(Option.isNone(storedSpec.preparedAt));
+      assert(Option.isNone(storedSpec.botLogin));
+      const started = SessionStarted.make({
+        session,
+        prompt: Option.some("Exact task\n\n  Preserve whitespace.\n"),
+        harnessSession: Option.some(
+          HarnessSession.make({
+            id: HarnessSessionId.make("native-1"),
+            cwd: "/worker/repo",
+            home: Option.some("/worker/codex/native-1"),
+          }),
+        ),
+      });
+      const encoded = yield* Schema.encodeEffect(SessionStarted)(started);
+      const decodedValue1 = yield* Schema.decodeEffect(SessionStarted)(encoded);
+      assert.deepStrictEqual(decodedValue1, started);
+      // A record from before the home was saved.
+      const withoutHome = yield* Schema.decodeEffect(SessionStarted)({
+        ...encoded,
+        harnessSession: { id: "native-1", cwd: "/worker/repo" },
+      });
+      assert(Option.isSome(withoutHome.harnessSession));
+      assert(Option.isNone(withoutHome.harnessSession.value.home));
+      assert.throws(() => HarnessSessionId.make(""));
+      assert.throws(() => HarnessSession.make({ id: HarnessSessionId.make("native-1"), cwd: "" }));
+      assert.throws(() =>
         HarnessSession.make({
           id: HarnessSessionId.make("native-1"),
           cwd: "/worker/repo",
-          home: Option.some("/worker/codex/native-1"),
+          home: Option.some(""),
         }),
-      ),
-    });
-    const encoded = Schema.encodeSync(SessionStarted)(started);
-    assert.deepStrictEqual(Schema.decodeSync(SessionStarted)(encoded), started);
-    // A record from before the home was saved.
-    const withoutHome = Schema.decodeSync(SessionStarted)({
-      ...encoded,
-      harnessSession: { id: "native-1", cwd: "/worker/repo" },
-    });
-    assert(Option.isSome(withoutHome.harnessSession));
-    assert(Option.isNone(withoutHome.harnessSession.value.home));
-    assert.throws(() => HarnessSessionId.make(""));
-    assert.throws(() => HarnessSession.make({ id: HarnessSessionId.make("native-1"), cwd: "" }));
-    assert.throws(() =>
-      HarnessSession.make({
-        id: HarnessSessionId.make("native-1"),
-        cwd: "/worker/repo",
-        home: Option.some(""),
-      }),
-    );
-  });
+      );
+    }),
+  );
 
   describe("outbound protocol reducer", () => {
     const outbound = (

@@ -55,20 +55,23 @@ import { apiRoutes } from "../src/http.ts";
 
 const failedWorker = WorkerName.make("failed");
 const healthyWorker = WorkerName.make("healthy");
-const instance = LoadedInstance.make({
-  config: Schema.decodeSync(UsineConfig)({
+const instance = Effect.gen(function* () {
+  const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
     version: 1,
     repos: [],
     workers: [
       { name: failedWorker, kind: "local" },
       { name: healthyWorker, kind: "local" },
     ],
-  }),
-  agents: [],
-  loops: [],
-  invalidAgents: [],
-  quarantinedLoops: [],
-  warnings: [],
+  });
+  return LoadedInstance.make({
+    config: decodedValue1,
+    agents: [],
+    loops: [],
+    invalidAgents: [],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 const submission = Submission.make({
   event: Event.make({
@@ -96,6 +99,8 @@ const submission = Submission.make({
 
 it("runs on-demand preflight, refuses busy workers, stores failures, and restores scheduling and attention without restarting", async () => {
   const program = Effect.gen(function* () {
+    const fixtureInstance = yield* instance;
+
     const currentDirectory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
       directory: sqliteTempDirectory(),
       prefix: "usine-preflight-api-",
@@ -133,8 +138,8 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
       sweep: Effect.void,
     });
     const current = Layer.succeed(CurrentInstance)({
-      get: Effect.succeed(instance),
-      changes: Stream.make(instance),
+      get: Effect.succeed(fixtureInstance),
+      changes: Stream.make(fixtureInstance),
       reload: Effect.die("unused"),
       commit: () => Effect.die("unused"),
       registerWorkers: () => Effect.void,
@@ -147,7 +152,7 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         }),
       ),
     });
-    const scheduler = stepExecutorLayer(instance.config, [submission.agent.brain]).pipe(
+    const scheduler = stepExecutorLayer(fixtureInstance.config, [submission.agent.brain]).pipe(
       Layer.provide(MarcbachmannCelLayer),
       Layer.provide(Layer.mergeAll(executor, current, app)),
     );
@@ -177,7 +182,11 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
       const operator = yield* Operator;
       const configuration = yield* OperatorConfiguration;
       const status = yield* WorkerStatus;
-      const backend = liveBackendLayer({ get: Effect.succeed(instance) }, operator, configuration);
+      const backend = liveBackendLayer(
+        { get: Effect.succeed(fixtureInstance) },
+        operator,
+        configuration,
+      );
       const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
         disableLogger: true,
       }).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
@@ -186,7 +195,7 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         const overview = client.get("/api/overview").pipe(
           Effect.tap((response) => Effect.sync(() => assert.strictEqual(response.status, 200))),
           Effect.flatMap((response) => response.text),
-          Effect.map(Schema.decodeUnknownSync(Schema.fromJsonString(FactoryOverview))),
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(FactoryOverview))),
         );
         const before = yield* overview;
         assert.deepStrictEqual(
@@ -211,9 +220,10 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         const failed = yield* client.post(`/api/workers/${failedWorker}/preflight`).pipe(
           Effect.tap((response) => Effect.sync(() => assert.strictEqual(response.status, 200))),
           Effect.flatMap((response) => response.text),
-          Effect.map(Schema.decodeUnknownSync(Schema.fromJsonString(WorkerPreflightView))),
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(WorkerPreflightView))),
         );
         assert.strictEqual(failed.prerequisites?._tag, "Failed");
+
         assert.deepStrictEqual(
           (yield* status.unavailable).map(({ worker }) => worker),
           [failedWorker],
@@ -230,7 +240,7 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         assert.include(updatedText, "already running");
         const during = yield* client.get("/api/configuration").pipe(
           Effect.flatMap((response) => response.text),
-          Effect.map(Schema.decodeUnknownSync(Schema.fromJsonString(ConfigurationView))),
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(ConfigurationView))),
         );
         assert.strictEqual(
           during.workers.find(({ name }) => name === failedWorker)?.preflightRunning,
@@ -245,10 +255,14 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         const response = yield* Fiber.join(requested);
         assert.strictEqual(response.status, 200);
         const latestText = yield* response.text;
-        const fresh = Schema.decodeSync(Schema.fromJsonString(WorkerPreflightView))(latestText);
+        const fresh = yield* Schema.decodeEffect(Schema.fromJsonString(WorkerPreflightView))(
+          latestText,
+        );
         assert.strictEqual(fresh.prerequisites?._tag, "Passed");
+
         assert.strictEqual((yield* status.checking).size, 0);
-        const stored = yield* configuration.view(instance);
+
+        const stored = yield* configuration.view(fixtureInstance);
         assert.deepStrictEqual(
           stored.workers.find(({ name }) => name === failedWorker)?.prerequisites,
           fresh.prerequisites,
@@ -256,10 +270,11 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
         const lease = yield* Fiber.join(waiting);
         assert.strictEqual(lease.worker, failedWorker);
         assert.strictEqual(failedChecks, 3);
+
         assert.deepStrictEqual((yield* overview).needsYou, []);
         const desk = yield* client.get("/api/desk").pipe(
           Effect.flatMap((response) => response.text),
-          Effect.map(Schema.decodeUnknownSync(Schema.fromJsonString(DeskView))),
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(DeskView))),
         );
         assert.strictEqual(
           desk.workers.find(({ name }) => name === failedWorker)?.preflight?._tag,

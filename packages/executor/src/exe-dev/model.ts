@@ -1,6 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
 import { BotLogin, type SshDestination } from "@usine/core/worker";
-import { Schema, type Effect } from "effect";
+import { type Brand, Schema, type Effect } from "effect";
 import type { SshCommand } from "@usine/agents/child-host";
 
 /** The bot used by exe.dev's native GitHub integration (ADR 0011). */
@@ -23,9 +23,10 @@ export const HomePath = Schema.String.check(
 export type HomePath = typeof HomePath.Type;
 
 /** An existing exe.dev GitHub integration, attached to the Worker's VM per Attempt. */
-export class GitHubIntegration extends Schema.Class<GitHubIntegration>(
-  "@usine/executor/ExeDevGitHubIntegration",
-)({
+export class GitHubIntegration extends Schema.Class<
+  GitHubIntegration,
+  Brand.Brand<"@usine/executor/exe-dev/model/GitHubIntegration">
+>("@usine/executor/ExeDevGitHubIntegration")({
   /** Must be unique across integrations. */
   repository: RepositoryName,
   /**

@@ -1,6 +1,6 @@
 import type { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { InstallationId, RepositoryId, Installation } from "./installation.ts";
 
 /** The repository permissions required for polling, label updates, and agent-authored changes. */
@@ -71,9 +71,10 @@ export const missingPermissions = (
   );
 
 /** A registered repository covered by the GitHub App installation. */
-export class CoveredProject extends Schema.TaggedClass<CoveredProject>(
-  "@usine/github/ProjectAccess/CoveredProject",
-)("CoveredProject", {
+export class CoveredProject extends Schema.TaggedClass<
+  CoveredProject,
+  Brand.Brand<"@usine/github/access/CoveredProject">
+>("@usine/github/ProjectAccess/CoveredProject")("CoveredProject", {
   /** The installation that can mint a token for this repository. */
   installationId: InstallationId,
   /** The managed repository name as supplied in the registry. */
@@ -83,9 +84,10 @@ export class CoveredProject extends Schema.TaggedClass<CoveredProject>(
 }) {}
 
 /** The error for a registry repository the installation doesn't cover. Returned per repository, so covered repositories can still run. */
-export class ProjectNotInstalledError extends Schema.TaggedError<ProjectNotInstalledError>(
-  "@usine/github/ProjectNotInstalledError",
-)("ProjectNotInstalledError", {
+export class ProjectNotInstalledError extends Schema.TaggedError<
+  ProjectNotInstalledError,
+  Brand.Brand<"@usine/github/access/ProjectNotInstalledError">
+>("@usine/github/ProjectNotInstalledError")("ProjectNotInstalledError", {
   /** The registry repository missing from the installation. */
   repository: RepositoryName,
   /** An operator-facing explanation of the missing repository access. */
@@ -132,9 +134,10 @@ export const deriveProjectAccess = (
 };
 
 /** The error when the installation lacks required repository permissions; `missing` uses `name:level` form. */
-export class AppPermissionError extends Schema.TaggedError<AppPermissionError>(
-  "@usine/github/AppPermissionError",
-)("AppPermissionError", {
+export class AppPermissionError extends Schema.TaggedError<
+  AppPermissionError,
+  Brand.Brand<"@usine/github/access/AppPermissionError">
+>("@usine/github/AppPermissionError")("AppPermissionError", {
   /** Unsatisfied repository permissions as `name:level` strings; a write grant satisfies a read requirement. */
   missing: Schema.Array(Schema.NonEmptyString).check(Schema.isNonEmpty()),
   /** An operator-facing explanation of the grants needed on the App and installation. */

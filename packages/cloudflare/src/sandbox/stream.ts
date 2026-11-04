@@ -34,9 +34,11 @@ const decoder = new TextDecoder();
 
 /** Sends `message` as a stream failure and closes the socket. */
 const refuse = (socket: StreamSocket, message: string) =>
-  socket
-    .send(encodeServerMessage(StreamFailed.make({ message })))
-    .pipe(Effect.andThen(socket.close(1011, "stream failed")));
+  encodeServerMessage(StreamFailed.make({ message })).pipe(
+    Effect.orDie,
+    Effect.flatMap(socket.send),
+    Effect.andThen(socket.close(1011, "stream failed")),
+  );
 
 /** Sends `bytes` of `channel` in messages of at most `FRAME_BYTES`. */
 const sendOutput = (socket: StreamSocket, channel: OutputChannel, bytes: Uint8Array) =>
@@ -138,7 +140,8 @@ export const execStream = Effect.fn("Sandbox.execStream")(function* (
     return yield* refuse(socket, "The container didn't start the command");
   }
   const handle = started.value;
-  yield* socket.send(encodeServerMessage(Started.make({ process })));
+  const startedMessage = yield* encodeServerMessage(Started.make({ process })).pipe(Effect.orDie);
+  yield* socket.send(startedMessage);
   yield* Effect.logInfo("Started a command in the sandbox", {
     ...fields,
     commandBytes: command.length,
@@ -171,7 +174,10 @@ export const execStream = Effect.fn("Sandbox.execStream")(function* (
     });
     return yield* socket.close(1011, "container stream failed");
   }
-  yield* socket.send(encodeServerMessage(Exited.make({ exitCode: exitCode.success })));
+  const exitedMessage = yield* encodeServerMessage(
+    Exited.make({ exitCode: exitCode.success }),
+  ).pipe(Effect.orDie);
+  yield* socket.send(exitedMessage);
   yield* socket.close(1000, "exited");
   yield* Effect.logInfo("The sandbox's command exited", { ...fields, exitCode: exitCode.success });
 });
@@ -237,7 +243,10 @@ export const attachStream = Effect.fn("Sandbox.attachStream")(function* (
     yield* Effect.logInfo("The client left the attach stream", fields);
     return;
   }
-  yield* socket.send(encodeServerMessage(Exited.make({ exitCode: exitCode.value })));
+  const exitedMessage = yield* encodeServerMessage(Exited.make({ exitCode: exitCode.value })).pipe(
+    Effect.orDie,
+  );
+  yield* socket.send(exitedMessage);
   yield* socket.close(1000, "exited");
   yield* Effect.logInfo("The attached command exited", { ...fields, exitCode: exitCode.value });
 });

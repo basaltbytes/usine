@@ -64,6 +64,8 @@ const interruptedStatus = () => {
 
 describe("the orchestrator's Hetzner server", () => {
   const text = rendered();
+  // Vitest registers these infrastructure fixtures synchronously.
+  // @effect-diagnostics-next-line schemaSync:off
   const userData = Schema.decodeUnknownSync(UserData)(parse(text));
 
   it("renders a cloud-config with the usine user's keys, the attempt image's Node.js, and the gateway's settings", () => {

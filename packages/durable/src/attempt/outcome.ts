@@ -20,6 +20,8 @@ import type { AttemptRecord, AttemptResult } from "./documents.ts";
 export type Settled = Result.Result<AttemptReport, AttemptFailure>;
 
 const failureJson = Schema.fromJsonString(AttemptFailure);
+// The attempt failure is already validated.
+// @effect-diagnostics-next-line schemaSync:off
 const encodeFailure = Schema.encodeSync(failureJson);
 const decodeFailure = Schema.decodeUnknownOption(failureJson);
 const decodeResult = Schema.decodeUnknownOption(
@@ -115,7 +117,7 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
 const resultJson = Schema.fromJsonString(StepResult);
 
 /** Encodes a harvested result for `AttemptRecord.result`. */
-export const encodeResult = Schema.encodeSync(resultJson);
+export const encodeResult = Schema.encodeEffect(resultJson);
 const decodeHarvested = Schema.decodeUnknownOption(resultJson);
 
 /**

@@ -7,7 +7,7 @@ import { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
@@ -16,9 +16,10 @@ import { FailureView } from "./attempt.ts";
 import { BoardItemLink, BoardProjectionError } from "./board.ts";
 
 /** A Run that needs operator approval before it can proceed. */
-export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
-  "@usine/orchestrator/ApprovalNeed",
-)("ApprovalNeed", {
+export class ApprovalNeed extends Schema.TaggedClass<
+  ApprovalNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/ApprovalNeed">
+>("@usine/orchestrator/ApprovalNeed")("ApprovalNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The managed repo, in `owner/name` form. */
@@ -40,9 +41,10 @@ export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
  * A failed Run that needs an operator decision. After a `QuestionFailure` or `BlockedFailure`, the
  * Item's next state opens no Run of the Loop (ADR 0017).
  */
-export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
-  "@usine/orchestrator/RunFailureNeed",
-)("RunFailureNeed", {
+export class RunFailureNeed extends Schema.TaggedClass<
+  RunFailureNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/RunFailureNeed">
+>("@usine/orchestrator/RunFailureNeed")("RunFailureNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The managed repo, in `owner/name` form. */
@@ -56,9 +58,10 @@ export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
 }) {}
 
 /** A repository poll failure that needs operator attention. */
-export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
-  "@usine/orchestrator/PollFailureNeed",
-)("PollFailureNeed", {
+export class PollFailureNeed extends Schema.TaggedClass<
+  PollFailureNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/PollFailureNeed">
+>("@usine/orchestrator/PollFailureNeed")("PollFailureNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The repository polling failure retained after sibling repositories continued. */
@@ -66,9 +69,10 @@ export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
 }) {}
 
 /** A declared repository label that couldn't be created or confirmed. */
-export class PreflightFindingNeed extends Schema.TaggedClass<PreflightFindingNeed>(
-  "@usine/orchestrator/PreflightFindingNeed",
-)("PreflightFindingNeed", {
+export class PreflightFindingNeed extends Schema.TaggedClass<
+  PreflightFindingNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/PreflightFindingNeed">
+>("@usine/orchestrator/PreflightFindingNeed")("PreflightFindingNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The declared label that could not be created. */
@@ -76,9 +80,10 @@ export class PreflightFindingNeed extends Schema.TaggedClass<PreflightFindingNee
 }) {}
 
 /** An Item that couldn't be shown on its Board. */
-export class BoardProjectionNeed extends Schema.TaggedClass<BoardProjectionNeed>(
-  "@usine/orchestrator/BoardProjectionNeed",
-)("BoardProjectionNeed", {
+export class BoardProjectionNeed extends Schema.TaggedClass<
+  BoardProjectionNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/BoardProjectionNeed">
+>("@usine/orchestrator/BoardProjectionNeed")("BoardProjectionNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The malformed stored item excluded from the board. */
@@ -86,9 +91,10 @@ export class BoardProjectionNeed extends Schema.TaggedClass<BoardProjectionNeed>
 }) {}
 
 /** A schedule Loop that couldn't evaluate or submit its work. */
-export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>(
-  "@usine/orchestrator/ScheduleFailureNeed",
-)("ScheduleFailureNeed", {
+export class ScheduleFailureNeed extends Schema.TaggedClass<
+  ScheduleFailureNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/ScheduleFailureNeed">
+>("@usine/orchestrator/ScheduleFailureNeed")("ScheduleFailureNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The schedule failure retained after sibling loops continued. */
@@ -99,9 +105,10 @@ export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>
  * An authored file that failed to load at startup and was left out: a quarantined Loop opens no
  * Runs, and an invalid Agent isn't in the roster. A fix takes effect at the next `usine up`.
  */
-export class ConfigFileNeed extends Schema.TaggedClass<ConfigFileNeed>(
-  "@usine/orchestrator/ConfigFileNeed",
-)("ConfigFileNeed", {
+export class ConfigFileNeed extends Schema.TaggedClass<
+  ConfigFileNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/ConfigFileNeed">
+>("@usine/orchestrator/ConfigFileNeed")("ConfigFileNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** Whether the invalid file defines a loop or an agent. */
@@ -120,9 +127,10 @@ export class ConfigFileNeed extends Schema.TaggedClass<ConfigFileNeed>(
  * @property attempts - The number of recorded attempts that startup would otherwise reconcile.
  * @property running - The number of those attempts with no recorded outcome; at most `attempts`.
  */
-export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorkerNeed>(
-  "@usine/orchestrator/UnconfiguredWorkerNeed",
-)(
+export class UnconfiguredWorkerNeed extends Schema.TaggedClass<
+  UnconfiguredWorkerNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/UnconfiguredWorkerNeed">
+>("@usine/orchestrator/UnconfiguredWorkerNeed")(
   "UnconfiguredWorkerNeed",
   Schema.Struct({
     /** The attention entry identity used to distinguish this condition from other entries. */
@@ -144,9 +152,10 @@ export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorke
  * A closed Attempt whose parent task couldn't be confirmed stopped. It is still ending on `worker`
  * and takes one of its slots until a retried stop succeeds (#475).
  */
-export class UnconfirmedStopNeed extends Schema.TaggedClass<UnconfirmedStopNeed>(
-  "@usine/orchestrator/UnconfirmedStopNeed",
-)("UnconfirmedStopNeed", {
+export class UnconfirmedStopNeed extends Schema.TaggedClass<
+  UnconfirmedStopNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/UnconfirmedStopNeed">
+>("@usine/orchestrator/UnconfirmedStopNeed")("UnconfirmedStopNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The managed repo, in `owner/name` form. */
@@ -162,9 +171,10 @@ export class UnconfirmedStopNeed extends Schema.TaggedClass<UnconfirmedStopNeed>
 }) {}
 
 /** A worker with running attempts that has stopped answering liveness checks. */
-export class UnresponsiveWorkerNeed extends Schema.TaggedClass<UnresponsiveWorkerNeed>(
-  "@usine/orchestrator/UnresponsiveWorkerNeed",
-)("UnresponsiveWorkerNeed", {
+export class UnresponsiveWorkerNeed extends Schema.TaggedClass<
+  UnresponsiveWorkerNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/UnresponsiveWorkerNeed">
+>("@usine/orchestrator/UnresponsiveWorkerNeed")("UnresponsiveWorkerNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The configured worker name. */
@@ -186,27 +196,28 @@ export class UnresponsiveWorkerNeed extends Schema.TaggedClass<UnresponsiveWorke
 }) {}
 
 /** An Item that stopped opening Runs until the operator resets its cycle budget. */
-export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(
-  "CycleBudgetNeed",
-  {
-    /** The attention entry identity used to distinguish this condition from other entries. */
-    id: Schema.String,
-    /** The unanswered cycle-budget ask that prevents another run. */
-    ask: CycleBudgetAsk,
-    /**
-     * The repository and item number for display, or the stored item key when it cannot be
-     * decoded.
-     */
-    itemLabel: Schema.String,
-    /** The GitHub item URL, or null when the item key cannot be decoded. */
-    itemUrl: Schema.NullOr(Schema.String),
-  },
-) {}
+export class CycleBudgetNeed extends Schema.TaggedClass<
+  CycleBudgetNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/CycleBudgetNeed">
+>()("CycleBudgetNeed", {
+  /** The attention entry identity used to distinguish this condition from other entries. */
+  id: Schema.String,
+  /** The unanswered cycle-budget ask that prevents another run. */
+  ask: CycleBudgetAsk,
+  /**
+   * The repository and item number for display, or the stored item key when it cannot be
+   * decoded.
+   */
+  itemLabel: Schema.String,
+  /** The GitHub item URL, or null when the item key cannot be decoded. */
+  itemUrl: Schema.NullOr(Schema.String),
+}) {}
 
 /** A worker excluded from scheduling after its startup preflight failed. */
-export class WorkerPreflightNeed extends Schema.TaggedClass<WorkerPreflightNeed>(
-  "@usine/orchestrator/WorkerPreflightNeed",
-)("WorkerPreflightNeed", {
+export class WorkerPreflightNeed extends Schema.TaggedClass<
+  WorkerPreflightNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/WorkerPreflightNeed">
+>("@usine/orchestrator/WorkerPreflightNeed")("WorkerPreflightNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The configured worker name. */
@@ -216,9 +227,10 @@ export class WorkerPreflightNeed extends Schema.TaggedClass<WorkerPreflightNeed>
 }) {}
 
 /** A cloud quota refusal that requires a worker configuration or provider account change. */
-export class WorkerQuotaNeed extends Schema.TaggedClass<WorkerQuotaNeed>(
-  "@usine/orchestrator/WorkerQuotaNeed",
-)("WorkerQuotaNeed", {
+export class WorkerQuotaNeed extends Schema.TaggedClass<
+  WorkerQuotaNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/WorkerQuotaNeed">
+>("@usine/orchestrator/WorkerQuotaNeed")("WorkerQuotaNeed", {
   /** The attention entry identity. */
   id: Schema.String,
   /** The worker whose provider refused machine creation. */
@@ -232,9 +244,10 @@ export const POOL_LIMIT_WARNING_PERCENT = 80;
 /**
  * A billing pool usage window at or above 80 percent of its allowance, with its next reset time.
  */
-export class PoolLimitNeed extends Schema.TaggedClass<PoolLimitNeed>(
-  "@usine/orchestrator/PoolLimitNeed",
-)("PoolLimitNeed", {
+export class PoolLimitNeed extends Schema.TaggedClass<
+  PoolLimitNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/PoolLimitNeed">
+>("@usine/orchestrator/PoolLimitNeed")("PoolLimitNeed", {
   /** The attention entry identity used to distinguish this condition from other entries. */
   id: Schema.String,
   /** The billing source for this usage. */
@@ -249,18 +262,20 @@ export class PoolLimitNeed extends Schema.TaggedClass<PoolLimitNeed>(
   resetsAt: Schema.DateTimeUtcFromString,
 }) {}
 
-export class WebhookSilenceNeed extends Schema.TaggedClass<WebhookSilenceNeed>(
-  "@usine/orchestrator/WebhookSilenceNeed",
-)("WebhookSilenceNeed", {
+export class WebhookSilenceNeed extends Schema.TaggedClass<
+  WebhookSilenceNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/WebhookSilenceNeed">
+>("@usine/orchestrator/WebhookSilenceNeed")("WebhookSilenceNeed", {
   id: Schema.String,
   startedAt: Schema.String,
   publicUrl: Schema.String,
 }) {}
 
 /** An upgrade has deferred runs for at least ten minutes. */
-export class UpgradeDrainNeed extends Schema.TaggedClass<UpgradeDrainNeed>(
-  "@usine/orchestrator/UpgradeDrainNeed",
-)("UpgradeDrainNeed", {
+export class UpgradeDrainNeed extends Schema.TaggedClass<
+  UpgradeDrainNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/UpgradeDrainNeed">
+>("@usine/orchestrator/UpgradeDrainNeed")("UpgradeDrainNeed", {
   id: Schema.String,
   wait: UpgradeWait,
   deferredRuns: Schema.Int.check(Schema.isGreaterThan(0)),

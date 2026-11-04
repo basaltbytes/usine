@@ -31,6 +31,8 @@ const origin = createServer((request, response) => {
 });
 origin.listen(0, "127.0.0.1");
 await once(origin, "listening");
+// The proxy callback reads the listening port synchronously.
+// @effect-diagnostics-next-line schemaSync:off
 const originAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
   origin.address(),
 );
@@ -51,6 +53,8 @@ proxy.on("connect", (request, socket, head) => {
 });
 proxy.listen(0, "127.0.0.1");
 await once(proxy, "listening");
+// The standalone fixture configures the proxy before starting its harness.
+// @effect-diagnostics-next-line schemaSync:off
 const proxyAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
   proxy.address(),
 );

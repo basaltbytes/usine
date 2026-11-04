@@ -2,7 +2,7 @@ import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp, isRefusal, WebhookDeliveryId } from "../src/github-app.ts";
 import { AppCredentials, AppId, GitHubCredentials, PrivateKey } from "../src/credentials.ts";
 import { CoveredProject, REQUIRED_REPOSITORY_PERMISSIONS } from "../src/access.ts";
@@ -50,22 +50,22 @@ const jsonResponse = (
     }),
   );
 
-const requestJson = (
-  request: HttpClientRequest.HttpClientRequest,
-): typeof TokenRequestBody.Type => {
-  assert.strictEqual(request.body._tag, "Uint8Array");
-  if (request.body._tag !== "Uint8Array") return assert.fail("missing body");
-  return Schema.decodeUnknownSync(TokenRequestBody)(
-    JSON.parse(new TextDecoder().decode(request.body.body)),
-  );
-};
+const requestJson = (request: HttpClientRequest.HttpClientRequest) =>
+  Effect.gen(function* () {
+    assert.strictEqual(request.body._tag, "Uint8Array");
+    if (request.body._tag !== "Uint8Array") return assert.fail("missing body");
+    return yield* Schema.decodeEffect(Schema.fromJsonString(TokenRequestBody))(
+      new TextDecoder().decode(request.body.body),
+    );
+  });
 
-const jwtJson = (part: string): Schema.Json => {
-  const base64 = part.replace(/-/gu, "+").replace(/_/gu, "/");
-  return Schema.decodeUnknownSync(Schema.Json)(
-    JSON.parse(Buffer.from(base64, "base64").toString("utf8")),
-  );
-};
+const jwtJson = (part: string) =>
+  Effect.gen(function* () {
+    const base64 = part.replace(/-/gu, "+").replace(/_/gu, "/");
+    return yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(
+      Buffer.from(base64, "base64").toString("utf8"),
+    );
+  });
 
 const appLayer = (client: HttpClient.HttpClient) =>
   GitHubApp.layer.pipe(
@@ -111,7 +111,7 @@ describe("GitHubApp", () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = [];
       const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
       const client = HttpClient.make((request) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           requests.push(request);
           if (request.url.endsWith("/app"))
             return jsonResponse(request, { slug: "usine-basaltbytes" });
@@ -125,7 +125,7 @@ describe("GitHubApp", () => {
             });
           }
           if (request.url.endsWith("/app/installations/77/access_tokens")) {
-            const body = requestJson(request);
+            const body = yield* requestJson(request);
             return Option.isNone(body.repository_ids)
               ? jsonResponse(request, {
                   token: "installation-secret",
@@ -138,7 +138,14 @@ describe("GitHubApp", () => {
                 });
           }
           return jsonResponse(request, { message: "unexpected request" }, 500);
-        }),
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.EncodeError({ request: request, cause }),
+              }),
+          ),
+        ),
       );
 
       return Effect.gen(function* () {
@@ -153,6 +160,7 @@ describe("GitHubApp", () => {
         assert.strictEqual(Redacted.value(wide.value), "installation-secret");
         assert(!String(wide).includes("installation-secret"));
         // The slug is the App's bot login, which attributes timeline changes to the factory.
+
         assert.strictEqual((yield* app.installation).appSlug, "usine-basaltbytes");
 
         const currentRepositories = yield* app.repositories;
@@ -177,19 +185,21 @@ describe("GitHubApp", () => {
         );
         assert.strictEqual(discoveries.length, 1);
         const tokenRequests = requests.filter((request) => request.method === "POST");
-        const wideRequests = tokenRequests.filter((request) =>
-          Option.isNone(requestJson(request).repository_ids),
+        const wideRequests = yield* Effect.filter(tokenRequests, (request) =>
+          Effect.gen(function* () {
+            return Option.isNone((yield* requestJson(request)).repository_ids);
+          }),
         );
         assert.strictEqual(wideRequests.length, 1);
         assert.strictEqual(tokenRequests.length, 3);
         for (const request of tokenRequests) {
-          const body = requestJson(request);
+          const body = yield* requestJson(request);
           assert.deepStrictEqual(body.permissions, REQUIRED_REPOSITORY_PERMISSIONS);
           assert(!("workflows" in body.permissions));
         }
         const workerRequest = tokenRequests.at(-1);
         assert(workerRequest !== undefined);
-        const workerBody = requestJson(workerRequest);
+        const workerBody = yield* requestJson(workerRequest);
         assert.deepStrictEqual(workerBody.permissions, REQUIRED_REPOSITORY_PERMISSIONS);
         assert(Option.isSome(workerBody.repository_ids));
         assert.deepStrictEqual(workerBody.repository_ids.value, [99]);
@@ -203,11 +213,14 @@ describe("GitHubApp", () => {
         assert.strictEqual(parts.length, 3);
         const [headerPart, claimsPart, signaturePart] = parts;
         assert(headerPart !== undefined && claimsPart !== undefined && signaturePart !== undefined);
-        assert.deepStrictEqual(Schema.decodeUnknownSync(JwtHeader)(jwtJson(headerPart)), {
+        const decodedValue4 = yield* jwtJson(headerPart);
+        const valueDecoded1 = yield* Schema.decodeUnknownEffect(JwtHeader)(decodedValue4);
+        assert.deepStrictEqual(valueDecoded1, {
           alg: "RS256",
           typ: "JWT",
         });
-        const claims = Schema.decodeUnknownSync(JwtClaims)(jwtJson(claimsPart));
+        const decodedValue3 = yield* jwtJson(claimsPart);
+        const claims = yield* Schema.decodeUnknownEffect(JwtClaims)(decodedValue3);
         assert.strictEqual(claims.iss, 12345);
         assert(claims.exp - claims.iat <= 600);
         assert(
@@ -268,14 +281,22 @@ describe("GitHubApp", () => {
     const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
     const bodies: Array<typeof TokenRequestBody.Type> = [];
     const client = HttpClient.make((request) =>
-      Effect.sync(() => {
-        bodies.push(requestJson(request));
+      Effect.gen(function* () {
+        const decodedValue2 = yield* requestJson(request);
+        bodies.push(decodedValue2);
         return jsonResponse(request, {
           token: "worker-secret",
           expires_at: expiresAt,
           repositories: [{ id: 99, full_name: "basaltbytes/usine" }],
         });
-      }),
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.EncodeError({ request: request, cause }),
+            }),
+        ),
+      ),
     );
     const project = CoveredProject.make({
       installationId: InstallationId.make(77),
@@ -370,12 +391,20 @@ describe("GitHubApp", () => {
     const client = HttpClient.make((request) =>
       Effect.gen(function* () {
         if (request.method !== "POST") return jsonResponse(request, [installation]);
+
         return jsonResponse(request, {
           token: "skewed-token",
           expires_at: new Date((yield* Clock.currentTimeMillis) + 62 * 60_000).toISOString(),
           repositories: [{ id: 99, full_name: "basaltbytes/usine" }],
         });
-      }),
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.EncodeError({ request: request, cause }),
+            }),
+        ),
+      ),
     );
     return Effect.gen(function* () {
       const app = yield* GitHubApp;
@@ -542,41 +571,47 @@ describe("GitHubApp webhook deliveries", () => {
   it.live("uses an App JWT and summary pagination until the persisted delivery ID", () => {
     const requests: Array<string> = [];
     const client = HttpClient.make((request) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         requests.push(request.url);
         const bearer = request.headers.authorization ?? "";
-        const claims = Schema.decodeUnknownSync(JwtClaims)(jwtJson(bearer.split(".")[1] ?? ""));
+        const decodedValue1 = yield* jwtJson(bearer.split(".")[1] ?? "");
+        const claims = yield* Schema.decodeUnknownEffect(JwtClaims)(decodedValue1);
         assert.strictEqual(claims.iss, credentials.appId);
         const first = request.url === "https://api.github.com/app/hook/deliveries?per_page=100";
         assert(
           first ||
             request.url === "https://api.github.com/app/hook/deliveries?per_page=100&cursor=older",
         );
+        const decodedValue5 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          first
+            ? [
+                { id: 12, event: "ping", repository_id: null },
+                { id: 11, event: "issues", repository_id: 99 },
+              ]
+            : [
+                { id: 10, event: "pull_request", repository_id: 99 },
+                { id: 9, event: "issues", repository_id: 99 },
+              ],
+        );
         return HttpClientResponse.fromWeb(
           request,
-          new Response(
-            JSON.stringify(
-              first
-                ? [
-                    { id: 12, event: "ping", repository_id: null },
-                    { id: 11, event: "issues", repository_id: 99 },
-                  ]
-                : [
-                    { id: 10, event: "pull_request", repository_id: 99 },
-                    { id: 9, event: "issues", repository_id: 99 },
-                  ],
-            ),
-            {
-              headers: {
-                "content-type": "application/json",
-                link: first
-                  ? '<https://api.github.com/app/hook/deliveries?per_page=100&cursor=older>; rel="next"'
-                  : '<https://api.github.com/app/hook/deliveries?per_page=100&cursor=unused>; rel="next"',
-              },
+          new Response(decodedValue5, {
+            headers: {
+              "content-type": "application/json",
+              link: first
+                ? '<https://api.github.com/app/hook/deliveries?per_page=100&cursor=older>; rel="next"'
+                : '<https://api.github.com/app/hook/deliveries?per_page=100&cursor=unused>; rel="next"',
             },
-          ),
+          }),
         );
-      }),
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.EncodeError({ request: request, cause }),
+            }),
+        ),
+      ),
     );
     return Effect.gen(function* () {
       const app = yield* GitHubApp;

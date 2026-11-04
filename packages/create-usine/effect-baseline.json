@@ -1,7 +1,6 @@
 {
   "src/scaffold.ts": {
-    "globalJsonInEffect": 1,
-    "schemaClassMissingBrand": 1
+    "globalJsonInEffect": 1
   },
   "test/scaffold.test.ts": {
     "asyncFunction": 8,
@@ -9,7 +8,6 @@
     "globalJson": 11,
     "newPromise": 2,
     "nodeBuiltinImport": 4,
-    "processEnv": 2,
-    "schemaSync": 2
+    "processEnv": 2
   }
 }

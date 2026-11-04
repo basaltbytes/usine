@@ -1,40 +1,44 @@
 import type { InstanceDirectory } from "@usine/core/instance";
-import { Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 import { lockHeld } from "./lock.ts";
 import { InstanceRecord, ProcessId, instanceFiles, readPid, readRecord } from "./record.ts";
 
 /** No process holds the instance lock. */
-export class Stopped extends Schema.TaggedClass<Stopped>("@usine/server/InstanceStopped")(
-  "Stopped",
-  {
-    /** The PID that a process left in `.usine/` when it didn't exit cleanly. */
-    stale: Schema.Option(ProcessId),
-  },
-) {}
+export class Stopped extends Schema.TaggedClass<
+  Stopped,
+  Brand.Brand<"@usine/server/instance/state/Stopped">
+>("@usine/server/InstanceStopped")("Stopped", {
+  /** The PID that a process left in `.usine/` when it didn't exit cleanly. */
+  stale: Schema.Option(ProcessId),
+}) {}
 
 /** A live process holds the instance lock, and its record names it. */
-export class Running extends Schema.TaggedClass<Running>("@usine/server/InstanceRunning")(
-  "Running",
-  { record: InstanceRecord },
-) {}
+export class Running extends Schema.TaggedClass<
+  Running,
+  Brand.Brand<"@usine/server/instance/state/Running">
+>("@usine/server/InstanceRunning")("Running", { record: InstanceRecord }) {}
 
 /**
  * A process holds the instance lock without a record of a live process: a usine version that
  * writes only `.usine/instance.pid`, or a process that is still starting.
  */
-export class Unrecorded extends Schema.TaggedClass<Unrecorded>("@usine/server/InstanceUnrecorded")(
-  "Unrecorded",
-  { pid: Schema.Option(ProcessId) },
-) {}
+export class Unrecorded extends Schema.TaggedClass<
+  Unrecorded,
+  Brand.Brand<"@usine/server/instance/state/Unrecorded">
+>("@usine/server/InstanceUnrecorded")("Unrecorded", { pid: Schema.Option(ProcessId) }) {}
 
 export const InstanceState = Schema.Union([Stopped, Running, Unrecorded]);
 export type InstanceState = typeof InstanceState.Type;
 
 /** The process couldn't be signaled, for example because another user owns it. */
-export class SignalError extends Schema.TaggedError<SignalError>("@usine/server/SignalError")(
-  "SignalError",
-  { pid: ProcessId, signal: Schema.String, reason: Schema.String },
-) {}
+export class SignalError extends Schema.TaggedError<
+  SignalError,
+  Brand.Brand<"@usine/server/instance/state/SignalError">
+>("@usine/server/SignalError")("SignalError", {
+  pid: ProcessId,
+  signal: Schema.String,
+  reason: Schema.String,
+}) {}
 
 const NoSuchProcess = Schema.Struct({ code: Schema.Literal("ESRCH") });
 

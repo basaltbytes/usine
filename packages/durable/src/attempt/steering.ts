@@ -1,11 +1,11 @@
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Effect, Option, Schema } from "effect";
-import type { DurableHarness } from "../harness.ts";
+import { durableError, type DurableHarness } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import type { AttemptHub } from "./hubs.ts";
 import { parentSessionId } from "./parent.ts";
 
-const encodeIntervention = Schema.encodeSync(AttemptChannel.Intervention);
+const encodeIntervention = Schema.encodeEffect(AttemptChannel.Intervention);
 
 export const hasPendingForwardedSteer = (record: Readonly<AttemptRecord>): boolean =>
   (record.queuedInputs ?? []).some(
@@ -30,6 +30,9 @@ export const queueParentSteer = Effect.fn("AttemptSteering.queueParent")(functio
     target: AttemptChannel.ParentTarget.make(),
     action: steer,
   });
+  const encoded = yield* encodeIntervention(intervention).pipe(
+    Effect.mapError((cause) => durableError("queue a parent turn for the steer", cause)),
+  );
   const state = yield* durable.use("queue a parent turn for the steer", (harness, context) =>
     harness.commit(async (tx) => {
       const task = await tx.task(hub.taskId);
@@ -53,7 +56,11 @@ export const queueParentSteer = Effect.fn("AttemptSteering.queueParent")(functio
       hold.paused = false;
       record.queuedInputs = [
         ...(record.queuedInputs ?? []).filter((input) => input.inputSequence !== inputSequence),
-        { inputSequence, requestId, intervention: encodeIntervention(intervention) },
+        {
+          inputSequence,
+          requestId,
+          intervention: encoded,
+        },
       ];
       return Option.some(
         AttemptChannel.InterventionState.make({

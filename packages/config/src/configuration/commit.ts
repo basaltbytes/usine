@@ -137,8 +137,11 @@ export const validateConfiguration = (
         errors: "all",
         onExcessProperty: "error",
       }).pipe(
-        Effect.mapError((e) => ConfigFileError.fromSchema(file, e)),
-        Effect.flatMap((value) => parser.parseAgentFile(file, formatAgent(value))),
+        Effect.mapBoth({
+          onSuccess: formatAgent,
+          onFailure: (error) => ConfigFileError.fromSchema(file, error),
+        }),
+        Effect.flatMap((text) => parser.parseAgentFile(file, text)),
         Effect.result,
       );
       if (Result.isFailure(parsed)) problems.push(parsed.failure);
@@ -176,6 +179,7 @@ export const validateConfiguration = (
       }
     }
     if (Arr.isArrayNonEmpty(problems)) return yield* ConfigurationInvalid.make({ problems });
+
     return LoadedInstance.make({
       config: config.success,
       agents,
@@ -282,12 +286,13 @@ export const commit = (
         ],
       });
     const number = ConfigurationRevisionNumber.make(current.number + 1);
+    const canonicalEntities = configurationEntities(instance);
     return {
       configuration: Configuration.make({ number, instance: Option.some(instance) }),
       revision: ConfigurationRevision.make({
         ...metadata,
         number,
-        changes: configurationDiff(before, configurationEntities(instance)),
+        changes: configurationDiff(before, canonicalEntities),
       }),
     };
   });

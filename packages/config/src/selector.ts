@@ -1,5 +1,5 @@
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
-import { Option, Schema } from "effect";
+import { type Brand, Option, Schema } from "effect";
 import { uniqueRepositoryNames } from "./checks.ts";
 import { RegistryTag, type ManagedRepo } from "./factory.ts";
 
@@ -7,7 +7,10 @@ import { RegistryTag, type ManagedRepo } from "./factory.ts";
  * Repository names or tags that narrow a loop's project membership. When both are set, both must
  * match (ADR 0004).
  */
-export class Selector extends Schema.Class<Selector>("@usine/config/Selector")({
+export class Selector extends Schema.Class<
+  Selector,
+  Brand.Brand<"@usine/config/selector/Selector">
+>("@usine/config/Selector")({
   /** Repository names to match case-insensitively; `None` imposes no name restriction. */
   repos: Schema.OptionFromOptionalKey(
     Schema.Array(RepositoryName).check(

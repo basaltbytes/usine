@@ -20,3 +20,7 @@ Errors: `ExpressionCheckError` (parse, type, or result type), `ExpressionEvaluat
 The 0.x APIs can change between minor releases.
 
 `checkInteger` requires a CEL `int` result. `evaluateInteger` checks and evaluates it as a `bigint`, preserving precision; consumers apply their own numeric range constraints.
+
+## Schema contracts
+
+Environment descriptors and expression errors use nominal Schema brands. Use the exported schema constructors for typed values and `Schema.decodeUnknownEffect` for untrusted input.

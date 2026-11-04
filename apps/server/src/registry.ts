@@ -1,12 +1,13 @@
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { runCommand } from "./command.ts";
 
 const NPM_VIEW_TIMEOUT = "30 seconds";
 
 /** The registry has no version of the package that matches the spec, or npm couldn't ask it. */
-export class PackageLookupError extends Schema.TaggedError<PackageLookupError>(
-  "@usine/server/PackageLookupError",
-)("PackageLookupError", {
+export class PackageLookupError extends Schema.TaggedError<
+  PackageLookupError,
+  Brand.Brand<"@usine/server/registry/PackageLookupError">
+>("@usine/server/PackageLookupError")("PackageLookupError", {
   packageName: Schema.String,
   spec: Schema.String,
   reason: Schema.String,

@@ -8,7 +8,7 @@ import {
 import { BlockList, connect, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import type { WorkerName } from "@usine/core/worker";
-import { Data, Effect, Fiber, Match, Option, Predicate, Schema } from "effect";
+import { type Brand, Data, Effect, Fiber, Match, Option, Predicate, Schema } from "effect";
 import { Headers } from "effect/http";
 import { tokenFromAuthorization, CallerTokens } from "../caller/caller.ts";
 import { ClientHelloReader, comparableHost } from "../egress/client-hello.ts";
@@ -50,25 +50,31 @@ const privateAddresses = (): BlockList => {
 };
 
 /** The error when the DNS lookup of an allowed host fails or returns nothing. */
-class Unresolvable extends Schema.TaggedError<Unresolvable>()("Unresolvable", {
+class Unresolvable extends Schema.TaggedError<
+  Unresolvable,
+  Brand.Brand<"@usine/gateway/node/egress-proxy/Unresolvable">
+>()("Unresolvable", {
   host: Schema.String,
 }) {}
 
 /** The error when the forward proxy can't listen on its address. */
-export class EgressProxyListenError extends Schema.TaggedError<EgressProxyListenError>()(
-  "EgressProxyListenError",
-  {
-    /** The local address on which the forward proxy failed to listen. */
-    host: Schema.String,
-    /** The requested local TCP port. */
-    port: Schema.Int,
-    /** The diagnostic explanation of the listen failure. */
-    message: Schema.String,
-  },
-) {}
+export class EgressProxyListenError extends Schema.TaggedError<
+  EgressProxyListenError,
+  Brand.Brand<"@usine/gateway/node/egress-proxy/EgressProxyListenError">
+>()("EgressProxyListenError", {
+  /** The local address on which the forward proxy failed to listen. */
+  host: Schema.String,
+  /** The requested local TCP port. */
+  port: Schema.Int,
+  /** The diagnostic explanation of the listen failure. */
+  message: Schema.String,
+}) {}
 
 /** The error when the upstream connection can't be opened or its response doesn't finish. */
-class Unreachable extends Schema.TaggedError<Unreachable>()("Unreachable", {
+class Unreachable extends Schema.TaggedError<
+  Unreachable,
+  Brand.Brand<"@usine/gateway/node/egress-proxy/Unreachable">
+>()("Unreachable", {
   host: Schema.String,
   port: Schema.Int,
   message: Schema.String,

@@ -1,3 +1,4 @@
+import { PassedCheckView, FailedCheckView } from "@usine/orchestrator/operator";
 import { projectQuery } from "~/features/projects/queries";
 import { projectTasksQuery } from "~/features/tasks/queries";
 import { workersQuery } from "~/features/configuration/queries";
@@ -185,7 +186,7 @@ it("fetches current workers on a first visit after cached configuration is inval
   await commands.workerPreflightResponses(encodeConfiguration(configuration));
   await queryClient.fetchQuery({ ...configurationQuery(), staleTime: 0 });
   queryClient.removeQueries({ queryKey: workersQuery().queryKey });
-  const updated = withPreflight({ _tag: "Passed", checkedAt: "2026-10-30T12:01:00Z" });
+  const updated = withPreflight(PassedCheckView.make({ checkedAt: "2026-10-30T12:01:00Z" }));
   await commands.workerPreflightResponses(encodeConfiguration(updated));
   await invalidateChanges(
     queryClient,
@@ -266,12 +267,13 @@ it.each([
   "runs preflight, shows remediation, and passes after repair on $device in $theme",
   async ({ device, width, height, theme }) => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    const failed = withPreflight({
-      _tag: "Failed",
-      checkedAt: "2026-10-30T12:00:00Z",
-      capability: "machine",
-      message: "SSH destination is unreachable. Restore connectivity to the worker.",
-    });
+    const failed = withPreflight(
+      FailedCheckView.make({
+        checkedAt: "2026-10-30T12:00:00Z",
+        capability: "machine",
+        message: "SSH destination is unreachable. Restore connectivity to the worker.",
+      }),
+    );
     await commands.workerPreflightResponses(encodeConfiguration(configuration));
     await mount("/configuration/workers", width, height);
     const action = page.getByRole("button", { name: "Run preflight on eu-1", exact: true });
@@ -301,7 +303,7 @@ it.each([
     if (device === "phone")
       page.getByRole("heading", { name: "Preflight", exact: true }).element().scrollIntoView();
     await commands.configurationEditorScreenshot(`773-failed-${device}-${theme}`);
-    const passed = withPreflight({ _tag: "Passed", checkedAt: "2026-10-30T12:01:00Z" });
+    const passed = withPreflight(PassedCheckView.make({ checkedAt: "2026-10-30T12:01:00Z" }));
     await commands.workerPreflightResponses(encodeConfiguration(failed));
     await action.click();
     await expect.element(action).toBeDisabled();

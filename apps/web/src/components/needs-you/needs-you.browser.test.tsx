@@ -21,6 +21,8 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import {
+  RunSummaryView,
+  AttemptSummaryView,
   ApprovalNeed,
   CycleBudgetNeed,
   UnresponsiveWorkerNeed,
@@ -119,7 +121,12 @@ const overview = (needsYou: ReadonlyArray<NeedView>, runs: ReadonlyArray<RunView
           ProjectView.make({
             repository,
             status: "needs-you",
-            runs,
+            runs: runs.map((run) =>
+              RunSummaryView.make({
+                ...run,
+                attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+              }),
+            ),
             board: BoardView.make({ lanes: [], failures: [] }),
             labels: [],
             preflightFindings: [],

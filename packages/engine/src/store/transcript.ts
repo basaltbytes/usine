@@ -30,7 +30,7 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
     yield* Effect.annotateCurrentSpan({ attemptId: envelope.attemptId, direction });
     const values = {
       attemptId: envelope.attemptId,
-      envelope: encodeEnvelope(envelope),
+      envelope: yield* encodeEnvelope(envelope),
       receivedAt: encodeDateTime(receivedAt),
     };
     const inserted = yield* database
@@ -213,6 +213,7 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
           .execute(),
     });
     // An unknown key in a transcript row is corruption.
+
     return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" }))
       .map(transcriptEntryFromRow)
       .sort((left, right) => left.sequence - right.sequence);

@@ -1,5 +1,5 @@
 import { OperatorActor } from "@usine/core/operator";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 
 /**
  * The content revision of an attention entry; a changed revision requires a new dismissal (ADR
@@ -9,7 +9,10 @@ export const AttentionRevision = Schema.NonEmptyString.pipe(Schema.brand("Attent
 export type AttentionRevision = typeof AttentionRevision.Type;
 
 /** The exact content of an attention entry that the operator acknowledged. */
-export class AttentionKey extends Schema.Class<AttentionKey>("@usine/engine/AttentionKey")({
+export class AttentionKey extends Schema.Class<
+  AttentionKey,
+  Brand.Brand<"@usine/engine/attention/model/AttentionKey">
+>("@usine/engine/AttentionKey")({
   /**
    * The stable identity of the attention entry; pair it with `revision` to dismiss its exact
    * content.
@@ -22,9 +25,10 @@ export class AttentionKey extends Schema.Class<AttentionKey>("@usine/engine/Atte
 /**
  * An operator dismissal of one attention entry revision, with the first recorded login and time.
  */
-export class AttentionAcknowledgement extends Schema.Class<AttentionAcknowledgement>(
-  "@usine/engine/AttentionAcknowledgement",
-)({
+export class AttentionAcknowledgement extends Schema.Class<
+  AttentionAcknowledgement,
+  Brand.Brand<"@usine/engine/attention/model/AttentionAcknowledgement">
+>("@usine/engine/AttentionAcknowledgement")({
   ...AttentionKey.fields,
   /** The operator login, or `None` when no login was recorded. */
   dismissedBy: Schema.OptionFromNullOr(OperatorActor),

@@ -84,7 +84,7 @@ export const readRecord = (durable: DurableHarness["Service"], attemptId: string
   );
 
 const outboundJson = Schema.fromJsonString(AttemptChannel.OutboundEnvelope);
-const encodeOutbound = Schema.encodeSync(outboundJson);
+const encodeOutbound = Schema.encodeEffect(outboundJson);
 const decodeOutbound = Schema.decodeUnknownEffect(Schema.Array(outboundJson));
 
 const admitOutbound = (
@@ -164,7 +164,8 @@ const emit = (
           payload,
         });
         outbound = yield* admitOutbound(hub, outbound, envelope);
-        pending.push(encodeOutbound(envelope));
+        const encoded = yield* encodeOutbound(envelope).pipe(Effect.orDie);
+        pending.push(encoded);
       }
       const cursor = advance(progress);
       yield* durable.use("reserve the outbound envelopes", (harness, context) =>
@@ -199,6 +200,7 @@ export const appendInbound = (
     Effect.gen(function* () {
       if (Option.isNone(hub.channel)) return yield* unavailable();
       const { io, progress } = hub.channel.value;
+
       const envelope = AttemptChannel.InboundEnvelope.make({
         version: AttemptChannel.PROTOCOL_VERSION,
         attemptId: hub.attemptId,

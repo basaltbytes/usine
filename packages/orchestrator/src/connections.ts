@@ -5,7 +5,7 @@ import type { WorkerName } from "@usine/core/worker";
 import {
   type AttemptConnections,
   ExecutorOperationError,
-  type WorkerCapabilityError,
+  WorkerCapabilityError,
 } from "@usine/executor";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 
@@ -32,7 +32,16 @@ export const workerConnectionsFor = <A extends { readonly name: WorkerName }>(
     const fileOf = (attemptId: AttemptId) => path.join(directory, `${safeSegment(attemptId)}.json`);
     const resolve = Effect.fn("Orchestrator.resolveWorkerConnection")(function* (worker: Worker) {
       yield* Effect.annotateCurrentSpan({ worker: worker.name });
-      const key = Schema.encodeSync(WorkerJson)(worker);
+      const key = yield* Schema.encodeEffect(WorkerJson)(worker).pipe(
+        Effect.mapError((cause) =>
+          WorkerCapabilityError.make({
+            worker: worker.name,
+            capability: "machine",
+            message: "Could not encode worker configuration",
+            cause,
+          }),
+        ),
+      );
       const cached = addresses.get(key);
       if (cached !== undefined) return cached;
       const address = yield* addressOf(worker);

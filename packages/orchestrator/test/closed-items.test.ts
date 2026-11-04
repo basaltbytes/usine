@@ -118,13 +118,18 @@ const fixPr = LoopFile.make({
   body: PromptTemplate.make("Fix pull request {{ item.number }}."),
 });
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
-  LoadedInstance.make({
-    config: Schema.decodeSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
-    agents: [developer],
-    invalidAgents: [],
-    quarantinedLoops: [],
-    warnings: [],
-    loops,
+  Effect.gen(function* () {
+    return LoadedInstance.make({
+      config: yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository }],
+      }),
+      agents: [developer],
+      invalidAgents: [],
+      quarantinedLoops: [],
+      warnings: [],
+      loops,
+    });
   });
 
 /** An Item as the fake GitHub serves it; `round` stands for any content change, such as a push. */
@@ -335,382 +340,392 @@ const update = (items: Map<number, GitHubItem>, number: number, change: Partial<
 describe("Items no Loop acts on", () => {
   it.live(
     "closes a merged pull request's cycle-budget Ask on the next poll and keeps its budget",
-    () => {
-      const items = new Map<number, GitHubItem>([
-        [468, { kind: "pr", number: 468, state: "OPEN", label: "ready-for-review", round: 1 }],
-      ]);
-      const instance = instanceWith([reviewPr]);
-      return withFactory(
-        items,
-        Effect.gen(function* () {
-          const polling = yield* PollingTriggers;
-          const budgets = yield* CycleBudgets;
-          yield* polling.poll(instance);
-          yield* settledRuns;
-          update(items, 468, { round: 2 });
-          const blocked = (yield* polling.poll(instance)).submissions[0];
-          assert(blocked?._tag === "CycleBlocked");
-          const attentionTags = yield* needTags(instance);
-          assert.deepStrictEqual(attentionTags, ["CycleBudgetNeed"]);
-          update(items, 468, { state: "MERGED" });
-          const merged = yield* polling.poll(instance);
-          assert.deepStrictEqual(merged.submissions, []);
-          const currentAsks = yield* budgets.asks;
-          assert.deepStrictEqual(currentAsks, []);
-          const currentAttentionTags = yield* needTags(instance);
-          assert.deepStrictEqual(currentAttentionTags, []);
-          const currentGeneration = yield* budgets.generation(gitHubItemKey(repository, 468));
-          assert.strictEqual(currentGeneration, 0);
-          // The budget wasn't reset, so the reopened pull request is at its limit again.
-          update(items, 468, { state: "OPEN" });
-          const reopened = (yield* polling.poll(instance)).submissions[0];
-          assert(reopened?._tag === "CycleBlocked");
-          const nextAttentionTags = yield* needTags(instance);
-          assert.deepStrictEqual(nextAttentionTags, ["CycleBudgetNeed"]);
-        }),
-      );
-    },
+    () =>
+      Effect.gen(function* () {
+        const items = new Map<number, GitHubItem>([
+          [468, { kind: "pr", number: 468, state: "OPEN", label: "ready-for-review", round: 1 }],
+        ]);
+        const instance = yield* instanceWith([reviewPr]);
+        return yield* withFactory(
+          items,
+          Effect.gen(function* () {
+            const polling = yield* PollingTriggers;
+            const budgets = yield* CycleBudgets;
+            yield* polling.poll(instance);
+            yield* settledRuns;
+            update(items, 468, { round: 2 });
+            const blocked = (yield* polling.poll(instance)).submissions[0];
+            assert(blocked?._tag === "CycleBlocked");
+            const attentionTags = yield* needTags(instance);
+            assert.deepStrictEqual(attentionTags, ["CycleBudgetNeed"]);
+            update(items, 468, { state: "MERGED" });
+            const merged = yield* polling.poll(instance);
+            assert.deepStrictEqual(merged.submissions, []);
+            const currentAsks = yield* budgets.asks;
+            assert.deepStrictEqual(currentAsks, []);
+            const currentAttentionTags = yield* needTags(instance);
+            assert.deepStrictEqual(currentAttentionTags, []);
+            const currentGeneration = yield* budgets.generation(gitHubItemKey(repository, 468));
+            assert.strictEqual(currentGeneration, 0);
+            // The budget wasn't reset, so the reopened pull request is at its limit again.
+            update(items, 468, { state: "OPEN" });
+            const reopened = (yield* polling.poll(instance)).submissions[0];
+            assert(reopened?._tag === "CycleBlocked");
+            const nextAttentionTags = yield* needTags(instance);
+            assert.deepStrictEqual(nextAttentionTags, ["CycleBudgetNeed"]);
+          }),
+        );
+      }),
   );
 
   it.live(
     "leaves a closed issue's failed Run out of Needs attention and keeps the failure in the drawer",
-    () => {
-      const items = new Map<number, GitHubItem>([
-        [177, { kind: "issue", number: 177, state: "OPEN", label: "ready-for-agent", round: 1 }],
-      ]);
-      const instance = instanceWith([startDev("none")]);
-      return withFactory(
-        items,
-        Effect.gen(function* () {
-          const polling = yield* PollingTriggers;
-          const operator = yield* Operator;
-          yield* polling.poll(instance);
-          const [failed] = yield* settledRuns;
-          assert(failed?.run.state._tag === "Failed");
-          const attentionTags = yield* needTags(instance);
-          assert.deepStrictEqual(attentionTags, ["RunFailureNeed"]);
-          assert.isNull((yield* operator.detail(instance, failed.run.id)).settledItemState);
-          update(items, 177, { state: "CLOSED" });
-          yield* polling.poll(instance);
-          const currentAttentionTags = yield* needTags(instance);
-          assert.deepStrictEqual(currentAttentionTags, []);
-          const detail = yield* operator.detail(instance, failed.run.id);
-          assert.strictEqual(detail.settledItemState, "issue-closed");
-          assert.isTrue(detail.run.canResolveFailure);
-          assert.strictEqual(detail.run.attempts.at(-1)?.outcome?._tag, "Failed");
-          const desk = yield* operator.desk(instance);
-          assert.deepStrictEqual(
-            desk.lastOutcomes.map(({ run }) => run.id),
-            [failed.run.id],
-          );
-        }),
-      );
-    },
+    () =>
+      Effect.gen(function* () {
+        const items = new Map<number, GitHubItem>([
+          [177, { kind: "issue", number: 177, state: "OPEN", label: "ready-for-agent", round: 1 }],
+        ]);
+        const instance = yield* instanceWith([startDev("none")]);
+        return yield* withFactory(
+          items,
+          Effect.gen(function* () {
+            const polling = yield* PollingTriggers;
+            const operator = yield* Operator;
+            yield* polling.poll(instance);
+            const [failed] = yield* settledRuns;
+            assert(failed?.run.state._tag === "Failed");
+            const attentionTags = yield* needTags(instance);
+            assert.deepStrictEqual(attentionTags, ["RunFailureNeed"]);
+
+            assert.isNull((yield* operator.detail(instance, failed.run.id)).settledItemState);
+            update(items, 177, { state: "CLOSED" });
+            yield* polling.poll(instance);
+            const currentAttentionTags = yield* needTags(instance);
+            assert.deepStrictEqual(currentAttentionTags, []);
+            const detail = yield* operator.detail(instance, failed.run.id);
+            assert.strictEqual(detail.settledItemState, "issue-closed");
+            assert.isTrue(detail.run.canResolveFailure);
+            assert.strictEqual(detail.run.attempts.at(-1)?.outcome?._tag, "Failed");
+            const desk = yield* operator.desk(instance);
+            assert.deepStrictEqual(
+              desk.lastOutcomes.map(({ run }) => run.id),
+              [failed.run.id],
+            );
+          }),
+        );
+      }),
   );
 
   it.live(
     "gives a Project whose only failed Run is on a merged pull request no status or card ring",
-    () => {
-      const items = new Map<number, GitHubItem>([
-        [470, { kind: "pr", number: 470, state: "OPEN", label: "ready-for-fix", round: 1 }],
-      ]);
-      const instance = instanceWith([fixPr]);
-      return withFactory(
-        items,
-        Effect.gen(function* () {
-          const polling = yield* PollingTriggers;
-          const operator = yield* Operator;
-          const attention = Effect.gen(function* () {
+    () =>
+      Effect.gen(function* () {
+        const items = new Map<number, GitHubItem>([
+          [470, { kind: "pr", number: 470, state: "OPEN", label: "ready-for-fix", round: 1 }],
+        ]);
+        const instance = yield* instanceWith([fixPr]);
+        return yield* withFactory(
+          items,
+          Effect.gen(function* () {
+            const polling = yield* PollingTriggers;
+            const operator = yield* Operator;
+            const attention = Effect.gen(function* () {
+              const overview = yield* operator.overview(instance);
+              const project = overview.projects[0];
+              const card = project?.board.lanes
+                .flatMap(({ items }) => items)
+                .find(({ number }) => number === 470);
+              const task = yield* operator.task(instance, repository, ItemNumber.make(470));
+              return {
+                status: project?.status,
+                ring: card?.needsYou,
+                taskNeedsYou: task.needsYou,
+                needs: overview.needsYou.map((need) => need._tag),
+              };
+            });
+            yield* polling.poll(instance);
+            const [failed] = yield* settledRuns;
+            assert(failed?.run.state._tag === "Failed");
+            const attentionNeeds = yield* attention;
+            assert.deepStrictEqual(attentionNeeds, {
+              status: "needs-you",
+              ring: true,
+              taskNeedsYou: true,
+              needs: ["RunFailureNeed"],
+            });
+            update(items, 470, { state: "MERGED" });
+            yield* polling.poll(instance);
+            const currentAttentionNeeds = yield* attention;
+            assert.deepStrictEqual(currentAttentionNeeds, {
+              status: "clear",
+              ring: false,
+              taskNeedsYou: false,
+              needs: [],
+            });
             const overview = yield* operator.overview(instance);
-            const project = overview.projects[0];
-            const card = project?.board.lanes
-              .flatMap(({ items }) => items)
-              .find(({ number }) => number === 470);
-            const task = yield* operator.task(instance, repository, ItemNumber.make(470));
-            return {
-              status: project?.status,
-              ring: card?.needsYou,
-              taskNeedsYou: task.needsYou,
-              needs: overview.needsYou.map((need) => need._tag),
-            };
-          });
-          yield* polling.poll(instance);
-          const [failed] = yield* settledRuns;
-          assert(failed?.run.state._tag === "Failed");
-          const attentionNeeds = yield* attention;
-          assert.deepStrictEqual(attentionNeeds, {
-            status: "needs-you",
-            ring: true,
-            taskNeedsYou: true,
-            needs: ["RunFailureNeed"],
-          });
-          update(items, 470, { state: "MERGED" });
-          yield* polling.poll(instance);
-          const currentAttentionNeeds = yield* attention;
-          assert.deepStrictEqual(currentAttentionNeeds, {
-            status: "clear",
-            ring: false,
-            taskNeedsYou: false,
-            needs: [],
-          });
-          const overview = yield* operator.overview(instance);
-          const run = overview.projects[0]?.runs.find(({ id }) => id === failed.run.id);
-          assert.isTrue(run?.canResolveFailure);
-        }),
-      );
-    },
+            const run = overview.projects[0]?.runs.find(({ id }) => id === failed.run.id);
+            assert.isTrue(run?.canResolveFailure);
+          }),
+        );
+      }),
   );
 
   it.live.each(["issue", "pr"] as const)(
     "keeps waiting %s items on the board outside the 500-item history window",
-    (kind) => {
-      const label = kind === "issue" ? "ready-for-agent" : "ready-for-review";
-      const items = new Map<number, GitHubItem>(
-        [182, 195, ...Array.from({ length: 501 }, (_, index) => index + 202)].map((number) => [
-          number,
-          {
-            kind,
+    (kind) =>
+      Effect.gen(function* () {
+        const label = kind === "issue" ? "ready-for-agent" : "ready-for-review";
+        const items = new Map<number, GitHubItem>(
+          [182, 195, ...Array.from({ length: 501 }, (_, index) => index + 202)].map((number) => [
             number,
-            state: "OPEN",
-            label: number < 202 ? label : "backlog",
-            round: 1,
-          },
-        ]),
-      );
-      const instance = LoadedInstance.make({
-        ...instanceWith([
-          kind === "issue"
-            ? startDev("required")
-            : LoopFile.make({ ...reviewPr, approval: "required" }),
-        ]),
-        config: Schema.decodeSync(UsineConfig)({
-          version: 1,
-          repos: [
             {
-              name: repository,
-              lanes: [
-                { name: "Ready", sources: [{ label }] },
-                { name: "Triage", sources: [{ label: "triage" }] },
-              ],
+              kind,
+              number,
+              state: "OPEN",
+              label: number < 202 ? label : "backlog",
+              round: 1,
             },
-          ],
-        }),
-      });
-      return withFactory(
-        items,
-        Effect.gen(function* () {
-          const polling = yield* PollingTriggers;
-          const operator = yield* Operator;
-          yield* polling.poll(instance);
-          const overview = yield* operator.overview(instance);
-          const cards = overview.projects.flatMap(({ board }) =>
-            board.lanes.flatMap(({ items }) => items),
-          );
-          assert.lengthOf(cards, 502);
-          assert(cards.some(({ number }) => number === 182));
-          assert(cards.some(({ number }) => number === 195));
-          assert(!cards.some(({ number }) => number === 202));
-          for (const number of [182, 195]) {
-            const task = yield* operator.task(instance, repository, ItemNumber.make(number));
-            assert.strictEqual(task.number, number);
-            assert.strictEqual(task.lane.name, "Ready");
-            assert.strictEqual(task.runs[0]?.state, "Waiting");
-          }
-          yield* operator.moveBoardItem(
-            instance,
-            BoardMove.make({
-              repository,
-              item: ItemNumber.make(195),
-              toLane: BoardLaneId.make("authored:Triage"),
-            }),
-          );
-          assert.strictEqual(items.get(195)?.label, "triage");
-          const approvals = overview.needsYou.filter((need) => need._tag === "ApprovalNeed");
-          assert.lengthOf(approvals, 2);
-          assert.deepStrictEqual(approvals.map(({ item }) => item?.number).sort(), [
-            ItemNumber.make(182),
-            ItemNumber.make(195),
-          ]);
-          for (const approval of approvals) {
-            assert(approval.item !== null);
-            assert.strictEqual(
-              approval.item.title,
-              `${kind === "issue" ? "Issue" : "Pull request"} ${approval.item.number}`,
-            );
-            assert.strictEqual(
-              approval.item.url,
-              `https://github.com/${repository}/${kind === "issue" ? "issues" : "pull"}/${approval.item.number}`,
-            );
-            assert.strictEqual(approval.item.kind, kind);
-            assert.strictEqual(approval.item.state, `${kind}-open`);
-          }
-          const reader = yield* ItemProjectionReader;
-          const writer = yield* ItemProjectionWriter;
-          const history = yield* reader.list(repository, { limit: 500 });
-          assert.lengthOf(history, 500);
-          assert(history.every(({ number }) => number >= 203));
-          const stored = yield* reader.get(gitHubItemKey(repository, 182));
-          assert(Option.isSome(stored));
-          yield* writer.upsert(
-            ItemProjection.make({
-              ...stored.value,
-              contentHash: ItemContentHash.make("relabeled"),
-              payload: {
-                ...stored.value.payload,
-                labels: { totalCount: 1, nodes: [{ name: "triage" }] },
+          ]),
+        );
+        const instance = LoadedInstance.make({
+          ...(yield* instanceWith([
+            kind === "issue"
+              ? startDev("required")
+              : LoopFile.make({ ...reviewPr, approval: "required" }),
+          ])),
+          config: yield* Schema.decodeEffect(UsineConfig)({
+            version: 1,
+            repos: [
+              {
+                name: repository,
+                lanes: [
+                  { name: "Ready", sources: [{ label }] },
+                  { name: "Triage", sources: [{ label: "triage" }] },
+                ],
               },
-            }),
-          );
-          const relabeled = yield* operator.task(instance, repository, ItemNumber.make(182));
-          assert.strictEqual(relabeled.lane.name, "Triage");
-          assert.strictEqual(relabeled.runs[0]?.state, "Waiting");
-          if (kind === "issue") {
-            yield* writer.upsert(
-              ItemProjection.make({
-                itemKey: gitHubItemKey(repository, 702),
+            ],
+          }),
+        });
+        return yield* withFactory(
+          items,
+          Effect.gen(function* () {
+            const polling = yield* PollingTriggers;
+            const operator = yield* Operator;
+            yield* polling.poll(instance);
+            const overview = yield* operator.overview(instance);
+            const cards = overview.projects.flatMap(({ board }) =>
+              board.lanes.flatMap(({ items }) => items),
+            );
+            assert.lengthOf(cards, 502);
+            assert(cards.some(({ number }) => number === 182));
+            assert(cards.some(({ number }) => number === 195));
+            assert(!cards.some(({ number }) => number === 202));
+            for (const number of [182, 195]) {
+              const task = yield* operator.task(instance, repository, ItemNumber.make(number));
+              assert.strictEqual(task.number, number);
+              assert.strictEqual(task.lane.name, "Ready");
+              assert.strictEqual(task.runs[0]?.state, "Waiting");
+            }
+            yield* operator.moveBoardItem(
+              instance,
+              BoardMove.make({
                 repository,
-                source: ItemProjectionSource.make("pr"),
-                number: ItemNumber.make(702),
-                contentHash: ItemContentHash.make("linked-pr"),
-                payload: pullRequestPayload({
-                  kind: "pr",
-                  number: 702,
-                  state: "OPEN",
-                  label: "backlog",
-                  round: 1,
-                }),
+                item: ItemNumber.make(195),
+                toLane: BoardLaneId.make("authored:Triage"),
               }),
             );
+            assert.strictEqual(items.get(195)?.label, "triage");
+            const approvals = overview.needsYou.filter((need) => need._tag === "ApprovalNeed");
+            assert.lengthOf(approvals, 2);
+            assert.deepStrictEqual(approvals.map(({ item }) => item?.number).sort(), [
+              ItemNumber.make(182),
+              ItemNumber.make(195),
+            ]);
+            for (const approval of approvals) {
+              assert(approval.item !== null);
+              assert.strictEqual(
+                approval.item.title,
+                `${kind === "issue" ? "Issue" : "Pull request"} ${approval.item.number}`,
+              );
+              assert.strictEqual(
+                approval.item.url,
+                `https://github.com/${repository}/${kind === "issue" ? "issues" : "pull"}/${approval.item.number}`,
+              );
+              assert.strictEqual(approval.item.kind, kind);
+              assert.strictEqual(approval.item.state, `${kind}-open`);
+            }
+            const reader = yield* ItemProjectionReader;
+            const writer = yield* ItemProjectionWriter;
+            const history = yield* reader.list(repository, { limit: 500 });
+            assert.lengthOf(history, 500);
+            assert(history.every(({ number }) => number >= 203));
+            const stored = yield* reader.get(gitHubItemKey(repository, 182));
+            assert(Option.isSome(stored));
             yield* writer.upsert(
               ItemProjection.make({
                 ...stored.value,
-                contentHash: ItemContentHash.make("linked-issue"),
+                contentHash: ItemContentHash.make("relabeled"),
                 payload: {
                   ...stored.value.payload,
-                  closedByPullRequestsReferences: {
-                    totalCount: 1,
-                    nodes: [
-                      {
-                        number: 702,
-                        state: "OPEN",
-                        isDraft: false,
-                        url: `https://github.com/${repository}/pull/702`,
-                      },
-                    ],
-                  },
+                  labels: { totalCount: 1, nodes: [{ name: "triage" }] },
                 },
               }),
             );
-            const linked = yield* operator.task(instance, repository, ItemNumber.make(702));
-            assert.deepStrictEqual(
-              linked.items.map(({ number }) => number),
-              [182, 702],
+            const relabeled = yield* operator.task(instance, repository, ItemNumber.make(182));
+            assert.strictEqual(relabeled.lane.name, "Triage");
+            assert.strictEqual(relabeled.runs[0]?.state, "Waiting");
+            if (kind === "issue") {
+              yield* writer.upsert(
+                ItemProjection.make({
+                  itemKey: gitHubItemKey(repository, 702),
+                  repository,
+                  source: ItemProjectionSource.make("pr"),
+                  number: ItemNumber.make(702),
+                  contentHash: ItemContentHash.make("linked-pr"),
+                  payload: pullRequestPayload({
+                    kind: "pr",
+                    number: 702,
+                    state: "OPEN",
+                    label: "backlog",
+                    round: 1,
+                  }),
+                }),
+              );
+              yield* writer.upsert(
+                ItemProjection.make({
+                  ...stored.value,
+                  contentHash: ItemContentHash.make("linked-issue"),
+                  payload: {
+                    ...stored.value.payload,
+                    closedByPullRequestsReferences: {
+                      totalCount: 1,
+                      nodes: [
+                        {
+                          number: 702,
+                          state: "OPEN",
+                          isDraft: false,
+                          url: `https://github.com/${repository}/pull/702`,
+                        },
+                      ],
+                    },
+                  },
+                }),
+              );
+              const linked = yield* operator.task(instance, repository, ItemNumber.make(702));
+              assert.deepStrictEqual(
+                linked.items.map(({ number }) => number),
+                [182, 702],
+              );
+              assert.strictEqual(linked.current, stored.value.itemKey);
+
+              const grouped = (yield* operator.overview(instance)).projects.flatMap(({ board }) =>
+                board.lanes.flatMap(({ items }) => items),
+              );
+              assert.lengthOf(grouped, 501);
+              assert.deepStrictEqual(
+                grouped.find(({ number }) => number === 182)?.items.map(({ number }) => number),
+                [182, 702],
+              );
+            }
+            yield* writer.upsert(
+              ItemProjection.make({
+                ...stored.value,
+                contentHash: ItemContentHash.make("malformed"),
+                payload: { number: 182 },
+              }),
             );
-            assert.strictEqual(linked.current, stored.value.itemKey);
-            const grouped = (yield* operator.overview(instance)).projects.flatMap(({ board }) =>
-              board.lanes.flatMap(({ items }) => items),
+
+            const refreshed = (yield* operator.overview(instance)).needsYou.filter(
+              (need) => need._tag === "ApprovalNeed",
             );
-            assert.lengthOf(grouped, 501);
-            assert.deepStrictEqual(
-              grouped.find(({ number }) => number === 182)?.items.map(({ number }) => number),
-              [182, 702],
+            assert.lengthOf(refreshed, 2);
+            assert.lengthOf(
+              refreshed.filter(({ item }) => item === null),
+              1,
             );
-          }
-          yield* writer.upsert(
-            ItemProjection.make({
-              ...stored.value,
-              contentHash: ItemContentHash.make("malformed"),
-              payload: { number: 182 },
-            }),
-          );
-          const refreshed = (yield* operator.overview(instance)).needsYou.filter(
-            (need) => need._tag === "ApprovalNeed",
-          );
-          assert.lengthOf(refreshed, 2);
-          assert.lengthOf(
-            refreshed.filter(({ item }) => item === null),
-            1,
-          );
-          assert.strictEqual(refreshed.find(({ item }) => item !== null)?.item?.number, 195);
-          const waiting = approvals.find(({ item }) => item?.number === 195);
-          assert(waiting !== undefined);
-          yield* operator.cancel(instance, waiting.runId);
-          const afterCancel = yield* operator.overview(instance);
-          assert(
-            !afterCancel.projects.some(({ board }) =>
-              board.lanes.some(({ items }) => items.some(({ number }) => number === 195)),
-            ),
-          );
-          const missing = yield* operator
-            .task(instance, repository, ItemNumber.make(195))
-            .pipe(Effect.flip);
-          assert.strictEqual(missing._tag, "BoardItemNotFoundError");
-        }),
-      );
-    },
+            assert.strictEqual(refreshed.find(({ item }) => item !== null)?.item?.number, 195);
+            const waiting = approvals.find(({ item }) => item?.number === 195);
+            assert(waiting !== undefined);
+            yield* operator.cancel(instance, waiting.runId);
+            const afterCancel = yield* operator.overview(instance);
+            assert(
+              !afterCancel.projects.some(({ board }) =>
+                board.lanes.some(({ items }) => items.some(({ number }) => number === 195)),
+              ),
+            );
+            const missing = yield* operator
+              .task(instance, repository, ItemNumber.make(195))
+              .pipe(Effect.flip);
+            assert.strictEqual(missing._tag, "BoardItemNotFoundError");
+          }),
+        );
+      }),
   );
 
   it.live(
     "revokes a waiting Run when its issue closes, so its approval leaves Needs attention",
-    () => {
-      const items = new Map<number, GitHubItem>([
-        [74, { kind: "issue", number: 74, state: "OPEN", label: "ready-for-agent", round: 1 }],
-      ]);
-      const instance = instanceWith([startDev("required")]);
-      return withFactory(
-        items,
-        Effect.gen(function* () {
-          const polling = yield* PollingTriggers;
-          const reader = yield* RunReader;
-          const opened = (yield* polling.poll(instance)).submissions[0];
-          assert(opened?._tag === "Claimed");
-          const attentionTags = yield* needTags(instance);
-          assert.deepStrictEqual(attentionTags, ["ApprovalNeed"]);
-          update(items, 74, { state: "CLOSED" });
-          const closed = yield* polling.poll(instance);
-          assert.strictEqual(closed.revokedRuns, 1);
-          const revoked = yield* reader.inspect(opened.runId);
-          assert(revoked.run.state._tag === "Canceled");
-          assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
-          const currentAttentionTags = yield* needTags(instance);
-          assert.deepStrictEqual(currentAttentionTags, []);
-        }),
-      );
-    },
+    () =>
+      Effect.gen(function* () {
+        const items = new Map<number, GitHubItem>([
+          [74, { kind: "issue", number: 74, state: "OPEN", label: "ready-for-agent", round: 1 }],
+        ]);
+        const instance = yield* instanceWith([startDev("required")]);
+        return yield* withFactory(
+          items,
+          Effect.gen(function* () {
+            const polling = yield* PollingTriggers;
+            const reader = yield* RunReader;
+            const opened = (yield* polling.poll(instance)).submissions[0];
+            assert(opened?._tag === "Claimed");
+            const attentionTags = yield* needTags(instance);
+            assert.deepStrictEqual(attentionTags, ["ApprovalNeed"]);
+            update(items, 74, { state: "CLOSED" });
+            const closed = yield* polling.poll(instance);
+            assert.strictEqual(closed.revokedRuns, 1);
+            const revoked = yield* reader.inspect(opened.runId);
+            assert(revoked.run.state._tag === "Canceled");
+            assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
+            const currentAttentionTags = yield* needTags(instance);
+            assert.deepStrictEqual(currentAttentionTags, []);
+          }),
+        );
+      }),
   );
 
   it.live(
     "clears the 2026-10-22 Needs attention: two merged pull requests' Asks and a closed issue's question",
-    () => {
-      const items = new Map<number, GitHubItem>([
-        [177, { kind: "issue", number: 177, state: "OPEN", label: "ready-for-agent", round: 1 }],
-        [468, { kind: "pr", number: 468, state: "OPEN", label: "ready-for-review", round: 1 }],
-        [469, { kind: "pr", number: 469, state: "OPEN", label: "ready-for-review", round: 1 }],
-      ]);
-      const instance = instanceWith([startDev("none"), reviewPr]);
-      return withFactory(
-        items,
-        Effect.gen(function* () {
-          const polling = yield* PollingTriggers;
-          const budgets = yield* CycleBudgets;
-          yield* polling.poll(instance);
-          yield* settledRuns;
-          for (const number of [468, 469]) update(items, number, { round: 2 });
-          yield* polling.poll(instance);
-          assert.deepStrictEqual([...(yield* needTags(instance))].sort(), [
-            "CycleBudgetNeed",
-            "CycleBudgetNeed",
-            "RunFailureNeed",
-          ]);
-          for (const number of [468, 469]) update(items, number, { state: "MERGED" });
-          update(items, 177, { state: "CLOSED" });
-          yield* polling.poll(instance);
-          const attentionTags = yield* needTags(instance);
-          assert.deepStrictEqual(attentionTags, []);
-          const currentAsks = yield* budgets.asks;
-          assert.deepStrictEqual(currentAsks, []);
-        }),
-      );
-    },
+    () =>
+      Effect.gen(function* () {
+        const items = new Map<number, GitHubItem>([
+          [177, { kind: "issue", number: 177, state: "OPEN", label: "ready-for-agent", round: 1 }],
+          [468, { kind: "pr", number: 468, state: "OPEN", label: "ready-for-review", round: 1 }],
+          [469, { kind: "pr", number: 469, state: "OPEN", label: "ready-for-review", round: 1 }],
+        ]);
+        const instance = yield* instanceWith([startDev("none"), reviewPr]);
+        return yield* withFactory(
+          items,
+          Effect.gen(function* () {
+            const polling = yield* PollingTriggers;
+            const budgets = yield* CycleBudgets;
+            yield* polling.poll(instance);
+            yield* settledRuns;
+            for (const number of [468, 469]) update(items, number, { round: 2 });
+            yield* polling.poll(instance);
+
+            assert.deepStrictEqual([...(yield* needTags(instance))].sort(), [
+              "CycleBudgetNeed",
+              "CycleBudgetNeed",
+              "RunFailureNeed",
+            ]);
+            for (const number of [468, 469]) update(items, number, { state: "MERGED" });
+            update(items, 177, { state: "CLOSED" });
+            yield* polling.poll(instance);
+            const attentionTags = yield* needTags(instance);
+            assert.deepStrictEqual(attentionTags, []);
+            const currentAsks = yield* budgets.asks;
+            assert.deepStrictEqual(currentAsks, []);
+          }),
+        );
+      }),
   );
 });

@@ -1,7 +1,13 @@
 import { projectQuery } from "~/features/projects/queries";
 import { projectTasksQuery } from "~/features/tasks/queries";
 import { AttemptTask } from "@usine/core/attempt";
-import { boardTaskRuns, AttemptView, RunView } from "@usine/orchestrator/operator";
+import {
+  RunSummaryView,
+  AttemptSummaryView,
+  boardTaskRuns,
+  AttemptView,
+  RunView,
+} from "@usine/orchestrator/operator";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -56,7 +62,10 @@ beforeEach(async () => {
           repository: RepositoryName.make("board-test/primary"),
           repositories: [RepositoryName.make("board-test/primary"), project.repository],
           runs: [
-            boardPlanRun(),
+            RunSummaryView.make({
+              ...boardPlanRun(),
+              attempts: boardPlanRun().attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+            }),
             ...project.board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
           ],
         }),

@@ -151,7 +151,9 @@ const summary = (plan: RunPlan) =>
       openedAt: at(plan.openedAt),
     }),
     pullRequestUrl: null,
-    attempts: attempts(plan.id, plan.agent, plan.attempts ?? []),
+    attempts: attempts(plan.id, plan.agent, plan.attempts ?? []).map((attempt) =>
+      AttemptSummary.make(attempt),
+    ),
     resolvedFailureAttemptId: Option.none(),
     closedAt: Option.map(Option.fromUndefinedOr(plan.closedAt), at),
     approval: Option.map(Option.fromUndefinedOr(plan.approvedAt), (approvedAt) =>
@@ -577,7 +579,11 @@ describe("Run statistics", () => {
     assert.deepStrictEqual({ ...view.runs }, { succeeded: 0, failed: 0, canceled: 0 });
     assert.strictEqual(view.needsAttention.failures, 0);
     assert.deepStrictEqual(
-      view.brains.map(({ outcomes }) => ({ ...outcomes })),
+      view.brains.map(({ outcomes }) => ({
+        succeeded: outcomes.succeeded,
+        failed: outcomes.failed,
+        canceled: outcomes.canceled,
+      })),
       [{ succeeded: 0, failed: 0, canceled: 0 }],
     );
   });
@@ -637,7 +643,10 @@ describe("Run statistics", () => {
 
   it("breaks down Runs per Loop and Agent, and Attempts per harness, model, and effort", () => {
     assert.deepStrictEqual(
-      week.loops.map(({ loop, outcomes }) => [loop, { ...outcomes }]),
+      week.loops.map(({ loop, outcomes }) => [
+        loop,
+        { succeeded: outcomes.succeeded, failed: outcomes.failed, canceled: outcomes.canceled },
+      ]),
       [
         ["review-pr", { succeeded: 3, failed: 0, canceled: 0 }],
         ["start-dev", { succeeded: 1, failed: 1, canceled: 1 }],
@@ -660,7 +669,7 @@ describe("Run statistics", () => {
       week.brains.map(({ brain, outcomes, usage: { tokens } }) => [
         brain.harness,
         brain.model,
-        { ...outcomes },
+        { succeeded: outcomes.succeeded, failed: outcomes.failed, canceled: outcomes.canceled },
         tokens,
       ]),
       [
@@ -836,17 +845,20 @@ const tokenReport = (attempt: string, tokens: number, usd: number) =>
     receivedAt: now,
   });
 
-const instance = LoadedInstance.make({
-  config: Schema.decodeSync(UsineConfig)({
+const instance = Effect.gen(function* () {
+  const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
     version: 1,
     repos: [{ name: repository }],
     workers: [{ name: "w1", kind: "local", max_concurrent_attempts: 2 }],
-  }),
-  agents: [],
-  invalidAgents: [],
-  loops: [],
-  quarantinedLoops: [],
-  warnings: [],
+  });
+  return LoadedInstance.make({
+    config: decodedValue1,
+    agents: [],
+    invalidAgents: [],
+    loops: [],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 
 describe("OperatorStatistics", () => {
@@ -854,6 +866,7 @@ describe("OperatorStatistics", () => {
     "reads tasks merged through linked issues with their budget resets, and the window's Runs once",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const since: Array<Option.Option<DateTime.Utc>> = [];
         const closedRuns = [implemented, firstReview, onlyReview];
         let itemReads = 0;
@@ -919,12 +932,12 @@ describe("OperatorStatistics", () => {
           ({ statistics, runStatistics }) =>
             Effect.gen(function* () {
               const first = yield* Effect.all([
-                statistics(instance, "7d"),
-                runStatistics(instance, "7d"),
+                statistics(fixtureInstance, "7d"),
+                runStatistics(fixtureInstance, "7d"),
               ]);
               const repeated = yield* Effect.all([
-                statistics(instance, "7d"),
-                runStatistics(instance, "7d"),
+                statistics(fixtureInstance, "7d"),
+                runStatistics(fixtureInstance, "7d"),
               ]);
               assert.strictEqual(repeated[0], first[0]);
               assert.strictEqual(repeated[1], first[1]);

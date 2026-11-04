@@ -318,7 +318,11 @@ describe("Claude child backend", () => {
       const { launches, sdk } = loginRace(1);
       const logs = infoLines();
       yield* Effect.gen(function* () {
-        const launching = yield* Effect.forkChild((yield* ChildBackend).launch(request()));
+        const launching = yield* Effect.forkChild(
+          Effect.gen(function* () {
+            return yield* (yield* ChildBackend).launch(request());
+          }),
+        );
         const session = yield* joinAdvancingClock(launching);
         const [events, result] = yield* Effect.all([
           Stream.runCollect(session.events),
@@ -352,8 +356,13 @@ describe("Claude child backend", () => {
       const { launches, sdk } = loginRace(Number.POSITIVE_INFINITY);
       const logs = infoLines();
       yield* Effect.gen(function* () {
-        const launching = yield* Effect.forkChild((yield* ChildBackend).launch(request()));
+        const launching = yield* Effect.forkChild(
+          Effect.gen(function* () {
+            return yield* (yield* ChildBackend).launch(request());
+          }),
+        );
         const session = yield* joinAdvancingClock(launching);
+
         assert.strictEqual((yield* session.result).message, LOGIN_ERROR);
         assert.lengthOf(launches, 4, "one launch and three retries");
         assert.deepStrictEqual(
@@ -373,7 +382,11 @@ describe("Claude child backend", () => {
     Effect.gen(function* () {
       const { launches, sdk } = loginRace(Number.POSITIVE_INFINITY);
       yield* Effect.gen(function* () {
-        const launching = yield* Effect.forkChild((yield* ChildBackend).launch(request()));
+        const launching = yield* Effect.forkChild(
+          Effect.gen(function* () {
+            return yield* (yield* ChildBackend).launch(request());
+          }),
+        );
         while (launches[0]?.closed !== true) yield* Effect.yieldNow;
         yield* Fiber.interrupt(launching);
         yield* TestClock.adjust("2 minutes");
@@ -476,6 +489,7 @@ describe("Claude child backend", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const session = yield* (yield* ChildBackend).launch(request());
+
         assert.strictEqual((yield* session.result).message, "Updated answer");
       }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
@@ -660,6 +674,7 @@ describe("Claude child backend", () => {
         const entered = input;
         yield* Effect.promise(() => entered.next());
         yield* running.intervene(OperatorMessage.make({ message: "Review with me" }), noDelivery);
+
         assert.strictEqual(
           (yield* Effect.promise(() => entered.next())).value?.message.content,
           "Review with me",
@@ -688,6 +703,7 @@ describe("Claude child backend", () => {
           OperatorMessage.make({ message: "One more adjustment" }),
           noDelivery,
         );
+
         assert.strictEqual(
           (yield* Effect.promise(() => entered.next())).value?.message.content,
           "One more adjustment",
@@ -710,7 +726,9 @@ describe("Claude child backend", () => {
         });
         yield* Queue.take(idle);
         yield* running.intervene(Release.make(), noDelivery);
+
         assert.strictEqual((yield* Fiber.join(result)).message, "Adjusted answer");
+
         assert.strictEqual((yield* Effect.promise(() => entered.next())).done, true);
         assert.deepStrictEqual(
           seen.filter((tag) => tag === "SessionStarted"),
@@ -748,6 +766,7 @@ describe("Claude child backend", () => {
       yield* running.intervene(Interrupt.make(), noDelivery);
       const hook = options?.hooks?.PreToolUse?.[0]?.hooks[0];
       assert(hook !== undefined);
+
       const settled = hook(
         {
           hook_event_name: "PreToolUse",
@@ -913,6 +932,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(options?.pathToClaudeCodeExecutable, "claude");
         const spawn = options?.spawnClaudeCodeProcess;
         assert(spawn !== undefined);
+
         const child = spawn({
           command: "claude",
           args: ["--output-format", "stream-json"],
@@ -928,7 +948,7 @@ describe("Claude child backend", () => {
           child.once("exit", (code) => resume(Effect.succeed(code)));
         });
         assert.strictEqual(exitCode, 0);
-        const spawned = Schema.decodeSync(
+        const spawned = yield* Schema.decodeEffect(
           Schema.fromJsonString(
             Schema.Struct({
               argv: Schema.Array(Schema.String),

@@ -9,12 +9,7 @@ import { entityPermission, loopScope } from "../access.ts";
 import { repositoryEditorEntity, repositoryEditorChanges } from "./repositories.ts";
 import { requestActor } from "@usine/core/operator";
 import { configurationLoopOperations } from "./loops/operations.ts";
-import {
-  type LoopDraft,
-  type LoopCheck,
-  type LoopPreviewRequest,
-  type LoopPreview,
-} from "./loops/model.ts";
+import type { LoopDraft, LoopCheck, LoopPreviewRequest, LoopPreview } from "./loops/model.ts";
 import {
   Configuration,
   ConfigurationChange,
@@ -175,7 +170,7 @@ export class ConfigurationEditor extends Context.Service<
         );
       const save = (
         snapshot: Configuration,
-        input: ConfigurationWrite,
+        input: Pick<ConfigurationWrite, "expected" | "message">,
         changes: ReadonlyArray<ConfigurationChange>,
       ) =>
         Effect.gen(function* () {
@@ -196,6 +191,7 @@ export class ConfigurationEditor extends Context.Service<
             )
               return yield* AccessDenied.make({ permission: "admin" });
           }
+
           return yield* current.commit({
             expected: input.expected,
             changes,
@@ -289,6 +285,7 @@ export class ConfigurationEditor extends Context.Service<
           yield* entityPermission(key, "read");
           const storedEntity = yield* findEntity(snapshot, key);
           const entity = repositoryEditorEntity(snapshot, storedEntity);
+
           return ConfigurationEntityView.make({
             ...entity,
             text: yield* formatConfigurationEntity(entity),
@@ -306,7 +303,8 @@ export class ConfigurationEditor extends Context.Service<
               ? yield* parseConfigurationEntity(parser, key, input.text)
               : ConfigurationEntity.make({ key, value: qualifyLoopValue(key, input.value) });
           const { entity, changes } = yield* repositoryEditorChanges(snapshot, parsed);
-          const before = entitiesOf(snapshot).find((entry) => entry.key.key === key.key);
+          const entities = entitiesOf(snapshot);
+          const before = entities.find((entry) => entry.key.key === key.key);
           const change = {
             key,
             before: Option.fromUndefinedOr(before?.value),

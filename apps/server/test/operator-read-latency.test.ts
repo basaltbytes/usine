@@ -40,7 +40,7 @@ import {
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { WorkerStatus } from "@usine/orchestrator/worker-status";
-import { Clock, DateTime, Deferred, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { flow, Clock, DateTime, Deferred, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpRouter } from "effect/http";
 import { assert, describe, it } from "vitest";
 import { liveBackendLayer } from "../src/backend.ts";
@@ -67,6 +67,8 @@ const READS = 3;
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = (number: number) =>
+  // The key contains already validated repository and item identifiers.
+  // @effect-diagnostics-next-line schemaSync:off
   Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]);
 const brain = BrainSpec.make({
   harness: "codex",
@@ -99,17 +101,20 @@ const loops = LABELS.map((label, index) =>
     body: PromptTemplate.make("Work on it."),
   }),
 );
-const instance = LoadedInstance.make({
-  config: Schema.decodeSync(UsineConfig)({
+const instance = Effect.gen(function* () {
+  const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
     version: 1,
     repos: [{ name: repository }],
     workers: [{ name: "worker", kind: "local", max_concurrent_attempts: 2 }],
-  }),
-  agents: [developer],
-  invalidAgents: [],
-  loops,
-  quarantinedLoops: [],
-  warnings: [],
+  });
+  return LoadedInstance.make({
+    config: decodedValue1,
+    agents: [developer],
+    invalidAgents: [],
+    loops,
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 
 // One Item in ten has a Loop's label, as on a Board where most work is done.
@@ -181,12 +186,18 @@ const started = (number: number) =>
 const timed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const before = yield* Clock.currentTimeMillis;
-    const value = yield* effect;
-    return { millis: (yield* Clock.currentTimeMillis) - before, value } as const;
+    const valueDecoded1 = yield* effect;
+    return { millis: (yield* Clock.currentTimeMillis) - before, value: valueDecoded1 } as const;
   });
 
-const decodeOverview = Schema.decodeUnknownSync(Schema.fromJsonString(FactoryOverview));
-const decodeDesk = Schema.decodeUnknownSync(Schema.fromJsonString(DeskView));
+const decodeOverview = flow(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(FactoryOverview)),
+  Effect.runSync,
+);
+const decodeDesk = flow(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(DeskView)),
+  Effect.runSync,
+);
 
 describe("operator read latency", () => {
   const checkReads = async ({
@@ -199,6 +210,7 @@ describe("operator read latency", () => {
     readonly history: boolean;
   }) => {
     const program = Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const startedAt = yield* Clock.currentTimeMillis;
       const fileSystem = yield* FileSystem.FileSystem;
       const root = yield* fileSystem.makeTempDirectoryScoped({
@@ -250,7 +262,7 @@ describe("operator read latency", () => {
           Layer.mock(OperatorConfiguration)({}),
         );
         const backend = liveBackendLayer(
-          { get: Effect.succeed(instance) },
+          { get: Effect.succeed(fixtureInstance) },
           operator,
           configuration,
         );
@@ -342,7 +354,11 @@ describe("operator read latency", () => {
               })),
             },
           }));
-          const previousBytes = bytes(JSON.stringify({ ...overview, projects: previousProjects }));
+          const decodedValue3 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+            ...overview,
+            projects: previousProjects,
+          });
+          const previousBytes = bytes(decodedValue3);
           const measurement = {
             items: initialItems,
             runs: history ? SIZE_RUNS : openRuns,
@@ -361,7 +377,10 @@ describe("operator read latency", () => {
               ),
             })),
           };
-          assert.isBelow(responseBytes, SIZE_BUDGET_BYTES, JSON.stringify(measurement));
+          const decodedValue2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            measurement,
+          );
+          assert.isBelow(responseBytes, SIZE_BUDGET_BYTES, decodedValue2);
           assert.strictEqual(
             overview.projects.flatMap(({ runs }) => runs).length,
             history ? 51 : openRuns,
@@ -373,19 +392,23 @@ describe("operator read latency", () => {
             .find(({ state }) => state === "Running");
           assert(firstRun !== undefined);
           const detailResponse = yield* read(`/api/runs/${firstRun.id}`);
-          const detail = Schema.decodeSync(Schema.fromJsonString(RunDetailView))(
+          const detail = yield* Schema.decodeEffect(Schema.fromJsonString(RunDetailView))(
             detailResponse.value,
           );
           assert.strictEqual(detail.run.task, longTask);
           assert.strictEqual(detail.run.attempts[0]?.task, longTask);
           assert.deepStrictEqual(detail.eventPayload, issue(1).payload);
           const taskResponse = yield* read(`/api/projects/basaltbytes/usine/tasks/1`);
-          const task = Schema.decodeSync(Schema.fromJsonString(TaskView))(taskResponse.value);
+          const task = yield* Schema.decodeEffect(Schema.fromJsonString(TaskView))(
+            taskResponse.value,
+          );
           assert.strictEqual(task.runs[0]?.task, longTask);
           assert.strictEqual(task.runs[0]?.attempts[0]?.task, longTask);
           if (history) {
             const doneResponse = yield* read("/api/projects/basaltbytes/usine/tasks/2");
-            const doneTask = Schema.decodeSync(Schema.fromJsonString(TaskView))(doneResponse.value);
+            const doneTask = yield* Schema.decodeEffect(Schema.fromJsonString(TaskView))(
+              doneResponse.value,
+            );
             assert.strictEqual(doneTask.runs.length, 3);
             assert(doneTask.runs.every(({ task }) => task === longTask));
             return;
@@ -424,7 +447,9 @@ describe("operator read latency", () => {
             desk: desk.millis,
           }));
           yield* Effect.logInfo("Operator read latency", { rounds: measurements });
-          const timings = JSON.stringify(measurements);
+          const timings = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            measurements,
+          );
           assert.isBelow(
             fastest(rounds.map(({ overview }) => overview.millis)),
             READ_BUDGET_MILLIS,
@@ -437,6 +462,7 @@ describe("operator read latency", () => {
           );
         }).pipe(Effect.provide(server));
       }).pipe(Effect.provide(observation));
+
       yield* Effect.logInfo("Operator latency fixture completed", {
         history,
         elapsedMillis: (yield* Clock.currentTimeMillis) - startedAt,

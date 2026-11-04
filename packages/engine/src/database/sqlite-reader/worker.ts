@@ -4,6 +4,8 @@ import { parentPort, workerData } from "node:worker_threads";
 import { isReadQuery } from "./query.ts";
 import { Params, Request, type Response } from "./protocol.ts";
 
+// Worker startup reads workerData synchronously.
+// @effect-diagnostics-next-line schemaSync:off
 const { filename } = Schema.decodeUnknownSync(Schema.Struct({ filename: Schema.String }))(
   workerData,
 );
@@ -19,6 +21,8 @@ const port = parentPort;
 if (port === null) throw new Error("SQLite reader requires a worker message port");
 
 port.on("message", (message) => {
+  // The worker message handler reads its request synchronously.
+  // @effect-diagnostics-next-line schemaSync:off
   const request = Schema.decodeUnknownSync(Request)(message);
   let response: Response;
   try {
@@ -55,6 +59,8 @@ port.on("message", (message) => {
       response = {
         id: request.id,
         ok: true,
+        // SQLite statement arguments are decoded synchronously.
+        // @effect-diagnostics-next-line schemaSync:off
         result: statement.all(...Schema.decodeUnknownSync(Params)(command.params)),
       };
     }

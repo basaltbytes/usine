@@ -1,4 +1,4 @@
-import { Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
+import { type Brand, Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { closedStruct } from "../closed-struct.ts";
@@ -41,7 +41,10 @@ export const StopReason = Schema.Literals(["cancel", "failed", "startup"]);
 export type StopReason = typeof StopReason.Type;
 
 /** The task and Agent that an operator sets for a Run's later Attempts. */
-export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext")({
+export class AttemptContext extends Schema.Class<
+  AttemptContext,
+  Brand.Brand<"@usine/core/attempt/attempt/AttemptContext">
+>("AttemptContext")({
   /** The effective task text for subsequent attempts in the run. */
   task: AttemptTask,
   /** The agent definition selected for subsequent attempts. */
@@ -51,7 +54,10 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
 }) {}
 
 /** An operator's resolution of a failed attempt; the login is absent if none was recorded. */
-export class FailureResolution extends Schema.Class<FailureResolution>("FailureResolution")(
+export class FailureResolution extends Schema.Class<
+  FailureResolution,
+  Brand.Brand<"@usine/core/attempt/attempt/FailureResolution">
+>("FailureResolution")(
   closedStruct({
     /** The time the operator marked the attempt's failure resolved. */
     resolvedAt: Schema.DateTimeUtcFromString,
@@ -66,7 +72,10 @@ const Kills = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
  * The processes that the kernel killed in an Attempt's containers because a container reached
  * its memory limit, `memoryMib`: the limit of the last container that recorded kills.
  */
-export class OutOfMemoryKills extends Schema.Class<OutOfMemoryKills>("OutOfMemoryKills")({
+export class OutOfMemoryKills extends Schema.Class<
+  OutOfMemoryKills,
+  Brand.Brand<"@usine/core/attempt/attempt/OutOfMemoryKills">
+>("OutOfMemoryKills")({
   /** The total processes the kernel killed across the attempt's containers. */
   kills: Kills,
   /** The memory limit, in MiB, of the last container that recorded kills. */
@@ -77,9 +86,10 @@ export class OutOfMemoryKills extends Schema.Class<OutOfMemoryKills>("OutOfMemor
  * The processes that the kernel killed in one of an Attempt's containers, `container`, because it
  * reached its memory limit, `memoryMib`. A reattachment runs the Attempt in a new container.
  */
-export class ContainerOutOfMemoryKills extends Schema.Class<ContainerOutOfMemoryKills>(
-  "ContainerOutOfMemoryKills",
-)({
+export class ContainerOutOfMemoryKills extends Schema.Class<
+  ContainerOutOfMemoryKills,
+  Brand.Brand<"@usine/core/attempt/attempt/ContainerOutOfMemoryKills">
+>("ContainerOutOfMemoryKills")({
   /** The runtime ID of the container that recorded the kills. */
   container: ContainerId,
   /** The cumulative processes the kernel killed in this container. */
@@ -110,7 +120,10 @@ export const totalOutOfMemoryKills = (
  * - `outOfMemory`: the processes the kernel killed in the Attempt's containers for memory, in all
  *   of them together; `None` if it killed none or the Attempt ran without a container.
  */
-export class Attempt extends Schema.Class<Attempt>("Attempt")({
+export class Attempt extends Schema.Class<
+  Attempt,
+  Brand.Brand<"@usine/core/attempt/attempt/Attempt">
+>("Attempt")({
   /** The identity of this try, distinct from every retry. */
   id: AttemptId,
   /** The run whose step this attempt tries. */
@@ -163,7 +176,10 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
  * The time span of an Attempt, open while `endedAt` is `None`, used to attribute GitHub writes
  * by Attempts that share one App login.
  */
-export class AttemptWindow extends Schema.Class<AttemptWindow>("AttemptWindow")({
+export class AttemptWindow extends Schema.Class<
+  AttemptWindow,
+  Brand.Brand<"@usine/core/attempt/attempt/AttemptWindow">
+>("AttemptWindow")({
   /** The attempt to which writes in this window may belong. */
   attemptId: AttemptId,
   /** The start time, rounded down to the second when comparing GitHub timestamps. */
@@ -214,7 +230,10 @@ export const windowsOverlap = (left: AttemptWindow, right: AttemptWindow): boole
  * Attempt only if its time is inside `own` and outside every `overlapping` window, which are the
  * same Agent's other Attempts on the Item.
  */
-export class AttemptWindows extends Schema.Class<AttemptWindows>("AttemptWindows")({
+export class AttemptWindows extends Schema.Class<
+  AttemptWindows,
+  Brand.Brand<"@usine/core/attempt/attempt/AttemptWindows">
+>("AttemptWindows")({
   /** The harvested attempt's window, or `None` when older records lack its end time. */
   own: Schema.Option(AttemptWindow),
   /** Other attempts by the same agent on the same item whose windows overlap this one. */
@@ -232,7 +251,10 @@ export const shouldAutoRetry = (options: {
 }): boolean => isAutoRetryableFailure(options.failure) && options.number < options.maxAutoAttempts;
 
 /** The next attempt after a provider capacity refusal, with its earliest start time. */
-export class ProviderRetry extends Schema.Class<ProviderRetry>("ProviderRetry")(
+export class ProviderRetry extends Schema.Class<
+  ProviderRetry,
+  Brand.Brand<"@usine/core/attempt/attempt/ProviderRetry">
+>("ProviderRetry")(
   closedStruct({
     /** The 1-based number of the attempt to start after the refusal. */
     nextAttempt: AttemptNumber.check(Schema.isGreaterThanOrEqualTo(2)),

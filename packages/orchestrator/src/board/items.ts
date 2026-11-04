@@ -117,5 +117,7 @@ export const settledItemState = Effect.fn("settledItemState")(function* (itemKey
  * Returns whether `run` needs the operator: it waits for approval, or its failure is unresolved and
  * `itemSettled` is false. An Item is settled when it's closed, merged, or gone from GitHub.
  */
-export const runNeedsAttention = (run: RunSummaryView, itemSettled: boolean): boolean =>
-  run.canApprove || (run.canResolveFailure && !itemSettled);
+export const runNeedsAttention = (
+  run: Pick<RunSummaryView, "canApprove" | "canResolveFailure">,
+  itemSettled: boolean,
+): boolean => run.canApprove || (run.canResolveFailure && !itemSettled);

@@ -3,7 +3,7 @@ import { EventId } from "./event.ts";
 import { ItemKey } from "./item.ts";
 import { LoopName } from "./loop.ts";
 import { RepositoryName } from "./repository.ts";
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 
 /** The maximum number of Runs one Loop can open for an Item between operator resets. */
 export const CycleLimit = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
@@ -27,7 +27,10 @@ export const CycleCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pip
 export type CycleCount = typeof CycleCount.Type;
 
 /** The admitted and completed Runs of one Loop in the current cycle generation. */
-export class LoopCycleCount extends Schema.Class<LoopCycleCount>("LoopCycleCount")(
+export class LoopCycleCount extends Schema.Class<
+  LoopCycleCount,
+  Brand.Brand<"@usine/core/cycle-budget/LoopCycleCount">
+>("LoopCycleCount")(
   closedStruct({
     /** The loop whose runs are counted in this cycle generation. */
     loop: LoopName,
@@ -47,7 +50,10 @@ export const CycleBudgetAskId = EventId.pipe(Schema.brand("CycleBudgetAskId"));
 export type CycleBudgetAskId = typeof CycleBudgetAskId.Type;
 
 /** The latest event refused by an item's exhausted budget for one loop. */
-export class CycleBudgetBlock extends Schema.Class<CycleBudgetBlock>("CycleBudgetBlock")(
+export class CycleBudgetBlock extends Schema.Class<
+  CycleBudgetBlock,
+  Brand.Brand<"@usine/core/cycle-budget/CycleBudgetBlock">
+>("CycleBudgetBlock")(
   closedStruct({
     loop: LoopName,
     eventId: EventId,
@@ -55,7 +61,10 @@ export class CycleBudgetBlock extends Schema.Class<CycleBudgetBlock>("CycleBudge
 ) {}
 
 /** An Ask for the operator to reset an Item's cycle budget; no Runs open until the reset. */
-export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk")(
+export class CycleBudgetAsk extends Schema.Class<
+  CycleBudgetAsk,
+  Brand.Brand<"@usine/core/cycle-budget/CycleBudgetAsk">
+>("CycleBudgetAsk")(
   closedStruct({
     /** The event-derived identity of the ask in this cycle generation. */
     id: CycleBudgetAskId,

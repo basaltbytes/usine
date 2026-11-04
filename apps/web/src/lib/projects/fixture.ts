@@ -35,6 +35,7 @@ import {
   ReadyOverview,
   RunFailedView,
   RunSummaryView,
+  AttemptSummaryView,
   RunView,
   StalledItemView,
   SucceededAttemptView,
@@ -105,7 +106,7 @@ const run = (
   minutes: number,
   attempts: ReadonlyArray<AttemptView>,
 ) =>
-  RunView.make({
+  RunSummaryView.make({
     agentBrain: BrainSpec.make({
       harness: "codex",
       model: ModelId.make("test-model"),
@@ -120,11 +121,9 @@ const run = (
     loopPaused: loop === "review",
     openedAt: minutesAgo(minutes),
     closedAt: isClosed(state) ? (attempts.at(-1)?.endedAt ?? minutesAgo(minutes)) : null,
-    task: `Work on #${item.number}.`,
-    attempts,
+    attempts: attempts.map((attempt) => AttemptSummaryView.make(attempt)),
     approval: null,
     runAgain: null,
-    resultMessage: null,
     pullRequestUrl: null,
     canApprove: state === "Waiting",
     canRetry: state === "Failed",
@@ -152,10 +151,12 @@ const pool = (
 
 /** Returns a Task's usage as the server computes it: its Runs' Attempt time and billing pools. */
 export const taskUsageOf = (
-  runs: ReadonlyArray<RunSummaryView>,
+  runs: ReadonlyArray<RunSummaryView | RunView>,
   pools: ReadonlyArray<TaskPoolUsageView> = [],
 ): TaskUsageView => {
-  const attempts = runs.flatMap((candidate) => candidate.attempts);
+  const attempts = runs.flatMap(
+    (candidate): ReadonlyArray<AttemptSummaryView | AttemptView> => candidate.attempts,
+  );
   const priced = pools.flatMap(({ cost }) => (cost === null ? [] : [cost]));
   return TaskUsageView.make({
     durationMillis: attempts.reduce(
@@ -185,7 +186,7 @@ export const taskUsageOf = (
 const task = (
   members: readonly [BoardItemLink, ...ReadonlyArray<BoardItemLink>],
   labels: ReadonlyArray<string>,
-  runs: ReadonlyArray<RunSummaryView> = [],
+  history: ReadonlyArray<RunSummaryView | RunView> = [],
   extra: {
     readonly conflicting?: boolean;
     readonly state?: BoardTaskView["state"];
@@ -194,6 +195,12 @@ const task = (
     readonly pools?: ReadonlyArray<TaskPoolUsageView>;
   } = {},
 ) => {
+  const runs = history.map((run) =>
+    RunSummaryView.make({
+      ...run,
+      attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+    }),
+  );
   const current = members.at(-1) ?? members[0];
   const state = extra.state ?? (current.kind === "pr" ? "pr-open" : "issue-open");
   // As the server does, a failed Run on a closed or merged Item doesn't need the operator.

@@ -1,6 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
-import { Option, Schema } from "effect";
+import { type Brand, Option, Schema } from "effect";
 import {
   HttpApi,
   HttpApiEndpoint,
@@ -29,7 +29,10 @@ export { AttachmentId, InstallationCredential } from "../attachment/attachment.t
 export { CallerToken, GATEWAY_TOKEN_HEADER } from "../caller/caller.ts";
 
 /** A request to attach one attempt's credential for one worker and repository until it expires. */
-export class AttachRequest extends Schema.Class<AttachRequest>("@usine/gateway/AttachRequest")({
+export class AttachRequest extends Schema.Class<
+  AttachRequest,
+  Brand.Brand<"@usine/gateway/admin/api/AttachRequest">
+>("@usine/gateway/AttachRequest")({
   /** The worker allowed to use the attachment. */
   worker: WorkerName,
   /** The repository authorized by the credential, in owner/name form. */
@@ -41,9 +44,10 @@ export class AttachRequest extends Schema.Class<AttachRequest>("@usine/gateway/A
 }) {}
 
 /** An attachment without its token. */
-export class AttachmentSummary extends Schema.Class<AttachmentSummary>(
-  "@usine/gateway/AttachmentSummary",
-)({
+export class AttachmentSummary extends Schema.Class<
+  AttachmentSummary,
+  Brand.Brand<"@usine/gateway/admin/api/AttachmentSummary">
+>("@usine/gateway/AttachmentSummary")({
   /** The stable attachment ID used for renewals and detach requests. */
   id: AttachmentId,
   /** The worker authorized by the attachment. */
@@ -71,7 +75,10 @@ export class AttachmentSummary extends Schema.Class<AttachmentSummary>(
  * The response to an attach or renew: the attachment and the worker VM's caller token.
  * Renewing with the same attachment ID, worker, and repository spelling returns the same token.
  */
-export class Attached extends Schema.Class<Attached>("@usine/gateway/Attached")({
+export class Attached extends Schema.Class<
+  Attached,
+  Brand.Brand<"@usine/gateway/admin/api/Attached">
+>("@usine/gateway/Attached")({
   /** The stored attachment metadata without its installation token. */
   attachment: AttachmentSummary,
   /** The token to give the attempt in place of credentials; unchanged when renewing the same claims. */
@@ -79,21 +86,28 @@ export class Attached extends Schema.Class<Attached>("@usine/gateway/Attached")(
 }) {}
 
 /** The response to a detach. `detached` is whether the attachment existed. */
-export class Detached extends Schema.Class<Detached>("@usine/gateway/Detached")({
+export class Detached extends Schema.Class<
+  Detached,
+  Brand.Brand<"@usine/gateway/admin/api/Detached">
+>("@usine/gateway/Detached")({
   /** Whether an attachment existed and was removed; `false` for an unknown or already detached ID. */
   detached: Schema.Boolean,
 }) {}
 
 /** The active attachments returned by the admin API, without their credentials. */
-export class AttachmentList extends Schema.Class<AttachmentList>("@usine/gateway/AttachmentList")({
+export class AttachmentList extends Schema.Class<
+  AttachmentList,
+  Brand.Brand<"@usine/gateway/admin/api/AttachmentList">
+>("@usine/gateway/AttachmentList")({
   /** Active attachments ordered by earliest expiry, with credentials omitted. */
   attachments: Schema.Array(AttachmentSummary),
 }) {}
 
 /** An LLM provider the gateway has a credential for, with the credential kind but not the credential. */
-export class LlmProviderSummary extends Schema.Class<LlmProviderSummary>(
-  "@usine/gateway/LlmProviderSummary",
-)({
+export class LlmProviderSummary extends Schema.Class<
+  LlmProviderSummary,
+  Brand.Brand<"@usine/gateway/admin/api/LlmProviderSummary">
+>("@usine/gateway/LlmProviderSummary")({
   /** The configured LLM provider identified by its gateway path prefix. */
   provider: LlmProviderName,
   /** Whether requests use an API key or a subscription credential. */
@@ -104,9 +118,10 @@ export class LlmProviderSummary extends Schema.Class<LlmProviderSummary>(
  * The LLM providers the gateway forwards to, with each credential kind. Providers without a
  * credential aren't listed.
  */
-export class LlmProviderList extends Schema.Class<LlmProviderList>(
-  "@usine/gateway/LlmProviderList",
-)({
+export class LlmProviderList extends Schema.Class<
+  LlmProviderList,
+  Brand.Brand<"@usine/gateway/admin/api/LlmProviderList">
+>("@usine/gateway/LlmProviderList")({
   /** Configured providers and credential kinds, excluding providers with no credential. */
   providers: Schema.Array(LlmProviderSummary),
 }) {

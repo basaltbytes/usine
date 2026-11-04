@@ -7,7 +7,7 @@ import {
 } from "@usine/cloudflare";
 import {
   decodeClientMessage,
-  encodeServerMessage,
+  ServerMessage,
   Exited,
   outputFrame,
   Started,
@@ -128,7 +128,14 @@ const defaultResponse = (
   }
 };
 
+// WebSocket callbacks encode validated server messages synchronously.
+// @effect-diagnostics-next-line schemaSync:off
+const encodeServerMessage = Schema.encodeSync(Schema.fromJsonString(ServerMessage));
+// Node HTTP handlers decode request fixtures synchronously.
+// @effect-diagnostics-next-line schemaSync:off
 const decodeCreate = Schema.decodeUnknownSync(Schema.toCodecJson(CreateSandbox));
+// Node HTTP handlers decode request fixtures synchronously.
+// @effect-diagnostics-next-line schemaSync:off
 const decodeCredentials = Schema.decodeUnknownSync(Schema.toCodecJson(SandboxCredentials));
 
 /**

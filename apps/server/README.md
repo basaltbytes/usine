@@ -254,3 +254,7 @@ The web UI uses `GET /api/changes` for entity invalidation. The authenticated st
 If the SQLite read worker stops, the server logs the cause at Error and fails its in-flight reads. Later reads use the main connection, where long reads can delay appends and HTTP responses. The server retries worker startup after 1 second, 5 seconds, 30 seconds, and then every 5 minutes. A replacement serves reads after a successful probe; successful recovery resets the retry delay.
 
 Read `GET /api/health` to check `sqliteReader`: `worker` means standalone reads use the worker, `fallback` means they use the main connection while waiting to retry, and `respawning` means a replacement is starting and reads still use the main connection. The endpoint remains a liveness check and returns HTTP 200 in each state.
+
+## Schema contracts
+
+Operator request and response records use nominal Schema brands. TypeScript integrations construct records with their schema’s `make` method or decode JSON with `Schema.decodeUnknownEffect`. HTTP request and response formats remain unchanged.

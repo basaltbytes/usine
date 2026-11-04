@@ -1,3 +1,4 @@
+import { RunSummaryView, AttemptSummaryView } from "@usine/orchestrator/operator";
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import {
   RequestPermissions,
@@ -116,7 +117,7 @@ import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/htt
 import { Context, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
-import { afterAll, assert, describe, it } from "vitest";
+import { beforeAll, afterAll, assert, describe, it } from "vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
 import { Port, SERVER_HOST } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
@@ -125,17 +126,20 @@ const runId = RunId.make("run-1");
 const loopName = LoopName.make("review-issue");
 const agentName = AgentName.make("developer");
 const repositoryName = RepositoryName.make("basaltbytes/usine");
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [{ name: "basaltbytes/usine" }],
 });
-const instance = LoadedInstance.make({
-  config,
-  agents: [],
-  invalidAgents: [],
-  loops: [],
-  quarantinedLoops: [],
-  warnings: [],
+const instance = Effect.gen(function* () {
+  const fixtureConfig = yield* config;
+  return LoadedInstance.make({
+    config: fixtureConfig,
+    agents: [],
+    invalidAgents: [],
+    loops: [],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 const run = RunView.make({
   agentBrain: BrainSpec.make({
@@ -212,7 +216,12 @@ const overview = ReadyOverview.make({
       repositories: [repositoryName],
       repository: repositoryName,
       status: "needs-you",
-      runs: [run],
+      runs: [
+        RunSummaryView.make({
+          ...run,
+          attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+        }),
+      ],
       board: BoardView.make({ failures: [], lanes: [] }),
       labels: [],
       preflightFindings: [],
@@ -391,36 +400,52 @@ const configuration: OperatorConfiguration["Service"] = {
   view: () => Effect.succeed(configurationView),
 };
 const dismissed: Array<AttentionAcknowledgement> = [];
-const backend = needsSetupBackendLayer(
-  { get: Effect.succeed(instance) },
-  "SecretsFileError",
-  observation,
-  configuration,
-  {
-    list: Effect.succeed(dismissed),
-    prune: () => Effect.die("unused"),
-    dismiss: (acknowledgement) =>
-      Effect.sync(() => {
-        dismissed.push(acknowledgement);
-      }),
-    undo: (key) =>
-      Effect.sync(() => {
-        const index = dismissed.findIndex(
-          (entry) => entry.id === key.id && entry.revision === key.revision,
-        );
-        if (index >= 0) dismissed.splice(index, 1);
-      }),
-  },
-);
-const app = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
-  disableLogger: true,
+const makeBackend = Effect.gen(function* () {
+  const fixtureInstance = yield* instance;
+  return needsSetupBackendLayer(
+    { get: Effect.succeed(fixtureInstance) },
+    "SecretsFileError",
+    observation,
+    configuration,
+    {
+      list: Effect.succeed(dismissed),
+      prune: () => Effect.die("unused"),
+      dismiss: (acknowledgement) =>
+        Effect.sync(() => {
+          dismissed.push(acknowledgement);
+        }),
+      undo: (key) =>
+        Effect.sync(() => {
+          const index = dismissed.findIndex(
+            (entry) => entry.id === key.id && entry.revision === key.revision,
+          );
+          if (index >= 0) dismissed.splice(index, 1);
+        }),
+    },
+  );
 });
+const makeApp = (backend: Effect.Success<typeof makeBackend>) =>
+  HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
+    disableLogger: true,
+  });
+
+let backend: Effect.Success<typeof makeBackend>;
+let app: ReturnType<typeof makeApp>;
+beforeAll(() =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      backend = yield* makeBackend;
+      app = makeApp(backend);
+    }),
+  ),
+);
 
 afterAll(() => app.dispose());
 
 it("publishes a valid OpenAPI document for every API route and protects non-public routes", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
+      const fixtureBackend = backend;
       const services = yield* authFixture();
       const auth = authenticatedRoutes(services);
       const setup = setupRoutes(
@@ -442,7 +467,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
           setup.protected.pipe(Layer.provide(auth.guard.layer)),
           setup.callback,
           securityMiddleware(services.authentication),
-        ).pipe(HttpRouter.provideRequest(backend)),
+        ).pipe(HttpRouter.provideRequest(fixtureBackend)),
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
@@ -500,7 +525,10 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       const validation = yield* Effect.promise(() =>
         validate("https://spec.openapis.org/oas/3.1/schema-base", document, "BASIC"),
       );
-      assert.isTrue(validation.valid, JSON.stringify(validation));
+      const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        validation,
+      );
+      assert.isTrue(validation.valid, decodedValue1);
       const generated = operatorOpenApi();
       assert.deepEqual(document, generated);
       const committed = yield* Effect.promise(() =>
@@ -558,7 +586,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
         );
         assert.isTrue(
           refusedValidation.valid,
-          `${endpoint.method} ${path}: ${JSON.stringify(refusedBody)}`,
+          `${endpoint.method} ${path}: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(refusedBody)}`,
         );
         if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
         for (const spelling of [
@@ -594,7 +622,10 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
             assert.equal(response.status, 403);
             const body = yield* Effect.promise(() => response.json());
             const result = yield* Effect.promise(() => validate(responseSchema, body));
-            assert.isTrue(result.valid, `${endpoint.method} ${path}: ${JSON.stringify(body)}`);
+            assert.isTrue(
+              result.valid,
+              `${endpoint.method} ${path}: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(body)}`,
+            );
           }
         }
       }
@@ -677,7 +708,8 @@ describe("operator HTTP API", () => {
         new Request("http://localhost/api/upgrade", { headers: authorization }),
       );
       assert.strictEqual(
-        Schema.decodeUnknownSync(UpgradeView)(await status.json()).channel,
+        (await Effect.runPromise(Schema.decodeUnknownEffect(UpgradeView)(await status.json())))
+          .channel,
         "next",
       );
       const invalid = await upgradeApp.handler(
@@ -739,7 +771,7 @@ describe("operator HTTP API", () => {
     assert(saved !== undefined);
     assert.strictEqual(saved.id, payload.id);
     assert.strictEqual(saved.revision, payload.revision);
-    assert.deepStrictEqual(saved.dismissedBy, instance.config.operator);
+    assert.deepStrictEqual(saved.dismissedBy, (await Effect.runPromise(instance)).config.operator);
     assert(DateTime.toEpochMillis(saved.dismissedAt) > 0);
     const undo = await send("undo", payload);
     assert.strictEqual(undo.status, 200);
@@ -749,14 +781,18 @@ describe("operator HTTP API", () => {
   it("preserves durable observation in needs-setup mode while intervention remains unavailable", async () => {
     const response = await app.handler(new Request("http://localhost/api/overview"));
     assert.strictEqual(response.status, 200);
-    const body = Schema.decodeUnknownSync(FactoryOverview)(await response.json());
+    const body = await Effect.runPromise(
+      Schema.decodeUnknownEffect(FactoryOverview)(await response.json()),
+    );
     assert.strictEqual(body._tag, "NeedsSetup");
     assert.strictEqual(body.projects[0]?.runs[0]?.id, runId);
     assert.strictEqual(body.loops[0]?.paused, true);
 
     const deskResponse = await app.handler(new Request("http://localhost/api/desk"));
     assert.strictEqual(deskResponse.status, 200);
-    const deskBody = Schema.decodeUnknownSync(DeskView)(await deskResponse.json());
+    const deskBody = await Effect.runPromise(
+      Schema.decodeUnknownEffect(DeskView)(await deskResponse.json()),
+    );
     assert.deepStrictEqual(
       deskBody.polls.map(({ polledAt }) => polledAt),
       [null],
@@ -770,7 +806,10 @@ describe("operator HTTP API", () => {
       new Request("http://localhost/api/projects/basaltbytes/usine/tasks/31"),
     );
     assert.strictEqual(taskResponse.status, 200);
-    assert.deepStrictEqual(Schema.decodeUnknownSync(TaskView)(await taskResponse.json()), task);
+    assert.deepStrictEqual(
+      await Effect.runPromise(Schema.decodeUnknownEffect(TaskView)(await taskResponse.json())),
+      task,
+    );
 
     for (const [search, window] of [
       ["?window=7d", "7d"],
@@ -782,7 +821,11 @@ describe("operator HTTP API", () => {
       );
       assert.strictEqual(statisticsResponse.status, 200, search);
       assert.strictEqual(
-        Schema.decodeUnknownSync(StatisticsView)(await statisticsResponse.json()).window,
+        (
+          await Effect.runPromise(
+            Schema.decodeUnknownEffect(StatisticsView)(await statisticsResponse.json()),
+          )
+        ).window,
         window,
       );
       const runStatisticsResponse = await app.handler(
@@ -790,7 +833,11 @@ describe("operator HTTP API", () => {
       );
       assert.strictEqual(runStatisticsResponse.status, 200, search);
       assert.strictEqual(
-        Schema.decodeUnknownSync(RunStatisticsView)(await runStatisticsResponse.json()).window,
+        (
+          await Effect.runPromise(
+            Schema.decodeUnknownEffect(RunStatisticsView)(await runStatisticsResponse.json()),
+          )
+        ).window,
         window,
       );
     }
@@ -824,7 +871,9 @@ describe("operator HTTP API", () => {
     );
     assert.strictEqual(configurationResponse.status, 200);
     assert.deepStrictEqual(
-      Schema.decodeUnknownSync(ConfigurationView)(await configurationResponse.json()),
+      await Effect.runPromise(
+        Schema.decodeUnknownEffect(ConfigurationView)(await configurationResponse.json()),
+      ),
       configurationView,
     );
 
@@ -1044,7 +1093,9 @@ describe("operator HTTP API", () => {
         }),
       );
       assert.strictEqual(proposed.status, 409);
-      const refusal = Schema.decodeUnknownSync(OperatorHttpError)(await proposed.json());
+      const refusal = await Effect.runPromise(
+        Schema.decodeUnknownEffect(OperatorHttpError)(await proposed.json()),
+      );
       assert.strictEqual(refusal.error, "BoardLaneReadOnlyError");
       assert.match(refusal.message, /read-only/i);
       assert.match(refusal.message, /usine\.yaml/);
@@ -1389,6 +1440,8 @@ describe("operator HTTP API", () => {
       const port = await new Promise<Port>((resolve) => {
         const probe = createServer();
         probe.listen({ host: SERVER_HOST, port: 0 }, () => {
+          // Node event callbacks decode their arguments synchronously.
+          // @effect-diagnostics-next-line schemaSync:off
           const { port: free } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(
             probe.address(),
           );
@@ -1411,8 +1464,10 @@ describe("operator HTTP API", () => {
       try {
         const statuses = await Effect.runPromise(
           Effect.gen(function* () {
+            const fixtureBackend = backend;
             const authentication = yield* authFixture();
-            yield* Layer.build(serverLayer(backend, webRoot, port, authentication));
+
+            yield* Layer.build(serverLayer(fixtureBackend, webRoot, port, authentication));
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped),
         );
@@ -1531,8 +1586,23 @@ it("retains all linked card membership when the board read omits settled cards",
     ...current,
     repository: repositoryName,
     items: [member, current],
-    ...boardRunSummary([run], run, [member, current]),
-    run,
+    ...boardRunSummary(
+      [
+        RunSummaryView.make({
+          ...run,
+          attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+        }),
+      ],
+      RunSummaryView.make({
+        ...run,
+        attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+      }),
+      [member, current],
+    ),
+    run: RunSummaryView.make({
+      ...run,
+      attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+    }),
     pullRequest: null,
     needsYou: false,
     loops: [],
@@ -1577,7 +1647,9 @@ it("retains all linked card membership when the board read omits settled cards",
       }),
     );
     assert.strictEqual(response.status, 200);
-    const paged = Schema.decodeUnknownSync(ProjectView)(await response.json());
+    const paged = await Effect.runPromise(
+      Schema.decodeUnknownEffect(ProjectView)(await response.json()),
+    );
     assert.deepStrictEqual(paged.board.cardedItemKeys, [member.itemKey, current.itemKey]);
     assert.deepStrictEqual(paged.board.lanes[0]?.items, []);
     assert.strictEqual(paged.board.lanes[0]?.totalItems, 1);

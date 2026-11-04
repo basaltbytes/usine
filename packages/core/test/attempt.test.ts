@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { DateTime, Option, Schema } from "effect";
+import { Effect, DateTime, Option, Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
 import {
   AttemptId,
@@ -36,8 +36,8 @@ const childBudget = ChildSessionBudgetFailure.make({
   attemptedChildren: ChildSessionCount.make(5),
 });
 const n = AttemptNumber.make;
-const decodeAttemptNumber = Schema.decodeUnknownSync(AttemptNumber);
-const decodeChildSessionBudget = Schema.decodeUnknownSync(ChildSessionBudget);
+const decodeAttemptNumber = Schema.decodeUnknownEffect(AttemptNumber);
+const decodeChildSessionBudget = Schema.decodeUnknownEffect(ChildSessionBudget);
 
 describe("auto-retry law (ADR 0002, ADR 0013)", () => {
   it("infrastructure and capacity failures permit automatic retries", () => {
@@ -79,43 +79,61 @@ describe("construction is the only door", () => {
       }),
     ).toThrow();
   });
-  it("rejects a resolution with an invalid time, operator, or unknown field", () => {
-    const decode = Schema.decodeUnknownSync(FailureResolution);
-    const resolution = { resolvedAt: "2026-10-27T00:00:00Z", operator: "Philippe" };
-    expect(() => decode({ ...resolution, resolvedAt: "not-a-time" })).toThrow();
-    expect(() => decode({ ...resolution, operator: "" })).toThrow();
-    expect(() => decode({ ...resolution, retry: true })).toThrow();
-  });
+  it.effect("rejects a resolution with an invalid time, operator, or unknown field", () =>
+    Effect.gen(function* () {
+      const decode = Schema.decodeUnknownEffect(FailureResolution);
+      const resolution = { resolvedAt: "2026-10-27T00:00:00Z", operator: "Philippe" };
+      expect((yield* Effect.flip(decode({ ...resolution, resolvedAt: "not-a-time" })))._tag).toBe(
+        "SchemaError",
+      );
+      expect((yield* Effect.flip(decode({ ...resolution, operator: "" })))._tag).toBe(
+        "SchemaError",
+      );
+      expect((yield* Effect.flip(decode({ ...resolution, retry: true })))._tag).toBe("SchemaError");
+    }),
+  );
 
-  it("attempt numbers below 1 or fractional are unconstructible", () => {
-    expect(() => decodeAttemptNumber(0)).toThrow();
-    expect(() => decodeAttemptNumber(-1)).toThrow();
-    expect(() => decodeAttemptNumber(1.5)).toThrow();
-    expect(decodeAttemptNumber(1)).toBe(1);
-  });
+  it.effect("attempt numbers below 1 or fractional are unconstructible", () =>
+    Effect.gen(function* () {
+      expect((yield* Effect.flip(decodeAttemptNumber(0)))._tag).toBe("SchemaError");
+      expect((yield* Effect.flip(decodeAttemptNumber(-1)))._tag).toBe("SchemaError");
+      expect((yield* Effect.flip(decodeAttemptNumber(1.5)))._tag).toBe("SchemaError");
+      const decodedValue4 = yield* decodeAttemptNumber(1);
+      expect(decodedValue4).toBe(1);
+    }),
+  );
 
-  it("child-session budgets below 1 or fractional are unconstructible", () => {
-    expect(() => decodeChildSessionBudget(0)).toThrow();
-    expect(() => decodeChildSessionBudget(-1)).toThrow();
-    expect(() => decodeChildSessionBudget(1.5)).toThrow();
-    expect(decodeChildSessionBudget(1)).toBe(1);
-  });
+  it.effect("child-session budgets below 1 or fractional are unconstructible", () =>
+    Effect.gen(function* () {
+      expect((yield* Effect.flip(decodeChildSessionBudget(0)))._tag).toBe("SchemaError");
+      expect((yield* Effect.flip(decodeChildSessionBudget(-1)))._tag).toBe("SchemaError");
+      expect((yield* Effect.flip(decodeChildSessionBudget(1.5)))._tag).toBe("SchemaError");
+      const decodedValue3 = yield* decodeChildSessionBudget(1);
+      expect(decodedValue3).toBe(1);
+    }),
+  );
 
-  it("empty ids are unconstructible", () => {
-    expect(() => Schema.decodeSync(EventId)("")).toThrow();
-  });
+  it.effect("empty ids are unconstructible", () =>
+    Effect.gen(function* () {
+      expect((yield* Effect.flip(Schema.decodeEffect(EventId)("")))._tag).toBe("SchemaError");
+    }),
+  );
 
-  it("an Event rejects payloads that SQLite cannot preserve as JSON", () => {
-    const decodeEvent = Schema.decodeUnknownSync(Event);
-    expect(() =>
-      decodeEvent({
-        id: EventId.make("event-1"),
-        dedupKey: DedupKey.make("loop/item/revision"),
-        payload: { callback: () => "not JSON" },
-        receivedAt: DateTime.makeUnsafe("2026-08-24T12:00:00Z"),
-      }),
-    ).toThrow();
-  });
+  it.effect("an Event rejects payloads that SQLite cannot preserve as JSON", () =>
+    Effect.gen(function* () {
+      const decodeEvent = Schema.decodeUnknownEffect(Event);
+      expect(
+        (yield* Effect.flip(
+          decodeEvent({
+            id: EventId.make("event-1"),
+            dedupKey: DedupKey.make("loop/item/revision"),
+            payload: { callback: () => "not JSON" },
+            receivedAt: DateTime.makeUnsafe("2026-08-24T12:00:00Z"),
+          }),
+        ))._tag,
+      ).toBe("SchemaError");
+    }),
+  );
 });
 
 describe("Attempt windows", () => {
@@ -136,26 +154,34 @@ describe("Attempt windows", () => {
 });
 
 describe("retained push refusal", () => {
-  it("reads older retained salvage and preserves a non-retryable push failure through JSON", () => {
-    const legacy = {
-      _tag: "Retained",
-      path: "/checkout",
-      commit: null,
-      message: "push failed",
-    } as const;
-    expect(Option.isNone(Schema.decodeSync(SalvageRetained)(legacy).pushFailure)).toBe(true);
-    const failure = GitHubPushFailure.make({
-      repository: RepositoryName.make("acme/demo"),
-      ref: "refs/heads/usine/salvage/run/1",
-      message: "GitHub refused the push (HTTP 403)",
-    });
-    expect(isAutoRetryableFailure(failure)).toBe(false);
-    const retained = SalvageRetained.make({
-      ...legacy,
-      commit: Option.none(),
-      pushFailure: Option.some(failure),
-    });
-    const json = Schema.fromJsonString(SalvageRetained);
-    expect(Schema.decodeSync(json)(Schema.encodeSync(json)(retained))).toEqual(retained);
-  });
+  it.effect(
+    "reads older retained salvage and preserves a non-retryable push failure through JSON",
+    () =>
+      Effect.gen(function* () {
+        const legacy = {
+          _tag: "Retained",
+          path: "/checkout",
+          commit: null,
+          message: "push failed",
+        } as const;
+        expect(
+          Option.isNone((yield* Schema.decodeEffect(SalvageRetained)(legacy)).pushFailure),
+        ).toBe(true);
+        const failure = GitHubPushFailure.make({
+          repository: RepositoryName.make("acme/demo"),
+          ref: "refs/heads/usine/salvage/run/1",
+          message: "GitHub refused the push (HTTP 403)",
+        });
+        expect(isAutoRetryableFailure(failure)).toBe(false);
+        const retained = SalvageRetained.make({
+          ...legacy,
+          commit: Option.none(),
+          pushFailure: Option.some(failure),
+        });
+        const json = Schema.fromJsonString(SalvageRetained);
+        const decodedValue1 = yield* Schema.encodeEffect(json)(retained);
+        const decodedValue2 = yield* Schema.decodeEffect(json)(decodedValue1);
+        expect(decodedValue2).toEqual(retained);
+      }),
+  );
 });

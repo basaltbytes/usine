@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Option, type PlatformError, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Option, type PlatformError, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Port } from "../cli.ts";
 import { ProcessId } from "./record.ts";
@@ -9,9 +9,13 @@ const TCP_LISTEN = "0A";
 const SOCKET_LINK = /^socket:\[(\d+)\]$/u;
 
 /** The OS couldn't list the TCP ports that a process listens on. */
-export class ListeningPortsError extends Schema.TaggedError<ListeningPortsError>(
-  "@usine/server/ListeningPortsError",
-)("ListeningPortsError", { pid: ProcessId, reason: Schema.String }) {}
+export class ListeningPortsError extends Schema.TaggedError<
+  ListeningPortsError,
+  Brand.Brand<"@usine/server/instance/ports/ListeningPortsError">
+>("@usine/server/ListeningPortsError")("ListeningPortsError", {
+  pid: ProcessId,
+  reason: Schema.String,
+}) {}
 
 /** Returns the port after the last colon of a socket address, in base `radix`. */
 const addressPort = (address: string, radix: 10 | 16) =>

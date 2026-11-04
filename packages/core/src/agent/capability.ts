@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { Harness } from "./brain.ts";
 
 /** A harness prerequisite that the operator must provision; a missing one is never retried. */
@@ -6,9 +6,10 @@ export const HarnessCapability = Schema.Literals(["binary", "version", "login"])
 export type HarnessCapability = typeof HarnessCapability.Type;
 
 /** An error for a Worker that is missing `capability` for `harness`. */
-export class HarnessUnavailableError extends Schema.TaggedError<HarnessUnavailableError>(
-  "HarnessUnavailableError",
-)("HarnessUnavailableError", {
+export class HarnessUnavailableError extends Schema.TaggedError<
+  HarnessUnavailableError,
+  Brand.Brand<"@usine/core/agent/capability/HarnessUnavailableError">
+>()("HarnessUnavailableError", {
   /** The coding-agent CLI that failed preflight. */
   harness: Harness,
   /** The missing or unsupported prerequisite that the operator must provision. */
@@ -18,7 +19,10 @@ export class HarnessUnavailableError extends Schema.TaggedError<HarnessUnavailab
 }) {}
 
 /** The result of a verify-only probe that found the harness available on the Worker. */
-export class HarnessReady extends Schema.TaggedClass<HarnessReady>("HarnessReady")("HarnessReady", {
+export class HarnessReady extends Schema.TaggedClass<
+  HarnessReady,
+  Brand.Brand<"@usine/core/agent/capability/HarnessReady">
+>()("HarnessReady", {
   /** The coding-agent CLI whose prerequisites passed verification. */
   harness: Harness,
 }) {}

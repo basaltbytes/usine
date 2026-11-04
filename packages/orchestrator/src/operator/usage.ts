@@ -17,29 +17,31 @@ import {
   RunUsageSource,
 } from "@usine/engine/run-reader";
 import { type TranscriptEntry, TranscriptUsageQuery } from "@usine/engine/transcript";
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
 import type { AttemptView } from "./attempt.ts";
 
 /**
  * A dollar cost from a harness or from usine's OpenAI price table. `estimate` is true in the Claude
  * and ChatGPT plans, which don't bill per token (ADR 0013).
  */
-export class UsageCostView extends Schema.Class<UsageCostView>("@usine/orchestrator/UsageCostView")(
-  {
-    /** The priced usage in US dollars. */
-    usd: UsdAmount,
-    /**
-     * Whether the amount estimates usage on a subscription plan rather than per-token billing (ADR
-     * 0013).
-     */
-    estimate: Schema.Boolean,
-  },
-) {}
+export class UsageCostView extends Schema.Class<
+  UsageCostView,
+  Brand.Brand<"@usine/orchestrator/operator/usage/UsageCostView">
+>("@usine/orchestrator/UsageCostView")({
+  /** The priced usage in US dollars. */
+  usd: UsdAmount,
+  /**
+   * Whether the amount estimates usage on a subscription plan rather than per-token billing (ADR
+   * 0013).
+   */
+  estimate: Schema.Boolean,
+}) {}
 
 /** One Attempt session's usage from its highest token report, and its billing pool. */
-export class SessionUsageView extends Schema.Class<SessionUsageView>(
-  "@usine/orchestrator/SessionUsageView",
-)({
+export class SessionUsageView extends Schema.Class<
+  SessionUsageView,
+  Brand.Brand<"@usine/orchestrator/operator/usage/SessionUsageView">
+>("@usine/orchestrator/SessionUsageView")({
   /** The attempt associated with this entry. */
   attemptId: AttemptId,
   /** The parent or child session whose highest token report supplies this usage. */
@@ -53,19 +55,23 @@ export class SessionUsageView extends Schema.Class<SessionUsageView>(
 }) {}
 
 /** A Run's usage in one billing pool. */
-export class PoolUsageView extends Schema.Class<PoolUsageView>("@usine/orchestrator/PoolUsageView")(
-  {
-    /** The billing source for this usage. */
-    pool: BillingPool,
-    /** The total reported tokens, summed once per session. */
-    tokens: TokenCount,
-    /** Null if any session in the pool has no price. */
-    cost: Schema.NullOr(UsageCostView),
-  },
-) {}
+export class PoolUsageView extends Schema.Class<
+  PoolUsageView,
+  Brand.Brand<"@usine/orchestrator/operator/usage/PoolUsageView">
+>("@usine/orchestrator/PoolUsageView")({
+  /** The billing source for this usage. */
+  pool: BillingPool,
+  /** The total reported tokens, summed once per session. */
+  tokens: TokenCount,
+  /** Null if any session in the pool has no price. */
+  cost: Schema.NullOr(UsageCostView),
+}) {}
 
 /** The tokens a Run's Attempts used, per pool and session, with their prices. */
-export class RunUsageView extends Schema.Class<RunUsageView>("@usine/orchestrator/RunUsageView")({
+export class RunUsageView extends Schema.Class<
+  RunUsageView,
+  Brand.Brand<"@usine/orchestrator/operator/usage/RunUsageView">
+>("@usine/orchestrator/RunUsageView")({
   /** The total reported tokens, summed once per session. */
   tokens: TokenCount,
   /** In the order API keys, Claude plan, ChatGPT plan; unused pools are absent. */
@@ -75,9 +81,10 @@ export class RunUsageView extends Schema.Class<RunUsageView>("@usine/orchestrato
 }) {}
 
 /** A Task's usage in one billing pool, summed over every session of every Run. */
-export class TaskPoolUsageView extends Schema.Class<TaskPoolUsageView>(
-  "@usine/orchestrator/TaskPoolUsageView",
-)({
+export class TaskPoolUsageView extends Schema.Class<
+  TaskPoolUsageView,
+  Brand.Brand<"@usine/orchestrator/operator/usage/TaskPoolUsageView">
+>("@usine/orchestrator/TaskPoolUsageView")({
   /** The billing source for this usage. */
   pool: BillingPool,
   /** The total reported tokens, summed once per session. */
@@ -92,28 +99,29 @@ export class TaskPoolUsageView extends Schema.Class<TaskPoolUsageView>(
  * A Task's usage over every Run on its Items: Attempt wall time, and tokens and cost per billing
  * pool.
  */
-export class TaskUsageView extends Schema.Class<TaskUsageView>("@usine/orchestrator/TaskUsageView")(
-  {
-    /** The summed wall time of ended Attempts, each from start to recorded end. */
-    durationMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** The start times of running Attempts; add the time since each to `durationMillis`. */
-    runningSince: Schema.Array(Schema.String),
-    /** The number of ended Attempts with no recorded end, excluded from `durationMillis`. */
-    unmeasured: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** The total reported tokens, summed once per session. */
-    tokens: TokenCount,
-    /**
-     * Each pool summed over the Runs, in the order API keys, Claude plan, ChatGPT plan; unused
-     * pools are absent.
-     */
-    pools: Schema.Array(TaskPoolUsageView),
-    /**
-     * The summed cost of the priced pools, or null if no pool has a price. It's an estimate if it
-     * includes the Claude or ChatGPT plan, and a lower bound if a pool is `unpriced`.
-     */
-    cost: Schema.NullOr(UsageCostView),
-  },
-) {}
+export class TaskUsageView extends Schema.Class<
+  TaskUsageView,
+  Brand.Brand<"@usine/orchestrator/operator/usage/TaskUsageView">
+>("@usine/orchestrator/TaskUsageView")({
+  /** The summed wall time of ended Attempts, each from start to recorded end. */
+  durationMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The start times of running Attempts; add the time since each to `durationMillis`. */
+  runningSince: Schema.Array(Schema.String),
+  /** The number of ended Attempts with no recorded end, excluded from `durationMillis`. */
+  unmeasured: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The total reported tokens, summed once per session. */
+  tokens: TokenCount,
+  /**
+   * Each pool summed over the Runs, in the order API keys, Claude plan, ChatGPT plan; unused
+   * pools are absent.
+   */
+  pools: Schema.Array(TaskPoolUsageView),
+  /**
+   * The summed cost of the priced pools, or null if no pool has a price. It's an estimate if it
+   * includes the Claude or ChatGPT plan, and a lower bound if a pool is `unpriced`.
+   */
+  cost: Schema.NullOr(UsageCostView),
+}) {}
 
 const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan"];
 
@@ -288,7 +296,10 @@ export const taskHistoryUsage = (
   );
 
 /** Selects the attempt identities and terminal status needed for token reports. */
-export const runUsageSource = (source: Pick<RunSummary, "run" | "attempts">): RunUsageSource =>
+export const runUsageSource = (source: {
+  readonly run: Pick<RunSummary["run"], "id">;
+  readonly attempts: ReadonlyArray<Pick<RunSummary["attempts"][number], "id" | "outcome">>;
+}): RunUsageSource =>
   RunUsageSource.make({
     run: { id: source.run.id },
     attempts: source.attempts.map(({ id, outcome }) => ({ id, ended: Option.isSome(outcome) })),

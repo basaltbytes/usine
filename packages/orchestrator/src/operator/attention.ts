@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import type { ChangeAudience } from "@usine/core/changes";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import {
@@ -18,6 +19,8 @@ import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT } from "./need.ts";
 import type { RunSummaryView } from "./run.ts";
 import { ProjectView, ReadyOverview } from "./overview.ts";
 
+// The need is already validated; attention keys are derived synchronously.
+// @effect-diagnostics-next-line schemaSync:off
 const encodeNeed = Schema.encodeSync(NeedView);
 
 /** Identifies the condition to dismiss; pool usage is grouped into threshold bands. */
@@ -62,7 +65,10 @@ export const needRepositories = (need: NeedView) =>
   });
 
 export const taskNeedsAttention = (
-  task: Pick<BoardTaskView, "items"> & { readonly runs: ReadonlyArray<Pick<RunSummaryView, "id">> },
+  task: {
+    readonly items: ReadonlyArray<Pick<BoardTaskView["items"][number], "itemKey">>;
+    readonly runs: ReadonlyArray<Pick<RunSummaryView, "id">>;
+  },
   needs: ReadonlyArray<NeedView>,
 ): boolean =>
   needs.some((need) => {
@@ -113,7 +119,7 @@ export const projectAttention = (
 
 export const partitionNeeds = (
   needs: ReadonlyArray<NeedView>,
-  acknowledgements: ReadonlyArray<AttentionKey>,
+  acknowledgements: ReadonlyArray<Pick<AttentionKey, "id" | "revision">>,
 ) => {
   const dismissed = new Set(
     acknowledgements.map(({ id, revision }) => JSON.stringify([id, revision])),
@@ -180,9 +186,9 @@ export const poolAttentionFor = (
 /** Uses the validated attention revision to scope dismissal notices like the displayed entry. */
 export const attentionAudiences = (key: AttentionKey): ReadonlyArray<ChangeAudience> => {
   const need = Schema.decodeOption(Schema.fromJsonString(NeedView))(key.revision);
-  if (Option.isNone(need)) return [{ _tag: "Instance" }];
+  if (Option.isNone(need)) return [InstanceScope.make()];
   const repositories = needRepositories(need.value);
   return repositories.length === 0
-    ? [{ _tag: "Instance" }]
+    ? [InstanceScope.make()]
     : repositories.map((repository) => ({ _tag: "Repository", repository }));
 };

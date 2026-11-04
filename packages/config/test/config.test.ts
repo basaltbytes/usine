@@ -132,11 +132,14 @@ describe("ConfigParser", () => {
         );
 
       expect(Option.isNone((yield* parse([])).tracing)).toBe(true);
-      const defaulted = Option.getOrNull(
-        (yield* parse(["tracing:", "  otlp_url: http://localhost:4318/v1/traces"])).tracing,
-      );
+      const decodedValue2 = yield* parse([
+        "tracing:",
+        "  otlp_url: http://localhost:4318/v1/traces",
+      ]);
+      const defaulted = Option.getOrNull(decodedValue2.tracing);
       expect(defaulted?.otlpUrl.href).toBe("http://localhost:4318/v1/traces");
       expect(defaulted?.serviceName).toBe("usine");
+
       const named = Option.getOrNull(
         (yield* parse([
           "tracing:",
@@ -251,11 +254,11 @@ describe("ConfigParser", () => {
         tmpfsSizeMib: 3072,
       });
 
-      const encoded = Schema.encodeSync(UsineConfig)(configured);
-      const reloaded = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        JSON.stringify(encoded),
+      const encoded = yield* Schema.encodeEffect(UsineConfig)(configured);
+      const decodedValue7 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        encoded,
       );
+      const reloaded = yield* parser.parseUsineYaml(InstancePath.make("usine.yaml"), decodedValue7);
       expect(reloaded).toEqual(configured);
 
       const gatewayOf = (lines: ReadonlyArray<string>) => [
@@ -479,9 +482,10 @@ describe("ConfigParser", () => {
         "{ attempts: 5, max_age: 25d }",
         "{ attempts: 5, max_age: 2h, extra: true }",
       ]) {
-        expect((yield* parse([...hetzner, `      reuse: ${invalid}`]).pipe(Effect.flip))._tag).toBe(
-          "ConfigFileError",
+        const decodedValue4 = yield* parse([...hetzner, `      reuse: ${invalid}`]).pipe(
+          Effect.flip,
         );
+        expect(decodedValue4._tag).toBe("ConfigFileError");
       }
       const customized = yield* parse([
         ...hetzner,
@@ -882,7 +886,9 @@ describe("ConfigParser", () => {
         `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
       const parse = (field: string) =>
         parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
+
       expect((yield* parse("")).maxCycles).toBe(3);
+
       expect((yield* parse("max_cycles: 5\n")).maxCycles).toBe(5);
       for (const invalid of ["max_cycles: 0\n", "max_cycles: 1.5\n", "maxCycles: 5\n"]) {
         expect((yield* parse(invalid).pipe(Effect.flip)).stage).toBe("schema");
@@ -897,15 +903,18 @@ describe("ConfigParser", () => {
         `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${ci}---\nFix CI.`;
       const parse = (ci: string) =>
         parser.parseLoopFile(InstancePath.make("loops/fix.md"), source(ci));
+
       expect(Option.isNone((yield* parse("")).ci)).toBe(true);
       const configured = yield* parse("ci:\n  fix_loop: widgets/fix\n  timeout_seconds: 3600\n");
       expect(Option.isSome(configured.ci) && configured.ci.value.fixLoop).toBe("widgets/fix");
+      const decodedValue9 = formatLoop(configured);
       const roundtrip = yield* parser.parseLoopFile(
         InstancePath.make("loops/fix.md"),
-        formatLoop(configured),
+        decodedValue9,
       );
       expect(roundtrip.ci).toEqual(configured.ci);
-      expect(formatLoop(configured)).toContain("fix_loop: widgets/fix");
+      const valueDecoded1 = formatLoop(configured);
+      expect(valueDecoded1).toContain("fix_loop: widgets/fix");
       for (const ci of [
         "ci:\n  fix_loop: fix\n  timeout_seconds: 0\n",
         "ci:\n  fixLoop: fix\n  timeout_seconds: 30\n",
@@ -922,8 +931,11 @@ describe("ConfigParser", () => {
         `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
       const parse = (field: string) =>
         parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
+
       expect((yield* parse("")).permissions).toBe("write");
+
       expect((yield* parse("permissions: read\n")).permissions).toBe("read");
+
       expect((yield* parse("permissions: write\n")).permissions).toBe("write");
       for (const invalid of [
         "permissions: admin\n",
@@ -944,15 +956,20 @@ describe("ConfigParser", () => {
         `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
       const parse = (field: string) =>
         parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
+
       expect(Option.isNone((yield* parse("")).priority)).toBe(true);
+
       expect((yield* parse("priority: 2\n")).priority).toStrictEqual(Option.some(2));
       for (const value of [0, -1])
         expect((yield* parse(`priority: ${value}\n`)).priority).toStrictEqual(Option.some(value));
+
       expect((yield* parse("priority: 1.5\n").pipe(Effect.flip)).stage).toBe("schema");
       const expression = 'item.labels.nodes.exists(l, l.name == "low-priority") ? -1 : 0';
+
       expect((yield* parse(`priority: '${expression}'\n`)).priority).toStrictEqual(
         Option.some(expression),
       );
+
       expect((yield* parse("priority: item.additions\n")).priority).toStrictEqual(
         Option.some("item.additions"),
       );
@@ -1005,7 +1022,9 @@ describe("ConfigParser", () => {
           InstancePath.make("loops/always.md"),
           `---\ntrigger:\n${trigger}agent: developer\n---\nDo the work.`,
         );
+
       expect((yield* parse("  on: issue\n  if: true\n")).trigger.if).toBe("true");
+
       expect((yield* parse("  on: pr\n  if: false\n")).trigger.if).toBe("false");
       const schedule = yield* parse("  on: schedule\n  if: true\n  cron: '0 9 * * 1'\n");
       expect(schedule.trigger.if).toBe("true");
@@ -1322,19 +1341,15 @@ describe("InstanceFolder", () => {
       expect(loop).toBeDefined();
       if (loop === undefined) return;
 
-      const repo = Schema.decodeUnknownSync(ManagedRepo);
-      expect(
-        matchesSelector(loop.selector, repo({ name: "basaltbytes/usine", tags: ["active"] })),
-      ).toBe(true);
-      expect(
-        matchesSelector(loop.selector, repo({ name: "basaltbytes/usine", tags: ["dormant"] })),
-      ).toBe(false);
-      expect(
-        matchesSelector(loop.selector, repo({ name: "basaltbytes/other", tags: ["active"] })),
-      ).toBe(false);
-      expect(matchesSelector(Option.none(), repo({ name: "basaltbytes/other", tags: [] }))).toBe(
-        true,
-      );
+      const repo = Schema.decodeUnknownEffect(ManagedRepo);
+      const decodedValue6 = yield* repo({ name: "basaltbytes/usine", tags: ["active"] });
+      expect(matchesSelector(loop.selector, decodedValue6)).toBe(true);
+      const decodedValue5 = yield* repo({ name: "basaltbytes/usine", tags: ["dormant"] });
+      expect(matchesSelector(loop.selector, decodedValue5)).toBe(false);
+      const decodedValue4 = yield* repo({ name: "basaltbytes/other", tags: ["active"] });
+      expect(matchesSelector(loop.selector, decodedValue4)).toBe(false);
+      const decodedValue3 = yield* repo({ name: "basaltbytes/other", tags: [] });
+      expect(matchesSelector(Option.none(), decodedValue3)).toBe(true);
     }).pipe(Effect.provide(instanceFolderLayer)),
   );
 
@@ -1361,9 +1376,11 @@ describe("InstanceFolder", () => {
           warnings: loaded.warnings,
         }),
       ).not.toThrow();
-      const repo = Schema.decodeUnknownSync(ManagedRepo);
-      expect(matchesSelector(loop.selector, repo({ name: "basaltbytes/usine" }))).toBe(true);
-      expect(matchesSelector(loop.selector, repo({ name: "basaltbytes/other" }))).toBe(false);
+      const repo = Schema.decodeUnknownEffect(ManagedRepo);
+      const decodedValue2 = yield* repo({ name: "basaltbytes/usine" });
+      expect(matchesSelector(loop.selector, decodedValue2)).toBe(true);
+      const decodedValue1 = yield* repo({ name: "basaltbytes/other" });
+      expect(matchesSelector(loop.selector, decodedValue1)).toBe(false);
     }).pipe(Effect.provide(Layer.merge(instanceFolderLayer, parserLayer))),
   );
 });

@@ -84,14 +84,14 @@ describe("GitHubLabelWriter", () => {
       assert.strictEqual(sent.headers.authorization, "Bearer label-writer-token");
       assert.strictEqual(sent.body._tag, "Uint8Array");
       if (sent.body._tag !== "Uint8Array") return;
-      assert.deepStrictEqual(
-        Schema.decodeUnknownSync(RequestBody)(JSON.parse(new TextDecoder().decode(sent.body.body))),
-        {
-          name: "ready-for-agent",
-          color: "A2EEEF",
-          description: "Ready for an agent to claim",
-        },
+      const valueDecoded1 = yield* Schema.decodeUnknownEffect(RequestBody)(
+        JSON.parse(new TextDecoder().decode(sent.body.body)),
       );
+      assert.deepStrictEqual(valueDecoded1, {
+        name: "ready-for-agent",
+        color: "A2EEEF",
+        description: "Ready for an agent to claim",
+      });
       assert.strictEqual(created.name, "ready-for-agent");
       assert.strictEqual(created.color, "A2EEEF");
       assert.strictEqual(Option.getOrNull(created.description), "Ready for an agent to claim");

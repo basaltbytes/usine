@@ -1,4 +1,4 @@
-import { Context, type Effect, type Result, Schema } from "effect";
+import { type Brand, Context, type Effect, type Result, Schema } from "effect";
 import type { Environment } from "./environment.ts";
 
 /**
@@ -30,9 +30,10 @@ export const CheckErrorCode = Schema.Literals([
 export type CheckErrorCode = typeof CheckErrorCode.Type;
 
 /** An error from checking an expression against an {@link Environment}; checking never reads a payload. */
-export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckError>(
-  "@usine/expression/ExpressionCheckError",
-)("ExpressionCheckError", {
+export class ExpressionCheckError extends Schema.TaggedError<
+  ExpressionCheckError,
+  Brand.Brand<"@usine/expression/expression-engine/ExpressionCheckError">
+>("@usine/expression/ExpressionCheckError")("ExpressionCheckError", {
   source: Source,
   code: CheckErrorCode,
   /**
@@ -51,9 +52,10 @@ export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckErro
  * An error from evaluating a checked expression, such as a missing `context` key, a value of the
  * wrong type, division by zero, or an out-of-range list index.
  */
-export class ExpressionEvaluationError extends Schema.TaggedError<ExpressionEvaluationError>(
-  "@usine/expression/ExpressionEvaluationError",
-)("ExpressionEvaluationError", {
+export class ExpressionEvaluationError extends Schema.TaggedError<
+  ExpressionEvaluationError,
+  Brand.Brand<"@usine/expression/expression-engine/ExpressionEvaluationError">
+>("@usine/expression/ExpressionEvaluationError")("ExpressionEvaluationError", {
   source: Source,
   /** A human-readable description, possibly multi-line with a marked excerpt of `source`. The wording isn't stable. */
   message: Schema.NonEmptyString,

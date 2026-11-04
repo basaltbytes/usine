@@ -50,13 +50,16 @@ for (const existing of [true, false])
         const currentServices = yield* build();
         const access = Context.get(currentServices, MemberAccess);
         if (!existing) yield* access.enroll(alice);
+
         assert.equal((yield* access.permissions(alice.id))[0]?.permission, "admin");
         const snapshot = yield* config.read;
         assert.isTrue(Option.isSome(snapshot.instance));
         const revisions = yield* config.list(Option.none());
         assert.equal(revisions.at(-1)?.actor.pipe(Option.getOrNull), localActor);
         yield* build();
+
         assert.equal((yield* config.read).number, snapshot.number);
+
         assert.equal(
           (yield* access.remove(alice.id).pipe(Effect.result))._tag,
           existing ? "Success" : "Failure",
@@ -67,6 +70,7 @@ for (const existing of [true, false])
           yield* store.add(alice, false);
           const nextPermissions = yield* access.permissions(alice.id);
           assert.deepEqual(nextPermissions, []);
+
           assert.equal((yield* access.permissions(bob.id))[0]?.permission, "admin");
         } else {
           assert.equal((yield* access.enroll(bob).pipe(Effect.flip)).status, 409);
@@ -83,15 +87,19 @@ for (const existing of [true, false])
           expected: current.number,
           actor: Option.some(localActor),
           message: Option.none(),
-          changes: bindings.map((binding) =>
-            ConfigurationChange.make({
-              key: ConfigurationEntityKey.make({
-                kind: "binding",
-                identifier: ConfigurationEntityId.make(binding.name),
-              }),
-              before: Option.some(Schema.encodeSync(RoleBinding)(binding)),
-              after: Option.none(),
-            }),
+          changes: yield* Effect.forEach(bindings, (binding) =>
+            Schema.encodeEffect(RoleBinding)(binding).pipe(
+              Effect.map((before) =>
+                ConfigurationChange.make({
+                  key: ConfigurationEntityKey.make({
+                    kind: "binding",
+                    identifier: ConfigurationEntityId.make(binding.name),
+                  }),
+                  before: Option.some(before),
+                  after: Option.none(),
+                }),
+              ),
+            ),
           ),
         });
         yield* build();

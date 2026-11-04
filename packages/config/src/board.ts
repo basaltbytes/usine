@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { nonBlankString } from "./checks.ts";
 import { GitHubLabelName } from "./label.ts";
 
@@ -35,20 +35,22 @@ export const isSettledItemState = (state: LaneItemState): state is SettledItemSt
   isSettled(state);
 
 /** A lane source that matches items with this GitHub label, which board moves can set. */
-export class LabelLaneSource extends Schema.Class<LabelLaneSource>("@usine/config/LabelLaneSource")(
-  {
-    /** The GitHub label to match; comparisons ignore case. */
-    label: GitHubLabelName,
-  },
-) {}
+export class LabelLaneSource extends Schema.Class<
+  LabelLaneSource,
+  Brand.Brand<"@usine/config/board/LabelLaneSource">
+>("@usine/config/LabelLaneSource")({
+  /** The GitHub label to match; comparisons ignore case. */
+  label: GitHubLabelName,
+}) {}
 
 /** A lane source that matches items in this state, which board moves can't change. */
-export class StateLaneSource extends Schema.Class<StateLaneSource>("@usine/config/StateLaneSource")(
-  {
-    /** The issue or pull request state to match independently of labels. */
-    state: LaneItemState,
-  },
-) {}
+export class StateLaneSource extends Schema.Class<
+  StateLaneSource,
+  Brand.Brand<"@usine/config/board/StateLaneSource">
+>("@usine/config/StateLaneSource")({
+  /** The issue or pull request state to match independently of labels. */
+  state: LaneItemState,
+}) {}
 
 /** A label or item state used to select items for a lane. */
 export const LaneSource = Schema.Union([LabelLaneSource, StateLaneSource]);
@@ -56,7 +58,9 @@ export const LaneSource = Schema.Union([LabelLaneSource, StateLaneSource]);
 export type LaneSource = typeof LaneSource.Type;
 
 /** A board lane that contains the items matching any of `sources`. */
-export class Lane extends Schema.Class<Lane>("@usine/config/Lane")({
+export class Lane extends Schema.Class<Lane, Brand.Brand<"@usine/config/board/Lane">>(
+  "@usine/config/Lane",
+)({
   /** The display name, unique within the project lane map. */
   name: LaneName,
   /** The nonempty set of label or state matches; an item can match any source. */

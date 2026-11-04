@@ -20,6 +20,6 @@ A failed run and project operator access or a higher role. Inspect its failure a
 
 A new attempt appears in the same run. The event stays unchanged. Edited task and agent definitions apply to all later attempts until another edit. A salvage branch, when available, supplies the prior attempt’s work.
 
-The engine automatically retries infrastructure failures up to three attempts per run. Agent failures, runaway limits, child-session budget failures, questions, and blockers require operator action. A retry uses the existing run’s cycle-budget reservation.
+The engine automatically retries infrastructure failures up to three attempts per run. Agent failures, internal encoding defects, runaway limits, child-session budget failures, questions, and blockers require operator action. A retry uses the existing run’s cycle-budget reservation.
 
 If the parent task cannot be confirmed stopped, its checkout and worker slot remain reserved. Wait for reconciliation or restore access to the worker; starting duplicate work does not release that slot.

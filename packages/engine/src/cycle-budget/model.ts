@@ -1,10 +1,13 @@
 import { CycleBudgetAsk, CycleBudgetAskId, CycleGeneration } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 
 /** A reset whose Item still needs fresh trigger evaluation; acknowledgment is per generation. */
-export class CycleBudgetReset extends Schema.Class<CycleBudgetReset>("CycleBudgetReset")({
+export class CycleBudgetReset extends Schema.Class<
+  CycleBudgetReset,
+  Brand.Brand<"@usine/engine/cycle-budget/model/CycleBudgetReset">
+>("CycleBudgetReset")({
   /** The item whose budget reset requires a fresh trigger evaluation. */
   itemKey: ItemKey,
   /** The managed repo whose polling cursor must restart. */
@@ -14,9 +17,10 @@ export class CycleBudgetReset extends Schema.Class<CycleBudgetReset>("CycleBudge
 }) {}
 
 /** An error for an Ask that is absent, answered differently, or no longer current. */
-export class CycleBudgetResetRejectedError extends Schema.TaggedError<CycleBudgetResetRejectedError>(
-  "CycleBudgetResetRejectedError",
-)("CycleBudgetResetRejectedError", {
+export class CycleBudgetResetRejectedError extends Schema.TaggedError<
+  CycleBudgetResetRejectedError,
+  Brand.Brand<"@usine/engine/cycle-budget/model/CycleBudgetResetRejectedError">
+>()("CycleBudgetResetRejectedError", {
   /** The ask that cannot accept this reset answer. */
   askId: CycleBudgetAskId,
 }) {}

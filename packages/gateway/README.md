@@ -222,3 +222,7 @@ The unit tests for the ChatGPT login (`test/chatgpt.test.ts`) use stand-ins for 
 - Codex (verified with 0.164.0; needs `codex`): `codex exec` disables plugin and app sync, update checks, and analytics, and runs with the `model_provider` the executor writes and only a caller token, against a stand-in for the ChatGPT backend and its token endpoint. The login's access token expires within a minute, so the case checks that the gateway refreshes it, sends the new token and the account to the backend, and writes the rotated refresh token to the auth file. Nothing reaches OpenAI.
 
 `Attachments.list` and `Attachments.sweep` are Effect values. Use `yield* attachments.list` to read current attachments and `yield* attachments.sweep` to remove expired attachments.
+
+## Schema contracts
+
+Gateway records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Attachment persistence encodes snapshots inside Effects and reports codec failures through `AttachmentPersistenceError`.

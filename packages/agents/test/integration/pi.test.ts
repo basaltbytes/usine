@@ -1,15 +1,19 @@
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { Effect, Schema, Layer } from "effect";
+import { Config, Effect, Schema, Layer } from "effect";
 import { PiChildBackend } from "../../src/runtime.ts";
 import { piChildBackendLayer, piSdkLive } from "../../src/pi/pi.ts";
 import { steeringContract, interruptionContract } from "./contract.ts";
 
-const brain = BrainSpec.make({
-  harness: "pi",
-  model: Schema.decodeUnknownSync(ModelId)(process.env.USINE_PI_INTEGRATION_MODEL),
-  effort: "low",
+const brain = Effect.gen(function* () {
+  const decodedValue2 = yield* Config.String("USINE_PI_INTEGRATION_MODEL");
+  const decodedValue1 = yield* Schema.decodeEffect(ModelId)(decodedValue2);
+  return BrainSpec.make({
+    harness: "pi",
+    model: decodedValue1,
+    effort: "low",
+  });
 });
 
 describe("Pi child live contract", () => {
@@ -17,8 +21,10 @@ describe("Pi child live contract", () => {
     "applies guidance during an active command and records the result",
     () =>
       Effect.gen(function* () {
+        const fixtureBrain = yield* brain;
         const piChildBackend = yield* PiChildBackend;
-        return yield* steeringContract(piChildBackend, brain);
+
+        return yield* steeringContract(piChildBackend, fixtureBrain);
       }).pipe(
         Effect.provide(
           piChildBackendLayer.pipe(
@@ -34,8 +40,10 @@ describe("Pi child live contract", () => {
     "interrupts an active command and settles the session",
     () =>
       Effect.gen(function* () {
+        const fixtureBrain = yield* brain;
         const piChildBackend = yield* PiChildBackend;
-        return yield* interruptionContract(piChildBackend, brain);
+
+        return yield* interruptionContract(piChildBackend, fixtureBrain);
       }).pipe(
         Effect.provide(
           piChildBackendLayer.pipe(

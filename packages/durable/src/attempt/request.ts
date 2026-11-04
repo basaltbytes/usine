@@ -11,6 +11,8 @@ import { readRecord } from "./relay.ts";
  */
 export type AttemptTaskInput = typeof StoredRequest.Encoded;
 
+// The stored request is already validated.
+// @effect-diagnostics-next-line schemaSync:off
 const encodeStored = Schema.encodeSync(StoredRequest);
 const decodeStored = Schema.decodeUnknownEffect(StoredRequest);
 const decodeStoredOption = Schema.decodeUnknownOption(StoredRequest);
@@ -19,7 +21,7 @@ const decodeStoredOption = Schema.decodeUnknownOption(StoredRequest);
 export const attemptIdOf = (input: JsonValue): Option.Option<AttemptId> =>
   Option.map(decodeStoredOption(input), ({ spec }) => spec.attemptId);
 
-export const taskInput = (request: AttemptRequest): AttemptTaskInput =>
+export const taskInput = (request: AttemptRequest) =>
   encodeStored(
     StoredRequest.make({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
   );

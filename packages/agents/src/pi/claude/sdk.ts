@@ -72,6 +72,8 @@ export class ClaudeSdk extends Context.Service<
   }
 >()("@usine/agents/pi/ClaudeSdk") {}
 
+// The SDK async iterator converts each message before yielding it.
+// @effect-diagnostics-next-line schemaSync:off
 const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
 
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>

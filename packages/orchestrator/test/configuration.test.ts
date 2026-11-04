@@ -1,3 +1,4 @@
+import { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/config/label";
@@ -162,18 +163,21 @@ Nobody runs this.
 
 const labels = Layer.succeed(RepositoryLabelProjectionReader)({
   get: (repository) =>
-    Effect.succeed(
-      repository === usine
-        ? Option.some(
-            Schema.decodeSync(RepositoryLabelProjection)({
-              repository,
-              labels: [
-                { name: "Ready", color: "0e8a16", description: "Ready for an Agent" },
-                { name: "review-findings", color: "d93f0b", description: null },
-              ],
-            }),
-          )
-        : Option.none(),
+    Effect.gen(function* () {
+      const decodedValue1 = yield* Schema.decodeEffect(RepositoryLabelProjection)({
+        repository,
+        labels: [
+          { name: "Ready", color: "0e8a16", description: "Ready for an Agent" },
+          { name: "review-findings", color: "d93f0b", description: null },
+        ],
+      });
+      return yield* Effect.succeed(
+        repository === usine ? Option.some(decodedValue1) : Option.none(),
+      );
+    }).pipe(
+      Effect.mapError((cause) =>
+        EnginePersistenceError.make({ operation: "read label fixture", cause }),
+      ),
     ),
 });
 
@@ -282,6 +286,7 @@ const readConfiguration = Effect.gen(function* () {
   yield* writeInstanceFiles(root, files);
   return yield* Effect.gen(function* () {
     const instance = yield* (yield* CurrentInstance).get;
+
     return yield* (yield* OperatorConfiguration).view(instance);
   }).pipe(
     Effect.provide(
@@ -290,7 +295,7 @@ const readConfiguration = Effect.gen(function* () {
         Layer.provideMerge(reloadableInstanceLayer(root)),
       ),
     ),
-    Effect.map(Schema.encodeSync(ConfigurationView)),
+    Effect.flatMap(Schema.encodeEffect(ConfigurationView)),
   );
 }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
@@ -419,7 +424,7 @@ describe("Configuration view", () => {
       });
       assert.deepStrictEqual(view.removedWorkers, [{ name: "retired", running: 1 }]);
 
-      const encoded = JSON.stringify(view);
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(view);
       assert.include(encoded, "USINE_GATEWAY_ADMIN_TOKEN");
       assert.notInclude(encoded, '"adminToken"');
     }),
@@ -451,10 +456,8 @@ describe("Configuration view", () => {
       assert(forReview?._tag === "Label", "In review starts with a label");
       assert.isFalse(forReview.label.onGitHub);
       assert.isTrue(forReview.label.declared);
-      assert.deepStrictEqual(
-        forReview.label.failure,
-        Schema.encodeSync(LabelPreflightFinding)(finding),
-      );
+      const decodedValue3 = yield* Schema.encodeEffect(LabelPreflightFinding)(finding);
+      assert.deepStrictEqual(forReview.label.failure, decodedValue3);
       assert.deepStrictEqual(prOpen, { _tag: "State", state: "pr-open" });
       const [reviewFindings] = findings?.sources ?? [];
       assert(reviewFindings?._tag === "Label", "Findings has a label");
@@ -509,6 +512,7 @@ describe("Configuration view", () => {
       yield* writeInstanceFiles(root, files);
       const view = yield* Effect.gen(function* () {
         const instance = yield* (yield* CurrentInstance).get;
+
         return yield* (yield* OperatorConfiguration).view(instance);
       }).pipe(
         Effect.provide(
@@ -517,7 +521,7 @@ describe("Configuration view", () => {
             Layer.provideMerge(reloadableInstanceLayer(root)),
           ),
         ),
-        Effect.map(Schema.encodeSync(ConfigurationView)),
+        Effect.flatMap(Schema.encodeEffect(ConfigurationView)),
       );
       assert.deepStrictEqual(
         view.workers.map(({ name, slots, prerequisites, harnesses }) => [

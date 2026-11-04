@@ -5,7 +5,13 @@ import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
 import { SessionEvent } from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
-import { DeskView, TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator/operator";
+import {
+  RunSummaryView,
+  AttemptSummaryView,
+  DeskView,
+  TranscriptEventView,
+  TranscriptPageCursor,
+} from "@usine/orchestrator/operator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AgentName } from "@usine/core/agent";
@@ -136,7 +142,12 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
       ProjectView.make({
         repository,
         status: "needs-you",
-        runs: [run],
+        runs: [
+          RunSummaryView.make({
+            ...run,
+            attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+          }),
+        ],
         board: BoardView.make({ lanes: [], failures: [] }),
         labels: [],
         preflightFindings: [],
@@ -150,7 +161,16 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     ...before,
     needsYou: [unrelated],
     projects: before.projects.map((project) =>
-      ProjectView.make({ ...project, status: "clear", runs: [resolvedRun] }),
+      ProjectView.make({
+        ...project,
+        status: "clear",
+        runs: [
+          RunSummaryView.make({
+            ...resolvedRun,
+            attempts: resolvedRun.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+          }),
+        ],
+      }),
     ),
   });
   const detail = RunDetailView.make({
@@ -269,7 +289,12 @@ it("marks a closed issue in its drawer and refreshes the agent definition warnin
           ProjectView.make({
             repository,
             status: "needs-you",
-            runs: [onIssue],
+            runs: [
+              RunSummaryView.make({
+                ...onIssue,
+                attempts: onIssue.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+              }),
+            ],
             board: BoardView.make({ lanes: [], failures: [] }),
             labels: [],
             preflightFindings: [],
@@ -410,7 +435,12 @@ it("refreshes an open queued run during machine preparation and quota backoff", 
       ProjectView.make({
         repository,
         status: "clear",
-        runs: [queued],
+        runs: [
+          RunSummaryView.make({
+            ...queued,
+            attempts: queued.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+          }),
+        ],
         board: BoardView.make({ lanes: [], failures: [] }),
         labels: [],
         preflightFindings: [],
@@ -540,7 +570,12 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
         ProjectView.make({
           repository,
           status: "clear",
-          runs: [viewed],
+          runs: [
+            RunSummaryView.make({
+              ...viewed,
+              attempts: viewed.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+            }),
+          ],
           board: BoardView.make({ lanes: [], failures: [] }),
           labels: [],
           preflightFindings: [],
@@ -662,7 +697,12 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
       ProjectView.make({
         repository,
         status: "needs-you",
-        runs: [failedRun],
+        runs: [
+          RunSummaryView.make({
+            ...failedRun,
+            attempts: failedRun.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+          }),
+        ],
         board: BoardView.make({ lanes: [], failures: [] }),
         labels: [],
         preflightFindings: [],

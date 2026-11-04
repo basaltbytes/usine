@@ -73,7 +73,7 @@ const settings = Effect.all({
 });
 
 const configFor = (values: Effect.Success<typeof settings>) =>
-  Schema.decodeSync(UsineConfig)({
+  Schema.decodeEffect(UsineConfig)({
     version: 1,
     repos: [{ name: values.repository }],
     workers: [
@@ -182,7 +182,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
     () =>
       Effect.gen(function* () {
         const values = yield* settings;
-        const config = configFor(values);
+        const config = yield* configFor(values);
         const repository = RepositoryName.make(values.repository);
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = yield* fileSystem.makeTempDirectoryScoped({
@@ -259,6 +259,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           ),
           Layer.provide(FetchHttpClient.layer),
         );
+
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
@@ -279,6 +280,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
+
           const accepted = yield* engine.submit(
             Submission.make({
               event: Event.make({
@@ -303,11 +305,10 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           const finished = yield* waitForTerminal(engine, accepted.runId);
           const attempt = finished.attempts[0];
           assert(attempt !== undefined);
-          assert.strictEqual(
-            finished.run.state._tag,
-            "Succeeded",
-            JSON.stringify(Option.getOrNull(attempt.outcome)),
+          const decodedValue2 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            Option.getOrNull(attempt.outcome),
           );
+          assert.strictEqual(finished.run.state._tag, "Succeeded", decodedValue2);
           assert.strictEqual(attempt.worker, WORKER);
           assert.strictEqual(observed.ghRepository, repository);
           assert.match(observed.advertisedHead ?? "", /^[0-9a-f]{40}\tHEAD$/u);
@@ -335,6 +336,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           assert.strictEqual(observed.worktree, worktree);
           const absent = (path: string) =>
             onMachine(host, { command: "test", args: ["!", "-e", path] });
+
           assert.strictEqual(
             (yield* onMachine(host, {
               command: "test",
@@ -343,20 +345,26 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             0,
             "the cached clone stays for the next Attempt",
           );
+
           assert.strictEqual((yield* absent(worktree)).exitCode, 0, "the worktree is removed");
+
           assert.strictEqual(
             (yield* absent(`${root}/credentials/${safeSegment(attempt.id)}`)).exitCode,
             0,
             "the Attempt's credential is removed",
           );
+
           assert.strictEqual(
             (yield* absent(`${worktree}.child-1.pid`)).exitCode,
             0,
             "the child's pid file is removed",
           );
+          const decodedValue7 = yield* onMachine(host, {
+            command: "kill",
+            args: ["-0", observed.childPid ?? ""],
+          });
           assert.notStrictEqual(
-            (yield* onMachine(host, { command: "kill", args: ["-0", observed.childPid ?? ""] }))
-              .exitCode,
+            decodedValue7.exitCode,
             0,
             "the child that outlived its SSH client is stopped",
           );
@@ -370,7 +378,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
     () =>
       Effect.gen(function* () {
         const values = yield* settings;
-        const config = configFor(values);
+        const config = yield* configFor(values);
         const unused = Layer.succeed(CredentialProvider)({
           issue: (repository) =>
             Effect.fail(
@@ -382,6 +390,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
               }),
             ),
         });
+
         const executor = sshExecutorLayer({
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
@@ -446,7 +455,7 @@ const gatewaySettings = Effect.all({
  * use their logins on the machine.
  */
 const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
-  Schema.decodeSync(UsineConfig)({
+  Schema.decodeEffect(UsineConfig)({
     version: 1,
     repos: [{ name: values.repository }],
     workers: [
@@ -537,7 +546,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
     () =>
       Effect.gen(function* () {
         const values = yield* gatewaySettings;
-        const config = gatewayConfigFor(values);
+        const config = yield* gatewayConfigFor(values);
         const repository = RepositoryName.make(values.repository);
         const branch = `usine-gateway-test/${globalThis.crypto.randomUUID()}`;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -631,6 +640,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           ),
           Layer.provide(FetchHttpClient.layer),
         );
+
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
@@ -651,6 +661,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
+
           const accepted = yield* engine.submit(
             Submission.make({
               event: Event.make({
@@ -675,11 +686,10 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           const finished = yield* waitForTerminal(engine, accepted.runId);
           const attempt = finished.attempts[0];
           assert(attempt !== undefined);
-          assert.strictEqual(
-            finished.run.state._tag,
-            "Succeeded",
-            JSON.stringify(Option.getOrNull(attempt.outcome)),
+          const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+            Option.getOrNull(attempt.outcome),
           );
+          assert.strictEqual(finished.run.state._tag, "Succeeded", decodedValue1);
           assert.strictEqual(observed.callerTokenFormat, "ugw1", "the child has a caller token");
           assert.match(observed.advertisedHead ?? "", /^[0-9a-f]{40}\tHEAD$/u);
           assert.strictEqual(observed.ghRepository, repository);
@@ -719,7 +729,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
     () =>
       Effect.gen(function* () {
         const values = yield* gatewaySettings;
-        const config = gatewayConfigFor(values);
+        const config = yield* gatewayConfigFor(values);
         const unused = Layer.succeed(CredentialProvider)({
           issue: (repository) =>
             Effect.fail(
@@ -731,6 +741,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
               }),
             ),
         });
+
         const executor = sshExecutorLayer({
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",

@@ -53,7 +53,7 @@ const developer = Agent.make({
   persona: AgentPersona.make("Build it."),
 });
 
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -66,13 +66,16 @@ const config = Schema.decodeSync(UsineConfig)({
     },
   ],
 });
-const instance = LoadedInstance.make({
-  config,
-  agents: [],
-  invalidAgents: [],
-  loops: [],
-  quarantinedLoops: [],
-  warnings: [],
+const instance = Effect.gen(function* () {
+  const fixtureConfig = yield* config;
+  return LoadedInstance.make({
+    config: fixtureConfig,
+    agents: [],
+    invalidAgents: [],
+    loops: [],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 
 const at = (iso: string) => DateTime.makeUnsafe(iso);
@@ -457,13 +460,14 @@ const readTask = (
   number: number,
   project: RepositoryName = repository,
   runEvents: ReadonlyArray<RunEvent> = [],
-  loaded: LoadedInstance = instance,
+  loaded?: LoadedInstance,
 ) =>
   Effect.gen(function* () {
+    const fixtureInstance = loaded ?? (yield* instance);
     const requested = yield* Ref.make<ReadonlyArray<string>>([]);
     const task = yield* Effect.gen(function* () {
       const operator = yield* OperatorObservation;
-      return yield* operator.task(loaded, project, ItemNumber.make(number));
+      return yield* operator.task(fixtureInstance, project, ItemNumber.make(number));
     }).pipe(Effect.provide(observation(requested, runEvents)));
     return { task, requested: yield* Ref.get(requested) };
   });
@@ -549,6 +553,7 @@ describe("Task view", () => {
 
   it.effect("names the lane the Board places its running Task in", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       // fix-ci was triggered while #42 had `ready`; it has `ready-for-review` now.
       const triggered = RunEvent.make({
         runId: RunId.make("run-fix-again"),
@@ -563,20 +568,21 @@ describe("Task view", () => {
       assert.strictEqual(labeled.task.current, gitHubItemKey(repository, 42));
       assert.strictEqual(labeled.task.lane.name, "In review");
       // With no lane for `ready-for-review`, the Task is in the lane its Run was triggered from.
+      const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [
+          {
+            name: repository,
+            lanes: [
+              { name: "Ready", sources: [{ label: "ready" }] },
+              { name: "Pull requests", sources: [{ state: "pr-open" }] },
+            ],
+          },
+        ],
+      });
       const unlaned = LoadedInstance.make({
-        ...instance,
-        config: Schema.decodeSync(UsineConfig)({
-          version: 1,
-          repos: [
-            {
-              name: repository,
-              lanes: [
-                { name: "Ready", sources: [{ label: "ready" }] },
-                { name: "Pull requests", sources: [{ state: "pr-open" }] },
-              ],
-            },
-          ],
-        }),
+        ...fixtureInstance,
+        config: decodedValue1,
       });
       const fallback = yield* readTask(40, repository, [triggered], unlaned);
       assert.strictEqual(fallback.task.lane.name, "Ready");

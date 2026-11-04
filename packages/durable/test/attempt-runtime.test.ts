@@ -580,6 +580,7 @@ describe("durable AttemptRuntime", () => {
             const attached = yield* Effect.forkChild(runtime.attached(request.spec.attemptId), {
               startImmediately: true,
             });
+
             assert.strictEqual((yield* runtime.execute(request, sink)).message, "Finished");
             yield* Fiber.join(attached).pipe(Effect.timeout("1 second"));
             const live = yield* runtime.isLive(request.spec.attemptId);
@@ -690,12 +691,13 @@ describe("durable AttemptRuntime", () => {
             };
             const stopped = yield* runtime.execute(request, sink).pipe(Effect.flip);
             assert.strictEqual(stopped._tag, "InfraFailure");
+
             const record = yield* (yield* DurableHarness).use(
               "read the record",
               (harness, context) =>
                 harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
             );
-            const entry = Schema.decodeUnknownSync(
+            const entry = yield* Schema.decodeUnknownEffect(
               Schema.Array(Schema.fromJsonString(AttemptChannel.OutboundEnvelope)),
             )(record?.pendingOutbound);
             assert.deepStrictEqual(trace(entry), [
@@ -706,6 +708,7 @@ describe("durable AttemptRuntime", () => {
             assert.isAbove(record?.relayedEntry ?? 0, 0);
 
             const execution = yield* Effect.forkChild(runtime.execute(request, sink));
+
             yield* (yield* (yield* StubChildren).next).reply("Child fixed the test.");
             const report = yield* Fiber.join(execution);
             assert.strictEqual(report.message, "Fixed after the replay.");
@@ -918,6 +921,7 @@ describe("durable AttemptRuntime", () => {
       yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+
         const child = yield* (yield* StubChildren).next.pipe(Effect.timeout("5 seconds"));
         assert.include(child.request.prompt, "Fix the third finding.");
         yield* child.reply("Third finding fixed.");
@@ -1115,6 +1119,7 @@ describe("durable AttemptRuntime", () => {
           );
           // The child never stopped, so no `SessionResumed` is sent.
           assert.notInclude(trace(outbound), "child.SessionResumed");
+
           const record = yield* (yield* DurableHarness).use("read the record", (harness, context) =>
             harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
           );
@@ -1169,6 +1174,7 @@ describe("durable AttemptRuntime", () => {
             ["Steer", 1, "queued"],
             ["Steer", 1, "rejected"],
           ]);
+
           const record = yield* (yield* DurableHarness).use("read the record", (harness, context) =>
             harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
           );
@@ -1223,6 +1229,7 @@ describe("durable AttemptRuntime", () => {
           const live = yield* runtime.isLive(request.spec.attemptId);
           assert.isTrue(live);
           yield* operator(AttemptChannel.Release.make());
+
           yield* (yield* children.next).reply("Opened pull request 7.");
           const report = yield* Fiber.join(execution);
           assert.strictEqual(report.message, "Opened the pull request.");
@@ -1944,6 +1951,7 @@ describe("durable AttemptRuntime", () => {
         const request = attemptRequest("run/step/7", 1);
         const recording = recordingSink();
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+
         yield* (yield* (yield* StubChildren).next).reply("First child done.");
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "ChildSessionBudgetFailure");
@@ -1968,6 +1976,7 @@ describe("durable AttemptRuntime", () => {
         const request = attemptRequest("run/step/9");
         const recording = recordingSink();
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+
         yield* (yield* (yield* StubChildren).next).ask("HTTP CONNECT or SOCKS for egress?");
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
         assert.deepStrictEqual(
@@ -2015,6 +2024,7 @@ describe("durable AttemptRuntime", () => {
         const runtime = yield* AttemptRuntime;
         const request = attemptRequest("run/step/824");
         const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
         yield* (yield* (yield* StubChildren).next).crash("Codex machine disappeared");
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "InfraFailure");
@@ -2042,6 +2052,7 @@ describe("durable AttemptRuntime", () => {
           const runtime = yield* AttemptRuntime;
           const request = attemptRequest("run/step/824-zero-exit");
           const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
           yield* (yield* (yield* StubChildren).next).crash("Codex app-server exited with code 0");
           const failure = yield* Fiber.join(execution).pipe(Effect.flip);
           assert.strictEqual(failure._tag, "InfraFailure");
@@ -2068,7 +2079,9 @@ describe("durable AttemptRuntime", () => {
           const runtime = yield* AttemptRuntime;
           const request = attemptRequest("run/step/824-earlier-report");
           const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
           yield* (yield* (yield* StubChildren).next)[report]("Publishing needs operator guidance.");
+
           yield* (yield* (yield* StubChildren).next).crash("Codex machine disappeared");
           const failure = yield* Fiber.join(execution).pipe(Effect.flip);
           assert.strictEqual(failure._tag, "InfraFailure");
@@ -2119,6 +2132,7 @@ describe("durable AttemptRuntime", () => {
         const request = attemptRequest("run/step/8");
         const recording = recordingSink();
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+
         yield* (yield* (yield* StubChildren).next).block("Publishing permission denied.");
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
         assert.deepStrictEqual(
@@ -2188,6 +2202,7 @@ describe("durable AttemptRuntime", () => {
           const execution = yield* Effect.forkChild(
             runtime.execute(attemptRequest(attempt), recordingSink().sink),
           );
+
           yield* (yield* (yield* StubChildren).next).fail(expected.message);
           const failure = yield* Fiber.join(execution).pipe(Effect.flip);
           assert.deepStrictEqual(failure, expected);
@@ -2213,7 +2228,9 @@ describe("durable AttemptRuntime", () => {
           const request = attemptRequest("run/step/20", 2);
           const recording = recordingSink();
           const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+
           yield* (yield* children.next).crash("Claude output stream failed");
+
           yield* (yield* children.next).crash("Claude output stream failed");
           const failure = yield* Fiber.join(execution).pipe(Effect.flip);
           assert(failure._tag === "InfraFailure");
@@ -2228,7 +2245,9 @@ describe("durable AttemptRuntime", () => {
           const retry = yield* Effect.forkChild(
             runtime.execute(attemptRequest("run/step/21", 2), recordingSink().sink),
           );
+
           yield* (yield* children.next).reply("Child fixed the test.");
+
           assert.strictEqual((yield* Fiber.join(retry)).message, "Fixed the flaky test.");
         }).pipe(
           Effect.provide(

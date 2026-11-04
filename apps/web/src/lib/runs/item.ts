@@ -128,7 +128,9 @@ export interface RunHeaderItems {
 export const runHeaderItems = (
   run: Pick<RunView, "pullRequestUrl">,
   item: Option.Option<RunItem>,
-  card: Option.Option<TaskIdentityView>,
+  card: Option.Option<
+    Pick<TaskIdentityView, "items" | "kind" | "number" | "title" | "url" | "state" | "itemKey">
+  >,
   settled: SettledItemState | null,
 ): RunHeaderItems => {
   const identity = Option.map(card, cardIdentity);

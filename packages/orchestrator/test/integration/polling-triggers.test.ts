@@ -78,47 +78,50 @@ const repositoryApi = (repository: RepositoryName): string =>
     .map((part) => encodeURIComponent(part))
     .join("/")}`;
 
-const makeInstance = (repository: RepositoryName, label: string): LoadedInstance => {
-  const config = Schema.decodeSync(UsineConfig)({
-    version: 1,
-    repos: [{ name: repository, tags: ["integration"] }],
-    settings: { poll_interval: 15 },
-  });
-  const agent = AgentFile.make({
-    name: AgentName.make("integration-agent"),
-    harness: "codex",
-    model: ModelId.make("gpt-5.6-sol"),
-    effort: "high",
-    parentModel: Option.none(),
-    parentEffort: Option.none(),
-    persona: AgentPersona.make("Exercise the polling integration path."),
-  });
-  const loop = LoopFile.make({
-    name: LoopName.make("integration-label"),
-    trigger: IssueTrigger.make({
-      on: "issue",
-      if: Source.make(`item.labels.nodes.exists(label, label.name == ${JSON.stringify(label)})`),
-    }),
-    selector: Option.some(
-      Selector.make({
-        repos: Option.some([config.repos[0]?.name ?? assert.fail("missing integration repo")]),
-        tags: Option.none(),
+const makeInstance = (repository: RepositoryName, label: string) =>
+  Effect.gen(function* () {
+    const config = yield* Schema.decodeEffect(UsineConfig)({
+      version: 1,
+      repos: [{ name: repository, tags: ["integration"] }],
+      settings: { poll_interval: 15 },
+    });
+    const agent = AgentFile.make({
+      name: AgentName.make("integration-agent"),
+      harness: "codex",
+      model: ModelId.make("gpt-5.6-sol"),
+      effort: "high",
+      parentModel: Option.none(),
+      parentEffort: Option.none(),
+      persona: AgentPersona.make("Exercise the polling integration path."),
+    });
+    const loop = LoopFile.make({
+      name: LoopName.make("integration-label"),
+      trigger: IssueTrigger.make({
+        on: "issue",
+        if: Source.make(
+          `item.labels.nodes.exists(label, label.name == ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(label)})`,
+        ),
       }),
-    ),
-    approval: "required",
-    step: StepName.make("run"),
-    agent: agent.name,
-    body: PromptTemplate.make("Integration test."),
+      selector: Option.some(
+        Selector.make({
+          repos: Option.some([config.repos[0]?.name ?? assert.fail("missing integration repo")]),
+          tags: Option.none(),
+        }),
+      ),
+      approval: "required",
+      step: StepName.make("run"),
+      agent: agent.name,
+      body: PromptTemplate.make("Integration test."),
+    });
+    return LoadedInstance.make({
+      config,
+      agents: [agent],
+      invalidAgents: [],
+      loops: [loop],
+      quarantinedLoops: [],
+      warnings: [],
+    });
   });
-  return LoadedInstance.make({
-    config,
-    agents: [agent],
-    invalidAgents: [],
-    loops: [loop],
-    quarantinedLoops: [],
-    warnings: [],
-  });
-};
 
 const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
@@ -195,7 +198,7 @@ describe("live GitHub polling", () => {
       });
       const repository = RepositoryName.make(settings.repository);
       const label = `usine-poll-${globalThis.crypto.randomUUID()}`;
-      const instance = makeInstance(repository, label);
+      const instance = yield* makeInstance(repository, label);
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "usine-live-polling-",
@@ -221,7 +224,13 @@ describe("live GitHub polling", () => {
           request(
             token,
             `${api}/labels`,
-            { method: "POST", body: JSON.stringify({ name: label, color: "6f42c1" }) },
+            {
+              method: "POST",
+              body: yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+                name: label,
+                color: "6f42c1",
+              }),
+            },
             201,
           ),
           () =>
@@ -234,7 +243,12 @@ describe("live GitHub polling", () => {
                     yield* request(
                       token,
                       `${api}/issues/${settings.issueNumber}/labels`,
-                      { method: "POST", body: JSON.stringify({ labels: [label] }) },
+                      {
+                        method: "POST",
+                        body: yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+                          labels: [label],
+                        }),
+                      },
                       200,
                     );
 
@@ -255,7 +269,7 @@ describe("live GitHub polling", () => {
                     assert(Option.isSome(originalRun), "the label change did not produce an Event");
                     const runId = originalRun.value;
                     const snapshot = yield* engine.inspect(runId);
-                    const eventPayload = Schema.decodeUnknownSync(IssuePayload)(
+                    const eventPayload = yield* Schema.decodeUnknownEffect(IssuePayload)(
                       snapshot.event.payload,
                     );
                     assert(eventPayload.labels.nodes.some(({ name }) => name === label));
@@ -285,6 +299,7 @@ describe("live GitHub polling", () => {
                       Option.isNone(restartedRun) || restartedRun.value === first.runId,
                       "a restart must not open a second run for the same state",
                     );
+
                     assert.strictEqual(
                       (yield* engine.inspect(first.runId)).event.id,
                       first.eventId,

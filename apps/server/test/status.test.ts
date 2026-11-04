@@ -57,7 +57,7 @@ const fakeOperatorApi = async (runs: ReadonlyArray<{ id: string; state: string }
   });
   servers.push(server);
   await new Promise<void>((resolve) => server.listen({ host: SERVER_HOST, port: 0 }, resolve));
-  return Schema.decodeUnknownSync(PortAddress)(server.address()).port;
+  return (await Effect.runPromise(Schema.decodeUnknownEffect(PortAddress)(server.address()))).port;
 };
 
 /** Returns a port that nothing listens on. */

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
 import { HttpServer } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import {
@@ -20,10 +20,10 @@ export class RegistryStorage extends Context.Service<
 >()("@usine/cloudflare/RegistryStorage") {}
 
 /** A sandbox's Durable Object didn't answer with its summary or a 404. */
-export class SandboxLookupFailed extends Schema.TaggedError<SandboxLookupFailed>()(
-  "SandboxLookupFailed",
-  { sandbox: SandboxName, reason: Schema.String },
-) {}
+export class SandboxLookupFailed extends Schema.TaggedError<
+  SandboxLookupFailed,
+  Brand.Brand<"@usine/cloudflare/registry/SandboxLookupFailed">
+>()("SandboxLookupFailed", { sandbox: SandboxName, reason: Schema.String }) {}
 
 /** Reads a sandbox's current summary from its own Durable Object. */
 export class SandboxLookup extends Context.Service<
@@ -49,6 +49,7 @@ const list = Effect.fn("SandboxRegistry.list")(function* (owner: SandboxOwner) {
   yield* Effect.annotateCurrentSpan({ owner });
   const storage = yield* RegistryStorage;
   const lookup = yield* SandboxLookup;
+
   const recorded = (yield* storage.list).filter((sandbox) => sandbox.owner === owner);
   const current = yield* Effect.forEach(
     recorded,

@@ -15,21 +15,25 @@ import { configurationLayer } from "../support/configuration.ts";
 const HOUR = 3_600_000;
 const at = (hour: number) => DateTime.makeUnsafe(hour * HOUR);
 const instance = (slots: number) =>
-  LoadedInstance.make({
-    config: Schema.decodeUnknownSync(UsineConfig)({
-      version: 2,
-      repos: [],
-      projects: [],
-      workers: [
-        { name: "local", kind: "local", max_concurrent_attempts: 1 },
-        ...(slots === 0 ? [] : [{ name: "worker", kind: "local", max_concurrent_attempts: slots }]),
-      ],
-    }),
-    agents: [],
-    invalidAgents: [],
-    loops: [],
-    quarantinedLoops: [],
-    warnings: [],
+  Effect.gen(function* () {
+    return LoadedInstance.make({
+      config: yield* Schema.decodeUnknownEffect(UsineConfig)({
+        version: 2,
+        repos: [],
+        projects: [],
+        workers: [
+          { name: "local", kind: "local", max_concurrent_attempts: 1 },
+          ...(slots === 0
+            ? []
+            : [{ name: "worker", kind: "local", max_concurrent_attempts: slots }]),
+        ],
+      }),
+      agents: [],
+      invalidAgents: [],
+      loops: [],
+      quarantinedLoops: [],
+      warnings: [],
+    });
   });
 
 const commit = (hour: number, slots: number) =>
@@ -37,14 +41,17 @@ const commit = (hour: number, slots: number) =>
     yield* TestClock.setTime(hour * HOUR);
     const store = yield* ConfigurationStore;
     const previous = yield* store.read;
+    const decodedValue2 = yield* instance(slots);
+    const decodedValue1 = configurationEntities(decodedValue2);
+    const fixtureValue1 = Option.match(previous.instance, {
+      onNone: () => [],
+      onSome: configurationEntities,
+    });
     yield* store.commit({
       expected: previous.number,
       actor: Option.none(),
       message: Option.none(),
-      changes: configurationDiff(
-        Option.match(previous.instance, { onNone: () => [], onSome: configurationEntities }),
-        configurationEntities(instance(slots)),
-      ),
+      changes: configurationDiff(fixtureValue1, decodedValue1),
     });
   });
 
@@ -90,8 +97,9 @@ describe("Worker slot history", () => {
   it.effect("uses declared slots when an embedded instance has no configuration revisions", () =>
     Effect.gen(function* () {
       const store = yield* ConfigurationStore;
+
       assert.strictEqual((yield* store.read).number, ConfigurationRevisionNumber.make(0));
-      const worker = instance(2).config.workers[1];
+      const worker = (yield* instance(2)).config.workers[1];
       assert(worker !== undefined);
       const history = yield* readWorkerCapacity(store, worker);
       assert.strictEqual(

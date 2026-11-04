@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { Effect, FileSystem, Option, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Option, Schema } from "effect";
 import {
   type InstanceFiles,
   type InstanceRecord,
@@ -12,18 +12,23 @@ import {
 } from "./record.ts";
 
 /** Another `usine up` has the instance lock, possibly while still draining its Attempts. */
-export class InstanceInUseError extends Schema.TaggedError<InstanceInUseError>(
-  "@usine/server/InstanceInUseError",
-)("InstanceInUseError", {
+export class InstanceInUseError extends Schema.TaggedError<
+  InstanceInUseError,
+  Brand.Brand<"@usine/server/instance/lock/InstanceInUseError">
+>("@usine/server/InstanceInUseError")("InstanceInUseError", {
   directory: Schema.String,
   /** The PID of the lock holder, if it could be read. */
   holder: Schema.Option(ProcessId),
 }) {}
 
 /** The instance lock could not be created or acquired for a reason other than another holder. */
-export class InstanceLockError extends Schema.TaggedError<InstanceLockError>(
-  "@usine/server/InstanceLockError",
-)("InstanceLockError", { directory: Schema.String, reason: Schema.String }) {}
+export class InstanceLockError extends Schema.TaggedError<
+  InstanceLockError,
+  Brand.Brand<"@usine/server/instance/lock/InstanceLockError">
+>("@usine/server/InstanceLockError")("InstanceLockError", {
+  directory: Schema.String,
+  reason: Schema.String,
+}) {}
 
 /** The node:sqlite error when another connection has the lock (`SQLITE_BUSY`). */
 const SqliteBusy = Schema.Struct({ errcode: Schema.Literal(5) });

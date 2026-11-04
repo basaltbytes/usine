@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { stringify } from "yaml";
 import type { ConfigFileError, InstancePath } from "../file.ts";
 import { splitMarkdown } from "../frontmatter.ts";
@@ -8,7 +8,10 @@ import { parseYamlDocument } from "./document.ts";
 export const writeYaml = (value: Schema.Json): string => stringify(value);
 
 /** A replacement of one value in a YAML file. */
-export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
+export class YamlEdit extends Schema.Class<
+  YamlEdit,
+  Brand.Brand<"@usine/config/yaml/writer/YamlEdit">
+>("@usine/config/YamlEdit")({
   /** The keys as written in the file, for example `["settings", "max_children"]`. */
   path: Schema.Array(Schema.NonEmptyString).check(Schema.isNonEmpty()),
   /** The replacement JSON value at `path`; missing mapping keys are created. */

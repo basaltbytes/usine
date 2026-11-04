@@ -14,7 +14,7 @@ const Snapshot = Schema.fromJsonString(
     }),
   ),
 );
-const encode = Schema.encodeSync(Snapshot);
+const encode = Schema.encodeEffect(Snapshot);
 const decode = Schema.decodeUnknownEffect(Snapshot, { onExcessProperty: "error" });
 
 /** Stores AES-256-GCM snapshots in `directory`, encrypted with a purpose-specific derivation of the caller key. */
@@ -67,12 +67,12 @@ export const fileAttachmentsLayer = (directory: string) =>
       const save = Effect.fn("GatewayAttachments.save")(function* (
         entries: ReadonlyArray<LiveAttachment>,
       ) {
+        const plaintext = yield* encode({ version: 1, entries }).pipe(
+          Effect.mapError(() => failure("write")),
+        );
         const nonce = randomBytes(12);
         const cipher = createCipheriv("aes-256-gcm", key, nonce);
-        const ciphertext = Buffer.concat([
-          cipher.update(encode({ version: 1, entries }), "utf8"),
-          cipher.final(),
-        ]);
+        const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
         const bytes = Buffer.concat([nonce, cipher.getAuthTag(), ciphertext]);
         const temporary = `${path}.${crypto.randomUUID()}.tmp`;
         yield* fs.writeFile(temporary, bytes, { mode: 0o600, flag: "wx" }).pipe(

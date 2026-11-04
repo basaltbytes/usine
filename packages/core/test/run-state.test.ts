@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { EventId } from "../src/event.ts";
 import * as RunState from "../src/run/state.ts";
 
-const decodeRunState = Schema.decodeUnknownSync(RunState.RunState);
+const decodeRunState = Schema.decodeUnknownEffect(RunState.RunState);
 
 describe("run state machine (ADR 0002)", () => {
   it("a gated run reaches running only through waiting and queued", () => {
@@ -119,13 +119,18 @@ describe("run state machine (ADR 0002)", () => {
     RunState.approve(pending);
   });
 
-  it("a stored state row parses back into the same state", () => {
-    const canceled = RunState.supersede(RunState.Waiting.make(), EventId.make("evt-9"));
-    const encoded = Schema.encodeSync(RunState.RunState)(canceled);
-    expect(decodeRunState(encoded)).toEqual(canceled);
-  });
+  it.effect("a stored state row parses back into the same state", () =>
+    Effect.gen(function* () {
+      const canceled = RunState.supersede(RunState.Waiting.make(), EventId.make("evt-9"));
+      const encoded = yield* Schema.encodeEffect(RunState.RunState)(canceled);
+      const decodedValue1 = yield* decodeRunState(encoded);
+      expect(decodedValue1).toEqual(canceled);
+    }),
+  );
 
-  it("a state row with an unknown tag is rejected", () => {
-    expect(() => decodeRunState({ _tag: "Paused" })).toThrow();
-  });
+  it.effect("a state row with an unknown tag is rejected", () =>
+    Effect.gen(function* () {
+      expect((yield* Effect.flip(decodeRunState({ _tag: "Paused" })))._tag).toBe("SchemaError");
+    }),
+  );
 });

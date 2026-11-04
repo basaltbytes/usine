@@ -1,26 +1,6 @@
 {
-  "src/agent.ts": {
-    "schemaClassMissingBrand": 2
-  },
-  "src/board.ts": {
-    "schemaClassMissingBrand": 3
-  },
-  "src/configuration/entities.ts": {
-    "schemaSync": 3
-  },
   "src/configuration/folder.ts": {
-    "deterministicKeys": 1,
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
-  },
-  "src/configuration/format.ts": {
-    "schemaSync": 2
-  },
-  "src/configuration/forms.ts": {
-    "schemaSync": 2
-  },
-  "src/configuration/model.ts": {
-    "schemaClassMissingBrand": 9
+    "deterministicKeys": 1
   },
   "src/configuration/sqlite/store.ts": {
     "preferBarrelImport": 1
@@ -28,61 +8,13 @@
   "src/configuration/store.ts": {
     "deterministicKeys": 1
   },
-  "src/factory.ts": {
-    "schemaClassMissingBrand": 15
-  },
-  "src/file.ts": {
-    "schemaClassMissingBrand": 2
-  },
   "src/instance-folder.ts": {
     "deterministicKeys": 1
   },
-  "src/instance/diagnostics.ts": {
-    "schemaClassMissingBrand": 2
-  },
-  "src/instance/instance.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/label.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/loop.ts": {
-    "schemaClassMissingBrand": 2
-  },
   "src/parser.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 2,
-    "schemaSync": 2
-  },
-  "src/payload-slices.ts": {
-    "schemaSync": 1
+    "deterministicKeys": 1
   },
   "src/project/operations.ts": {
-    "globalJson": 1,
-    "schemaSync": 1
-  },
-  "src/project/project.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/selector.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/trigger.ts": {
-    "schemaClassMissingBrand": 3
-  },
-  "src/yaml/writer.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "test/config.test.ts": {
-    "globalJsonInEffect": 1,
-    "schemaSync": 3,
-    "schemaSyncInEffect": 3
-  },
-  "test/configuration.test.ts": {
-    "schemaSync": 5
-  },
-  "test/projects.test.ts": {
-    "schemaSync": 3,
-    "schemaSyncInEffect": 3
+    "globalJson": 1
   }
 }

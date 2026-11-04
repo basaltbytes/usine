@@ -74,8 +74,8 @@ const agent = AgentFile.make({
   parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
-const instance = LoadedInstance.make({
-  config: Schema.decodeSync(UsineConfig)({
+const instance = Effect.gen(function* () {
+  const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
     version: 1,
     repos: [
       {
@@ -87,25 +87,28 @@ const instance = LoadedInstance.make({
       },
     ],
     settings: { poll_interval: 60 },
-  }),
-  agents: [agent],
-  invalidAgents: [],
-  quarantinedLoops: [],
-  warnings: [],
-  loops: [
-    LoopFile.make({
-      name: LoopName.make("start-dev"),
-      trigger: IssueTrigger.make({
-        on: "issue",
-        if: Source.make('item.labels.nodes.exists(label, label.name == "ready")'),
+  });
+  return LoadedInstance.make({
+    config: decodedValue1,
+    agents: [agent],
+    invalidAgents: [],
+    quarantinedLoops: [],
+    warnings: [],
+    loops: [
+      LoopFile.make({
+        name: LoopName.make("start-dev"),
+        trigger: IssueTrigger.make({
+          on: "issue",
+          if: Source.make('item.labels.nodes.exists(label, label.name == "ready")'),
+        }),
+        selector: Option.none(),
+        approval: "required",
+        step: StepName.make("run"),
+        agent: agent.name,
+        body: PromptTemplate.make("Implement issue {{ item.number }}."),
       }),
-      selector: Option.none(),
-      approval: "required",
-      step: StepName.make("run"),
-      agent: agent.name,
-      body: PromptTemplate.make("Implement issue {{ item.number }}."),
-    }),
-  ],
+    ],
+  });
 });
 const payload = (labels: ReadonlyArray<string>): IssuePayload => ({
   number: 74,
@@ -139,6 +142,7 @@ describe("Board self-writes", () => {
       `reconciles a Board write after ${outcome} and opens one approval before the next poll`,
       () =>
         Effect.gen(function* () {
+          const fixtureInstance = yield* instance;
           const fs = yield* FileSystem.FileSystem;
           const currentDirectory = yield* fs.makeTempDirectoryScoped({
             directory: sqliteTempDirectory(),
@@ -253,7 +257,8 @@ describe("Board self-writes", () => {
             const polling = yield* PollingTriggers;
             const operator = yield* Operator;
             const reader = yield* RunReader;
-            const fiber = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
+
+            const fiber = yield* polling.run(fixedInstance(fixtureInstance)).pipe(Effect.forkChild);
             yield* awaitCondition(polling.latest, Option.isSome);
             assert.strictEqual(changeRequests, 1);
             const move = BoardMove.make({
@@ -262,8 +267,10 @@ describe("Board self-writes", () => {
               toLane: BoardLaneId.make("authored:Ready"),
             });
             const applyMove = Effect.gen(function* () {
-              if (outcome === "success") return yield* operator.moveBoardItem(instance, move);
-              const error = yield* operator.moveBoardItem(instance, move).pipe(Effect.flip);
+              if (outcome === "success")
+                return yield* operator.moveBoardItem(fixtureInstance, move);
+
+              const error = yield* operator.moveBoardItem(fixtureInstance, move).pipe(Effect.flip);
               assert(Option.isSome(writeFailure));
               assert.strictEqual(
                 error,
@@ -272,6 +279,7 @@ describe("Board self-writes", () => {
               );
             });
             yield* applyMove;
+
             const recorded = yield* (yield* BoardMoves).onItem(
               gitHubItemKey(repository, 74),
               DateTime.makeUnsafe(0),
@@ -286,7 +294,8 @@ describe("Board self-writes", () => {
               [{ fromLane: "Backlog", toLane: "Ready", added: ["ready"], removed: ["backlog"] }],
               "the move is recorded whatever its label write did",
             );
-            const overview = yield* awaitCondition(operator.overview(instance), (value) =>
+
+            const overview = yield* awaitCondition(operator.overview(fixtureInstance), (value) =>
               value.projects.some((project) => project.runs.some((run) => run.state === "Waiting")),
             );
             assert.strictEqual(overview.projects[0]?.runs.length, 1);
@@ -303,7 +312,8 @@ describe("Board self-writes", () => {
             const waiting = overview.projects[0]?.runs[0];
             assert(waiting !== undefined);
             yield* applyMove;
-            yield* polling.poll(instance);
+
+            yield* polling.poll(fixtureInstance);
             const runs = yield* reader.list({ closedLimit: 10 });
             assert.strictEqual(runs.length, 1);
             assert.strictEqual(runs[0]?.run.id, waiting.id);

@@ -219,122 +219,130 @@ export const fakeProviders = () => {
     error: { code: failure.code, message: failure.message, details: null },
   });
 
-  const handleHetzner = (call: ProviderCall): readonly [number, Schema.Json] => {
-    if (call.headers.authorization !== `Bearer ${hetzner.token}`)
-      return [
-        401,
-        hetznerError({ status: 401, code: "unauthorized", message: "unable to authenticate" }),
-      ];
-    const page = { meta: { pagination: { next_page: null } } };
-    const segments = call.path.split("/").filter((segment) => segment !== "");
-    if (call.method === "GET" && call.path === "/server_types")
-      return [
-        200,
-        {
-          server_types: hetzner.serverTypes.filter(({ name }) => name === call.query.name),
-          ...page,
-        },
-      ];
-    if (call.method === "GET" && call.path === "/ssh_keys")
-      return [
-        200,
-        { ssh_keys: hetzner.sshKeys.filter(({ name }) => name === call.query.name), ...page },
-      ];
-    if (call.method === "GET" && call.path === "/firewalls")
-      return [
-        200,
-        { firewalls: hetzner.firewalls.filter(({ name }) => name === call.query.name), ...page },
-      ];
-    if (call.method === "GET" && call.path === "/networks")
-      return [
-        200,
-        { networks: hetzner.networks.filter(({ name }) => name === call.query.name), ...page },
-      ];
-    if (call.method === "GET" && call.path === "/images") {
-      const images = hetzner.images.filter(
-        (image) =>
-          (call.query.type === undefined || image.type === call.query.type) &&
-          call.query.name === undefined,
-      );
-      // Only system images have names, and the fake has none.
-      return [200, { images, ...page }];
-    }
-    if (call.method === "GET" && segments[0] === "images" && segments[1] !== undefined) {
-      const image = hetzner.images.find(({ id }) => String(id) === segments[1]);
-      return image === undefined
-        ? [404, hetznerError({ status: 404, code: "not_found", message: "image not found" })]
-        : [200, { image }];
-    }
-    if (call.method === "POST" && call.path === "/servers") {
-      if (hetzner.createFails !== undefined)
-        return [hetzner.createFails.status, hetznerError(hetzner.createFails)];
-      const body = Schema.decodeUnknownSync(CreateServerBody)(call.body);
-      const id = hetzner.nextId++;
-      const server: FakeServer = {
-        id,
-        name: body.name,
-        status: "initializing",
-        created: "2026-10-25T12:00:00+00:00",
-        labels: { ...body.labels },
-        privateIp: body.networks.length > 0 ? `10.42.0.${String(hetzner.nextIp++)}` : undefined,
-        publicIp: body.public_net.enable_ipv4 ? `203.0.113.${String(hetzner.nextIp++)}` : undefined,
-        startingReads: hetzner.startingReads,
-      };
-      hetzner.servers.set(id, server);
-      if (hetzner.createAnswerFails)
+  const handleHetzner = (call: ProviderCall) =>
+    Effect.gen(function* (): Effect.fn.Return<readonly [number, Schema.Json], Schema.SchemaError> {
+      if (call.headers.authorization !== `Bearer ${hetzner.token}`)
         return [
-          500,
-          hetznerError({ status: 500, code: "server_error", message: "creation response lost" }),
+          401,
+          hetznerError({ status: 401, code: "unauthorized", message: "unable to authenticate" }),
         ];
+      const page = { meta: { pagination: { next_page: null } } };
+      const segments = call.path.split("/").filter((segment) => segment !== "");
+      if (call.method === "GET" && call.path === "/server_types")
+        return [
+          200,
+          {
+            server_types: hetzner.serverTypes.filter(({ name }) => name === call.query.name),
+            ...page,
+          },
+        ];
+      if (call.method === "GET" && call.path === "/ssh_keys")
+        return [
+          200,
+          { ssh_keys: hetzner.sshKeys.filter(({ name }) => name === call.query.name), ...page },
+        ];
+      if (call.method === "GET" && call.path === "/firewalls")
+        return [
+          200,
+          { firewalls: hetzner.firewalls.filter(({ name }) => name === call.query.name), ...page },
+        ];
+      if (call.method === "GET" && call.path === "/networks")
+        return [
+          200,
+          { networks: hetzner.networks.filter(({ name }) => name === call.query.name), ...page },
+        ];
+      if (call.method === "GET" && call.path === "/images") {
+        const images = hetzner.images.filter(
+          (image) =>
+            (call.query.type === undefined || image.type === call.query.type) &&
+            call.query.name === undefined,
+        );
+        // Only system images have names, and the fake has none.
+        return [200, { images, ...page }];
+      }
+      if (call.method === "GET" && segments[0] === "images" && segments[1] !== undefined) {
+        const image = hetzner.images.find(({ id }) => String(id) === segments[1]);
+        return image === undefined
+          ? [404, hetznerError({ status: 404, code: "not_found", message: "image not found" })]
+          : [200, { image }];
+      }
+      if (call.method === "POST" && call.path === "/servers") {
+        if (hetzner.createFails !== undefined)
+          return [hetzner.createFails.status, hetznerError(hetzner.createFails)];
+        const body = yield* Schema.decodeUnknownEffect(CreateServerBody)(call.body);
+        const id = hetzner.nextId++;
+        const server: FakeServer = {
+          id,
+          name: body.name,
+          status: "initializing",
+          created: "2026-10-25T12:00:00+00:00",
+          labels: { ...body.labels },
+          privateIp: body.networks.length > 0 ? `10.42.0.${String(hetzner.nextIp++)}` : undefined,
+          publicIp: body.public_net.enable_ipv4
+            ? `203.0.113.${String(hetzner.nextIp++)}`
+            : undefined,
+          startingReads: hetzner.startingReads,
+        };
+        hetzner.servers.set(id, server);
+        if (hetzner.createAnswerFails)
+          return [
+            500,
+            hetznerError({ status: 500, code: "server_error", message: "creation response lost" }),
+          ];
+        return [
+          201,
+          {
+            server: serverJson(server),
+            action: { id: id + 1_000_000, command: "create_server", status: "running" },
+            next_actions: [],
+            root_password: null,
+          },
+        ];
+      }
+      if (segments[0] === "servers" && segments[1] !== undefined) {
+        const server = hetzner.servers.get(Number(segments[1]));
+        if (server === undefined)
+          return [
+            404,
+            hetznerError({ status: 404, code: "not_found", message: "server not found" }),
+          ];
+        if (call.method === "GET") {
+          if (server.startingReads > 0) server.startingReads -= 1;
+          else server.status = "running";
+          return [200, { server: serverJson(server) }];
+        }
+        if (call.method === "PUT") {
+          server.labels = {
+            ...(yield* Schema.decodeUnknownEffect(LabelsBody)(call.body)).labels,
+          };
+          return [200, { server: serverJson(server) }];
+        }
+        if (call.method === "DELETE") {
+          if (hetzner.deleteFails !== undefined)
+            return [hetzner.deleteFails.status, hetznerError(hetzner.deleteFails)];
+          hetzner.servers.delete(server.id);
+          return [200, { action: { id: 9, command: "delete_server", status: "running" } }];
+        }
+      }
+      if (call.method === "GET" && call.path === "/servers") {
+        const selector = (call.query.label_selector ?? "").split(",").filter((part) => part !== "");
+        const servers = [...hetzner.servers.values()].filter((server) =>
+          selector.every((part) => {
+            const [key = "", value = ""] = part.split("=");
+            return server.labels[key] === value;
+          }),
+        );
+        return [200, { servers: servers.map(serverJson), ...page }];
+      }
       return [
-        201,
-        {
-          server: serverJson(server),
-          action: { id: id + 1_000_000, command: "create_server", status: "running" },
-          next_actions: [],
-          root_password: null,
-        },
-      ];
-    }
-    if (segments[0] === "servers" && segments[1] !== undefined) {
-      const server = hetzner.servers.get(Number(segments[1]));
-      if (server === undefined)
-        return [404, hetznerError({ status: 404, code: "not_found", message: "server not found" })];
-      if (call.method === "GET") {
-        if (server.startingReads > 0) server.startingReads -= 1;
-        else server.status = "running";
-        return [200, { server: serverJson(server) }];
-      }
-      if (call.method === "PUT") {
-        server.labels = { ...Schema.decodeUnknownSync(LabelsBody)(call.body).labels };
-        return [200, { server: serverJson(server) }];
-      }
-      if (call.method === "DELETE") {
-        if (hetzner.deleteFails !== undefined)
-          return [hetzner.deleteFails.status, hetznerError(hetzner.deleteFails)];
-        hetzner.servers.delete(server.id);
-        return [200, { action: { id: 9, command: "delete_server", status: "running" } }];
-      }
-    }
-    if (call.method === "GET" && call.path === "/servers") {
-      const selector = (call.query.label_selector ?? "").split(",").filter((part) => part !== "");
-      const servers = [...hetzner.servers.values()].filter((server) =>
-        selector.every((part) => {
-          const [key = "", value = ""] = part.split("=");
-          return server.labels[key] === value;
+        404,
+        hetznerError({
+          status: 404,
+          code: "not_found",
+          message: `no route ${call.method} ${call.path}`,
         }),
-      );
-      return [200, { servers: servers.map(serverJson), ...page }];
-    }
-    return [
-      404,
-      hetznerError({
-        status: 404,
-        code: "not_found",
-        message: `no route ${call.method} ${call.path}`,
-      }),
-    ];
-  };
+      ];
+    });
 
   const boatError = (failure: CannedError) => ({
     ok: false,
@@ -357,141 +365,152 @@ export const fakeProviders = () => {
     sshEndpoint: boat.sshEndpoint ?? null,
   });
 
-  const handleBoat = (call: ProviderCall): readonly [number, Schema.Json] => {
-    if (call.headers.authorization !== `Bearer ${boat.token}`)
-      return [401, boatError({ status: 401, code: "unauthorized", message: "Unauthorized" })];
-    const segments = call.path.split("/").filter((segment) => segment !== "");
-    if (call.method === "GET" && call.path.startsWith("/saved-snapshots/")) {
-      const name = call.path.slice("/saved-snapshots/".length);
-      const status = boat.snapshots.get(name);
-      return status === undefined
-        ? [404, { code: "snapshot_not_found" }]
-        : [200, { snapshot: { name, status } }];
-    }
-    if (call.method === "GET" && call.path === "/me")
-      return [200, { ok: true, type: "user.info", user: { login: "operator" } }];
-    if (call.method === "GET" && call.path === "/limits")
-      return [200, { ok: true, type: "limits.info", ...boat.limits }];
-    if (call.method === "POST" && call.path === "/sandboxes") {
-      if (boat.createFails !== undefined)
-        return [boat.createFails.status, boatError(boat.createFails)];
-      const id = `bx_${"23456789abcdefgh".slice(0, 8 - String(boat.nextId).length)}${String(boat.nextId++)}`;
-      const sandbox: FakeSandbox = {
-        id,
-        name: Schema.decodeUnknownSync(NamedBody)(call.body).name,
-        state: "provisioning",
-        createdAt: "2026-10-25T12:00:00Z",
-        provisioningReads: boat.provisioningReads,
-        body: call.body,
-      };
-      boat.sandboxes.set(id, sandbox);
-      return [
-        202,
-        {
-          ok: true,
-          type: "sandbox.created",
-          status: "provisioning",
-          ttlSeconds: null,
-          sandbox: sandboxJson(sandbox),
-        },
-      ];
-    }
-    if (call.method === "GET" && call.path === "/sandboxes") {
-      const all = [...boat.sandboxes.values()];
-      const start = call.query.cursor === undefined ? 0 : Number(call.query.cursor);
-      const slice = all.slice(start, start + boat.pageSize);
-      const next = start + boat.pageSize < all.length ? String(start + boat.pageSize) : null;
-      return [
-        200,
-        {
-          ok: true,
-          type: "sandbox.list",
-          sandboxes: slice.map(sandboxJson),
-          pageInfo: { nextCursor: next, hasMore: next !== null, limit: boat.pageSize },
-        },
-      ];
-    }
-    if (segments[0] === "sandboxes" && segments[1] !== undefined) {
-      const sandbox = boat.sandboxes.get(segments[1]);
-      if (sandbox === undefined)
-        return [404, boatError({ status: 404, code: "not_found", message: "Not found" })];
-      if (call.method === "GET" && segments.length === 2) {
-        if (boat.readFails !== undefined) return [boat.readFails.status, boatError(boat.readFails)];
-        if (sandbox.provisioningReads > 0) sandbox.provisioningReads -= 1;
-        else if (sandbox.state === "provisioning") sandbox.state = "ready";
-        return [200, { ok: true, type: "sandbox.info", sandbox: sandboxJson(sandbox) }];
+  const handleBoat = (call: ProviderCall) =>
+    Effect.gen(function* (): Effect.fn.Return<readonly [number, Schema.Json], Schema.SchemaError> {
+      if (call.headers.authorization !== `Bearer ${boat.token}`)
+        return [401, boatError({ status: 401, code: "unauthorized", message: "Unauthorized" })];
+      const segments = call.path.split("/").filter((segment) => segment !== "");
+      if (call.method === "GET" && call.path.startsWith("/saved-snapshots/")) {
+        const name = call.path.slice("/saved-snapshots/".length);
+        const status = boat.snapshots.get(name);
+        return status === undefined
+          ? [404, { code: "snapshot_not_found" }]
+          : [200, { snapshot: { name, status } }];
       }
-      if (call.method === "POST" && segments[2] === "sshkey") {
-        const configured = {
-          ok: true,
-          type: "ssh_key.configured",
-          success: true,
-          machineIp: "198.51.100.20",
-          sshUser: "user",
-          sshEndpoint: boat.sshEndpoint ?? null,
+      if (call.method === "GET" && call.path === "/me")
+        return [200, { ok: true, type: "user.info", user: { login: "operator" } }];
+      if (call.method === "GET" && call.path === "/limits")
+        return [200, { ok: true, type: "limits.info", ...boat.limits }];
+      if (call.method === "POST" && call.path === "/sandboxes") {
+        if (boat.createFails !== undefined)
+          return [boat.createFails.status, boatError(boat.createFails)];
+        const id = `bx_${"23456789abcdefgh".slice(0, 8 - String(boat.nextId).length)}${String(boat.nextId++)}`;
+        const sandbox: FakeSandbox = {
+          id,
+          name: (yield* Schema.decodeUnknownEffect(NamedBody)(call.body)).name,
+          state: "provisioning",
+          createdAt: "2026-10-25T12:00:00Z",
+          provisioningReads: boat.provisioningReads,
+          body: call.body,
         };
-        return [
-          200,
-          boat.hostKey === undefined ? configured : { ...configured, hostKey: boat.hostKey },
-        ];
-      }
-      if (call.method === "PATCH") {
-        sandbox.name = Schema.decodeUnknownSync(NamedBody)(call.body).name;
-        return [200, { ok: true, type: "sandbox.info", sandbox: sandboxJson(sandbox) }];
-      }
-      if (call.method === "DELETE") {
-        if (call.headers["x-ascii-confirm-delete"] !== sandbox.id)
-          return [
-            409,
-            boatError({ status: 409, code: "confirm_delete", message: "Confirm the deletion" }),
-          ];
-        boat.sandboxes.delete(sandbox.id);
+        boat.sandboxes.set(id, sandbox);
         return [
           202,
-          { ok: true, type: "sandbox.deleting", operation: { id: "bdop_0", status: "accepted" } },
+          {
+            ok: true,
+            type: "sandbox.created",
+            status: "provisioning",
+            ttlSeconds: null,
+            sandbox: sandboxJson(sandbox),
+          },
         ];
       }
-    }
-    return [
-      404,
-      boatError({
-        status: 404,
-        code: "not_found",
-        message: `no route ${call.method} ${call.path}`,
-      }),
-    ];
-  };
+      if (call.method === "GET" && call.path === "/sandboxes") {
+        const all = [...boat.sandboxes.values()];
+        const start = call.query.cursor === undefined ? 0 : Number(call.query.cursor);
+        const slice = all.slice(start, start + boat.pageSize);
+        const next = start + boat.pageSize < all.length ? String(start + boat.pageSize) : null;
+        return [
+          200,
+          {
+            ok: true,
+            type: "sandbox.list",
+            sandboxes: slice.map(sandboxJson),
+            pageInfo: { nextCursor: next, hasMore: next !== null, limit: boat.pageSize },
+          },
+        ];
+      }
+      if (segments[0] === "sandboxes" && segments[1] !== undefined) {
+        const sandbox = boat.sandboxes.get(segments[1]);
+        if (sandbox === undefined)
+          return [404, boatError({ status: 404, code: "not_found", message: "Not found" })];
+        if (call.method === "GET" && segments.length === 2) {
+          if (boat.readFails !== undefined)
+            return [boat.readFails.status, boatError(boat.readFails)];
+          if (sandbox.provisioningReads > 0) sandbox.provisioningReads -= 1;
+          else if (sandbox.state === "provisioning") sandbox.state = "ready";
+          return [200, { ok: true, type: "sandbox.info", sandbox: sandboxJson(sandbox) }];
+        }
+        if (call.method === "POST" && segments[2] === "sshkey") {
+          const configured = {
+            ok: true,
+            type: "ssh_key.configured",
+            success: true,
+            machineIp: "198.51.100.20",
+            sshUser: "user",
+            sshEndpoint: boat.sshEndpoint ?? null,
+          };
+          return [
+            200,
+            boat.hostKey === undefined ? configured : { ...configured, hostKey: boat.hostKey },
+          ];
+        }
+        if (call.method === "PATCH") {
+          sandbox.name = (yield* Schema.decodeUnknownEffect(NamedBody)(call.body)).name;
+          return [200, { ok: true, type: "sandbox.info", sandbox: sandboxJson(sandbox) }];
+        }
+        if (call.method === "DELETE") {
+          if (call.headers["x-ascii-confirm-delete"] !== sandbox.id)
+            return [
+              409,
+              boatError({ status: 409, code: "confirm_delete", message: "Confirm the deletion" }),
+            ];
+          boat.sandboxes.delete(sandbox.id);
+          return [
+            202,
+            { ok: true, type: "sandbox.deleting", operation: { id: "bdop_0", status: "accepted" } },
+          ];
+        }
+      }
+      return [
+        404,
+        boatError({
+          status: 404,
+          code: "not_found",
+          message: `no route ${call.method} ${call.path}`,
+        }),
+      ];
+    });
 
   const clientWith = (fallback: HttpClient.HttpClient) =>
     HttpClient.make((request, url) =>
-      Effect.suspend(() => {
-        const provider = url.href.startsWith(HETZNER_TEST_API)
-          ? ("hetzner" as const)
-          : url.href.startsWith(BOAT_TEST_API)
-            ? ("boat" as const)
-            : undefined;
-        if (provider === undefined) return fallback.execute(request);
-        if (provider === "hetzner" && hetzner.unreachable)
-          return Effect.fail(
-            new HttpClientError.HttpClientError({
+      Effect.suspend(() =>
+        Effect.gen(function* () {
+          const provider = url.href.startsWith(HETZNER_TEST_API)
+            ? ("hetzner" as const)
+            : url.href.startsWith(BOAT_TEST_API)
+              ? ("boat" as const)
+              : undefined;
+          if (provider === undefined) return yield* fallback.execute(request);
+          if (provider === "hetzner" && hetzner.unreachable)
+            return yield* new HttpClientError.HttpClientError({
               reason: new HttpClientError.TransportError({
                 request,
                 description: "connect ETIMEDOUT",
               }),
-            }),
-          );
-        const base = provider === "hetzner" ? HETZNER_TEST_API : BOAT_TEST_API;
-        const call: ProviderCall = {
-          method: request.method,
-          path: url.pathname.slice(new URL(base).pathname.length),
-          query: Object.fromEntries(url.searchParams),
-          headers: Object.fromEntries(Object.entries(request.headers)),
-          body: bodyOf(request.body),
-        };
-        calls.push({ ...call, provider });
-        const [status, body] = provider === "hetzner" ? handleHetzner(call) : handleBoat(call);
-        return Effect.succeed(json(request, status, body));
-      }),
+            });
+          const base = provider === "hetzner" ? HETZNER_TEST_API : BOAT_TEST_API;
+          const call: ProviderCall = {
+            method: request.method,
+            path: url.pathname.slice(new URL(base).pathname.length),
+            query: Object.fromEntries(url.searchParams),
+            headers: Object.fromEntries(Object.entries(request.headers)),
+            body: bodyOf(request.body),
+          };
+          calls.push({ ...call, provider });
+          const [status, body] =
+            provider === "hetzner" ? yield* handleHetzner(call) : yield* handleBoat(call);
+          return yield* Effect.succeed(json(request, status, body));
+        }).pipe(
+          Effect.mapError((cause) =>
+            Schema.isSchemaError(cause)
+              ? new HttpClientError.HttpClientError({
+                  reason: new HttpClientError.EncodeError({ request, cause }),
+                })
+              : cause,
+          ),
+        ),
+      ),
     );
   return {
     calls,

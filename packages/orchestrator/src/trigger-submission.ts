@@ -13,7 +13,7 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryRevision } from "@usine/core/repository";
 import { Submission, type SubmissionResult } from "@usine/engine/engine";
-import { type DateTime, Effect, Match, Option, Result, Schema } from "effect";
+import { type Brand, type DateTime, Effect, Match, Option, Result, Schema } from "effect";
 
 /**
  * The revision for issue and schedule Attempts, which resolve the remote's default branch at
@@ -28,9 +28,10 @@ export interface ResolvedLoop {
 }
 
 /** The Agent of a loaded Loop is no longer in the roster. */
-export class LoopAgentResolutionError extends Schema.TaggedError<LoopAgentResolutionError>(
-  "@usine/orchestrator/LoopAgentResolutionError",
-)("LoopAgentResolutionError", {
+export class LoopAgentResolutionError extends Schema.TaggedError<
+  LoopAgentResolutionError,
+  Brand.Brand<"@usine/orchestrator/trigger-submission/LoopAgentResolutionError">
+>("@usine/orchestrator/LoopAgentResolutionError")("LoopAgentResolutionError", {
   loop: LoopName,
   agent: AgentName,
   message: Schema.NonEmptyString,

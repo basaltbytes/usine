@@ -1,16 +1,19 @@
 import { InstanceDirectory } from "@usine/core/instance";
 import type { ReleaseVersion } from "@usine/core/upgrade";
-import { Config, Effect, FileSystem, Path, Schema } from "effect";
+import { type Brand, Config, Effect, FileSystem, Path, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { environmentTemplate } from "./environment.ts";
 
 const Installer = Schema.Literals(["npm", "pnpm"]);
 type Installer = typeof Installer.Type;
 
-class ScaffoldError extends Schema.TaggedError<ScaffoldError>("create-usine/ScaffoldError")(
-  "ScaffoldError",
-  { directory: InstanceDirectory, message: Schema.String },
-) {}
+class ScaffoldError extends Schema.TaggedError<
+  ScaffoldError,
+  Brand.Brand<"@usine/create-usine/scaffold/ScaffoldError">
+>("create-usine/ScaffoldError")("ScaffoldError", {
+  directory: InstanceDirectory,
+  message: Schema.String,
+}) {}
 
 export const detectInstaller = Effect.fn("Scaffold.detectInstaller")(function* (
   directory: InstanceDirectory,

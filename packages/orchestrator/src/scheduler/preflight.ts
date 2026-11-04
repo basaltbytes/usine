@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import { ChangeBus } from "@usine/core/changes";
 import type { Worker } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
@@ -38,7 +39,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
 ) {
   const bus = yield* ChangeBus;
   const changed = (worker: WorkerName) =>
-    bus.publish([{ audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } }]);
+    bus.publish([{ audience: InstanceScope.make(), target: { kind: "worker", id: worker } }]);
   const configuration = yield* Ref.make<PreflightConfiguration>({ workers: [], roster: [] });
   const records = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
   const blocked = yield* TxRef.make<ReadonlyMap<WorkerName, string>>(new Map());
@@ -104,6 +105,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
 
   const recover = Effect.fn("WorkerScheduler.retryPreflight")(function* (name: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker: name });
+
     if (!(yield* TxRef.get(blocked)).has(name)) return false;
     const { workers, roster } = yield* Ref.get(configuration);
     const worker = workers.find((worker) => worker.name === name);
@@ -236,6 +238,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
               });
             }
             yield* changed(name);
+
             return (yield* Ref.get(records)).get(name) ?? unchecked(name);
           }),
         ),

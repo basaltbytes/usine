@@ -6,7 +6,7 @@ import {
   CloudflareLlmProvider,
   type WorkerName,
 } from "@usine/core/worker";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { ProcessId, SandboxName, SandboxOwner } from "./names.ts";
 
@@ -35,7 +35,10 @@ export const sandboxName = (owner: SandboxOwner, attempt: AttemptId): SandboxNam
   SandboxName.make(`${owner}.${safeSegment(attempt)}`);
 
 /** An API key that the provider's outbound handler sends in place of the sandbox's placeholder. */
-export class ApiKeyCredential extends Schema.TaggedClass<ApiKeyCredential>()("ApiKey", {
+export class ApiKeyCredential extends Schema.TaggedClass<
+  ApiKeyCredential,
+  Brand.Brand<"@usine/cloudflare/api/api/ApiKeyCredential">
+>()("ApiKey", {
   key: Schema.Redacted(Schema.NonEmptyString),
 }) {}
 
@@ -47,7 +50,10 @@ export const ProviderCredential = Schema.Union([ApiKeyCredential]);
 export type ProviderCredential = typeof ProviderCredential.Type;
 
 /** A provider and the credential its outbound handler uses to authenticate sandbox requests. */
-export class ProviderGrant extends Schema.Class<ProviderGrant>("@usine/cloudflare/ProviderGrant")({
+export class ProviderGrant extends Schema.Class<
+  ProviderGrant,
+  Brand.Brand<"@usine/cloudflare/api/api/ProviderGrant">
+>("@usine/cloudflare/ProviderGrant")({
   provider: CloudflareLlmProvider,
   credential: ProviderCredential,
 }) {}
@@ -61,9 +67,10 @@ const uniqueProviders = Schema.makeFilter<ReadonlyArray<ProviderGrant>>(
  * The secrets that a sandbox's outbound handlers hold. The container never receives them. A host
  * without a credential is refused, so replacing the credentials with none revokes them.
  */
-export class SandboxCredentials extends Schema.Class<SandboxCredentials>(
-  "@usine/cloudflare/SandboxCredentials",
-)({
+export class SandboxCredentials extends Schema.Class<
+  SandboxCredentials,
+  Brand.Brand<"@usine/cloudflare/api/api/SandboxCredentials">
+>("@usine/cloudflare/SandboxCredentials")({
   /**
    * When usine issued these credentials, later than any credentials it issued before. The sandbox
    * refuses credentials issued before the ones it holds, so a delayed request can't restore
@@ -76,7 +83,10 @@ export class SandboxCredentials extends Schema.Class<SandboxCredentials>(
 }) {}
 
 /** A request to create the sandbox for one Attempt, or to return it if it already runs that Attempt. */
-export class CreateSandbox extends Schema.Class<CreateSandbox>("@usine/cloudflare/CreateSandbox")({
+export class CreateSandbox extends Schema.Class<
+  CreateSandbox,
+  Brand.Brand<"@usine/cloudflare/api/api/CreateSandbox">
+>("@usine/cloudflare/CreateSandbox")({
   owner: SandboxOwner,
   attempt: AttemptId,
   image: CloudflareImageName,
@@ -85,9 +95,10 @@ export class CreateSandbox extends Schema.Class<CreateSandbox>("@usine/cloudflar
 }) {}
 
 /** A sandbox's identity, container configuration, and current lifecycle flags. */
-export class SandboxSummary extends Schema.Class<SandboxSummary>(
-  "@usine/cloudflare/SandboxSummary",
-)({
+export class SandboxSummary extends Schema.Class<
+  SandboxSummary,
+  Brand.Brand<"@usine/cloudflare/api/api/SandboxSummary">
+>("@usine/cloudflare/SandboxSummary")({
   name: SandboxName,
   owner: SandboxOwner,
   attempt: AttemptId,
@@ -109,32 +120,50 @@ export class SandboxSummary extends Schema.Class<SandboxSummary>(
 }) {}
 
 /** The sandboxes of one owner whose current state the registry could read. */
-export class SandboxList extends Schema.Class<SandboxList>("@usine/cloudflare/SandboxList")({
+export class SandboxList extends Schema.Class<
+  SandboxList,
+  Brand.Brand<"@usine/cloudflare/api/api/SandboxList">
+>("@usine/cloudflare/SandboxList")({
   sandboxes: Schema.Array(SandboxSummary),
 }) {}
 
 /** The deployed worker's sandbox protocol version and available image names. */
-export class HealthReport extends Schema.Class<HealthReport>("@usine/cloudflare/HealthReport")({
+export class HealthReport extends Schema.Class<
+  HealthReport,
+  Brand.Brand<"@usine/cloudflare/api/api/HealthReport">
+>("@usine/cloudflare/HealthReport")({
   protocol: Schema.Literal(SANDBOX_PROTOCOL),
   /** The names in the Worker's `containers[].images`. */
   images: Schema.Array(CloudflareImageName),
 }) {}
 
 /** The response to a stop: the number of commands that were still running. */
-export class Stopped extends Schema.Class<Stopped>("@usine/cloudflare/Stopped")({
+export class Stopped extends Schema.Class<
+  Stopped,
+  Brand.Brand<"@usine/cloudflare/api/api/Stopped">
+>("@usine/cloudflare/Stopped")({
   stopped: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 
 /** The response to a destroy. `destroyed` is whether the sandbox existed. */
-export class Destroyed extends Schema.Class<Destroyed>("@usine/cloudflare/Destroyed")({
+export class Destroyed extends Schema.Class<
+  Destroyed,
+  Brand.Brand<"@usine/cloudflare/api/api/Destroyed">
+>("@usine/cloudflare/Destroyed")({
   destroyed: Schema.Boolean,
 }) {}
 
 /** A command with a recorded process ID but no readable exit code in its process files. */
-export class ProcessRunning extends Schema.TaggedClass<ProcessRunning>()("Running", {}) {}
+export class ProcessRunning extends Schema.TaggedClass<
+  ProcessRunning,
+  Brand.Brand<"@usine/cloudflare/api/api/ProcessRunning">
+>()("Running", {}) {}
 
 /** A command whose process files contain its exit code. */
-export class ProcessExited extends Schema.TaggedClass<ProcessExited>()("Exited", {
+export class ProcessExited extends Schema.TaggedClass<
+  ProcessExited,
+  Brand.Brand<"@usine/cloudflare/api/api/ProcessExited">
+>()("Exited", {
   exitCode: Schema.Int,
 }) {}
 
@@ -143,7 +172,10 @@ export const ProcessState = Schema.Union([ProcessRunning, ProcessExited]);
 export type ProcessState = typeof ProcessState.Type;
 
 /** A command's state and output size, read from its process files. */
-export class ProcessStatus extends Schema.Class<ProcessStatus>("@usine/cloudflare/ProcessStatus")({
+export class ProcessStatus extends Schema.Class<
+  ProcessStatus,
+  Brand.Brand<"@usine/cloudflare/api/api/ProcessStatus">
+>("@usine/cloudflare/ProcessStatus")({
   process: ProcessId,
   /** The command's process ID in the container. */
   pid: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -153,42 +185,52 @@ export class ProcessStatus extends Schema.Class<ProcessStatus>("@usine/cloudflar
 }) {}
 
 /** The requested sandbox has no stored record. The API returns HTTP 404. */
-export class SandboxNotFound extends Schema.TaggedError<SandboxNotFound>()(
-  "SandboxNotFound",
-  { sandbox: SandboxName },
-  { httpApiStatus: 404 },
-) {}
+export class SandboxNotFound extends Schema.TaggedError<
+  SandboxNotFound,
+  Brand.Brand<"@usine/cloudflare/api/api/SandboxNotFound">
+>()("SandboxNotFound", { sandbox: SandboxName }, { httpApiStatus: 404 }) {}
 
 /** The sandbox exists for another owner or Attempt. */
-export class SandboxConflict extends Schema.TaggedError<SandboxConflict>()(
+export class SandboxConflict extends Schema.TaggedError<
+  SandboxConflict,
+  Brand.Brand<"@usine/cloudflare/api/api/SandboxConflict">
+>()(
   "SandboxConflict",
   { sandbox: SandboxName, owner: SandboxOwner, attempt: AttemptId },
   { httpApiStatus: 409 },
 ) {}
 
 /** The sandbox holds credentials issued at `current`, after the request's, which it refused. */
-export class StaleCredentials extends Schema.TaggedError<StaleCredentials>()(
+export class StaleCredentials extends Schema.TaggedError<
+  StaleCredentials,
+  Brand.Brand<"@usine/cloudflare/api/api/StaleCredentials">
+>()(
   "StaleCredentials",
   { sandbox: SandboxName, issuedAt: Schema.DateTimeUtc, current: Schema.DateTimeUtc },
   { httpApiStatus: 409 },
 ) {}
 
 /** The Worker's `containers[].images` has no image with this name. */
-export class ImageNotFound extends Schema.TaggedError<ImageNotFound>()(
+export class ImageNotFound extends Schema.TaggedError<
+  ImageNotFound,
+  Brand.Brand<"@usine/cloudflare/api/api/ImageNotFound">
+>()(
   "ImageNotFound",
   { image: CloudflareImageName, images: Schema.Array(Schema.String) },
   { httpApiStatus: 422 },
 ) {}
 
 /** The requested command has no readable process ID in the sandbox. The API returns HTTP 404. */
-export class ProcessNotFound extends Schema.TaggedError<ProcessNotFound>()(
-  "ProcessNotFound",
-  { sandbox: SandboxName, process: ProcessId },
-  { httpApiStatus: 404 },
-) {}
+export class ProcessNotFound extends Schema.TaggedError<
+  ProcessNotFound,
+  Brand.Brand<"@usine/cloudflare/api/api/ProcessNotFound">
+>()("ProcessNotFound", { sandbox: SandboxName, process: ProcessId }, { httpApiStatus: 404 }) {}
 
 /** The container didn't start, stopped, or failed a command. `message` comes from the runtime. */
-export class ContainerUnavailable extends Schema.TaggedError<ContainerUnavailable>()(
+export class ContainerUnavailable extends Schema.TaggedError<
+  ContainerUnavailable,
+  Brand.Brand<"@usine/cloudflare/api/api/ContainerUnavailable">
+>()(
   "ContainerUnavailable",
   { sandbox: SandboxName, message: Schema.String },
   { httpApiStatus: 503 },

@@ -10,12 +10,13 @@ import {
   UpgradeRecord,
   UpgradeTiming,
 } from "@usine/core/upgrade";
-import { DateTime, Effect, Schema } from "effect";
+import { type Brand, DateTime, Effect, Schema } from "effect";
 
 /** An operator request to install a release immediately or after attempts finish. */
-export class UpgradeRequest extends Schema.Class<UpgradeRequest>(
-  "@usine/orchestrator/UpgradeRequest",
-)({
+export class UpgradeRequest extends Schema.Class<
+  UpgradeRequest,
+  Brand.Brand<"@usine/orchestrator/operator/upgrade/UpgradeRequest">
+>("@usine/orchestrator/UpgradeRequest")({
   /** Whether to install immediately or wait until attempts finish. */
   timing: UpgradeTiming,
   /** The requested release version, or `None` to select the available release. */
@@ -23,7 +24,10 @@ export class UpgradeRequest extends Schema.Class<UpgradeRequest>(
 }) {}
 
 /** The running release and the availability, progress, and last result of an upgrade. */
-export class UpgradeView extends Schema.Class<UpgradeView>("@usine/orchestrator/UpgradeView")({
+export class UpgradeView extends Schema.Class<
+  UpgradeView,
+  Brand.Brand<"@usine/orchestrator/operator/upgrade/UpgradeView">
+>("@usine/orchestrator/UpgradeView")({
   /** The version string of the running server. */
   running: Schema.String,
   /** The selected release channel. */

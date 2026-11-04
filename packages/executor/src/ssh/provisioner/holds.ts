@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import { ChangeBus, type ScopedChange } from "@usine/core/changes";
 import type { AttemptId } from "@usine/core/attempt";
 import type { Run } from "@usine/core/run";
@@ -58,7 +59,7 @@ export const machineHolds = Effect.gen(function* () {
     const changes = new Map<string, ScopedChange>();
     for (const entry of entries) {
       changes.set(`worker:${entry.worker}`, {
-        audience: { _tag: "Instance" },
+        audience: InstanceScope.make(),
         target: { kind: "worker", id: entry.worker },
       });
       for (const run of Option.toArray(entry.run))

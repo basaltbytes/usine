@@ -1,7 +1,16 @@
 import { requestSystemUpgrade } from "./client.ts";
 import { join, sep } from "node:path";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { Console, DateTime, Duration, Effect, FileSystem, Option, Schema } from "effect";
+import {
+  type Brand,
+  Console,
+  DateTime,
+  Duration,
+  Effect,
+  FileSystem,
+  Option,
+  Schema,
+} from "effect";
 import { backup } from "../backup.ts";
 import type { UpgradeCommand } from "../cli.ts";
 import { runCommand, runInTerminal } from "../command.ts";
@@ -32,9 +41,10 @@ import {
 const GIT_TIMEOUT = "30 seconds";
 
 /** The running engine isn't installed in the instance's `node_modules`, so no pin selects it. */
-export class EngineOutsideInstanceError extends Schema.TaggedError<EngineOutsideInstanceError>(
-  "@usine/server/EngineOutsideInstanceError",
-)("EngineOutsideInstanceError", {
+export class EngineOutsideInstanceError extends Schema.TaggedError<
+  EngineOutsideInstanceError,
+  Brand.Brand<"@usine/server/upgrade/upgrade/EngineOutsideInstanceError">
+>("@usine/server/EngineOutsideInstanceError")("EngineOutsideInstanceError", {
   script: Schema.String,
   version: Schema.String,
   /** Whether the entry point is in a `node_modules` folder, as with a global install. */
@@ -42,9 +52,10 @@ export class EngineOutsideInstanceError extends Schema.TaggedError<EngineOutside
 }) {}
 
 /** The instance's `package.json` is absent or doesn't pin `@usine/server` to a registry version. */
-export class EnginePinError extends Schema.TaggedError<EnginePinError>(
-  "@usine/server/EnginePinError",
-)("EnginePinError", {
+export class EnginePinError extends Schema.TaggedError<
+  EnginePinError,
+  Brand.Brand<"@usine/server/upgrade/upgrade/EnginePinError">
+>("@usine/server/EnginePinError")("EnginePinError", {
   path: Schema.String,
   missing: Schema.Boolean,
   /** The local spec, such as `link:../usine/apps/server`, if `@usine/server` has one. */
@@ -52,17 +63,22 @@ export class EnginePinError extends Schema.TaggedError<EnginePinError>(
 }) {}
 
 /** A file that `usine upgrade` reads or writes couldn't be accessed. */
-export class UpgradeFileError extends Schema.TaggedError<UpgradeFileError>(
-  "@usine/server/UpgradeFileError",
-)("UpgradeFileError", { path: Schema.String, reason: Schema.String }) {}
+export class UpgradeFileError extends Schema.TaggedError<
+  UpgradeFileError,
+  Brand.Brand<"@usine/server/upgrade/upgrade/UpgradeFileError">
+>("@usine/server/UpgradeFileError")("UpgradeFileError", {
+  path: Schema.String,
+  reason: Schema.String,
+}) {}
 
 /**
  * `usine upgrade` failed after it changed the pin. `install` restored the pin, `start` left the
  * instance stopped, and `listen` left a new process that doesn't answer.
  */
-export class UpgradeFailedError extends Schema.TaggedError<UpgradeFailedError>(
-  "@usine/server/UpgradeFailedError",
-)("UpgradeFailedError", {
+export class UpgradeFailedError extends Schema.TaggedError<
+  UpgradeFailedError,
+  Brand.Brand<"@usine/server/upgrade/upgrade/UpgradeFailedError">
+>("@usine/server/UpgradeFailedError")("UpgradeFailedError", {
   stage: Schema.Literals(["install", "start", "listen"]),
   reason: Schema.String,
   previous: Schema.String,
@@ -175,6 +191,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
           packaged: script.includes(`${sep}node_modules${sep}`),
         });
       }
+
       return yield* printLines([
         runningLine(running.value, ` from ${script}`),
         `${targetLabel(command)}${yield* resolveVersion(directory, SERVER_PACKAGE, spec)}`,

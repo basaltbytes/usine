@@ -63,8 +63,12 @@ export const configurationLoopOperations = Effect.gen(function* () {
   const check = Effect.fn("ConfigurationEditor.checkLoop")(function* (input: LoopDraft) {
     yield* Effect.annotateCurrentSpan({ loop: input.name });
     const snapshot = yield* store.read;
+    const entities = Option.match(snapshot.instance, {
+      onNone: () => [],
+      onSome: configurationEntities,
+    });
     const resolved = resolveConfigurationEntityKey(
-      Option.match(snapshot.instance, { onNone: () => [], onSome: configurationEntities }),
+      entities,
       ConfigurationEntityKey.make({
         kind: "loop",
         identifier: ConfigurationEntityId.make(input.name),

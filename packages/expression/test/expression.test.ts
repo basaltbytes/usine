@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Result, Schema } from "effect";
+import { Effect, Result } from "effect";
 import { ExpressionEngine, Source } from "../src/expression-engine.ts";
 import { MarcbachmannCelLayer } from "../src/marcbachmann-cel.ts";
 import {
@@ -10,8 +10,8 @@ import {
   Variable,
 } from "../src/environment.ts";
 
-const typeReference = Schema.decodeUnknownSync(TypeReference);
-const source = Schema.decodeUnknownSync(Source);
+const typeReference = TypeReference.make;
+const source = Source.make;
 
 const issueEnvironment = Environment.make({
   types: [
@@ -120,13 +120,17 @@ describe("ExpressionEngine", () => {
         ["item.reviewers.exists(reviewer, reviewer.login == null)", true, false],
       ] as const;
       for (const [expression, onNulls, onValues] of cases) {
-        expect(
-          [
-            yield* engine.evaluateBoolean(source(expression), nullableEnvironment, withNulls),
-            yield* engine.evaluateBoolean(source(expression), nullableEnvironment, withValues),
-          ],
-          expression,
-        ).toEqual([onNulls, onValues]);
+        const decodedValue1 = yield* engine.evaluateBoolean(
+          source(expression),
+          nullableEnvironment,
+          withNulls,
+        );
+        const decodedValue2 = yield* engine.evaluateBoolean(
+          source(expression),
+          nullableEnvironment,
+          withValues,
+        );
+        expect([decodedValue1, decodedValue2], expression).toEqual([onNulls, onValues]);
       }
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
@@ -398,6 +402,7 @@ it.effect("checks integer result types and preserves signed integer evaluation",
       expect(
         (yield* engine.checkInteger(source(value), issueEnvironment).pipe(Effect.flip)).code,
       ).toBe("unexpected_result_type");
+
     expect(
       (yield* engine.evaluateInteger(source("1 / 0"), issueEnvironment, {}).pipe(Effect.flip))._tag,
     ).toBe("ExpressionEvaluationError");

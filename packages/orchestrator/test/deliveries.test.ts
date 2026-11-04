@@ -1,3 +1,4 @@
+import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -52,20 +53,30 @@ const project = CoveredProject.make({
   repositoryId: RepositoryId.make(99),
 });
 const instance = (mode: "off" | "deliveries") =>
-  LoadedInstance.make({
-    config: Schema.decodeSync(UsineConfig)({
-      version: 1,
-      repos: [{ name: repository }],
-      webhooks: { mode },
-    }),
-    agents: [],
-    loops: [],
-    invalidAgents: [],
-    quarantinedLoops: [],
-    warnings: [],
+  Effect.gen(function* () {
+    return LoadedInstance.make({
+      config: yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository }],
+        webhooks: { mode },
+      }),
+      agents: [],
+      loops: [],
+      invalidAgents: [],
+      quarantinedLoops: [],
+      warnings: [],
+    });
   });
 const delivery = (id: string, event: string, repositoryId: number | null) =>
-  Schema.decodeSync(WebhookDelivery)({ id, event, repositoryId });
+  Schema.decodeEffect(WebhookDelivery)({ id, event, repositoryId }).pipe(
+    Effect.mapError((cause) =>
+      InvalidGitHubResponseError.make({
+        operation: "poll-webhook-deliveries",
+        message: "Invalid delivery fixture",
+        detail: cause.message,
+      }),
+    ),
+  );
 
 const appLayer = (deliveries: GitHubApp["Service"]["deliveries"]) =>
   Layer.mock(GitHubApp)({
@@ -87,14 +98,14 @@ describe("Webhook delivery polling", () => {
         const hints: Array<RepositoryName> = [];
         const seen: Array<Option.Option<WebhookDeliveryId>> = [];
         const app = appLayer((after) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             seen.push(after);
             return [
-              delivery("9", "ping", null),
-              delivery("3851199271760044123", "ping", null),
-              delivery("3851199271760044122", "issues", 100),
-              delivery("3851199271760044121", "issues", 99),
-              delivery("3851199271760044120", "pull_request", 99),
+              yield* delivery("9", "ping", null),
+              yield* delivery("3851199271760044123", "ping", null),
+              yield* delivery("3851199271760044122", "issues", 100),
+              yield* delivery("3851199271760044121", "issues", 99),
+              yield* delivery("3851199271760044120", "pull_request", 99),
             ].filter(({ id }) => Option.isNone(after) || BigInt(id) > BigInt(after.value));
           }),
         );
@@ -113,7 +124,9 @@ describe("Webhook delivery polling", () => {
           );
         }
         const cycle = Effect.gen(function* () {
-          yield* (yield* WebhookDeliveries).poll(instance("deliveries"));
+          const decodedValue9 = yield* instance("deliveries");
+          yield* (yield* WebhookDeliveries).poll(decodedValue9);
+
           const stored = yield* (yield* CursorStore).read(key, Schema.String);
           assert.deepStrictEqual(stored, Option.some("3851199271760044123"));
         }).pipe(
@@ -158,7 +171,11 @@ describe("Webhook delivery polling", () => {
         Layer.provideMerge(polling),
         Layer.provide(
           appLayer((after) =>
-            Effect.succeed(Option.isSome(after) ? [] : [delivery("1", "issues", 99)]),
+            Effect.gen(function* () {
+              return yield* Effect.succeed(
+                Option.isSome(after) ? [] : [yield* delivery("1", "issues", 99)],
+              );
+            }),
           ),
         ),
         Layer.provide(Layer.succeed(CursorStore)(cursors.store)),
@@ -166,7 +183,7 @@ describe("Webhook delivery polling", () => {
       return Effect.gen(function* () {
         const poller = yield* PollingTriggers;
         const deliveries = yield* WebhookDeliveries;
-        const current = instance("deliveries");
+        const current = yield* instance("deliveries");
         const fiber = yield* poller.run(fixedInstance(current)).pipe(Effect.forkChild);
         yield* TestClock.adjust("1 millis");
         assert.strictEqual(requests, 1);
@@ -193,21 +210,25 @@ describe("Webhook delivery polling", () => {
     );
     return Effect.gen(function* () {
       const source = yield* WebhookDeliveries;
-      const current = yield* SubscriptionRef.make(instance("off"));
+      const decodedValue8 = yield* instance("off");
+      const current = yield* SubscriptionRef.make(decodedValue8);
       const enabled = yield* source
         .run({ get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) })
         .pipe(Effect.forkChild);
       yield* TestClock.adjust("30 seconds");
       assert.strictEqual(requests, 0);
-      yield* SubscriptionRef.set(current, instance("deliveries"));
+      const decodedValue7 = yield* instance("deliveries");
+      yield* SubscriptionRef.set(current, decodedValue7);
       yield* TestClock.adjust("1 millis");
       assert.strictEqual(requests, 1);
       yield* TestClock.adjust("9999 millis");
       assert.strictEqual(requests, 2);
-      yield* SubscriptionRef.set(current, instance("off"));
+      const decodedValue6 = yield* instance("off");
+      yield* SubscriptionRef.set(current, decodedValue6);
       yield* TestClock.adjust("30 seconds");
       assert.strictEqual(requests, 2);
-      yield* SubscriptionRef.set(current, instance("deliveries"));
+      const decodedValue5 = yield* instance("deliveries");
+      yield* SubscriptionRef.set(current, decodedValue5);
       yield* TestClock.adjust("1 millis");
       assert.strictEqual(requests, 3);
       yield* Fiber.interrupt(enabled);
@@ -242,7 +263,8 @@ describe("Webhook delivery polling", () => {
     const cursors = memoryCursorStore();
     return Effect.gen(function* () {
       const source = yield* WebhookDeliveries;
-      const fiber = yield* source.run(fixedInstance(instance("deliveries"))).pipe(Effect.forkChild);
+      const decodedValue4 = yield* instance("deliveries");
+      const fiber = yield* source.run(fixedInstance(decodedValue4)).pipe(Effect.forkChild);
       yield* Deferred.await(started);
       yield* TestClock.adjust("29999 millis");
       assert.strictEqual(requests, 1);
@@ -269,19 +291,22 @@ it.effect(
       const started = yield* Deferred.make<void>();
       const stopped = yield* Deferred.make<void>();
       const received = yield* Deferred.make<void>();
-      const current = yield* SubscriptionRef.make(instance("deliveries"));
+      const decodedValue3 = yield* instance("deliveries");
+      const current = yield* SubscriptionRef.make(decodedValue3);
       const cursors = memoryCursorStore();
       let requests = 0;
       const app = appLayer(() =>
-        Effect.suspend(() => {
-          requests += 1;
-          return requests === 1
-            ? Deferred.succeed(started, undefined).pipe(
-                Effect.andThen(Effect.never),
-                Effect.ensuring(Deferred.succeed(stopped, undefined)),
-              )
-            : Effect.succeed([delivery("42", "issues", 99)]);
-        }),
+        Effect.suspend(() =>
+          Effect.gen(function* () {
+            requests += 1;
+            return yield* requests === 1
+              ? Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.ensuring(Deferred.succeed(stopped, undefined)),
+                )
+              : Effect.succeed([yield* delivery("42", "issues", 99)]);
+          }),
+        ),
       );
       yield* Effect.gen(function* () {
         const source = yield* WebhookDeliveries;
@@ -289,11 +314,13 @@ it.effect(
           .run({ get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) })
           .pipe(Effect.forkChild);
         yield* Deferred.await(started);
-        yield* SubscriptionRef.set(current, instance("off"));
+        const decodedValue2 = yield* instance("off");
+        yield* SubscriptionRef.set(current, decodedValue2);
         yield* Deferred.await(stopped);
         yield* TestClock.adjust("1 minute");
         assert.strictEqual(requests, 1);
-        yield* SubscriptionRef.set(current, instance("deliveries"));
+        const decodedValue1 = yield* instance("deliveries");
+        yield* SubscriptionRef.set(current, decodedValue1);
         yield* Deferred.await(received);
         yield* TestClock.adjust("1 millis");
         assert.strictEqual(requests, 2);

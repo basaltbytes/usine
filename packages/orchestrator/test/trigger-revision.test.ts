@@ -17,7 +17,7 @@ it.effect.each(["issue", "pr"] as const)(
   "pins each %s Event to its worker revision, including a later push",
   (source) =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: "acme/demo" }],
       });
@@ -27,7 +27,7 @@ it.effect.each(["issue", "pr"] as const)(
         InstancePath.make("loops/review.md"),
         `---\ntrigger:\n  on: ${source}\n  if: 'true'\nagent: reviewer\n---\nInspect item {{ item.number }}.`,
       );
-      const agent = Schema.decodeSync(AgentFile)({
+      const agent = yield* Schema.decodeEffect(AgentFile)({
         name: "reviewer",
         harness: "codex",
         model: "gpt-5.6-sol",
@@ -75,7 +75,7 @@ it.effect.each(["issue", "pr"] as const)(
       });
       for (const digit of ["a", "b"]) {
         const sha = digit.repeat(40);
-        const projection = Schema.decodeSync(ItemProjection)({
+        const projection = yield* Schema.decodeEffect(ItemProjection)({
           repository: repository.name,
           source,
           number: 63,
@@ -92,7 +92,7 @@ it.effect.each(["issue", "pr"] as const)(
       assert.strictEqual(submissions.length, 2);
       assert.notStrictEqual(submissions[0]?.event.id, submissions[1]?.event.id);
       if (source === "pr") {
-        const invalid = Schema.decodeSync(ItemProjection)({
+        const invalid = yield* Schema.decodeEffect(ItemProjection)({
           repository: repository.name,
           source,
           number: 63,

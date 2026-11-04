@@ -78,8 +78,7 @@ export const gatewayAddress = (
 const SentAttachRequest = Schema.Struct({
   worker: Schema.String,
   repository: Schema.String,
-  credential: Schema.Struct({
-    _tag: Schema.Literal("InstallationCredential"),
+  credential: Schema.TaggedStruct("InstallationCredential", {
     token: Schema.String,
   }),
   expiresAt: Schema.String,
@@ -148,14 +147,21 @@ export const fakeGateway = (
           if (inFlight === 0) idle.openUnsafe();
         }),
     );
-  const settings = Layer.succeed(GatewaySettings)({
-    domain: DOMAIN,
-    github: GITHUB_ORIGINS,
-    providers,
-    egress: Result.getOrThrow(parseEgressAllowlist("")),
-    adminToken: Schema.decodeSync(AdminToken)(ADMIN_TOKEN),
-    callerKey: Schema.decodeSync(CallerKey)("caller-key-for-executor-tests-0123456789"),
-  });
+  const settings = Layer.effect(
+    GatewaySettings,
+    Effect.gen(function* () {
+      return {
+        domain: DOMAIN,
+        github: GITHUB_ORIGINS,
+        providers,
+        egress: Result.getOrThrow(parseEgressAllowlist("")),
+        adminToken: yield* Schema.decodeEffect(AdminToken)(ADMIN_TOKEN),
+        callerKey: yield* Schema.decodeEffect(CallerKey)(
+          "caller-key-for-executor-tests-0123456789",
+        ),
+      };
+    }),
+  );
   // The admin API reads no ChatGPT login, so the logins get no file system or token endpoint.
   const noChatGptLogin = Layer.mergeAll(
     FileSystem.layerNoop({}),

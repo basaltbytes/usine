@@ -17,7 +17,7 @@ import {
   type Source,
 } from "./expression-engine.ts";
 
-const decodeTypeReference = Schema.decodeUnknownSync(TypeReference);
+const decodeTypeReference = TypeReference.make;
 
 const ENVIRONMENT_OPTIONS = {
   unlistedVariablesAreDyn: false,

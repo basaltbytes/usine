@@ -6,7 +6,16 @@ import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RunId } from "@usine/core/run";
-import { Array as Arr, Console, Duration, Effect, FileSystem, Option, Schema } from "effect";
+import {
+  type Brand,
+  Array as Arr,
+  Console,
+  Duration,
+  Effect,
+  FileSystem,
+  Option,
+  Schema,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import type { ServeError } from "effect/http/HttpServerError";
 
@@ -79,94 +88,103 @@ Environment:
 
 Every command reads .env in the instance folder for the variables that the environment doesn't set.`;
 
-export class CliUsageError extends Schema.TaggedError<CliUsageError>("@usine/server/CliUsageError")(
-  "CliUsageError",
-  { message: Schema.String },
-) {}
+export class CliUsageError extends Schema.TaggedError<
+  CliUsageError,
+  Brand.Brand<"@usine/server/cli/CliUsageError">
+>("@usine/server/CliUsageError")("CliUsageError", { message: Schema.String }) {}
 
-export class CliVersionError extends Schema.TaggedError<CliVersionError>(
-  "@usine/server/CliVersionError",
-)("CliVersionError", { cause: Schema.Defect() }) {}
+export class CliVersionError extends Schema.TaggedError<
+  CliVersionError,
+  Brand.Brand<"@usine/server/cli/CliVersionError">
+>("@usine/server/CliVersionError")("CliVersionError", { cause: Schema.Defect() }) {}
 
 /** Another process is listening on the HTTP port. */
-export class PortInUseError extends Schema.TaggedError<PortInUseError>(
-  "@usine/server/PortInUseError",
-)("PortInUseError", {
+export class PortInUseError extends Schema.TaggedError<
+  PortInUseError,
+  Brand.Brand<"@usine/server/cli/PortInUseError">
+>("@usine/server/PortInUseError")("PortInUseError", {
   port: Port,
   /** The PID of the listening process, or `None` if lsof can't find it. */
   holder: Schema.Option(Schema.Int),
 }) {}
 
-export class ServerStartError extends Schema.TaggedError<ServerStartError>(
-  "@usine/server/ServerStartError",
-)("ServerStartError", { port: Port, cause: Schema.Defect() }) {}
+export class ServerStartError extends Schema.TaggedError<
+  ServerStartError,
+  Brand.Brand<"@usine/server/cli/ServerStartError">
+>("@usine/server/ServerStartError")("ServerStartError", { port: Port, cause: Schema.Defect() }) {}
 
 /** The instance folder is in a directory the OS may clear, which would delete the run history. */
-export class VolatileInstanceDirectoryError extends Schema.TaggedError<VolatileInstanceDirectoryError>(
-  "@usine/server/VolatileInstanceDirectoryError",
-)("VolatileInstanceDirectoryError", {
+export class VolatileInstanceDirectoryError extends Schema.TaggedError<
+  VolatileInstanceDirectoryError,
+  Brand.Brand<"@usine/server/cli/VolatileInstanceDirectoryError">
+>("@usine/server/VolatileInstanceDirectoryError")("VolatileInstanceDirectoryError", {
   directory: Schema.String,
   root: Schema.String,
 }) {}
 
-export class BrowserOpenError extends Schema.TaggedError<BrowserOpenError>(
-  "@usine/server/BrowserOpenError",
-)("BrowserOpenError", {
+export class BrowserOpenError extends Schema.TaggedError<
+  BrowserOpenError,
+  Brand.Brand<"@usine/server/cli/BrowserOpenError">
+>("@usine/server/BrowserOpenError")("BrowserOpenError", {
   command: Schema.String,
   cause: Schema.Defect(),
 }) {}
 
-export class HelpCommand extends Schema.TaggedClass<HelpCommand>("@usine/server/HelpCommand")(
-  "HelpCommand",
-  {},
-) {}
+export class HelpCommand extends Schema.TaggedClass<
+  HelpCommand,
+  Brand.Brand<"@usine/server/cli/HelpCommand">
+>("@usine/server/HelpCommand")("HelpCommand", {}) {}
 
-export class VersionCommand extends Schema.TaggedClass<VersionCommand>(
-  "@usine/server/VersionCommand",
-)("VersionCommand", {}) {}
+export class VersionCommand extends Schema.TaggedClass<
+  VersionCommand,
+  Brand.Brand<"@usine/server/cli/VersionCommand">
+>("@usine/server/VersionCommand")("VersionCommand", {}) {}
 
-export class UpCommand extends Schema.TaggedClass<UpCommand>("@usine/server/UpCommand")(
-  "UpCommand",
-  {
-    port: Port,
-    /** The origin of the UI's pages besides the loopback ones, which the operator API accepts. */
-    origin: Schema.Option(UiOrigin),
-    logLevel: UpLogLevel,
-    allowVolatileInstance: Schema.Boolean,
-    detach: Schema.Boolean,
-  },
-) {}
+export class UpCommand extends Schema.TaggedClass<
+  UpCommand,
+  Brand.Brand<"@usine/server/cli/UpCommand">
+>("@usine/server/UpCommand")("UpCommand", {
+  port: Port,
+  /** The origin of the UI's pages besides the loopback ones, which the operator API accepts. */
+  origin: Schema.Option(UiOrigin),
+  logLevel: UpLogLevel,
+  allowVolatileInstance: Schema.Boolean,
+  detach: Schema.Boolean,
+}) {}
 
 /** Reports whether `usine up` runs in the current instance folder. */
-export class StatusCommand extends Schema.TaggedClass<StatusCommand>("@usine/server/StatusCommand")(
-  "StatusCommand",
-  {},
-) {}
+export class StatusCommand extends Schema.TaggedClass<
+  StatusCommand,
+  Brand.Brand<"@usine/server/cli/StatusCommand">
+>("@usine/server/StatusCommand")("StatusCommand", {}) {}
 
 /** How long a lifecycle command waits for each stop and start, and whether it ends the drain. */
-export class LifecycleOptions extends Schema.Class<LifecycleOptions>(
-  "@usine/server/LifecycleOptions",
-)({
+export class LifecycleOptions extends Schema.Class<
+  LifecycleOptions,
+  Brand.Brand<"@usine/server/cli/LifecycleOptions">
+>("@usine/server/LifecycleOptions")({
   timeout: Schema.Duration,
   /** Sends a second `SIGTERM`, which stops the instance without waiting for running Attempts. */
   force: Schema.Boolean,
 }) {}
 
 /** Stops the `usine up` of the current instance folder and waits for it to exit. */
-export class StopCommand extends Schema.TaggedClass<StopCommand>("@usine/server/StopCommand")(
-  "StopCommand",
-  { options: LifecycleOptions },
-) {}
+export class StopCommand extends Schema.TaggedClass<
+  StopCommand,
+  Brand.Brand<"@usine/server/cli/StopCommand">
+>("@usine/server/StopCommand")("StopCommand", { options: LifecycleOptions }) {}
 
 /** Stops the `usine up` of the current instance folder and starts it again in the background. */
-export class RestartCommand extends Schema.TaggedClass<RestartCommand>(
-  "@usine/server/RestartCommand",
-)("RestartCommand", { options: LifecycleOptions }) {}
+export class RestartCommand extends Schema.TaggedClass<
+  RestartCommand,
+  Brand.Brand<"@usine/server/cli/RestartCommand">
+>("@usine/server/RestartCommand")("RestartCommand", { options: LifecycleOptions }) {}
 
 /** Moves the instance's `@usine/server` pin to another published version and restarts it. */
-export class UpgradeCommand extends Schema.TaggedClass<UpgradeCommand>(
-  "@usine/server/UpgradeCommand",
-)("UpgradeCommand", {
+export class UpgradeCommand extends Schema.TaggedClass<
+  UpgradeCommand,
+  Brand.Brand<"@usine/server/cli/UpgradeCommand">
+>("@usine/server/UpgradeCommand")("UpgradeCommand", {
   /** A version or dist-tag; `latest` if absent. */
   version: Schema.Option(Schema.NonEmptyString),
   check: Schema.Boolean,
@@ -174,23 +192,24 @@ export class UpgradeCommand extends Schema.TaggedClass<UpgradeCommand>(
 }) {}
 
 /** Exports one Run from the current instance into a new local JSON file. */
-export class ExportRunCommand extends Schema.TaggedClass<ExportRunCommand>(
-  "@usine/server/ExportRunCommand",
-)("ExportRunCommand", {
+export class ExportRunCommand extends Schema.TaggedClass<
+  ExportRunCommand,
+  Brand.Brand<"@usine/server/cli/ExportRunCommand">
+>("@usine/server/ExportRunCommand")("ExportRunCommand", {
   runId: RunId,
   output: Schema.Option(Schema.NonEmptyString),
 }) {}
 
 /** Copies the current instance's runtime store into a new SQLite file. */
-export class BackupCommand extends Schema.TaggedClass<BackupCommand>("@usine/server/BackupCommand")(
-  "BackupCommand",
-  { output: Schema.NonEmptyString },
-) {}
+export class BackupCommand extends Schema.TaggedClass<
+  BackupCommand,
+  Brand.Brand<"@usine/server/cli/BackupCommand">
+>("@usine/server/BackupCommand")("BackupCommand", { output: Schema.NonEmptyString }) {}
 
-export class SignInCommand extends Schema.TaggedClass<SignInCommand>("SignInCommand")(
-  "SignInCommand",
-  { action: Schema.Literals(["device", "link"]), origin: UiOrigin },
-) {}
+export class SignInCommand extends Schema.TaggedClass<
+  SignInCommand,
+  Brand.Brand<"@usine/server/cli/SignInCommand">
+>()("SignInCommand", { action: Schema.Literals(["device", "link"]), origin: UiOrigin }) {}
 
 export interface CliEnvironment {
   readonly port: Option.Option<string>;

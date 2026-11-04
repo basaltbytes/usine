@@ -8,7 +8,7 @@ import {
   type SshPort,
   type WorkerName,
 } from "@usine/core/worker";
-import type { DateTime, Effect } from "effect";
+import type { Brand, DateTime, Effect } from "effect";
 import { Option, Schema } from "effect";
 import type { MachineUnavailableError, WorkerCapabilityError } from "../../executor.ts";
 
@@ -62,9 +62,10 @@ interface CreatedMachine {
 }
 
 /** The error of a provider API request other than a creation. Contains no token. */
-export class ProviderApiError extends Schema.TaggedError<ProviderApiError>(
-  "@usine/executor/ProviderApiError",
-)("ProviderApiError", {
+export class ProviderApiError extends Schema.TaggedError<
+  ProviderApiError,
+  Brand.Brand<"@usine/executor/ssh/provisioner/model/ProviderApiError">
+>("@usine/executor/ProviderApiError")("ProviderApiError", {
   provider: MachineProvider,
   operation: Schema.String,
   /** The HTTP status, or `None` if the API didn't respond. */

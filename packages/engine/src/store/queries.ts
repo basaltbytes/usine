@@ -199,10 +199,9 @@ const attemptSummarySelection = Struct.omit(attemptSelection, ["task", "comments
 const storedStateTag = jsonExtract(runs.stateJson, "$._tag");
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
-// The Json round-trip gives `queriesFor` a portable named type; without it tsc
-// cannot emit the declaration (TS2883).
-const storedAgent = (agent: Agent): Schema.Json =>
-  Schema.decodeSync(Schema.Json)(encodeAgent(agent));
+// The explicit JSON return type lets tsc emit a portable declaration for `queriesFor`.
+const storedAgent = (agent: Agent): Effect.Effect<Schema.Json, Schema.SchemaError> =>
+  encodeAgent(agent);
 
 export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) => {
   const changedRun = (runId: RunId) =>
@@ -389,6 +388,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
   ) {
     const runIds = storedRuns.map(({ runId }) => runId);
     // Chunks keep each read below the driver's bind-parameter limit.
+
     const storedAttempts = (yield* Effect.forEach(EffectArray.chunksOf(runIds, 100), (ids) =>
       database
         .select(attemptSummarySelection)
@@ -420,6 +420,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     itemKeys: ReadonlyArray<ItemKey>,
   ) {
     if (itemKeys.length === 0) return [];
+
     const storedRuns = (yield* Effect.forEach(
       EffectArray.chunksOf([...new Set(itemKeys)], 100),
       (keys) =>
@@ -439,6 +440,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
   ) {
     yield* Effect.annotateCurrentSpan({ itemKeys, attentionRunIds });
     const items = yield* boardHistoryQueries(database).itemHistory(itemKeys);
+
     const storedRuns = (yield* Effect.forEach(
       EffectArray.chunksOf([...new Set(itemKeys)], 100),
       (keys) => {
@@ -599,9 +601,10 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     at?: DateTime.Utc,
   ) {
     const closedAt = RunState.isOpen(state) ? null : encodeDateTime(at ?? (yield* DateTime.now));
+    const stateJson = yield* encodeRunState(state);
     const updated = yield* database
       .update(runs)
-      .set({ stateJson: encodeRunState(state), closedAt })
+      .set({ stateJson: stateJson, closedAt })
       .where(eq(runs.runId, runId))
       .returning({ runId: runs.runId })
       .execute();
@@ -617,9 +620,10 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     resolution: FailureResolution,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
+    const resolutionJson = yield* encodeFailureResolution(resolution);
     yield* database
       .update(attempts)
-      .set({ failureResolutionJson: encodeFailureResolution(resolution) })
+      .set({ failureResolutionJson: resolutionJson })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
     yield* database
@@ -631,6 +635,11 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
   });
 
   const addAttempt = Effect.fn("RunStoreQueries.addAttempt")(function* (attempt: Attempt) {
+    const brainJson = yield* encodeBrainSpec(attempt.brain);
+    const startJson = yield* Option.match(attempt.start, {
+      onNone: () => Effect.succeed(null),
+      onSome: encodeAttemptStart,
+    });
     yield* database
       .insert(attempts)
       .values({
@@ -639,7 +648,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
         stepName: attempt.stepName,
         workerName: attempt.worker,
         attemptNumber: attempt.number,
-        brainJson: encodeBrainSpec(attempt.brain),
+        brainJson: brainJson,
         task: attempt.task,
         agent: attempt.agent,
         operatorIntervened: attempt.operatorIntervened,
@@ -648,7 +657,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
         outcomeJson: null,
         endedAt: null,
         salvageJson: null,
-        startJson: Option.match(attempt.start, { onNone: () => null, onSome: encodeAttemptStart }),
+        startJson: startJson,
       })
       .execute();
     yield* changedAttempt(attempt.id);
@@ -674,6 +683,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       .from(runs)
       .where(eq(runs.runId, runId))
       .execute();
+
     return Option.fromNullishOr((yield* decodeNextStarts(rows))[0]?.nextStart);
   });
 
@@ -681,10 +691,14 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     runId: RunId,
     start: Option.Option<OperatorRetryStart>,
   ) {
+    const startJson = yield* Option.match(start, {
+      onNone: () => Effect.succeed(null),
+      onSome: encodeAttemptStart,
+    });
     yield* database
       .update(runs)
       .set({
-        nextStartJson: Option.match(start, { onNone: () => null, onSome: encodeAttemptStart }),
+        nextStartJson: startJson,
       })
       .where(eq(runs.runId, runId))
       .execute();
@@ -696,16 +710,19 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     salvage: AttemptSalvage,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId, salvage: salvage._tag });
+    const salvageJson = yield* encodeSalvage(salvage);
     yield* database
       .update(attempts)
-      .set({ salvageJson: encodeSalvage(salvage) })
+      .set({ salvageJson: salvageJson })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
     if (salvage._tag === "Retained" && Option.isSome(salvage.pushFailure))
       yield* database
         .update(attempts)
         .set({
-          outcomeJson: encodeOutcome(AttemptFailed.make({ failure: salvage.pushFailure.value })),
+          outcomeJson: yield* encodeOutcome(
+            AttemptFailed.make({ failure: salvage.pushFailure.value }),
+          ),
         })
         .where(
           and(
@@ -723,9 +740,10 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     comments: ReadonlyArray<Comment>,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId, comments: comments.length });
+    const commentsJson = yield* encodeComments(comments);
     yield* database
       .update(attempts)
-      .set({ commentsJson: encodeComments(comments) })
+      .set({ commentsJson: commentsJson })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
     yield* changedAttempt(attemptId);
@@ -754,9 +772,10 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       recorded.filter(({ container }) => container !== kills.container),
       kills,
     );
+    const outOfMemoryJson = yield* encodeOutOfMemory(containers);
     yield* database
       .update(attempts)
-      .set({ outOfMemoryJson: encodeOutOfMemory(containers) })
+      .set({ outOfMemoryJson: outOfMemoryJson })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
 
@@ -769,9 +788,10 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     outcome: AttemptOutcome,
     endedAt: DateTime.Utc,
   ) {
+    const outcomeJson = yield* encodeOutcome(outcome);
     yield* database
       .update(attempts)
-      .set({ outcomeJson: encodeOutcome(outcome), endedAt: encodeDateTime(endedAt) })
+      .set({ outcomeJson: outcomeJson, endedAt: encodeDateTime(endedAt) })
       .where(and(eq(attempts.attemptId, attemptId), isNull(attempts.outcomeJson)))
       .execute();
     yield* changedAttempt(attemptId);
@@ -781,9 +801,10 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     runId: RunId,
     outcome: AttemptOutcome,
   ) {
+    const outcomeJson = yield* encodeOutcome(outcome);
     yield* database
       .update(attempts)
-      .set({ outcomeJson: encodeOutcome(outcome) })
+      .set({ outcomeJson: outcomeJson })
       .where(
         and(
           eq(attempts.runId, runId),
@@ -799,11 +820,12 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     context: AttemptContext,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, agent: context.agent.name });
+    const agentJson = yield* storedAgent(context.agent);
     yield* database
       .update(runs)
       .set({
         task: context.task,
-        agentJson: storedAgent(context.agent),
+        agentJson: agentJson,
         parentModel: Option.getOrNull(context.parentModel),
       })
       .where(eq(runs.runId, runId))
@@ -840,9 +862,10 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     stepName: StepName,
     result: StepResult,
   ) {
+    const resultJson = yield* encodeStepResult(result);
     yield* database
       .update(steps)
-      .set({ result: encodeStepResult(result) })
+      .set({ result: resultJson })
       .where(and(eq(steps.runId, runId), eq(steps.stepName, stepName)))
       .execute();
     yield* changedRun(runId);
@@ -857,12 +880,13 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     approval: Event,
     source: ApprovalSource,
   ) {
+    const payloadJson = yield* encodePayload(approval.payload);
     yield* database
       .insert(events)
       .values({
         eventId: approval.id,
         dedupKey: approval.dedupKey,
-        payloadJson: encodePayload(approval.payload),
+        payloadJson: payloadJson,
         receivedAt: encodeDateTime(approval.receivedAt),
       })
       .onConflictDoNothing()
@@ -910,18 +934,20 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       )
       .onConflictDoNothing()
       .execute();
+    const stateJson = yield* encodeRunState(RunState.Pending.make());
+    const agentJson = yield* storedAgent(submission.agent);
     yield* database
       .insert(runs)
       .values({
         runId,
         eventId,
         loopName: submission.loop,
-        stateJson: encodeRunState(RunState.Pending.make()),
+        stateJson: stateJson,
         openedAt: encodeDateTime(submission.event.receivedAt),
         repository: submission.repository,
         revision: submission.revision,
         task: submission.task,
-        agentJson: storedAgent(submission.agent),
+        agentJson: agentJson,
         parentModel: Option.getOrNull(submission.parentModel),
       })
       .onConflictDoNothing()
@@ -1025,12 +1051,13 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       readonly reopening: number;
     }> = Option.none(),
   ) {
+    const payloadJson = yield* encodePayload(submission.event.payload);
     yield* database
       .insert(events)
       .values({
         eventId: submission.event.id,
         dedupKey: submission.event.dedupKey,
-        payloadJson: encodePayload(submission.event.payload),
+        payloadJson: payloadJson,
         receivedAt: encodeDateTime(submission.event.receivedAt),
       })
       .onConflictDoNothing()
@@ -1038,6 +1065,14 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     const routes = yield* eventRouteByDedup(submission.event.dedupKey);
     const existing = routes[0];
     if (existing === undefined) {
+      const ciOnGreenJson = yield* Schema.encodeEffect(Submission.fields.ciOnGreen)(
+        submission.ciOnGreen,
+      ).pipe(Effect.orDie);
+      const ciPolicyJson = yield* Option.match(submission.ciPolicy, {
+        onNone: () => Effect.succeed(null),
+        onSome: Schema.encodeEffect(CiPolicy),
+      }).pipe(Effect.orDie);
+      const agentJson = yield* storedAgent(submission.agent);
       yield* database
         .insert(triggerEvents)
         .values({
@@ -1049,17 +1084,14 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
           approvalReason: Option.getOrNull(submission.approvalReason),
           permissions: submission.permissions,
           ciFailureHead: Option.getOrNull(submission.ciFailureHead),
-          ciOnGreenJson: Schema.encodeSync(Submission.fields.ciOnGreen)(submission.ciOnGreen),
-          ciPolicyJson: Option.match(submission.ciPolicy, {
-            onNone: () => null,
-            onSome: Schema.encodeSync(CiPolicy),
-          }),
+          ciOnGreenJson: ciOnGreenJson,
+          ciPolicyJson: ciPolicyJson,
           cycleLimit: Option.getOrNull(submission.cycleLimit),
           cycleGeneration: submission.cycleGeneration,
           repository: submission.repository,
           revision: submission.revision,
           task: submission.task,
-          agentJson: storedAgent(submission.agent),
+          agentJson: agentJson,
           parentModel: Option.getOrNull(submission.parentModel),
           reopensEventId: Option.getOrNull(Option.map(reopens, ({ eventId }) => eventId)),
           reopening: Option.match(reopens, {
@@ -1120,6 +1152,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       .from(runs)
       .where(and(openState, ne(storedStateTag, waiting), ne(storedStateTag, "AwaitingCi")))
       .execute();
+
     return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
 

@@ -91,6 +91,8 @@ const freePort = () =>
   new Promise<Port>((resolve) => {
     const server = createServer();
     server.listen({ host: SERVER_HOST, port: 0 }, () => {
+      // Node event callbacks decode their arguments synchronously.
+      // @effect-diagnostics-next-line schemaSync:off
       const { port } = Schema.decodeUnknownSync(PortAddress)(server.address());
       server.close(() => resolve(port));
     });

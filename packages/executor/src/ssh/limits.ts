@@ -6,16 +6,17 @@ import {
   ContainerMemoryMib,
   ContainerPids,
 } from "@usine/core/worker";
-import { Match, Option, Schema } from "effect";
+import { type Brand, Match, Option, Schema } from "effect";
 import { memoryFromMeminfo } from "../memory-preflight.ts";
 import type { SshWorkerContainer } from "./model.ts";
 
 const MIB = 1024 ** 2;
 
 /** What a Linux machine's kernel reports of its CPUs, memory, and tasks. */
-export class MachineResources extends Schema.Class<MachineResources>(
-  "@usine/executor/MachineResources",
-)({
+export class MachineResources extends Schema.Class<
+  MachineResources,
+  Brand.Brand<"@usine/executor/ssh/limits/MachineResources">
+>("@usine/executor/MachineResources")({
   /** The CPUs available to the SSH user, as `nproc` counts them. */
   cpus: Schema.Int.check(Schema.isGreaterThan(0)),
   memoryBytes: Schema.Int.check(Schema.isGreaterThan(0)),

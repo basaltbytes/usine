@@ -1,5 +1,5 @@
 import { CommitSha } from "@usine/core/repository";
-import { Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 
 /** GitHub's opaque HTTP validator for a conditional repository, label-catalog, or branch request. */
 export const EntityTag = Schema.NonEmptyString.pipe(Schema.brand("GitHubEntityTag"));
@@ -10,7 +10,10 @@ export const BaseRefName = Schema.NonEmptyString.pipe(Schema.brand("GitHubBaseRe
 export type BaseRefName = typeof BaseRefName.Type;
 
 /** The commit at the tip of a base branch, with the ETag for the next conditional read. */
-export class BaseRefHead extends Schema.Class<BaseRefHead>("@usine/github/BaseRefHead")({
+export class BaseRefHead extends Schema.Class<
+  BaseRefHead,
+  Brand.Brand<"@usine/github/polling/detection/BaseRefHead">
+>("@usine/github/BaseRefHead")({
   /** The branch name without `refs/heads/`; reuse this head only for that branch and repository. */
   baseRefName: BaseRefName,
   /** The commit at the branch tip when GitHub answered the read. */
@@ -20,7 +23,10 @@ export class BaseRefHead extends Schema.Class<BaseRefHead>("@usine/github/BaseRe
 }) {}
 
 /** A REST cursor used only for efficiency; losing it is safe because event deduplication is permanent (ADR 0007). */
-export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCursor")({
+export class PollCursor extends Schema.Class<
+  PollCursor,
+  Brand.Brand<"@usine/github/polling/detection/PollCursor">
+>("@usine/github/PollCursor")({
   /** The HTTP validator for the saved change-detection URL; `None` requests an unconditional read. */
   entityTag: Schema.OptionFromNullOr(EntityTag),
   /** The latest processed update time in UTC; the next request overlaps it by five seconds to avoid gaps. */
@@ -34,20 +40,21 @@ export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCurs
 }
 
 /** An issue number and update time from repository change detection. */
-export class ChangedIssue extends Schema.TaggedClass<ChangedIssue>("@usine/github/ChangedIssue")(
-  "ChangedIssue",
-  {
-    /** The repository-local item number used to fetch its payload slice. */
-    number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-    /** The UTC update time reported by the REST Issues endpoint, used to advance the polling watermark. */
-    updatedAt: Schema.DateTimeUtc,
-  },
-) {}
+export class ChangedIssue extends Schema.TaggedClass<
+  ChangedIssue,
+  Brand.Brand<"@usine/github/polling/detection/ChangedIssue">
+>("@usine/github/ChangedIssue")("ChangedIssue", {
+  /** The repository-local item number used to fetch its payload slice. */
+  number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  /** The UTC update time reported by the REST Issues endpoint, used to advance the polling watermark. */
+  updatedAt: Schema.DateTimeUtc,
+}) {}
 
 /** A pull request number and update time from repository change detection. */
-export class ChangedPullRequest extends Schema.TaggedClass<ChangedPullRequest>(
-  "@usine/github/ChangedPullRequest",
-)("ChangedPullRequest", {
+export class ChangedPullRequest extends Schema.TaggedClass<
+  ChangedPullRequest,
+  Brand.Brand<"@usine/github/polling/detection/ChangedPullRequest">
+>("@usine/github/ChangedPullRequest")("ChangedPullRequest", {
   /** The repository-local item number used to fetch its payload slice. */
   number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   /** The UTC update time reported by the REST Issues endpoint, used to advance the polling watermark. */
@@ -59,9 +66,10 @@ export const ChangedItem = Schema.Union([ChangedIssue, ChangedPullRequest]);
 export type ChangedItem = typeof ChangedItem.Type;
 
 /** The result when GitHub confirms that the repository cursor is current. */
-export class RepositoryNotModified extends Schema.TaggedClass<RepositoryNotModified>(
-  "@usine/github/RepositoryNotModified",
-)("RepositoryNotModified", {
+export class RepositoryNotModified extends Schema.TaggedClass<
+  RepositoryNotModified,
+  Brand.Brand<"@usine/github/polling/detection/RepositoryNotModified">
+>("@usine/github/RepositoryNotModified")("RepositoryNotModified", {
   /** The cursor to save after processing this detection result. */
   cursor: PollCursor,
   /** The earliest UTC time for the next conditional poll, including the normal poll interval and request backoff; `None` adds no server delay. */
@@ -73,9 +81,10 @@ export class RepositoryNotModified extends Schema.TaggedClass<RepositoryNotModif
 }) {}
 
 /** Changed items, the next cursor, and whether the page cap left items unfetched. */
-export class RepositoryChanges extends Schema.TaggedClass<RepositoryChanges>(
-  "@usine/github/RepositoryChanges",
-)("RepositoryChanges", {
+export class RepositoryChanges extends Schema.TaggedClass<
+  RepositoryChanges,
+  Brand.Brand<"@usine/github/polling/detection/RepositoryChanges">
+>("@usine/github/RepositoryChanges")("RepositoryChanges", {
   /** The cursor to save after processing this detection result. */
   cursor: PollCursor,
   /** The detected issue and pull request updates; watermark overlap can return previously seen items. */

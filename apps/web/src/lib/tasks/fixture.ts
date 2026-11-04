@@ -1,3 +1,4 @@
+import { RunSummaryView, AttemptSummaryView } from "@usine/orchestrator/operator";
 import { LabelLaneSource, LaneName, StateLaneSource } from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
 import { AgentName } from "@usine/core/agent";
@@ -291,6 +292,12 @@ const card = (task: TaskView) => {
   const items = task.items.map(({ itemKey, kind, number, title, url, state }) =>
     BoardItemLink.make({ itemKey, kind, number, title, url, state }),
   );
+  const runs = task.runs.map((run) =>
+    RunSummaryView.make({
+      ...run,
+      attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+    }),
+  );
   return BoardTaskView.make({
     repository: task.repository,
     itemKey: current.itemKey,
@@ -302,8 +309,8 @@ const card = (task: TaskView) => {
     labels: current.labels,
     items,
     pullRequest: null,
-    ...boardRunSummary([...task.runs].reverse(), task.runs[0] ?? null, items),
-    run: task.runs[0] ?? null,
+    ...boardRunSummary([...runs].reverse(), runs[0] ?? null, items),
+    run: runs[0] ?? null,
     needsYou: task.needsYou,
     conflicting: current.conflicting,
     loops: [],

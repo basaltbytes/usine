@@ -1,6 +1,6 @@
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 
 /** The global append order of the stored transcript; distinct from `AttemptChannel.Sequence`. */
 export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
@@ -21,8 +21,7 @@ const LegacyOutboundEnvelope = Schema.Struct({
   version: LegacyVersion,
 });
 
-const LegacyInboundEnvelope = Schema.Struct({
-  _tag: Schema.Literal("InboundEnvelope"),
+const LegacyInboundEnvelope = Schema.TaggedStruct("InboundEnvelope", {
   version: LegacyVersion,
   attemptId: AttemptId,
   sequence: AttemptChannel.Sequence,
@@ -47,62 +46,68 @@ const TranscriptEnvelope = Schema.Union([
 ]);
 
 /** An append-only row of an Attempt transcript. */
-export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engine/TranscriptEntry")(
-  {
-    /** The database-wide append position, used for paging across stored entries. */
-    sequence: TranscriptSequence,
-    /** The attempt whose channel produced this entry. */
-    attemptId: AttemptId,
-    /**
-     * Whether the envelope was sent to the attempt (`inbound`) or received from it (`outbound`).
-     */
-    direction: AttemptChannel.Direction,
-    /**
-     * The stored channel envelope, accepting protocol versions 3 through 7 for historical
-     * transcripts.
-     */
-    envelope: TranscriptEnvelope,
-    /** The UTC time the engine recorded the envelope, distinct from its sender's `sentAt`. */
-    receivedAt: Schema.DateTimeUtc,
-  },
-) {}
+export class TranscriptEntry extends Schema.Class<
+  TranscriptEntry,
+  Brand.Brand<"@usine/engine/transcript/TranscriptEntry">
+>("@usine/engine/TranscriptEntry")({
+  /** The database-wide append position, used for paging across stored entries. */
+  sequence: TranscriptSequence,
+  /** The attempt whose channel produced this entry. */
+  attemptId: AttemptId,
+  /**
+   * Whether the envelope was sent to the attempt (`inbound`) or received from it (`outbound`).
+   */
+  direction: AttemptChannel.Direction,
+  /**
+   * The stored channel envelope, accepting protocol versions 3 through 7 for historical
+   * transcripts.
+   */
+  envelope: TranscriptEnvelope,
+  /** The UTC time the engine recorded the envelope, distinct from its sender's `sentAt`. */
+  receivedAt: Schema.DateTimeUtc,
+}) {}
 
 /** A query for all rows of one Attempt, in append order. */
-export class TranscriptAllQuery extends Schema.TaggedClass<TranscriptAllQuery>(
-  "@usine/engine/TranscriptAllQuery",
-)("TranscriptAllQuery", {
+export class TranscriptAllQuery extends Schema.TaggedClass<
+  TranscriptAllQuery,
+  Brand.Brand<"@usine/engine/transcript/TranscriptAllQuery">
+>("@usine/engine/TranscriptAllQuery")("TranscriptAllQuery", {
   /** The attempt whose stored transcript to query. */
   attemptId: AttemptId,
 }) {}
 
 /** A query for each session's launch metadata, latest lifecycle, and supervision receipt. */
-export class TranscriptSessionsQuery extends Schema.TaggedClass<TranscriptSessionsQuery>(
-  "@usine/engine/TranscriptSessionsQuery",
-)("TranscriptSessionsQuery", {
+export class TranscriptSessionsQuery extends Schema.TaggedClass<
+  TranscriptSessionsQuery,
+  Brand.Brand<"@usine/engine/transcript/TranscriptSessionsQuery">
+>("@usine/engine/TranscriptSessionsQuery")("TranscriptSessionsQuery", {
   /** The attempt whose stored transcript to query. */
   attemptId: AttemptId,
 }) {}
 
 /** The latest worker notice, including recovery, regardless of later session activity. */
-export class TranscriptWorkerQuery extends Schema.TaggedClass<TranscriptWorkerQuery>(
-  "@usine/engine/TranscriptWorkerQuery",
-)("TranscriptWorkerQuery", {
+export class TranscriptWorkerQuery extends Schema.TaggedClass<
+  TranscriptWorkerQuery,
+  Brand.Brand<"@usine/engine/transcript/TranscriptWorkerQuery">
+>("@usine/engine/TranscriptWorkerQuery")("TranscriptWorkerQuery", {
   /** The attempt whose stored transcript to query. */
   attemptId: AttemptId,
 }) {}
 
 /** A query for each session's highest `SessionTokensUpdated` report, which is its cumulative usage. */
-export class TranscriptUsageQuery extends Schema.TaggedClass<TranscriptUsageQuery>(
-  "@usine/engine/TranscriptUsageQuery",
-)("TranscriptUsageQuery", {
+export class TranscriptUsageQuery extends Schema.TaggedClass<
+  TranscriptUsageQuery,
+  Brand.Brand<"@usine/engine/transcript/TranscriptUsageQuery">
+>("@usine/engine/TranscriptUsageQuery")("TranscriptUsageQuery", {
   /** The attempt whose stored transcript to query. */
   attemptId: AttemptId,
 }) {}
 
 /** A query for up to `limit` rows after `after`, in append order. */
-export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
-  "@usine/engine/TranscriptTailQuery",
-)("TranscriptTailQuery", {
+export class TranscriptTailQuery extends Schema.TaggedClass<
+  TranscriptTailQuery,
+  Brand.Brand<"@usine/engine/transcript/TranscriptTailQuery">
+>("@usine/engine/TranscriptTailQuery")("TranscriptTailQuery", {
   /** The attempt whose stored transcript to query. */
   attemptId: AttemptId,
   /** The last row already received, excluded from the response. */
@@ -112,9 +117,10 @@ export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>
 }) {}
 
 /** A query for the newest `limit` rows before `before`, returned in append order. */
-export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>(
-  "@usine/engine/TranscriptPageQuery",
-)("TranscriptPageQuery", {
+export class TranscriptPageQuery extends Schema.TaggedClass<
+  TranscriptPageQuery,
+  Brand.Brand<"@usine/engine/transcript/TranscriptPageQuery">
+>("@usine/engine/TranscriptPageQuery")("TranscriptPageQuery", {
   /** The attempt whose stored transcript to query. */
   attemptId: AttemptId,
   /** The earliest row already loaded, excluded from the response, or `None` to start at the tail. */

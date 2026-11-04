@@ -19,7 +19,7 @@ import {
   ProviderCapacityFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
-import { Context, Effect, Match, Option, Schema, Scope, Stream } from "effect";
+import { type Brand, Context, Effect, Match, Option, Schema, Scope, Stream } from "effect";
 import { ChildHost } from "./child-host/child-host.ts";
 
 /** The checkout directory of an attempt. */
@@ -27,7 +27,10 @@ export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWo
 export type WorkingDirectory = typeof WorkingDirectory.Type;
 
 /** A task delegated to one child, with its session and the checkout it shares with the parent. */
-export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/ChildRequest")({
+export class ChildRequest extends Schema.Class<
+  ChildRequest,
+  Brand.Brand<"@usine/agents/runtime/ChildRequest">
+>("@usine/agents/ChildRequest")({
   /** The child identity, parent session, and brain spec selected for the delegated task. */
   session: ChildSession,
   /** The checkout directory on `host`. */
@@ -53,15 +56,19 @@ export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/Chil
 }) {}
 
 /** The final message a parent or child session returns. */
-export class SessionResult extends Schema.Class<SessionResult>("@usine/agents/SessionResult")({
+export class SessionResult extends Schema.Class<
+  SessionResult,
+  Brand.Brand<"@usine/agents/runtime/SessionResult">
+>("@usine/agents/SessionResult")({
   /** The final answer returned after the session finishes its work. */
   message: Schema.NonEmptyString,
 }) {}
 
 /** An error for a model ID that the harness cannot resolve. */
-export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
-  "@usine/agents/UnknownModelError",
-)("UnknownModelError", {
+export class UnknownModelError extends Schema.TaggedError<
+  UnknownModelError,
+  Brand.Brand<"@usine/agents/runtime/UnknownModelError">
+>("@usine/agents/UnknownModelError")("UnknownModelError", {
   /** The harness selected by the agent's brain spec. */
   harness: Harness,
   /** The model requested for the session. */
@@ -71,9 +78,10 @@ export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
 }) {}
 
 /** An error for a credential that cannot use the billing pool the session needs. */
-export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableError>(
-  "@usine/agents/PoolUnavailableError",
-)("PoolUnavailableError", {
+export class PoolUnavailableError extends Schema.TaggedError<
+  PoolUnavailableError,
+  Brand.Brand<"@usine/agents/runtime/PoolUnavailableError">
+>("@usine/agents/PoolUnavailableError")("PoolUnavailableError", {
   /** The harness selected by the agent's brain spec. */
   harness: Harness,
   /** The model requested for the session. */
@@ -85,9 +93,10 @@ export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableErro
 }) {}
 
 /** An error for a model that does not support the rostered reasoning effort. */
-export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffortError>(
-  "@usine/agents/UnsupportedEffortError",
-)("UnsupportedEffortError", {
+export class UnsupportedEffortError extends Schema.TaggedError<
+  UnsupportedEffortError,
+  Brand.Brand<"@usine/agents/runtime/UnsupportedEffortError">
+>("@usine/agents/UnsupportedEffortError")("UnsupportedEffortError", {
   /** The harness selected by the agent's brain spec. */
   harness: Harness,
   /** The model requested for the session. */
@@ -121,9 +130,10 @@ export const FAILED_MARKER = "[usine:failed]";
 export const CAPACITY_MARKER = "[usine:provider-capacity]";
 
 /** A harness refusal because its model provider has no capacity. */
-export class AgentCapacityError extends Schema.TaggedError<AgentCapacityError>(
-  "@usine/agents/AgentCapacityError",
-)("AgentCapacityError", {
+export class AgentCapacityError extends Schema.TaggedError<
+  AgentCapacityError,
+  Brand.Brand<"@usine/agents/runtime/AgentCapacityError">
+>("@usine/agents/AgentCapacityError")("AgentCapacityError", {
   /** The affected session, or `None` when no session identity is available. */
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   /** The provider's capacity refusal, or the details after the capacity report marker. */
@@ -131,9 +141,10 @@ export class AgentCapacityError extends Schema.TaggedError<AgentCapacityError>(
 }) {}
 
 /** An error for a session that finished and reported that the work failed. */
-export class AgentResultError extends Schema.TaggedError<AgentResultError>(
-  "@usine/agents/AgentResultError",
-)("AgentResultError", {
+export class AgentResultError extends Schema.TaggedError<
+  AgentResultError,
+  Brand.Brand<"@usine/agents/runtime/AgentResultError">
+>("@usine/agents/AgentResultError")("AgentResultError", {
   /** The affected session, or `None` when no session identity is available. */
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   /** The harness failure or the details after the failed report marker. */
@@ -156,9 +167,10 @@ export const harnessFailure = (
     : AgentResultError.make({ sessionId, message });
 
 /** An error for a session that finished with the blocker marker; `message` is the blocker text. */
-export class AgentBlockedError extends Schema.TaggedError<AgentBlockedError>(
-  "@usine/agents/AgentBlockedError",
-)("AgentBlockedError", {
+export class AgentBlockedError extends Schema.TaggedError<
+  AgentBlockedError,
+  Brand.Brand<"@usine/agents/runtime/AgentBlockedError">
+>("@usine/agents/AgentBlockedError")("AgentBlockedError", {
   /** The affected session, or `None` when no session identity is available. */
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   /** The unresolved blocker after the blocked report marker. */
@@ -166,9 +178,10 @@ export class AgentBlockedError extends Schema.TaggedError<AgentBlockedError>(
 }) {}
 
 /** An error for a session that finished with a question for the operator; `message` is the question. */
-export class AgentQuestionError extends Schema.TaggedError<AgentQuestionError>(
-  "@usine/agents/AgentQuestionError",
-)("AgentQuestionError", {
+export class AgentQuestionError extends Schema.TaggedError<
+  AgentQuestionError,
+  Brand.Brand<"@usine/agents/runtime/AgentQuestionError">
+>("@usine/agents/AgentQuestionError")("AgentQuestionError", {
   /** The affected session, or `None` when no session identity is available. */
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   /** The operator question after the question report marker. */
@@ -176,9 +189,10 @@ export class AgentQuestionError extends Schema.TaggedError<AgentQuestionError>(
 }) {}
 
 /** An error for a Pi parent that requested more children than the attempt's budget allows. */
-export class ChildSessionBudgetExceededError extends Schema.TaggedError<ChildSessionBudgetExceededError>(
-  "@usine/agents/ChildSessionBudgetExceededError",
-)("ChildSessionBudgetExceededError", {
+export class ChildSessionBudgetExceededError extends Schema.TaggedError<
+  ChildSessionBudgetExceededError,
+  Brand.Brand<"@usine/agents/runtime/ChildSessionBudgetExceededError">
+>("@usine/agents/ChildSessionBudgetExceededError")("ChildSessionBudgetExceededError", {
   /** The attempt's maximum number of child sessions. */
   maxChildren: ChildSessionBudget,
   /** The child count including the launch that exceeded the budget. */
@@ -194,9 +208,10 @@ export const SessionOperation = Schema.Literals(SESSION_OPERATIONS);
 export type SessionOperation = typeof SessionOperation.Type;
 
 /** An error for an SDK or process failure after the model and harness were validated. */
-export class SessionOperationError extends Schema.TaggedError<SessionOperationError>(
-  "@usine/agents/SessionOperationError",
-)("SessionOperationError", {
+export class SessionOperationError extends Schema.TaggedError<
+  SessionOperationError,
+  Brand.Brand<"@usine/agents/runtime/SessionOperationError">
+>("@usine/agents/SessionOperationError")("SessionOperationError", {
   /** The operation that failed, used to distinguish launch, output, and control failures. */
   operation: SessionOperation,
   /** The affected session, or `None` when no session identity is available. */

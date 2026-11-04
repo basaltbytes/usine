@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
 import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../src/github-app.ts";
 import { GitHubItemWriter, ItemLabelMutation } from "../src/item-writer.ts";
 import {
@@ -47,37 +47,49 @@ describe("GitHubItemWriter", () => {
     const unrelated = Array.from({ length: 60 }, (_, index) => `unrelated-${index}`);
     const current = new Set([...unrelated, "ready"]);
     let concurrentAdded = false;
-    const client = HttpClient.make((request) => {
-      requests.push(request);
-      if (request.method === "POST") {
-        assert.strictEqual(request.body._tag, "Uint8Array");
-        if (request.body._tag === "Uint8Array") {
-          const body = Schema.decodeUnknownSync(LabelRequest)(
-            JSON.parse(new TextDecoder().decode(request.body.body)),
-          );
-          body.labels.forEach((label) => current.add(label));
+    const client = HttpClient.make((request) =>
+      Effect.gen(function* () {
+        requests.push(request);
+        if (request.method === "POST") {
+          assert.strictEqual(request.body._tag, "Uint8Array");
+          if (request.body._tag === "Uint8Array") {
+            const body = yield* Schema.decodeEffect(Schema.fromJsonString(LabelRequest))(
+              new TextDecoder().decode(request.body.body),
+            );
+            body.labels.forEach((label) => current.add(label));
+          }
+          // An unrelated label arrives after the stale projection, during the multi-request lane move.
+          current.add("concurrent-label");
+          concurrentAdded = true;
+        } else if (request.method === "DELETE") {
+          const removed = current.delete(decodeURIComponent(request.url.split("/").at(-1) ?? ""));
+          if (!removed) {
+            return yield* Effect.succeed(
+              HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })),
+            );
+          }
         }
-        // An unrelated label arrives after the stale projection, during the multi-request lane move.
-        current.add("concurrent-label");
-        concurrentAdded = true;
-      } else if (request.method === "DELETE") {
-        const removed = current.delete(decodeURIComponent(request.url.split("/").at(-1) ?? ""));
-        if (!removed) {
-          return Effect.succeed(
-            HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })),
-          );
-        }
-      }
-      return Effect.succeed(
-        HttpClientResponse.fromWeb(
-          request,
-          new Response(JSON.stringify([...current].map((name) => ({ name }))), {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          }),
+        const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          [...current].map((name) => ({ name })),
+        );
+        return yield* Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(decodedValue1, {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            }),
+          ),
+        );
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.EncodeError({ request: request, cause }),
+            }),
         ),
-      );
-    });
+      ),
+    );
     const layer = GitHubItemWriter.layer.pipe(
       Layer.provide(appLayer),
       Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
@@ -108,8 +120,8 @@ describe("GitHubItemWriter", () => {
       assert.strictEqual(addRequest.headers.authorization, "Bearer item-writer-token");
       assert.strictEqual(addRequest.body._tag, "Uint8Array");
       if (addRequest.body._tag !== "Uint8Array") return;
-      const body = Schema.decodeUnknownSync(LabelRequest)(
-        JSON.parse(new TextDecoder().decode(addRequest.body.body)),
+      const body = yield* Schema.decodeEffect(Schema.fromJsonString(LabelRequest))(
+        new TextDecoder().decode(addRequest.body.body),
       );
       assert.deepStrictEqual(body.labels, ["ready-for-review"]);
       assert.strictEqual(

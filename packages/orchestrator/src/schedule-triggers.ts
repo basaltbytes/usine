@@ -23,6 +23,7 @@ import {
 import { LoopControl } from "@usine/engine/loop-control";
 import { ExpressionEngine, type ExpressionError } from "@usine/expression/expression-engine";
 import {
+  type Brand,
   Clock,
   Context,
   Cron,
@@ -84,9 +85,10 @@ const scheduleFailureLogFields = (error: ScheduleTriggerError) => {
 };
 
 /** A schedule Loop whose Agent is no longer in the loaded roster. */
-export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailure>(
-  "@usine/orchestrator/ScheduleAgentFailure",
-)("ScheduleAgentFailure", {
+export class ScheduleAgentFailure extends Schema.TaggedClass<
+  ScheduleAgentFailure,
+  Brand.Brand<"@usine/orchestrator/schedule-triggers/ScheduleAgentFailure">
+>("@usine/orchestrator/ScheduleAgentFailure")("ScheduleAgentFailure", {
   /** The project-qualified loop name. */
   loop: LoopName,
   /** The referenced agent name. */
@@ -96,9 +98,10 @@ export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailur
 }) {}
 
 /** A selected repository whose Tick couldn't be evaluated or submitted. */
-export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>(
-  "@usine/orchestrator/ScheduleTickFailure",
-)("ScheduleTickFailure", {
+export class ScheduleTickFailure extends Schema.TaggedClass<
+  ScheduleTickFailure,
+  Brand.Brand<"@usine/orchestrator/schedule-triggers/ScheduleTickFailure">
+>("@usine/orchestrator/ScheduleTickFailure")("ScheduleTickFailure", {
   /** The project-qualified loop name. */
   loop: LoopName,
   /** The managed repo, in `owner/name` form. */
@@ -115,9 +118,10 @@ export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>
  * A schedule whose cron boundaries couldn't be computed at this instant. `Cron.prev` and
  * `Cron.next` fail inside a DST spring-forward gap; the schedule retries next cycle.
  */
-export class ScheduleCronFailure extends Schema.TaggedClass<ScheduleCronFailure>(
-  "@usine/orchestrator/ScheduleCronFailure",
-)("ScheduleCronFailure", {
+export class ScheduleCronFailure extends Schema.TaggedClass<
+  ScheduleCronFailure,
+  Brand.Brand<"@usine/orchestrator/schedule-triggers/ScheduleCronFailure">
+>("@usine/orchestrator/ScheduleCronFailure")("ScheduleCronFailure", {
   /** The project-qualified loop name. */
   loop: LoopName,
   /** The configured cron expression whose boundaries could not be computed. */
@@ -144,24 +148,25 @@ export const ScheduleFailure = Schema.Union([
 export type ScheduleFailure = typeof ScheduleFailure.Type;
 
 /** The result of evaluating every schedule loop at one instant. */
-export class ScheduleCycle extends Schema.Class<ScheduleCycle>("@usine/orchestrator/ScheduleCycle")(
-  {
-    /** The number of unpaused schedule loops evaluated. */
-    loops: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** The number of due loop and repository pairs evaluated. */
-    fanout: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** Run engine results for matching ticks, including deduplicated submissions. */
-    submissions: Schema.Array(SubmissionResult),
-    /** The due loop and repository pairs whose condition did not match. */
-    skipped: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** The loops whose latest cron boundary was already submitted in this process. */
-    alreadyFired: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** Agent, cron, or per-repository failures; sibling evaluations continue. */
-    failures: Schema.Array(ScheduleFailure),
-    /** The earliest next cron boundary, or `None` without a computable schedule. */
-    nextTickAt: Schema.Option(Schema.DateTimeUtc),
-  },
-) {}
+export class ScheduleCycle extends Schema.Class<
+  ScheduleCycle,
+  Brand.Brand<"@usine/orchestrator/schedule-triggers/ScheduleCycle">
+>("@usine/orchestrator/ScheduleCycle")({
+  /** The number of unpaused schedule loops evaluated. */
+  loops: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The number of due loop and repository pairs evaluated. */
+  fanout: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Run engine results for matching ticks, including deduplicated submissions. */
+  submissions: Schema.Array(SubmissionResult),
+  /** The due loop and repository pairs whose condition did not match. */
+  skipped: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The loops whose latest cron boundary was already submitted in this process. */
+  alreadyFired: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Agent, cron, or per-repository failures; sibling evaluations continue. */
+  failures: Schema.Array(ScheduleFailure),
+  /** The earliest next cron boundary, or `None` without a computable schedule. */
+  nextTickAt: Schema.Option(Schema.DateTimeUtc),
+}) {}
 
 const watchedSchedules = (instance: LoadedInstance): ReadonlyArray<WatchedSchedule> =>
   instance.loops.flatMap((loop) => {
@@ -333,6 +338,7 @@ export class ScheduleTriggers extends Context.Service<
 
       const tick = Effect.fn("ScheduleTriggers.tick")(function* (instance: LoadedInstance) {
         const now = yield* DateTime.now;
+
         const paused = new Set(
           (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
         );

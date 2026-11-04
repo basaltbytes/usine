@@ -110,6 +110,7 @@ export const sqliteConfigurationLayer = Layer.effect(
             const current = yield* read.pipe(
               Effect.mapError(failure("read configuration for commit")),
             );
+
             const result = yield* commit(parser, current, request.expected, request.changes, {
               actor: request.actor,
               message: request.message,
@@ -118,7 +119,7 @@ export const sqliteConfigurationLayer = Layer.effect(
             const value = yield* Schema.encodeEffect(RevisionJson)(result.revision).pipe(
               Effect.mapError(failure("encode revision")),
             );
-            yield* sql`INSERT INTO ${sql(revisionTable)} ${sql.insert({ number: result.revision.number, value })}`;
+            yield* sql`INSERT INTO ${sql(revisionTable)} ${sql.insert({ number: result.revision.number, value: value })}`;
             for (const change of result.revision.changes) {
               if (Option.isNone(change.after))
                 yield* sql`DELETE FROM ${sql(entityTable)} WHERE key = ${change.key.key}`;

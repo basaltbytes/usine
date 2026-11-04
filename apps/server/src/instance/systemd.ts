@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Option, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Option, Schema } from "effect";
 import { runCommand } from "../command.ts";
 import type { ProcessId } from "./record.ts";
 
@@ -46,9 +46,14 @@ export const currentSystemService = Effect.fn("Instance.currentSystemService")(f
 });
 
 /** `systemctl` couldn't run, or exited with a non-zero status. */
-export class SystemctlError extends Schema.TaggedError<SystemctlError>(
-  "@usine/server/SystemctlError",
-)("SystemctlError", { command: Schema.String, unit: SystemdUnit, reason: Schema.String }) {}
+export class SystemctlError extends Schema.TaggedError<
+  SystemctlError,
+  Brand.Brand<"@usine/server/instance/systemd/SystemctlError">
+>("@usine/server/SystemctlError")("SystemctlError", {
+  command: Schema.String,
+  unit: SystemdUnit,
+  reason: Schema.String,
+}) {}
 
 /** Runs `systemctl <args> <unit>` and returns its standard output. */
 export const systemctl = (unit: SystemdUnit, args: ReadonlyArray<string>) =>
@@ -92,13 +97,12 @@ interface UnitState {
 
 /** Returns the state of `unit` from `systemctl show`. */
 export const unitState = Effect.fn("Instance.unitState")(function* (unit: SystemdUnit) {
+  const output = yield* systemctl(unit, ["show", "--property=ActiveState", "--property=SubState"]);
   const properties = new Map(
-    (yield* systemctl(unit, ["show", "--property=ActiveState", "--property=SubState"]))
-      .split("\n")
-      .map((line) => {
-        const separator = line.indexOf("=");
-        return [line.slice(0, separator), line.slice(separator + 1).trim()] as const;
-      }),
+    output.split("\n").map((line) => {
+      const separator = line.indexOf("=");
+      return [line.slice(0, separator), line.slice(separator + 1).trim()] as const;
+    }),
   );
   return {
     active: properties.get("ActiveState") ?? "unknown",

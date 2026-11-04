@@ -145,6 +145,7 @@ export class ConfigurationFolder extends Context.Service<
               return yield* ConfigurationInvalid.make({ problems });
             if (Result.isFailure(config))
               return yield* ConfigurationInvalid.make({ problems: [config.failure] });
+
             return yield* Effect.fromResult(
               migrateProjects(
                 LoadedInstance.make({
@@ -174,7 +175,7 @@ export class ConfigurationFolder extends Context.Service<
           function* (root, instance) {
             yield* Effect.annotateCurrentSpan({ directory: root });
             yield* fs.makeDirectory(root, { recursive: true });
-            const encoded = Schema.encodeSync(UsineConfig)(instance.config);
+            const encoded = yield* Schema.encodeEffect(UsineConfig)(instance.config);
             const exported =
               instance.config.version === 1
                 ? encoded

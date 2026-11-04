@@ -26,6 +26,8 @@ export const repositoryEditorEntity = (
   if (project === undefined) return entity;
   return ConfigurationEntity.make({
     ...entity,
+    // The value is already validated.
+    // @effect-diagnostics-next-line schemaSync:off
     value: Schema.encodeSync(ManagedRepo)(
       ManagedRepo.make({ ...repository, lanes: project.lanes }),
     ),
@@ -49,7 +51,7 @@ export const repositoryEditorChanges = (snapshot: Configuration, entity: Configu
       project.includes(repository.name),
     );
     if (project === undefined || project.repositories.length !== 1) return { entity, changes: [] };
-    const before = Schema.encodeSync(Project)(project);
+    const before = yield* Schema.encodeEffect(Project)(project);
     const key = ConfigurationEntityKey.make({
       kind: "project",
       identifier: ConfigurationEntityId.make(project.id),

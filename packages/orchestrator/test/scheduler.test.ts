@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -59,7 +60,7 @@ describe("Worker scheduler startup", () => {
         const bus = yield* ChangeBus;
         const entered = yield* Deferred.make<void>();
         let initial = true;
-        const config = Schema.decodeSync(UsineConfig)({
+        const config = yield* Schema.decodeEffect(UsineConfig)({
           version: 1,
           repos: [],
           workers: [{ name: "local", kind: "local" }],
@@ -105,11 +106,14 @@ describe("Worker scheduler startup", () => {
           .pipe(Effect.forkChild);
         yield* Effect.yieldNow;
         assert.isUndefined(waiting.pollUnsafe());
+
         assert.strictEqual((yield* status.checking).has(worker), true);
         yield* Fiber.interrupt(check);
         const lease = yield* Fiber.join(waiting);
         assert.strictEqual(lease.worker, worker);
+
         assert.strictEqual((yield* status.checking).size, 0);
+
         assert.strictEqual(
           (yield* Effect.flip(status.runPreflight(worker))).reason,
           "attempt-running",
@@ -119,7 +123,7 @@ describe("Worker scheduler startup", () => {
         const afterRelease = yield* bus.open;
         assert.strictEqual(afterRelease.revision, beforeRelease + 1);
         assert.deepStrictEqual(afterRelease.history.at(-1)?.changes, [
-          { audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } },
+          { audience: InstanceScope.make(), target: { kind: "worker", id: worker } },
         ]);
       }).pipe(Effect.scoped, Effect.provide(changeBusLayer)),
     ),
@@ -145,7 +149,7 @@ describe("Worker scheduler startup", () => {
         intervene: unused,
         sweep: Effect.void,
       });
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [],
         workers: [
@@ -183,6 +187,7 @@ describe("Worker scheduler startup", () => {
             const steps = Context.get(context, StepExecutor);
             const status = Context.get(context, WorkerStatus);
             const agent = yield* developer;
+
             assert.deepStrictEqual(
               (yield* status.slots).map(({ worker, capacity }) => [worker, capacity]),
               [
@@ -232,6 +237,7 @@ describe("Worker scheduler startup", () => {
             const status = Context.get(context, WorkerStatus);
             const instances = yield* CurrentInstance;
             yield* instances.reload;
+
             assert.strictEqual(
               (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
               0,
@@ -256,12 +262,14 @@ describe("Worker scheduler startup", () => {
             ]);
             const refused = yield* instances.reload.pipe(Effect.flip);
             assert.strictEqual(refused._tag, "ReloadPreflightError");
+
             assert.strictEqual(
               (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
               0,
             );
             failing.length = 0;
             yield* instances.reload;
+
             assert.strictEqual(
               (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
               2,
@@ -298,12 +306,15 @@ describe("Worker scheduler startup", () => {
                 ),
               ],
             ]);
+
             const refused = yield* (yield* CurrentInstance).reload.pipe(Effect.flip);
             assert.strictEqual(refused._tag, "ReloadPreflightError");
+
             assert.deepStrictEqual(
               (yield* status.unavailable).map(({ worker }) => worker),
               ["local"],
             );
+
             assert.strictEqual(
               (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
               0,
@@ -311,6 +322,7 @@ describe("Worker scheduler startup", () => {
             yield* TestClock.adjust("1 minute");
             const currentUnavailable = yield* status.unavailable;
             assert.deepStrictEqual(currentUnavailable, []);
+
             assert.strictEqual(
               (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
               1,
@@ -335,6 +347,7 @@ describe("Worker scheduler startup", () => {
           yield* (yield* CurrentInstance).reload;
           yield* TestClock.adjust("20 minutes");
           assert.lengthOf(calls, 2);
+
           assert.deepStrictEqual(
             (yield* Context.get(context, WorkerStatus).slots).map(({ worker }) => worker),
             ["spare"],
@@ -564,6 +577,7 @@ describe("Worker scheduler reservations that name a Worker", () => {
             scheduler.reserve(runOf(4), submission(agent, 4), Option.none()),
           );
           yield* assertWaiting(waiting, "both slots are leased");
+
           assert.deepStrictEqual(
             (yield* status.queue).map(({ runId, ahead }) => [runId, ahead]),
             [
@@ -573,8 +587,10 @@ describe("Worker scheduler reservations that name a Worker", () => {
             "the reattached Attempt's Run waits for local only, so spare's next slot goes to run 4",
           );
           yield* onLocal.release;
+
           assert.strictEqual((yield* leaseOf(reattaching)).worker, local);
           yield* behind.release;
+
           assert.strictEqual((yield* leaseOf(waiting)).worker, spare);
         }).pipe(Effect.scoped),
     ),
@@ -604,6 +620,7 @@ describe("Worker scheduler reservations that name a Worker", () => {
             scheduler.reserve(runOf(5), submission(agent, 5), Option.none()),
           );
           yield* assertWaiting(waiting, "both slots are leased");
+
           assert.deepStrictEqual(
             (yield* status.queue).map(({ runId, ahead }) => [runId, ahead]),
             [
@@ -617,6 +634,7 @@ describe("Worker scheduler reservations that name a Worker", () => {
           const onLocalAgain = yield* leaseOf(reattachingLocal);
           assert.strictEqual(onLocalAgain.worker, local);
           yield* assertWaiting(waiting, "local's freed slot went to run 3");
+
           assert.deepStrictEqual(
             (yield* status.queue).map(({ runId, ahead }) => [runId, ahead]),
             [
@@ -626,6 +644,7 @@ describe("Worker scheduler reservations that name a Worker", () => {
             "local's next slot goes to run 5",
           );
           yield* onLocalAgain.release;
+
           assert.strictEqual((yield* leaseOf(waiting)).worker, local);
           yield* Fiber.interrupt(reattachingSpare);
         }).pipe(Effect.scoped),
@@ -647,6 +666,7 @@ describe("Worker scheduler reservations that name a Worker", () => {
         );
         yield* assertWaiting(reattaching, "the only slot is leased");
         yield* held.release;
+
         assert.strictEqual((yield* leaseOf(reattaching)).worker, local);
         yield* assertWaiting(earlier, "the reattached Attempt holds the slot");
       }).pipe(Effect.scoped),
@@ -766,6 +786,7 @@ describe("Worker scheduler lease order", () => {
           const failing = yield* Effect.forkChild(reserve(3, "start-dev", "ready-for-agent"));
           const review = yield* Effect.forkChild(reserve(4, "review-pr", "ready-for-review"));
           yield* assertWaiting(review, "both slots are leased");
+
           assert.deepStrictEqual(
             (yield* status.queue).map(({ runId, position }) => [runId, position.priority]),
             [
@@ -820,12 +841,14 @@ describe("Worker scheduler lease order", () => {
           ),
         );
         yield* assertWaiting(review, "both slots are leased");
+
         assert.deepStrictEqual(
           (yield* status.queue).map(({ runId }) => runId),
           [7, 3, 4, 5, 6].map(runOf),
         );
 
         yield* first.release;
+
         assert.strictEqual((yield* leaseOf(review)).worker, local);
         const [third, ...behind] = queued;
         assert(third !== undefined);
@@ -833,6 +856,7 @@ describe("Worker scheduler lease order", () => {
           assertWaiting(fiber, "the review-pr Run took the freed slot"),
         );
         yield* second.release;
+
         assert.strictEqual((yield* leaseOf(third)).worker, local);
         yield* Effect.forEach(behind, (fiber) =>
           assertWaiting(fiber, "the earliest start-dev Event goes first"),
@@ -933,6 +957,7 @@ describe("Worker scheduler slots occupied by Attempts that already run", () => {
             yield* first.release;
             yield* assertWaiting(onLocal, "the first Attempt's slot retired");
             yield* second.release;
+
             assert.strictEqual((yield* leaseOf(onLocal)).worker, local);
           }).pipe(Effect.scoped),
       ),
@@ -958,10 +983,12 @@ describe("Worker scheduler slots occupied by Attempts that already run", () => {
         const currentWorkers = yield* scheduler.workers;
         assert.deepStrictEqual(currentWorkers, [local]);
         const agent = yield* developer;
-        assert.strictEqual(
-          (yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none())).worker,
-          local,
+        const decodedValue26 = yield* scheduler.reserve(
+          runOf(1),
+          submission(agent, 1),
+          Option.none(),
         );
+        assert.strictEqual(decodedValue26.worker, local);
       }).pipe(Effect.scoped),
     ),
   );
@@ -1025,6 +1052,7 @@ describe("Worker scheduler on reload", () => {
             [{ worker: local, running: 1, slots: 1 }],
           );
           yield* second.release;
+
           assert.strictEqual((yield* leaseOf(waiting)).worker, local);
         }).pipe(Effect.scoped),
       ),
@@ -1076,6 +1104,7 @@ describe("Worker scheduler on reload", () => {
           const nextWorkers = yield* scheduler.workers;
           assert.deepStrictEqual(nextWorkers, [local]);
           yield* onLocal.release;
+
           assert.strictEqual((yield* leaseOf(waiting)).worker, local);
         }).pipe(Effect.scoped),
     ),
@@ -1110,6 +1139,7 @@ describe("Worker scheduler on reload", () => {
           const report = yield* instances.reload;
           assert.deepStrictEqual(report.workers.added, [spare]);
           assert.deepStrictEqual(preflighted, ["spare x2: gpt-5.6-sol"]);
+
           assert.strictEqual((yield* leaseOf(waiting)).worker, spare);
         }).pipe(Effect.scoped),
       ),
@@ -1209,6 +1239,7 @@ describe("Worker scheduler on reload", () => {
         ]);
         const repointed = yield* instances.reload;
         assert.deepStrictEqual(repointed.workers.changed, [WorkerName.make("build-1")]);
+
         assert.strictEqual((yield* instances.get).config.workers[0]?.kind, "ssh");
         assert.include(preflighted, "build-1 x1: gpt-5.6-sol");
 
@@ -1391,6 +1422,7 @@ describe("SSH Workers on reload", () => {
             Redacted.value(address.gateway.value.adminToken),
             "admin-token-set-after-startup",
           );
+
           assert.strictEqual((yield* leaseOf(waiting)).worker, build2);
         }).pipe(Effect.scoped),
       ),
@@ -1903,6 +1935,7 @@ it.live(
           ["usine.yaml", usineYaml(gatewaySshWorker("build-1", 2, TOKEN_ENV))],
         ]);
         yield* instances.reload;
+
         assert.strictEqual((yield* instances.get).config.workers[0]?.maxConcurrentAttempts, 2);
         const waiting = yield* scheduler
           .reserve(runOf(2), submission(agent, 2), Option.none())

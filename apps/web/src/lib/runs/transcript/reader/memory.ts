@@ -3,11 +3,10 @@ import { TranscriptSequence } from "@usine/engine/transcript";
 import { Effect, Option, Schema } from "effect";
 
 const identity = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024));
-const timestamp = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0));
+const timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 
 /** A transcript row and its offset in pixels from the top of the viewport. */
-export const ReadingAnchor = Schema.Struct({
-  _tag: Schema.Literal("Anchor"),
+export const ReadingAnchor = Schema.TaggedStruct("Anchor", {
   key: identity,
   surface: Schema.Literals(["row", "group", "result"]),
   sequence: TranscriptSequence,
@@ -16,10 +15,7 @@ export const ReadingAnchor = Schema.Struct({
 export type ReadingAnchor = typeof ReadingAnchor.Type;
 
 /** The saved reader position: `Latest` to follow new events, or an anchor. */
-export const ReaderPosition = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal("Latest") }),
-  ReadingAnchor,
-]);
+export const ReaderPosition = Schema.Union([Schema.TaggedStruct("Latest", {}), ReadingAnchor]);
 export type ReaderPosition = typeof ReaderPosition.Type;
 
 /** The reader state saved in the browser; it contains no transcript content or tool payloads. */

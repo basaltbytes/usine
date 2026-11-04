@@ -70,7 +70,7 @@ export const testAgent = Agent.make({
   persona: AgentPersona.make("Implement the task."),
 });
 
-export const config = Schema.decodeSync(UsineConfig)({
+export const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [{ name: "acme/demo" }],
   workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
@@ -213,27 +213,31 @@ export const localRuntime = (
   remote: string,
   options: LocalRuntimeOptions = {},
 ) =>
-  localEngineLayer(instance).pipe(
-    Layer.provide(
-      stepExecutorLayer(config, []).pipe(
-        Layer.provide(MarcbachmannCelLayer),
+  Layer.unwrap(
+    Effect.map(config, (configuration) =>
+      localEngineLayer(instance).pipe(
         Layer.provide(
-          localExecutorLayer({
-            instanceDirectory: instance,
-            repositoryUrl: () => remote,
-            interruptGrace: "100 millis",
-            harnessReadiness: harnessReady,
-            ...options.executor,
-          }).pipe(Layer.provide(options.platform ?? NodeServices.layer)),
+          stepExecutorLayer(configuration, []).pipe(
+            Layer.provide(MarcbachmannCelLayer),
+            Layer.provide(
+              localExecutorLayer({
+                instanceDirectory: instance,
+                repositoryUrl: () => remote,
+                interruptGrace: "100 millis",
+                harnessReadiness: harnessReady,
+                ...options.executor,
+              }).pipe(Layer.provide(options.platform ?? NodeServices.layer)),
+            ),
+            Layer.provide(fixedConfigLayer(configuration)),
+            Layer.provide(testAppLayer),
+          ),
         ),
-        Layer.provide(fixedConfigLayer(config)),
-        Layer.provide(testAppLayer),
+        Layer.provide(options.credentials ?? credentialLayer),
+        Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
+        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(alwaysHoldsLayer),
       ),
     ),
-    Layer.provide(options.credentials ?? credentialLayer),
-    Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
-    Layer.provide(claudeLoginLockLayer),
-    Layer.provide(alwaysHoldsLayer),
   );
 
 export const withLocalEngine = <A, E, R>(

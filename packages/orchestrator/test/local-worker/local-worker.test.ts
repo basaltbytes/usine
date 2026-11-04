@@ -146,6 +146,7 @@ const pullRequestParent =
           request.cwd,
         );
       }
+
       const head = (yield* output("git", ["rev-parse", "HEAD"], request.cwd)).trim();
       yield* fileSystem.writeFileString(
         `${request.cwd}/.test-pull-request.json`,
@@ -220,12 +221,14 @@ const withGitHubEngine = <A, E, R>(
       Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, github)),
       Layer.provide(NodeServices.layer),
     );
+    const decodedValue2 = yield* config;
+    const decodedValue3 = yield* config;
     const engine = localEngineLayer(instance).pipe(
       Layer.provide(
-        stepExecutorLayer(config, []).pipe(
+        stepExecutorLayer(decodedValue2, []).pipe(
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(executor),
-          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(fixedConfigLayer(decodedValue3)),
           Layer.provide(testAppLayer),
         ),
       ),
@@ -244,7 +247,9 @@ describe("local worker", () => {
         const fs = yield* FileSystem.FileSystem;
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-preflight-" });
         const instance = InstanceDirectory.make(directory);
-        const runtime = localLayer(instance, config, [testAgent.brain], {
+        const configDecoded1 = yield* config;
+        const decodedValue5 = yield* config;
+        const runtime = localLayer(instance, configDecoded1, [testAgent.brain], {
           harnessReadiness: harnessUnavailable,
         }).pipe(
           Layer.provide(MarcbachmannCelLayer),
@@ -252,11 +257,12 @@ describe("local worker", () => {
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(claudeLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
-          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(fixedConfigLayer(decodedValue5)),
           Layer.provide(testAppLayer),
         );
         const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
         assert.strictEqual(error._tag, "WorkerCapabilityError");
+
         assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
@@ -280,6 +286,7 @@ describe("local worker", () => {
             assert.strictEqual(outcome._tag, "Failed");
             if (outcome._tag === "Failed") assert.strictEqual(outcome.failure._tag, "AgentFailure");
             const fs = yield* FileSystem.FileSystem;
+
             assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
           }),
       ),
@@ -300,6 +307,7 @@ describe("local worker", () => {
             const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
             assert.deepStrictEqual(attemptFailures(snapshot.attempts), [["AgentFailure", refusal]]);
             const fs = yield* FileSystem.FileSystem;
+
             assert(!(yield* fs.exists(`${instance}/.usine/workers/local/attempts`)));
           }),
       );
@@ -430,9 +438,14 @@ describe("local worker", () => {
           Layer.provide(claudeLoginLockLayer),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
+        const decodedValue9 = yield* config;
+        const decodedValue10 = yield* config;
         const budgetConfig = UsineConfig.make({
-          ...config,
-          settings: Settings.make({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
+          ...decodedValue9,
+          settings: Settings.make({
+            ...decodedValue10.settings,
+            maxAttemptMinutes: Option.some(1),
+          }),
         });
         const runtime = stepExecutorLayer(budgetConfig, []).pipe(
           Layer.provide(MarcbachmannCelLayer),
@@ -589,7 +602,9 @@ describe("local worker", () => {
             );
             if (phase === "diagnostic") {
               const error = yield* preparing.pipe(Effect.flip);
-              const encoded = Schema.encodeSync(Schema.fromJsonString(ExecutorError))(error);
+              const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(ExecutorError))(
+                error,
+              );
               assert(!encoded.includes(TOKEN));
               assert(encoded.includes("[REDACTED]"));
             } else {
@@ -600,10 +615,14 @@ describe("local worker", () => {
               assert(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
             }
             if (phase === "preflight" || phase === "credential") {
-              assert(!(yield* fileSystem.exists(`${root}/.usine/workers/local/attempts`)));
+              const decodedValue11 = yield* fileSystem.exists(
+                `${root}/.usine/workers/local/attempts`,
+              );
+              assert(!decodedValue11);
               return;
             }
             assert.throws(() => Redacted.value(credential));
+
             assert(!(yield* fileSystem.exists(staging)));
             const entries = yield* fileSystem.readDirectory(
               `${root}/.usine/workers/local/attempts`,
@@ -624,6 +643,7 @@ describe("local worker", () => {
         const remote = yield* makeRemote(root);
         const seed = `${root}/seed`;
         yield* run("git", ["commit", "--allow-empty", "-m", "PR-only change"], seed);
+
         const prHead = (yield* output("git", ["rev-parse", "HEAD"], seed)).trim();
         yield* run("git", ["push", "origin", "HEAD:refs/pull/63/head"], seed);
         const issued: Array<Redacted.Redacted<string>> = [];
@@ -669,13 +689,16 @@ describe("local worker", () => {
             Effect.gen(function* () {
               const prepared = yield* executor.prepare(request);
               assert.strictEqual(prepared.workspace.spec.baseCommit, prHead);
-              assert.strictEqual(
-                (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
-                prHead,
+              const decodedValue14 = yield* output(
+                "git",
+                ["rev-parse", "HEAD"],
+                prepared.workspace.worktree,
               );
+              assert.strictEqual(decodedValue14.trim(), prHead);
               return prepared;
             }),
           );
+
           assert(!(yield* fileSystem.exists(prepared.workspace.worktree)));
           const registration = yield* output("git", [
             "--git-dir",
@@ -734,6 +757,7 @@ describe("local worker", () => {
         const strayFile = path.join(reposRoot, ".DS_Store");
         yield* fileSystem.makeDirectory(reposRoot, { recursive: true });
         yield* run("git", ["clone", "--bare", remote, cache]);
+
         const commit = (yield* output("git", [
           "--git-dir",
           cache,
@@ -761,7 +785,9 @@ describe("local worker", () => {
             message: Array.isArray(message) ? message.map(String).join(" ") : String(message),
           });
         });
-        const runtime = localLayer(instance, config, [], {
+        const configDecoded2 = yield* config;
+        const decodedValue17 = yield* config;
+        const runtime = localLayer(instance, configDecoded2, [], {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
@@ -770,7 +796,7 @@ describe("local worker", () => {
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(claudeLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
-          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(fixedConfigLayer(decodedValue17)),
           Layer.provide(testAppLayer),
         );
         yield* Effect.asVoid(RunEngine).pipe(
@@ -831,9 +857,11 @@ describe("local worker", () => {
             attemptRuntime: stubAttemptRuntime(new StubStorage(), (context) =>
               Effect.gen(function* () {
                 environments.push(context.request.environment);
-                identities.push(
-                  (yield* commitAsChild(context.request.cwd, context.request.environment)).trim(),
+                const decodedValue18 = yield* commitAsChild(
+                  context.request.cwd,
+                  context.request.environment,
                 );
+                identities.push(decodedValue18.trim());
                 return yield* completes(context);
               }),
             ),
@@ -973,7 +1001,7 @@ describe("local worker", () => {
             intervene: () => Effect.die("unused"),
             sweep: Effect.void,
           });
-          const single = Schema.decodeSync(UsineConfig)({
+          const single = yield* Schema.decodeEffect(UsineConfig)({
             version: 1,
             repos: [{ name: "acme/demo" }],
             workers: [{ name: "worker", kind, max_concurrent_attempts: 1 }],
@@ -981,6 +1009,7 @@ describe("local worker", () => {
           const failed = yield* Effect.gen(function* () {
             const selected = submission(9);
             const runId = RunId.make(`bot-login-${kind}`);
+
             return yield* (yield* StepExecutor)
               .execute(
                 StepExecution.make({
@@ -1091,6 +1120,7 @@ describe("local worker", () => {
         Effect.gen(function* () {
           const path = yield* Path.Path;
           const fileSystem = yield* FileSystem.FileSystem;
+
           assert(
             !(yield* fileSystem.exists(path.join(instance, ".usine", "workers"))),
             "preflight must not create worker state",
@@ -1265,7 +1295,9 @@ describe("local worker", () => {
             assert.strictEqual(newer._tag, "Claimed");
             assert.strictEqual(older._tag, "Claimed");
             if (newer._tag !== "Claimed" || older._tag !== "Claimed") return;
+
             assert.strictEqual((yield* engine.inspect(newer.runId)).run.state._tag, "Pending");
+
             assert.strictEqual((yield* engine.inspect(older.runId)).run.state._tag, "Pending");
 
             yield* waitFor(engine, first.runId, "Succeeded");
@@ -1306,6 +1338,7 @@ describe("local worker", () => {
               }
             }
             const path = yield* Path.Path;
+
             const attempts = yield* (yield* FileSystem.FileSystem).readDirectory(
               path.join(instance, ".usine", "workers", "local", "attempts"),
             );

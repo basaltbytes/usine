@@ -29,10 +29,11 @@ export const runConfigCommand = Effect.fn("Cli.config")(
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
     const { instance, number } = yield* initializeConfiguration(directory);
+    const entities = configurationEntities(instance);
     const resolveKey = (
       key: ConfigurationEntityKey,
     ): Effect.Effect<ConfigurationEntityKey, ConfigCommandError> =>
-      Effect.fromOption(resolveConfigurationEntityKey(configurationEntities(instance), key), () =>
+      Effect.fromOption(resolveConfigurationEntityKey(entities, key), () =>
         ConfigCommandError.make({
           message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
         }),
@@ -70,11 +71,9 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         return yield* Console.log(`Exported revision ${number} to ${resolve(command.folder)}.`);
       case "ConfigImportCommand": {
         const imported = yield* folder.load(InstanceDirectory.make(resolve(command.folder)));
-        return yield* save(
-          number,
-          configurationDiff(configurationEntities(instance), configurationEntities(imported)),
-          command.message,
-        );
+        const before = configurationEntities(instance);
+        const after = configurationEntities(imported);
+        return yield* save(number, configurationDiff(before, after), command.message);
       }
       case "ConfigLogCommand": {
         const entityFilter = yield* Option.match(command.entity, {

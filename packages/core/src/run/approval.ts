@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { closedStruct } from "../closed-struct.ts";
 import { OperatorActor } from "../operator.ts";
 
@@ -9,7 +9,10 @@ export const ApprovalChannel = Schema.Literals(APPROVAL_CHANNELS);
 export type ApprovalChannel = typeof ApprovalChannel.Type;
 
 /** Older approvals can have no recorded approver. */
-export class ApprovalSource extends Schema.Class<ApprovalSource>("ApprovalSource")(
+export class ApprovalSource extends Schema.Class<
+  ApprovalSource,
+  Brand.Brand<"@usine/core/run/approval/ApprovalSource">
+>("ApprovalSource")(
   closedStruct({
     /** The authenticated channel through which approval arrived. */
     channel: ApprovalChannel,
@@ -22,7 +25,10 @@ export class ApprovalSource extends Schema.Class<ApprovalSource>("ApprovalSource
  * A Run's approval. `approvedAt` is when the approval Event arrived, and `source` is `None` for
  * older records.
  */
-export class RunApproval extends Schema.Class<RunApproval>("RunApproval")({
+export class RunApproval extends Schema.Class<
+  RunApproval,
+  Brand.Brand<"@usine/core/run/approval/RunApproval">
+>("RunApproval")({
   /** The time the approval event arrived. */
   approvedAt: Schema.DateTimeUtc,
   /** The approval channel and operator, or `None` for older records. */

@@ -1,13 +1,19 @@
+import { InstanceScope } from "@usine/core/access";
 import { GitHubUserId, PermissionGrant, administratorPermissions } from "@usine/core/access";
 import { OperatorActor, OperatorLogin } from "@usine/core/operator";
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 
 export { GitHubUserId } from "@usine/core/access";
-export class GitHubIdentity extends Schema.Class<GitHubIdentity>("GitHubIdentity")({
+export class GitHubIdentity extends Schema.Class<
+  GitHubIdentity,
+  Brand.Brand<"@usine/server/auth/model/GitHubIdentity">
+>("GitHubIdentity")({
   login: OperatorLogin,
   id: GitHubUserId,
 }) {}
-export class Member extends Schema.Class<Member>("Member")({
+export class Member extends Schema.Class<Member, Brand.Brand<"@usine/server/auth/model/Member">>(
+  "Member",
+)({
   ...GitHubIdentity.fields,
   addedAt: Schema.Finite,
   addedBy: OperatorActor,
@@ -22,7 +28,10 @@ export const TokenName = Schema.String.check(Schema.isMinLength(1), Schema.isMax
   Schema.brand("TokenName"),
 );
 export type TokenName = typeof TokenName.Type;
-export class InstanceToken extends Schema.Class<InstanceToken>("InstanceToken")({
+export class InstanceToken extends Schema.Class<
+  InstanceToken,
+  Brand.Brand<"@usine/server/auth/model/InstanceToken">
+>("InstanceToken")({
   id: TokenId,
   memberId: GitHubUserId,
   name: TokenName,
@@ -32,7 +41,7 @@ export class InstanceToken extends Schema.Class<InstanceToken>("InstanceToken")(
   expiresAt: Schema.Finite,
   scopes: Schema.Array(PermissionGrant).pipe(
     Schema.withDecodingDefaultKey(
-      Effect.succeed([{ permission: "admin", scope: { _tag: "Instance" } }]),
+      Effect.succeed([{ permission: "admin", scope: InstanceScope.make() }]),
     ),
     Schema.withConstructorDefault(Effect.succeed(administratorPermissions)),
   ),
@@ -42,7 +51,10 @@ export class InstanceToken extends Schema.Class<InstanceToken>("InstanceToken")(
     return now - this.lastUsedAt < 60_000 ? this : InstanceToken.make({ ...this, lastUsedAt: now });
   }
 }
-export class AuthError extends Schema.TaggedError<AuthError>("AuthError")("AuthError", {
+export class AuthError extends Schema.TaggedError<
+  AuthError,
+  Brand.Brand<"@usine/server/auth/model/AuthError">
+>()("AuthError", {
   status: Schema.Literals([400, 401, 403, 409, 429, 500, 502, 503]),
   message: Schema.String,
 }) {}

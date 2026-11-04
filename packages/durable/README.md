@@ -111,3 +111,7 @@ A child's `SessionOperationError` is recorded as an infrastructure failure. This
 `DurableHarnessOptions.openStorage` supplies pi-durable storage independently of the engine's runtime database. The Node composition uses a separate `.usine/durable.sqlite`; pi-durable owns its schema and migrations. `test/storage.test.ts` runs the pinned pi-durable storage conformance suite against `MemoryStorage` and Node SQLite as part of `pnpm test`. See the [persistence inventory](../../docs/persistence.md) for the storage boundaries and adapter test matrix.
 
 The `/backup` operation requires `FileSystem` and `Path`. Provide `NodeServices.layer` at the application entry point.
+
+## Schema contracts
+
+Attempt runtime records and errors use nominal Schema brands. Task-input and failed-outcome encoders are pure functions over validated values. Encoding failures in runtime operations are defects; storage failures use the durable harness error channel.

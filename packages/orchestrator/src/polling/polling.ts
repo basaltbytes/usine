@@ -29,6 +29,7 @@ import {
   GitHubPolling,
 } from "@usine/github/polling";
 import {
+  type Brand,
   Clock,
   Context,
   DateTime,
@@ -79,9 +80,10 @@ const ITEM_CONCURRENCY = 4;
 const WatchKey = Schema.NonEmptyString.pipe(Schema.brand("GitHubPollWatchKey"));
 type WatchKey = typeof WatchKey.Type;
 
-class StoredPollCursor extends Schema.Class<StoredPollCursor>(
-  "@usine/orchestrator/StoredPollCursor",
-)({
+class StoredPollCursor extends Schema.Class<
+  StoredPollCursor,
+  Brand.Brand<"@usine/orchestrator/polling/polling/StoredPollCursor">
+>("@usine/orchestrator/StoredPollCursor")({
   boardVersion: Schema.Literal(5),
   openPullRequests: Schema.Array(OpenPullRequest),
   // A cursor written before polling recorded base branch heads has none, so every base branch
@@ -255,6 +257,7 @@ export class PollingTriggers extends Context.Service<
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
         const key = cursorKey(watched.repository);
         const now = yield* Clock.currentTimeMillis;
+
         const lastCheck = (yield* Ref.get(openIssueChecks)).get(key);
         if (
           lastCheck !== undefined &&
@@ -299,6 +302,7 @@ export class PollingTriggers extends Context.Service<
           // begin, including on the first cycle after `usine up`.
           const detected = yield* github.changes(watched.repository.name, stored.cursor);
           yield* hints.defer(detected.backoffUntil);
+
           const retrying = (yield* Ref.get(retriedFailingItems)).repositories.has(
             cursorKey(watched.repository),
           )
@@ -484,6 +488,7 @@ export class PollingTriggers extends Context.Service<
 
       // Bind only dependencies, preserving the caller's clock, logging and
       // tracing context on each cycle instead of capturing them at layer build.
+
       const repositoryServices = (yield* Effect.context<
         Effect.Services<ReturnType<typeof pollRepository>>
       >()).pipe(
@@ -509,6 +514,7 @@ export class PollingTriggers extends Context.Service<
               ? retried
               : { instance: Option.some(instance), repositories: new Set<CursorKey>() },
           );
+
           const paused = new Set(
             (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
           );
@@ -519,6 +525,7 @@ export class PollingTriggers extends Context.Service<
               });
             }
           }
+
           const resolved = (yield* resolveTriggerLoops(instance)).filter(
             ({ loop }) => !paused.has(loop.name),
           );
@@ -673,9 +680,11 @@ export class PollingTriggers extends Context.Service<
             item: Option.getOrUndefined(Option.map(hint.item, (item) => item.number)),
           });
           yield* hints.awaitBackoff;
+
           const paused = new Set(
             (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
           );
+
           const resolved = (yield* resolveTriggerLoops(instance)).filter(
             ({ loop }) => !paused.has(loop.name),
           );

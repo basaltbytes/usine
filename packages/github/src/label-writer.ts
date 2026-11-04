@@ -1,5 +1,5 @@
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
+import { type Brand, Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "./github-app.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
@@ -7,9 +7,10 @@ import type { GitHubAppError } from "./error.ts";
 import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./polling/labels.ts";
 
 /** A label definition in the format of GitHub's create-label endpoint. */
-export class NewRepositoryLabel extends Schema.Class<NewRepositoryLabel>(
-  "@usine/github/NewRepositoryLabel",
-)({
+export class NewRepositoryLabel extends Schema.Class<
+  NewRepositoryLabel,
+  Brand.Brand<"@usine/github/label-writer/NewRepositoryLabel">
+>("@usine/github/NewRepositoryLabel")({
   /** The label name to create in the repository, preserving case. */
   name: RepositoryLabelName,
   /** Six hexadecimal digits without `#`; `None` omits the color so GitHub chooses its default. */

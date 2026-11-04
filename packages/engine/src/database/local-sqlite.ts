@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import {
+  type Brand,
   Context,
   Effect,
   FileSystem,
@@ -244,9 +245,10 @@ export const runReaderLayer = (
 };
 
 /** An error from a backup, with both paths because a copy error can come from either file. */
-export class RuntimeStoreBackupError extends Schema.TaggedError<RuntimeStoreBackupError>(
-  "@usine/engine/RuntimeStoreBackupError",
-)("RuntimeStoreBackupError", {
+export class RuntimeStoreBackupError extends Schema.TaggedError<
+  RuntimeStoreBackupError,
+  Brand.Brand<"@usine/engine/database/local-sqlite/RuntimeStoreBackupError">
+>("@usine/engine/RuntimeStoreBackupError")("RuntimeStoreBackupError", {
   /**
    * The failed phase: `open` checks or opens the source, `stage` prepares a temporary file, `copy`
    * runs SQLite backup, and `publish` creates the destination hard link.

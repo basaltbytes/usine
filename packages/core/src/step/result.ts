@@ -1,8 +1,11 @@
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { CommitSha } from "../repository.ts";
 
 /** A commit between the workspace base and the final HEAD. */
-export class Commit extends Schema.TaggedClass<Commit>("StepResult/Commit")("Commit", {
+export class Commit extends Schema.TaggedClass<
+  Commit,
+  Brand.Brand<"@usine/core/step/result/Commit">
+>("StepResult/Commit")("Commit", {
   /** The full commit ID found between the checkout base and final HEAD. */
   sha: CommitSha,
   /** The commit subject recorded by Git. */
@@ -10,19 +13,19 @@ export class Commit extends Schema.TaggedClass<Commit>("StepResult/Commit")("Com
 }) {}
 
 /** A pull request the agent created or updated during the Attempt. */
-export class PullRequest extends Schema.TaggedClass<PullRequest>("StepResult/PullRequest")(
-  "PullRequest",
-  {
-    /** The pull request number within the attempt's repository. */
-    number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-    /** The GitHub pull request URL, encoded as a string for storage. */
-    url: Schema.URLFromString,
-    /** The pushed head, or `None` for facts recorded before CI handoffs. */
-    head: Schema.OptionFromOptionalKey(CommitSha).pipe(
-      Schema.withConstructorDefault(Effect.succeedNone),
-    ),
-  },
-) {}
+export class PullRequest extends Schema.TaggedClass<
+  PullRequest,
+  Brand.Brand<"@usine/core/step/result/PullRequest">
+>("StepResult/PullRequest")("PullRequest", {
+  /** The pull request number within the attempt's repository. */
+  number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  /** The GitHub pull request URL, encoded as a string for storage. */
+  url: Schema.URLFromString,
+  /** The pushed head, or `None` for facts recorded before CI handoffs. */
+  head: Schema.OptionFromOptionalKey(CommitSha).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
+}) {}
 
 /**
  * - `issue-comment`: in an issue or pull request conversation.
@@ -36,7 +39,10 @@ export type CommentKind = typeof CommentKind.Type;
  * A GitHub comment or review that the agent created or updated on the Run's Item. `at` is the
  * creation time of a comment or submission time of a review, or `None` for older records.
  */
-export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("Comment", {
+export class Comment extends Schema.TaggedClass<
+  Comment,
+  Brand.Brand<"@usine/core/step/result/Comment">
+>("StepResult/Comment")("Comment", {
   /** The GitHub URL of the comment or submitted review, encoded as a string for storage. */
   url: Schema.URLFromString,
   /** Whether this is a conversation comment, submitted review, or diff comment. */
@@ -50,7 +56,10 @@ export const StepResultFact = Schema.Union([Commit, PullRequest, Comment]);
 export type StepResultFact = typeof StepResultFact.Type;
 
 /** The agent's final message and the facts kept after workspace cleanup. */
-export class StepResult extends Schema.Class<StepResult>("StepResult")({
+export class StepResult extends Schema.Class<
+  StepResult,
+  Brand.Brand<"@usine/core/step/result/StepResult">
+>("StepResult")({
   /** The agent's final response for the completed step. */
   message: Schema.NonEmptyString,
   /** The commits and GitHub writes retained as evidence after checkout cleanup. */

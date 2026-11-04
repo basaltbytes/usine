@@ -2,13 +2,14 @@ import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RunId } from "@usine/core/run";
 import { TranscriptSequence } from "@usine/engine/transcript";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { FailureView } from "./attempt.ts";
 
 /** An Attempt failure in the transcript with only displayable details. */
-export class FailedTranscriptView extends Schema.TaggedClass<FailedTranscriptView>(
-  "@usine/orchestrator/FailedTranscriptView",
-)("Failed", {
+export class FailedTranscriptView extends Schema.TaggedClass<
+  FailedTranscriptView,
+  Brand.Brand<"@usine/orchestrator/operator/transcript/FailedTranscriptView">
+>("@usine/orchestrator/FailedTranscriptView")("Failed", {
   /** The attempt failure with safe operator-facing details. */
   failure: FailureView,
 }) {}
@@ -34,9 +35,10 @@ export const TranscriptPayload = Schema.Union([
 export type TranscriptPayload = typeof TranscriptPayload.Type;
 
 /** A stored Attempt channel message with its sequence, direction, and receipt time. */
-export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
-  "@usine/orchestrator/TranscriptEventView",
-)({
+export class TranscriptEventView extends Schema.Class<
+  TranscriptEventView,
+  Brand.Brand<"@usine/orchestrator/operator/transcript/TranscriptEventView">
+>("@usine/orchestrator/TranscriptEventView")({
   /** The durable transcript sequence used for paging. */
   sequence: TranscriptSequence,
   /** The attempt associated with this entry. */
@@ -54,9 +56,10 @@ export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
 }) {}
 
 /** The start of the next earlier transcript page within one Attempt. */
-export class TranscriptPageCursor extends Schema.Class<TranscriptPageCursor>(
-  "@usine/orchestrator/TranscriptPageCursor",
-)({
+export class TranscriptPageCursor extends Schema.Class<
+  TranscriptPageCursor,
+  Brand.Brand<"@usine/orchestrator/operator/transcript/TranscriptPageCursor">
+>("@usine/orchestrator/TranscriptPageCursor")({
   /** The attempt associated with this entry. */
   attemptId: AttemptId,
   /** The exclusive sequence boundary for reading earlier rows of this attempt. */
@@ -64,22 +67,25 @@ export class TranscriptPageCursor extends Schema.Class<TranscriptPageCursor>(
 }) {}
 
 /** A request for the newest bounded transcript window when a Run opens. */
-export class ColdTranscriptRequest extends Schema.TaggedClass<ColdTranscriptRequest>(
-  "@usine/orchestrator/ColdTranscriptRequest",
-)("ColdTranscriptRequest", {}) {}
+export class ColdTranscriptRequest extends Schema.TaggedClass<
+  ColdTranscriptRequest,
+  Brand.Brand<"@usine/orchestrator/operator/transcript/ColdTranscriptRequest">
+>("@usine/orchestrator/ColdTranscriptRequest")("ColdTranscriptRequest", {}) {}
 
 /** A request for transcript events after the last seen sequence. */
-export class TailTranscriptRequest extends Schema.TaggedClass<TailTranscriptRequest>(
-  "@usine/orchestrator/TailTranscriptRequest",
-)("TailTranscriptRequest", {
+export class TailTranscriptRequest extends Schema.TaggedClass<
+  TailTranscriptRequest,
+  Brand.Brand<"@usine/orchestrator/operator/transcript/TailTranscriptRequest">
+>("@usine/orchestrator/TailTranscriptRequest")("TailTranscriptRequest", {
   /** The exclusive sequence boundary for reading newer rows across the run. */
   after: TranscriptSequence,
 }) {}
 
 /** A request for an earlier page before a sequence within one Attempt. */
-export class EarlierTranscriptRequest extends Schema.TaggedClass<EarlierTranscriptRequest>(
-  "@usine/orchestrator/EarlierTranscriptRequest",
-)("EarlierTranscriptRequest", {
+export class EarlierTranscriptRequest extends Schema.TaggedClass<
+  EarlierTranscriptRequest,
+  Brand.Brand<"@usine/orchestrator/operator/transcript/EarlierTranscriptRequest">
+>("@usine/orchestrator/EarlierTranscriptRequest")("EarlierTranscriptRequest", {
   /** The attempt associated with this entry. */
   attemptId: AttemptId,
   /** The exclusive sequence boundary for reading older rows of the requested attempt. */
@@ -96,9 +102,10 @@ export const TranscriptRequest = Schema.Union([
 export type TranscriptRequest = typeof TranscriptRequest.Type;
 
 /** The requested Attempt isn't in the Run whose transcript is being read. */
-export class TranscriptAttemptNotFoundError extends Schema.TaggedError<TranscriptAttemptNotFoundError>(
-  "@usine/orchestrator/TranscriptAttemptNotFoundError",
-)("TranscriptAttemptNotFoundError", {
+export class TranscriptAttemptNotFoundError extends Schema.TaggedError<
+  TranscriptAttemptNotFoundError,
+  Brand.Brand<"@usine/orchestrator/operator/transcript/TranscriptAttemptNotFoundError">
+>("@usine/orchestrator/TranscriptAttemptNotFoundError")("TranscriptAttemptNotFoundError", {
   /** The run associated with this entry. */
   runId: RunId,
   /** The attempt associated with this entry. */

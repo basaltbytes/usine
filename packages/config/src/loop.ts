@@ -3,7 +3,7 @@ import { AgentName } from "@usine/core/agent";
 import { CycleLimit, DEFAULT_CYCLE_LIMIT } from "@usine/core/cycle-budget";
 import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
 import { StepName } from "@usine/core/step";
-import { Effect, Option, Predicate, Schema } from "effect";
+import { type Brand, Effect, Option, Predicate, Schema } from "effect";
 import {
   ExpressionEngine,
   ExpressionEvaluationError,
@@ -45,7 +45,9 @@ export type LoopApproval = typeof LoopApproval.Type;
  * A parsed loop definition from `projects/<project>/loops/<loop>.md` or the legacy
  * `loops/<name>.md` format (ADR 0031).
  */
-export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
+export class LoopFile extends Schema.Class<LoopFile, Brand.Brand<"@usine/config/loop/LoopFile">>(
+  "@usine/config/LoopFile",
+)({
   /** The loop identifier derived from its path; version 2 uses `project/loop`. */
   name: LoopFileName,
   /** The stream and condition checked before opening a run. */
@@ -85,14 +87,15 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
 }) {}
 
 /** A loop that isn't run because its file failed to load or a reference didn't resolve. */
-export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("@usine/config/QuarantinedLoop")(
-  {
-    /** The rejected file path relative to the instance folder. */
-    file: InstancePath,
-    /** The loading or validation failure that excluded this file. */
-    error: ConfigFileError,
-  },
-) {}
+export class QuarantinedLoop extends Schema.Class<
+  QuarantinedLoop,
+  Brand.Brand<"@usine/config/loop/QuarantinedLoop">
+>("@usine/config/QuarantinedLoop")({
+  /** The rejected file path relative to the instance folder. */
+  file: InstancePath,
+  /** The loading or validation failure that excluded this file. */
+  error: ConfigFileError,
+}) {}
 
 /**
  * Returns the relative Markdown path for `name`, using `projects/<project>/loops/<loop>.md` for a

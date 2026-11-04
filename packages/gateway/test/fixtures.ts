@@ -30,14 +30,19 @@ export const settingsLayer = (
 ) =>
   SettingsInForce.layer.pipe(
     Layer.provideMerge(
-      Layer.succeed(GatewaySettings)({
-        domain: DOMAIN,
-        github,
-        providers,
-        egress: Result.getOrThrow(parseEgressAllowlist(TEST_ALLOWLIST)),
-        adminToken: Schema.decodeSync(AdminToken)(ADMIN_TOKEN_VALUE),
-        callerKey: Schema.decodeSync(CallerKey)(callerKey),
-      }),
+      Layer.effect(
+        GatewaySettings,
+        Effect.gen(function* () {
+          return {
+            domain: DOMAIN,
+            github,
+            providers,
+            egress: Result.getOrThrow(parseEgressAllowlist(TEST_ALLOWLIST)),
+            adminToken: yield* Schema.decodeEffect(AdminToken)(ADMIN_TOKEN_VALUE),
+            callerKey: yield* Schema.decodeEffect(CallerKey)(callerKey),
+          };
+        }),
+      ),
     ),
   );
 

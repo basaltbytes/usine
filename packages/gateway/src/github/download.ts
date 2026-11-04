@@ -1,4 +1,4 @@
-import { Effect, Option, Result, Schema, Stream } from "effect";
+import { type Brand, Effect, Option, Result, Schema, Stream } from "effect";
 import { Headers, HttpClient, type HttpClientResponse } from "effect/http";
 import type { Attachment } from "../attachment/attachment.ts";
 import { absoluteUrl, afterPrefix, type GitHubOrigins, type GitHubRoute } from "./github.ts";
@@ -8,9 +8,10 @@ const API_DOWNLOAD_PATH =
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 3;
 
-class DownloadRedirectFailed extends Schema.TaggedError<DownloadRedirectFailed>(
-  "DownloadRedirectFailed",
-)("DownloadRedirectFailed", {
+class DownloadRedirectFailed extends Schema.TaggedError<
+  DownloadRedirectFailed,
+  Brand.Brand<"@usine/gateway/github/download/DownloadRedirectFailed">
+>()("DownloadRedirectFailed", {
   reason: Schema.Literals(["invalid-location", "redirect-limit", "upstream-failure"]),
 }) {}
 

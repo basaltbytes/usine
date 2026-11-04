@@ -1,7 +1,7 @@
 import type { BotLogin } from "@usine/core/worker";
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
+import { type Brand, Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient } from "effect/http";
 import { GitHubItemNotFoundError, type GitHubAppError } from "./error.ts";
 import { GitHubApp } from "./github-app.ts";
@@ -13,37 +13,37 @@ import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./po
 const MAX_TIMELINE_PAGES = 10;
 
 /** A label the bot added to the item; `label` is its current GitHub definition. */
-export class LabelAdded extends Schema.TaggedClass<LabelAdded>("@usine/github/LabelAdded")(
-  "LabelAdded",
-  {
-    /** The UTC time GitHub recorded for the label change. */
-    at: Schema.DateTimeUtc,
-    /** The label's current definition, which can differ from its definition at the change time. */
-    label: RepositoryLabel,
-  },
-) {}
+export class LabelAdded extends Schema.TaggedClass<
+  LabelAdded,
+  Brand.Brand<"@usine/github/item-history/LabelAdded">
+>("@usine/github/LabelAdded")("LabelAdded", {
+  /** The UTC time GitHub recorded for the label change. */
+  at: Schema.DateTimeUtc,
+  /** The label's current definition, which can differ from its definition at the change time. */
+  label: RepositoryLabel,
+}) {}
 
 /** A label the bot removed from the item; `label` is its current GitHub definition. */
-export class LabelRemoved extends Schema.TaggedClass<LabelRemoved>("@usine/github/LabelRemoved")(
-  "LabelRemoved",
-  {
-    /** The UTC time GitHub recorded for the label change. */
-    at: Schema.DateTimeUtc,
-    /** The label's current definition, which can differ from its definition at the change time. */
-    label: RepositoryLabel,
-  },
-) {}
+export class LabelRemoved extends Schema.TaggedClass<
+  LabelRemoved,
+  Brand.Brand<"@usine/github/item-history/LabelRemoved">
+>("@usine/github/LabelRemoved")("LabelRemoved", {
+  /** The UTC time GitHub recorded for the label change. */
+  at: Schema.DateTimeUtc,
+  /** The label's current definition, which can differ from its definition at the change time. */
+  label: RepositoryLabel,
+}) {}
 
 /** A comment the bot posted on the item; `url` links to it. */
-export class Commented extends Schema.TaggedClass<Commented>("@usine/github/Commented")(
-  "Commented",
-  {
-    /** The UTC time GitHub recorded for the comment's creation. */
-    at: Schema.DateTimeUtc,
-    /** The URL of the bot's comment. */
-    url: Schema.NonEmptyString,
-  },
-) {}
+export class Commented extends Schema.TaggedClass<
+  Commented,
+  Brand.Brand<"@usine/github/item-history/Commented">
+>("@usine/github/Commented")("Commented", {
+  /** The UTC time GitHub recorded for the comment's creation. */
+  at: Schema.DateTimeUtc,
+  /** The URL of the bot's comment. */
+  url: Schema.NonEmptyString,
+}) {}
 
 /** The state of a submitted pull request review. */
 export const ReviewState = Schema.Literals([
@@ -55,7 +55,10 @@ export const ReviewState = Schema.Literals([
 export type ReviewState = typeof ReviewState.Type;
 
 /** A review the bot submitted on the pull request; `url` links to it. */
-export class Reviewed extends Schema.TaggedClass<Reviewed>("@usine/github/Reviewed")("Reviewed", {
+export class Reviewed extends Schema.TaggedClass<
+  Reviewed,
+  Brand.Brand<"@usine/github/item-history/Reviewed">
+>("@usine/github/Reviewed")("Reviewed", {
   /** The review submission time in UTC, or its creation time when GitHub omits submission time. */
   at: Schema.DateTimeUtc,
   /** The URL of the submitted review. */

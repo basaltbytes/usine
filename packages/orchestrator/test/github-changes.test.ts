@@ -1,3 +1,4 @@
+import { AttemptSummary } from "@usine/engine/run-reader";
 import { LocalWorker, ExeDevWorker } from "@usine/config/factory";
 import { testAppLayer } from "./support/github-app.ts";
 import { assert, describe, it } from "@effect/vitest";
@@ -136,7 +137,7 @@ const reviewRun = RunSummary.make({
   itemKey,
   run: run(reviewRunId, "review-issue"),
   pullRequestUrl: null,
-  attempts: [review],
+  attempts: [AttemptSummary.make(review)],
   resolvedFailureAttemptId: Option.none(),
   closedAt: Option.none(),
   approval: Option.none(),
@@ -248,7 +249,7 @@ const testLayer = (
             itemKey,
             run: saved.run,
             pullRequestUrl: null,
-            attempts: saved.attempts,
+            attempts: saved.attempts.map((attempt) => AttemptSummary.make(attempt)),
             resolvedFailureAttemptId: Option.none(),
             closedAt: Option.none(),
             approval: Option.none(),
@@ -453,6 +454,7 @@ describe("RunGitHubChanges", () => {
           // Ended Attempts come from the cache; GitHub is asked only about the live one.
           const currentSnapshot = yield* changes.read(workers, runId);
           assert.deepStrictEqual(summary(currentSnapshot), summary(read));
+
           assert.deepStrictEqual((yield* Ref.get(requests)).slice(1), ["2026-10-16T13:02:00.000Z"]);
 
           // A recently ended Attempt is read again until GitHub's record is final.
@@ -468,6 +470,7 @@ describe("RunGitHubChanges", () => {
           yield* TestClock.adjust("1 minute");
           yield* changes.read(workers, runId);
           yield* changes.read(workers, runId);
+
           assert.strictEqual((yield* Ref.get(requests)).length, 4);
         }).pipe(Effect.provide(testLayer(current, requests)));
       }),

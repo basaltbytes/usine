@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Predicate, Redacted, Schema } from "effect";
+import { flow, Effect, Predicate, Redacted, Schema } from "effect";
 import { Attached } from "../src/admin/api.ts";
 import { silentTunnel } from "./tunnel.ts";
 import { ADMIN_TOKEN_VALUE, freeGatewayPorts } from "./fixtures.ts";
@@ -149,7 +149,10 @@ describe("the usine-gateway command", () => {
           });
         const response = await adminRequest("", "POST", payload);
         assert.strictEqual(response.status, 200);
-        const decode = Schema.decodeUnknownSync(Schema.toCodecJson(Attached));
+        const decode = flow(
+          Schema.decodeUnknownEffect(Schema.toCodecJson(Attached)),
+          Effect.runSync,
+        );
         const attached = decode(await response.json());
         const token = Redacted.value(attached.callerToken);
         const call = () =>

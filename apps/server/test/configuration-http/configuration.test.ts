@@ -122,6 +122,7 @@ it("creates, reads, replaces and deletes entities with paginated and filtered re
         "/revisions?kind=nonsense",
       ])
         expect((yield* request("GET", path)).status).toBe(404);
+
       expect((yield* request("GET", "/revisions?limit=0")).status).toBe(400);
     }).pipe(Effect.scoped),
   ));
@@ -174,6 +175,7 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
       });
       expect(secret.status).toBe(422);
       expect(JSON.stringify(secret)).not.toContain("sk-literal-secret");
+
       expect(
         (yield* request("PUT", "/entities/label/ready", {
           expected: 1,
@@ -204,6 +206,7 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
           ],
         },
       });
+
       expect((yield* store.read).number).toBe(1);
     }).pipe(Effect.scoped),
   ));
@@ -234,10 +237,13 @@ it.each(["type:bug", "type:", "notes.md", "type/bug:"])(
             problems: [{ entity: { kind: "label", identifier }, path: ["color"] }],
           },
         });
+
         expect((yield* store.read).number).toBe(1);
-        expect(
-          (yield* request("PUT", path, { expected: 1, value: { name: identifier } })).status,
-        ).toBe(200);
+        const decodedValue5 = yield* request("PUT", path, {
+          expected: 1,
+          value: { name: identifier },
+        });
+        expect(decodedValue5.status).toBe(200);
       }).pipe(Effect.scoped),
     ),
 );
@@ -246,10 +252,14 @@ it("reverts changes as a new revision and identifies entities changed by later r
   Effect.runPromise(
     Effect.gen(function* () {
       const { request } = yield* harness();
+
       expect(
-        (yield* request("PUT", "/entities/label/ready", { expected: 1, value: { name: "ready" } }))
-          .status,
+        (yield* request("PUT", "/entities/label/ready", {
+          expected: 1,
+          value: { name: "ready" },
+        })).status,
       ).toBe(200);
+
       expect(
         (yield* request("PUT", "/entities/label/ready", {
           expected: 2,
@@ -277,14 +287,20 @@ it("reverts changes as a new revision and identifies entities changed by later r
         status: 200,
         body: { number: 4, value: { name: "ready" } },
       });
+
       expect((yield* request("DELETE", "/entities/label/ready", { expected: 4 })).status).toBe(200);
+
       expect((yield* request("POST", "/revisions/5/revert", { expected: 5 })).status).toBe(200);
+
       expect((yield* request("GET", "/entities/label/ready")).status).toBe(200);
-      expect(
-        (yield* request("PUT", "/entities/label/extra", { expected: 6, value: { name: "extra" } }))
-          .status,
-      ).toBe(200);
+      const decodedValue11 = yield* request("PUT", "/entities/label/extra", {
+        expected: 6,
+        value: { name: "extra" },
+      });
+      expect(decodedValue11.status).toBe(200);
+
       expect((yield* request("POST", "/revisions/7/revert", { expected: 7 })).status).toBe(200);
+
       expect((yield* request("GET", "/entities/label/extra")).status).toBe(404);
     }).pipe(Effect.scoped),
   ));
@@ -295,6 +311,7 @@ it("applies API changes to the configuration view and running scheduler, and pau
       const { request, controls, status } = yield* harness();
       const currentPaused = yield* controls.isPaused(LoopName.make("acme-project/implement"));
       expect(currentPaused).toBe(false);
+
       expect(
         (yield* request("PUT", "/entities/worker/local", {
           expected: 1,
@@ -308,6 +325,7 @@ it("applies API changes to the configuration view and running scheduler, and pau
         status: 200,
         body: { workers: [{ name: "local", maxConcurrentAttempts: 3, slots: { capacity: 3 } }] },
       });
+
       expect(
         (yield* request("PUT", "/entities/loop/acme-project%2Freview", {
           expected: 2,
@@ -334,6 +352,7 @@ it("applies API changes to the configuration view and running scheduler, and pau
           ),
         },
       });
+
       expect(
         (yield* request("PUT", "/entities/worker/extra", {
           expected: 3,
@@ -341,8 +360,11 @@ it("applies API changes to the configuration view and running scheduler, and pau
           value: { name: "extra", kind: "local" },
         })).status,
       ).toBe(200);
+
       expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "local"]);
+
       expect((yield* request("POST", "/revisions/4/revert", { expected: 4 })).status).toBe(200);
+
       expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["local"]);
     }).pipe(Effect.scoped),
   ));
@@ -362,6 +384,7 @@ it("preserves encoded identifiers and accepts only one of two writes to the same
         { concurrency: "unbounded" },
       );
       expect(results.map(({ status }) => status).sort()).toEqual([200, 409]);
+
       expect((yield* store.read).number).toBe(2);
       const saved = yield* request("PUT", "/entities/repository/owner%2Frepo", {
         expected: 2,
@@ -383,6 +406,7 @@ it("restores worker order when reverting a move or deletion", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const { request, status } = yield* harness();
+
       expect(
         (yield* request("PUT", "/entities/worker/extra", {
           expected: 1,
@@ -390,6 +414,7 @@ it("restores worker order when reverting a move or deletion", () =>
           position: 0,
         })).status,
       ).toBe(200);
+
       expect(
         (yield* request("PUT", "/entities/worker/local", {
           expected: 2,
@@ -397,13 +422,19 @@ it("restores worker order when reverting a move or deletion", () =>
           position: 0,
         })).status,
       ).toBe(200);
+
       expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["local", "extra"]);
+
       expect((yield* request("POST", "/revisions/3/revert", { expected: 3 })).status).toBe(200);
+
       expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "local"]);
+
       expect((yield* request("DELETE", "/entities/worker/extra", { expected: 4 })).status).toBe(
         200,
       );
+
       expect((yield* request("POST", "/revisions/5/revert", { expected: 5 })).status).toBe(200);
+
       expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "local"]);
     }).pipe(Effect.scoped),
   ));
@@ -447,11 +478,15 @@ it.each(["stale", "storage"] as const)(
             : { status: 500, body: { error: "ConfigurationStoreError" } },
         );
         expect([...workers.keys()]).toEqual(["local"]);
+
         expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["local"]);
+
         expect((yield* current.get).config.workers.map(({ name }) => name)).toEqual(["local"]);
+
         expect((yield* store.read).number).toBe(expected);
         const currentResponse = yield* request("GET", "/entities/worker/extra");
         expect(currentResponse).toMatchObject({ status: 404 });
+
         expect(
           (yield* request("PUT", "/entities/worker/extra", {
             expected,
@@ -463,9 +498,10 @@ it.each(["stale", "storage"] as const)(
         expect(currentSlots).toContainEqual(
           expect.objectContaining({ worker: "extra", capacity: 3 }),
         );
-        expect(
-          (yield* request("DELETE", "/entities/worker/extra", { expected: expected + 1 })).status,
-        ).toBe(200);
+        const decodedValue33 = yield* request("DELETE", "/entities/worker/extra", {
+          expected: expected + 1,
+        });
+        expect(decodedValue33.status).toBe(200);
         expect([...workers.keys()]).toEqual(["local"]);
       }).pipe(Effect.scoped),
     ),
@@ -489,18 +525,22 @@ it.each([
             })).status,
           ).toBe(200);
         }
-        expect(
-          (yield* request("DELETE", `/entities/worker/${removed}`, { expected: 3 })).status,
-        ).toBe(200);
-        expect(
-          (yield* request("DELETE", `/entities/worker/${laterRemoved}`, { expected: 4 })).status,
-        ).toBe(200);
+        const decodedValue35 = yield* request("DELETE", `/entities/worker/${removed}`, {
+          expected: 3,
+        });
+        expect(decodedValue35.status).toBe(200);
+        const decodedValue36 = yield* request("DELETE", `/entities/worker/${laterRemoved}`, {
+          expected: 4,
+        });
+        expect(decodedValue36.status).toBe(200);
         const response = yield* request("POST", "/revisions/4/revert", { expected: 5 });
         expect(response).toMatchObject({
           status: 200,
           body: { number: 6 },
         });
+
         expect((yield* status.slots).map(({ worker }) => worker)).toEqual(expected);
+
         expect((yield* request("GET", `/entities/worker/${laterRemoved}`)).status).toBe(404);
       }).pipe(Effect.scoped),
     ),
@@ -531,9 +571,11 @@ it("restores several deleted workers while preserving later additions and deleti
           before.filter(({ key }) => key.key !== "worker:b" && key.key !== "worker:c"),
         ),
       });
+
       expect((yield* request("DELETE", "/entities/worker/local", { expected: 5 })).status).toBe(
         200,
       );
+
       expect(
         (yield* request("PUT", "/entities/worker/extra", {
           expected: 6,
@@ -541,8 +583,11 @@ it("restores several deleted workers while preserving later additions and deleti
           position: 0,
         })).status,
       ).toBe(200);
+
       expect((yield* request("POST", "/revisions/5/revert", { expected: 7 })).status).toBe(200);
+
       expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "b", "c", "d"]);
+
       expect((yield* request("GET", "/entities/worker/local")).status).toBe(404);
     }).pipe(Effect.scoped),
   ));
@@ -562,6 +607,10 @@ it("serves installation repositories, live labels and supported harnesses, and r
         workerToken: () => unused,
         repositories: Effect.succeed([repository]),
       });
+      const labelCatalog = yield* Schema.decodeEffect(RepositoryLabelCatalog)({
+        entityTag: null,
+        labels: [{ name: "ready", color: "00ff00", description: "Ready" }],
+      });
       const polling = Layer.succeed(GitHubPolling)({
         changes: () => unused,
         baseRefHead: () => unused,
@@ -569,12 +618,7 @@ it("serves installation repositories, live labels and supported harnesses, and r
         missingIssues: () => unused,
         labels: (name) =>
           name === repository
-            ? Effect.succeed(
-                Schema.decodeSync(RepositoryLabelCatalog)({
-                  entityTag: null,
-                  labels: [{ name: "ready", color: "00ff00", description: "Ready" }],
-                }),
-              )
+            ? Effect.succeed(labelCatalog)
             : Effect.fail(
                 InvalidGitHubResponseError.make({
                   operation: "list-repository-labels",
@@ -683,6 +727,7 @@ it("checks drafts without saving and returns CEL positions, template errors, and
             expect.objectContaining({ path: ["agent"] }),
           ]),
         });
+
         expect((yield* store.read).number).toBe(1);
         const entries = yield* store.list(Option.none());
         expect(entries).toHaveLength(1);
@@ -762,6 +807,7 @@ it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop
             ]),
           });
         }
+
         expect((yield* store.read).number).toBe(1);
         const entries = yield* store.list(Option.none());
         expect(entries).toHaveLength(1);
@@ -802,11 +848,10 @@ it("previews at most 20 stored matches with an exact total, a selected prompt, a
           ]),
           prompt: { text: "Implement Issue 1 in acme/project." },
         });
-        expect(
-          Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))(
-            first.body,
-          ).items,
-        ).toHaveLength(20);
+        const decodedValue47 = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ items: Schema.Array(Schema.Unknown) }),
+        )(first.body);
+        expect(decodedValue47.items).toHaveLength(20);
         const selected = yield* request("POST", "/loops/preview", {
           name: "acme-project/draft",
           value,
@@ -849,6 +894,7 @@ it("previews at most 20 stored matches with an exact total, a selected prompt, a
           itemKey: previewItem(1).itemKey,
         });
         expect(noMatch.status).toBe(404);
+
         expect((yield* store.read).number).toBe(1);
       }),
     ),
@@ -858,6 +904,7 @@ it("preserves lanes across repository casing, scopes project previews, and refus
   Effect.runPromise(
     Effect.gen(function* () {
       const { request, current } = yield* harness();
+
       expect((yield* current.get).config.version).toBe(2);
       const response = yield* request("PUT", "/entities/loop/acme-other%2Fimplement", {
         expected: 1,
@@ -893,9 +940,10 @@ it("preserves lanes across repository casing, scopes project previews, and refus
         },
       });
       expect(updatedResponse).toMatchObject({ status: 200, body: { number: 3 } });
+      const decodedValue50 = yield* Schema.encodeEffect(Schema.toCodecJson(LoopFile))(loop);
       const latestResponse = yield* request("POST", "/loops/preview", {
         name: "acme-project/implement",
-        value: Schema.encodeSync(Schema.toCodecJson(LoopFile))(loop),
+        value: decodedValue50,
       });
       expect(latestResponse).toMatchObject({
         status: 200,
@@ -906,15 +954,15 @@ it("preserves lanes across repository casing, scopes project previews, and refus
         status: 200,
         body: { value: { lanes: [{ name: "Ready" }] } },
       });
-      const repository = Schema.decodeUnknownSync(
+      const repository = yield* Schema.decodeUnknownEffect(
         Schema.Struct({ number: ConfigurationRevisionNumber, value: ManagedRepo }),
       )(repositoryResponse.body);
-      const value = Schema.encodeSync(ManagedRepo)(repository.value);
+      const valueDecoded1 = yield* Schema.encodeEffect(ManagedRepo)(repository.value);
       const secondResponse = yield* request("PUT", "/entities/repository/acme%2Fproject", {
         expected: repository.number,
         value: {
-          ...value,
-          lanes: [...repository.value.lanes, { name: "Done", sources: [{ label: "done" }] }],
+          ...valueDecoded1,
+          lanes: [...(valueDecoded1.lanes ?? []), { name: "Done", sources: [{ label: "done" }] }],
         },
       });
       expect(secondResponse).toMatchObject({ status: 200, body: { number: 4 } });

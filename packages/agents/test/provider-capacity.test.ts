@@ -1,12 +1,12 @@
 import { assert, it } from "@effect/vitest";
 import { AgentSessionId } from "@usine/core/agent/session";
-import { Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { turnFailure } from "../src/pi/codex/codec.ts";
 import { resultFailure } from "../src/pi/claude/codec.ts";
 import { AgentCapacityError } from "../src/runtime.ts";
 import { TurnCompleted } from "../src/protocol/codex.ts";
 
-it.each([
+it.effect.each([
   {
     code: "serverOverloaded",
     message: "The provider refused the request",
@@ -34,16 +34,21 @@ it.each([
     message: "Not steerable",
     expected: "AgentResultError",
   },
-])("uses Codex's structured refusal code: $code", ({ code, message, expected }) => {
-  const { turn } = Schema.decodeSync(TurnCompleted)({
-    turn: {
-      id: "turn",
-      status: "failed",
-      error: { message, codexErrorInfo: code, additionalDetails: null },
-    },
-  });
-  assert.strictEqual(turnFailure(AgentSessionId.make("child"), turn.error, message)._tag, expected);
-});
+])("uses Codex's structured refusal code: $code", ({ code, message, expected }) =>
+  Effect.gen(function* () {
+    const { turn } = yield* Schema.decodeEffect(TurnCompleted)({
+      turn: {
+        id: "turn",
+        status: "failed",
+        error: { message, codexErrorInfo: code, additionalDetails: null },
+      },
+    });
+    assert.strictEqual(
+      turnFailure(AgentSessionId.make("child"), turn.error, message)._tag,
+      expected,
+    );
+  }),
+);
 
 it("keeps Claude turn limits terminal after an earlier capacity retry", () => {
   const sessionId = AgentSessionId.make("child");

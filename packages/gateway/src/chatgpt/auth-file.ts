@@ -1,26 +1,39 @@
-import { DateTime, Effect, Exit, FileSystem, Option, Redacted, Result, Schema } from "effect";
+import {
+  type Brand,
+  DateTime,
+  Effect,
+  Exit,
+  FileSystem,
+  Option,
+  Redacted,
+  Result,
+  Schema,
+} from "effect";
 import { Base64Url } from "effect/encoding";
 
 /**
  * The error when a ChatGPT login's `auth.json` can't be read or written, or isn't a Codex
  * ChatGPT login. The message never contains a token.
  */
-export class ChatGptAuthFileError extends Schema.TaggedError<ChatGptAuthFileError>()(
-  "ChatGptAuthFileError",
-  {
-    /** The auth file involved in the failed read, validation, or write. */
-    path: Schema.String,
-    /** Whether loading the login or persisting rotated tokens failed. */
-    operation: Schema.Literals(["read", "write"]),
-    /** A diagnostic explanation that excludes token values. */
-    message: Schema.String,
-  },
-) {}
+export class ChatGptAuthFileError extends Schema.TaggedError<
+  ChatGptAuthFileError,
+  Brand.Brand<"@usine/gateway/chatgpt/auth-file/ChatGptAuthFileError">
+>()("ChatGptAuthFileError", {
+  /** The auth file involved in the failed read, validation, or write. */
+  path: Schema.String,
+  /** Whether loading the login or persisting rotated tokens failed. */
+  operation: Schema.Literals(["read", "write"]),
+  /** A diagnostic explanation that excludes token values. */
+  message: Schema.String,
+}) {}
 
 const Token = Schema.Redacted(Schema.NonEmptyString);
 
 /** A ChatGPT login's tokens stored in memory for requests and refreshes. */
-export class ChatGptTokens extends Schema.Class<ChatGptTokens>("@usine/gateway/ChatGptTokens")({
+export class ChatGptTokens extends Schema.Class<
+  ChatGptTokens,
+  Brand.Brand<"@usine/gateway/chatgpt/auth-file/ChatGptTokens">
+>("@usine/gateway/ChatGptTokens")({
   /** The bearer token used for ChatGPT backend requests. */
   accessToken: Token,
   /** The token exchanged at the OAuth endpoint when the access token needs renewal. */

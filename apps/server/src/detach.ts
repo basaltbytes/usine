@@ -1,7 +1,17 @@
 import { spawn } from "node:child_process";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { Console, Deferred, Duration, Effect, FileSystem, Option, Schedule, Schema } from "effect";
+import {
+  type Brand,
+  Console,
+  Deferred,
+  Duration,
+  Effect,
+  FileSystem,
+  Option,
+  Schedule,
+  Schema,
+} from "effect";
 import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpCommand } from "./cli.ts";
 import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
@@ -19,9 +29,10 @@ const LOG_TAIL_BYTES = 64 * 1024;
  * A `usine up` started in the background exited before it listened, or stopped writing to its log
  * without listening.
  */
-export class DetachedStartError extends Schema.TaggedError<DetachedStartError>(
-  "@usine/server/DetachedStartError",
-)("DetachedStartError", {
+export class DetachedStartError extends Schema.TaggedError<
+  DetachedStartError,
+  Brand.Brand<"@usine/server/detach/DetachedStartError">
+>("@usine/server/DetachedStartError")("DetachedStartError", {
   /**
    * `exited` if the process ended. `silent` if it still runs, but neither listened nor wrote to
    * its log for `timeout`.
@@ -38,9 +49,13 @@ export class DetachedStartError extends Schema.TaggedError<DetachedStartError>(
 }) {}
 
 /** The log file couldn't be opened, or the process couldn't be spawned. */
-export class DetachedSpawnError extends Schema.TaggedError<DetachedSpawnError>(
-  "@usine/server/DetachedSpawnError",
-)("DetachedSpawnError", { command: Schema.String, reason: Schema.String }) {}
+export class DetachedSpawnError extends Schema.TaggedError<
+  DetachedSpawnError,
+  Brand.Brand<"@usine/server/detach/DetachedSpawnError">
+>("@usine/server/DetachedSpawnError")("DetachedSpawnError", {
+  command: Schema.String,
+  reason: Schema.String,
+}) {}
 
 const reasonOf = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -91,16 +106,17 @@ const logTail = (log: string, offset: number) =>
   );
 
 /** A `usine up` that `startDetached` started and that answers on its port. */
-export class StartedInstance extends Schema.Class<StartedInstance>("@usine/server/StartedInstance")(
-  {
-    pid: ProcessId,
-    port: Port,
-    /** The systemd service that started the process, whose journal has its output. */
-    unit: Schema.Option(SystemdUnit).pipe(
-      Schema.withConstructorDefault(Effect.succeed(Option.none<SystemdUnit>())),
-    ),
-  },
-) {}
+export class StartedInstance extends Schema.Class<
+  StartedInstance,
+  Brand.Brand<"@usine/server/detach/StartedInstance">
+>("@usine/server/StartedInstance")({
+  pid: ProcessId,
+  port: Port,
+  /** The systemd service that started the process, whose journal has its output. */
+  unit: Schema.Option(SystemdUnit).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<SystemdUnit>())),
+  ),
+}) {}
 
 type StartOutcome =
   | { readonly _tag: "Listening"; readonly started: StartedInstance }
@@ -265,9 +281,10 @@ export const startedMessage = ({ pid, port, unit }: StartedInstance): string =>
  * The systemd service that `systemctl start` started failed before its `usine up` answered, or its
  * `usine up` didn't answer within the timeout.
  */
-export class SystemdStartError extends Schema.TaggedError<SystemdStartError>(
-  "@usine/server/SystemdStartError",
-)("SystemdStartError", {
+export class SystemdStartError extends Schema.TaggedError<
+  SystemdStartError,
+  Brand.Brand<"@usine/server/detach/SystemdStartError">
+>("@usine/server/SystemdStartError")("SystemdStartError", {
   unit: SystemdUnit,
   /** `failed` if the service stopped or waits to restart, `silent` if it runs but didn't answer. */
   outcome: Schema.Literals(["failed", "silent"]),

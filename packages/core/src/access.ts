@@ -1,4 +1,4 @@
-import { Context, Effect, Schema } from "effect";
+import { type Brand, Context, Effect, Schema } from "effect";
 import { ProjectId } from "./project.ts";
 
 /** GitHub's stable numeric member identity, preserved across login changes. */
@@ -11,17 +11,23 @@ export type ProjectRole = typeof ProjectRole.Type;
 export const Permission = Schema.Literals(["read", "operate", "maintain", "admin"]);
 export type Permission = typeof Permission.Type;
 
-export class InstanceScope extends Schema.TaggedClass<InstanceScope>("InstanceScope")(
-  "Instance",
-  {},
-) {}
-export class ProjectScope extends Schema.TaggedClass<ProjectScope>("ProjectScope")("Project", {
+export class InstanceScope extends Schema.TaggedClass<
+  InstanceScope,
+  Brand.Brand<"@usine/core/access/InstanceScope">
+>("InstanceScope")("Instance", {}) {}
+export class ProjectScope extends Schema.TaggedClass<
+  ProjectScope,
+  Brand.Brand<"@usine/core/access/ProjectScope">
+>("ProjectScope")("Project", {
   project: ProjectId,
 }) {}
 export const AccessScope = Schema.Union([InstanceScope, ProjectScope]);
 export type AccessScope = typeof AccessScope.Type;
 
-export class PermissionGrant extends Schema.Class<PermissionGrant>("PermissionGrant")(
+export class PermissionGrant extends Schema.Class<
+  PermissionGrant,
+  Brand.Brand<"@usine/core/access/PermissionGrant">
+>("PermissionGrant")(
   Schema.Struct({ permission: Permission, scope: AccessScope }).check(
     Schema.makeFilter(
       ({ permission, scope }) => permission !== "admin" || scope._tag === "Instance",
@@ -35,7 +41,10 @@ export const administratorPermissions = [
   PermissionGrant.make({ permission: "admin", scope: InstanceScope.make() }),
 ];
 
-export class RoleBinding extends Schema.Class<RoleBinding>("RoleBinding")(
+export class RoleBinding extends Schema.Class<
+  RoleBinding,
+  Brand.Brand<"@usine/core/access/RoleBinding">
+>("RoleBinding")(
   Schema.Struct({
     name: Schema.NonEmptyString,
     member: GitHubUserId,
@@ -95,7 +104,10 @@ export const RequestPermissions = Context.Reference<ReadonlyArray<PermissionGran
     defaultValue: () => administratorPermissions,
   },
 );
-export class AccessDenied extends Schema.TaggedError<AccessDenied>("AccessDenied")("AccessDenied", {
+export class AccessDenied extends Schema.TaggedError<
+  AccessDenied,
+  Brand.Brand<"@usine/core/access/AccessDenied">
+>()("AccessDenied", {
   permission: Permission,
 }) {}
 export const requirePermission = Effect.fn("Authorization.requirePermission")(function* (

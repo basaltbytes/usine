@@ -4,7 +4,7 @@ import { ConfigProblem } from "@usine/config/file";
 import { LoopFile, PriorityValue } from "@usine/config/loop";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 
 /** A loop draft identified by name, supplied as either form JSON or Markdown text. */
 export const LoopDraft = Schema.Union([
@@ -22,7 +22,10 @@ export const LoopDraft = Schema.Union([
 /** A loop draft identified by name, supplied as either form JSON or Markdown text. */
 export type LoopDraft = typeof LoopDraft.Type;
 /** Validation problems in a loop draft. An empty list means validation passed. */
-export class LoopCheck extends Schema.Class<LoopCheck>("LoopCheck")({
+export class LoopCheck extends Schema.Class<
+  LoopCheck,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/loops/model/LoopCheck">
+>("LoopCheck")({
   /** Validation problems with field paths; empty when the draft is valid. */
   problems: Schema.Array(ConfigProblem),
 }) {}
@@ -30,7 +33,10 @@ export class LoopCheck extends Schema.Class<LoopCheck>("LoopCheck")({
  * A loop draft to evaluate against stored items without submitting runs, with an optional item for
  * prompt rendering.
  */
-export class LoopPreviewRequest extends Schema.Class<LoopPreviewRequest>("LoopPreviewRequest")({
+export class LoopPreviewRequest extends Schema.Class<
+  LoopPreviewRequest,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/loops/model/LoopPreviewRequest">
+>("LoopPreviewRequest")({
   /** The project-qualified loop identity used to validate the draft. */
   name: LoopFile.fields.name,
   /** The loop form JSON to validate and evaluate. */
@@ -38,7 +44,10 @@ export class LoopPreviewRequest extends Schema.Class<LoopPreviewRequest>("LoopPr
   /** The stored item for prompt rendering; omitted to render the first matching item. */
   itemKey: Schema.optionalKey(ItemKey),
 }) {}
-export class LoopPreviewItem extends Schema.Class<LoopPreviewItem>("LoopPreviewItem")({
+export class LoopPreviewItem extends Schema.Class<
+  LoopPreviewItem,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/loops/model/LoopPreviewItem">
+>("LoopPreviewItem")({
   itemKey: ItemKey,
   repository: RepositoryName,
   kind: Schema.Literals(["issue", "pr"]),
@@ -50,7 +59,10 @@ export class LoopPreviewItem extends Schema.Class<LoopPreviewItem>("LoopPreviewI
   priority: PriorityValue,
 }) {}
 /** Matching stored items and a rendered prompt for a loop draft, with per-item failures. */
-export class LoopPreview extends Schema.Class<LoopPreview>("LoopPreview")({
+export class LoopPreview extends Schema.Class<
+  LoopPreview,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/loops/model/LoopPreview">
+>("LoopPreview")({
   /** The draft trigger stream. */
   stream: Stream,
   /** Up to 20 matching stored issues or pull requests; schedule previews return no items. */

@@ -1,31 +1,31 @@
 import { ConfigurationEntityKey } from "@usine/config/configuration";
-import { Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 
-class ConfigExportCommand extends Schema.TaggedClass<ConfigExportCommand>("ConfigExportCommand")(
-  "ConfigExportCommand",
-  {
-    folder: Schema.NonEmptyString,
-  },
-) {}
-class ConfigImportCommand extends Schema.TaggedClass<ConfigImportCommand>("ConfigImportCommand")(
-  "ConfigImportCommand",
-  {
-    folder: Schema.NonEmptyString,
-    message: Schema.Option(Schema.String),
-  },
-) {}
-class ConfigEditCommand extends Schema.TaggedClass<ConfigEditCommand>("ConfigEditCommand")(
-  "ConfigEditCommand",
-  {
-    entity: ConfigurationEntityKey,
-  },
-) {}
-class ConfigLogCommand extends Schema.TaggedClass<ConfigLogCommand>("ConfigLogCommand")(
-  "ConfigLogCommand",
-  {
-    entity: Schema.Option(ConfigurationEntityKey),
-  },
-) {}
+class ConfigExportCommand extends Schema.TaggedClass<
+  ConfigExportCommand,
+  Brand.Brand<"@usine/server/configuration/command/ConfigExportCommand">
+>()("ConfigExportCommand", {
+  folder: Schema.NonEmptyString,
+}) {}
+class ConfigImportCommand extends Schema.TaggedClass<
+  ConfigImportCommand,
+  Brand.Brand<"@usine/server/configuration/command/ConfigImportCommand">
+>()("ConfigImportCommand", {
+  folder: Schema.NonEmptyString,
+  message: Schema.Option(Schema.String),
+}) {}
+class ConfigEditCommand extends Schema.TaggedClass<
+  ConfigEditCommand,
+  Brand.Brand<"@usine/server/configuration/command/ConfigEditCommand">
+>()("ConfigEditCommand", {
+  entity: ConfigurationEntityKey,
+}) {}
+class ConfigLogCommand extends Schema.TaggedClass<
+  ConfigLogCommand,
+  Brand.Brand<"@usine/server/configuration/command/ConfigLogCommand">
+>()("ConfigLogCommand", {
+  entity: Schema.Option(ConfigurationEntityKey),
+}) {}
 export const ConfigCommand = Schema.Union([
   ConfigExportCommand,
   ConfigImportCommand,
@@ -34,9 +34,10 @@ export const ConfigCommand = Schema.Union([
 ]);
 export type ConfigCommand = typeof ConfigCommand.Type;
 
-export class ConfigCommandError extends Schema.TaggedError<ConfigCommandError>(
-  "ConfigCommandError",
-)("ConfigCommandError", { message: Schema.String }) {}
+export class ConfigCommandError extends Schema.TaggedError<
+  ConfigCommandError,
+  Brand.Brand<"@usine/server/configuration/command/ConfigCommandError">
+>()("ConfigCommandError", { message: Schema.String }) {}
 
 const usage = () =>
   ConfigCommandError.make({

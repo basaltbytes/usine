@@ -135,6 +135,8 @@ export const HoldDoc = defineDoc<Hold>({
   checkpointWhen: () => false,
   initial: () => ({ paused: false, guidance: [], held: [] }),
   migrate: (value) => {
+    // Document migration callbacks return their result synchronously.
+    // @effect-diagnostics-next-line schemaSync:off
     const legacy = Schema.decodeUnknownSync(LegacyHold)(value, { onExcessProperty: "error" });
     return {
       ...legacy,

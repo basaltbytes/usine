@@ -135,7 +135,7 @@ const fixture = Effect.gen(function* () {
     );
     assert.equal(response.status, 200);
     const responseBody = yield* Effect.promise(() => response.json());
-    const result = Schema.decodeUnknownSync(
+    const result = yield* Schema.decodeUnknownEffect(
       Schema.Struct({ action: Schema.String, manifest: Schema.String }),
     )(responseBody);
     const state = new URL(result.action).searchParams.get("state");
@@ -177,6 +177,7 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
         const f = yield* fixture;
         const currentStatus = yield* f.setup.status;
         assert.deepEqual(currentStatus, { _tag: "NoApp" });
+
         assert.equal((yield* f.request("/api/setup/activate", {})).status, 409);
         const currentAvailable = yield* f.github.available;
         assert.equal(currentAvailable, false);
@@ -185,6 +186,7 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
         assert.deepEqual(manifest.default_permissions, REQUIRED_REPOSITORY_PERMISSIONS);
         assert.deepEqual(manifest.callback_urls, ["https://usine.example/api/auth/callback"]);
         assert.equal(manifest.hook_attributes.url, "https://usine.example/webhooks/github");
+
         assert.equal((yield* (yield* f.resume).status)._tag, "MissingKey");
         const rejected = yield* f.request(
           `/api/setup/callback?state=${begun.state}&code=code`,
@@ -200,6 +202,7 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
         assert.include(response.headers.get("content-security-policy") ?? "", "script-src 'self'");
         assert.match(response.headers.get("set-cookie") ?? "", /Max-Age=0/);
         const target = `${f.directory}/${GITHUB_APP_SECRETS_PATH}`;
+
         assert.equal((yield* f.fs.stat(target)).mode & 0o777, 0o600);
         const contents = yield* f.fs.readFileString(target);
         assert.deepEqual(JSON.parse(contents), {
@@ -216,10 +219,11 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
           "https://usine.example/api/auth/callback",
         );
         assert.match(authorizationUrl, /client_id=Iv1.created/);
-        assert.equal(
-          (yield* f.github.web("user-code", "https://usine.example/api/auth/callback")).login,
-          alice.login,
+        const decodedValue4 = yield* f.github.web(
+          "user-code",
+          "https://usine.example/api/auth/callback",
         );
+        assert.equal(decodedValue4.login, alice.login);
         const replay = yield* f.request(callback, undefined, { cookie: begun.cookie });
         assert.match(replay.headers.get("location") ?? "", /already%20completed/);
         assert.equal(f.requests.filter((url) => url.includes("/conversions")).length, 1);
@@ -244,6 +248,7 @@ it("resumes all setup states, exchanges the redirect once, and saves complete ow
         f.register();
         const latestStatus = yield* f.setup.status;
         assert.deepEqual(latestStatus, { _tag: "Ready" });
+
         assert.equal((yield* f.request("/api/setup/manifest", { name: "overwrite" })).status, 409);
       }),
     ),
@@ -254,6 +259,7 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
     run(
       Effect.gen(function* () {
         const f = yield* fixture;
+
         assert.equal((yield* f.request("/api/setup/manifest", { name: "usine" }, {})).status, 401);
         const crossSite = yield* f.request(
           "/api/setup/manifest",
@@ -271,6 +277,7 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
         const session = yield* f.auth.authentication.consumeLink(
           new URLSearchParams(new URL(currentLink).hash.slice(1)).get("link") ?? "",
         );
+
         assert.equal(
           (yield* f.request(
             "/api/setup/manifest",
@@ -289,6 +296,7 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
         assert.match(response.headers.get("location") ?? "", /GitHub%20could%20not/);
         const currentExists = yield* f.fs.exists(`${f.directory}/${GITHUB_APP_SECRETS_PATH}`);
         assert.equal(currentExists, false);
+
         assert.equal((yield* (yield* f.resume).status)._tag, "MissingKey");
         const restored = yield* f.request("/api/setup/restore", {
           credentials: JSON.stringify({ app_id: 123, private_key: pem }),
@@ -297,6 +305,7 @@ it("keeps failed exchange recoverable, rejects unsafe requests, and restores leg
         const saved = yield* loadLocalSecrets(f.directory);
         assert.ok(Option.isSome(saved));
         if (Option.isSome(saved)) assert.equal(Option.isNone(saved.value.clientId), true);
+
         assert.equal((yield* f.setup.status)._tag, "NeedsInstallation");
       }),
     ),
@@ -333,6 +342,7 @@ it("drains the activation response before closing setup HTTP and preserves its a
         yield* Fiber.join(running);
         const access = yield* f.auth.authentication.authenticate(Redacted.value(session.secret));
         assert.equal(access.credential, "bootstrap");
+
         assert.equal((yield* (yield* f.resume).status)._tag, "NeedsInstallation");
       }),
     ),

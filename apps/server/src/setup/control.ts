@@ -1,6 +1,7 @@
 import type { SetupState } from "@usine/orchestrator/operator";
 import type { InstanceDirectory } from "@usine/core/instance";
 import {
+  AppCredentials,
   GitHubApp,
   GitHubCredentials,
   REQUIRED_REPOSITORY_PERMISSIONS,
@@ -49,9 +50,9 @@ const makeSetup = Effect.fn("Setup.make")(function* (
   const origin = auth.authentication.origin;
   const fileServices = Context.make(FileSystem.FileSystem, fs).pipe(Context.add(Path.Path, path));
   const credentials = loadLocalCredentials(directory).pipe(Effect.provideContext(fileServices));
-  const appLayer = (value: GitHubCredentials["Service"]) =>
+  const appLayer = (value: Pick<GitHubCredentials["Service"], "appId" | "privateKey">) =>
     GitHubApp.layer.pipe(
-      Layer.provide(Layer.succeed(GitHubCredentials, value)),
+      Layer.provide(Layer.succeed(GitHubCredentials, AppCredentials.make(value))),
       Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
     );
   const needsCredentials = Effect.gen(function* () {

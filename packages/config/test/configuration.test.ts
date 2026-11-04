@@ -103,9 +103,11 @@ Implement #{{ item.number }}.
   });
 });
 
-const initialChanges = Effect.map(fixture, (instance) =>
-  configurationDiff([], configurationEntities(instance)),
+const initialChanges = fixture.pipe(
+  Effect.map(configurationEntities),
+  Effect.map((entities) => configurationDiff([], entities)),
 );
+const decodeObject = Schema.decodeUnknownEffect(Schema.JsonObject);
 const initialize = Effect.gen(function* () {
   const store = yield* ConfigurationStore;
   const changes = yield* initialChanges;
@@ -116,6 +118,7 @@ describe("configuration domain without layers", () => {
   it.effect("omits unchanged entities when adding or removing an entity before them", () =>
     Effect.gen(function* () {
       const fixtureInstance = yield* fixture;
+
       const original = configurationEntities(fixtureInstance);
       const added = ConfigurationEntity.make({
         key: ConfigurationEntityKey.make({
@@ -145,6 +148,7 @@ describe("configuration domain without layers", () => {
   it.effect("ignores unordered entity positions and records worker-relative positions", () =>
     Effect.gen(function* () {
       const fixtureInstance = yield* fixture;
+
       const original = configurationEntities(fixtureInstance);
       const workers = original.filter(({ key }) => key.kind === "worker");
       const other = original.filter(({ key }) => key.kind !== "worker");
@@ -221,27 +225,27 @@ for (const [name, layer] of adapters)
   describe(`${name} configuration store contract`, () => {
     it.effect("stores defaults and round-trips every entity kind without changes", () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* fixture;
         const store = yield* ConfigurationStore;
         const folder = yield* ConfigurationFolder;
         const fs = yield* FileSystem.FileSystem;
         const directory = yield* fs.makeTempDirectoryScoped();
         const root = InstanceDirectory.make(directory);
-        const fixtureInstance = yield* fixture;
+
         const canonical = configurationEntities(fixtureInstance);
-        const changes = (yield* initialChanges).map((change) =>
-          change.key.kind === "loop"
-            ? ConfigurationChange.make({
-                ...change,
-                after: Option.map(change.after, (value) => {
-                  const {
-                    maxCycles: _cycles,
-                    permissions: _permissions,
-                    ...fields
-                  } = Schema.decodeUnknownSync(Schema.JsonObject)(value);
-                  return fields;
-                }),
-              })
-            : change,
+        const initial = yield* initialChanges;
+        const changes = yield* Effect.forEach(initial, (change) =>
+          Effect.gen(function* () {
+            if (change.key.kind !== "loop") return change;
+            const after = yield* Effect.transposeOption(Option.map(change.after, decodeObject));
+            return ConfigurationChange.make({
+              ...change,
+              after: Option.map(
+                after,
+                ({ maxCycles: _cycles, permissions: _permissions, ...fields }) => fields,
+              ),
+            });
+          }),
         );
         const revision = yield* store.commit({ expected: zero, changes, ...metadata });
         expect(revision.changes).toEqual(configurationDiff([], canonical));
@@ -255,7 +259,8 @@ for (const [name, layer] of adapters)
           new Set(["settings", "worker", "repository", "project", "label", "loop", "agent"]),
         );
         const migratedInstance = yield* Effect.fromResult(migrateProjects(instance.value));
-        expect(configurationDiff(configurationEntities(migratedInstance), imported)).toEqual([]);
+        const valueDecoded1 = configurationEntities(migratedInstance);
+        expect(configurationDiff(valueDecoded1, imported)).toEqual([]);
         for (const entity of imported) {
           const formattedEntity = yield* formatConfigurationEntity(entity);
           const edited = yield* parseConfigurationEntity(parser, entity.key, formattedEntity);
@@ -274,9 +279,10 @@ for (const [name, layer] of adapters)
 
     it.effect("preserves worker order through imports, value changes, and revision replay", () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* fixture;
         const store = yield* ConfigurationStore;
         yield* initialize;
-        const fixtureInstance = yield* fixture;
+
         const original = configurationEntities(fixtureInstance);
         const workers = original.filter(({ key }) => key.kind === "worker");
         const other = original.filter(({ key }) => key.kind !== "worker");
@@ -290,29 +296,30 @@ for (const [name, layer] of adapters)
           }),
           value: { name: "new-preferred", kind: "local", max_concurrent_attempts: 1 },
         });
+        const resized = yield* Effect.forEach(original, (entity) =>
+          Effect.gen(function* () {
+            if (entity.key.kind !== "worker") return entity;
+            const valueDecoded4 = yield* decodeObject(entity.value);
+            return ConfigurationEntity.make({
+              ...entity,
+              value: { ...valueDecoded4, max_concurrent_attempts: 2 },
+            });
+          }),
+        );
         for (const candidate of [
           [settings, ...workers, added, ...rest],
           original,
           reordered,
-          original.map((entity) =>
-            entity.key.kind === "worker"
-              ? ConfigurationEntity.make({
-                  ...entity,
-                  value: {
-                    ...Schema.decodeUnknownSync(Schema.JsonObject)(entity.value),
-                    max_concurrent_attempts: 2,
-                  },
-                })
-              : entity,
-          ),
+          resized,
           [settings, added, ...[...workers].reverse(), ...rest],
           original,
         ]) {
           const current = yield* store.read;
-          const changes = configurationDiff(
-            Option.match(current.instance, { onNone: () => [], onSome: configurationEntities }),
-            candidate,
-          );
+          const valueDecoded2 = Option.match(current.instance, {
+            onNone: () => [],
+            onSome: configurationEntities,
+          });
+          const changes = configurationDiff(valueDecoded2, candidate);
           expect(changes.length).toBeGreaterThan(0);
           if (current.number <= 2)
             expect(changes.map(({ key }) => key.key)).toEqual([added.key.key]);
@@ -323,7 +330,8 @@ for (const [name, layer] of adapters)
               (yield* store.list(Option.some(entity.key))).map(({ number }) => number),
             ).toEqual([1]);
           const saved = yield* store.read;
-          expect(Option.map(saved.instance, configurationEntities)).toEqual(Option.some(candidate));
+          const savedEntities = Option.map(saved.instance, configurationEntities);
+          expect(savedEntities).toEqual(Option.some(candidate));
           expect(configurationDiff(candidate, candidate)).toEqual([]);
         }
         let replayed = Configuration.empty;
@@ -342,11 +350,18 @@ for (const [name, layer] of adapters)
 
     it.effect("inserts and removes workers without changing surviving workers' history", () =>
       Effect.gen(function* () {
-        const store = yield* ConfigurationStore;
-        const initial = yield* initialize;
-        let replayed = (yield* commit(parser, Configuration.empty, zero, initial.changes, initial))
-          .configuration;
         const fixtureInstance = yield* fixture;
+        const store = yield* ConfigurationStore;
+        const initialRevision = yield* initialize;
+
+        let replayed = (yield* commit(
+          parser,
+          Configuration.empty,
+          zero,
+          initialRevision.changes,
+          initialRevision,
+        )).configuration;
+
         const original = configurationEntities(fixtureInstance);
         const workers = original.filter(({ key }) => key.kind === "worker");
         const other = original.filter(({ key }) => key.kind !== "worker");
@@ -366,10 +381,11 @@ for (const [name, layer] of adapters)
           ];
           for (const target of [candidate, original]) {
             const current = yield* store.read;
-            const changes = configurationDiff(
-              Option.match(current.instance, { onNone: () => [], onSome: configurationEntities }),
-              target,
-            );
+            const valueDecoded3 = Option.match(current.instance, {
+              onNone: () => [],
+              onSome: configurationEntities,
+            });
+            const changes = configurationDiff(valueDecoded3, target);
             expect(changes).toEqual([
               ConfigurationChange.make(
                 target === candidate
@@ -415,10 +431,11 @@ for (const [name, layer] of adapters)
 
     it.effect("rejects invalid ordering without writing a revision", () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* fixture;
         const store = yield* ConfigurationStore;
         yield* initialize;
         const current = yield* store.read;
-        const fixtureInstance = yield* fixture;
+
         const entities = configurationEntities(fixtureInstance);
         const workers = entities.filter(({ key }) => key.kind === "worker");
         for (const changes of [
@@ -476,23 +493,27 @@ for (const [name, layer] of adapters)
           const store = yield* ConfigurationStore;
           const storedConfiguration = yield* store.read;
           expect(storedConfiguration).toEqual(Configuration.empty);
-          const first = yield* initialize;
+          const initialRevision = yield* initialize;
           const state = yield* store.read;
           expect(state.number).toBe(1);
           const key = ConfigurationEntityKey.make({
             kind: "agent",
             identifier: ConfigurationEntityId.make("developer"),
           });
-          const agent = first.changes.find(({ key: candidate }) => candidate.key === key.key);
+          const agent = initialRevision.changes.find(
+            ({ key: candidate }) => candidate.key === key.key,
+          );
           expect(agent).toBeDefined();
           if (agent === undefined) return;
+          const agentValue = yield* Effect.transposeOption(Option.map(agent.after, decodeObject));
           const change = ConfigurationChange.make({
             key,
             before: agent.after,
-            after: Option.map(agent.after, (value) => {
-              const object = Schema.decodeUnknownSync(Schema.JsonObject)(value);
-              return { ...object, harness: "claude", model: "claude-sonnet-4-6" };
-            }),
+            after: Option.map(agentValue, (value) => ({
+              ...value,
+              harness: "claude",
+              model: "claude-sonnet-4-6",
+            })),
           });
           const second = yield* store.commit({
             expected: state.number,
@@ -501,6 +522,7 @@ for (const [name, layer] of adapters)
           });
           expect(second.number).toBe(2);
           expect(second.changes[0]?.before).toEqual(agent.after);
+
           expect((yield* store.list(Option.some(key))).map(({ number }) => number)).toEqual([1, 2]);
           const currentRevision = yield* store.revision(second.number);
           expect(currentRevision).toEqual(Option.some(second));
@@ -518,40 +540,42 @@ for (const [name, layer] of adapters)
       () =>
         Effect.gen(function* () {
           const store = yield* ConfigurationStore;
-          const first = yield* initialize;
-          const loop = first.changes.find(({ key }) => key.kind === "loop");
+          const initialRevision = yield* initialize;
+
+          const loop = initialRevision.changes.find(({ key }) => key.kind === "loop");
           if (loop === undefined) return yield* Effect.die("fixture has no loop");
+          const loopValue = yield* Effect.transposeOption(Option.map(loop.after, decodeObject));
           const invalid = ConfigurationChange.make({
             ...loop,
             before: loop.after,
-            after: Option.map(loop.after, (value) => ({
-              ...Schema.decodeUnknownSync(Schema.JsonObject)(value),
+            after: Option.map(loopValue, (value) => ({
+              ...value,
               agent: "missing",
             })),
           });
           const failure = yield* store
-            .commit({ expected: first.number, changes: [invalid], ...metadata })
+            .commit({ expected: initialRevision.number, changes: [invalid], ...metadata })
             .pipe(Effect.flip);
           expect(failure._tag).toBe("ConfigurationInvalid");
           const invalidCel = ConfigurationChange.make({
             ...loop,
             before: loop.after,
-            after: Option.map(loop.after, (value) => ({
-              ...Schema.decodeUnknownSync(Schema.JsonObject)(value),
+            after: Option.map(loopValue, (value) => ({
+              ...value,
               body: "{{ nonexistent.value }}",
             })),
           });
-          expect(
-            (yield* store
-              .commit({ expected: first.number, changes: [invalidCel], ...metadata })
-              .pipe(Effect.flip))._tag,
-          ).toBe("ConfigurationInvalid");
+          const decodedValue2 = yield* store
+            .commit({ expected: initialRevision.number, changes: [invalidCel], ...metadata })
+            .pipe(Effect.flip);
+          expect(decodedValue2._tag).toBe("ConfigurationInvalid");
+
           expect((yield* store.list(Option.none())).length).toBe(1);
           const results = yield* Effect.forEach(
             [1, 2],
             () =>
               store
-                .commit({ expected: first.number, changes: [], ...metadata })
+                .commit({ expected: initialRevision.number, changes: [], ...metadata })
                 .pipe(Effect.result),
             { concurrency: 2 },
           );
@@ -559,6 +583,7 @@ for (const [name, layer] of adapters)
           expect(results.filter(Result.isFailure).map(({ failure }) => failure._tag)).toEqual([
             "StaleRevision",
           ]);
+
           expect((yield* store.read).number).toBe(2);
         }).pipe(Effect.provide(layer)),
     );
@@ -568,11 +593,12 @@ it.effect(
   "round-trips every entity kind through the folder format and reports errors across files",
   () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* fixture;
       const fs = yield* FileSystem.FileSystem;
       const folder = yield* ConfigurationFolder;
       const directory = yield* fs.makeTempDirectoryScoped();
       const root = InstanceDirectory.make(directory);
-      const fixtureInstance = yield* fixture;
+
       const original = yield* Effect.fromResult(migrateProjects(fixtureInstance));
       yield* folder.export(root, original);
       const imported = yield* folder.load(root);
@@ -615,6 +641,7 @@ it.live("observes another SQLite connection and preserves history after reopenin
       );
     const services = yield* Layer.build(connection());
     const first = Context.get(services, ConfigurationStore);
+
     const imported = yield* first.commit({
       expected: zero,
       changes: yield* initialChanges,
@@ -626,10 +653,13 @@ it.live("observes another SQLite connection and preserves history after reopenin
       .changes(imported.number)
       .pipe(Stream.take(1), Stream.runCollect, Effect.forkChild);
     const revision = yield* second.commit({ expected: imported.number, changes: [], ...metadata });
+
     expect((yield* Fiber.join(watching)).map(({ number }) => number)).toEqual([revision.number]);
     const reopenedConnectionServices = yield* Layer.build(connection());
     const reopened = Context.get(reopenedConnectionServices, ConfigurationStore);
+
     expect((yield* reopened.read).number).toBe(2);
+
     expect((yield* reopened.list(Option.none())).map(({ number }) => number)).toEqual([1, 2]);
   }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
 );

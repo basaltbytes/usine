@@ -3,7 +3,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { GitHubLabelName } from "@usine/config/label";
 import { isSettledItemState, LaneItemState, LaneName, LaneSource } from "@usine/config/board";
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { RunStateTag, RunSummaryView } from "./run.ts";
 import { TaskUsageView } from "./usage.ts";
 
@@ -18,31 +18,33 @@ export const BoardLaneOrigin = Schema.Literals(["authored", "proposed", "fallbac
 export type BoardLaneOrigin = typeof BoardLaneOrigin.Type;
 
 /** An Item of a Task, with its own title, GitHub URL, and GitHub state. */
-export class BoardItemLink extends Schema.Class<BoardItemLink>("@usine/orchestrator/BoardItemLink")(
-  {
-    /** The stored item identity, including its stream and repository. */
-    itemKey: ItemKey,
-    /** Whether this item is an issue or pull request. */
-    kind: Schema.Literals(["issue", "pr"]),
-    /** The GitHub item number within its repository. */
-    number: ItemNumber,
-    /** The last polled GitHub title. */
-    title: Schema.String,
-    /** The GitHub URL for the item. */
-    url: Schema.NonEmptyString,
-    /** The last polled issue or pull request state used for lane placement. */
-    state: LaneItemState,
-    /** The last polled labels, including labels on non-current linked items. */
-    labels: Schema.Array(GitHubLabelName).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
-    /** Whether this item is an open pull request with conflicts against its base. */
-    conflicting: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
-  },
-) {}
+export class BoardItemLink extends Schema.Class<
+  BoardItemLink,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardItemLink">
+>("@usine/orchestrator/BoardItemLink")({
+  /** The stored item identity, including its stream and repository. */
+  itemKey: ItemKey,
+  /** Whether this item is an issue or pull request. */
+  kind: Schema.Literals(["issue", "pr"]),
+  /** The GitHub item number within its repository. */
+  number: ItemNumber,
+  /** The last polled GitHub title. */
+  title: Schema.String,
+  /** The GitHub URL for the item. */
+  url: Schema.NonEmptyString,
+  /** The last polled issue or pull request state used for lane placement. */
+  state: LaneItemState,
+  /** The last polled labels, including labels on non-current linked items. */
+  labels: Schema.Array(GitHubLabelName).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+  /** Whether this item is an open pull request with conflicts against its base. */
+  conflicting: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+}) {}
 
 /** An open or merged pull request of a Task. Closed, unmerged pull requests are excluded. */
-export class BoardPullRequestView extends Schema.Class<BoardPullRequestView>(
-  "@usine/orchestrator/BoardPullRequestView",
-)({
+export class BoardPullRequestView extends Schema.Class<
+  BoardPullRequestView,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardPullRequestView">
+>("@usine/orchestrator/BoardPullRequestView")({
   /** The pull request number within its repository. */
   number: ItemNumber,
   /** The GitHub pull request URL. */
@@ -63,46 +65,47 @@ export class BoardPullRequestView extends Schema.Class<BoardPullRequestView>(
  * @property url - The GitHub URL for the current item.
  * @property state - The last polled state of the current item, used for lane placement.
  */
-export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestrator/BoardTaskView")(
-  {
-    ...BoardItemLink.fields,
-    /** The managed repo, in `owner/name` form. */
-    repository: RepositoryName,
-    /** The current item labels used for lane placement. */
-    labels: Schema.Array(GitHubLabelName),
-    /** The linked issues and pull requests that form the task. */
-    items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
-    /**
-     * The highest-numbered open pull request, else the highest-numbered merged one, or null if
-     * there is neither.
-     */
-    pullRequest: Schema.NullOr(BoardPullRequestView),
-    /** The number of saved runs across the task's items. */
-    runCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** The number of attempts across every saved run. */
-    attemptCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** Additional runs needed for current actions, latest activity, and CI handoffs. */
-    runContext: Schema.Array(RunSummaryView),
-    /** Each loop in first-run order, with its latest state. */
-    loopStates: Schema.Array(Schema.Struct({ loop: LoopName, state: RunStateTag })),
-    /**
-     * The newest Run that needs the operator, else the open Run, else the newest Run, or null if
-     * there are no Runs. A failed Run on a closed or merged Item doesn't need the operator.
-     */
-    run: Schema.NullOr(RunSummaryView),
-    /** Whether a run or cycle-budget ask on the task needs operator attention. */
-    needsYou: Schema.Boolean,
-    /** Whether the current Item is an open pull request whose branch conflicts with its base. */
-    conflicting: Schema.Boolean,
-    /**
-     * The Loops whose trigger currently matches one of the Task's Items, including paused Loops, in
-     * Item order and then Loop order.
-     */
-    loops: Schema.Array(LoopName),
-    /** The summed attempt time, tokens, and cost across every saved run. */
-    usage: TaskUsageView,
-  },
-) {}
+export class BoardTaskView extends Schema.Class<
+  BoardTaskView,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardTaskView">
+>("@usine/orchestrator/BoardTaskView")({
+  ...BoardItemLink.fields,
+  /** The managed repo, in `owner/name` form. */
+  repository: RepositoryName,
+  /** The current item labels used for lane placement. */
+  labels: Schema.Array(GitHubLabelName),
+  /** The linked issues and pull requests that form the task. */
+  items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
+  /**
+   * The highest-numbered open pull request, else the highest-numbered merged one, or null if
+   * there is neither.
+   */
+  pullRequest: Schema.NullOr(BoardPullRequestView),
+  /** The number of saved runs across the task's items. */
+  runCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The number of attempts across every saved run. */
+  attemptCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Additional runs needed for current actions, latest activity, and CI handoffs. */
+  runContext: Schema.Array(RunSummaryView),
+  /** Each loop in first-run order, with its latest state. */
+  loopStates: Schema.Array(Schema.Struct({ loop: LoopName, state: RunStateTag })),
+  /**
+   * The newest Run that needs the operator, else the open Run, else the newest Run, or null if
+   * there are no Runs. A failed Run on a closed or merged Item doesn't need the operator.
+   */
+  run: Schema.NullOr(RunSummaryView),
+  /** Whether a run or cycle-budget ask on the task needs operator attention. */
+  needsYou: Schema.Boolean,
+  /** Whether the current Item is an open pull request whose branch conflicts with its base. */
+  conflicting: Schema.Boolean,
+  /**
+   * The Loops whose trigger currently matches one of the Task's Items, including paused Loops, in
+   * Item order and then Loop order.
+   */
+  loops: Schema.Array(LoopName),
+  /** The summed attempt time, tokens, and cost across every saved run. */
+  usage: TaskUsageView,
+}) {}
 
 /** Returns the retained card summaries in run-opening order. Full history is on task detail. */
 export const boardTaskRuns = (
@@ -170,9 +173,10 @@ const BoardLaneViewFields = {
  * @property sources - The label and item-state sources used for task placement.
  * @property items - The task cards assigned to this lane.
  */
-export class WritableBoardLaneView extends Schema.TaggedClass<WritableBoardLaneView>(
-  "@usine/orchestrator/WritableBoardLaneView",
-)("WritableBoardLane", {
+export class WritableBoardLaneView extends Schema.TaggedClass<
+  WritableBoardLaneView,
+  Brand.Brand<"@usine/orchestrator/operator/board/WritableBoardLaneView">
+>("@usine/orchestrator/WritableBoardLaneView")("WritableBoardLane", {
   ...BoardLaneViewFields,
   /** Always `authored`; only configured label lanes accept moves. */
   origin: Schema.Literal("authored"),
@@ -190,9 +194,10 @@ export class WritableBoardLaneView extends Schema.TaggedClass<WritableBoardLaneV
  * grouping.
  * @property items - The task cards assigned to this lane.
  */
-export class ReadOnlyBoardLaneView extends Schema.TaggedClass<ReadOnlyBoardLaneView>(
-  "@usine/orchestrator/ReadOnlyBoardLaneView",
-)("ReadOnlyBoardLane", BoardLaneViewFields) {}
+export class ReadOnlyBoardLaneView extends Schema.TaggedClass<
+  ReadOnlyBoardLaneView,
+  Brand.Brand<"@usine/orchestrator/operator/board/ReadOnlyBoardLaneView">
+>("@usine/orchestrator/ReadOnlyBoardLaneView")("ReadOnlyBoardLane", BoardLaneViewFields) {}
 
 /** A Board lane; only `WritableBoardLaneView` accepts operator moves. */
 export const BoardLaneView = Schema.Union([WritableBoardLaneView, ReadOnlyBoardLaneView]);
@@ -200,9 +205,10 @@ export const BoardLaneView = Schema.Union([WritableBoardLaneView, ReadOnlyBoardL
 export type BoardLaneView = typeof BoardLaneView.Type;
 
 /** An Item that couldn't be projected as a Board card. Other Items are unaffected. */
-export class BoardProjectionError extends Schema.TaggedError<BoardProjectionError>(
-  "@usine/orchestrator/BoardProjectionError",
-)("BoardProjectionError", {
+export class BoardProjectionError extends Schema.TaggedError<
+  BoardProjectionError,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardProjectionError">
+>("@usine/orchestrator/BoardProjectionError")("BoardProjectionError", {
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The stored item identity, including its stream and repository. */
@@ -212,7 +218,10 @@ export class BoardProjectionError extends Schema.TaggedError<BoardProjectionErro
 }) {}
 
 /** The Project's lanes and the Item failures from building their cards. */
-export class BoardView extends Schema.Class<BoardView>("@usine/orchestrator/BoardView")({
+export class BoardView extends Schema.Class<
+  BoardView,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardView">
+>("@usine/orchestrator/BoardView")({
   /** The configured or proposed lanes, including the unmapped lane when needed. */
   lanes: Schema.Array(BoardLaneView),
   /** All linked item keys with cards, including cards omitted from paginated lanes. */
@@ -222,7 +231,10 @@ export class BoardView extends Schema.Class<BoardView>("@usine/orchestrator/Boar
 }) {}
 
 /** A repository label. `color` is null for catalogs stored before colors were kept. */
-export class LabelView extends Schema.Class<LabelView>("@usine/orchestrator/LabelView")({
+export class LabelView extends Schema.Class<
+  LabelView,
+  Brand.Brand<"@usine/orchestrator/operator/board/LabelView">
+>("@usine/orchestrator/LabelView")({
   /** The GitHub label name. */
   name: GitHubLabelName,
   /** The hexadecimal color without a leading hash, or null when unavailable. */
@@ -232,7 +244,10 @@ export class LabelView extends Schema.Class<LabelView>("@usine/orchestrator/Labe
 }) {}
 
 /** An operator request to move one Project Item into a lane. */
-export class BoardMove extends Schema.Class<BoardMove>("@usine/orchestrator/BoardMove")({
+export class BoardMove extends Schema.Class<
+  BoardMove,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardMove">
+>("@usine/orchestrator/BoardMove")({
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The GitHub item number to move within the repository. */
@@ -242,9 +257,10 @@ export class BoardMove extends Schema.Class<BoardMove>("@usine/orchestrator/Boar
 }) {}
 
 /** The requested Project isn't in the operator overview. */
-export class BoardProjectNotFoundError extends Schema.TaggedError<BoardProjectNotFoundError>(
-  "@usine/orchestrator/BoardProjectNotFoundError",
-)("BoardProjectNotFoundError", {
+export class BoardProjectNotFoundError extends Schema.TaggedError<
+  BoardProjectNotFoundError,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardProjectNotFoundError">
+>("@usine/orchestrator/BoardProjectNotFoundError")("BoardProjectNotFoundError", {
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
 }) {
@@ -254,9 +270,10 @@ export class BoardProjectNotFoundError extends Schema.TaggedError<BoardProjectNo
 }
 
 /** The requested Item isn't on the Project's Board. */
-export class BoardItemNotFoundError extends Schema.TaggedError<BoardItemNotFoundError>(
-  "@usine/orchestrator/BoardItemNotFoundError",
-)("BoardItemNotFoundError", {
+export class BoardItemNotFoundError extends Schema.TaggedError<
+  BoardItemNotFoundError,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardItemNotFoundError">
+>("@usine/orchestrator/BoardItemNotFoundError")("BoardItemNotFoundError", {
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The requested GitHub item number absent from the board. */
@@ -268,9 +285,10 @@ export class BoardItemNotFoundError extends Schema.TaggedError<BoardItemNotFound
 }
 
 /** The requested destination lane isn't on the Project's Board. */
-export class BoardLaneNotFoundError extends Schema.TaggedError<BoardLaneNotFoundError>(
-  "@usine/orchestrator/BoardLaneNotFoundError",
-)("BoardLaneNotFoundError", {
+export class BoardLaneNotFoundError extends Schema.TaggedError<
+  BoardLaneNotFoundError,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardLaneNotFoundError">
+>("@usine/orchestrator/BoardLaneNotFoundError")("BoardLaneNotFoundError", {
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The requested destination lane ID. */
@@ -282,9 +300,10 @@ export class BoardLaneNotFoundError extends Schema.TaggedError<BoardLaneNotFound
 }
 
 /** The requested destination lane doesn't accept label-based moves. */
-export class BoardLaneReadOnlyError extends Schema.TaggedError<BoardLaneReadOnlyError>(
-  "@usine/orchestrator/BoardLaneReadOnlyError",
-)("BoardLaneReadOnlyError", {
+export class BoardLaneReadOnlyError extends Schema.TaggedError<
+  BoardLaneReadOnlyError,
+  Brand.Brand<"@usine/orchestrator/operator/board/BoardLaneReadOnlyError">
+>("@usine/orchestrator/BoardLaneReadOnlyError")("BoardLaneReadOnlyError", {
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The requested destination lane ID. */

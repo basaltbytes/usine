@@ -27,6 +27,8 @@ const entity = (kind: ConfigurationEntityKind, identifier: string, value: Schema
 export const configurationEntities = (
   instance: LoadedInstance,
 ): ReadonlyArray<ConfigurationEntity> => {
+  // The value is already validated.
+  // @effect-diagnostics-next-line schemaSync:off
   const { workers, repos, labels, projects, bindings, ...settings } = Schema.encodeSync(
     UsineConfig,
   )(instance.config);
@@ -44,9 +46,13 @@ export const configurationEntities = (
     ...(projects ?? []).map((value) => entity("project", value.id, value)),
     ...(labels ?? []).map((value) => entity("label", value.name, value)),
     ...instance.agents.map((value) =>
+      // The value is already validated.
+      // @effect-diagnostics-next-line schemaSync:off
       entity("agent", value.name, Schema.encodeSync(AgentJson)(value)),
     ),
     ...instance.loops.map((value) =>
+      // The value is already validated.
+      // @effect-diagnostics-next-line schemaSync:off
       entity("loop", value.name, Schema.encodeSync(LoopJson)(value)),
     ),
   ];

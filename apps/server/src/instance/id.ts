@@ -1,11 +1,12 @@
 import { InstanceId } from "@usine/core/instance";
-import { Effect, FileSystem, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Schema } from "effect";
 import type { InstanceFiles } from "./record.ts";
 
 /** `.usine/instance-id` couldn't be read or created, or doesn't contain an instance ID. */
-export class InstanceIdError extends Schema.TaggedError<InstanceIdError>(
-  "@usine/server/InstanceIdError",
-)("InstanceIdError", {
+export class InstanceIdError extends Schema.TaggedError<
+  InstanceIdError,
+  Brand.Brand<"@usine/server/instance/id/InstanceIdError">
+>("@usine/server/InstanceIdError")("InstanceIdError", {
   operation: Schema.Literals(["read", "create"]),
   path: Schema.String,
   reason: Schema.String,

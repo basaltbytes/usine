@@ -1,10 +1,13 @@
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { InstancePath, ConfigFileError } from "./file.ts";
 
 /** A parsed agent Markdown file; `name` comes from the filename. */
-export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile")({
+export class AgentFile extends Schema.Class<
+  AgentFile,
+  Brand.Brand<"@usine/config/agent/AgentFile">
+>("@usine/config/AgentFile")({
   /** The agent name derived from its Markdown filename. */
   name: AgentName,
   /** The CLI used to run the agent as a child session. */
@@ -33,7 +36,10 @@ export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile"
 }
 
 /** An agent file that failed to load and is left out of the roster. */
-export class InvalidAgent extends Schema.Class<InvalidAgent>("@usine/config/InvalidAgent")({
+export class InvalidAgent extends Schema.Class<
+  InvalidAgent,
+  Brand.Brand<"@usine/config/agent/InvalidAgent">
+>("@usine/config/InvalidAgent")({
   /** The rejected file path relative to the instance folder. */
   file: InstancePath,
   /** The loading or validation failure that excluded this file. */

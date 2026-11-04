@@ -6,6 +6,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import type { PollingTriggers } from "@usine/orchestrator/polling-triggers";
 import type { WebhookHealth } from "@usine/orchestrator/webhooks";
 import {
+  type Brand,
   ByteSize,
   Config,
   Effect,
@@ -20,13 +21,17 @@ import {
 } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-export class WebhookConfigurationError extends Schema.TaggedError<WebhookConfigurationError>(
-  "@usine/server/WebhookConfigurationError",
-)("WebhookConfigurationError", { message: Schema.String }) {}
+export class WebhookConfigurationError extends Schema.TaggedError<
+  WebhookConfigurationError,
+  Brand.Brand<"@usine/server/webhooks/WebhookConfigurationError">
+>("@usine/server/WebhookConfigurationError")("WebhookConfigurationError", {
+  message: Schema.String,
+}) {}
 
-class WebhookRequestError extends Schema.TaggedError<WebhookRequestError>(
-  "@usine/server/WebhookRequestError",
-)("WebhookRequestError", {
+class WebhookRequestError extends Schema.TaggedError<
+  WebhookRequestError,
+  Brand.Brand<"@usine/server/webhooks/WebhookRequestError">
+>("@usine/server/WebhookRequestError")("WebhookRequestError", {
   status: Schema.Literals([400, 401]),
   message: Schema.String,
 }) {}

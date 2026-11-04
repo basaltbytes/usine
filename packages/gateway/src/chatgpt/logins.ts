@@ -1,4 +1,5 @@
 import {
+  type Brand,
   Context,
   DateTime,
   type Duration,
@@ -59,17 +60,17 @@ const REJECTED_CODES: ReadonlySet<string> = new Set([
  * fixes (`refresh-rejected`). The message names no token and no text from the token endpoint.
  * The reverse proxy answers 401 for `refresh-rejected`, and otherwise 503, which Codex retries.
  */
-export class ChatGptLoginUnavailable extends Schema.TaggedError<ChatGptLoginUnavailable>()(
-  "ChatGptLoginUnavailable",
-  {
-    /** The auth file of the login that could not provide an access token. */
-    authFile: Schema.String,
-    /** Whether the auth file is unreadable, refresh needs a retry, or a new login is required. */
-    reason: Schema.Literals(["unreadable", "refresh-failed", "refresh-rejected"]),
-    /** A client-safe explanation that excludes tokens and token-endpoint response text. */
-    message: Schema.String,
-  },
-) {}
+export class ChatGptLoginUnavailable extends Schema.TaggedError<
+  ChatGptLoginUnavailable,
+  Brand.Brand<"@usine/gateway/chatgpt/logins/ChatGptLoginUnavailable">
+>()("ChatGptLoginUnavailable", {
+  /** The auth file of the login that could not provide an access token. */
+  authFile: Schema.String,
+  /** Whether the auth file is unreadable, refresh needs a retry, or a new login is required. */
+  reason: Schema.Literals(["unreadable", "refresh-failed", "refresh-rejected"]),
+  /** A client-safe explanation that excludes tokens and token-endpoint response text. */
+  message: Schema.String,
+}) {}
 
 /** A string field that Codex reads as absent when it's null or empty. */
 const OptionalText = Schema.optionalKey(Schema.NullOr(Schema.String));

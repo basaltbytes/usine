@@ -1,14 +1,25 @@
 import { InstanceDirectory } from "@usine/core/instance";
-import { Config, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
+import {
+  type Brand,
+  Config,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Redacted,
+  Schema,
+} from "effect";
 import { AppCredentials, AppId, GitHubCredentials, RedactedPrivateKey } from "./credentials.ts";
 
 /** The credential file path relative to the instance directory; the file must have mode 0600 (ADR 0011). */
 export const GITHUB_APP_SECRETS_PATH = ".usine/github-app.json";
 
 /** An invalid App ID or private key in the environment; loading fails instead of using the file value. */
-export class EnvironmentCredentialsError extends Schema.TaggedError<EnvironmentCredentialsError>(
-  "@usine/github/EnvironmentCredentialsError",
-)("EnvironmentCredentialsError", {
+export class EnvironmentCredentialsError extends Schema.TaggedError<
+  EnvironmentCredentialsError,
+  Brand.Brand<"@usine/github/local-secrets/EnvironmentCredentialsError">
+>("@usine/github/EnvironmentCredentialsError")("EnvironmentCredentialsError", {
   /** Instructions for correcting `USINE_GITHUB_APP_ID` or `USINE_GITHUB_PRIVATE_KEY`, without their values. */
   message: Schema.NonEmptyString,
 }) {}
@@ -18,9 +29,10 @@ export const SecretsFileReason = Schema.Literals(["read", "permissions", "parse"
 export type SecretsFileReason = typeof SecretsFileReason.Type;
 
 /** A credential file that cannot be read, does not have mode 0600, or fails JSON or credential validation. */
-export class SecretsFileError extends Schema.TaggedError<SecretsFileError>(
-  "@usine/github/SecretsFileError",
-)("SecretsFileError", {
+export class SecretsFileError extends Schema.TaggedError<
+  SecretsFileError,
+  Brand.Brand<"@usine/github/local-secrets/SecretsFileError">
+>("@usine/github/SecretsFileError")("SecretsFileError", {
   /** The resolved credential file path under the instance directory. */
   path: Schema.NonEmptyString,
   /** The file access, permissions, or parsing failure category. */
@@ -42,7 +54,10 @@ const environment = Config.all({
 });
 
 /** Runtime App credentials, including optional user authorization and webhook secrets. */
-export class GitHubAppSecrets extends Schema.Class<GitHubAppSecrets>("GitHubAppSecrets")({
+export class GitHubAppSecrets extends Schema.Class<
+  GitHubAppSecrets,
+  Brand.Brand<"@usine/github/local-secrets/GitHubAppSecrets">
+>("GitHubAppSecrets")({
   ...AppCredentials.fields,
   clientId: Schema.OptionFromOptionalKey(Schema.NonEmptyString),
   clientSecret: Schema.OptionFromOptionalKey(Schema.RedactedFromValue(Schema.NonEmptyString)),

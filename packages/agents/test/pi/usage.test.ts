@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { TokenBreakdown } from "@usine/core/agent/session";
-import { Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import {
   addUsage,
   claudeTokenMeter,
@@ -72,32 +72,34 @@ describe("Claude query tokens", () => {
 });
 
 describe("Codex thread tokens", () => {
-  it("ignores cached input so a long conversation does not read as consumption", () => {
-    const usage = Schema.decodeUnknownSync(CodexTokenUsage)({
-      threadId: "thread",
-      tokenUsage: {
-        total: {
-          totalTokens: 2_000_400,
-          inputTokens: 2_000_000,
-          cachedInputTokens: 1_950_000,
-          cacheWriteInputTokens: 20_000,
-          outputTokens: 400,
-          reasoningOutputTokens: 100,
+  it.effect("ignores cached input so a long conversation does not read as consumption", () =>
+    Effect.gen(function* () {
+      const usage = yield* Schema.decodeUnknownEffect(CodexTokenUsage)({
+        threadId: "thread",
+        tokenUsage: {
+          total: {
+            totalTokens: 2_000_400,
+            inputTokens: 2_000_000,
+            cachedInputTokens: 1_950_000,
+            cacheWriteInputTokens: 20_000,
+            outputTokens: 400,
+            reasoningOutputTokens: 100,
+          },
+          last: { totalTokens: 1, inputTokens: 1, cachedInputTokens: 0, outputTokens: 0 },
         },
-        last: { totalTokens: 1, inputTokens: 1, cachedInputTokens: 0, outputTokens: 0 },
-      },
-    });
-    assert.strictEqual(codexThreadTokens(usage.tokenUsage.total), 50_400);
-    assert.strictEqual(
-      codexThreadTokens({
-        inputTokens: 10,
-        cachedInputTokens: 30,
-        cacheWriteInputTokens: 0,
-        outputTokens: 7,
-      }),
-      7,
-    );
-  });
+      });
+      assert.strictEqual(codexThreadTokens(usage.tokenUsage.total), 50_400);
+      assert.strictEqual(
+        codexThreadTokens({
+          inputTokens: 10,
+          cachedInputTokens: 30,
+          cacheWriteInputTokens: 0,
+          outputTokens: 7,
+        }),
+        7,
+      );
+    }),
+  );
 
   it("splits input into cache reads, cache writes, and the rest", () => {
     assert.deepStrictEqual(

@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 import { GitHubPushFailure } from "./failure.ts";
 import type { LoopPermissions } from "../loop.ts";
 import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
@@ -16,24 +16,25 @@ export const salvageRefFor = (runId: RunId, number: AttemptNumber): SalvageRef =
   SalvageRef.make(`usine/salvage/${safeSegment(runId)}/${number}`);
 
 /** Unfinished work committed and pushed to `ref`; `commit` is the pushed head. */
-export class SalvagePushed extends Schema.TaggedClass<SalvagePushed>("AttemptSalvage/Pushed")(
-  "Pushed",
-  {
-    /** The remote branch containing the unfinished work. */
-    ref: SalvageRef,
-    /** The head commit successfully pushed to the remote branch. */
-    commit: CommitSha,
-  },
-) {}
+export class SalvagePushed extends Schema.TaggedClass<
+  SalvagePushed,
+  Brand.Brand<"@usine/core/attempt/salvage/SalvagePushed">
+>("AttemptSalvage/Pushed")("Pushed", {
+  /** The remote branch containing the unfinished work. */
+  ref: SalvageRef,
+  /** The head commit successfully pushed to the remote branch. */
+  commit: CommitSha,
+}) {}
 
 /**
  * Unfinished work pushed to `ref` at `commit`, without files that the salvage can't push, such as
  * a file over GitHub's size limit. The workspace at `path` on the Worker keeps their only copy,
  * and `message` names them.
  */
-export class SalvagePartlyPushed extends Schema.TaggedClass<SalvagePartlyPushed>(
-  "AttemptSalvage/PartlyPushed",
-)("PartlyPushed", {
+export class SalvagePartlyPushed extends Schema.TaggedClass<
+  SalvagePartlyPushed,
+  Brand.Brand<"@usine/core/attempt/salvage/SalvagePartlyPushed">
+>("AttemptSalvage/PartlyPushed")("PartlyPushed", {
   /** The remote branch containing the files that could be pushed. */
   ref: SalvageRef,
   /** The head commit successfully pushed to the remote branch. */
@@ -45,39 +46,39 @@ export class SalvagePartlyPushed extends Schema.TaggedClass<SalvagePartlyPushed>
 }) {}
 
 /** A failed salvage that left the workspace at `path` on the Worker. `commit` is `None` if inspection failed. */
-export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("AttemptSalvage/Retained")(
-  "Retained",
-  {
-    /** The checkout retained on the worker after salvage failed. */
-    path: Schema.NonEmptyString,
-    /** The checkout's head commit, or `None` if inspection failed. */
-    commit: Schema.OptionFromNullOr(CommitSha),
-    /** The diagnostic explaining why the checkout could not be salvaged. */
-    message: Schema.String,
-    /** A push refusal that also fails the attempt; absent on older salvage records. */
-    pushFailure: Schema.OptionFromNullOr(GitHubPushFailure).pipe(
-      Schema.withDecodingDefaultKey(Effect.succeed(null)),
-      Schema.withConstructorDefault(Effect.succeed(Option.none<GitHubPushFailure>())),
-    ),
-  },
-) {}
+export class SalvageRetained extends Schema.TaggedClass<
+  SalvageRetained,
+  Brand.Brand<"@usine/core/attempt/salvage/SalvageRetained">
+>("AttemptSalvage/Retained")("Retained", {
+  /** The checkout retained on the worker after salvage failed. */
+  path: Schema.NonEmptyString,
+  /** The checkout's head commit, or `None` if inspection failed. */
+  commit: Schema.OptionFromNullOr(CommitSha),
+  /** The diagnostic explaining why the checkout could not be salvaged. */
+  message: Schema.String,
+  /** A push refusal that also fails the attempt; absent on older salvage records. */
+  pushFailure: Schema.OptionFromNullOr(GitHubPushFailure).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(Option.none<GitHubPushFailure>())),
+  ),
+}) {}
 
 /**
  * A salvage whose push the remote refused for a reason that pushing again can't fix, such as a
  * file over GitHub's size limit. It left the workspace at `path` on the Worker, and recovery
  * doesn't push `commit` again.
  */
-export class SalvageRejected extends Schema.TaggedClass<SalvageRejected>("AttemptSalvage/Rejected")(
-  "Rejected",
-  {
-    /** The checkout retained on the worker after the remote refused the push. */
-    path: Schema.NonEmptyString,
-    /** The rejected head commit, which recovery must not push again. */
-    commit: CommitSha,
-    /** The remote refusal that requires intervention before another push. */
-    message: Schema.String,
-  },
-) {}
+export class SalvageRejected extends Schema.TaggedClass<
+  SalvageRejected,
+  Brand.Brand<"@usine/core/attempt/salvage/SalvageRejected">
+>("AttemptSalvage/Rejected")("Rejected", {
+  /** The checkout retained on the worker after the remote refused the push. */
+  path: Schema.NonEmptyString,
+  /** The rejected head commit, which recovery must not push again. */
+  commit: CommitSha,
+  /** The remote refusal that requires intervention before another push. */
+  message: Schema.String,
+}) {}
 
 /** What the executor kept of the workspace of an unsuccessful Attempt. */
 export const AttemptSalvage = Schema.Union([

@@ -1,5 +1,5 @@
 import { OperatorActor } from "@usine/core/operator";
-import { Option, Schema } from "effect";
+import { type Brand, Option, Schema } from "effect";
 import { ConfigFileError } from "../file.ts";
 import { LoadedInstance } from "../instance/instance.ts";
 
@@ -32,9 +32,10 @@ export const ConfigurationEntityId = Schema.NonEmptyString.pipe(
 export type ConfigurationEntityId = typeof ConfigurationEntityId.Type;
 
 /** The kind and identifier that uniquely identify one configuration entity. */
-export class ConfigurationEntityKey extends Schema.Class<ConfigurationEntityKey>(
-  "@usine/config/ConfigurationEntityKey",
-)({
+export class ConfigurationEntityKey extends Schema.Class<
+  ConfigurationEntityKey,
+  Brand.Brand<"@usine/config/configuration/model/ConfigurationEntityKey">
+>("@usine/config/ConfigurationEntityKey")({
   /** The entity category used to interpret its value. */
   kind: ConfigurationEntityKind,
   /** The identifier within the category; settings use `instance`. */
@@ -50,9 +51,10 @@ export class ConfigurationEntityKey extends Schema.Class<ConfigurationEntityKey>
  * Values use the JSON codec of their entity schema. Settings use the singleton identifier
  * `instance`.
  */
-export class ConfigurationEntity extends Schema.Class<ConfigurationEntity>(
-  "@usine/config/ConfigurationEntity",
-)({
+export class ConfigurationEntity extends Schema.Class<
+  ConfigurationEntity,
+  Brand.Brand<"@usine/config/configuration/model/ConfigurationEntity">
+>("@usine/config/ConfigurationEntity")({
   /** The kind and identifier of this entity. */
   key: ConfigurationEntityKey,
   /** The entity's encoded JSON value, including parser defaults. */
@@ -60,9 +62,10 @@ export class ConfigurationEntity extends Schema.Class<ConfigurationEntity>(
 }) {}
 
 /** An entity addition, edit, removal, or worker reorder in a configuration revision. */
-export class ConfigurationChange extends Schema.Class<ConfigurationChange>(
-  "@usine/config/ConfigurationChange",
-)({
+export class ConfigurationChange extends Schema.Class<
+  ConfigurationChange,
+  Brand.Brand<"@usine/config/configuration/model/ConfigurationChange">
+>("@usine/config/ConfigurationChange")({
   /** The entity affected by the change. */
   key: ConfigurationEntityKey,
   /** The expected previous value, or `None` when adding an entity. */
@@ -74,7 +77,10 @@ export class ConfigurationChange extends Schema.Class<ConfigurationChange>(
 }) {}
 
 /** A configuration snapshot at a revision. Only revision zero has no loaded instance. */
-export class Configuration extends Schema.Class<Configuration>("@usine/config/Configuration")(
+export class Configuration extends Schema.Class<
+  Configuration,
+  Brand.Brand<"@usine/config/configuration/model/Configuration">
+>("@usine/config/Configuration")(
   Schema.Struct({
     /** The current revision number, or zero before initialization. */
     number: ConfigurationRevisionNumber,
@@ -102,9 +108,10 @@ export class Configuration extends Schema.Class<Configuration>("@usine/config/Co
 }
 
 /** A committed configuration change with its attribution and UTC time (ADR 0031). */
-export class ConfigurationRevision extends Schema.Class<ConfigurationRevision>(
-  "@usine/config/ConfigurationRevision",
-)({
+export class ConfigurationRevision extends Schema.Class<
+  ConfigurationRevision,
+  Brand.Brand<"@usine/config/configuration/model/ConfigurationRevision">
+>("@usine/config/ConfigurationRevision")({
   /** The positive, increasing revision number assigned by commit. */
   number: ConfigurationRevisionNumber.check(Schema.isGreaterThan(0)),
   /** The operator login attributed to this change, or `None` when unavailable. */
@@ -118,28 +125,30 @@ export class ConfigurationRevision extends Schema.Class<ConfigurationRevision>(
 }) {}
 
 /** A refused commit whose expected revision differs from the current revision. */
-export class StaleRevision extends Schema.TaggedError<StaleRevision>("@usine/config/StaleRevision")(
-  "StaleRevision",
-  {
-    /** The revision number the caller used as the base for its changes. */
-    expected: ConfigurationRevisionNumber,
-    /** The current revision number that caused the commit to be refused. */
-    actual: ConfigurationRevisionNumber,
-  },
-) {}
+export class StaleRevision extends Schema.TaggedError<
+  StaleRevision,
+  Brand.Brand<"@usine/config/configuration/model/StaleRevision">
+>("@usine/config/StaleRevision")("StaleRevision", {
+  /** The revision number the caller used as the base for its changes. */
+  expected: ConfigurationRevisionNumber,
+  /** The current revision number that caused the commit to be refused. */
+  actual: ConfigurationRevisionNumber,
+}) {}
 
 /** Configuration validation failures collected before a candidate can be committed. */
-export class ConfigurationInvalid extends Schema.TaggedError<ConfigurationInvalid>(
-  "@usine/config/ConfigurationInvalid",
-)("ConfigurationInvalid", {
+export class ConfigurationInvalid extends Schema.TaggedError<
+  ConfigurationInvalid,
+  Brand.Brand<"@usine/config/configuration/model/ConfigurationInvalid">
+>("@usine/config/ConfigurationInvalid")("ConfigurationInvalid", {
   /** The nonempty list of file or entity diagnostics collected during validation. */
   problems: Schema.NonEmptyArray(ConfigFileError),
 }) {}
 
 /** A storage or export failure with the attempted operation and original cause. */
-export class ConfigurationStoreError extends Schema.TaggedError<ConfigurationStoreError>(
-  "@usine/config/ConfigurationStoreError",
-)("ConfigurationStoreError", {
+export class ConfigurationStoreError extends Schema.TaggedError<
+  ConfigurationStoreError,
+  Brand.Brand<"@usine/config/configuration/model/ConfigurationStoreError">
+>("@usine/config/ConfigurationStoreError")("ConfigurationStoreError", {
   /** The storage or export operation that failed. */
   operation: Schema.String,
   /** The original failure for diagnosis. */
@@ -147,9 +156,10 @@ export class ConfigurationStoreError extends Schema.TaggedError<ConfigurationSto
 }) {}
 
 /** A refused revert because later revisions changed entities in the target revision. */
-export class ConfigurationRevertBlocked extends Schema.TaggedError<ConfigurationRevertBlocked>(
-  "@usine/config/ConfigurationRevertBlocked",
-)("ConfigurationRevertBlocked", {
+export class ConfigurationRevertBlocked extends Schema.TaggedError<
+  ConfigurationRevertBlocked,
+  Brand.Brand<"@usine/config/configuration/model/ConfigurationRevertBlocked">
+>("@usine/config/ConfigurationRevertBlocked")("ConfigurationRevertBlocked", {
   /** The entities in the target revision that later revisions also changed. */
   entities: Schema.NonEmptyArray(ConfigurationEntityKey),
 }) {}

@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { assert, it, onTestFinished } from "vitest";
 
 const exec = promisify(execFile);
@@ -135,8 +135,8 @@ it.each(["npm", "pnpm"])(
     onTestFinished(() => new Promise<void>((resolve) => registry.close(() => resolve())));
     registry.listen(0, "127.0.0.1");
     await once(registry, "listening");
-    const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
-      registry.address(),
+    const { port } = await Effect.runPromise(
+      Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(registry.address()),
     );
     await writeFile(
       join(f.root, "package.json"),
@@ -207,6 +207,8 @@ const freePort = () =>
     const listener = createServer();
     listener.on("error", reject);
     listener.listen(0, "127.0.0.1", () => {
+      // Node event callbacks decode their arguments synchronously.
+      // @effect-diagnostics-next-line schemaSync:off
       const address = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
         listener.address(),
       );

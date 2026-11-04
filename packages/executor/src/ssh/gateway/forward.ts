@@ -1,7 +1,18 @@
 import { createServer } from "node:net";
 import type { RemoteShell } from "@usine/agents/child-host";
 import { type GatewayAdminPort, SshDestination } from "@usine/core/worker";
-import { DateTime, Deferred, Effect, Fiber, Option, Ref, Result, Schema, Stream } from "effect";
+import {
+  type Brand,
+  DateTime,
+  Deferred,
+  Effect,
+  Fiber,
+  Option,
+  Ref,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 
 /** The line the SSH client prints through `LocalCommand` when its local port is listening. */
@@ -26,9 +37,10 @@ export interface OpenForward {
  * The error for a closed admin API forward, whose SSH client didn't open or exited. `since` is
  * when the Gateway became unreachable, and `reason` is the SSH client's error.
  */
-export class GatewayForwardClosed extends Schema.TaggedError<GatewayForwardClosed>(
-  "@usine/executor/GatewayForwardClosed",
-)("GatewayForwardClosed", {
+export class GatewayForwardClosed extends Schema.TaggedError<
+  GatewayForwardClosed,
+  Brand.Brand<"@usine/executor/ssh/gateway/forward/GatewayForwardClosed">
+>("@usine/executor/GatewayForwardClosed")("GatewayForwardClosed", {
   gateway: SshDestination,
   generation: Schema.Int,
   since: Schema.DateTimeUtc,

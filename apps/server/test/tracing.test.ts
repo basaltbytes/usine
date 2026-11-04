@@ -33,8 +33,8 @@ const startCollector = async (status = 200) => {
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
-    server.address(),
+  const { port } = await Effect.runPromise(
+    Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(server.address()),
   );
   return {
     received,

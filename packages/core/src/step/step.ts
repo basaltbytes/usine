@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 import { RunId } from "../run/run.ts";
 import { StepResult } from "./result.ts";
 
@@ -8,7 +8,7 @@ export const StepName = Schema.NonEmptyString.pipe(Schema.brand("StepName"));
 export type StepName = typeof StepName.Type;
 
 /** A unit of work in a Run, exactly one per Run in v1. `result` is `None` until an Attempt succeeds. */
-export class Step extends Schema.Class<Step>("Step")({
+export class Step extends Schema.Class<Step, Brand.Brand<"@usine/core/step/step/Step">>("Step")({
   /** The run to which this step belongs. */
   runId: RunId,
   /** The step's identity from the loop definition. */

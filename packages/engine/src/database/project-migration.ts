@@ -14,7 +14,7 @@ import {
 import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
-import { Effect, Option, Predicate, Schema } from "effect";
+import { type Brand, Effect, Option, Predicate, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { EnginePersistenceError } from "../engine/error.ts";
 
@@ -22,7 +22,10 @@ import { EnginePersistenceError } from "../engine/error.ts";
  * A managed repo and its project assignment, used to qualify stored loop identities during
  * migration.
  */
-export class RepositoryProject extends Schema.Class<RepositoryProject>("RepositoryProject")({
+export class RepositoryProject extends Schema.Class<
+  RepositoryProject,
+  Brand.Brand<"@usine/engine/database/project-migration/RepositoryProject">
+>("RepositoryProject")({
   /**
    * The managed repo whose stored loop references need the project prefix; matching ignores case.
    */

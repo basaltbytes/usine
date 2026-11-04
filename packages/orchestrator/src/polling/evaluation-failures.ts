@@ -4,13 +4,14 @@ import type { RepositoryName } from "@usine/core/repository";
 import { ItemContentHash } from "@usine/engine/item-projection";
 import { Source } from "@usine/expression/expression-engine";
 import { ChangedIssue, type ChangedItem, ChangedPullRequest } from "@usine/github/polling";
-import { Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 import { RepositoryPollFailure } from "./cycle.ts";
 
 /** A Loop that couldn't evaluate an Item: its `if:` failed or its prompt didn't render. */
-export class LoopEvaluationFailure extends Schema.Class<LoopEvaluationFailure>(
-  "@usine/orchestrator/LoopEvaluationFailure",
-)({
+export class LoopEvaluationFailure extends Schema.Class<
+  LoopEvaluationFailure,
+  Brand.Brand<"@usine/orchestrator/polling/evaluation-failures/LoopEvaluationFailure">
+>("@usine/orchestrator/LoopEvaluationFailure")({
   loop: LoopName,
   /** The failed part: the trigger's `if:` or a prompt interpolation. */
   stage: Schema.Literals(["if", "prompt"]),
@@ -23,7 +24,10 @@ export class LoopEvaluationFailure extends Schema.Class<LoopEvaluationFailure>(
  * An Item whose latest evaluation failed for at least one Loop. The poll cursor keeps it until the
  * Item is evaluated again, and the first poll of a new process retries it.
  */
-export class FailingItem extends Schema.Class<FailingItem>("@usine/orchestrator/FailingItem")({
+export class FailingItem extends Schema.Class<
+  FailingItem,
+  Brand.Brand<"@usine/orchestrator/polling/evaluation-failures/FailingItem">
+>("@usine/orchestrator/FailingItem")({
   stream: Schema.Literals(["issue", "pr"]),
   number: ItemNumber,
   updatedAt: Schema.DateTimeUtcFromString,

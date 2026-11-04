@@ -1,11 +1,11 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 
 /** A host that runs children as local processes. */
-export class LocalProcess extends Schema.TaggedClass<LocalProcess>("@usine/agents/LocalProcess")(
-  "LocalProcess",
-  {},
-) {}
+export class LocalProcess extends Schema.TaggedClass<
+  LocalProcess,
+  Brand.Brand<"@usine/agents/child-host/child-host/LocalProcess">
+>("@usine/agents/LocalProcess")("LocalProcess", {}) {}
 
 /** The local SSH executable and the options before the destination. */
 export const SshCommand = Schema.Struct({
@@ -26,27 +26,27 @@ export const ShellContainer = Schema.Struct({
 export type ShellContainer = typeof ShellContainer.Type;
 
 /** A host that runs each child on another machine as one SSH command, through its standard streams. */
-export class RemoteShell extends Schema.TaggedClass<RemoteShell>("@usine/agents/RemoteShell")(
-  "RemoteShell",
-  {
-    /** The local SSH client and connection options used to reach the remote machine. */
-    ssh: SshCommand,
-    /**
-     * The SSH client's process environment: what SSH needs to connect, never the orchestrator's
-     * secrets (ADR 0011), plus the variables that `-o SendEnv=` options in `ssh` forward to the
-     * child. Use it for values that must not appear on the command line, such as a gateway caller
-     * token. Never log this field.
-     */
-    sshEnvironment: Schema.Record(Schema.String, Schema.String),
-    /** The SSH destination, passed as one argument. */
-    destination: Schema.NonEmptyString,
-    /**
-     * The container that runs each command, with the working directory, variables, and PID file
-     * inside it. If absent, the SSH user's shell runs the command.
-     */
-    container: Schema.optionalKey(ShellContainer),
-  },
-) {}
+export class RemoteShell extends Schema.TaggedClass<
+  RemoteShell,
+  Brand.Brand<"@usine/agents/child-host/child-host/RemoteShell">
+>("@usine/agents/RemoteShell")("RemoteShell", {
+  /** The local SSH client and connection options used to reach the remote machine. */
+  ssh: SshCommand,
+  /**
+   * The SSH client's process environment: what SSH needs to connect, never the orchestrator's
+   * secrets (ADR 0011), plus the variables that `-o SendEnv=` options in `ssh` forward to the
+   * child. Use it for values that must not appear on the command line, such as a gateway caller
+   * token. Never log this field.
+   */
+  sshEnvironment: Schema.Record(Schema.String, Schema.String),
+  /** The SSH destination, passed as one argument. */
+  destination: Schema.NonEmptyString,
+  /**
+   * The container that runs each command, with the working directory, variables, and PID file
+   * inside it. If absent, the SSH user's shell runs the command.
+   */
+  container: Schema.optionalKey(ShellContainer),
+}) {}
 
 /** The host that runs an attempt's children, chosen by the worker that prepared its checkout. */
 export const ChildHost = Schema.Union([LocalProcess, RemoteShell]);

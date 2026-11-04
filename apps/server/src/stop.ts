@@ -1,7 +1,7 @@
 import { readAdminToken } from "./auth/local.ts";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
-import { Config, Console, Duration, Effect, Option, Schema } from "effect";
+import { type Brand, Config, Console, Duration, Effect, Option, Schema } from "effect";
 import type { LifecycleOptions, Port } from "./cli.ts";
 import { type InstanceRecord, ProcessId } from "./instance/record.ts";
 import { gatewayTokenVariables, hasLiveAttempt, listRuns } from "./instance/operator-api.ts";
@@ -19,9 +19,10 @@ export const LifecycleCommandName = Schema.Literals(["stop", "restart", "upgrade
 export type LifecycleCommandName = typeof LifecycleCommandName.Type;
 
 /** The instance process didn't exit within the timeout. Its drain continues. */
-export class StopTimeoutError extends Schema.TaggedError<StopTimeoutError>(
-  "@usine/server/StopTimeoutError",
-)("StopTimeoutError", {
+export class StopTimeoutError extends Schema.TaggedError<
+  StopTimeoutError,
+  Brand.Brand<"@usine/server/stop/StopTimeoutError">
+>("@usine/server/StopTimeoutError")("StopTimeoutError", {
   command: LifecycleCommandName,
   pid: ProcessId,
   timeout: Schema.Duration,
@@ -32,40 +33,51 @@ export class StopTimeoutError extends Schema.TaggedError<StopTimeoutError>(
 }) {}
 
 /** The instance process still ran `timeout` after `--force` sent it `SIGKILL`. */
-export class KillTimeoutError extends Schema.TaggedError<KillTimeoutError>(
-  "@usine/server/KillTimeoutError",
-)("KillTimeoutError", {
+export class KillTimeoutError extends Schema.TaggedError<
+  KillTimeoutError,
+  Brand.Brand<"@usine/server/stop/KillTimeoutError">
+>("@usine/server/KillTimeoutError")("KillTimeoutError", {
   command: LifecycleCommandName,
   pid: ProcessId,
   timeout: Schema.Duration,
 }) {}
 
 /** No `usine up` runs in the instance folder. */
-export class InstanceNotRunningError extends Schema.TaggedError<InstanceNotRunningError>(
-  "@usine/server/InstanceNotRunningError",
-)("InstanceNotRunningError", { command: LifecycleCommandName, directory: Schema.String }) {}
+export class InstanceNotRunningError extends Schema.TaggedError<
+  InstanceNotRunningError,
+  Brand.Brand<"@usine/server/stop/InstanceNotRunningError">
+>("@usine/server/InstanceNotRunningError")("InstanceNotRunningError", {
+  command: LifecycleCommandName,
+  directory: Schema.String,
+}) {}
 
 /** A process holds the instance lock without an instance record, so its launch is unknown. */
-export class UnrecordedInstanceError extends Schema.TaggedError<UnrecordedInstanceError>(
-  "@usine/server/UnrecordedInstanceError",
-)("UnrecordedInstanceError", {
+export class UnrecordedInstanceError extends Schema.TaggedError<
+  UnrecordedInstanceError,
+  Brand.Brand<"@usine/server/stop/UnrecordedInstanceError">
+>("@usine/server/UnrecordedInstanceError")("UnrecordedInstanceError", {
   command: LifecycleCommandName,
   directory: Schema.String,
   pid: Schema.Option(ProcessId),
 }) {}
 
 /** Runs have live Attempts, and the operator didn't pass `--force`. */
-export class LiveAttemptsError extends Schema.TaggedError<LiveAttemptsError>(
-  "@usine/server/LiveAttemptsError",
-)("LiveAttemptsError", { command: LifecycleCommandName, runs: Schema.Array(RunId) }) {}
+export class LiveAttemptsError extends Schema.TaggedError<
+  LiveAttemptsError,
+  Brand.Brand<"@usine/server/stop/LiveAttemptsError">
+>("@usine/server/LiveAttemptsError")("LiveAttemptsError", {
+  command: LifecycleCommandName,
+  runs: Schema.Array(RunId),
+}) {}
 
 /**
  * Neither the shell that would start the new `usine up` nor `.env` sets variables that its startup
  * needs.
  */
-export class MissingEnvironmentError extends Schema.TaggedError<MissingEnvironmentError>(
-  "@usine/server/MissingEnvironmentError",
-)("MissingEnvironmentError", {
+export class MissingEnvironmentError extends Schema.TaggedError<
+  MissingEnvironmentError,
+  Brand.Brand<"@usine/server/stop/MissingEnvironmentError">
+>("@usine/server/MissingEnvironmentError")("MissingEnvironmentError", {
   command: LifecycleCommandName,
   variables: Schema.Array(Schema.NonEmptyString),
 }) {}
@@ -90,10 +102,10 @@ export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment"
   );
   const missing: Array<string> = [];
   for (const name of names) {
-    const value = yield* Config.option(Config.String(name)).pipe(
+    const configuredValue = yield* Config.option(Config.String(name)).pipe(
       Effect.orElseSucceed(() => Option.none<string>()),
     );
-    if (Option.isNone(value)) missing.push(name);
+    if (Option.isNone(configuredValue)) missing.push(name);
   }
   if (missing.length === 0) return;
   yield* Effect.logInfo("Refusing to stop the instance: the new process would lack variables", {

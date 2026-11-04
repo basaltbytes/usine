@@ -2,16 +2,17 @@ import { ProjectId } from "@usine/core/project";
 import { AgentName } from "@usine/core/agent";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RunSummaryView } from "./run.ts";
 import { BoardItemLink, BoardView, LabelView } from "./board.ts";
 import { NeedView } from "./need.ts";
 
 /** Item identities used by navigation, notifications, and run headings. */
-export class TaskIdentityView extends Schema.Class<TaskIdentityView>(
-  "@usine/orchestrator/TaskIdentityView",
-)({
+export class TaskIdentityView extends Schema.Class<
+  TaskIdentityView,
+  Brand.Brand<"@usine/orchestrator/operator/overview/TaskIdentityView">
+>("@usine/orchestrator/TaskIdentityView")({
   ...BoardItemLink.fields,
   repository: RepositoryName,
   items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
@@ -28,7 +29,10 @@ export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
 export type ProjectStatus = typeof ProjectStatus.Type;
 
 /** A project with its runs, board, label catalog, and preflight findings. */
-export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/ProjectView")({
+export class ProjectView extends Schema.Class<
+  ProjectView,
+  Brand.Brand<"@usine/orchestrator/operator/overview/ProjectView">
+>("@usine/orchestrator/ProjectView")({
   /** The configured project ID; omitted in repository-only projections. */
   id: Schema.optionalKey(ProjectId),
   /** The configured project display name; omitted in repository-only projections. */
@@ -53,7 +57,10 @@ export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/
 }) {}
 
 /** A Loop's trigger and Agent with its runtime pause state. */
-export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopView")({
+export class LoopView extends Schema.Class<
+  LoopView,
+  Brand.Brand<"@usine/orchestrator/operator/overview/LoopView">
+>("@usine/orchestrator/LoopView")({
   /** The project-qualified loop name. */
   name: LoopName,
   /** The trigger stream: `issue`, `pr`, or `schedule`. */
@@ -65,9 +72,10 @@ export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopVi
 }) {}
 
 /** The Projects, Loops, and operator needs of a configured factory. */
-export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
-  "@usine/orchestrator/ReadyOverview",
-)("Ready", {
+export class ReadyOverview extends Schema.TaggedClass<
+  ReadyOverview,
+  Brand.Brand<"@usine/orchestrator/operator/overview/ReadyOverview">
+>("@usine/orchestrator/ReadyOverview")("Ready", {
   /** Compact task identities for screens that omit boards. */
   identities,
   /** The configured projects with their boards and run summaries. */
@@ -81,9 +89,10 @@ export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
 }) {}
 
 /** The overview during setup, with the error that prevents normal operation. */
-export class NeedsSetupOverview extends Schema.TaggedClass<NeedsSetupOverview>(
-  "@usine/orchestrator/NeedsSetupOverview",
-)("NeedsSetup", {
+export class NeedsSetupOverview extends Schema.TaggedClass<
+  NeedsSetupOverview,
+  Brand.Brand<"@usine/orchestrator/operator/overview/NeedsSetupOverview">
+>("@usine/orchestrator/NeedsSetupOverview")("NeedsSetup", {
   /** Compact task identities for screens that omit boards. */
   identities,
   /** The setup failure tag. */

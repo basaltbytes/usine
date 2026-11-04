@@ -1,7 +1,7 @@
 import { InstanceDirectory } from "@usine/core/instance";
 import { readAdminToken } from "../auth/local.ts";
 import { RunId } from "@usine/core/run";
-import { Effect, Redacted, Schema } from "effect";
+import { type Brand, Effect, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { type Port, SERVER_HOST } from "../cli.ts";
 
@@ -11,7 +11,10 @@ const OPERATOR_API_TIMEOUT = "5 seconds";
 // version.
 
 /** A Run as `GET /api/overview` lists it. */
-export class ListedRun extends Schema.Class<ListedRun>("@usine/server/ListedRun")({
+export class ListedRun extends Schema.Class<
+  ListedRun,
+  Brand.Brand<"@usine/server/instance/operator-api/ListedRun">
+>("@usine/server/ListedRun")({
   id: RunId,
   state: Schema.String,
 }) {}
@@ -29,9 +32,13 @@ const Configuration = Schema.Struct({
 });
 
 /** The running instance's operator API didn't answer, or its answer didn't decode. */
-export class OperatorApiError extends Schema.TaggedError<OperatorApiError>(
-  "@usine/server/OperatorApiError",
-)("OperatorApiError", { url: Schema.String, reason: Schema.String }) {}
+export class OperatorApiError extends Schema.TaggedError<
+  OperatorApiError,
+  Brand.Brand<"@usine/server/instance/operator-api/OperatorApiError">
+>("@usine/server/OperatorApiError")("OperatorApiError", {
+  url: Schema.String,
+  reason: Schema.String,
+}) {}
 
 const apiUrl = (port: Port, path: string) => `http://${SERVER_HOST}:${port}${path}`;
 

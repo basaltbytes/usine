@@ -324,7 +324,9 @@ describe("usine CLI", () => {
   it("refuses a port another process listens on before startup and names that process", async () => {
     const listener = createServer();
     await new Promise<void>((resolve) => listener.listen({ host: SERVER_HOST, port: 0 }, resolve));
-    const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(listener.address());
+    const { port } = await Effect.runPromise(
+      Schema.decodeUnknownEffect(Schema.Struct({ port: Port }))(listener.address()),
+    );
 
     const refused = await Effect.runPromise(
       refuseTakenPort(port).pipe(Effect.flip, Effect.provide(NodeServices.layer)),

@@ -1,6 +1,6 @@
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
-import { Clock, Context, Effect, Layer, Schema } from "effect";
+import { type Brand, Clock, Context, Effect, Layer, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "./github-app.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
@@ -10,9 +10,10 @@ const LabelResponse = Schema.Array(Schema.Struct({ name: Schema.NonEmptyString }
 const LabelNames = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique());
 
 /** The labels to add and remove on one item; other labels are unchanged. */
-export class ItemLabelMutation extends Schema.Class<ItemLabelMutation>(
-  "@usine/github/ItemLabelMutation",
-)({
+export class ItemLabelMutation extends Schema.Class<
+  ItemLabelMutation,
+  Brand.Brand<"@usine/github/item-writer/ItemLabelMutation">
+>("@usine/github/ItemLabelMutation")({
   /** Unique labels to add before removing labels. */
   add: LabelNames,
   /** Unique labels to remove after additions; labels already absent are ignored. */

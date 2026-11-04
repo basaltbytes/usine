@@ -70,7 +70,7 @@ export const parseConfigurationForm = (key: ConfigurationEntityKey, text: string
   const file = InstancePath.make(key.key);
   if (key.kind === "loop")
     return parseLoopDraft(InstancePath.make(`loops/${key.identifier}.md`), text).pipe(
-      Effect.map(Schema.encodeSync(LoopJson)),
+      Effect.flatMap(Schema.encodeEffect(LoopJson)),
       Effect.flatMap((value) => Schema.decodeUnknownEffect(Schema.JsonObject)(value)),
       Effect.catchTag("SchemaError", (error) =>
         Effect.fail(ConfigFileError.fromSchema(file, error)),
@@ -78,7 +78,7 @@ export const parseConfigurationForm = (key: ConfigurationEntityKey, text: string
     );
   if (key.kind === "agent")
     return parseAgentFile(InstancePath.make(`agents/${key.identifier}.md`), text).pipe(
-      Effect.map(Schema.encodeSync(AgentJson)),
+      Effect.flatMap(Schema.encodeEffect(AgentJson)),
       Effect.flatMap((value) => Schema.decodeUnknownEffect(Schema.JsonObject)(value)),
       Effect.catchTag("SchemaError", (error) =>
         Effect.fail(ConfigFileError.fromSchema(file, error)),

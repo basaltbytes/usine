@@ -6,7 +6,7 @@ import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const PositiveCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -32,7 +32,10 @@ export type StatisticsBucket = typeof StatisticsBucket.Type;
  * task's first Run to the close of its last Run, or to the merge if a Run was open at the merge or
  * closed after it. The wait between the last Run and the merge is left out.
  */
-export class TaskDoneView extends Schema.Class<TaskDoneView>("@usine/orchestrator/TaskDoneView")({
+export class TaskDoneView extends Schema.Class<
+  TaskDoneView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/TaskDoneView">
+>("@usine/orchestrator/TaskDoneView")({
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The task's first issue, or its first pull request if it has no issue. */
@@ -47,9 +50,10 @@ export class TaskDoneView extends Schema.Class<TaskDoneView>("@usine/orchestrato
 }) {}
 
 /** The tasks done in one period. `medianMillis` is null if there are none. */
-export class TaskPeriodView extends Schema.Class<TaskPeriodView>(
-  "@usine/orchestrator/TaskPeriodView",
-)({
+export class TaskPeriodView extends Schema.Class<
+  TaskPeriodView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/TaskPeriodView">
+>("@usine/orchestrator/TaskPeriodView")({
   /** The first UTC day of the period as `YYYY-MM-DD`. */
   start: UtcDay,
   /** The number of tasks whose pull request merged in this period. */
@@ -63,19 +67,21 @@ export class TaskPeriodView extends Schema.Class<TaskPeriodView>(
 }) {}
 
 /** A Loop's share of the measured tasks' time or tokens, averaged over the tasks. */
-export class LoopShareView extends Schema.Class<LoopShareView>("@usine/orchestrator/LoopShareView")(
-  {
-    /** The project-qualified loop name. */
-    loop: LoopName,
-    /** The average share of measured task time or tokens, from 0 to 1. */
-    share: Share,
-  },
-) {}
+export class LoopShareView extends Schema.Class<
+  LoopShareView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/LoopShareView">
+>("@usine/orchestrator/LoopShareView")({
+  /** The project-qualified loop name. */
+  loop: LoopName,
+  /** The average share of measured task time or tokens, from 0 to 1. */
+  share: Share,
+}) {}
 
 /** The median wall time of a Loop's closed Runs on the measured tasks, summed over Attempts. */
-export class LoopRunTimeView extends Schema.Class<LoopRunTimeView>(
-  "@usine/orchestrator/LoopRunTimeView",
-)({
+export class LoopRunTimeView extends Schema.Class<
+  LoopRunTimeView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/LoopRunTimeView">
+>("@usine/orchestrator/LoopRunTimeView")({
   /** The project-qualified loop name. */
   loop: LoopName,
   /** The number of closed runs included in this median. */
@@ -89,7 +95,10 @@ export class LoopRunTimeView extends Schema.Class<LoopRunTimeView>(
  * task's duration that the Loop's Attempts ran, or that no Attempt ran (`waiting`: approval, queue,
  * and the time between Runs), averaged over the tasks.
  */
-export class TaskTimeView extends Schema.Class<TaskTimeView>("@usine/orchestrator/TaskTimeView")({
+export class TaskTimeView extends Schema.Class<
+  TaskTimeView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/TaskTimeView">
+>("@usine/orchestrator/TaskTimeView")({
   /** The number of tasks with complete attempt end times. */
   tasks: PositiveCount,
   /** The average share per loop of measured task duration. */
@@ -104,7 +113,10 @@ export class TaskTimeView extends Schema.Class<TaskTimeView>("@usine/orchestrato
  * The median cost of the priced tasks: those whose sessions all have a price. `estimate` is true if
  * a session of a priced task is in the Claude or ChatGPT plan.
  */
-export class TaskCostView extends Schema.Class<TaskCostView>("@usine/orchestrator/TaskCostView")({
+export class TaskCostView extends Schema.Class<
+  TaskCostView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/TaskCostView">
+>("@usine/orchestrator/TaskCostView")({
   /** The number of measured tasks with a price for every session. */
   tasks: PositiveCount,
   /** The median total cost per priced task in US dollars. */
@@ -117,9 +129,10 @@ export class TaskCostView extends Schema.Class<TaskCostView>("@usine/orchestrato
  * The tokens of the tasks done whose Runs with an Attempt all reported tokens, with each Loop's
  * share. `cost` is null if no such task is priced.
  */
-export class TaskTokensView extends Schema.Class<TaskTokensView>(
-  "@usine/orchestrator/TaskTokensView",
-)({
+export class TaskTokensView extends Schema.Class<
+  TaskTokensView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/TaskTokensView">
+>("@usine/orchestrator/TaskTokensView")({
   /** The number of tasks with token reports for every run that has an attempt. */
   tasks: PositiveCount,
   /** The median total reported tokens per measured task. */
@@ -134,9 +147,10 @@ export class TaskTokensView extends Schema.Class<TaskTokensView>(
  * The tasks done with an Attempt that ended before usine recorded end times, left out of `time`.
  * Each such Attempt started before `before`.
  */
-export class UntimedTasksView extends Schema.Class<UntimedTasksView>(
-  "@usine/orchestrator/UntimedTasksView",
-)({
+export class UntimedTasksView extends Schema.Class<
+  UntimedTasksView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/UntimedTasksView">
+>("@usine/orchestrator/UntimedTasksView")({
   /** The number of tasks excluded from time statistics because an attempt has no recorded end. */
   tasks: PositiveCount,
   /** The UTC day after the latest start of an attempt with no recorded end, as `YYYY-MM-DD`. */
@@ -147,9 +161,10 @@ export class UntimedTasksView extends Schema.Class<UntimedTasksView>(
  * The tasks done in `window`: a task is done when its pull request merges, and counts if it has a
  * Run. Runs that a newer Event or an Item change canceled before an Attempt are left out.
  */
-export class StatisticsView extends Schema.Class<StatisticsView>(
-  "@usine/orchestrator/StatisticsView",
-)({
+export class StatisticsView extends Schema.Class<
+  StatisticsView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/StatisticsView">
+>("@usine/orchestrator/StatisticsView")({
   /** The requested UTC date window. */
   window: StatisticsWindow,
   /** The window's start: midnight UTC of its first day. */
@@ -187,9 +202,10 @@ export class StatisticsView extends Schema.Class<StatisticsView>(
 }) {}
 
 /** The median of at least one duration. */
-export class DurationSummaryView extends Schema.Class<DurationSummaryView>(
-  "@usine/orchestrator/DurationSummaryView",
-)({
+export class DurationSummaryView extends Schema.Class<
+  DurationSummaryView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/DurationSummaryView">
+>("@usine/orchestrator/DurationSummaryView")({
   /** The number of durations included in the median. */
   count: PositiveCount,
   /** The median duration in milliseconds. */
@@ -197,9 +213,10 @@ export class DurationSummaryView extends Schema.Class<DurationSummaryView>(
 }) {}
 
 /** Closed Runs or ended Attempts counted by outcome. */
-export class OutcomeCountsView extends Schema.Class<OutcomeCountsView>(
-  "@usine/orchestrator/OutcomeCountsView",
-)({
+export class OutcomeCountsView extends Schema.Class<
+  OutcomeCountsView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/OutcomeCountsView">
+>("@usine/orchestrator/OutcomeCountsView")({
   /** The number of successful terminal outcomes. */
   succeeded: Count,
   /** The number of failed terminal outcomes. */
@@ -209,9 +226,10 @@ export class OutcomeCountsView extends Schema.Class<OutcomeCountsView>(
 }) {}
 
 /** The tokens used in one billing pool. */
-export class PoolTokensView extends Schema.Class<PoolTokensView>(
-  "@usine/orchestrator/PoolTokensView",
-)({
+export class PoolTokensView extends Schema.Class<
+  PoolTokensView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/PoolTokensView">
+>("@usine/orchestrator/PoolTokensView")({
   /** The billing source for this usage. */
   pool: BillingPool,
   /** The total reported tokens, summed once per session. */
@@ -222,9 +240,10 @@ export class PoolTokensView extends Schema.Class<PoolTokensView>(
  * The cost of the priced Runs or Attempts: those with a price for each session. `estimate` is true
  * if a priced session is in the Claude or ChatGPT plan.
  */
-export class CostSummaryView extends Schema.Class<CostSummaryView>(
-  "@usine/orchestrator/CostSummaryView",
-)({
+export class CostSummaryView extends Schema.Class<
+  CostSummaryView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/CostSummaryView">
+>("@usine/orchestrator/CostSummaryView")({
   /** The total cost of fully priced entries in US dollars. */
   usd: UsdAmount,
   /** The mean cost per fully priced run or attempt in US dollars. */
@@ -239,9 +258,10 @@ export class CostSummaryView extends Schema.Class<CostSummaryView>(
  * The tokens and cost of the Runs or Attempts with at least one Attempt. `meanTokens` is null if
  * none has one, and `cost` is null if none is priced.
  */
-export class UsageSummaryView extends Schema.Class<UsageSummaryView>(
-  "@usine/orchestrator/UsageSummaryView",
-)({
+export class UsageSummaryView extends Schema.Class<
+  UsageSummaryView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/UsageSummaryView">
+>("@usine/orchestrator/UsageSummaryView")({
   /** The number of entries with at least one attempt. */
   measured: Count,
   /** The total reported tokens, summed once per session. */
@@ -269,9 +289,10 @@ const groupFields = {
  * without a measured entry.
  * @property usage - Reported tokens and priced costs for this group.
  */
-export class LoopStatisticsView extends Schema.Class<LoopStatisticsView>(
-  "@usine/orchestrator/LoopStatisticsView",
-)({
+export class LoopStatisticsView extends Schema.Class<
+  LoopStatisticsView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/LoopStatisticsView">
+>("@usine/orchestrator/LoopStatisticsView")({
   /** The project-qualified loop name. */
   loop: LoopName,
   ...groupFields,
@@ -285,9 +306,10 @@ export class LoopStatisticsView extends Schema.Class<LoopStatisticsView>(
  * without a measured entry.
  * @property usage - Reported tokens and priced costs for this group.
  */
-export class AgentStatisticsView extends Schema.Class<AgentStatisticsView>(
-  "@usine/orchestrator/AgentStatisticsView",
-)({
+export class AgentStatisticsView extends Schema.Class<
+  AgentStatisticsView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/AgentStatisticsView">
+>("@usine/orchestrator/AgentStatisticsView")({
   /** The referenced agent name. */
   agent: AgentName,
   ...groupFields,
@@ -301,9 +323,10 @@ export class AgentStatisticsView extends Schema.Class<AgentStatisticsView>(
  * without a measured entry.
  * @property usage - Reported tokens and priced costs for this group.
  */
-export class BrainStatisticsView extends Schema.Class<BrainStatisticsView>(
-  "@usine/orchestrator/BrainStatisticsView",
-)({
+export class BrainStatisticsView extends Schema.Class<
+  BrainStatisticsView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/BrainStatisticsView">
+>("@usine/orchestrator/BrainStatisticsView")({
   /** The harness, model, and reasoning effort shared by the grouped attempts. */
   brain: BrainSpec,
   ...groupFields,
@@ -316,18 +339,20 @@ export class BrainStatisticsView extends Schema.Class<BrainStatisticsView>(
  * @property failed - The number of failed terminal outcomes.
  * @property canceled - The number of canceled terminal outcomes.
  */
-export class ThroughputPeriodView extends Schema.Class<ThroughputPeriodView>(
-  "@usine/orchestrator/ThroughputPeriodView",
-)({
+export class ThroughputPeriodView extends Schema.Class<
+  ThroughputPeriodView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/ThroughputPeriodView">
+>("@usine/orchestrator/ThroughputPeriodView")({
   /** The first UTC day of this period as `YYYY-MM-DD`. */
   start: UtcDay,
   ...OutcomeCountsView.fields,
 }) {}
 
 /** The time from a Run's opening, or its approval, to its first Attempt's start on `worker`. */
-export class WorkerQueueWaitView extends Schema.Class<WorkerQueueWaitView>(
-  "@usine/orchestrator/WorkerQueueWaitView",
-)({
+export class WorkerQueueWaitView extends Schema.Class<
+  WorkerQueueWaitView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/WorkerQueueWaitView">
+>("@usine/orchestrator/WorkerQueueWaitView")({
   /** The configured worker name. */
   worker: WorkerName,
   /** Durations from run opening or approval to the first attempt start. */
@@ -335,9 +360,10 @@ export class WorkerQueueWaitView extends Schema.Class<WorkerQueueWaitView>(
 }) {}
 
 /** The number of closed Runs that took `attempts` Attempts. */
-export class AttemptCountView extends Schema.Class<AttemptCountView>(
-  "@usine/orchestrator/AttemptCountView",
-)({
+export class AttemptCountView extends Schema.Class<
+  AttemptCountView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/AttemptCountView">
+>("@usine/orchestrator/AttemptCountView")({
   /** The number of attempts taken by each run in this group. */
   attempts: PositiveCount,
   /** The number of closed runs with this attempt count. */
@@ -348,9 +374,10 @@ export class AttemptCountView extends Schema.Class<AttemptCountView>(
  * Attempt time as a share of the worker's slot-time capacity over the window. Configuration
  * revisions determine capacity; `slots` is the current slot count.
  */
-export class WorkerUtilizationView extends Schema.Class<WorkerUtilizationView>(
-  "@usine/orchestrator/WorkerUtilizationView",
-)({
+export class WorkerUtilizationView extends Schema.Class<
+  WorkerUtilizationView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/WorkerUtilizationView">
+>("@usine/orchestrator/WorkerUtilizationView")({
   /** The configured worker name. */
   worker: WorkerName,
   /** The currently configured slot count; historical revisions determine the denominator. */
@@ -362,9 +389,10 @@ export class WorkerUtilizationView extends Schema.Class<WorkerUtilizationView>(
 }) {}
 
 /** The Needs attention entries raised in one period. */
-export class NeedsAttentionPeriodView extends Schema.Class<NeedsAttentionPeriodView>(
-  "@usine/orchestrator/NeedsAttentionPeriodView",
-)({
+export class NeedsAttentionPeriodView extends Schema.Class<
+  NeedsAttentionPeriodView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/NeedsAttentionPeriodView">
+>("@usine/orchestrator/NeedsAttentionPeriodView")({
   /** The first UTC day of the period as `YYYY-MM-DD`. */
   start: UtcDay,
   /** The number of approval requests raised in this period. */
@@ -379,9 +407,10 @@ export class NeedsAttentionPeriodView extends Schema.Class<NeedsAttentionPeriodV
  * answer (retry or resolution). Each answered failure contributes once to `failureWait` and to
  * either `retryWait` or `resolutionWait`. Older resolutions without a timestamp are excluded.
  */
-export class NeedsAttentionView extends Schema.Class<NeedsAttentionView>(
-  "@usine/orchestrator/NeedsAttentionView",
-)({
+export class NeedsAttentionView extends Schema.Class<
+  NeedsAttentionView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/NeedsAttentionView">
+>("@usine/orchestrator/NeedsAttentionView")({
   /** The number of approval requests in the window. */
   approvals: Count,
   /** The number of failed attempts without an automatic retry in the window. */
@@ -406,9 +435,10 @@ export class NeedsAttentionView extends Schema.Class<NeedsAttentionView>(
  * tokens, and cost, and the Worker, retry, and Needs attention measures. Runs that a newer Event or
  * an Item change canceled before an Attempt are left out.
  */
-export class RunStatisticsView extends Schema.Class<RunStatisticsView>(
-  "@usine/orchestrator/RunStatisticsView",
-)({
+export class RunStatisticsView extends Schema.Class<
+  RunStatisticsView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/RunStatisticsView">
+>("@usine/orchestrator/RunStatisticsView")({
   /** The requested UTC date window. */
   window: StatisticsWindow,
   /** The window's start: midnight UTC of its first day. */

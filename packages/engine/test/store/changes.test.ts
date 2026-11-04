@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { ChangeBus, changeBusLayer, type ChangeTarget } from "@usine/core/changes";
@@ -92,6 +93,7 @@ it.effect(
           Effect.gen(function* () {
             const before = (yield* bus.open).revision;
             yield* operation;
+
             assert.strictEqual((yield* bus.open).revision, before);
           });
         const database = yield* RunDatabase;
@@ -111,6 +113,7 @@ it.effect(
         );
         assert(started._tag === "AttemptStarted");
         const attempt = started.execution.attempt;
+
         const envelope = OutboundEnvelope.make({
           version: PROTOCOL_VERSION,
           attemptId: attempt.id,
@@ -157,9 +160,11 @@ it.effect(
         );
         const beforeReset = (yield* bus.open).revision;
         yield* TestClock.adjust("1 minute");
+
         assert.strictEqual((yield* bus.open).revision, beforeReset + 1);
+
         assert.deepStrictEqual((yield* bus.open).history.at(-1)?.changes, [
-          { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+          { audience: InstanceScope.make(), target: { kind: "attention", id: "instance" } },
         ]);
         yield* expectWrite(
           store.finishAttempt(
@@ -250,6 +255,7 @@ it.effect(
         const updatedNow = yield* DateTime.now;
         yield* expectUnchanged(writer.markGone(item.itemKey, updatedNow));
         const acknowledgements = yield* AttentionAcknowledgements;
+
         const acknowledgement = AttentionAcknowledgement.make({
           id: "need",
           revision: AttentionRevision.make("revision"),
@@ -342,16 +348,18 @@ it.effect("restores only the latest future pool reset deadlines after a store re
       Effect.gen(function* () {
         yield* RunStore;
         yield* TestClock.adjust("1 minute");
+
         assert.strictEqual((yield* bus.open).revision, beforeRestart);
         for (const count of [1, 2]) {
           yield* TestClock.adjust("1 minute");
           const snapshot = yield* bus.open;
           assert.strictEqual(snapshot.revision, beforeRestart + count);
           assert.deepStrictEqual(snapshot.history.at(-1)?.changes, [
-            { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+            { audience: InstanceScope.make(), target: { kind: "attention", id: "instance" } },
           ]);
         }
         yield* TestClock.adjust("1 hour");
+
         assert.strictEqual((yield* bus.open).revision, beforeRestart + 2);
       }),
     );
