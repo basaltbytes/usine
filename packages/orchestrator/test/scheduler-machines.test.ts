@@ -245,7 +245,8 @@ describe("Worker scheduler on a provisioned Worker", () => {
         const lease = yield* steps.reserve(run, submission(1), Option.none());
         assert.strictEqual(lease.worker, POOL);
         assert.deepStrictEqual(fake.calls, [], "a slot reservation creates no machine");
-        assert.lengthOf(yield* status.machines, 1);
+        const currentMachines = yield* status.machines;
+        assert.lengthOf(currentMachines, 1);
         const attempt = AttemptId.make("run-1/execute/1");
         const failure = yield* steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip);
         assert(Schema.is(InfraFailure)(failure), failure._tag);
@@ -295,14 +296,16 @@ describe("Worker scheduler on a provisioned Worker", () => {
         assert(pause !== undefined, "the Worker is paused");
         assert.strictEqual(pause.reason, reason);
         assert(Option.isNone(pause.quota));
-        assert.strictEqual(quotaWaits(yield* status.provisioning).size, 0);
+        const currentProvisioning = yield* status.provisioning;
+        assert.strictEqual(quotaWaits(currentProvisioning).size, 0);
         assert.isTrue(pause.blocked);
         assert.strictEqual(pause.failures, 1);
         assert.strictEqual(
           DateTime.toEpochMillis(pause.retryAt) - DateTime.toEpochMillis(pause.failedAt),
           30_000,
         );
-        assert.lengthOf(yield* status.queue, 0, "the persisted Attempt has a slot");
+        const currentQueue = yield* status.queue;
+        assert.lengthOf(currentQueue, 0, "the persisted Attempt has a slot");
         const [slot] = yield* status.slots;
         assert.strictEqual(slot?.leased, 1);
 
@@ -317,7 +320,8 @@ describe("Worker scheduler on a provisioned Worker", () => {
           fake.calls.filter((call) => call.startsWith("create")),
           2,
         );
-        assert.lengthOf(yield* status.provisioning, 0, "a success ends the pause");
+        const nextProvisioning = yield* status.provisioning;
+        assert.lengthOf(nextProvisioning, 0, "a success ends the pause");
       }).pipe(Effect.scoped),
     );
   }
@@ -358,8 +362,10 @@ describe("Worker scheduler on a provisioned Worker", () => {
             steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip),
           );
           yield* settle;
-          if (transition === "creation") assert.lengthOf(yield* status.provisioning, 0);
-          else assert.isTrue((yield* status.provisioning)[0]?.blocked);
+          if (transition === "creation") {
+            const currentProvisioning = yield* status.provisioning;
+            assert.lengthOf(currentProvisioning, 0);
+          } else assert.isTrue((yield* status.provisioning)[0]?.blocked);
           yield* Ref.set(fake.provisioned, false);
           if (transition === "revision") {
             const changed = LoadedInstance.make({
@@ -392,8 +398,10 @@ describe("Worker scheduler on a provisioned Worker", () => {
             fake.calls.filter((call) => call.startsWith("create")),
             1,
           );
-          assert.lengthOf(yield* status.provisioning, 0);
-          assert.strictEqual(quotaWaits(yield* status.provisioning).size, 0);
+          const nextProvisioning = yield* status.provisioning;
+          assert.lengthOf(nextProvisioning, 0);
+          const updatedProvisioning = yield* status.provisioning;
+          assert.strictEqual(quotaWaits(updatedProvisioning).size, 0);
           yield* lease.release;
           const next = yield* steps.reserve(
             RunId.make("next-fixed-run"),
@@ -524,7 +532,8 @@ describe("Worker scheduler on a provisioned Worker", () => {
         fake.calls.filter((call) => call.startsWith("create")),
         1,
       );
-      assert.lengthOf(yield* status.provisioning, 0);
+      const currentProvisioning = yield* status.provisioning;
+      assert.lengthOf(currentProvisioning, 0);
       assert.notInclude(prepared, attempt);
       assert.isUndefined(waiting.pollUnsafe());
       yield* Ref.set(available, true);
@@ -585,16 +594,18 @@ describe("Worker scheduler on a provisioned Worker", () => {
         );
         yield* settle;
         const assertQuota = Effect.gen(function* () {
+          const currentProvisioning = yield* status.provisioning;
           assert.strictEqual(
-            quotaWaits(yield* status.provisioning).size,
+            quotaWaits(currentProvisioning).size,
             1,
             "the run with a machine does not wait for quota",
           );
           const needs = (yield* refresh(overview, [], [POOL])).needsYou;
           assert.lengthOf(needs, 1);
           assert.strictEqual(needs[0]?._tag, "WorkerQuotaNeed");
+          const nextProvisioning = yield* status.provisioning;
           assert.deepStrictEqual(
-            quotaWaits(yield* status.provisioning).get(runId),
+            quotaWaits(nextProvisioning).get(runId),
             MachineQuotaWait.make({
               worker: POOL,
               message,
@@ -644,8 +655,10 @@ describe("Worker scheduler on a provisioned Worker", () => {
         yield* TestClock.adjust("1 second");
         yield* settle;
         yield* Fiber.join(waiting);
-        assert.lengthOf(yield* status.provisioning, 0);
-        assert.strictEqual(quotaWaits(yield* status.provisioning).size, 0);
+        const currentProvisioning = yield* status.provisioning;
+        assert.lengthOf(currentProvisioning, 0);
+        const nextProvisioning = yield* status.provisioning;
+        assert.strictEqual(quotaWaits(nextProvisioning).size, 0);
         assert.lengthOf((yield* refresh(overview, [], [POOL])).needsYou, 0);
         assert.strictEqual(fake.calls.filter((call) => call.startsWith("create")).length, 4);
         yield* lease.release;
@@ -676,11 +689,8 @@ describe("Worker scheduler on a provisioned Worker", () => {
       yield* Fiber.interrupt(waiting);
       yield* lease.release;
       assert.strictEqual((yield* status.slots)[0]?.leased, 0);
-      assert.strictEqual(
-        quotaWaits(yield* status.provisioning).size,
-        0,
-        "canceling clears the run wait",
-      );
+      const currentProvisioning = yield* status.provisioning;
+      assert.strictEqual(quotaWaits(currentProvisioning).size, 0, "canceling clears the run wait");
       assert(
         Option.isSome((yield* status.provisioning)[0]?.quota ?? Option.none()),
         "canceling retains worker attention",
@@ -700,7 +710,8 @@ describe("Worker scheduler on a provisioned Worker", () => {
         .execute(executionOf(RunId.make("run-2"), AttemptId.make("run-2/execute/1")), sink)
         .pipe(Effect.flip);
       assert.include(fake.calls, "create pool run-2 run-2/execute/1");
-      assert.lengthOf(yield* status.provisioning, 0);
+      const nextProvisioning = yield* status.provisioning;
+      assert.lengthOf(nextProvisioning, 0);
       yield* resumed.release;
     }).pipe(Effect.scoped),
   );

@@ -199,7 +199,8 @@ describe("ChatGPT login at the gateway", () => {
           (path) => Effect.promise(() => rm(path, { recursive: true, force: true })),
         );
         const authFile = join(directory, "auth.json");
-        const expiring = chatGptAccessToken(DateTime.add(yield* DateTime.now, { minutes: 1 }));
+        const currentNow = yield* DateTime.now;
+        const expiring = chatGptAccessToken(DateTime.add(currentNow, { minutes: 1 }));
         yield* Effect.promise(() =>
           writeFile(authFile, authFileText({ access: expiring, refresh: "rt-first" })),
         );
@@ -224,12 +225,13 @@ describe("ChatGPT login at the gateway", () => {
               HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE),
             ),
           });
+          const currentNow = yield* DateTime.now;
           const attached = yield* client.attachments.attach({
             payload: AttachRequest.make({
               worker: WORKER,
               repository: REPOSITORY,
               credential: AnonymousCredential.make(),
-              expiresAt: DateTime.add(yield* DateTime.now, { minutes: 10 }),
+              expiresAt: DateTime.add(currentNow, { minutes: 10 }),
             }),
           });
           const home = join(directory, "home");

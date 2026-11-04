@@ -79,12 +79,11 @@ describe("Webhook delivery polling", () => {
     "persists the exact newest ID and resumes after reopening SQLite with an initially %s cursor",
     (initialCursor) =>
       Effect.gen(function* () {
-        const directory = InstanceDirectory.make(
-          yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-deliveries-",
-          }),
-        );
+        const currentDirectory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-deliveries-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const hints: Array<RepositoryName> = [];
         const seen: Array<Option.Option<WebhookDeliveryId>> = [];
         const app = appLayer((after) =>
@@ -298,13 +297,11 @@ it.effect(
         yield* Deferred.await(received);
         yield* TestClock.adjust("1 millis");
         assert.strictEqual(requests, 2);
-        assert.deepStrictEqual(
-          yield* cursors.store.read(
-            CursorKey.make(`github-deliveries:${installation.id}`),
-            WebhookDeliveryId,
-          ),
-          Option.some(WebhookDeliveryId.make("42")),
+        const snapshot = yield* cursors.store.read(
+          CursorKey.make(`github-deliveries:${installation.id}`),
+          WebhookDeliveryId,
         );
+        assert.deepStrictEqual(snapshot, Option.some(WebhookDeliveryId.make("42")));
         yield* Fiber.interrupt(running);
       }).pipe(
         Effect.provide(

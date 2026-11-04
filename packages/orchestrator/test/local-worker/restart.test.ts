@@ -115,18 +115,17 @@ describe("local worker restart", () => {
         const worktree = `${root}/.usine/workers/local/attempts/${safeSegment(attempt.id)}`;
         yield* commitInWorktree(worktree, "Work before the restart");
         yield* Scope.close(firstScope, Exit.void);
-        assert(yield* fileSystem.exists(worktree), "the checkout must survive the restart");
+        const currentExists = yield* fileSystem.exists(worktree);
+        assert(currentExists, "the checkout must survive the restart");
 
         const secondScope = yield* Scope.make();
-        const second = Context.get(
-          yield* Scope.provide(
-            Layer.build(
-              durableRuntime(instance, remote, database, [answer("Finished after the restart")]),
-            ),
-            secondScope,
+        const services = yield* Scope.provide(
+          Layer.build(
+            durableRuntime(instance, remote, database, [answer("Finished after the restart")]),
           ),
-          RunEngine,
+          secondScope,
         );
+        const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");
         assert.deepStrictEqual(
           finished.attempts.map(({ id, number }) => [id, number]),
@@ -193,7 +192,11 @@ describe("local worker restart", () => {
         const [attempt] = (yield* first.inspect(accepted.runId)).attempts;
         assert(attempt !== undefined);
         // The same order as `usine backup`: the durable storage first, then the runtime store.
-        assert(yield* backupDurableStorage(instance, `${backups}/backup.durable.sqlite`));
+        const durableBackup = yield* backupDurableStorage(
+          instance,
+          `${backups}/backup.durable.sqlite`,
+        );
+        assert(durableBackup);
         yield* backupRuntimeStore(instance, `${backups}/backup.sqlite`);
         yield* Scope.close(firstScope, Exit.void);
 
@@ -206,15 +209,13 @@ describe("local worker restart", () => {
         yield* fileSystem.copyFile(`${backups}/backup.durable.sqlite`, database);
 
         const secondScope = yield* Scope.make();
-        const second = Context.get(
-          yield* Scope.provide(
-            Layer.build(
-              durableRuntime(instance, remote, database, [answer("Finished after the restore")]),
-            ),
-            secondScope,
+        const services = yield* Scope.provide(
+          Layer.build(
+            durableRuntime(instance, remote, database, [answer("Finished after the restore")]),
           ),
-          RunEngine,
+          secondScope,
         );
+        const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");
         assert.deepStrictEqual(
           finished.attempts.map(({ id, number }) => [id, number]),
@@ -283,16 +284,15 @@ describe("local worker restart", () => {
         const relayed = yield* first.transcript(TranscriptAllQuery.make({ attemptId: attempt.id }));
         assert.strictEqual(relayed.at(-1)?.envelope.payload._tag, "Final");
         yield* Scope.close(firstScope, Exit.void);
-        assert(yield* fileSystem.exists(worktree), "the unharvested checkout survives the stop");
+        const currentExists = yield* fileSystem.exists(worktree);
+        assert(currentExists, "the unharvested checkout survives the stop");
 
         const secondScope = yield* Scope.make();
-        const second = Context.get(
-          yield* Scope.provide(
-            Layer.build(durableRuntime(instance, remote, database, [])),
-            secondScope,
-          ),
-          RunEngine,
+        const services = yield* Scope.provide(
+          Layer.build(durableRuntime(instance, remote, database, [])),
+          secondScope,
         );
+        const second = Context.get(services, RunEngine);
         const finished = yield* waitFor(second, accepted.runId, "Succeeded");
         assert.deepStrictEqual(
           finished.attempts.map(({ id, number }) => [id, number]),

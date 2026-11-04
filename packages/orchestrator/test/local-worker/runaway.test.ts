@@ -170,10 +170,8 @@ describe("local worker runaway guard", () => {
           assert(failure._tag === "RunawayFailure");
           assert.strictEqual(failure.ceiling, "wall-clock");
           assert.strictEqual(storage.tasks.get(attemptId)?.state._tag, "canceled");
-          assert.deepStrictEqual(
-            yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
-            [],
-          );
+          const entries = yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`);
+          assert.deepStrictEqual(entries, []);
         }).pipe(
           Effect.provide(
             stepExecutorLayer(ceiling, []).pipe(

@@ -222,7 +222,8 @@ const watchWorker = (
         const watching = watchers();
         const attemptIds = watching.map(({ attemptId }) => attemptId);
         const previous = yield* Ref.get(liveness);
-        const next = observe(worker, previous, result, yield* DateTime.now, attemptIds);
+        const observedAt = yield* DateTime.now;
+        const next = observe(worker, previous, result, observedAt, attemptIds);
         yield* Ref.set(liveness, next.liveness);
         const fields = {
           worker,

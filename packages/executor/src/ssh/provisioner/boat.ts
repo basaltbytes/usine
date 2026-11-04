@@ -370,12 +370,11 @@ export const boatDriverFor = (
           if (ENDED.has(sandbox.state)) return Option.none<MachineEndpoint>();
           if (!RUNNING.has(sandbox.state))
             return yield* ProviderUnanswered.make({ detail: `Boat sandbox is ${sandbox.state}` });
-          return Option.some(
-            yield* endpointOf({
-              machineIp: sandbox.ip ?? null,
-              sshEndpoint: sandbox.sshEndpoint ?? null,
-            }),
-          );
+          const endpoint = yield* endpointOf({
+            machineIp: sandbox.ip ?? null,
+            sshEndpoint: sandbox.sshEndpoint ?? null,
+          });
+          return Option.some(endpoint);
         }).pipe(
           Effect.catchIf(
             (failure) => failure._tag === "ProviderRefused" && failure.status === 404,

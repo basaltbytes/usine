@@ -275,9 +275,10 @@ const workers = Layer.succeed(WorkerStatus)({
 });
 
 const readConfiguration = Effect.gen(function* () {
-  const root = InstanceDirectory.make(
-    yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({ prefix: "usine-config-" }),
-  );
+  const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+    prefix: "usine-config-",
+  });
+  const root = InstanceDirectory.make(directory);
   yield* writeInstanceFiles(root, files);
   return yield* Effect.gen(function* () {
     const instance = yield* (yield* CurrentInstance).get;
@@ -501,9 +502,10 @@ describe("Configuration view", () => {
 
   it.effect("reads in setup mode, where no Worker runs Attempts", () =>
     Effect.gen(function* () {
-      const root = InstanceDirectory.make(
-        yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({ prefix: "usine-config-" }),
-      );
+      const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+        prefix: "usine-config-",
+      });
+      const root = InstanceDirectory.make(directory);
       yield* writeInstanceFiles(root, files);
       const view = yield* Effect.gen(function* () {
         const instance = yield* (yield* CurrentInstance).get;

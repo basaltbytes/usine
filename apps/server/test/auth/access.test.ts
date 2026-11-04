@@ -23,13 +23,13 @@ for (const existing of [true, false])
     Effect.runPromise(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-access-",
-          }),
-        );
-        const database = Layer.succeedContext(yield* Layer.build(localSqliteLayer(directory)));
+        const currentDirectory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-access-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
+        const services = yield* Layer.build(localSqliteLayer(directory));
+        const database = Layer.succeedContext(services);
         const context = yield* Layer.build(
           Layer.merge(configurationLayer, sqliteAuthLayer).pipe(Layer.provide(database)),
         );
@@ -47,7 +47,8 @@ for (const existing of [true, false])
               Layer.provide(database),
             ),
           );
-        const access = Context.get(yield* build(), MemberAccess);
+        const currentServices = yield* build();
+        const access = Context.get(currentServices, MemberAccess);
         if (!existing) yield* access.enroll(alice);
         assert.equal((yield* access.permissions(alice.id))[0]?.permission, "admin");
         const snapshot = yield* config.read;
@@ -61,13 +62,16 @@ for (const existing of [true, false])
           existing ? "Success" : "Failure",
         );
         if (existing) {
-          assert.deepEqual(yield* access.permissions(alice.id), []);
+          const currentPermissions = yield* access.permissions(alice.id);
+          assert.deepEqual(currentPermissions, []);
           yield* store.add(alice, false);
-          assert.deepEqual(yield* access.permissions(alice.id), []);
+          const nextPermissions = yield* access.permissions(alice.id);
+          assert.deepEqual(nextPermissions, []);
           assert.equal((yield* access.permissions(bob.id))[0]?.permission, "admin");
         } else {
           assert.equal((yield* access.enroll(bob).pipe(Effect.flip)).status, 409);
-          assert.deepEqual(yield* access.permissions(bob.id), []);
+          const updatedPermissions = yield* access.permissions(bob.id);
+          assert.deepEqual(updatedPermissions, []);
         }
         // A role removed after migration is not restored on a later startup.
         const current = yield* config.read;
@@ -91,6 +95,7 @@ for (const existing of [true, false])
           ),
         });
         yield* build();
-        assert.deepEqual(yield* access.permissions(existing ? bob.id : alice.id), []);
+        const latestPermissions = yield* access.permissions(existing ? bob.id : alice.id);
+        assert.deepEqual(latestPermissions, []);
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
     ));

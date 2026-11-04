@@ -118,18 +118,17 @@ export const subagentTool = (services: ExtensionServices) => {
     const hub = yield* services.hubs.hub(spec.attemptId, owner.taskId);
     services.hubs.bindParent(hub, api.conversationId);
     const excerpt = taskExcerpt(task);
-    const attemptedChildren = ChildSessionCount.make(
-      yield* call("count the child spawn", () =>
-        api.commit(async (tx) => {
-          const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
-          record.children += 1;
-          if (record.children > spec.maxChildren && record.childBudgetExceeded === null) {
-            record.childBudgetExceeded = { attempted: record.children, max: spec.maxChildren };
-          }
-          return record.children;
-        }, context),
-      ),
+    const childCount = yield* call("count the child spawn", () =>
+      api.commit(async (tx) => {
+        const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
+        record.children += 1;
+        if (record.children > spec.maxChildren && record.childBudgetExceeded === null) {
+          record.childBudgetExceeded = { attempted: record.children, max: spec.maxChildren };
+        }
+        return record.children;
+      }, context),
     );
+    const attemptedChildren = ChildSessionCount.make(childCount);
     yield* Effect.annotateCurrentSpan({
       attemptId: spec.attemptId,
       attemptedChildren,

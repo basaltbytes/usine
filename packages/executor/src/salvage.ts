@@ -171,10 +171,8 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
         .filter((path) => path.length > 0);
       if (staged.length === 0) return { commit: current, leftOut: [] };
       const tree = (yield* git(["write-tree"])).trim();
-      const oversized = oversizedIn(
-        yield* git(["ls-tree", "-r", "-l", "-z", tree]),
-        new Set(staged),
-      );
+      const treeListing = yield* git(["ls-tree", "-r", "-l", "-z", tree]);
+      const oversized = oversizedIn(treeListing, new Set(staged));
       if (oversized.length > 0) {
         yield* git([
           "--literal-pathspecs",

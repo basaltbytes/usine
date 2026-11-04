@@ -51,9 +51,10 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const services = Layer.mergeAll(
         RunStore.layer,
         ItemProjectionWriter.layer,
@@ -93,7 +94,8 @@ it.effect(
             yield* operation;
             assert.strictEqual((yield* bus.open).revision, before);
           });
-        const transaction = changeTransaction(yield* RunDatabase, bus);
+        const database = yield* RunDatabase;
+        const transaction = changeTransaction(database, bus);
         yield* expectUnchanged(
           transaction((_database, record) =>
             record({ audience, target: { kind: "run", id: "rolled-back" } }).pipe(
@@ -120,6 +122,7 @@ it.effect(
           { kind: "attempt", id: attempt.id },
         ]);
         yield* expectUnchanged(store.appendTranscript("outbound", envelope));
+        const currentNow = yield* DateTime.now;
         const report = PoolRateLimitsUpdated.make({
           session: ParentSession.make({
             id: AgentSessionId.make("pool-session"),
@@ -136,7 +139,7 @@ it.effect(
               RateLimitWindow.make({
                 usedPercent: 90,
                 windowDurationMinutes: Option.some(60),
-                resetsAt: Option.some(DateTime.add(yield* DateTime.now, { minutes: 1 })),
+                resetsAt: Option.some(DateTime.add(currentNow, { minutes: 1 })),
               }),
             ),
           }),
@@ -240,10 +243,12 @@ it.effect(
             ),
             [{ kind: "item", id: item.itemKey }],
           );
-        yield* expectWrite(writer.markGone(item.itemKey, yield* DateTime.now), [
+        const nextNow = yield* DateTime.now;
+        yield* expectWrite(writer.markGone(item.itemKey, nextNow), [
           { kind: "item", id: item.itemKey },
         ]);
-        yield* expectUnchanged(writer.markGone(item.itemKey, yield* DateTime.now));
+        const updatedNow = yield* DateTime.now;
+        yield* expectUnchanged(writer.markGone(item.itemKey, updatedNow));
         const acknowledgements = yield* AttentionAcknowledgements;
         const acknowledgement = AttentionAcknowledgement.make({
           id: "need",
@@ -271,9 +276,10 @@ it.effect(
 it.effect("restores only the latest future pool reset deadlines after a store restart", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
-    );
+    const currentDirectory = yield* fs.makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     const bus = yield* ChangeBus;
     const now = yield* DateTime.now;
     const withStore = <A, E, R>(operation: Effect.Effect<A, E, R | RunStore>) =>

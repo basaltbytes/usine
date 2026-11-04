@@ -35,9 +35,11 @@ describe("CallerTokens", () => {
       Effect.gen(function* () {
         const callers = yield* CallerTokens;
         const token = yield* callers.issue(claims);
-        assert.deepStrictEqual(yield* callers.verify(token), claims);
+        const verifiedCaller = yield* callers.verify(token);
+        assert.deepStrictEqual(verifiedCaller, claims);
+        const callerToken = yield* callers.issue(claims);
         assert.strictEqual(
-          Redacted.value(yield* callers.issue(claims)),
+          Redacted.value(callerToken),
           Redacted.value(token),
           "a renewal must not change the token children already hold",
         );
@@ -51,7 +53,8 @@ describe("CallerTokens", () => {
       tokens(
         Effect.gen(function* () {
           const callers = yield* CallerTokens;
-          const mac = Redacted.value(yield* callers.issue(claims)).split(".")[2];
+          const callerToken = yield* callers.issue(claims);
+          const mac = Redacted.value(callerToken).split(".")[2];
           for (const forged of [
             CallerClaims.make({
               attachment: OTHER_ATTACHMENT,
@@ -103,28 +106,26 @@ describe("CallerTokens", () => {
       tokens(
         Effect.gen(function* () {
           const callers = yield* CallerTokens;
-          const caller = Redacted.value(yield* callers.issue(claims));
+          const callerToken = yield* callers.issue(claims);
+          const caller = Redacted.value(callerToken);
           const strip = (input: Record<string, string>) =>
             Effect.map(callers.withoutCallerTokens(Headers.fromInput(input)), (headers) =>
               Object.fromEntries(Object.entries(headers)),
             );
-          assert.deepStrictEqual(
-            yield* strip({
-              "x-usine-gateway-token": caller,
-              authorization: `Bearer ${caller}`,
-              "x-api-key": "registry-key",
-              accept: "*/*",
-            }),
-            { "x-api-key": "registry-key", accept: "*/*" },
-          );
-          assert.deepStrictEqual(
-            yield* strip({
-              authorization: `Basic ${Base64.encode(`x-access-token:${caller}`)}`,
-              "x-api-key": caller,
-            }),
-            {},
-          );
-          assert.deepStrictEqual(yield* strip({ authorization: "Bearer npm_registryToken" }), {
+          const currentHeaders = yield* strip({
+            "x-usine-gateway-token": caller,
+            authorization: `Bearer ${caller}`,
+            "x-api-key": "registry-key",
+            accept: "*/*",
+          });
+          assert.deepStrictEqual(currentHeaders, { "x-api-key": "registry-key", accept: "*/*" });
+          const nextHeaders = yield* strip({
+            authorization: `Basic ${Base64.encode(`x-access-token:${caller}`)}`,
+            "x-api-key": caller,
+          });
+          assert.deepStrictEqual(nextHeaders, {});
+          const updatedHeaders = yield* strip({ authorization: "Bearer npm_registryToken" });
+          assert.deepStrictEqual(updatedHeaders, {
             authorization: "Bearer npm_registryToken",
           });
         }),

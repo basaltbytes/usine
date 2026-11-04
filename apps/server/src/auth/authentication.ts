@@ -360,7 +360,8 @@ export const authenticationLayer = (options: {
           }
           yield* limit("callback");
           states.delete(hash);
-          const member = yield* memberFor(yield* github.web(code, callback), pending.bootstrap);
+          const githubIdentity = yield* github.web(code, callback);
+          const member = yield* memberFor(githubIdentity, pending.bootstrap);
           return yield* issue(member, "session", TokenName.make("Browser"));
         }),
         startDevice: Effect.fn("Authentication.startDevice")(function* (name) {
@@ -412,7 +413,8 @@ export const authenticationLayer = (options: {
           }
           Redacted.wipeUnsafe(state.code);
           const member = yield* memberFor(identity.value, false);
-          return Option.some(yield* issue(member, "device", state.name));
+          const token = yield* issue(member, "device", state.name);
+          return Option.some(token);
         }),
         signOut: Effect.fn("Authentication.signOut")(function* (secret) {
           const access = yield* authenticate(secret);

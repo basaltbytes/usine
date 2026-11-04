@@ -17,7 +17,8 @@ describe("Pi child live contract", () => {
     "applies guidance during an active command and records the result",
     () =>
       Effect.gen(function* () {
-        return yield* steeringContract(yield* PiChildBackend, brain);
+        const piChildBackend = yield* PiChildBackend;
+        return yield* steeringContract(piChildBackend, brain);
       }).pipe(
         Effect.provide(
           piChildBackendLayer.pipe(
@@ -33,7 +34,8 @@ describe("Pi child live contract", () => {
     "interrupts an active command and settles the session",
     () =>
       Effect.gen(function* () {
-        return yield* interruptionContract(yield* PiChildBackend, brain);
+        const piChildBackend = yield* PiChildBackend;
+        return yield* interruptionContract(piChildBackend, brain);
       }).pipe(
         Effect.provide(
           piChildBackendLayer.pipe(

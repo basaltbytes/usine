@@ -80,7 +80,8 @@ it.each(["npm", "curl", "timeout", "flock"])(
             .pipe(Effect.flip);
           expect(error).toBeInstanceOf(UpgradeError);
           expect(error.message).toContain(`Missing required executable: ${missing}`);
-          expect(yield* Ref.get(drained)).toBe(false);
+          const drainedState = yield* Ref.get(drained);
+          expect(drainedState).toBe(false);
           expect((yield* upgrades.status).phase).toBe("idle");
           executable(missing, "exit 0");
           yield* platform.value.preflight;
@@ -137,7 +138,8 @@ esac`,
         const unavailable = yield* upgrades.check().pipe(Effect.flip);
         expect(unavailable.message).toContain("@usine/cloudflare@1.1.0");
         expect((yield* upgrades.status).available).toBeNull();
-        expect(yield* Ref.get(drained)).toBe(false);
+        const drainedState = yield* Ref.get(drained);
+        expect(drainedState).toBe(false);
         const lookups = readFileSync(join(folder, "lookups"), "utf8");
         expect(lookups.match(/@usine\/engine@\^1\.1\.0 version/gu)).toHaveLength(1);
         expect(lookups).not.toContain("effect@");
@@ -149,14 +151,18 @@ esac`,
           .request(UpgradeRequest.make({ timing: "idle", version: Option.none() }))
           .pipe(Effect.flip);
         expect(refused.message).toContain("@usine/cloudflare@1.1.0");
-        expect(yield* Ref.get(drained)).toBe(false);
-        expect(yield* Ref.get(launched)).toBe(false);
+        const currentDrainedState = yield* Ref.get(drained);
+        expect(currentDrainedState).toBe(false);
+        const launchedState = yield* Ref.get(launched);
+        expect(launchedState).toBe(false);
         expect((yield* upgrades.status).phase).toBe("idle");
         writeFileSync(join(folder, "ready"), "");
         yield* upgrades.request(UpgradeRequest.make({ timing: "idle", version: Option.none() }));
         yield* Effect.yieldNow;
-        expect(yield* Ref.get(drained)).toBe(true);
-        expect(yield* Ref.get(launched)).toBe(true);
+        const nextDrainedState = yield* Ref.get(drained);
+        expect(nextDrainedState).toBe(true);
+        const currentLaunchedState = yield* Ref.get(launched);
+        expect(currentLaunchedState).toBe(true);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
   } finally {

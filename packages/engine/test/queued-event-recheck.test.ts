@@ -85,7 +85,8 @@ describe("queued Event trigger re-check", () => {
           assert.strictEqual(resubmitted._tag, "Ignored");
           if (resubmitted._tag === "Ignored") assert.strictEqual(resubmitted.reason, "revoked");
           // No Run ever opened for the dropped Event, so no approval was asked.
-          const missing = yield* Effect.flip(engine.inspect(yield* runIdFor(second)));
+          const currentRunId = yield* runIdFor(second);
+          const missing = yield* Effect.flip(engine.inspect(currentRunId));
           assert.strictEqual(missing._tag, "RunNotFoundError");
         }).pipe(Effect.provide(runtime));
       }),

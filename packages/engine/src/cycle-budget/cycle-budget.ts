@@ -74,7 +74,8 @@ export class CycleBudgets extends Context.Service<
     CycleBudgets,
     Effect.gen(function* () {
       const database = yield* RunDatabase;
-      const transact = changeTransaction(database, yield* ChangeBus);
+      const changes = yield* ChangeBus;
+      const transact = changeTransaction(database, changes);
       const queries = cycleQueries(database);
       const generation = Effect.fn("CycleBudgets.generation")(function* (itemKey: ItemKey) {
         yield* Effect.annotateCurrentSpan({ itemKey });
@@ -189,7 +190,8 @@ export class CycleBudgets extends Context.Service<
         reason: CycleBudgetAskCloseReason,
       ) {
         yield* Effect.annotateCurrentSpan({ askId, reason });
-        const closedAt = encodeDateTime(yield* DateTime.now);
+        const observedAt = yield* DateTime.now;
+        const closedAt = encodeDateTime(observedAt);
         return yield* transact((transaction, record) =>
           Effect.gen(function* () {
             const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);

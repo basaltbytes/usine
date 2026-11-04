@@ -397,13 +397,11 @@ const makeClaudeChild = Effect.gen(function* () {
       }
       for (const message of messages) input.offer(userMessage(message));
       const read: Array<Schema.Json> = [];
-      const login =
+      const loginResult =
         messages.length === 0
-          ? ("undecided" as const)
-          : Option.getOrElse(
-              yield* checkLogin(output, read).pipe(Effect.timeoutOption(LOGIN_WINDOW)),
-              () => "undecided" as const,
-            );
+          ? Option.none()
+          : yield* checkLogin(output, read).pipe(Effect.timeoutOption(LOGIN_WINDOW));
+      const login = Option.getOrElse(loginResult, () => "undecided" as const);
       yield* Effect.logDebug("Claude child's first messages settled its login check", {
         sessionId: request.session.id,
         worker: request.worker,

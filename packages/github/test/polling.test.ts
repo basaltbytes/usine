@@ -314,10 +314,8 @@ describe("GitHubPolling", () => {
       const first = yield* polling.baseRefHead(repository, baseRefName, Option.none());
       assert.strictEqual(first.sha, sha);
       assert.deepStrictEqual(first.entityTag, Option.some('W/"head-1"'));
-      assert.strictEqual(
-        yield* polling.baseRefHead(repository, baseRefName, Option.some(first)),
-        first,
-      );
+      const baseHead = yield* polling.baseRefHead(repository, baseRefName, Option.some(first));
+      assert.strictEqual(baseHead, first);
       assert.strictEqual(
         requests[0]?.url,
         "https://api.github.com/repos/basaltbytes/usine/git/ref/heads/release/1.x",
@@ -669,16 +667,15 @@ describe("GitHubPolling", () => {
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
       const numbers = Array.from({ length: 60 }, (_, index) => ItemNumber.make(index + 1));
-      assert.deepStrictEqual(yield* polling.missingIssues(repository, numbers), [
-        ItemNumber.make(7),
-        ItemNumber.make(55),
-      ]);
+      const currentMissingIssues = yield* polling.missingIssues(repository, numbers);
+      assert.deepStrictEqual(currentMissingIssues, [ItemNumber.make(7), ItemNumber.make(55)]);
       assert.deepStrictEqual(
         asked.map((chunk) => chunk.length),
         [50, 10],
       );
       assert.deepStrictEqual(asked.flat(), numbers);
-      assert.deepStrictEqual(yield* polling.missingIssues(repository, []), []);
+      const nextMissingIssues = yield* polling.missingIssues(repository, []);
+      assert.deepStrictEqual(nextMissingIssues, []);
       assert.strictEqual(asked.length, 2);
     }).pipe(Effect.provide(pollingLayer(client)));
   });

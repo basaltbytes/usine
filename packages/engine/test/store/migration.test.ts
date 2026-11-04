@@ -58,12 +58,11 @@ describe("Attempt migrations", () => {
   it.live("upgrades populated Attempts without losing transcripts or disabling foreign keys", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-intervention-upgrade-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-intervention-upgrade-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const historical = yield* fs.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),
         prefix: "usine-historical-migrations-",
@@ -147,7 +146,8 @@ describe("Attempt migrations", () => {
           ],
         );
         const sql = yield* SqlClient.SqlClient;
-        assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+        const rows = yield* sql`PRAGMA foreign_key_check`;
+        assert.deepStrictEqual(rows, []);
         assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
         const before = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
         yield* sql`UPDATE usine_attempts SET operator_intervened = 1 WHERE attempt_id = ${id}`;
@@ -163,12 +163,11 @@ describe("Run driver migration", () => {
   it.live("drops the Effect workflow and cluster tables from an existing instance", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-workflow-upgrade-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-workflow-upgrade-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const historical = yield* fs.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),
         prefix: "usine-workflow-migrations-",
@@ -222,12 +221,11 @@ describe("Event reopening migration", () => {
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-reopening-upgrade-",
-          }),
-        );
+        const currentDirectory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-reopening-upgrade-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const historical = yield* fs.makeTempDirectoryScoped({
           directory: sqliteTempDirectory(),
           prefix: "usine-reopening-migrations-",
@@ -275,7 +273,8 @@ describe("Event reopening migration", () => {
             "Pending",
           );
           const sql = yield* SqlClient.SqlClient;
-          assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+          const rows = yield* sql`PRAGMA foreign_key_check`;
+          assert.deepStrictEqual(rows, []);
         }).pipe(
           Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
         );
@@ -289,12 +288,11 @@ describe("Attempt salvage check migration", () => {
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-salvage-check-upgrade-",
-          }),
-        );
+        const currentDirectory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-salvage-check-upgrade-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const historical = yield* fs.makeTempDirectoryScoped({
           directory: sqliteTempDirectory(),
           prefix: "usine-salvage-check-migrations-",
@@ -342,16 +340,16 @@ describe("Attempt salvage check migration", () => {
           assert(attempt !== undefined && Option.isSome(attempt.salvage));
           assert.strictEqual(attempt.salvage.value._tag, "Pushed");
           const sql = yield* SqlClient.SqlClient;
-          assert.deepStrictEqual(
-            yield* sql`SELECT name FROM sqlite_master WHERE name = 'usine_item_projection_repository'`,
-            [],
-          );
+          const rows =
+            yield* sql`SELECT name FROM sqlite_master WHERE name = 'usine_item_projection_repository'`;
+          assert.deepStrictEqual(rows, []);
           const rejected =
             yield* sql`UPDATE usine_attempts SET salvage_json = 'not json' WHERE attempt_id = ${id}`.pipe(
               Effect.flip,
             );
           assert.include(String(rejected.reason.cause), "CHECK constraint failed");
-          assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+          const currentRows = yield* sql`PRAGMA foreign_key_check`;
+          assert.deepStrictEqual(currentRows, []);
           const before = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
           yield* sql`UPDATE usine_attempts SET salvage_json = NULL WHERE attempt_id = ${id}`;
           const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
@@ -370,12 +368,11 @@ describe("Attempt start migration", () => {
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-attempt-start-upgrade-",
-          }),
-        );
+        const currentDirectory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-attempt-start-upgrade-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const historical = yield* fs.makeTempDirectoryScoped({
           directory: sqliteTempDirectory(),
           prefix: "usine-attempt-start-migrations-",
@@ -432,12 +429,11 @@ describe("Run approval source migration", () => {
   it.live("renames an applied approval migration without replaying it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-approval-rename-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-approval-rename-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const previous = yield* Effect.scoped(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
@@ -449,16 +445,16 @@ describe("Run approval source migration", () => {
         yield* Effect.scoped(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient;
-            assert.deepStrictEqual(
-              yield* sql`SELECT id, hash, created_at, applied_at FROM usine_migrations ORDER BY id`,
-              previous,
-            );
+            const rows =
+              yield* sql`SELECT id, hash, created_at, applied_at FROM usine_migrations ORDER BY id`;
+            assert.deepStrictEqual(rows, previous);
             assert.strictEqual(
               (yield* sql`SELECT name FROM usine_migrations WHERE name = '20261029101340_member_approval_source'`)
                 .length,
               1,
             );
-            assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+            const currentRows = yield* sql`PRAGMA foreign_key_check`;
+            assert.deepStrictEqual(currentRows, []);
           }).pipe(Effect.provide(localSqliteLayer(directory))),
         );
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
@@ -470,12 +466,11 @@ describe("Run approval source migration", () => {
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          const directory = InstanceDirectory.make(
-            yield* fs.makeTempDirectoryScoped({
-              directory: sqliteTempDirectory(),
-              prefix: "usine-approval-source-upgrade-",
-            }),
-          );
+          const currentDirectory = yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-approval-source-upgrade-",
+          });
+          const directory = InstanceDirectory.make(currentDirectory);
           const historical = yield* fs.makeTempDirectoryScoped({
             directory: sqliteTempDirectory(),
             prefix: "usine-approval-source-migrations-",
@@ -541,7 +536,8 @@ describe("Run approval source migration", () => {
               ),
             );
             const sql = yield* SqlClient.SqlClient;
-            assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+            const rows = yield* sql`PRAGMA foreign_key_check`;
+            assert.deepStrictEqual(rows, []);
             assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
             const rejected =
               yield* sql`UPDATE usine_approvals SET channel = 'invalid' WHERE run_id = ${runId}`.pipe(
@@ -559,12 +555,11 @@ describe("Run close time migration", () => {
   it.live("dates a Run closed before the upgrade by its last Attempt's end or start", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-run-closed-at-upgrade-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-run-closed-at-upgrade-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const historical = yield* fs.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),
         prefix: "usine-run-closed-at-migrations-",
@@ -619,12 +614,11 @@ describe("Transcript read model migration", () => {
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const directory = InstanceDirectory.make(
-          yield* fs.makeTempDirectoryScoped({
-            directory: sqliteTempDirectory(),
-            prefix: "usine-transcript-upgrade-",
-          }),
-        );
+        const currentDirectory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-transcript-upgrade-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
         const historical = yield* fs.makeTempDirectoryScoped({
           directory: sqliteTempDirectory(),
           prefix: "usine-transcript-migrations-",
@@ -751,24 +745,21 @@ describe("Transcript read model migration", () => {
         );
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          assert.deepStrictEqual(
-            yield* sql`SELECT * FROM usine_session_usage ORDER BY attempt_id, session_id`,
-            expected.usage,
-          );
-          assert.deepStrictEqual(
-            yield* sql`SELECT * FROM usine_pool_rate_limits ORDER BY pool`,
-            expected.pools,
-          );
-          assert.deepStrictEqual(
-            yield* sql`SELECT sequence, attempt_id, direction, channel_sequence, envelope, received_at FROM usine_attempt_transcripts ORDER BY sequence`,
-            expected.all,
-          );
+          const rows =
+            yield* sql`SELECT * FROM usine_session_usage ORDER BY attempt_id, session_id`;
+          assert.deepStrictEqual(rows, expected.usage);
+          const currentRows = yield* sql`SELECT * FROM usine_pool_rate_limits ORDER BY pool`;
+          assert.deepStrictEqual(currentRows, expected.pools);
+          const nextRows =
+            yield* sql`SELECT sequence, attempt_id, direction, channel_sequence, envelope, received_at FROM usine_attempt_transcripts ORDER BY sequence`;
+          assert.deepStrictEqual(nextRows, expected.all);
           const columns = yield* sql`PRAGMA table_xinfo(usine_attempt_transcripts)`;
           assert.deepStrictEqual(
             columns.filter(({ hidden }) => hidden === 2).map(({ name }) => name),
             ["payload_tag", "event_tag", "session_id"],
           );
-          assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+          const updatedRows = yield* sql`PRAGMA foreign_key_check`;
+          assert.deepStrictEqual(updatedRows, []);
           assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
         }).pipe(Effect.provide(localSqliteLayer(directory)));
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

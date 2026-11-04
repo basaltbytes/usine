@@ -55,7 +55,10 @@ describe("Provisioned machine reuse behind a gateway", () => {
             }),
           );
           gateway.switches.refusedDetaches.clear();
-          if (!detachFails) assert.lengthOf(yield* attachmentsInForce, 0);
+          if (!detachFails) {
+            const attachments = yield* attachmentsInForce;
+            assert.lengthOf(attachments, 0);
+          }
           yield* machines.release(first.hold);
           const nextRequest = CheckoutRequest.make({
             ...request,

@@ -147,7 +147,8 @@ describe("exe.dev launch", () => {
         const prepared = yield* executor.prepare(request);
         const result = yield* prepared.launch(sink);
         assert.strictEqual(result.message, `Completed: ${request.task}`);
-        assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
+        const live = yield* executor.isLive(ATTEMPT_ID);
+        assert.isTrue(live);
       }).pipe(
         Effect.scoped,
         Effect.provide(runtime(ssh.layer, completes, storage, failingResultWrite)),
@@ -165,7 +166,8 @@ describe("exe.dev launch", () => {
         );
         const result = yield* prepared.launch(sink);
         assert.strictEqual(result.message, `Completed: ${request.task}`);
-        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        const live = yield* executor.isLive(ATTEMPT_ID);
+        assert.isFalse(live);
         assert(
           ssh.state.commands.map(remoteLine).some((line) => line.includes("'worktree' 'remove'")),
           "the recorded result permits checkout cleanup",
@@ -198,7 +200,8 @@ describe("exe.dev launch", () => {
         const salvaged: Array<string> = [];
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
-          assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the report awaits its harvest");
+          const live = yield* executor.isLive(ATTEMPT_ID);
+          assert.isTrue(live, "the report awaits its harvest");
           yield* executor.recover(
             openAttempt,
             {
@@ -232,7 +235,8 @@ describe("exe.dev launch", () => {
         const salvaged: Array<string> = [];
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
-          assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the parent task outlived the restart");
+          const live = yield* executor.isLive(ATTEMPT_ID);
+          assert.isTrue(live, "the parent task outlived the restart");
           yield* executor.recover(
             openAttempt,
             {
@@ -242,7 +246,8 @@ describe("exe.dev launch", () => {
             },
             Effect.succeed(COMMIT_AUTHOR),
           );
-          assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+          const currentLive = yield* executor.isLive(ATTEMPT_ID);
+          assert.isFalse(currentLive);
         }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
         assert.deepStrictEqual(salvaged, ["Pushed"]);
       });
@@ -288,7 +293,8 @@ describe("exe.dev launch", () => {
           const canceled = yield* executor.cancel(ATTEMPT_ID, "cancel").pipe(Effect.flip);
           assert(canceled._tag === "ExecutorOperationError");
           assert.strictEqual(canceled.operation, "cancel");
-          assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the parent task may still run");
+          const live = yield* executor.isLive(ATTEMPT_ID);
+          assert.isTrue(live, "the parent task may still run");
         }).pipe(
           Effect.scoped,
           Effect.provide(runtime(ssh.layer, completes, storage, failingCancel)),
@@ -384,7 +390,8 @@ describe("exe.dev launch", () => {
           const separator = command.args.indexOf("--");
           if (separator >= 0) assert.strictEqual(command.args.slice(separator + 1).length, 1);
         }
-        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        const live = yield* executor.isLive(ATTEMPT_ID);
+        assert.isFalse(live);
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, parent)));
     },
   );
@@ -399,7 +406,8 @@ describe("exe.dev launch", () => {
         const prepared = yield* executor.prepare(request);
         const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
         yield* Deferred.await(started);
-        assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
+        const live = yield* executor.isLive(ATTEMPT_ID);
+        assert.isTrue(live);
         const before = ssh.state.commands.length;
         const released = yield* executor
           .cancel(ATTEMPT_ID, "cancel")
@@ -417,7 +425,8 @@ describe("exe.dev launch", () => {
         const stop = lines.indexOf(KILL_CHILDREN);
         assert(stop >= 0, "cancel must stop the remote children");
         assert(lines.findIndex((line) => line.includes("'worktree' 'remove'")) > stop);
-        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        const currentLive = yield* executor.isLive(ATTEMPT_ID);
+        assert.isFalse(currentLive);
         assert.strictEqual(
           ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
           1,
@@ -622,7 +631,8 @@ describe("exe.dev launch", () => {
         const failure = yield* Fiber.join(launch).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "InfraFailure");
         assert.strictEqual(failure.message, "The parent stopped");
-        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        const live = yield* executor.isLive(ATTEMPT_ID);
+        assert.isFalse(live);
         // The launch's own stop outlasted the interrupt grace, so the launch kept the checkout
         // and released its grant; the cancel that confirmed the stop reconciled the checkout with
         // fresh grants for comments and salvage.
@@ -652,7 +662,8 @@ describe("exe.dev launch", () => {
       assert(failure._tag === "RunawayFailure");
       assert.strictEqual(failure.ceiling, "wall-clock");
       assert.include(ssh.state.commands.map(remoteLine), KILL_CHILDREN);
-      assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+      const live = yield* executor.isLive(ATTEMPT_ID);
+      assert.isFalse(live);
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
   });
 
@@ -716,7 +727,8 @@ describe("exe.dev launch", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-          assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
+          const live = yield* executor.isLive(ATTEMPT_ID);
+          assert.isTrue(live);
           const before = ssh.state.commands.length;
           const prepared = yield* executor.prepare(
             CheckoutRequest.make({ ...request, reattach: true }),
@@ -739,7 +751,8 @@ describe("exe.dev launch", () => {
                 envelope.payload.event.text === "Resumed after a restart",
             ),
           );
-          assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+          const currentLive = yield* executor.isLive(ATTEMPT_ID);
+          assert.isFalse(currentLive);
         }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
       });
     },
@@ -761,7 +774,8 @@ describe("exe.dev launch", () => {
         assert.strictEqual(error._tag, "ExecutorOperationError");
         assert.strictEqual(error.message, "The reattached attempt's checkout no longer exists");
         assert(!ssh.state.commands.slice(before).some(({ args }) => args.includes("attach")));
-        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        const live = yield* executor.isLive(ATTEMPT_ID);
+        assert.isFalse(live);
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
     });
   });

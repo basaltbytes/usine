@@ -84,7 +84,8 @@ describe("local checkout reconciliation", () => {
       }).pipe(Effect.provide(executorLayer(root, observed)));
       assert.strictEqual(reads.filter((path) => path === attempts).length, 1);
       assert.strictEqual(probes.filter((path) => path.startsWith(`${attempts}/`)).length, 0);
-      assert(yield* fs.exists(`${attempts}/unknown`));
+      const currentExists = yield* fs.exists(`${attempts}/unknown`);
+      assert(currentExists);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

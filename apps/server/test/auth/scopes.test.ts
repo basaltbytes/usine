@@ -28,7 +28,8 @@ it("keeps local attribution separate from members and limits issued tokens to cu
       const auth = services.authentication;
       const local = yield* auth.authenticate(localSecret);
       assert.isTrue(Option.isNone(local.member));
-      const url = new URL(yield* auth.link);
+      const currentLink = yield* auth.link;
+      const url = new URL(currentLink);
       const session = yield* auth.consumeLink(
         new URLSearchParams(url.hash.slice(1)).get("link") ?? "",
       );
@@ -156,7 +157,8 @@ it("removes access from an existing browser session when its binding is removed"
         scope: alpha,
       }).permissions;
       const { authentication: auth } = yield* authFixture([alice], alice, () => grants);
-      const link = new URL(yield* auth.link);
+      const currentLink = yield* auth.link;
+      const link = new URL(currentLink);
       const session = yield* auth.consumeLink(
         new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
       );

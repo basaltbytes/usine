@@ -17,8 +17,7 @@
     "asyncFunction": 3
   },
   "src/attempt/request.ts": {
-    "schemaSync": 1,
-    "yieldInCallArgument": 1
+    "schemaSync": 1
   },
   "src/attempt/runtime.ts": {
     "asyncFunction": 11,
@@ -31,8 +30,7 @@
     "schemaSync": 1
   },
   "src/attempt/subagent.ts": {
-    "asyncFunction": 5,
-    "yieldInCallArgument": 1
+    "asyncFunction": 5
   },
   "src/attempt/task.ts": {
     "asyncFunction": 6
@@ -55,16 +53,12 @@
     "processEnvInEffect": 2,
     "strictBooleanExpressions": 2
   },
-  "src/testing.ts": {
-    "yieldInCallArgument": 2
-  },
   "test/attempt-runtime.test.ts": {
     "asyncFunction": 8,
     "globalJson": 5,
     "globalJsonInEffect": 1,
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 26
+    "schemaSyncInEffect": 1
   },
   "test/fixtures/http-dispatcher.ts": {
     "asyncFunction": 1,

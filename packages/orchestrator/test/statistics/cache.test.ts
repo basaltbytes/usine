@@ -51,23 +51,29 @@ describe("Statistics cache", () => {
             return reads;
           }),
         );
-        assert.deepStrictEqual(
-          yield* Effect.all([cached(instance, "7d"), cached(instance, "7d")], {
-            concurrency: "unbounded",
-          }),
-          [1, 1],
-        );
-        assert.strictEqual(yield* cached(instance, "30d"), 2);
-        assert.strictEqual(yield* cached(instance, "all"), 3);
+        const results = yield* Effect.all([cached(instance, "7d"), cached(instance, "7d")], {
+          concurrency: "unbounded",
+        });
+        assert.deepStrictEqual(results, [1, 1]);
+        const statistics = yield* cached(instance, "30d");
+        assert.strictEqual(statistics, 2);
+        const currentStatistics = yield* cached(instance, "all");
+        assert.strictEqual(currentStatistics, 3);
         yield* TestClock.adjust("4 minutes");
-        assert.strictEqual(yield* cached(instance, "7d"), 1);
-        assert.strictEqual(yield* cached(instance, "30d"), 2);
-        assert.strictEqual(yield* cached(instance, "all"), 3);
+        const nextStatistics = yield* cached(instance, "7d");
+        assert.strictEqual(nextStatistics, 1);
+        const updatedStatistics = yield* cached(instance, "30d");
+        assert.strictEqual(updatedStatistics, 2);
+        const latestStatistics = yield* cached(instance, "all");
+        assert.strictEqual(latestStatistics, 3);
         yield* TestClock.adjust("1 minute");
-        assert.strictEqual(yield* cached(instance, "7d"), 4);
+        const secondStatistics = yield* cached(instance, "7d");
+        assert.strictEqual(secondStatistics, 4);
         yield* TestClock.adjust(1);
-        assert.strictEqual(yield* cached(instance, "30d"), 5);
-        assert.strictEqual(yield* cached(instance, "all"), 6);
+        const thirdStatistics = yield* cached(instance, "30d");
+        assert.strictEqual(thirdStatistics, 5);
+        const fourthStatistics = yield* cached(instance, "all");
+        assert.strictEqual(fourthStatistics, 6);
       }),
   );
 
@@ -79,15 +85,21 @@ describe("Statistics cache", () => {
         Effect.sync(() => current),
         () => Effect.sync(() => ++reads),
       );
-      assert.strictEqual(yield* cached(instance, "7d"), 1);
+      const statistics = yield* cached(instance, "7d");
+      assert.strictEqual(statistics, 1);
       const reloaded = LoadedInstance.make({ ...instance });
-      assert.strictEqual(yield* cached(reloaded, "7d"), 2);
+      const currentStatistics = yield* cached(reloaded, "7d");
+      assert.strictEqual(currentStatistics, 2);
       current = Option.none();
-      assert.strictEqual(yield* cached(reloaded, "7d"), 3);
-      assert.strictEqual(yield* cached(reloaded, "7d"), 4);
+      const nextStatistics = yield* cached(reloaded, "7d");
+      assert.strictEqual(nextStatistics, 3);
+      const updatedStatistics = yield* cached(reloaded, "7d");
+      assert.strictEqual(updatedStatistics, 4);
       current = Option.some(ProjectionRevision.make(0));
-      assert.strictEqual(yield* cached(reloaded, "7d"), 5);
-      assert.strictEqual(yield* cached(reloaded, "7d"), 5);
+      const latestStatistics = yield* cached(reloaded, "7d");
+      assert.strictEqual(latestStatistics, 5);
+      const secondStatistics = yield* cached(reloaded, "7d");
+      assert.strictEqual(secondStatistics, 5);
     }),
   );
 
@@ -105,9 +117,12 @@ describe("Statistics cache", () => {
           return reads;
         }),
       );
-      assert.deepStrictEqual(yield* Effect.flip(cached(instance, "7d")), failure);
-      assert.strictEqual(yield* cached(instance, "7d"), 2);
-      assert.strictEqual(yield* cached(instance, "7d"), 2);
+      const currentFailure = yield* Effect.flip(cached(instance, "7d"));
+      assert.deepStrictEqual(currentFailure, failure);
+      const statistics = yield* cached(instance, "7d");
+      assert.strictEqual(statistics, 2);
+      const currentStatistics = yield* cached(instance, "7d");
+      assert.strictEqual(currentStatistics, 2);
     }),
   );
 
@@ -138,20 +153,21 @@ describe("Statistics cache", () => {
         ],
         { concurrency: "unbounded" },
       );
-      assert.strictEqual(yield* cached(instance, "7d"), 2);
-      assert.strictEqual(yield* cached(instance, "7d"), 2);
+      const statistics = yield* cached(instance, "7d");
+      assert.strictEqual(statistics, 2);
+      const currentStatistics = yield* cached(instance, "7d");
+      assert.strictEqual(currentStatistics, 2);
     }),
   );
 
   it.effect("invalidates every window when a stored run closes or its close time changes", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-statistics-cache-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-statistics-cache-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const database = localSqliteLayer(directory);
       const services = RunReader.layer.pipe(Layer.provideMerge(database));
       yield* Effect.gen(function* () {
@@ -174,15 +190,19 @@ describe("Statistics cache", () => {
           reader.closedSince(Option.none()).pipe(Effect.tap(() => Effect.sync(() => (reads += 1)))),
         );
         for (const window of ["7d", "30d", "all"] as const) {
-          assert.isEmpty(yield* cached(instance, window));
-          assert.isEmpty(yield* cached(instance, window));
+          const statistics = yield* cached(instance, window);
+          assert.isEmpty(statistics);
+          const currentStatistics = yield* cached(instance, window);
+          assert.isEmpty(currentStatistics);
         }
         assert.strictEqual(reads, 3);
         const failed = JSON.stringify(Schema.encodeSync(RunState.RunState)(RunState.Failed.make()));
         yield* sql`UPDATE usine_runs SET state_json = ${failed}, closed_at = '2026-10-25T01:00:00.000Z' WHERE run_id = 'cached-run'`;
         for (const window of ["7d", "30d", "all"] as const) {
-          assert.lengthOf(yield* cached(instance, window), 1);
-          assert.lengthOf(yield* cached(instance, window), 1);
+          const nextStatistics = yield* cached(instance, window);
+          assert.lengthOf(nextStatistics, 1);
+          const updatedStatistics = yield* cached(instance, window);
+          assert.lengthOf(updatedStatistics, 1);
         }
         assert.strictEqual(reads, 6);
         yield* sql`UPDATE usine_runs SET closed_at = '2026-10-25T02:00:00.000Z' WHERE run_id = 'cached-run'`;
@@ -195,7 +215,8 @@ describe("Statistics cache", () => {
         }
         assert.strictEqual(reads, 9);
         yield* sql`UPDATE usine_runs SET state_json = ${pending}, closed_at = NULL WHERE run_id = 'cached-run'`;
-        assert.isEmpty(yield* cached(instance, "7d"));
+        const latestStatistics = yield* cached(instance, "7d");
+        assert.isEmpty(latestStatistics);
         yield* sql`UPDATE usine_runs SET state_json = ${failed}, closed_at = '2026-10-25T03:00:00.000Z' WHERE run_id = 'cached-run'`;
         const [retried] = yield* cached(instance, "7d");
         assert.deepStrictEqual(
@@ -210,12 +231,11 @@ describe("Statistics cache", () => {
   it.effect("refreshes every cached run statistics window after a failure is resolved", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-resolution-statistics-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-resolution-statistics-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const worker = WorkerName.make("local");
       const executor = Layer.succeed(StepExecutor)({
         workers: Effect.succeed([worker]),
@@ -257,7 +277,8 @@ describe("Statistics cache", () => {
         for (const window of windows) {
           const before = yield* statistics.runStatistics(instance, window);
           assert.strictEqual(before.needsAttention.failureWait, null);
-          assert.strictEqual(yield* statistics.runStatistics(instance, window), before);
+          const currentRunStatistics = yield* statistics.runStatistics(instance, window);
+          assert.strictEqual(currentRunStatistics, before);
         }
         const operator = Option.some(OperatorLogin.make("Philippe"));
         yield* engine.resolveFailure(claim.runId, attempt.id, operator);
@@ -275,7 +296,8 @@ describe("Statistics cache", () => {
             after.needsAttention.failureWait,
           );
           assert.strictEqual(after.needsAttention.retryWait, null);
-          assert.strictEqual(yield* statistics.runStatistics(instance, window), after);
+          const nextRunStatistics = yield* statistics.runStatistics(instance, window);
+          assert.strictEqual(nextRunStatistics, after);
         }
       }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer)),

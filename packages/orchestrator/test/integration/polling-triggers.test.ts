@@ -197,9 +197,10 @@ describe("live GitHub polling", () => {
       const label = `usine-poll-${globalThis.crypto.randomUUID()}`;
       const instance = makeInstance(repository, label);
       const fileSystem = yield* FileSystem.FileSystem;
-      const runtimeDirectory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-live-polling-" }),
-      );
+      const directory = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "usine-live-polling-",
+      });
+      const runtimeDirectory = InstanceDirectory.make(directory);
       const credentialsDirectory = InstanceDirectory.make(settings.credentialsDirectory);
       const platformLayer = Layer.merge(NodeFileSystem.layer, NodePath.layer);
       const credentialsLayer = localSecretsLayer(credentialsDirectory).pipe(

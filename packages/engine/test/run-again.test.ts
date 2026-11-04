@@ -166,7 +166,8 @@ describe("Run again", () => {
             asks.map(({ id }) => id),
             [blocked.ask.id],
           );
-          assert.deepStrictEqual(yield* historyOf("budget-item"), [first.runId]);
+          const history = yield* historyOf("budget-item");
+          assert.deepStrictEqual(history, [first.runId]);
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),

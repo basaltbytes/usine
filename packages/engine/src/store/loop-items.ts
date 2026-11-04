@@ -38,17 +38,16 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     and(eq(loopItems.loopName, loop), eq(loopItems.itemKey, itemKey));
 
   const row = Effect.fn("LoopItems.row")(function* (loop: LoopName, itemKey: ItemKey) {
-    const rows = yield* decodeLoopItems(
-      yield* database
-        .select({
-          observedEventId: loopItems.observedEventId,
-          suppressedByRunId: loopItems.suppressedByRunId,
-          suppressedEventId: loopItems.suppressedEventId,
-        })
-        .from(loopItems)
-        .where(where(loop, itemKey))
-        .execute(),
-    );
+    const storedRows = yield* database
+      .select({
+        observedEventId: loopItems.observedEventId,
+        suppressedByRunId: loopItems.suppressedByRunId,
+        suppressedEventId: loopItems.suppressedEventId,
+      })
+      .from(loopItems)
+      .where(where(loop, itemKey))
+      .execute();
+    const rows = yield* decodeLoopItems(storedRows);
     return Option.fromNullishOr(rows[0]);
   });
 
@@ -58,7 +57,8 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     itemKey: ItemKey,
     eventId: EventId,
   ) {
-    const before: PreviousSighting = Option.map(yield* row(loop, itemKey), ({ observedEventId }) =>
+    const storedRow = yield* row(loop, itemKey);
+    const before: PreviousSighting = Option.map(storedRow, ({ observedEventId }) =>
       Option.fromNullishOr(observedEventId),
     );
     yield* database
@@ -86,7 +86,8 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     loop: LoopName,
     itemKey: ItemKey,
   ) {
-    return Option.flatMap(yield* row(loop, itemKey), ({ suppressedByRunId, suppressedEventId }) =>
+    const storedRow = yield* row(loop, itemKey);
+    return Option.flatMap(storedRow, ({ suppressedByRunId, suppressedEventId }) =>
       suppressedByRunId === null
         ? Option.none<Suppression>()
         : Option.some<Suppression>({

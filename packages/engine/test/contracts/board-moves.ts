@@ -42,13 +42,12 @@ export const boardMovesContract = (adapter: PersistenceAdapter) => {
           yield* moves.record(
             BoardMoveRecord.make({ ...first, itemKey: ItemKey.make("other-item") }),
           );
-          assert.deepStrictEqual(yield* moves.onItem(first.itemKey, first.at), [first, second]);
-          assert.deepStrictEqual(yield* moves.onItem(first.itemKey, earlier.at), [
-            earlier,
-            first,
-            second,
-          ]);
-          assert.deepStrictEqual(yield* reader.revision, revision);
+          const currentMoves = yield* moves.onItem(first.itemKey, first.at);
+          assert.deepStrictEqual(currentMoves, [first, second]);
+          const nextMoves = yield* moves.onItem(first.itemKey, earlier.at);
+          assert.deepStrictEqual(nextMoves, [earlier, first, second]);
+          const currentRevision = yield* reader.revision;
+          assert.deepStrictEqual(currentRevision, revision);
         }),
       ),
     );

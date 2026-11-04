@@ -526,7 +526,8 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
               early.set(attemptId, keepNotice(early.get(attemptId) ?? [], notice));
               return;
             }
-            yield* active.io.append("outbound", yield* envelope(task, notice));
+            const noticeEnvelope = yield* envelope(task, notice);
+            yield* active.io.append("outbound", noticeEnvelope);
           }).pipe(Effect.orDie),
         attached: (attemptId) => Effect.suspend(() => Deferred.await(relayedFor(attemptId))),
         intervene: (attemptId, intervention) =>
@@ -548,17 +549,15 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
                 payload: intervention.action,
               }),
             );
-            yield* active.io.append(
-              "outbound",
-              yield* envelope(
-                task,
-                AttemptChannel.InterventionApplied.make({
-                  inputSequence,
-                  intervention,
-                  state: AttemptChannel.InterventionState.make({ held: false, paused: false }),
-                }),
-              ),
+            const noticeEnvelope = yield* envelope(
+              task,
+              AttemptChannel.InterventionApplied.make({
+                inputSequence,
+                intervention,
+                state: AttemptChannel.InterventionState.make({ held: false, paused: false }),
+              }),
             );
+            yield* active.io.append("outbound", noticeEnvelope);
           }),
       });
     }),

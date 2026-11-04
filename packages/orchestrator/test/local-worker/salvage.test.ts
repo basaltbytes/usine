@@ -94,10 +94,8 @@ describe("local worker salvage", () => {
             assert(Option.isSome(attempt.salvage) && attempt.salvage.value._tag === "Retained");
             assert.deepStrictEqual(attempt.salvage.value.pushFailure, Option.some(failure));
             const fs = yield* FileSystem.FileSystem;
-            assert.strictEqual(
-              yield* fs.readFileString(`${attempt.salvage.value.path}/progress.txt`),
-              "keep this work\n",
-            );
+            const contents = yield* fs.readFileString(`${attempt.salvage.value.path}/progress.txt`);
+            assert.strictEqual(contents, "keep this work\n");
             const view = runView(snapshot, new Set(), new Map());
             assert.isTrue(view.canResolveFailure);
             const outcome = view.attempts[0]?.outcome;
@@ -150,7 +148,8 @@ describe("local worker salvage", () => {
               salvaged.commit,
             ])).trim();
             assert.strictEqual(subject, `wip(usine): salvage attempt ${attempt.id}`);
-            assert.deepStrictEqual(yield* identityOf(salvaged.commit, remote), [BOT, BOT]);
+            const commitIdentity = yield* identityOf(salvaged.commit, remote);
+            assert.deepStrictEqual(commitIdentity, [BOT, BOT]);
             const files = (yield* output("git", [
               "--git-dir",
               remote,
@@ -255,7 +254,8 @@ describe("local worker salvage", () => {
                   windows: aloneOnItem(failedRecordRequest.attemptId),
                   salvage: () =>
                     Effect.gen(function* () {
-                      assert(yield* fileSystem.exists(worktree).pipe(Effect.orDie));
+                      const currentExists = yield* fileSystem.exists(worktree).pipe(Effect.orDie);
+                      assert(currentExists);
                       return yield* InfraFailure.make({
                         message: "salvage database unavailable",
                         cause: "outage",
@@ -265,7 +265,8 @@ describe("local worker salvage", () => {
               );
               assert(Exit.isFailure(exit));
               assert(Cause.pretty(exit.cause).includes("salvage database unavailable"));
-              assert(yield* fileSystem.exists(worktree));
+              const currentExists = yield* fileSystem.exists(worktree);
+              assert(currentExists);
               return worktree;
             }),
           );
@@ -284,7 +285,8 @@ describe("local worker salvage", () => {
             {
               salvage: (salvage) =>
                 Effect.gen(function* () {
-                  assert(yield* fileSystem.exists(retained));
+                  const currentExists = yield* fileSystem.exists(retained);
+                  assert(currentExists);
                   assert(salvage._tag === "Pushed");
                   recorded.push(salvage);
                 }),
@@ -295,7 +297,8 @@ describe("local worker salvage", () => {
           );
           const recovered = recorded[0];
           assert(recovered !== undefined);
-          assert.deepStrictEqual(yield* identityOf(recovered.commit, remote), [BOT, BOT]);
+          const commitIdentity = yield* identityOf(recovered.commit, remote);
+          assert.deepStrictEqual(commitIdentity, [BOT, BOT]);
           assert.strictEqual(
             (yield* output("git", [
               "--git-dir",
@@ -366,23 +369,24 @@ describe("local worker salvage", () => {
         const firstBase = yield* head(seed);
         yield* git(["checkout", "-b", "attempt-1"]);
         // Authored by the bot, like a salvage commit, and committed by the seed's identity.
-        const worked = yield* salvage(
-          1,
-          yield* commitFile(
-            "progress.md",
-            "half done\n",
-            "wip(usine): salvage attempt r/1",
-            `--author=${BOT}`,
-          ),
+        const currentCommit = yield* commitFile(
+          "progress.md",
+          "half done\n",
+          "wip(usine): salvage attempt r/1",
+          `--author=${BOT}`,
         );
+        const worked = yield* salvage(1, currentCommit);
         yield* git(["checkout", "-b", "attempt-2", firstBase]);
-        const conflicting = yield* salvage(
-          2,
-          yield* commitFile("README.md", "# edited by the Attempt\n", "wip(usine): salvage r/2"),
+        const nextCommit = yield* commitFile(
+          "README.md",
+          "# edited by the Attempt\n",
+          "wip(usine): salvage r/2",
         );
+        const conflicting = yield* salvage(2, nextCommit);
         yield* git(["checkout", "-b", "attempt-3", firstBase]);
         yield* git(["commit", "--allow-empty", "-m", "wip(usine): salvage attempt r/3"]);
-        const empty = yield* salvage(3, yield* head(seed));
+        const updatedCommit = yield* head(seed);
+        const empty = yield* salvage(3, updatedCommit);
         // A fix is committed on the default branch after the first Attempt started.
         yield* git(["checkout", "main"]);
         const tip = yield* commitFile("README.md", "# fixed on main\n", "fix: unblock the run");
@@ -432,9 +436,12 @@ describe("local worker salvage", () => {
                 (yield* output("git", ["rev-parse", "HEAD^"], worktree)).trim(),
                 tip,
               );
-              assert.deepStrictEqual(yield* identityOf("HEAD", worktree), [BOT, BOT]);
-              assert.strictEqual(yield* read(worktree, "progress.md"), "half done\n");
-              assert.strictEqual(yield* read(worktree, "README.md"), "# fixed on main\n");
+              const commitIdentity = yield* identityOf("HEAD", worktree);
+              assert.deepStrictEqual(commitIdentity, [BOT, BOT]);
+              const contents = yield* read(worktree, "progress.md");
+              assert.strictEqual(contents, "half done\n");
+              const currentContents = yield* read(worktree, "README.md");
+              assert.strictEqual(currentContents, "# fixed on main\n");
             }),
           );
 
@@ -445,8 +452,10 @@ describe("local worker salvage", () => {
               assert.strictEqual(spec.baseCommit, tip);
               assert(Option.isNone(spec.resume));
               assert.deepStrictEqual(spec.conflictingSalvage, Option.some(conflicting));
-              assert.strictEqual(yield* head(worktree), tip);
-              assert.strictEqual(yield* read(worktree, "README.md"), "# fixed on main\n");
+              const currentCommit = yield* head(worktree);
+              assert.strictEqual(currentCommit, tip);
+              const contents = yield* read(worktree, "README.md");
+              assert.strictEqual(contents, "# fixed on main\n");
               assert.strictEqual(
                 (yield* output("git", ["--git-dir", remote, "rev-parse", conflicting.ref])).trim(),
                 conflicting.commit,
@@ -459,7 +468,8 @@ describe("local worker salvage", () => {
               const { spec, worktree } = (yield* executor.prepare(request(6, empty))).workspace;
               assert(Option.isNone(spec.resume));
               assert(Option.isNone(spec.conflictingSalvage));
-              assert.strictEqual(yield* head(worktree), tip);
+              const commit = yield* head(worktree);
+              assert.strictEqual(commit, tip);
             }),
           );
         }).pipe(Effect.provide(runtime));
@@ -505,7 +515,8 @@ describe("local worker salvage", () => {
           // echoed isn't.
           assert.include(salvage.message, "access revoked for [REDACTED]");
           assert.notInclude(salvage.message, TOKEN);
-          assert(yield* fileSystem.exists(worktree));
+          const currentExists = yield* fileSystem.exists(worktree);
+          assert(currentExists);
           return { runId: accepted.runId, worktree };
         }).pipe(Effect.provide(runtime()));
         // A second startup during the outage must also keep the only copy, and its reconcile
@@ -518,7 +529,8 @@ describe("local worker salvage", () => {
           assert.include(salvage.value.message, "access revoked for [REDACTED]");
           assert.notInclude(salvage.value.message, TOKEN);
         }).pipe(Effect.provide(runtime()));
-        assert(yield* fileSystem.exists(saved.worktree));
+        const currentExists = yield* fileSystem.exists(saved.worktree);
+        assert(currentExists);
         yield* fileSystem.remove(hook);
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -534,7 +546,8 @@ describe("local worker salvage", () => {
             ])).trim(),
             "recover this work",
           );
-          assert.deepStrictEqual(yield* identityOf(salvage.value.commit, remote), [BOT, BOT]);
+          const commitIdentity = yield* identityOf(salvage.value.commit, remote);
+          assert.deepStrictEqual(commitIdentity, [BOT, BOT]);
           assert(!(yield* fileSystem.exists(saved.worktree)));
         }).pipe(Effect.provide(runtime()));
       }).pipe(Effect.provide(NodeServices.layer)),
@@ -590,8 +603,10 @@ describe("local worker salvage", () => {
         yield* restart();
         yield* fileSystem.writeFileString(gitFile, gitLink);
         yield* restart();
-        assert.strictEqual(yield* fileSystem.readFileString(refusals), "refused\n");
-        assert(yield* fileSystem.exists(saved.worktree));
+        const contents = yield* fileSystem.readFileString(refusals);
+        assert.strictEqual(contents, "refused\n");
+        const currentExists = yield* fileSystem.exists(saved.worktree);
+        assert(currentExists);
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
   );
@@ -627,13 +642,15 @@ describe("local worker salvage", () => {
           assert.include(salvage.message, "dataset.csv (100.0 MiB)");
           return { runId: accepted.runId, worktree, salvage };
         }).pipe(Effect.provide(runtime()));
-        assert(yield* fileSystem.exists(`${saved.worktree}/dataset.csv`));
+        const currentExists = yield* fileSystem.exists(`${saved.worktree}/dataset.csv`);
+        assert(currentExists);
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
           const salvage = (yield* engine.inspect(saved.runId)).attempts[0]?.salvage;
           assert.deepStrictEqual(salvage, Option.some(saved.salvage));
         }).pipe(Effect.provide(runtime()));
-        assert(yield* fileSystem.exists(`${saved.worktree}/dataset.csv`));
+        const nextExists = yield* fileSystem.exists(`${saved.worktree}/dataset.csv`);
+        assert(nextExists);
         assert.strictEqual(
           (yield* output("git", [
             "--git-dir",

@@ -259,7 +259,8 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
 
 const get = Effect.fn("Sandbox.get")(function* (name: SandboxName) {
   yield* Effect.annotateCurrentSpan({ sandbox: name });
-  return yield* summarize(yield* stored(name));
+  const storedSandbox = yield* stored(name);
+  return yield* summarize(storedSandbox);
 });
 
 const credentials = Effect.fn("Sandbox.credentials")(function* (
@@ -378,9 +379,11 @@ const processStatus = Effect.fn("Sandbox.process")(function* (
         onSuccess: Option.map((bytes) => decoder.decode(bytes)),
       }),
     );
-  const pid = Option.flatMap(yield* read(files.pid), pidOf);
+  const pidText = yield* read(files.pid);
+  const pid = Option.flatMap(pidText, pidOf);
   if (Option.isNone(pid)) return yield* ProcessNotFound.make({ sandbox: name, process });
-  const exitCode = Option.flatMap(yield* read(files.exit), exitCodeOf);
+  const exitText = yield* read(files.exit);
+  const exitCode = Option.flatMap(exitText, exitCodeOf);
   const size = (path: string) =>
     container.size(path).pipe(
       Effect.mapBoth({
@@ -404,7 +407,8 @@ const isImageName = Schema.is(CloudflareImageName);
 
 const health = Effect.fn("Sandbox.health")(function* () {
   const container = yield* SandboxContainer;
-  const images = Object.keys(yield* container.images).filter(isImageName);
+  const availableImages = yield* container.images;
+  const images = Object.keys(availableImages).filter(isImageName);
   return HealthReport.make({ protocol: SANDBOX_PROTOCOL, images });
 });
 

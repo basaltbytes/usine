@@ -123,9 +123,11 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   ),
 ) {
   const fs = yield* FileSystem.FileSystem;
-  const directory = InstanceDirectory.make(
-    yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory(), prefix: "usine-ci-" }),
-  );
+  const currentDirectory = yield* fs.makeTempDirectoryScoped({
+    directory: sqliteTempDirectory(),
+    prefix: "usine-ci-",
+  });
+  const directory = InstanceDirectory.make(currentDirectory);
   const observed = yield* Ref.make(CheckSnapshot.make({ head, state: "pending" }));
   const observationFailure = yield* Ref.make(Option.none<GitHubApiError | GitHubRateLimitError>());
   const mergeable = yield* Ref.make<PullRequestPayload["mergeable"]>("CONFLICTING");
@@ -219,7 +221,8 @@ const scenario = Effect.fn("test.ciScenario")(function* (
 
 const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number, sameLoop = false) {
   const engine = yield* RunEngine;
-  const submission = yield* triggerSubmission(yield* ExpressionEngine, {
+  const expressions = yield* ExpressionEngine;
+  const submission = yield* triggerSubmission(expressions, {
     loop: LoopFile.make({
       ...loop,
       name: sameLoop ? loop.name : LoopName.make("development"),
@@ -441,7 +444,8 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
         assert.strictEqual(runNeedsAttention(projected, false), false);
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
         yield* engine.drain;
-        const another = yield* triggerSubmission(yield* ExpressionEngine, {
+        const expressions = yield* ExpressionEngine;
+        const another = yield* triggerSubmission(expressions, {
           loop: LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) }),
           agent: agent.agent,
           parentModel: Option.none(),
@@ -651,7 +655,8 @@ it.live.each([
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
         const sourceId = yield* openWait(setup.timeoutSeconds);
-        const existing = yield* triggerSubmission(yield* ExpressionEngine, {
+        const expressions = yield* ExpressionEngine;
+        const existing = yield* triggerSubmission(expressions, {
           loop,
           agent: agent.agent,
           parentModel: Option.none(),

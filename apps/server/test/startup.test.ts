@@ -44,9 +44,10 @@ it("answers the version while recovering 400 finished attempts without per-attem
   await Effect.runPromise(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const template = submission({ number: 1 });
       yield* committedBeforeCrash(directory, (store) =>
         Effect.gen(function* () {
@@ -130,7 +131,8 @@ it("answers the version while recovering 400 finished attempts without per-attem
       const client = yield* HttpClient.HttpClient;
       const version = yield* client.get("/api/version");
       assert.strictEqual(version.status, 200);
-      assert.strictEqual(yield* version.json, "0.5.1-next.341");
+      const currentJson = yield* version.json;
+      assert.strictEqual(currentJson, "0.5.1-next.341");
       assert.strictEqual(recovered, 1, "the API answers before reconciliation finishes");
       const notReady = yield* client.get("/api/ready");
       assert.strictEqual(notReady.status, 503);
@@ -162,7 +164,8 @@ it("answers the version while recovering 400 finished attempts without per-attem
       );
       const readiness = yield* client.get("/api/ready");
       assert.strictEqual(readiness.status, 200);
-      assert.deepStrictEqual(yield* readiness.json, { ok: true });
+      const nextJson = yield* readiness.json;
+      assert.deepStrictEqual(nextJson, { ok: true });
       const ready = yield* client.get("/api/overview");
       assert.strictEqual(
         ready.status,

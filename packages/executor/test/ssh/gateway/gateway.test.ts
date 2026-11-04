@@ -105,13 +105,14 @@ const CHATGPT_PROVIDERS = {
 const leftover = (id: string, worker: string) =>
   Effect.gen(function* () {
     const store = yield* Attachments;
+    const currentNow = yield* DateTime.now;
     yield* store.attach(
       Attachment.make({
         id: AttachmentId.make(id),
         worker: WorkerName.make(worker),
         repository: RepositoryName.make("acme/demo"),
         credential: InstallationCredential.make({ token: Redacted.make("ghs_left-by-a-crash") }),
-        expiresAt: DateTime.add(yield* DateTime.now, { minutes: 50 }),
+        expiresAt: DateTime.add(currentNow, { minutes: 50 }),
       }),
     );
   });
@@ -206,7 +207,8 @@ describe("SSH Worker behind a Gateway", () => {
           removeWorktree >= 0 && (detach?.machineCalls ?? 0) > removeWorktree,
           "the token stays attached until the checkout is cleaned up",
         );
-        assert.deepStrictEqual(yield* attachmentsInForce, []);
+        const attachments = yield* attachmentsInForce;
+        assert.deepStrictEqual(attachments, []);
         assert.notInclude(logs.lines.join("\n"), TOKEN_PREFIX);
         assert.notInclude(logs.lines.join("\n"), callerToken);
       }).pipe(
@@ -494,7 +496,8 @@ describe("SSH Worker behind a Gateway", () => {
       const released = gateway.calls.length;
       yield* TestClock.adjust("2 hours");
       assert.strictEqual(gateway.calls.length, released, "renewal stops with the Attempt");
-      assert.deepStrictEqual(yield* attachmentsInForce, []);
+      const attachments = yield* attachmentsInForce;
+      assert.deepStrictEqual(attachments, []);
     }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
   });
 
@@ -512,7 +515,8 @@ describe("SSH Worker behind a Gateway", () => {
         // Simulate lost state or a restart of an older gateway.
         const store = yield* Attachments;
         yield* store.detach(attached.id);
-        assert.deepStrictEqual(yield* attachmentsInForce, []);
+        const attachments = yield* attachmentsInForce;
+        assert.deepStrictEqual(attachments, []);
         yield* advance(gateway, 2);
         const [restored] = yield* attachmentsInForce;
         assert.strictEqual(
@@ -695,7 +699,8 @@ describe("SSH Worker behind a Gateway", () => {
           before,
           "the children get the new attachment's token",
         );
-        assert.deepStrictEqual(yield* attachmentsInForce, []);
+        const attachments = yield* attachmentsInForce;
+        assert.deepStrictEqual(attachments, []);
       }).pipe(Effect.provide(gateway.layer));
     },
   );
@@ -862,7 +867,8 @@ describe("SSH Worker behind a Gateway", () => {
         const prepared = yield* executor.prepare(request);
         const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
         const given = yield* Deferred.await(started);
-        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("api-key"));
+        const currentGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(currentGatewayCredential, Option.some("api-key"));
 
         // While the Attempt runs, a Gateway reload replaces its API key with a subscription token.
         const inForce = yield* SettingsInForce;
@@ -882,7 +888,8 @@ describe("SSH Worker behind a Gateway", () => {
         });
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         // The same Attempt's next child records the kind this preflight found.
-        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("subscription"));
+        const nextGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(nextGatewayCredential, Option.some("subscription"));
         yield* Deferred.succeed(finish, undefined);
         yield* Fiber.join(launch);
       }).pipe(
@@ -919,17 +926,20 @@ describe("SSH Worker behind a Gateway", () => {
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
         assert(given !== undefined, "the Attempt's parent ran");
-        assert.deepStrictEqual(yield* given.gatewayCredential, Option.none());
+        const currentGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(currentGatewayCredential, Option.none());
 
         // A reload that gives the Worker another slot preflights it again.
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 2);
         assert.strictEqual(warnings().length, 1, "the Worker is warned once");
-        assert.deepStrictEqual(yield* given.gatewayCredential, Option.none());
+        const nextGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(nextGatewayCredential, Option.none());
 
         // Once the Gateway is upgraded, the next preflight still reads and records the kind.
         gateway.switches.reportsProviders = true;
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 2);
-        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("api-key"));
+        const updatedGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(updatedGatewayCredential, Option.some("api-key"));
         assert.strictEqual(warnings().length, 1);
       }).pipe(
         Effect.scoped,
@@ -1123,7 +1133,8 @@ describe("SSH Worker behind a Gateway", () => {
         assert.include(config, 'base_url = "http://llm.gw.test/openai/v1"');
         assert.include(config, 'env_key = "USINE_GATEWAY_TOKEN"');
         assert.notInclude(config, callerToken);
-        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("subscription"));
+        const currentGatewayCredential = yield* given.gatewayCredential;
+        assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
         assert(
           machine.state.calls.some(({ line }) => line === `exec 'rm' '-rf' '${codexHome}'`),
           "cleanup removes the Attempt's Codex home",

@@ -23,11 +23,13 @@ it.effect(
         mode: "endpoint",
         publicUrl: new URL("https://usine.example/webhooks/github"),
       } as const;
-      assert.isFalse(yield* health.silent);
+      const currentSilent = yield* health.silent;
+      assert.isFalse(currentSilent);
       yield* TestClock.adjust("599 seconds");
       assert.deepStrictEqual((yield* attention(overview, config)).needsYou, []);
       yield* TestClock.adjust("1 second");
-      assert.isTrue(yield* health.silent);
+      const nextSilent = yield* health.silent;
+      assert.isTrue(nextSilent);
       assert.strictEqual((yield* bus.open).revision, revision + 1);
       assert.deepStrictEqual((yield* bus.open).history.at(-1)?.changes, [
         { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
@@ -57,7 +59,8 @@ it.effect(
       yield* health.received;
       assert.strictEqual((yield* bus.open).revision, revision + 2);
       yield* TestClock.adjust("1 day");
-      assert.isFalse(yield* health.silent);
+      const updatedSilent = yield* health.silent;
+      assert.isFalse(updatedSilent);
       assert.strictEqual((yield* bus.open).revision, revision + 2);
       assert.deepStrictEqual((yield* attention(overview, config)).needsYou, []);
       assert.deepStrictEqual((yield* attention(overview, config)).dismissedNeeds, []);

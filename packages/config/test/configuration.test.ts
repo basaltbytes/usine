@@ -115,7 +115,8 @@ const initialize = Effect.gen(function* () {
 describe("configuration domain without layers", () => {
   it.effect("omits unchanged entities when adding or removing an entity before them", () =>
     Effect.gen(function* () {
-      const original = configurationEntities(yield* fixture);
+      const fixtureInstance = yield* fixture;
+      const original = configurationEntities(fixtureInstance);
       const added = ConfigurationEntity.make({
         key: ConfigurationEntityKey.make({
           kind: "label",
@@ -143,7 +144,8 @@ describe("configuration domain without layers", () => {
 
   it.effect("ignores unordered entity positions and records worker-relative positions", () =>
     Effect.gen(function* () {
-      const original = configurationEntities(yield* fixture);
+      const fixtureInstance = yield* fixture;
+      const original = configurationEntities(fixtureInstance);
       const workers = original.filter(({ key }) => key.kind === "worker");
       const other = original.filter(({ key }) => key.kind !== "worker");
       expect(configurationDiff(original, [...other.reverse(), ...workers])).toEqual([]);
@@ -222,8 +224,10 @@ for (const [name, layer] of adapters)
         const store = yield* ConfigurationStore;
         const folder = yield* ConfigurationFolder;
         const fs = yield* FileSystem.FileSystem;
-        const root = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
-        const canonical = configurationEntities(yield* fixture);
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const root = InstanceDirectory.make(directory);
+        const fixtureInstance = yield* fixture;
+        const canonical = configurationEntities(fixtureInstance);
         const changes = (yield* initialChanges).map((change) =>
           change.key.kind === "loop"
             ? ConfigurationChange.make({
@@ -243,23 +247,18 @@ for (const [name, layer] of adapters)
         expect(revision.changes).toEqual(configurationDiff([], canonical));
         const { instance } = yield* store.read;
         if (Option.isNone(instance)) return yield* Effect.die("configuration is uninitialized");
-        yield* folder.export(root, yield* Effect.fromResult(migrateProjects(instance.value)));
-        const imported = configurationEntities(yield* folder.load(root));
+        const exportedInstance = yield* Effect.fromResult(migrateProjects(instance.value));
+        yield* folder.export(root, exportedInstance);
+        const reloadedInstance = yield* folder.load(root);
+        const imported = configurationEntities(reloadedInstance);
         expect(new Set(imported.map(({ key }) => key.kind))).toEqual(
           new Set(["settings", "worker", "repository", "project", "label", "loop", "agent"]),
         );
-        expect(
-          configurationDiff(
-            configurationEntities(yield* Effect.fromResult(migrateProjects(instance.value))),
-            imported,
-          ),
-        ).toEqual([]);
+        const migratedInstance = yield* Effect.fromResult(migrateProjects(instance.value));
+        expect(configurationDiff(configurationEntities(migratedInstance), imported)).toEqual([]);
         for (const entity of imported) {
-          const edited = yield* parseConfigurationEntity(
-            parser,
-            entity.key,
-            yield* formatConfigurationEntity(entity),
-          );
+          const formattedEntity = yield* formatConfigurationEntity(entity);
+          const edited = yield* parseConfigurationEntity(parser, entity.key, formattedEntity);
           expect(configurationDiff([entity], [edited])).toEqual([]);
         }
       }).pipe(
@@ -277,7 +276,8 @@ for (const [name, layer] of adapters)
       Effect.gen(function* () {
         const store = yield* ConfigurationStore;
         yield* initialize;
-        const original = configurationEntities(yield* fixture);
+        const fixtureInstance = yield* fixture;
+        const original = configurationEntities(fixtureInstance);
         const workers = original.filter(({ key }) => key.kind === "worker");
         const other = original.filter(({ key }) => key.kind !== "worker");
         const [settings, ...rest] = other;
@@ -335,7 +335,8 @@ for (const [name, layer] of adapters)
               Option.map(replayed.instance, ({ config }) => config.workers.map(({ name }) => name)),
             ).toEqual(Option.some(["fallback", "local"]));
         }
-        expect(replayed).toEqual(yield* store.read);
+        const storedConfiguration = yield* store.read;
+        expect(replayed).toEqual(storedConfiguration);
       }).pipe(Effect.provide(layer)),
     );
 
@@ -345,7 +346,8 @@ for (const [name, layer] of adapters)
         const initial = yield* initialize;
         let replayed = (yield* commit(parser, Configuration.empty, zero, initial.changes, initial))
           .configuration;
-        const original = configurationEntities(yield* fixture);
+        const fixtureInstance = yield* fixture;
+        const original = configurationEntities(fixtureInstance);
         const workers = original.filter(({ key }) => key.kind === "worker");
         const other = original.filter(({ key }) => key.kind !== "worker");
         const added = ConfigurationEntity.make({
@@ -393,7 +395,8 @@ for (const [name, layer] of adapters)
               revision.changes,
               revision,
             )).configuration;
-            expect(replayed).toEqual(yield* store.read);
+            const storedConfiguration = yield* store.read;
+            expect(replayed).toEqual(storedConfiguration);
             expect(
               Option.map(replayed.instance, ({ config }) => config.workers.map(({ name }) => name)),
             ).toEqual(
@@ -415,7 +418,8 @@ for (const [name, layer] of adapters)
         const store = yield* ConfigurationStore;
         yield* initialize;
         const current = yield* store.read;
-        const entities = configurationEntities(yield* fixture);
+        const fixtureInstance = yield* fixture;
+        const entities = configurationEntities(fixtureInstance);
         const workers = entities.filter(({ key }) => key.kind === "worker");
         for (const changes of [
           workers.map(({ key, value }) =>
@@ -457,8 +461,10 @@ for (const [name, layer] of adapters)
             .commit({ expected: current.number, changes, ...metadata })
             .pipe(Effect.flip);
           expect(failure._tag).toBe("ConfigurationInvalid");
-          expect(yield* store.read).toEqual(current);
-          expect(yield* store.list(Option.none())).toHaveLength(1);
+          const storedConfiguration = yield* store.read;
+          expect(storedConfiguration).toEqual(current);
+          const entries = yield* store.list(Option.none());
+          expect(entries).toHaveLength(1);
         }
       }).pipe(Effect.provide(layer)),
     );
@@ -468,7 +474,8 @@ for (const [name, layer] of adapters)
       () =>
         Effect.gen(function* () {
           const store = yield* ConfigurationStore;
-          expect(yield* store.read).toEqual(Configuration.empty);
+          const storedConfiguration = yield* store.read;
+          expect(storedConfiguration).toEqual(Configuration.empty);
           const first = yield* initialize;
           const state = yield* store.read;
           expect(state.number).toBe(1);
@@ -495,7 +502,8 @@ for (const [name, layer] of adapters)
           expect(second.number).toBe(2);
           expect(second.changes[0]?.before).toEqual(agent.after);
           expect((yield* store.list(Option.some(key))).map(({ number }) => number)).toEqual([1, 2]);
-          expect(yield* store.revision(second.number)).toEqual(Option.some(second));
+          const currentRevision = yield* store.revision(second.number);
+          expect(currentRevision).toEqual(Option.some(second));
           const streamed = yield* store.changes(zero).pipe(Stream.take(2), Stream.runCollect);
           expect(streamed.map(({ number }) => number)).toEqual([1, 2]);
           const current = yield* store.read;
@@ -562,15 +570,18 @@ it.effect(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const folder = yield* ConfigurationFolder;
-      const root = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
-      const original = yield* Effect.fromResult(migrateProjects(yield* fixture));
+      const directory = yield* fs.makeTempDirectoryScoped();
+      const root = InstanceDirectory.make(directory);
+      const fixtureInstance = yield* fixture;
+      const original = yield* Effect.fromResult(migrateProjects(fixtureInstance));
       yield* folder.export(root, original);
       const imported = yield* folder.load(root);
       expect(Equal.equals(imported, original)).toBe(true);
       const withoutLoops = LoadedInstance.make({ ...original, loops: [] });
       yield* folder.export(root, withoutLoops);
       yield* fs.remove(`${root}/projects`, { recursive: true });
-      expect(Equal.equals(yield* folder.load(root), withoutLoops)).toBe(true);
+      const reloadedInstance = yield* folder.load(root);
+      expect(Equal.equals(reloadedInstance, withoutLoops)).toBe(true);
       const [project] = original.config.projects;
       if (project === undefined) return yield* Effect.die("fixture project missing");
       yield* fs.makeDirectory(`${root}/projects/${project.id}`, { recursive: true });
@@ -602,19 +613,22 @@ it.live("observes another SQLite connection and preserves history after reopenin
         Layer.provide(parserLayer),
         Layer.provide(SqliteClient.layer({ filename: `${directory}/configuration.sqlite` })),
       );
-    const first = Context.get(yield* Layer.build(connection()), ConfigurationStore);
+    const services = yield* Layer.build(connection());
+    const first = Context.get(services, ConfigurationStore);
     const imported = yield* first.commit({
       expected: zero,
       changes: yield* initialChanges,
       ...metadata,
     });
-    const second = Context.get(yield* Layer.build(connection()), ConfigurationStore);
+    const secondConnectionServices = yield* Layer.build(connection());
+    const second = Context.get(secondConnectionServices, ConfigurationStore);
     const watching = yield* first
       .changes(imported.number)
       .pipe(Stream.take(1), Stream.runCollect, Effect.forkChild);
     const revision = yield* second.commit({ expected: imported.number, changes: [], ...metadata });
     expect((yield* Fiber.join(watching)).map(({ number }) => number)).toEqual([revision.number]);
-    const reopened = Context.get(yield* Layer.build(connection()), ConfigurationStore);
+    const reopenedConnectionServices = yield* Layer.build(connection());
+    const reopened = Context.get(reopenedConnectionServices, ConfigurationStore);
     expect((yield* reopened.read).number).toBe(2);
     expect((yield* reopened.list(Option.none())).map(({ number }) => number)).toEqual([1, 2]);
   }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),

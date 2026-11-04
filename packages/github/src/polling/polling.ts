@@ -285,7 +285,8 @@ export class GitHubPolling extends Context.Service<
           .execute(request)
           .pipe(Effect.mapError((error) => transportError(operation, error)));
         if (isTransientStatus(response.status)) {
-          return yield* statusError(operation, response, yield* Clock.currentTimeMillis);
+          const now = yield* Clock.currentTimeMillis;
+          return yield* statusError(operation, response, now);
         }
         return response;
       }, retryTransientRequest);
@@ -357,7 +358,8 @@ export class GitHubPolling extends Context.Service<
         operation: GitHubOperation,
         initialUrl: string,
       ) {
-        return yield* remainingLabelPages(operation, yield* labelsPage(operation, initialUrl));
+        const labelPage = yield* labelsPage(operation, initialUrl);
+        return yield* remainingLabelPages(operation, labelPage);
       });
 
       const labels = Effect.fn("GitHubPolling.labels")(function* (

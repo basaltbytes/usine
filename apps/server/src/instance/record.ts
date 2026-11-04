@@ -145,11 +145,10 @@ export const readRecord = Effect.fn("Instance.readRecord")(function* (files: Ins
   const text = yield* fileSystem
     .readFileString(files.record)
     .pipe(Effect.mapError((error) => failure(error.message)));
-  return Option.some(
-    yield* Schema.decodeEffect(RecordFromJson)(text).pipe(
-      Effect.mapError((error) => failure(error.message)),
-    ),
+  const instanceRecord = yield* Schema.decodeEffect(RecordFromJson)(text).pipe(
+    Effect.mapError((error) => failure(error.message)),
   );
+  return Option.some(instanceRecord);
 });
 
 const PidFromText = Schema.Trim.pipe(

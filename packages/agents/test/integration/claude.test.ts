@@ -38,7 +38,8 @@ describe("Claude child live contract", () => {
       () =>
         live(
           Effect.gen(function* () {
-            return yield* steeringContract(yield* ClaudeChildBackend, brain, child);
+            const claudeChildBackend = yield* ClaudeChildBackend;
+            return yield* steeringContract(claudeChildBackend, brain, child);
           }),
         ),
       210_000,
@@ -49,7 +50,8 @@ describe("Claude child live contract", () => {
       () =>
         live(
           Effect.gen(function* () {
-            return yield* interruptionContract(yield* ClaudeChildBackend, brain, child);
+            const claudeChildBackend = yield* ClaudeChildBackend;
+            return yield* interruptionContract(claudeChildBackend, brain, child);
           }),
         ),
       150_000,

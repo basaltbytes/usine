@@ -73,12 +73,12 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   );
   const readOutcome = Effect.gen(function* () {
     if (!(yield* fs.exists(resultPath))) return Option.none<UpgradeRecord>();
-    return Option.some(
-      yield* Schema.decodeEffect(Schema.fromJsonString(UpgradeRecord))(
-        yield* fs.readFileString(resultPath),
-        { onExcessProperty: "error" },
-      ),
+    const contents = yield* fs.readFileString(resultPath);
+    const upgradeRecord = yield* Schema.decodeEffect(Schema.fromJsonString(UpgradeRecord))(
+      contents,
+      { onExcessProperty: "error" },
     );
+    return Option.some(upgradeRecord);
   }).pipe(Effect.mapError(failure));
   const outcome = Effect.gen(function* () {
     const result = yield* readOutcome;

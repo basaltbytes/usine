@@ -118,7 +118,8 @@ describe("Events of canceled Runs", () => {
           yield* waitFor(engine, running.runId, ({ run }) => run.state._tag === "Succeeded");
           const reopened = yield* engine.submit(queued);
           assert(reopened._tag === "Claimed");
-          assert.notStrictEqual(reopened.runId, yield* runIdFor(queued));
+          const currentRunId = yield* runIdFor(queued);
+          assert.notStrictEqual(reopened.runId, currentRunId);
           const finished = yield* waitFor(
             engine,
             reopened.runId,

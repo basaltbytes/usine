@@ -18,12 +18,11 @@ it.effect("cached SQLite statements release completed responses across six hours
     }
 
     const fs = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-statement-retention-",
-      }),
-    );
+    const currentDirectory = yield* fs.makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+      prefix: "usine-statement-retention-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     const database = yield* Layer.build(localSqliteLayer(directory));
     const sql = Context.get(database, SqlClient.SqlClient);
     const context = (yield* Effect.context<never>()).pipe(Context.merge(database));
@@ -58,7 +57,8 @@ it.effect("cached SQLite statements release completed responses across six hours
       queryObjects(ResponsePayload, { format: "count" });
       yield* Effect.promise(() => setImmediate());
       assert.strictEqual(queryObjects(ResponsePayload, { format: "count" }), 0);
-      assert.deepStrictEqual(yield* sql`SELECT 42 AS value`, [{ value: 42 }]);
+      const currentRows = yield* sql`SELECT 42 AS value`;
+      assert.deepStrictEqual(currentRows, [{ value: 42 }]);
       if (hour < 6) yield* TestClock.adjust("1 hour");
     }
   }).pipe(Effect.provide(NodeServices.layer)),
@@ -87,15 +87,15 @@ it.effect("SQLite queries keep their request trace and SQL attributes", () =>
       },
     });
     const fs = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-statement-trace-",
-      }),
-    );
+    const currentDirectory = yield* fs.makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+      prefix: "usine-statement-trace-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     yield* Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      assert.deepStrictEqual(yield* sql`SELECT 42 AS value`, [{ value: 42 }]);
+      const rows = yield* sql`SELECT 42 AS value`;
+      assert.deepStrictEqual(rows, [{ value: 42 }]);
     }).pipe(
       Effect.withSpan("http.request"),
       Effect.provideService(Statement.SpanPropagationEnabled, true),

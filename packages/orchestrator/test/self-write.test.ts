@@ -140,12 +140,11 @@ describe("Board self-writes", () => {
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          const directory = InstanceDirectory.make(
-            yield* fs.makeTempDirectoryScoped({
-              directory: sqliteTempDirectory(),
-              prefix: "usine-self-write-",
-            }),
-          );
+          const currentDirectory = yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-self-write-",
+          });
+          const directory = InstanceDirectory.make(currentDirectory);
           let labels: ReadonlyArray<string> = ["backlog"];
           let writeFailure: Option.Option<GitHubAppError> = Option.none();
           let changeRequests = 0;

@@ -101,11 +101,10 @@ describe("generateHostKey", () => {
         const signature = yield* Effect.promise(() =>
           crypto.subtle.sign({ name: "Ed25519" }, signing, message),
         );
-        assert.isTrue(
-          yield* Effect.promise(() =>
-            crypto.subtle.verify({ name: "Ed25519" }, verifying, signature, message),
-          ),
+        const responseBody = yield* Effect.promise(() =>
+          crypto.subtle.verify({ name: "Ed25519" }, verifying, signature, message),
         );
+        assert.isTrue(responseBody);
         assert.notStrictEqual((yield* generateHostKey).publicKey, pair.publicKey);
       }),
   );

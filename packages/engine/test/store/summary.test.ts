@@ -40,9 +40,10 @@ for (const [method, phase, selection, transition] of [
   it.live(`${method} stays coherent when ${transition} commits before reading ${phase}`, () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
         const runId = RunId.make("changing-during-summary");
@@ -73,7 +74,8 @@ for (const [method, phase, selection, transition] of [
                   ),
                 );
               } else {
-                assert(yield* store.retry(runId));
+                const retryResult = yield* store.retry(runId);
+                assert(retryResult);
                 const retried = yield* store.beginAttempt(
                   runId,
                   WorkerName.make("local"),
@@ -178,12 +180,11 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-summary-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-summary-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
         const task = AttemptTask.make("Saved prompt. ".repeat(10_000));

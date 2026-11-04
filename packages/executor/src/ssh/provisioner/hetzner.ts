@@ -164,7 +164,8 @@ export const hetznerDriverFor = (
           const response: ProviderResponse = yield* api.send("GET", path, {
             query: { ...query, page: String(page), per_page: "50" },
           });
-          pages.push(yield* api.decode(schema, operation)(response));
+          const decodedPage = yield* api.decode(schema, operation)(response);
+          pages.push(decodedPage);
           const meta: typeof Pagination.Type = yield* api.decode(Pagination, operation)(response);
           page = meta.meta?.pagination.next_page ?? null;
         }

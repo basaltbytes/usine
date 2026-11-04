@@ -94,7 +94,8 @@ const targetVersions = Effect.fn("Cli.upgradeTargets")(function* (
   for (const { name } of manifest.pins) {
     if (name === SERVER_PACKAGE) continue;
     const spec = Option.getOrElse(Option.fromUndefinedOr(serverDependencies[name]), () => "latest");
-    versions.set(name, yield* resolveVersion(directory, name, spec));
+    const resolvedVersion = yield* resolveVersion(directory, name, spec);
+    versions.set(name, resolvedVersion);
   }
   return versions;
 });
@@ -157,7 +158,9 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   // Only a running engine shows where it runs from. A stopped one is whatever the pin installs.
   if (Option.isSome(running)) {
     const script = running.value.launch.script;
-    if (!installedInInstance(yield* realPathOrSelf(directory), yield* realPathOrSelf(script))) {
+    const instancePath = yield* realPathOrSelf(directory);
+    const scriptPath = yield* realPathOrSelf(script);
+    if (!installedInInstance(instancePath, scriptPath)) {
       const unit = yield* supervisingUnit(running.value.pid, running.value.systemdUnit);
       if (
         Option.isSome(unit) &&
@@ -278,11 +281,11 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     onNone: () => previous,
     onSome: ({ version }) => version,
   });
-  const backupPath = hasStore
-    ? Option.some(
-        join(files.backups, `runtime-${backupStamp(yield* DateTime.now)}-${writer}.sqlite`),
-      )
-    : Option.none<string>();
+  let backupPath = Option.none<string>();
+  if (hasStore) {
+    const now = yield* DateTime.now;
+    backupPath = Option.some(join(files.backups, `runtime-${backupStamp(now)}-${writer}.sqlite`));
+  }
   if (Option.isSome(backupPath)) {
     yield* fileSystem
       .makeDirectory(files.backups, { recursive: true, mode: 0o700 })

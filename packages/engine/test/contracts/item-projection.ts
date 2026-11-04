@@ -34,19 +34,25 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
           const reader = yield* ItemProjectionReader;
           const writer = yield* ItemProjectionWriter;
           const runs = yield* RunReader;
-          assert.deepStrictEqual(yield* reader.get(item.itemKey), Option.none());
+          const snapshot = yield* reader.get(item.itemKey);
+          assert.deepStrictEqual(snapshot, Option.none());
           const before = yield* runs.revision;
           assert(Option.isSome(before));
 
-          assert.strictEqual(yield* writer.upsert(item), true);
-          assert.deepStrictEqual(yield* reader.get(item.itemKey), Option.some(item));
+          const currentChanged = yield* writer.upsert(item);
+          assert.strictEqual(currentChanged, true);
+          const currentSnapshot = yield* reader.get(item.itemKey);
+          assert.deepStrictEqual(currentSnapshot, Option.some(item));
           const changed = yield* runs.revision;
           assert(Option.isSome(changed));
           assert.strictEqual(changed.value, before.value + 1);
-          assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [item]);
+          const entries = yield* reader.list(repository, { limit: 10 });
+          assert.deepStrictEqual(entries, [item]);
 
-          assert.strictEqual(yield* writer.upsert(item), false);
-          assert.deepStrictEqual(yield* runs.revision, changed);
+          const nextChanged = yield* writer.upsert(item);
+          assert.strictEqual(nextChanged, false);
+          const currentRevision = yield* runs.revision;
+          assert.deepStrictEqual(currentRevision, changed);
         }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
@@ -68,24 +74,32 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
           const reader = yield* ItemProjectionReader;
           const writer = yield* ItemProjectionWriter;
           const runs = yield* RunReader;
-          assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), false);
+          const changed = yield* writer.markGone(item.itemKey, goneAt);
+          assert.strictEqual(changed, false);
           yield* writer.upsert(item);
           const before = yield* runs.revision;
 
-          assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), true);
+          const currentChanged = yield* writer.markGone(item.itemKey, goneAt);
+          assert.strictEqual(currentChanged, true);
           const gone = ItemProjection.make({ ...item, goneAt: Option.some(goneAt) });
-          assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [gone]);
+          const entries = yield* reader.list(repository, { limit: 10 });
+          assert.deepStrictEqual(entries, [gone]);
           assert(Option.isSome(before));
-          assert.deepStrictEqual(yield* runs.revision, Option.some(before.value + 1));
-          assert.strictEqual(
-            yield* writer.markGone(item.itemKey, DateTime.makeUnsafe("2026-10-19T13:00:00Z")),
-            false,
+          const currentRevision = yield* runs.revision;
+          assert.deepStrictEqual(currentRevision, Option.some(before.value + 1));
+          const nextChanged = yield* writer.markGone(
+            item.itemKey,
+            DateTime.makeUnsafe("2026-10-19T13:00:00Z"),
           );
-          assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [gone]);
+          assert.strictEqual(nextChanged, false);
+          const currentEntries = yield* reader.list(repository, { limit: 10 });
+          assert.deepStrictEqual(currentEntries, [gone]);
 
           // The same content observed again means GitHub has the Item after all.
-          assert.strictEqual(yield* writer.upsert(item), true);
-          assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [item]);
+          const updatedChanged = yield* writer.upsert(item);
+          assert.strictEqual(updatedChanged, true);
+          const nextEntries = yield* reader.list(repository, { limit: 10 });
+          assert.deepStrictEqual(nextEntries, [item]);
         }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
@@ -125,10 +139,8 @@ export const itemProjectionContract = (adapter: PersistenceAdapter) => {
             ItemKey.make(`github:${repository}:31`),
             DateTime.makeUnsafe("2026-10-20T12:00:00Z"),
           );
-          assert.deepStrictEqual(yield* reader.openIssues(repository), [
-            ItemNumber.make(12),
-            ItemNumber.make(28),
-          ]);
+          const currentOpenIssues = yield* reader.openIssues(repository);
+          assert.deepStrictEqual(currentOpenIssues, [ItemNumber.make(12), ItemNumber.make(28)]);
         }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );

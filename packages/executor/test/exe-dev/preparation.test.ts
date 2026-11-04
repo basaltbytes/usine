@@ -650,7 +650,8 @@ describe("exe.dev preparation", () => {
       const released = yield* attempt.pipe(Effect.exit, Effect.map(detaches), Effect.forkChild);
       while (!ssh.state.parked) yield* Effect.yieldNow;
       const canceling = yield* Effect.forkChild(executor.cancel(ATTEMPT_ID, "cancel"));
-      assert.strictEqual(yield* Fiber.join(released), 1);
+      const releasedResult = yield* Fiber.join(released);
+      assert.strictEqual(releasedResult, 1);
       yield* Fiber.join(canceling);
       assert.strictEqual(detaches(), 1);
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));

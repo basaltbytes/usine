@@ -38,12 +38,11 @@ describe("Run evidence reader", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-evidence-reader-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-evidence-reader-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const now = DateTime.makeUnsafe("2026-09-06T00:00:00Z");
       const model = ModelId.make("evidence-model");
       const starts = yield* Queue.unbounded<Effect.Effect<void, AttemptFailure>>();
@@ -223,7 +222,8 @@ describe("Loop sightings", () => {
             const [unmatched] = yield* sightingsOf("reopened");
             assert.deepStrictEqual(unmatched?.event, Option.none());
             assert.deepStrictEqual(unmatched?.run, Option.none());
-            assert.deepStrictEqual(yield* sightingsOf("never-seen"), []);
+            const currentSightings = yield* sightingsOf("never-seen");
+            assert.deepStrictEqual(currentSightings, []);
           }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
         }),
       ),
@@ -258,7 +258,8 @@ describe("Run Events", () => {
           assert.deepStrictEqual(byRun.get(first.runId)?.payload, { revision: 1 });
           assert.deepStrictEqual(byRun.get(second.runId)?.id, EventId.make("event-2"));
           assert.deepStrictEqual(byRun.get(second.runId)?.payload, { revision: 2 });
-          assert.deepStrictEqual(yield* reader.events([]), []);
+          const currentEvents = yield* reader.events([]);
+          assert.deepStrictEqual(currentEvents, []);
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),

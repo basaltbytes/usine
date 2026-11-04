@@ -197,7 +197,8 @@ export const attachStream = Effect.fn("Sandbox.attachStream")(function* (
     yield* Effect.logWarning("Refused to attach to an unknown command", fields);
     return yield* refuse(socket, `Sandbox ${name} has no command ${process}`);
   }
-  if (Option.isNone(yield* extendLease(name).pipe(Effect.option))) {
+  const lease = yield* extendLease(name).pipe(Effect.option);
+  if (Option.isNone(lease)) {
     yield* Effect.logWarning("Refused to attach: the sandbox was destroyed", fields);
     return yield* refuse(socket, `Sandbox ${name} was destroyed`);
   }
@@ -214,9 +215,8 @@ export const attachStream = Effect.fn("Sandbox.attachStream")(function* (
   const follow = Effect.gen(function* () {
     while (true) {
       // Reads the exit file first, so the output read after it is complete when it exists.
-      const exit = Option.flatMap(yield* container.read(files.exit), (bytes) =>
-        exitCodeOf(decoder.decode(bytes)),
-      );
+      const exitBytes = yield* container.read(files.exit);
+      const exit = Option.flatMap(exitBytes, (bytes) => exitCodeOf(decoder.decode(bytes)));
       yield* forward("stdout");
       yield* forward("stderr");
       if (Option.isSome(exit)) return exit.value;

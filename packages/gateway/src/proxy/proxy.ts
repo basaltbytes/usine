@@ -306,16 +306,13 @@ export class GatewayProxy extends Context.Service<
           attachment.credential,
           withoutCallerCredentials(endToEndHeaders(request.headers)),
         );
-        const response = yield* throughGateway(
-          yield* forwardRequest(
-            githubDownloadClient(client, settings.github, attachment, route.value, request.method),
-            request,
-            route.value.upstream,
-            headers,
-          ),
-          live,
-          route.value,
+        const forwardedResponse = yield* forwardRequest(
+          githubDownloadClient(client, settings.github, attachment, route.value, request.method),
+          request,
+          route.value.upstream,
+          headers,
         );
+        const response = yield* throughGateway(forwardedResponse, live, route.value);
         yield* forwarded(
           route.value.protocol === "release"
             ? "Served a GitHub release download"

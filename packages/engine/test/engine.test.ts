@@ -320,7 +320,8 @@ describe("durable run engine", () => {
           const engine = yield* RunEngine;
           const reader = yield* RunReader;
           const controls = yield* LoopControl;
-          const initialRevision = Option.getOrThrow(yield* reader.revision);
+          const currentRevision = yield* reader.revision;
+          const initialRevision = Option.getOrThrow(currentRevision);
           const first = yield* engine.submit(
             submission({ number: 1, item: "listed-one", approval: "required" }),
           );
@@ -359,11 +360,14 @@ describe("durable run engine", () => {
             [second.runId],
           );
           assert.strictEqual(history[0]?.attempts.length, 1);
-          assert.deepStrictEqual(yield* reader.forItems([]), []);
-          const runRevision = Option.getOrThrow(yield* reader.revision);
+          const itemStates = yield* reader.forItems([]);
+          assert.deepStrictEqual(itemStates, []);
+          const nextRevision = yield* reader.revision;
+          const runRevision = Option.getOrThrow(nextRevision);
           assert(runRevision > initialRevision);
           yield* controls.pause(LoopName.make("review"));
-          assert(Option.getOrThrow(yield* reader.revision) > runRevision);
+          const updatedRevision = yield* reader.revision;
+          assert(Option.getOrThrow(updatedRevision) > runRevision);
         }).pipe(Effect.provide(runtime));
       }),
     ),
@@ -812,14 +816,17 @@ describe("durable run engine", () => {
           const counts = Effect.map(reader.attemptsByWorker, (counted) =>
             counted.map(({ worker, attempts, running }) => [worker, attempts, running]),
           );
-          assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
+          const rowCounts = yield* counts;
+          assert.deepStrictEqual(rowCounts, [["local", 2, 1]]);
           // `local` is in `StepExecutor.workers`, like a removed Worker until its last Attempt ends.
           const local = WorkerName.make("local");
+          const failure = yield* Effect.flip(engine.discardLeftovers(local));
           assert.deepStrictEqual(
-            yield* Effect.flip(engine.discardLeftovers(local)),
+            failure,
             LeftoversDiscardRejectedError.make({ worker: local, running: 1 }),
           );
-          assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
+          const currentRowCounts = yield* counts;
+          assert.deepStrictEqual(currentRowCounts, [["local", 2, 1]]);
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),
@@ -857,14 +864,16 @@ describe("durable run engine", () => {
           const behind = submission({ number: 59, item: "cancel-queued" });
           assert.strictEqual((yield* engine.submit(behind))._tag, "Queued");
           yield* engine.cancel(running.runId);
+          const currentRunId = yield* runIdFor(behind);
           const opened = yield* waitFor(
             engine,
-            yield* runIdFor(behind),
+            currentRunId,
             ({ run }) => run.state._tag === "Succeeded",
           );
           assert.strictEqual(opened.attempts.length, 1);
           assert.strictEqual((yield* engine.inspect(running.runId)).run.state._tag, "Canceled");
-          assert.strictEqual(yield* Ref.get(checks), 1);
+          const preflightChecksState = yield* Ref.get(checks);
+          assert.strictEqual(preflightChecksState, 1);
         }).pipe(Effect.provide(engineLayer(directory, executor, condition)));
       }),
     ),
@@ -952,7 +961,8 @@ describe("durable run engine", () => {
               },
             );
             assert.deepStrictEqual(attempts, []);
-            assert.strictEqual(yield* TxRef.get(leased), 1);
+            const leasedState = yield* TxRef.get(leased);
+            assert.strictEqual(leasedState, 1);
             // The canceled execution also fails, so either stop can record the Attempt first.
             const listed = yield* unconfirmed.list;
             assert.deepStrictEqual(
@@ -977,7 +987,8 @@ describe("durable run engine", () => {
               ({ run }) => run.state._tag === "Succeeded",
             );
             assert.lengthOf(delivered.attempts, 1);
-            assert.deepStrictEqual(yield* unconfirmed.list, []);
+            const currentList = yield* unconfirmed.list;
+            assert.deepStrictEqual(currentList, []);
             yield* Effect.repeat(TxRef.get(leased), {
               until: (count) => count === 0,
               schedule: Schedule.spaced("10 millis"),
@@ -1027,8 +1038,10 @@ describe("durable run engine", () => {
               Option.some("Failed"),
             );
             assert.deepStrictEqual(new Set(stops.map(([, reason]) => reason)), new Set(["failed"]));
-            assert.strictEqual(yield* TxRef.get(worker.leased), 1);
-            assert.deepStrictEqual(yield* unconfirmed.list, [
+            const leasedState = yield* TxRef.get(worker.leased);
+            assert.strictEqual(leasedState, 1);
+            const currentList = yield* unconfirmed.list;
+            assert.deepStrictEqual(currentList, [
               UnconfirmedStop.make({
                 attemptId: failed.id,
                 runId: accepted.runId,
@@ -1047,7 +1060,8 @@ describe("durable run engine", () => {
               ({ run }) => run.state._tag === "Succeeded",
             );
             assert.lengthOf(delivered.attempts, 2);
-            assert.deepStrictEqual(yield* unconfirmed.list, []);
+            const nextList = yield* unconfirmed.list;
+            assert.deepStrictEqual(nextList, []);
             yield* Effect.repeat(TxRef.get(worker.leased), {
               until: (count) => count === 0,
               schedule: Schedule.spaced("10 millis"),
@@ -1093,7 +1107,8 @@ describe("durable run engine", () => {
             yield* Ref.set(worker.unstoppable, true);
             const refusal = yield* Effect.flip(engine.cancel(running.runId));
             assert.strictEqual(refusal._tag, "AttemptCancellationError");
-            assert.deepStrictEqual(yield* unconfirmed.list, [
+            const currentList = yield* unconfirmed.list;
+            assert.deepStrictEqual(currentList, [
               UnconfirmedStop.make({
                 attemptId: attempt.id,
                 runId: running.runId,
@@ -1130,13 +1145,15 @@ describe("durable run engine", () => {
             assert.deepStrictEqual(waiting.attempts, []);
             assert.isEmpty((yield* engine.inspect(otherLoop.runId)).attempts);
             assert.deepStrictEqual(new Set(stops.map(([, reason]) => reason)), new Set(["cancel"]));
-            assert.strictEqual(yield* TxRef.get(worker.leased), 1);
+            const leasedState = yield* TxRef.get(worker.leased);
+            assert.strictEqual(leasedState, 1);
 
             // Once a retry stops the parent task, the queued Event's Run starts.
             yield* Ref.set(worker.unstoppable, false);
             yield* waitFor(engine, queuedRunId, ({ run }) => run.state._tag === "Succeeded");
             yield* waitFor(engine, otherLoop.runId, ({ run }) => run.state._tag === "Succeeded");
-            assert.deepStrictEqual(yield* unconfirmed.list, []);
+            const nextList = yield* unconfirmed.list;
+            assert.deepStrictEqual(nextList, []);
             yield* Effect.repeat(TxRef.get(worker.leased), {
               until: (count) => count === 0,
               schedule: Schedule.spaced("10 millis"),
@@ -1171,8 +1188,10 @@ describe("durable run engine", () => {
           const [failed] = delivered.attempts;
           assert(failed !== undefined);
           assert.lengthOf(delivered.attempts, 2);
-          assert.deepStrictEqual(yield* Ref.get(worker.stops), [[failed.id, "failed"]]);
-          assert.deepStrictEqual(yield* unconfirmed.list, []);
+          const stopsState = yield* Ref.get(worker.stops);
+          assert.deepStrictEqual(stopsState, [[failed.id, "failed"]]);
+          const currentList = yield* unconfirmed.list;
+          assert.deepStrictEqual(currentList, []);
           yield* Effect.repeat(TxRef.get(worker.leased), {
             until: (count) => count === 0,
             schedule: Schedule.spaced("10 millis"),
@@ -1215,7 +1234,8 @@ describe("durable run engine", () => {
           yield* Deferred.await(reserveEntered);
           yield* engine.cancel(result.runId);
           // The cancel returns only after the Run's fiber left its reservation.
-          assert.isTrue(yield* Deferred.isDone(reserveLeft));
+          const reserveLeftDone = yield* Deferred.isDone(reserveLeft);
+          assert.isTrue(reserveLeftDone);
           const snapshot = yield* engine.inspect(result.runId);
           assert.strictEqual(snapshot.run.state._tag, "Canceled");
           assert.strictEqual(snapshot.attempts.length, 0);
@@ -1235,7 +1255,8 @@ describe("durable run engine", () => {
           assert(first._tag === "Claimed");
           // The ID that earlier versions assigned to this Event, so existing Runs keep their IDs.
           assert.strictEqual(first.runId, "c33a338a9aaafa7490fa315fbf02a437");
-          assert.strictEqual(yield* runIdFor(original), first.runId);
+          const currentRunId = yield* runIdFor(original);
+          assert.strictEqual(currentRunId, first.runId);
           const resubmitted = yield* engine.submit(
             Submission.make({
               ...original,
@@ -1400,7 +1421,8 @@ describe("store failures in a Run's fiber", () => {
             }),
           );
           assert.strictEqual(finished.attempts.length, 1);
-          assert.strictEqual(yield* Ref.get(reserved), 2);
+          const reservedState = yield* Ref.get(reserved);
+          assert.strictEqual(reservedState, 2);
           // The failure is an event of the Run's trace, not of the launch span that already ended.
           assert.deepStrictEqual(failureSpans, ["RunDriver.drive"]);
         }).pipe(

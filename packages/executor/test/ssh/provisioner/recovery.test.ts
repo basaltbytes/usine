@@ -39,7 +39,8 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
         });
         const machines = yield* WorkerMachines;
         if (unreadable) {
-          assert.isTrue(Option.isNone(yield* machines.adopt(WORKER, request.attemptId)));
+          const adoptedMachine = yield* machines.adopt(WORKER, request.attemptId);
+          assert.isTrue(Option.isNone(adoptedMachine));
           yield* machines.sweep;
           assert.isTrue(
             providers.hetzner.servers.has(21),

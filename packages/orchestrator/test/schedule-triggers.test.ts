@@ -569,12 +569,11 @@ describe("ScheduleTriggers", () => {
   it.live("deduplicates one scheduled Event across engine restarts", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-schedules-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-schedules-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const config = configWith([{ name: "basaltbytes/usine" }]);
       const instance = instanceWith(config, [scheduleLoop(config, { cron: "0 0 1 1 *" })]);
 

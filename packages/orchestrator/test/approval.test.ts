@@ -108,12 +108,11 @@ for (const scenario of [
     });
     return Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-approval-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-approval-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const config = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const loop = yield* config.parseLoopFile(

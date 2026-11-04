@@ -99,7 +99,8 @@ for (const address of [hetznerAddress, boatAddress]) {
             "a repeated old release cannot release a new attempt",
           );
           yield* machines.release(reused.hold);
-          assert.lengthOf(yield* machines.machines, 0);
+          const currentMachines = yield* machines.machines;
+          assert.lengthOf(currentMachines, 0);
           assert.strictEqual(records.size, 0, "deletion leaves no previous attempt connections");
           const fresh = yield* machines.create(WORKER, MACHINE_RUN, third, [TEST_AGENT.brain]);
           assert.notEqual(fresh.id, first.id);
@@ -151,7 +152,8 @@ for (const address of [hetznerAddress, boatAddress]) {
         );
         machine.state.containerRemovalFails = false;
         yield* machines.release(first.hold);
-        assert.lengthOf(yield* machines.machines, 0);
+        const currentMachines = yield* machines.machines;
+        assert.lengthOf(currentMachines, 0);
         const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
         assert.notEqual(next.id, first.id);
         yield* machines.release(next.hold);

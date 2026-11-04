@@ -707,6 +707,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       });
     });
     const { settings, webhooks, tracing } = config;
+    const lastHint = yield* polling.lastHint;
     const configuration = ConfigurationView.make({
       bindings: config.bindings,
       projects: config.projects,
@@ -733,7 +734,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         parentEffort: Option.getOrNull(settings.parentEffort),
         operator: Option.getOrNull(config.operator),
         webhooks: webhooks.mode,
-        lastHintAt: Option.getOrNull(Option.map(yield* polling.lastHint, DateTime.formatIso)),
+        lastHintAt: Option.getOrNull(Option.map(lastHint, DateTime.formatIso)),
         webhooksPublicUrl: webhooks.mode === "endpoint" ? webhooks.publicUrl.href : null,
         tracing: Option.match(tracing, {
           onNone: () => null,

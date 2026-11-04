@@ -336,12 +336,11 @@ it.live(
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-reset-race-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-reset-race-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const parser = yield* ConfigParser;
       const makeLoop = (body: string, approval: "none" | "required") =>
         parser.parseLoopFile(
@@ -484,7 +483,9 @@ it.live(
             }),
           );
         const attention = Effect.gen(function* () {
-          return partitionNeeds((yield* budgets.asks).map(needFor), yield* acknowledgements.list);
+          const asks = yield* budgets.asks;
+          const dismissed = yield* acknowledgements.list;
+          return partitionNeeds(asks.map(needFor), dismissed);
         });
         yield* dismiss(blocked.ask);
         yield* polling.poll(withLoop(loop));
@@ -539,7 +540,8 @@ it.live(
           yield* Effect.sleep("10 millis");
         }
         assert.strictEqual((yield* engine.inspect(admitted.runId)).run.state._tag, "Waiting");
-        assert.deepStrictEqual(yield* budgets.asks, []);
+        const currentAsks = yield* budgets.asks;
+        assert.deepStrictEqual(currentAsks, []);
       }).pipe(Effect.provide(runtime));
     }).pipe(
       Effect.provide(

@@ -24,22 +24,21 @@ export const readBoardItems = Effect.fn("Board.readItems")(function* (
         : [],
     ),
   );
-  const additional = EffectArray.getSomes(
-    yield* Effect.forEach(
-      missing,
-      (itemKey) =>
-        reader
-          .get(itemKey)
-          .pipe(
-            Effect.tap((item) =>
-              Option.isNone(item)
-                ? Effect.logInfo("Open run has no stored board item", { repository, itemKey })
-                : Effect.void,
-            ),
+  const missingItems = yield* Effect.forEach(
+    missing,
+    (itemKey) =>
+      reader
+        .get(itemKey)
+        .pipe(
+          Effect.tap((item) =>
+            Option.isNone(item)
+              ? Effect.logInfo("Open run has no stored board item", { repository, itemKey })
+              : Effect.void,
           ),
-      { concurrency: 4 },
-    ),
+        ),
+    { concurrency: 4 },
   );
+  const additional = EffectArray.getSomes(missingItems);
   yield* Effect.logDebug("Selected board items", {
     repository,
     history: history.length,

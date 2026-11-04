@@ -6,20 +6,17 @@
   },
   "src/auth/authentication.ts": {
     "cryptoRandomUUIDInEffect": 1,
-    "deterministicKeys": 1,
-    "yieldInCallArgument": 2
+    "deterministicKeys": 1
   },
   "src/auth/crypto.ts": {
     "nodeBuiltinImport": 1
   },
   "src/auth/github.ts": {
-    "deterministicKeys": 1,
-    "yieldInCallArgument": 2
+    "deterministicKeys": 1
   },
   "src/auth/http.ts": {
     "globalJson": 2,
-    "strictBooleanExpressions": 1,
-    "yieldInCallArgument": 2
+    "strictBooleanExpressions": 1
   },
   "src/auth/local.ts": {
     "cryptoRandomUUIDInEffect": 1
@@ -50,16 +47,14 @@
     "strictBooleanExpressions": 3
   },
   "src/command.ts": {
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 1
   },
   "src/conditional-reads.ts": {
     "nodeBuiltinImport": 1,
     "strictBooleanExpressions": 1
   },
   "src/configuration/cli.ts": {
-    "nodeBuiltinImport": 1,
-    "yieldInCallArgument": 4
+    "nodeBuiltinImport": 1
   },
   "src/configuration/command.ts": {
     "redundantSchemaTagIdentifier": 5,
@@ -73,8 +68,7 @@
     "schemaClassMissingBrand": 1
   },
   "src/http.ts": {
-    "nodeBuiltinImport": 2,
-    "yieldInCallArgument": 2
+    "nodeBuiltinImport": 2
   },
   "src/instance/environment.ts": {
     "nodeBuiltinImport": 1,
@@ -89,8 +83,7 @@
   },
   "src/instance/manifest.ts": {
     "nodeBuiltinImport": 1,
-    "schemaClassMissingBrand": 3,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 3
   },
   "src/instance/operator-api.ts": {
     "schemaClassMissingBrand": 2
@@ -102,18 +95,13 @@
     "globalJson": 1,
     "nodeBuiltinImport": 2,
     "schemaClassMissingBrand": 3,
-    "schemaSync": 1,
-    "yieldInCallArgument": 1
+    "schemaSync": 1
   },
   "src/instance/state.ts": {
     "schemaClassMissingBrand": 4
   },
   "src/instance/systemd.ts": {
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 1
-  },
-  "src/main.ts": {
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 1
   },
   "src/openapi.ts": {
     "strictBooleanExpressions": 2
@@ -123,14 +111,7 @@
   },
   "src/setup/control.ts": {
     "deterministicKeys": 1,
-    "globalJsonInEffect": 1,
-    "yieldInCallArgument": 1
-  },
-  "src/setup/http.ts": {
-    "yieldInCallArgument": 1
-  },
-  "src/status.ts": {
-    "yieldInCallArgument": 6
+    "globalJsonInEffect": 1
   },
   "src/stop.ts": {
     "schemaClassMissingBrand": 6
@@ -139,33 +120,27 @@
     "schemaClassMissingBrand": 1
   },
   "src/up.ts": {
-    "nodeBuiltinImport": 2,
-    "yieldInCallArgument": 1
+    "nodeBuiltinImport": 2
   },
   "src/upgrade/control.ts": {
     "deterministicKeys": 1,
-    "schemaClassMissingBrand": 2,
-    "yieldInCallArgument": 3
+    "schemaClassMissingBrand": 2
   },
   "src/upgrade/platform.ts": {
     "globalJsonInEffect": 1,
-    "nodeBuiltinImport": 1,
-    "yieldInCallArgument": 2
+    "nodeBuiltinImport": 1
   },
   "src/upgrade/upgrade.ts": {
     "nodeBuiltinImport": 1,
-    "schemaClassMissingBrand": 4,
-    "yieldInCallArgument": 4
+    "schemaClassMissingBrand": 4
   },
   "src/webhooks.ts": {
     "nodeBuiltinImport": 1,
-    "schemaClassMissingBrand": 2,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 2
   },
   "test/auth/access.test.ts": {
     "asyncFunction": 1,
-    "schemaSync": 1,
-    "yieldInCallArgument": 7
+    "schemaSync": 1
   },
   "test/auth/github.test.ts": {
     "asyncFunction": 1,
@@ -176,28 +151,22 @@
     "asyncFunction": 9,
     "globalJson": 1,
     "schemaSync": 2,
-    "schemaSyncInEffect": 2,
-    "yieldInCallArgument": 14
+    "schemaSyncInEffect": 2
   },
   "test/auth/local.test.ts": {
-    "asyncFunction": 1,
-    "yieldInCallArgument": 2
+    "asyncFunction": 1
   },
   "test/auth/migration.test.ts": {
-    "asyncFunction": 1,
-    "yieldInCallArgument": 2
+    "asyncFunction": 1
   },
   "test/auth/permissions.test.ts": {
-    "asyncFunction": 1,
-    "yieldInCallArgument": 1
+    "asyncFunction": 1
   },
   "test/auth/scopes.test.ts": {
-    "asyncFunction": 5,
-    "yieldInCallArgument": 2
+    "asyncFunction": 5
   },
   "test/auth/store.test.ts": {
-    "asyncFunction": 6,
-    "yieldInCallArgument": 16
+    "asyncFunction": 6
   },
   "test/backup.test.ts": {
     "asyncFunction": 4,
@@ -215,14 +184,12 @@
   },
   "test/configuration-http/access.test.ts": {
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 4
+    "schemaSyncInEffect": 1
   },
   "test/configuration-http/configuration.test.ts": {
     "globalJsonInEffect": 2,
     "schemaSync": 5,
-    "schemaSyncInEffect": 4,
-    "yieldInCallArgument": 49
+    "schemaSyncInEffect": 4
   },
   "test/configuration-http/support.ts": {
     "asyncFunction": 1,
@@ -254,8 +221,7 @@
     "globalJsonInEffect": 4,
     "newPromise": 1,
     "nodeBuiltinImport": 2,
-    "schemaSync": 11,
-    "yieldInCallArgument": 17
+    "schemaSync": 11
   },
   "test/instance/environment.test.ts": {
     "asyncFunction": 3,
@@ -270,8 +236,7 @@
     "globalJsonInEffect": 1,
     "nodeBuiltinImport": 2,
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 4
+    "schemaSyncInEffect": 1
   },
   "test/instance/manifest.test.ts": {
     "asyncFunction": 4,
@@ -323,23 +288,18 @@
     "nodeBuiltinImport": 2,
     "processEnvInEffect": 2
   },
-  "test/setup/configuration.test.ts": {
-    "yieldInCallArgument": 2
-  },
   "test/setup/setup.test.ts": {
     "globalDate": 2,
     "globalJsonInEffect": 5,
     "nodeBuiltinImport": 1,
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 16
+    "schemaSyncInEffect": 1
   },
   "test/shutdown.test.ts": {
     "nodeBuiltinImport": 1
   },
   "test/startup.test.ts": {
-    "asyncFunction": 1,
-    "yieldInCallArgument": 3
+    "asyncFunction": 1
   },
   "test/status.test.ts": {
     "asyncFunction": 6,
@@ -362,8 +322,7 @@
   "test/upgrade/control.test.ts": {
     "asyncFunction": 12,
     "schemaSync": 1,
-    "schemaSyncInEffect": 1,
-    "yieldInCallArgument": 23
+    "schemaSyncInEffect": 1
   },
   "test/upgrade/helper.test.ts": {
     "asyncFunction": 2,
@@ -378,8 +337,7 @@
   },
   "test/upgrade/platform.test.ts": {
     "asyncFunction": 2,
-    "nodeBuiltinImport": 2,
-    "yieldInCallArgument": 6
+    "nodeBuiltinImport": 2
   },
   "test/upgrade/upgrade.test.ts": {
     "asyncFunction": 6,
@@ -392,13 +350,11 @@
   "test/webhooks.test.ts": {
     "globalJsonInEffect": 2,
     "nodeBuiltinImport": 1,
-    "schemaSync": 1,
-    "yieldInCallArgument": 4
+    "schemaSync": 1
   },
   "test/worker-preflight.test.ts": {
     "asyncFunction": 1,
     "schemaSync": 6,
-    "schemaSyncInEffect": 5,
-    "yieldInCallArgument": 6
+    "schemaSyncInEffect": 5
   }
 }

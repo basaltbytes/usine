@@ -496,7 +496,8 @@ describe("SSH Worker", () => {
         const { parent, signalsOf } = yield* workingAttempts([request.attemptId]);
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
-          assert.isTrue(yield* executor.isLive(request.attemptId));
+          const live = yield* executor.isLive(request.attemptId);
+          assert.isTrue(live);
           const before = machine.state.calls.length;
           const prepared = yield* executor.prepare(
             CheckoutRequest.make({ ...request, reattach: true }),
@@ -563,7 +564,8 @@ describe("SSH Worker", () => {
             .launch(sink)
             .pipe(Effect.forkChild);
           yield* Deferred.await(working);
-          const launchedAt = DateTime.formatIso(yield* DateTime.now);
+          const currentNow = yield* DateTime.now;
+          const launchedAt = DateTime.formatIso(currentNow);
 
           machine.state.stalled = true;
           yield* TestClock.adjust("1 minute");
@@ -717,7 +719,8 @@ describe("SSH Worker", () => {
           });
 
           const first = yield* launch(request);
-          const launchedAt = DateTime.formatIso(yield* DateTime.now);
+          const currentNow = yield* DateTime.now;
+          const launchedAt = DateTime.formatIso(currentNow);
           yield* silentProbe;
           assert.deepStrictEqual(tags(noticesOf(request.attemptId)), ["WorkerUnresponsive"]);
 

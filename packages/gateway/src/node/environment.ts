@@ -264,7 +264,8 @@ export const readStartupSettings = Effect.fn("GatewayNode.readStartupSettings")(
 export const settingsFromEnvironment = Layer.effect(
   GatewaySettings,
   Effect.gen(function* () {
-    const source = yield* readSettingsSource(yield* ConfigProvider.ConfigProvider);
+    const configProvider = yield* ConfigProvider.ConfigProvider;
+    const source = yield* readSettingsSource(configProvider);
     const { settings } = yield* readStartupSettings(source);
     return settings;
   }),

@@ -106,7 +106,8 @@ const controlledChild = <A, E, R>(
       const session = AgentSessionId.make(`parent:${brain.harness}-live:child:1`);
       const childPid = childPidFile(cwd, session);
       yield* Effect.addFinalizer(() => fs.remove(childPid, { force: true }).pipe(Effect.ignore));
-      const launch = yield* Scope.fork(yield* Effect.scope);
+      const currentScope = yield* Effect.scope;
+      const launch = yield* Scope.fork(currentScope);
       const running = yield* backend
         .launch(
           ChildRequest.make({
@@ -152,16 +153,20 @@ const controlledChild = <A, E, R>(
           ),
         ),
       ).pipe(Effect.timeout("90 seconds"));
-      const pid = Number(yield* fs.readFileString(pidFile));
+      const contents = yield* fs.readFileString(pidFile);
+      const pid = Number(contents);
       assert(Number.isSafeInteger(pid) && pid > 0);
-      assert(yield* isRunning(pid), "the command must still be running before steer or interrupt");
+      const currentRunning = yield* isRunning(pid);
+      assert(currentRunning, "the command must still be running before steer or interrupt");
+      const currentContents = yield* fs.readFileString(path.join(cwd, "command.marker"));
       assert.strictEqual(
-        yield* fs.readFileString(path.join(cwd, "command.marker")),
+        currentContents,
         MARKER,
         "the child's commands must see the environment it was given",
       );
       if (child.host._tag === "RemoteShell") {
-        const recorded = Number(yield* fs.readFileString(childPid));
+        const nextContents = yield* fs.readFileString(childPid);
+        const recorded = Number(nextContents);
         assert(
           Number.isSafeInteger(recorded) && (yield* isRunning(recorded)),
           "a running remote child must record its live pid beside the worktree",

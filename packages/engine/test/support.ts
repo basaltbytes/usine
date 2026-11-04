@@ -192,12 +192,11 @@ export const withInstance = <A, E, R>(
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fileSystem.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-engine-",
-      }),
-    );
+    const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+      prefix: "usine-engine-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     return yield* use(directory);
   }).pipe(Effect.provide(NodeServices.layer));
 
@@ -210,5 +209,6 @@ export const committedBeforeCrash = <A, E>(
   write: (store: RunStore["Service"]) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
-    return yield* write(yield* RunStore);
+    const store = yield* RunStore;
+    return yield* write(store);
   }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))));

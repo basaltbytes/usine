@@ -26,12 +26,11 @@ import { alice, bob } from "./fixture.ts";
 const sqlLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-members-",
-      }),
-    );
+    const currentDirectory = yield* fs.makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+      prefix: "usine-members-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     return sqliteAuthLayer.pipe(Layer.provide(localSqliteLayer(directory)));
   }),
 ).pipe(Layer.provide(NodeServices.layer));
@@ -56,7 +55,8 @@ for (const [name, layer] of [
           assert.isDefined(first);
           if (first === undefined) return;
           assert.equal((yield* store.remove(first.id).pipe(Effect.flip)).status, 409);
-          assert.lengthOf(yield* store.members, 1);
+          const currentMembers = yield* store.members;
+          assert.lengthOf(currentMembers, 1);
         }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
       ));
     it("changes only owned token scopes and preserves them when recording use", async () =>
@@ -109,13 +109,16 @@ for (const [name, layer] of [
             expiresAt: 100,
           });
           yield* store.issue(token);
-          assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("wrong"), 5)));
+          const authenticatedToken = yield* store.authenticate(secretHash("wrong"), 5);
+          assert.isTrue(Option.isNone(authenticatedToken));
           const found = yield* store.authenticate(token.hash, 5);
           assert.isTrue(Option.isSome(found));
           assert.equal((yield* store.tokens(alice.id))[0]?.lastUsedAt, 1);
-          assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 100)));
+          const currentAuthenticatedToken = yield* store.authenticate(token.hash, 100);
+          assert.isTrue(Option.isNone(currentAuthenticatedToken));
           yield* store.revoke(bob.id, token.id);
-          assert.isTrue(Option.isSome(yield* store.authenticate(token.hash, 6)));
+          const nextAuthenticatedToken = yield* store.authenticate(token.hash, 6);
+          assert.isTrue(Option.isSome(nextAuthenticatedToken));
           const renamed = yield* store.rename(
             GitHubIdentity.make({ id: alice.id, login: OperatorLogin.make("alice-renamed") }),
           );
@@ -123,10 +126,8 @@ for (const [name, layer] of [
             renamed,
             Member.make({ ...alice, login: OperatorLogin.make("alice-renamed") }),
           );
-          assert.equal(
-            Option.getOrNull(yield* store.authenticate(token.hash, 6))?.member.login,
-            renamed.login,
-          );
+          const updatedAuthenticatedToken = yield* store.authenticate(token.hash, 6);
+          assert.equal(Option.getOrNull(updatedAuthenticatedToken)?.member.login, renamed.login);
           assert.equal(
             (yield* store
               .rename(GitHubIdentity.make({ id: alice.id, login: bob.login }))
@@ -141,8 +142,10 @@ for (const [name, layer] of [
               .pipe(Effect.flip)).status,
             403,
           );
-          assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 7)));
-          assert.deepEqual(yield* store.tokens(alice.id), []);
+          const latestAuthenticatedToken = yield* store.authenticate(token.hash, 7);
+          assert.isTrue(Option.isNone(latestAuthenticatedToken));
+          const currentTokens = yield* store.tokens(alice.id);
+          assert.deepEqual(currentTokens, []);
         }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
       ));
     it("rejects duplicate logins regardless of case and revokes a member's own token", async () =>
@@ -163,7 +166,8 @@ for (const [name, layer] of [
           });
           yield* store.issue(token);
           yield* store.revoke(alice.id, token.id);
-          assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 2)));
+          const authenticatedToken = yield* store.authenticate(token.hash, 2);
+          assert.isTrue(Option.isNone(authenticatedToken));
         }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
       ));
   });
@@ -207,28 +211,27 @@ for (const [name, layer] of [
           }),
         );
         for (const now of [1, 59_999]) {
-          assert.equal(
-            Option.getOrNull(yield* store.authenticate(token.hash, now))?.token.lastUsedAt,
-            0,
-          );
+          const authenticatedToken = yield* store.authenticate(token.hash, now);
+          assert.equal(Option.getOrNull(authenticatedToken)?.token.lastUsedAt, 0);
         }
         yield* Effect.all(
           Array.from({ length: 5 }, () => store.authenticate(token.hash, 60_000)),
           { concurrency: "unbounded" },
         );
-        assert.equal(
-          Option.getOrNull(yield* store.authenticate(token.hash, 60_001))?.token.lastUsedAt,
-          60_000,
-        );
+        const currentAuthenticatedToken = yield* store.authenticate(token.hash, 60_001);
+        assert.equal(Option.getOrNull(currentAuthenticatedToken)?.token.lastUsedAt, 60_000);
         yield* TestClock.adjust("60 seconds");
         assert.deepEqual(
           (yield* store.tokens(alice.id)).map(({ id, lastUsedAt }) => ({ id, lastUsedAt })),
           [{ id: token.id, lastUsedAt: 60_000 }],
         );
         // Moving time back distinguishes deletion from filtering an expired row.
-        assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("expired"), 1)));
-        assert.isTrue(Option.isNone(yield* store.authenticate(secretHash("other-member"), 1)));
-        assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 120_000)));
+        const nextAuthenticatedToken = yield* store.authenticate(secretHash("expired"), 1);
+        assert.isTrue(Option.isNone(nextAuthenticatedToken));
+        const updatedAuthenticatedToken = yield* store.authenticate(secretHash("other-member"), 1);
+        assert.isTrue(Option.isNone(updatedAuthenticatedToken));
+        const latestAuthenticatedToken = yield* store.authenticate(token.hash, 120_000);
+        assert.isTrue(Option.isNone(latestAuthenticatedToken));
       }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
     ));
 
@@ -236,12 +239,11 @@ it("authenticates recently used SQLite tokens while another connection has the w
   Effect.runPromise(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-auth-lock-",
-        }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-auth-lock-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       yield* Effect.gen(function* () {
         const store = yield* AuthStore;
         yield* store.add(alice, true);
@@ -261,7 +263,8 @@ it("authenticates recently used SQLite tokens while another connection has the w
           (database) => Effect.sync(() => database.close()),
         );
         writer.exec("BEGIN IMMEDIATE");
-        assert.isTrue(Option.isSome(yield* store.authenticate(token.hash, 1)));
+        const authenticatedToken = yield* store.authenticate(token.hash, 1);
+        assert.isTrue(Option.isSome(authenticatedToken));
         writer.exec("ROLLBACK");
         writer.exec(
           "CREATE TABLE auth_updates (token_id TEXT); CREATE TRIGGER count_auth_updates AFTER UPDATE ON usine_instance_tokens BEGIN INSERT INTO auth_updates VALUES (new.id); END",

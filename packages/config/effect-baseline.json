@@ -23,8 +23,7 @@
     "schemaClassMissingBrand": 9
   },
   "src/configuration/sqlite/store.ts": {
-    "preferBarrelImport": 1,
-    "yieldInCallArgument": 1
+    "preferBarrelImport": 1
   },
   "src/configuration/store.ts": {
     "deterministicKeys": 1
@@ -72,28 +71,18 @@
     "schemaClassMissingBrand": 3
   },
   "src/yaml/writer.ts": {
-    "schemaClassMissingBrand": 1,
-    "yieldInCallArgument": 1
+    "schemaClassMissingBrand": 1
   },
   "test/config.test.ts": {
     "globalJsonInEffect": 1,
     "schemaSync": 3,
-    "schemaSyncInEffect": 3,
-    "yieldInCallArgument": 3
-  },
-  "test/configuration-forms.test.ts": {
-    "yieldInCallArgument": 2
+    "schemaSyncInEffect": 3
   },
   "test/configuration.test.ts": {
-    "schemaSync": 5,
-    "yieldInCallArgument": 23
-  },
-  "test/label-events.test.ts": {
-    "yieldInCallArgument": 2
+    "schemaSync": 5
   },
   "test/projects.test.ts": {
     "schemaSync": 3,
-    "schemaSyncInEffect": 3,
-    "yieldInCallArgument": 2
+    "schemaSyncInEffect": 3
   }
 }

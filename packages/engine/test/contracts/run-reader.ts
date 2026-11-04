@@ -68,9 +68,11 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
           const old = yield* claim("opened-first");
           const oldAttempt = yield* begin(old);
           const middle = yield* claim("opened-second");
-          yield* finish(yield* begin(middle));
+          const middleAttempt = yield* begin(middle);
+          yield* finish(middleAttempt);
           const newest = yield* claim("opened-third");
-          yield* finish(yield* begin(newest));
+          const newestAttempt = yield* begin(newest);
+          yield* finish(newestAttempt);
           yield* finish(oldAttempt);
 
           assert.deepStrictEqual(
@@ -95,7 +97,9 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
 
           // A Run canceled before any Attempt closes at the cancel time, not at its open time.
           const waited = yield* claim("waited-for-approval");
-          yield* finish(yield* begin(yield* claim("finished-meanwhile")));
+          const meanwhileRunId = yield* claim("finished-meanwhile");
+          const meanwhileAttempt = yield* begin(meanwhileRunId);
+          yield* finish(meanwhileAttempt);
           yield* store
             .cancel(waited)
             .pipe(Effect.provideService(ActingMember, Option.some(OperatorLogin.make("alice"))));
@@ -120,7 +124,9 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
 
           const otherRepository = RepositoryName.make("acme/hidden");
           for (const name of ["hidden-first", "hidden-second", "hidden-third"]) {
-            yield* finish(yield* begin(yield* claim(name, otherRepository)));
+            const hiddenRunId = yield* claim(name, otherRepository);
+            const hiddenAttempt = yield* begin(hiddenRunId);
+            yield* finish(hiddenAttempt);
           }
           const visible = yield* reader.closed({
             limit: 2,
@@ -130,7 +136,8 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
             visible.map(({ run }) => run.id),
             [waited, RunId.make("finished-meanwhile")],
           );
-          assert.deepStrictEqual(yield* reader.closed({ limit: 2, repositories: [] }), []);
+          const runsWithoutRepositories = yield* reader.closed({ limit: 2, repositories: [] });
+          assert.deepStrictEqual(runsWithoutRepositories, []);
           assert.deepStrictEqual(
             (yield* reader.closed({ limit: 2 })).map(({ run }) => run.id),
             [RunId.make("hidden-third"), RunId.make("hidden-second")],
@@ -211,10 +218,8 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
               [[ids[0], latest]],
             );
             assert.strictEqual((yield* reader.events([...ids, latest])).length, 5);
-            assert.deepStrictEqual(
-              yield* reader.runForEvent(DedupKey.make(latest)),
-              Option.some(latest),
-            );
+            const runId = yield* reader.runForEvent(DedupKey.make(latest));
+            assert.deepStrictEqual(runId, Option.some(latest));
             const evidence = yield* reader.evidence(latest);
             assert.strictEqual(evidence.snapshot.run.state._tag, "Running");
             assert.deepStrictEqual(evidence.transcript, []);

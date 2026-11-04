@@ -52,12 +52,11 @@ export const sqliteAdapter: PersistenceAdapter = {
   name: "sqlite",
   fixture: Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-contract-",
-      }),
-    );
+    const currentDirectory = yield* fs.makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+      prefix: "usine-contract-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     return {
       open: Layer.fresh(
         Layer.mergeAll(

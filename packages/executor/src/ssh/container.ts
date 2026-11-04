@@ -160,7 +160,8 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     yield* Effect.annotateCurrentSpan({ worker: machine.address.name, slots });
     const configured = configuredLimits(machine.address.container);
     if (Option.isSome(configured)) return configured.value;
-    return resolveLimits(machine.address.container, yield* readResources(machine), slots);
+    const resources = yield* readResources(machine);
+    return resolveLimits(machine.address.container, resources, slots);
   });
 
   const record = (machine: SshMachine, isolation: AttemptIsolation) =>

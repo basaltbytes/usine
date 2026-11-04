@@ -77,12 +77,11 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         );
       }
       case "ConfigLogCommand": {
-        const revisions = yield* store.list(
-          yield* Option.match(command.entity, {
-            onNone: () => Effect.succeedNone,
-            onSome: (key) => resolveKey(key).pipe(Effect.asSome),
-          }),
-        );
+        const entityFilter = yield* Option.match(command.entity, {
+          onNone: () => Effect.succeedNone,
+          onSome: (key) => resolveKey(key).pipe(Effect.asSome),
+        });
+        const revisions = yield* store.list(entityFilter);
         return yield* Effect.forEach(
           revisions,
           (revision) =>
@@ -114,7 +113,8 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         const temporary = yield* fs.makeTempDirectoryScoped({ prefix: "usine-config-edit-" });
         const extension = entity.key.kind === "agent" || entity.key.kind === "loop" ? "md" : "yaml";
         const file = `${temporary}/entity.${extension}`;
-        yield* fs.writeFileString(file, yield* formatConfigurationEntity(entity));
+        const formattedEntity = yield* formatConfigurationEntity(entity);
+        yield* fs.writeFileString(file, formattedEntity);
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const exit = yield* spawner.exitCode(
           ChildProcess.make("sh", ["-c", `${editor.value} "$1"`, "usine-config-edit", file], {
@@ -130,11 +130,9 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         const latest = yield* store.read;
         if (latest.number !== number)
           return yield* StaleRevision.make({ expected: number, actual: latest.number });
-        const edited = yield* parseConfigurationEntity(
-          yield* ConfigParser,
-          entity.key,
-          yield* fs.readFileString(file),
-        );
+        const parser = yield* ConfigParser;
+        const contents = yield* fs.readFileString(file);
+        const edited = yield* parseConfigurationEntity(parser, entity.key, contents);
         return yield* save(number, configurationDiff([entity], [edited]), Option.none());
       }
     }

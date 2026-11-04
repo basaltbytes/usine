@@ -358,12 +358,13 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       commitAuthor: Effect.Effect<BotAccount, A>,
     ) {
       yield* Effect.annotateCurrentSpan({ attemptId: attempt.attemptId, worker: attempt.worker });
+      const workerIsolation = yield* worker.isolation(machine);
       const isolation = yield* isolationOfCheckout(
         "cleanup",
         machine,
         attempt.attemptId,
         worktree,
-        yield* worker.isolation(machine),
+        workerIsolation,
       );
       const reconcile = (
         git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
@@ -416,9 +417,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             "cleanup",
           );
           yield* stopChildren("cleanup", machine, worktree, attempt.attemptId, isolation);
+          const checkoutScope = yield* Effect.scope;
           const checkout = yield* checkoutHostFor(
             "cleanup",
-            yield* Effect.scope,
+            checkoutScope,
             machine,
             attempt,
             worktree,
@@ -445,25 +447,29 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               machine,
               "cleanup",
             );
+            const checkoutScope = yield* Effect.scope;
+            const workerIsolation = yield* worker.isolation(machine);
+            const checkoutIsolation = yield* isolationOfCheckout(
+              "cleanup",
+              machine,
+              attempt.attemptId,
+              worktree,
+              workerIsolation,
+            );
             const checkout = yield* checkoutHostFor(
               "cleanup",
-              yield* Effect.scope,
+              checkoutScope,
               machine,
               attempt,
               worktree,
               access,
-              yield* isolationOfCheckout(
-                "cleanup",
-                machine,
-                attempt.attemptId,
-                worktree,
-                yield* worker.isolation(machine),
-              ),
+              checkoutIsolation,
               [],
             );
+            const checkoutShell = yield* checkout.shell;
             return yield* harvestPostedComments(
               spec,
-              harvestCommand("cleanup", worktree, access, yield* checkout.shell),
+              harvestCommand("cleanup", worktree, access, checkoutShell),
               windows,
             );
           }),
@@ -800,7 +806,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
       // A reattachment reuses its checkout before any credential is granted.
       const reattached = request.reattach
-        ? Option.some(yield* takeOver(request, machine, worktree, isolation))
+        ? yield* takeOver(request, machine, worktree, isolation).pipe(Effect.asSome)
         : Option.none();
       const harness = Option.match(reattached, {
         onNone: () => request.agent.brain.harness,
@@ -926,7 +932,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         ),
       );
       yield* checkoutHeld(request.attemptId, true);
-      if (isolation._tag === "Container") yield* probeBrain(yield* checkoutHost.shell);
+      if (isolation._tag === "Container") {
+        const checkoutShell = yield* checkoutHost.shell;
+        yield* probeBrain(checkoutShell);
+      }
 
       const prepared = provisioned.workspace;
       yield* Effect.logInfo(`${label} Attempt workspace ready`, {

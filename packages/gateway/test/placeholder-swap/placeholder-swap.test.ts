@@ -160,12 +160,13 @@ const swap = (providers: LlmProviders) =>
       baseUrl: `http://${admin.host}:${admin.port}`,
       transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
     });
+    const currentNow = yield* DateTime.now;
     const attached = yield* client.attachments.attach({
       payload: AttachRequest.make({
         worker: WORKER,
         repository: REPOSITORY,
         credential: AnonymousCredential.make(),
-        expiresAt: DateTime.add(yield* DateTime.now, { minutes: 10 }),
+        expiresAt: DateTime.add(currentNow, { minutes: 10 }),
       }),
     });
     const home = yield* Effect.acquireRelease(

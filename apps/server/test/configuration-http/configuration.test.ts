@@ -31,9 +31,11 @@ it("attributes a revision to the authenticated member instead of the configured 
       const { request } = yield* harness(
         Layer.succeed(ActingMember, Option.some(OperatorLogin.make("alice"))),
       );
-      expect(
-        yield* request("PUT", "/entities/label/ready", { expected: 1, value: { name: "ready" } }),
-      ).toMatchObject({ status: 200, body: { actor: "alice" } });
+      const response = yield* request("PUT", "/entities/label/ready", {
+        expected: 1,
+        value: { name: "ready" },
+      });
+      expect(response).toMatchObject({ status: 200, body: { actor: "alice" } });
     }).pipe(Effect.scoped),
   ));
 
@@ -41,27 +43,27 @@ it("creates, reads, replaces and deletes entities with paginated and filtered re
   Effect.runPromise(
     Effect.gen(function* () {
       const { request } = yield* harness();
-      expect(yield* request("GET", "/entities/agent/developer")).toMatchObject({
+      const response = yield* request("GET", "/entities/agent/developer");
+      expect(response).toMatchObject({
         status: 200,
         body: { number: 1, value: { name: "developer", harness: "codex" }, text: agentText },
       });
-      expect(
-        yield* request("PUT", "/entities/label/ready", {
-          expected: 1,
-          message: "Add ready",
-          value: { name: "ready" },
-        }),
-      ).toMatchObject({
+      const currentResponse = yield* request("PUT", "/entities/label/ready", {
+        expected: 1,
+        message: "Add ready",
+        value: { name: "ready" },
+      });
+      expect(currentResponse).toMatchObject({
         status: 200,
         body: { number: 2, actor: "operator", message: "Add ready" },
       });
-      expect(
-        yield* request("PUT", "/entities/label/ready", {
-          expected: 2,
-          text: "name: ready\ncolor: ff0000\n",
-        }),
-      ).toMatchObject({ status: 200, body: { number: 3 } });
-      expect(yield* request("GET", "/entities/label/ready")).toMatchObject({
+      const nextResponse = yield* request("PUT", "/entities/label/ready", {
+        expected: 2,
+        text: "name: ready\ncolor: ff0000\n",
+      });
+      expect(nextResponse).toMatchObject({ status: 200, body: { number: 3 } });
+      const updatedResponse = yield* request("GET", "/entities/label/ready");
+      expect(updatedResponse).toMatchObject({
         status: 200,
         body: {
           number: 3,
@@ -69,7 +71,8 @@ it("creates, reads, replaces and deletes entities with paginated and filtered re
           text: "name: ready\ncolor: ff0000\n",
         },
       });
-      expect(yield* request("GET", "/revisions/3")).toMatchObject({
+      const latestResponse = yield* request("GET", "/revisions/3");
+      expect(latestResponse).toMatchObject({
         status: 200,
         body: {
           number: 3,
@@ -82,27 +85,33 @@ it("creates, reads, replaces and deletes entities with paginated and filtered re
           ],
         },
       });
-      expect(yield* request("GET", "/revisions?limit=2")).toMatchObject({
+      const secondResponse = yield* request("GET", "/revisions?limit=2");
+      expect(secondResponse).toMatchObject({
         status: 200,
         body: { revisions: [{ number: 3 }, { number: 2 }], nextBefore: 2 },
       });
-      expect(yield* request("GET", "/revisions?before=2&limit=2")).toMatchObject({
+      const thirdResponse = yield* request("GET", "/revisions?before=2&limit=2");
+      expect(thirdResponse).toMatchObject({
         status: 200,
         body: { revisions: [{ number: 1 }], nextBefore: null },
       });
-      expect(yield* request("GET", "/revisions?kind=agent")).toMatchObject({
+      const fourthResponse = yield* request("GET", "/revisions?kind=agent");
+      expect(fourthResponse).toMatchObject({
         status: 200,
         body: { revisions: [{ number: 1 }] },
       });
-      expect(yield* request("GET", "/revisions?identifier=ready")).toMatchObject({
+      const fifthResponse = yield* request("GET", "/revisions?identifier=ready");
+      expect(fifthResponse).toMatchObject({
         status: 200,
         body: { revisions: [{ number: 3 }, { number: 2 }] },
       });
-      expect(yield* request("GET", "/revisions?kind=label&identifier=missing")).toMatchObject({
+      const sixthResponse = yield* request("GET", "/revisions?kind=label&identifier=missing");
+      expect(sixthResponse).toMatchObject({
         status: 200,
         body: { revisions: [] },
       });
-      expect(yield* request("DELETE", "/entities/label/ready", { expected: 3 })).toMatchObject({
+      const seventhResponse = yield* request("DELETE", "/entities/label/ready", { expected: 3 });
+      expect(seventhResponse).toMatchObject({
         status: 200,
         body: { number: 4 },
       });
@@ -121,15 +130,19 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
   Effect.runPromise(
     Effect.gen(function* () {
       const { request, store } = yield* harness();
-      expect(
-        yield* request("PUT", "/entities/label/ready", { expected: 0, value: { name: "ready" } }),
-      ).toMatchObject({ status: 409, body: { error: "StaleRevision", expected: 0, current: 1 } });
-      expect(
-        yield* request("PUT", "/entities/label/ready", {
-          expected: 1,
-          value: { name: "ready", color: "wrong", description: 42 },
-        }),
-      ).toMatchObject({
+      const response = yield* request("PUT", "/entities/label/ready", {
+        expected: 0,
+        value: { name: "ready" },
+      });
+      expect(response).toMatchObject({
+        status: 409,
+        body: { error: "StaleRevision", expected: 0, current: 1 },
+      });
+      const currentResponse = yield* request("PUT", "/entities/label/ready", {
+        expected: 1,
+        value: { name: "ready", color: "wrong", description: 42 },
+      });
+      expect(currentResponse).toMatchObject({
         status: 422,
         body: {
           problems: [
@@ -138,12 +151,11 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
           ],
         },
       });
-      expect(
-        yield* request("PUT", "/entities/settings/instance", {
-          expected: 1,
-          text: "version: 2\noperator: operator\ntracing: { otlp_url: http://localhost:4318/v1/traces }\n",
-        }),
-      ).toMatchObject({
+      const nextResponse = yield* request("PUT", "/entities/settings/instance", {
+        expected: 1,
+        text: "version: 2\noperator: operator\ntracing: { otlp_url: http://localhost:4318/v1/traces }\n",
+      });
+      expect(nextResponse).toMatchObject({
         status: 409,
         body: { error: "RestartRequiredError", fields: ["tracing"] },
       });
@@ -169,7 +181,10 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
           text: "name: ready",
         })).status,
       ).toBe(400);
-      expect(yield* request("DELETE", "/entities/agent/developer", { expected: 1 })).toMatchObject({
+      const updatedResponse = yield* request("DELETE", "/entities/agent/developer", {
+        expected: 1,
+      });
+      expect(updatedResponse).toMatchObject({
         status: 422,
         body: {
           problems: [
@@ -177,12 +192,11 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
           ],
         },
       });
-      expect(
-        yield* request("PUT", "/entities/loop/acme-project%2Fbad", {
-          expected: 1,
-          text: loopText.replace("'true'", "'missing.field'"),
-        }),
-      ).toMatchObject({
+      const latestResponse = yield* request("PUT", "/entities/loop/acme-project%2Fbad", {
+        expected: 1,
+        text: loopText.replace("'true'", "'missing.field'"),
+      });
+      expect(latestResponse).toMatchObject({
         status: 422,
         body: {
           problems: [
@@ -201,19 +215,19 @@ it.each(["type:bug", "type:", "notes.md", "type/bug:"])(
       Effect.gen(function* () {
         const { request, store } = yield* harness();
         const path = `/entities/label/${encodeURIComponent(identifier)}`;
-        expect(yield* request("PUT", path, { expected: 1, text: "name: [" })).toMatchObject({
+        const response = yield* request("PUT", path, { expected: 1, text: "name: [" });
+        expect(response).toMatchObject({
           status: 422,
           body: {
             error: "ConfigurationInvalid",
             problems: [{ entity: { kind: "label", identifier }, path: [] }],
           },
         });
-        expect(
-          yield* request("PUT", path, {
-            expected: 1,
-            value: { name: identifier, color: "wrong" },
-          }),
-        ).toMatchObject({
+        const currentResponse = yield* request("PUT", path, {
+          expected: 1,
+          value: { name: identifier, color: "wrong" },
+        });
+        expect(currentResponse).toMatchObject({
           status: 422,
           body: {
             error: "ConfigurationInvalid",
@@ -242,17 +256,24 @@ it("reverts changes as a new revision and identifies entities changed by later r
           value: { name: "ready", color: "ff0000" },
         })).status,
       ).toBe(200);
-      expect(yield* request("POST", "/revisions/2/revert", { expected: 3 })).toMatchObject({
+      const response = yield* request("POST", "/revisions/2/revert", { expected: 3 });
+      expect(response).toMatchObject({
         status: 409,
         body: {
           error: "ConfigurationRevertBlocked",
           entities: [{ kind: "label", identifier: "ready" }],
         },
       });
-      expect(
-        yield* request("POST", "/revisions/3/revert", { expected: 3, message: "Restore ready" }),
-      ).toMatchObject({ status: 200, body: { number: 4, message: "Restore ready" } });
-      expect(yield* request("GET", "/entities/label/ready")).toMatchObject({
+      const currentResponse = yield* request("POST", "/revisions/3/revert", {
+        expected: 3,
+        message: "Restore ready",
+      });
+      expect(currentResponse).toMatchObject({
+        status: 200,
+        body: { number: 4, message: "Restore ready" },
+      });
+      const nextResponse = yield* request("GET", "/entities/label/ready");
+      expect(nextResponse).toMatchObject({
         status: 200,
         body: { number: 4, value: { name: "ready" } },
       });
@@ -272,17 +293,18 @@ it("applies API changes to the configuration view and running scheduler, and pau
   Effect.runPromise(
     Effect.gen(function* () {
       const { request, controls, status } = yield* harness();
-      expect(yield* controls.isPaused(LoopName.make("acme-project/implement"))).toBe(false);
+      const currentPaused = yield* controls.isPaused(LoopName.make("acme-project/implement"));
+      expect(currentPaused).toBe(false);
       expect(
         (yield* request("PUT", "/entities/worker/local", {
           expected: 1,
           value: { name: "local", kind: "local", max_concurrent_attempts: 3 },
         })).status,
       ).toBe(200);
-      expect(yield* status.slots).toMatchObject([
-        { worker: WorkerName.make("local"), capacity: 3 },
-      ]);
-      expect(yield* request("GET", "")).toMatchObject({
+      const currentSlots = yield* status.slots;
+      expect(currentSlots).toMatchObject([{ worker: WorkerName.make("local"), capacity: 3 }]);
+      const response = yield* request("GET", "");
+      expect(response).toMatchObject({
         status: 200,
         body: { workers: [{ name: "local", maxConcurrentAttempts: 3, slots: { capacity: 3 } }] },
       });
@@ -295,8 +317,10 @@ it("applies API changes to the configuration view and running scheduler, and pau
           ),
         })).status,
       ).toBe(200);
-      expect(yield* controls.isPaused(LoopName.make("acme-project/review"))).toBe(true);
-      expect(yield* request("GET", "")).toMatchObject({
+      const nextPaused = yield* controls.isPaused(LoopName.make("acme-project/review"));
+      expect(nextPaused).toBe(true);
+      const currentResponse = yield* request("GET", "");
+      expect(currentResponse).toMatchObject({
         status: 200,
         body: {
           loops: expect.arrayContaining(
@@ -344,7 +368,8 @@ it("preserves encoded identifiers and accepts only one of two writes to the same
         value: { name: "owner/repo" },
       });
       expect(saved.status).toBe(200);
-      expect(yield* request("GET", "/entities/repository/owner%2Frepo")).toMatchObject({
+      const response = yield* request("GET", "/entities/repository/owner%2Frepo");
+      expect(response).toMatchObject({
         status: 200,
         body: {
           key: { kind: "repository", identifier: "owner/repo" },
@@ -412,12 +437,11 @@ it.each(["stale", "storage"] as const)(
                 ),
               ),
         );
-        expect(
-          yield* request("PUT", "/entities/worker/extra", {
-            expected: 1,
-            value: { name: "extra", kind: "local" },
-          }),
-        ).toMatchObject(
+        const response = yield* request("PUT", "/entities/worker/extra", {
+          expected: 1,
+          value: { name: "extra", kind: "local" },
+        });
+        expect(response).toMatchObject(
           failure === "stale"
             ? { status: 409, body: { error: "StaleRevision", current: 2 } }
             : { status: 500, body: { error: "ConfigurationStoreError" } },
@@ -426,7 +450,8 @@ it.each(["stale", "storage"] as const)(
         expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["local"]);
         expect((yield* current.get).config.workers.map(({ name }) => name)).toEqual(["local"]);
         expect((yield* store.read).number).toBe(expected);
-        expect(yield* request("GET", "/entities/worker/extra")).toMatchObject({ status: 404 });
+        const currentResponse = yield* request("GET", "/entities/worker/extra");
+        expect(currentResponse).toMatchObject({ status: 404 });
         expect(
           (yield* request("PUT", "/entities/worker/extra", {
             expected,
@@ -434,7 +459,8 @@ it.each(["stale", "storage"] as const)(
           })).status,
         ).toBe(200);
         expect(workers.get(WorkerName.make("extra"))?.maxConcurrentAttempts).toBe(3);
-        expect(yield* status.slots).toContainEqual(
+        const currentSlots = yield* status.slots;
+        expect(currentSlots).toContainEqual(
           expect.objectContaining({ worker: "extra", capacity: 3 }),
         );
         expect(
@@ -469,7 +495,8 @@ it.each([
         expect(
           (yield* request("DELETE", `/entities/worker/${laterRemoved}`, { expected: 4 })).status,
         ).toBe(200);
-        expect(yield* request("POST", "/revisions/4/revert", { expected: 5 })).toMatchObject({
+        const response = yield* request("POST", "/revisions/4/revert", { expected: 5 });
+        expect(response).toMatchObject({
           status: 200,
           body: { number: 6 },
         });
@@ -557,24 +584,29 @@ it("serves installation repositories, live labels and supported harnesses, and r
               ),
       });
       const { request } = yield* harness(Layer.merge(github, polling));
-      expect(yield* request("GET", "/repositories")).toEqual({ status: 200, body: ["acme/repo"] });
-      expect(yield* request("GET", "/labels/acme%2Frepo")).toEqual({
+      const response = yield* request("GET", "/repositories");
+      expect(response).toEqual({ status: 200, body: ["acme/repo"] });
+      const currentResponse = yield* request("GET", "/labels/acme%2Frepo");
+      expect(currentResponse).toEqual({
         status: 200,
         body: [{ name: "ready", color: "00ff00", description: "Ready" }],
       });
-      expect(yield* request("GET", "/capabilities")).toMatchObject({
+      const nextResponse = yield* request("GET", "/capabilities");
+      expect(nextResponse).toMatchObject({
         status: 200,
         body: {
           harnesses: expect.arrayContaining(["codex"]),
           efforts: expect.arrayContaining(["high"]),
         },
       });
-      expect(yield* request("GET", "/labels/acme%2Funavailable")).toMatchObject({
+      const updatedResponse = yield* request("GET", "/labels/acme%2Funavailable");
+      expect(updatedResponse).toMatchObject({
         status: 503,
         body: { error: "BackendUnavailableError" },
       });
       const setup = yield* harness();
-      expect(yield* setup.request("GET", "/repositories")).toMatchObject({
+      const latestResponse = yield* setup.request("GET", "/repositories");
+      expect(latestResponse).toMatchObject({
         status: 503,
         body: { error: "BackendUnavailableError" },
       });
@@ -652,7 +684,8 @@ it("checks drafts without saving and returns CEL positions, template errors, and
           ]),
         });
         expect((yield* store.read).number).toBe(1);
-        expect(yield* store.list(Option.none())).toHaveLength(1);
+        const entries = yield* store.list(Option.none());
+        expect(entries).toHaveLength(1);
       }),
     ),
   ));
@@ -730,7 +763,8 @@ it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop
           });
         }
         expect((yield* store.read).number).toBe(1);
-        expect(yield* store.list(Option.none())).toHaveLength(1);
+        const entries = yield* store.list(Option.none());
+        expect(entries).toHaveLength(1);
       }),
     ),
   ),
@@ -825,13 +859,13 @@ it("preserves lanes across repository casing, scopes project previews, and refus
     Effect.gen(function* () {
       const { request, current } = yield* harness();
       expect((yield* current.get).config.version).toBe(2);
-      expect(
-        yield* request("PUT", "/entities/loop/acme-other%2Fimplement", {
-          expected: 1,
-          text: loopText,
-        }),
-      ).toMatchObject({ status: 200 });
-      expect(yield* request("GET", "")).toMatchObject({
+      const response = yield* request("PUT", "/entities/loop/acme-other%2Fimplement", {
+        expected: 1,
+        text: loopText,
+      });
+      expect(response).toMatchObject({ status: 200 });
+      const currentResponse = yield* request("GET", "");
+      expect(currentResponse).toMatchObject({
         status: 200,
         body: {
           projects: [
@@ -840,7 +874,8 @@ it("preserves lanes across repository casing, scopes project previews, and refus
           ],
         },
       });
-      expect(yield* request("GET", "/entities/loop/implement")).toMatchObject({ status: 404 });
+      const nextResponse = yield* request("GET", "/entities/loop/implement");
+      expect(nextResponse).toMatchObject({ status: 404 });
       const loop = (yield* current.get).loops[0];
       if (loop === undefined) return yield* Effect.die("fixture loop missing");
       const entity = yield* request("GET", "/entities/loop/acme-project%2Fimplement");
@@ -848,23 +883,24 @@ it("preserves lanes across repository casing, scopes project previews, and refus
         status: 200,
         body: { key: { identifier: "acme-project/implement" } },
       });
-      expect(
-        yield* request("PUT", "/entities/project/acme-project", {
-          expected: 2,
-          value: {
-            id: "acme-project",
-            name: "Renamed",
-            repositories: ["Acme/Project"],
-            lanes: [{ name: "Ready", sources: [{ label: "ready" }] }],
-          },
-        }),
-      ).toMatchObject({ status: 200, body: { number: 3 } });
-      expect(
-        yield* request("POST", "/loops/preview", {
-          name: "acme-project/implement",
-          value: Schema.encodeSync(Schema.toCodecJson(LoopFile))(loop),
-        }),
-      ).toMatchObject({ status: 200, body: { repositoriesWithoutItems: ["acme/project"] } });
+      const updatedResponse = yield* request("PUT", "/entities/project/acme-project", {
+        expected: 2,
+        value: {
+          id: "acme-project",
+          name: "Renamed",
+          repositories: ["Acme/Project"],
+          lanes: [{ name: "Ready", sources: [{ label: "ready" }] }],
+        },
+      });
+      expect(updatedResponse).toMatchObject({ status: 200, body: { number: 3 } });
+      const latestResponse = yield* request("POST", "/loops/preview", {
+        name: "acme-project/implement",
+        value: Schema.encodeSync(Schema.toCodecJson(LoopFile))(loop),
+      });
+      expect(latestResponse).toMatchObject({
+        status: 200,
+        body: { repositoriesWithoutItems: ["acme/project"] },
+      });
       const repositoryResponse = yield* request("GET", "/entities/repository/acme%2Fproject");
       expect(repositoryResponse).toMatchObject({
         status: 200,
@@ -874,16 +910,16 @@ it("preserves lanes across repository casing, scopes project previews, and refus
         Schema.Struct({ number: ConfigurationRevisionNumber, value: ManagedRepo }),
       )(repositoryResponse.body);
       const value = Schema.encodeSync(ManagedRepo)(repository.value);
-      expect(
-        yield* request("PUT", "/entities/repository/acme%2Fproject", {
-          expected: repository.number,
-          value: {
-            ...value,
-            lanes: [...repository.value.lanes, { name: "Done", sources: [{ label: "done" }] }],
-          },
-        }),
-      ).toMatchObject({ status: 200, body: { number: 4 } });
-      expect(yield* request("GET", "/entities/project/acme-project")).toMatchObject({
+      const secondResponse = yield* request("PUT", "/entities/repository/acme%2Fproject", {
+        expected: repository.number,
+        value: {
+          ...value,
+          lanes: [...repository.value.lanes, { name: "Done", sources: [{ label: "done" }] }],
+        },
+      });
+      expect(secondResponse).toMatchObject({ status: 200, body: { number: 4 } });
+      const thirdResponse = yield* request("GET", "/entities/project/acme-project");
+      expect(thirdResponse).toMatchObject({
         status: 200,
         body: {
           value: {
@@ -894,17 +930,16 @@ it("preserves lanes across repository casing, scopes project previews, and refus
           },
         },
       });
-      expect(
-        yield* request("PUT", "/entities/project/acme-project", {
-          expected: 4,
-          value: {
-            id: "acme-project",
-            name: "Invalid ownership",
-            repositories: ["acme/project", "acme/other"],
-            lanes: [],
-          },
-        }),
-      ).toMatchObject({ status: 422 });
+      const fourthResponse = yield* request("PUT", "/entities/project/acme-project", {
+        expected: 4,
+        value: {
+          id: "acme-project",
+          name: "Invalid ownership",
+          repositories: ["acme/project", "acme/other"],
+          lanes: [],
+        },
+      });
+      expect(fourthResponse).toMatchObject({ status: 422 });
     }).pipe(Effect.scoped),
   ));
 
@@ -917,13 +952,13 @@ it("accepts webhook mode revisions and returns the running mode", () =>
           mode === "endpoint"
             ? { mode, public_url: "https://usine.example/webhooks/github" }
             : { mode };
-        expect(
-          yield* request("PUT", "/entities/settings/instance", {
-            expected: index + 1,
-            value: { version: 2, operator: "operator", webhooks },
-          }),
-        ).toMatchObject({ status: 200, body: { number: index + 2 } });
-        expect(yield* request("GET", "/entities/settings/instance")).toMatchObject({
+        const response = yield* request("PUT", "/entities/settings/instance", {
+          expected: index + 1,
+          value: { version: 2, operator: "operator", webhooks },
+        });
+        expect(response).toMatchObject({ status: 200, body: { number: index + 2 } });
+        const currentResponse = yield* request("GET", "/entities/settings/instance");
+        expect(currentResponse).toMatchObject({
           status: 200,
           body: { value: { webhooks } },
         });

@@ -63,7 +63,8 @@ describe("an Attempt's windows", () => {
               yield* Deferred.succeed(reviewStarted, undefined);
               yield* Deferred.await(fixHarvested);
             } else yield* Deferred.await(reviewStarted);
-            yield* harvest(execution.attempt.id, yield* io.windows);
+            const currentWindows = yield* io.windows;
+            yield* harvest(execution.attempt.id, currentWindows);
             if (execution.run.loop === "fix") yield* Deferred.succeed(fixHarvested, undefined);
             return stepResult("Harvested");
           }),
@@ -86,8 +87,9 @@ describe("an Attempt's windows", () => {
             ({ run }) => run.state._tag === "Succeeded",
           )).attempts;
           assert(reviewAttempt !== undefined && fixAttempt !== undefined);
+          const contentsState = yield* Ref.get(read);
           assert.deepStrictEqual(
-            yield* Ref.get(read),
+            contentsState,
             new Map([
               [fixAttempt.id, [reviewAttempt.id]],
               [reviewAttempt.id, [fixAttempt.id]],
@@ -153,10 +155,8 @@ describe("an Attempt's windows", () => {
           ),
         );
         const firstScope = yield* Scope.make();
-        const firstEngine = Context.get(
-          yield* Scope.provide(Layer.build(first), firstScope),
-          RunEngine,
-        );
+        const services = yield* Scope.provide(Layer.build(first), firstScope);
+        const firstEngine = Context.get(services, RunEngine);
         const review = yield* firstEngine.submit(onPullRequest(1, "review"));
         const fix = yield* firstEngine.submit(onPullRequest(2, "fix"));
         assert(review._tag === "Claimed" && fix._tag === "Claimed");
@@ -188,15 +188,14 @@ describe("an Attempt's windows", () => {
           ),
         );
         const secondScope = yield* Scope.make();
-        const secondEngine = Context.get(
-          yield* Scope.provide(Layer.build(second), secondScope),
-          RunEngine,
-        );
+        const currentServices = yield* Scope.provide(Layer.build(second), secondScope);
+        const secondEngine = Context.get(currentServices, RunEngine);
         const [reviewAttempt] = (yield* secondEngine.inspect(review.runId)).attempts;
         const [fixAttempt] = (yield* secondEngine.inspect(fix.runId)).attempts;
         assert(reviewAttempt !== undefined && fixAttempt !== undefined);
+        const contentsState = yield* Ref.get(read);
         assert.deepStrictEqual(
-          yield* Ref.get(read),
+          contentsState,
           new Map([
             [reviewAttempt.id, [fixAttempt.id]],
             [fixAttempt.id, [reviewAttempt.id]],

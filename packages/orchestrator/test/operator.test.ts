@@ -763,19 +763,24 @@ describe("Operator", () => {
                 needsYou.filter((need) => need._tag === "WebhookSilenceNeed"),
               ),
             );
-          assert.deepStrictEqual(yield* warnings, []);
+          const configWarnings = yield* warnings;
+          assert.deepStrictEqual(configWarnings, []);
           yield* TestClock.adjust("10 minutes");
           const [need] = yield* warnings;
           assert(need !== undefined);
-          assert.strictEqual(yield* Ref.get(reads), 1);
+          const readsState = yield* Ref.get(reads);
+          assert.strictEqual(readsState, 1);
           yield* operator.dismissNeed(endpointInstance, attentionKey(need));
-          assert.deepStrictEqual(yield* warnings, []);
+          const currentConfigWarnings = yield* warnings;
+          assert.deepStrictEqual(currentConfigWarnings, []);
           yield* operator.undoDismissNeed(attentionKey(need));
           assert.strictEqual((yield* warnings).length, 1);
           const readsBeforeDelivery = yield* Ref.get(reads);
           yield* health.received;
-          assert.deepStrictEqual(yield* warnings, []);
-          assert.strictEqual(yield* Ref.get(reads), readsBeforeDelivery);
+          const nextConfigWarnings = yield* warnings;
+          assert.deepStrictEqual(nextConfigWarnings, []);
+          const currentReadsState = yield* Ref.get(reads);
+          assert.strictEqual(currentReadsState, readsBeforeDelivery);
         }).pipe(
           Effect.provide(
             Layer.merge(testLayer(approved, moved, reads, revision), WebhookHealth.layer),
@@ -896,7 +901,8 @@ describe("Operator", () => {
           const needs = Effect.map(operator.overview(instance), (view) =>
             view.needsYou.filter((need) => need._tag === "PoolLimitNeed"),
           );
-          assert.deepStrictEqual(yield* needs, []);
+          const attentionNeeds = yield* needs;
+          assert.deepStrictEqual(attentionNeeds, []);
           append(80);
           const [need] = yield* needs;
           assert(need !== undefined);
@@ -904,13 +910,11 @@ describe("Operator", () => {
           assert.strictEqual(Option.getOrNull(need.login), "operator@example.com");
           assert.strictEqual(need.usedPercent, 80);
           assert.deepStrictEqual(need.resetsAt, resetsAt);
-          assert.strictEqual(
-            yield* Ref.get(reads),
-            1,
-            "rate windows refresh without a board revision",
-          );
+          const readsState = yield* Ref.get(reads);
+          assert.strictEqual(readsState, 1, "rate windows refresh without a board revision");
           yield* operator.dismissNeed(instance, attentionKey(need));
-          assert.deepStrictEqual(yield* needs, []);
+          const currentAttentionNeeds = yield* needs;
+          assert.deepStrictEqual(currentAttentionNeeds, []);
           assert(
             (yield* operator.overview(instance)).dismissedNeeds.some(
               (entry) => entry.id === need.id,
@@ -928,38 +932,51 @@ describe("Operator", () => {
             assert.strictEqual(dismissed.usedPercent, usedPercent);
           }
           yield* operator.undoDismissNeed(attentionKey(need));
-          assert.deepStrictEqual(yield* needs, [PoolLimitNeed.make({ ...need, usedPercent: 89 })]);
+          const nextAttentionNeeds = yield* needs;
+          assert.deepStrictEqual(nextAttentionNeeds, [
+            PoolLimitNeed.make({ ...need, usedPercent: 89 }),
+          ]);
           yield* operator.dismissNeed(instance, attentionKey(need));
           append(90);
           const [higherBand] = yield* needs;
           assert(higherBand !== undefined);
           assert.strictEqual(higherBand.usedPercent, 90);
           yield* operator.dismissNeed(instance, attentionKey(higherBand));
-          assert.deepStrictEqual(yield* needs, []);
+          const updatedAttentionNeeds = yield* needs;
+          assert.deepStrictEqual(updatedAttentionNeeds, []);
           const nextReset = DateTime.add(resetsAt, { hours: 1 });
           append(90, nextReset);
           const [nextWindow] = yield* needs;
           assert(nextWindow !== undefined);
           assert.deepStrictEqual(nextWindow.resetsAt, nextReset);
           yield* operator.dismissNeed(instance, attentionKey(nextWindow));
-          assert.deepStrictEqual(yield* needs, []);
+          const latestAttentionNeeds = yield* needs;
+          assert.deepStrictEqual(latestAttentionNeeds, []);
           append(20);
-          assert.deepStrictEqual(yield* needs, []);
+          const secondAttentionNeeds = yield* needs;
+          assert.deepStrictEqual(secondAttentionNeeds, []);
           assert(
             !(yield* operator.overview(instance)).dismissedNeeds.some(
               (entry) => entry.id === need.id,
             ),
           );
           append(80);
-          assert.deepStrictEqual(yield* needs, [need], "a cleared warning needs a new dismissal");
-          yield* TestClock.adjust("1 hour");
+          const thirdAttentionNeeds = yield* needs;
           assert.deepStrictEqual(
-            yield* needs,
+            thirdAttentionNeeds,
+            [need],
+            "a cleared warning needs a new dismissal",
+          );
+          yield* TestClock.adjust("1 hour");
+          const fourthAttentionNeeds = yield* needs;
+          assert.deepStrictEqual(
+            fourthAttentionNeeds,
             [],
             "the reset clears the warning with no new event",
           );
           yield* TestClock.adjust("1 second");
-          assert.deepStrictEqual(yield* needs, []);
+          const fifthAttentionNeeds = yield* needs;
+          assert.deepStrictEqual(fifthAttentionNeeds, []);
         }).pipe(
           Effect.provide(
             testLayer(
@@ -1139,7 +1156,8 @@ describe("Operator", () => {
             view.needsYou.filter((need) => need._tag === "UnresponsiveWorkerNeed"),
           );
           append(silent(1));
-          assert.deepStrictEqual(yield* workerNeeds, []);
+          const workerAttention = yield* workerNeeds;
+          assert.deepStrictEqual(workerAttention, []);
           append(silent(3));
           const needs = yield* workerNeeds;
           assert.lengthOf(needs, 1);
@@ -1150,13 +1168,11 @@ describe("Operator", () => {
             need.attempts.map(({ runId, attemptId }) => [runId, attemptId]),
             [[current.run.id, attemptId]],
           );
-          assert.strictEqual(
-            yield* Ref.get(reads),
-            1,
-            "worker notices do not need a board revision",
-          );
+          const readsState = yield* Ref.get(reads);
+          assert.strictEqual(readsState, 1, "worker notices do not need a board revision");
           yield* operator.dismissNeed(instance, attentionKey(need));
-          assert.deepStrictEqual(yield* workerNeeds, []);
+          const currentWorkerAttention = yield* workerNeeds;
+          assert.deepStrictEqual(currentWorkerAttention, []);
           assert(
             (yield* operator.overview(instance)).dismissedNeeds.some(
               (entry) => entry.id === need.id,
@@ -1169,20 +1185,24 @@ describe("Operator", () => {
               recovered: false,
             }),
           );
-          assert.deepStrictEqual(yield* workerNeeds, []);
+          const nextWorkerAttention = yield* workerNeeds;
+          assert.deepStrictEqual(nextWorkerAttention, []);
           assert(
             !(yield* operator.overview(instance)).dismissedNeeds.some(
               (entry) => entry.id === need.id,
             ),
           );
           append(silent(3));
-          assert.lengthOf(yield* workerNeeds, 1, "recovery prunes the previous dismissal");
+          const updatedWorkerAttention = yield* workerNeeds;
+          assert.lengthOf(updatedWorkerAttention, 1, "recovery prunes the previous dismissal");
           append(silent(3, DateTime.add(now, { minutes: 10 })));
-          assert.lengthOf(yield* workerNeeds, 1);
+          const latestWorkerAttention = yield* workerNeeds;
+          assert.lengthOf(latestWorkerAttention, 1);
           append(
             AttemptChannel.WorkerResponsive.make({ worker: need.worker, lastAnsweredAt: now }),
           );
-          assert.deepStrictEqual(yield* workerNeeds, []);
+          const secondWorkerAttention = yield* workerNeeds;
+          assert.deepStrictEqual(secondWorkerAttention, []);
         }).pipe(
           Effect.provide(
             testLayer(
@@ -1228,7 +1248,8 @@ describe("Operator", () => {
           const detail = yield* operator.detail(instance, runId);
           assert.strictEqual(detail.run.state, "Waiting");
           assert.strictEqual(detail.run.canApprove, true);
-          assert.deepStrictEqual(yield* Ref.get(approved), []);
+          const approvedState = yield* Ref.get(approved);
+          assert.deepStrictEqual(approvedState, []);
           const approval = before.needsYou.find((need) => need._tag === "ApprovalNeed");
           assert(approval !== undefined);
           yield* operator.undoDismissNeed(attentionKey(approval));
@@ -1515,7 +1536,8 @@ describe("Operator", () => {
         yield* operator.overview(instance);
         const readsAfterPruning = yield* Ref.get(reads);
         yield* operator.overview(instance);
-        assert.strictEqual(yield* Ref.get(reads), readsAfterPruning);
+        const readsState = yield* Ref.get(reads);
+        assert.strictEqual(readsState, readsAfterPruning);
 
         for (const need of failures) yield* operator.dismissNeed(instance, attentionKey(need));
         yield* Ref.set(latestPoll, Option.none());
@@ -1726,8 +1748,10 @@ describe("Operator", () => {
               const overview = yield* (yield* Operator).overview(loaded);
               return overview.needsYou.map(({ _tag }) => _tag);
             }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
-          assert.include(yield* needs(instance), need);
-          assert.notInclude(yield* needs(elsewhere), need);
+          const attentionNeeds = yield* needs(instance);
+          assert.include(attentionNeeds, need);
+          const currentAttentionNeeds = yield* needs(elsewhere);
+          assert.notInclude(currentAttentionNeeds, need);
         }
       }),
   );
@@ -1825,7 +1849,8 @@ describe("Operator", () => {
         const recordedMoves: Array<BoardMoveRecord> = [];
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          assert.strictEqual(laneOf(yield* operator.overview(loaded)), lane);
+          const currentOverview = yield* operator.overview(loaded);
+          assert.strictEqual(laneOf(currentOverview), lane);
           // A move records the lane the Board showed the card in.
           yield* operator.moveBoardItem(
             loaded,
@@ -2077,10 +2102,12 @@ describe("Operator", () => {
               ["chatgptPlan", 9_800],
             ],
           );
-          assert.strictEqual(yield* Ref.get(reads), 1);
+          const readsState = yield* Ref.get(reads);
+          assert.strictEqual(readsState, 1);
           assert.deepStrictEqual(usageQueries.slice(4), [retryAttemptId]);
           // Without a new report, the read returns the same overview.
-          assert.strictEqual(yield* (yield* Operator).overview(declared), later);
+          const currentOverview = yield* (yield* Operator).overview(declared);
+          assert.strictEqual(currentOverview, later);
         }).pipe(
           Effect.provide(
             testLayer(
@@ -2146,15 +2173,10 @@ describe("Operator", () => {
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
           // The paused Loop still watches the Item; a pull-request Loop never matches an issue.
-          assert.deepStrictEqual(cardLoops(yield* operator.overview(watched)), [
-            loopName,
-            labelled.name,
-          ]);
-          assert.deepStrictEqual(cardLoops(yield* operator.overview(reloaded)), [
-            loopName,
-            labelled.name,
-            triage.name,
-          ]);
+          const currentOverview = yield* operator.overview(watched);
+          assert.deepStrictEqual(cardLoops(currentOverview), [loopName, labelled.name]);
+          const nextOverview = yield* operator.overview(reloaded);
+          assert.deepStrictEqual(cardLoops(nextOverview), [loopName, labelled.name, triage.name]);
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
       }),
   );
@@ -2334,7 +2356,8 @@ describe("Operator", () => {
             task: AttemptTask.make("Finish the review"),
             agent: reviewer.name,
           });
-          assert.deepStrictEqual(yield* operator.runAgain(configured, runId, edit), opened);
+          const runAgainResult = yield* operator.runAgain(configured, runId, edit);
+          assert.deepStrictEqual(runAgainResult, opened);
           assert.deepStrictEqual(requests, [
             [
               runId,
@@ -2447,8 +2470,10 @@ describe("Operator", () => {
         const dismissed = yield* operator.overview(instance);
         assert(!dismissed.needsYou.some((entry) => entry.id === need.id));
         assert(dismissed.dismissedNeeds.some((entry) => entry.id === need.id));
-        assert.deepStrictEqual(yield* Ref.get(asks), [ask]);
-        assert.deepStrictEqual(yield* Ref.get(answered), []);
+        const asksState = yield* Ref.get(asks);
+        assert.deepStrictEqual(asksState, [ask]);
+        const answeredState = yield* Ref.get(answered);
+        assert.deepStrictEqual(answeredState, []);
         const nextRound = CycleBudgetAsk.make({
           ...ask,
           counts: [
@@ -2505,7 +2530,8 @@ describe("Operator", () => {
           const rejected = yield* operator.approve(instance, runId).pipe(Effect.flip);
           assert(rejected._tag === "RunOperationRejectedError");
           assert.strictEqual(rejected.state, "Queued");
-          assert.deepStrictEqual(yield* Ref.get(approved), []);
+          const approvedState = yield* Ref.get(approved);
+          assert.deepStrictEqual(approvedState, []);
 
           const overview = yield* operator.overview(instance);
           assert(overview._tag === "Ready");
@@ -2548,20 +2574,24 @@ describe("Operator", () => {
           { concurrency: "unbounded" },
         );
         assert(overview !== undefined);
-        assert.strictEqual(yield* Ref.get(overviewReads), 1);
+        const overviewReadsState = yield* Ref.get(overviewReads);
+        assert.strictEqual(overviewReadsState, 1);
         yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
         yield* operator.overview(instance);
-        assert.strictEqual(yield* Ref.get(overviewReads), 2);
+        const currentOverviewReadsState = yield* Ref.get(overviewReads);
+        assert.strictEqual(currentOverviewReadsState, 2);
         // A missing invalidation singleton must bypass the cache entirely.
         yield* Ref.set(projectionRevision, Option.none());
         yield* operator.overview(instance);
         yield* operator.overview(instance);
-        assert.strictEqual(yield* Ref.get(overviewReads), 4);
+        const nextOverviewReadsState = yield* Ref.get(overviewReads);
+        assert.strictEqual(nextOverviewReadsState, 4);
         // Bypassing the cache also clears its old token: once revision
         // tracking recovers, the first request must rebuild the projection.
         yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
         yield* operator.overview(instance);
-        assert.strictEqual(yield* Ref.get(overviewReads), 5);
+        const updatedOverviewReadsState = yield* Ref.get(overviewReads);
+        assert.strictEqual(updatedOverviewReadsState, 5);
         assert.strictEqual(overview.projects[0]?.status, "needs-you");
         assert.strictEqual(overview.loops[0]?.paused, true);
         assert.strictEqual(overview.projects[0]?.runs[0]?.loopPaused, true);
@@ -2746,7 +2776,8 @@ describe("Operator", () => {
             )
             .pipe(Effect.flip);
           assert.strictEqual(proposedLane._tag, "BoardLaneReadOnlyError");
-          assert.strictEqual(yield* Ref.get(movedLabels), null);
+          const movedLabelsState = yield* Ref.get(movedLabels);
+          assert.strictEqual(movedLabelsState, null);
           assert.deepStrictEqual(logs, [
             [
               "Board move rejected",
@@ -2876,7 +2907,8 @@ describe("Operator", () => {
             needsYou.filter((need) => need._tag === "UnconfiguredWorkerNeed"),
           );
         // The reader reports three Attempts on `local`, the Worker `instance` declares, one of them open.
-        assert.deepStrictEqual(yield* unconfiguredNeeds(instance), []);
+        const unconfiguredAttention = yield* unconfiguredNeeds(instance);
+        assert.deepStrictEqual(unconfiguredAttention, []);
         // A reload that changes only the Worker leaves the runtime store as it
         // was; the overview must not answer from its cache.
         const switched = LoadedInstance.make({
@@ -2959,7 +2991,8 @@ describe("Operator", () => {
           // The stop succeeds without a write to the runtime store; the overview must not answer
           // from its cache.
           yield* Ref.set(stops, []);
-          assert.deepStrictEqual(yield* unconfirmedNeeds, []);
+          const unconfirmedAttention = yield* unconfirmedNeeds;
+          assert.deepStrictEqual(unconfirmedAttention, []);
         }).pipe(
           Effect.provide(
             testLayer(
@@ -3022,12 +3055,14 @@ describe("Operator", () => {
             operator.detail(instance, runId),
             ({ unconfirmedStop }) => unconfirmedStop,
           );
+          const visibleAttention = yield* shown;
           assert.deepStrictEqual(
-            yield* shown,
+            visibleAttention,
             UnconfirmedStopView.make({ runId, attemptNumber: original.number, worker: local }),
           );
           yield* Ref.set(stops, []);
-          assert.strictEqual(yield* shown, null);
+          const currentVisibleAttention = yield* shown;
+          assert.strictEqual(currentVisibleAttention, null);
         }).pipe(
           Effect.provide(
             testLayer(
@@ -3123,7 +3158,8 @@ it.effect(
         );
         assert((yield* runWaits).every((value) => value === null));
         yield* Ref.set(drain, Option.some(UpgradeDrain.make({ wait, runIds: [current.run.id] })));
-        assert.deepStrictEqual(yield* runWaits, [wait]);
+        const upgradeWaits = yield* runWaits;
+        assert.deepStrictEqual(upgradeWaits, [wait]);
         assert.deepStrictEqual(
           (yield* operator.detail(instance, current.run.id)).run.upgradeWait,
           wait,
@@ -3370,13 +3406,11 @@ it.effect("authorizes historical run actions by current repository ownership", (
               operator.cancel(current, runId),
               operator.intervene(current, runId, intervention),
             ]) {
-              assert.equal(
-                yield* action.pipe(
-                  Effect.provideService(RequestPermissions, deniedGrants),
-                  Effect.match({ onFailure: (error) => error._tag, onSuccess: () => "Allowed" }),
-                ),
-                "AccessDenied",
+              const currentAction = yield* action.pipe(
+                Effect.provideService(RequestPermissions, deniedGrants),
+                Effect.match({ onFailure: (error) => error._tag, onSuccess: () => "Allowed" }),
               );
+              assert.equal(currentAction, "AccessDenied");
             }
           }
         }
@@ -3393,7 +3427,8 @@ it.effect("authorizes historical run actions by current repository ownership", (
         "reset",
         "cancel",
       ]);
-      assert.deepEqual(yield* Ref.get(approved), []);
+      const approvedState = yield* Ref.get(approved);
+      assert.deepEqual(approvedState, []);
     }).pipe(
       Effect.provide(
         testLayer(approved, moved, reads, revision, historical, budgets, {

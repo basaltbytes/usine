@@ -305,21 +305,20 @@ export class ScheduleTriggers extends Context.Service<
 
         const dedupKey = eventKey(due.loop, due.repository, due.scheduledAt);
         const task = yield* config.renderPrompt(due.loop, context);
-        const submitted = yield* runs.submit(
-          yield* triggerSubmission(expressions, {
-            cycleGeneration: CycleGeneration.make(0),
-            agent: due.agent,
-            dedupKey,
-            itemKey: itemKey(due.repository),
-            loop: due.loop,
-            payload,
-            receivedAt,
-            repository: due.repository,
-            revision: DEFAULT_BRANCH_REVISION,
-            task: AttemptTask.make(task),
-            parentModel: due.parentModel,
-          }),
-        );
+        const submission = yield* triggerSubmission(expressions, {
+          cycleGeneration: CycleGeneration.make(0),
+          agent: due.agent,
+          dedupKey,
+          itemKey: itemKey(due.repository),
+          loop: due.loop,
+          payload,
+          receivedAt,
+          repository: due.repository,
+          revision: DEFAULT_BRANCH_REVISION,
+          task: AttemptTask.make(task),
+          parentModel: due.parentModel,
+        });
+        const submitted = yield* runs.submit(submission);
         yield* Effect.logInfo("Submitted scheduled Tick", {
           loop: due.loop.name,
           repository: due.repository.name,

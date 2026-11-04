@@ -102,7 +102,8 @@ const fakeClient = Layer.effect(
           body,
         };
         yield* Ref.update(sent, (all) => [...all, received]);
-        return HttpClientResponse.fromWeb(request, yield* (yield* Ref.get(answer))(received));
+        const reply = yield* (yield* Ref.get(answer))(received);
+        return HttpClientResponse.fromWeb(request, reply);
       }),
     );
   }),
@@ -217,13 +218,17 @@ describe("ChatGptLogins", () => {
       Effect.gen(function* () {
         const { login } = yield* authFile("60 minutes");
         yield* setAnswer(refreshing());
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "first");
+        const token = yield* accessToken(login);
+        assert.strictEqual(nonceOf(token), "first");
         yield* TestClock.adjust("54 minutes");
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "first");
-        assert.lengthOf(yield* tokenRequests, 0);
+        const currentToken = yield* accessToken(login);
+        assert.strictEqual(nonceOf(currentToken), "first");
+        const requests = yield* tokenRequests;
+        assert.lengthOf(requests, 0);
 
         yield* TestClock.adjust("2 minutes");
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        const nextToken = yield* accessToken(login);
+        assert.strictEqual(nonceOf(nextToken), "second");
         const [refresh] = yield* tokenRequests;
         assert(refresh !== undefined);
         assert.strictEqual(refresh.method, "POST");
@@ -236,8 +241,10 @@ describe("ChatGptLogins", () => {
           Headers.get(refresh.headers, "content-type"),
           Option.some("application/json"),
         );
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
-        assert.lengthOf(yield* tokenRequests, 1);
+        const updatedToken = yield* accessToken(login);
+        assert.strictEqual(nonceOf(updatedToken), "second");
+        const currentRequests = yield* tokenRequests;
+        assert.lengthOf(currentRequests, 1);
       }).pipe(Effect.provide(logins)),
   );
 
@@ -255,10 +262,12 @@ describe("ChatGptLogins", () => {
         assert.strictEqual(written.tokens.account_id, CHATGPT_ACCOUNT);
         assert.strictEqual(written.auth_mode, "chatgpt");
         assert.isNull(written.OPENAI_API_KEY);
-        assert.strictEqual(written.last_refresh, DateTime.formatIso(yield* DateTime.now));
+        const currentNow = yield* DateTime.now;
+        assert.strictEqual(written.last_refresh, DateTime.formatIso(currentNow));
         const { mode } = yield* Effect.promise(() => stat(path));
         assert.strictEqual(mode & 0o777, 0o600);
-        assert.deepStrictEqual(yield* Effect.promise(() => readdir(directory)), ["auth.json"]);
+        const responseBody = yield* Effect.promise(() => readdir(directory));
+        assert.deepStrictEqual(responseBody, ["auth.json"]);
       }).pipe(Effect.provide(logins)),
   );
 
@@ -283,7 +292,8 @@ describe("ChatGptLogins", () => {
       yield* Deferred.succeed(release, undefined);
       const tokens = yield* Fiber.joinAll(requests);
       assert.deepStrictEqual(new Set(tokens.map(nonceOf)), new Set(["second"]));
-      assert.lengthOf(yield* tokenRequests, 1);
+      const currentRequests = yield* tokenRequests;
+      assert.lengthOf(currentRequests, 1);
     }).pipe(Effect.provide(logins)),
   );
 
@@ -301,15 +311,19 @@ describe("ChatGptLogins", () => {
           assert.strictEqual(failed._tag, "ChatGptLoginUnavailable");
           assert.strictEqual(failed.reason, "refresh-failed");
         }
-        assert.lengthOf(yield* tokenRequests, 1, "the waiting requests share one refresh");
+        const requests = yield* tokenRequests;
+        assert.lengthOf(requests, 1, "the waiting requests share one refresh");
 
         yield* setAnswer(refreshing());
         assert.strictEqual((yield* Effect.flip(accessToken(login))).reason, "refresh-failed");
-        assert.lengthOf(yield* tokenRequests, 1, "a request during the backoff calls nothing");
+        const currentRequests = yield* tokenRequests;
+        assert.lengthOf(currentRequests, 1, "a request during the backoff calls nothing");
 
         yield* TestClock.adjust("10 seconds");
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
-        assert.lengthOf(yield* tokenRequests, 2);
+        const token = yield* accessToken(login);
+        assert.strictEqual(nonceOf(token), "second");
+        const nextRequests = yield* tokenRequests;
+        assert.lengthOf(nextRequests, 2);
       }).pipe(Effect.provide(logins)),
   );
 
@@ -354,8 +368,10 @@ describe("ChatGptLogins", () => {
         yield* Fiber.interrupt(caller);
         yield* Deferred.succeed(release, undefined);
 
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
-        assert.lengthOf(yield* tokenRequests, 1);
+        const token = yield* accessToken(login);
+        assert.strictEqual(nonceOf(token), "second");
+        const requests = yield* tokenRequests;
+        assert.lengthOf(requests, 1);
         assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-second");
       }).pipe(Effect.provide(logins)),
   );
@@ -367,13 +383,16 @@ describe("ChatGptLogins", () => {
       yield* setAnswer(refreshing());
       const refreshed = yield* service.access(login);
       yield* service.refused(login, refreshed);
-      assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
-      assert.lengthOf(yield* tokenRequests, 1);
+      const token = yield* accessToken(login);
+      assert.strictEqual(nonceOf(token), "second");
+      const requests = yield* tokenRequests;
+      assert.lengthOf(requests, 1);
 
       yield* TestClock.adjust("1 minute");
       yield* service.refused(login, refreshed);
       yield* accessToken(login);
-      assert.lengthOf(yield* tokenRequests, 2);
+      const currentRequests = yield* tokenRequests;
+      assert.lengthOf(currentRequests, 2);
     }).pipe(Effect.provide(logins)),
   );
 
@@ -389,7 +408,8 @@ describe("ChatGptLogins", () => {
           }),
         ),
       );
-      assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+      const token = yield* accessToken(login);
+      assert.strictEqual(nonceOf(token), "second");
       assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-first");
     }).pipe(Effect.provide(logins)),
   );
@@ -405,11 +425,13 @@ describe("ChatGptLogins", () => {
             Effect.andThen(answer(sent)),
           ),
         );
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        const token = yield* accessToken(login);
+        assert.strictEqual(nonceOf(token), "second");
         assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-operator");
 
         yield* (yield* ChatGptLogins).reload(login);
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "refresh-operator");
+        const currentToken = yield* accessToken(login);
+        assert.strictEqual(nonceOf(currentToken), "refresh-operator");
       }).pipe(Effect.provide(logins)),
   );
 
@@ -419,13 +441,16 @@ describe("ChatGptLogins", () => {
       Effect.gen(function* () {
         const { directory, login } = yield* authFile("1 minute");
         yield* setAnswer(refreshing());
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        const token = yield* accessToken(login);
+        assert.strictEqual(nonceOf(token), "second");
         const moved = join(directory, "moved.json");
         yield* replaceAuthFile(moved, "refresh-first", "60 minutes");
         const elsewhere = ChatGptLogin.make({ ...login, authFile: HostFilePath.make(moved) });
         yield* (yield* ChatGptLogins).reload(elsewhere);
-        assert.strictEqual(nonceOf(yield* accessToken(elsewhere)), "second");
-        assert.lengthOf(yield* tokenRequests, 1);
+        const currentToken = yield* accessToken(elsewhere);
+        assert.strictEqual(nonceOf(currentToken), "second");
+        const requests = yield* tokenRequests;
+        assert.lengthOf(requests, 1);
       }).pipe(Effect.provide(logins)),
   );
 
@@ -461,12 +486,15 @@ describe("ChatGptLogins", () => {
           assert.include(rejected.message, path);
           const again = yield* Effect.flip(accessToken(login));
           assert.strictEqual(again.reason, "refresh-rejected");
-          assert.lengthOf(yield* tokenRequests, 1);
+          const requests = yield* tokenRequests;
+          assert.lengthOf(requests, 1);
 
           yield* replaceAuthFile(path, "refresh-new", "60 minutes");
           yield* (yield* ChatGptLogins).reload(login);
-          assert.strictEqual(nonceOf(yield* accessToken(login)), "refresh-new");
-          assert.lengthOf(yield* tokenRequests, 1);
+          const token = yield* accessToken(login);
+          assert.strictEqual(nonceOf(token), "refresh-new");
+          const currentRequests = yield* tokenRequests;
+          assert.lengthOf(currentRequests, 1);
         }).pipe(Effect.provide(logins)),
     );
 
@@ -477,19 +505,24 @@ describe("ChatGptLogins", () => {
         const { path, login } = yield* authFile("1 minute");
         const service = yield* ChatGptLogins;
         yield* setAnswer(refreshing());
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        const token = yield* accessToken(login);
+        assert.strictEqual(nonceOf(token), "second");
 
         yield* service.reload(login);
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        const currentToken = yield* accessToken(login);
+        assert.strictEqual(nonceOf(currentToken), "second");
 
         yield* replaceAuthFile(path, "refresh-first", "60 minutes");
         yield* service.reload(login);
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        const nextToken = yield* accessToken(login);
+        assert.strictEqual(nonceOf(nextToken), "second");
 
         yield* replaceAuthFile(path, "refresh-other", "60 minutes");
         yield* service.reload(login);
-        assert.strictEqual(nonceOf(yield* accessToken(login)), "refresh-other");
-        assert.lengthOf(yield* tokenRequests, 1);
+        const updatedToken = yield* accessToken(login);
+        assert.strictEqual(nonceOf(updatedToken), "refresh-other");
+        const requests = yield* tokenRequests;
+        assert.lengthOf(requests, 1);
       }).pipe(Effect.provide(logins)),
   );
 
@@ -526,20 +559,20 @@ const proxyFor = (login: ChatGptLogin) =>
 const attach = Effect.gen(function* () {
   const attachments = yield* Attachments;
   const callers = yield* CallerTokens;
+  const currentNow = yield* DateTime.now;
   yield* attachments.attach(
     Attachment.make({
       id: ATTACHMENT,
       worker: WORKER,
       repository: REPOSITORY,
       credential: AnonymousCredential.make(),
-      expiresAt: DateTime.add(yield* DateTime.now, { hours: 2 }),
+      expiresAt: DateTime.add(currentNow, { hours: 2 }),
     }),
   );
-  return Redacted.value(
-    yield* callers.issue(
-      CallerClaims.make({ attachment: ATTACHMENT, worker: WORKER, repository: REPOSITORY }),
-    ),
+  const callerToken = yield* callers.issue(
+    CallerClaims.make({ attachment: ATTACHMENT, worker: WORKER, repository: REPOSITORY }),
   );
+  return Redacted.value(callerToken);
 });
 
 const send = (url: string, headers: Record<string, string>, body?: string) =>
@@ -626,8 +659,10 @@ describe("GatewayProxy with a ChatGPT login", () => {
             });
             assert.deepStrictEqual([answer.status, answer.reason], [404, "unsupported-path"], path);
           }
-          assert.lengthOf(yield* backendRequests, 0);
-          assert.lengthOf(yield* tokenRequests, 0);
+          const requests = yield* backendRequests;
+          assert.lengthOf(requests, 0);
+          const currentRequests = yield* tokenRequests;
+          assert.lengthOf(currentRequests, 0);
         }).pipe(Effect.provide(proxyFor(login)));
       }),
   );
@@ -654,7 +689,8 @@ describe("GatewayProxy with a ChatGPT login", () => {
               [status, "provider-login-unavailable"],
             );
             assert.include(answer.body, '"reason":"provider-login-unavailable"');
-            assert.lengthOf(yield* backendRequests, 0);
+            const requests = yield* backendRequests;
+            assert.lengthOf(requests, 0);
           }).pipe(Effect.provide(proxyFor(login)));
         }),
     );
@@ -678,9 +714,11 @@ describe("GatewayProxy with a ChatGPT login", () => {
           "{}",
         );
         assert.strictEqual((yield* ask).status, 401);
-        assert.lengthOf(yield* tokenRequests, 0);
+        const requests = yield* tokenRequests;
+        assert.lengthOf(requests, 0);
         assert.strictEqual((yield* ask).status, 200);
-        assert.lengthOf(yield* tokenRequests, 1);
+        const currentRequests = yield* tokenRequests;
+        assert.lengthOf(currentRequests, 1);
       }).pipe(Effect.provide(proxyFor(login)));
     }),
   );

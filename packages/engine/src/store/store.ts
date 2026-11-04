@@ -156,7 +156,8 @@ const makeRunStore = Effect.gen(function* () {
         continue;
       }
       const resetsAt = limit.value.resetsAt.value;
-      const delay = Duration.toMillis(DateTime.distance(yield* DateTime.now, resetsAt));
+      const observedAt = yield* DateTime.now;
+      const delay = Duration.toMillis(DateTime.distance(observedAt, resetsAt));
       if (delay <= 0) {
         yield* Effect.logDebug("Pool reset deadline has passed", { pool: event.pool, window });
         continue;
@@ -324,7 +325,8 @@ const makeRunStore = Effect.gen(function* () {
           recorded.event.id,
         );
         // After a reopening, later sightings of the trigger's Event join the newest reopening.
-        const current = Option.getOrElse(yield* tx.newestReopening(recorded.event.id), () => ({
+        const newestReopening = yield* tx.newestReopening(recorded.event.id);
+        const current = Option.getOrElse(newestReopening, () => ({
           submission: recorded,
           reopening: 0,
         }));
@@ -364,7 +366,8 @@ const makeRunStore = Effect.gen(function* () {
                 reopening,
               },
             );
-            return yield* claimEvent(tx, reopened, yield* runIdOf(reopened));
+            const admittedRunId = yield* runIdOf(reopened);
+            return yield* claimEvent(tx, reopened, admittedRunId);
           }
         }
       }),
@@ -430,7 +433,8 @@ const makeRunStore = Effect.gen(function* () {
     stop: OperatorStop,
   ) {
     const runId = current.run.id;
-    const queued = Option.map(yield* tx.nextQueued(runId), ({ submission }) => submission.event.id);
+    const queuedRun = yield* tx.nextQueued(runId);
+    const queued = Option.map(queuedRun, ({ submission }) => submission.event.id);
     const fields = { runId, loop: current.run.loop, itemKey: current.itemKey, stop };
     if (
       yield* tx.loopItems.startSuppression(
@@ -888,15 +892,18 @@ const makeRunStore = Effect.gen(function* () {
             message: `Run ${runId} cannot run again: run ${blocking.runId} of loop "${loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
           });
         }
-        const trigger = Option.getOrElse(yield* tx.reopenedEvent(current.event.id), () => ({
+        const reopenedEvent = yield* tx.reopenedEvent(current.event.id);
+        const trigger = Option.getOrElse(reopenedEvent, () => ({
           eventId: current.event.id,
           dedupKey: current.event.dedupKey,
         }));
-        const reopening = Option.match(yield* tx.newestReopening(trigger.eventId), {
+        const newestReopening = yield* tx.newestReopening(trigger.eventId);
+        const reopening = Option.match(newestReopening, {
           onNone: () => 1,
           onSome: (newest) => newest.reopening + 1,
         });
-        const generation = Option.match(yield* tx.cycles.get(itemKey), {
+        const cycleBudget = yield* tx.cycles.get(itemKey);
+        const generation = Option.match(cycleBudget, {
           onNone: () => CycleGeneration.make(0),
           onSome: (budget) => budget.generation,
         });
@@ -916,7 +923,8 @@ const makeRunStore = Effect.gen(function* () {
           recorded.event.id,
           RunAgain.make({ from: runId, requestedBy: request.requestedBy }),
         );
-        const result = yield* admitRun(tx, recorded, yield* runIdOf(recorded));
+        const admittedRunId = yield* runIdOf(recorded);
+        const result = yield* admitRun(tx, recorded, admittedRunId);
         yield* Effect.logInfo(
           "Run again decided",
           Match.valueTags(result, {
@@ -949,7 +957,8 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction, record);
         const current = yield* tx.snapshot(runId);
-        const decision = cancelRun(current, yield* ActingMember);
+        const actor = yield* ActingMember;
+        const decision = cancelRun(current, actor);
         yield* Effect.logInfo("Operator cancellation decided", {
           runId,
           state: current.run.state._tag,
@@ -1027,7 +1036,8 @@ const makeRunStore = Effect.gen(function* () {
         if ((yield* tx.blockingRun(submission.loop, submission.itemKey)).length > 0) {
           return Option.none<RunId>();
         }
-        if (Option.isSome(yield* tx.loopItems.suppression(submission.loop, submission.itemKey))) {
+        const suppression = yield* tx.loopItems.suppression(submission.loop, submission.itemKey);
+        if (Option.isSome(suppression)) {
           return Option.none<RunId>();
         }
         if (!(yield* tx.cycles.isCurrentEvent(submission))) return Option.none<RunId>();

@@ -240,15 +240,15 @@ export class ConfigurationEditor extends Context.Service<
                 }),
               ),
             );
-          const identifier =
-            query.kind === "loop" && query.identifier !== undefined
-              ? (yield* resolveKey(
-                  yield* store.read,
-                  yield* entityKey(
-                    ConfigurationEntityRequest.make({ kind: "loop", identifier: query.identifier }),
-                  ),
-                )).identifier
-              : query.identifier;
+          let identifier = query.identifier;
+          if (query.kind === "loop" && query.identifier !== undefined) {
+            const snapshot = yield* store.read;
+            const requestedKey = yield* entityKey(
+              ConfigurationEntityRequest.make({ kind: "loop", identifier: query.identifier }),
+            );
+            const key = yield* resolveKey(snapshot, requestedKey);
+            identifier = key.identifier;
+          }
           const history = yield* store.list(Option.none());
           const allowed = yield* Effect.filter(history, (revision) =>
             Effect.forEach(revision.changes, ({ key }) => entityPermission(key, "read")).pipe(
@@ -283,10 +283,12 @@ export class ConfigurationEditor extends Context.Service<
         }),
         entity: Effect.fn("ConfigurationEditor.entity")(function* (request) {
           const snapshot = yield* store.read;
-          const key = yield* resolveKey(snapshot, yield* entityKey(request));
+          const requestedKey = yield* entityKey(request);
+          const key = yield* resolveKey(snapshot, requestedKey);
           yield* Effect.annotateCurrentSpan({ entity: key.key });
           yield* entityPermission(key, "read");
-          const entity = repositoryEditorEntity(snapshot, yield* findEntity(snapshot, key));
+          const storedEntity = yield* findEntity(snapshot, key);
+          const entity = repositoryEditorEntity(snapshot, storedEntity);
           return ConfigurationEntityView.make({
             ...entity,
             text: yield* formatConfigurationEntity(entity),
@@ -295,7 +297,8 @@ export class ConfigurationEditor extends Context.Service<
         }),
         replace: Effect.fn("ConfigurationEditor.replace")(function* (request, input) {
           const snapshot = yield* snapshotFor(input.expected);
-          const key = yield* resolveKey(snapshot, yield* entityKey(request));
+          const requestedKey = yield* entityKey(request);
+          const key = yield* resolveKey(snapshot, requestedKey);
           yield* Effect.annotateCurrentSpan({ entity: key.key, expectedRevision: input.expected });
           yield* entityPermission(key, "maintain");
           const parsed =
@@ -318,7 +321,8 @@ export class ConfigurationEditor extends Context.Service<
         }),
         remove: Effect.fn("ConfigurationEditor.remove")(function* (request, input) {
           const snapshot = yield* snapshotFor(input.expected);
-          const key = yield* resolveKey(snapshot, yield* entityKey(request));
+          const requestedKey = yield* entityKey(request);
+          const key = yield* resolveKey(snapshot, requestedKey);
           yield* Effect.annotateCurrentSpan({ entity: key.key, expectedRevision: input.expected });
           const entity = yield* findEntity(snapshot, key);
           return yield* save(snapshot, input, [

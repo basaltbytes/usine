@@ -23,9 +23,10 @@ const withInstance = <A, E, R>(use: (root: InstanceDirectory) => Effect.Effect<A
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const root = InstanceDirectory.make(
-      yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-github-secrets-" }),
-    );
+    const directory = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "usine-github-secrets-",
+    });
+    const root = InstanceDirectory.make(directory);
     yield* fileSystem.makeDirectory(path.join(root, ".usine"));
     return yield* use(root);
   }).pipe(Effect.scoped, Effect.provide(nodeLayer));
@@ -115,7 +116,8 @@ it.effect("replaces an insecure old file with complete owner-only secrets", () =
       const secrets = yield* Schema.decodeEffect(GitHubAppSecretsFromJson)(source);
       yield* writeLocalSecrets(root, secrets);
       assert.equal((yield* fs.stat(target)).mode & 0o777, 0o600);
-      assert.deepEqual(JSON.parse(yield* fs.readFileString(target)), JSON.parse(source));
+      const contents = yield* fs.readFileString(target);
+      assert.deepEqual(JSON.parse(contents), JSON.parse(source));
       const loaded = yield* loadLocalSecrets(root);
       assert.ok(Option.isSome(loaded));
       if (Option.isSome(loaded)) {
@@ -123,7 +125,8 @@ it.effect("replaces an insecure old file with complete owner-only secrets", () =
         assert.ok(!JSON.stringify(loaded.value).includes("oauth-secret"));
         assert.ok(!JSON.stringify(loaded.value).includes("hook-secret"));
       }
-      assert.deepEqual(yield* fs.readDirectory(path.dirname(target)), ["github-app.json"]);
+      const entries = yield* fs.readDirectory(path.dirname(target));
+      assert.deepEqual(entries, ["github-app.json"]);
     }),
   ),
 );

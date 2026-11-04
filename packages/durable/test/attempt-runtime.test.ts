@@ -151,7 +151,8 @@ describe("durable AttemptRuntime", () => {
           lastAnsweredAt,
           reason: "Connection timed out during banner exchange",
         });
-        assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+        const live = yield* runtime.isLive(request.spec.attemptId);
+        assert.isFalse(live);
         // Sent before `execute` starts, so the notice is buffered until the parent starts.
         yield* runtime.notify(request.spec.attemptId, silent);
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
@@ -168,8 +169,10 @@ describe("durable AttemptRuntime", () => {
           child.request.prompt.indexOf("# Parent context"),
           child.request.prompt.indexOf("# Delegated task"),
         );
-        assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
-        assert.isTrue(Option.isNone(yield* runtime.unsupervised(request.spec.attemptId)));
+        const currentLive = yield* runtime.isLive(request.spec.attemptId);
+        assert.isTrue(currentLive);
+        const currentUnsupervised = yield* runtime.unsupervised(request.spec.attemptId);
+        assert.isTrue(Option.isNone(currentUnsupervised));
         yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(42));
         // A shorter time (an earlier record committed late) must not replace the stored one.
         yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(30));
@@ -180,7 +183,8 @@ describe("durable AttemptRuntime", () => {
         yield* child.reply("Child fixed the test.");
         const report = yield* Fiber.join(execution);
         assert.strictEqual(report.message, "Fixed the flaky test and opened a pull request.");
-        assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+        const nextLive = yield* runtime.isLive(request.spec.attemptId);
+        assert.isFalse(nextLive);
         const outbound = recording.outbound();
         const launch = outbound.flatMap(({ payload }) =>
           payload._tag === "SessionEvent" &&
@@ -418,9 +422,11 @@ describe("durable AttemptRuntime", () => {
               opened.waitForTask(taskId, context),
             );
             assert.strictEqual(settled.state.outcome.status, "completed");
-            assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+            const live = yield* runtime.isLive(request.spec.attemptId);
+            assert.isTrue(live);
             const report = yield* runtime.execute(request, recording.sink);
-            assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+            const currentLive = yield* runtime.isLive(request.spec.attemptId);
+            assert.isFalse(currentLive);
             const found = yield* turn(harness);
             return { report, found };
           }),
@@ -543,23 +549,28 @@ describe("durable AttemptRuntime", () => {
             const services = yield* Layer.build(layer({ database, parent: [answer("Finished")] }));
             const runtime = Context.get(services, AttemptRuntime);
             yield* runtime.execute(request, sink).pipe(Effect.flip);
-            assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
-            assert.isTrue(Option.isNone(yield* runtime.finished(request.spec.attemptId)));
+            const live = yield* runtime.isLive(request.spec.attemptId);
+            assert.isTrue(live);
+            const currentFinished = yield* runtime.finished(request.spec.attemptId);
+            assert.isTrue(Option.isNone(currentFinished));
           }),
         );
         yield* Effect.scoped(
           Effect.gen(function* () {
             const services = yield* Layer.build(layer({ database, parent: [] }));
             const runtime = Context.get(services, AttemptRuntime);
-            assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+            const live = yield* runtime.isLive(request.spec.attemptId);
+            assert.isTrue(live);
             const attached = yield* Effect.forkChild(runtime.attached(request.spec.attemptId), {
               startImmediately: true,
             });
             const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);
             assert.strictEqual(failure._tag, "InfraFailure");
             yield* Fiber.join(attached).pipe(Effect.timeout("1 second"));
-            assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
-            assert.isTrue(Option.isNone(yield* runtime.finished(request.spec.attemptId)));
+            const currentLive = yield* runtime.isLive(request.spec.attemptId);
+            assert.isTrue(currentLive);
+            const currentFinished = yield* runtime.finished(request.spec.attemptId);
+            assert.isTrue(Option.isNone(currentFinished));
           }),
         );
         yield* Effect.scoped(
@@ -571,8 +582,10 @@ describe("durable AttemptRuntime", () => {
             });
             assert.strictEqual((yield* runtime.execute(request, sink)).message, "Finished");
             yield* Fiber.join(attached).pipe(Effect.timeout("1 second"));
-            assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
-            assert.isTrue(Option.isSome(yield* runtime.finished(request.spec.attemptId)));
+            const live = yield* runtime.isLive(request.spec.attemptId);
+            assert.isFalse(live);
+            const currentFinished = yield* runtime.finished(request.spec.attemptId);
+            assert.isTrue(Option.isSome(currentFinished));
             const record = yield* Context.get(services, DurableHarness).use(
               "read the delivered outbox",
               (harness, context) =>
@@ -764,7 +777,8 @@ describe("durable AttemptRuntime", () => {
             }),
           );
           assert.deepStrictEqual(receipts(recording.outbound()), [["Steer", 1, "queued"]]);
-          assert.deepStrictEqual(yield* child.interventions, [
+          const currentInterventions = yield* child.interventions;
+          assert.deepStrictEqual(currentInterventions, [
             AttemptChannel.Steer.make({ message: "Use pnpm, not npm." }),
           ]);
           yield* child.readQueued;
@@ -954,7 +968,8 @@ describe("durable AttemptRuntime", () => {
           yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
           yield* Effect.sleep("300 millis");
           assert.isUndefined(execution.pollUnsafe());
-          assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+          const live = yield* runtime.isLive(request.spec.attemptId);
+          assert.isTrue(live);
           yield* Effect.gen(function* () {
             while (
               !receipts(recording.outbound()).some(
@@ -1205,7 +1220,8 @@ describe("durable AttemptRuntime", () => {
           // The parent answered the operator; under the Hold that answer does not end the Attempt.
           yield* Effect.sleep("300 millis");
           assert.isUndefined(execution.pollUnsafe());
-          assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+          const live = yield* runtime.isLive(request.spec.attemptId);
+          assert.isTrue(live);
           yield* operator(AttemptChannel.Release.make());
           yield* (yield* children.next).reply("Opened pull request 7.");
           const report = yield* Fiber.join(execution);
@@ -1395,7 +1411,8 @@ describe("durable AttemptRuntime", () => {
         yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
         yield* Effect.sleep("300 millis");
         assert.isUndefined(execution.pollUnsafe());
-        assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+        const live = yield* runtime.isLive(request.spec.attemptId);
+        assert.isTrue(live);
         yield* operator(AttemptChannel.Release.make());
         const report = yield* Fiber.join(execution);
         assert.strictEqual(report.message, "Continued after the release.");
@@ -1502,8 +1519,10 @@ describe("durable AttemptRuntime", () => {
           recording.inbound().map(({ payload, operator }) => [payload._tag, operator]),
           [["Cancel", "engine"]],
         );
-        assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
-        assert.deepStrictEqual(yield* runtime.finished(request.spec.attemptId), Option.none());
+        const live = yield* runtime.isLive(request.spec.attemptId);
+        assert.isFalse(live);
+        const currentFinished = yield* runtime.finished(request.spec.attemptId);
+        assert.deepStrictEqual(currentFinished, Option.none());
       }).pipe(Effect.provide(layer({ database, parent: [delegate("Fix the flaky test")] })));
     }).pipe(Effect.scoped),
   );
@@ -1541,7 +1560,8 @@ describe("durable AttemptRuntime", () => {
         yield* Deferred.await(launching).pipe(Effect.timeout("5 seconds"));
         yield* runtime.cancel(request.spec.attemptId);
         yield* Deferred.await(abandoned).pipe(Effect.timeout("5 seconds"));
-        assert(Exit.isFailure(yield* Fiber.await(execution)));
+        const executionResult = yield* Fiber.await(execution);
+        assert(Exit.isFailure(executionResult));
       }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
   );
@@ -1610,9 +1630,11 @@ describe("durable AttemptRuntime", () => {
         };
         const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "RunawayFailure");
-        assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+        const live = yield* runtime.isLive(request.spec.attemptId);
+        assert.isTrue(live);
         yield* runtime.cancel(request.spec.attemptId);
-        assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+        const currentLive = yield* runtime.isLive(request.spec.attemptId);
+        assert.isFalse(currentLive);
       }).pipe(Effect.provide(layer({ database, parent: [delegate("Fix the flaky test")] })));
     }).pipe(Effect.scoped),
   );
@@ -1670,7 +1692,8 @@ describe("durable AttemptRuntime", () => {
           assert.strictEqual(report.message, "The next attempt finished.");
           assert.strictEqual(opened, 2);
           assertAdmitted(next.spec.attemptId, recording.outbound());
-          assert.isFalse(yield* runtime.isLive(failed.spec.attemptId));
+          const live = yield* runtime.isLive(failed.spec.attemptId);
+          assert.isFalse(live);
           assert.lengthOf(
             logs.matching(/Aborting the task of an Attempt that a storage failure ended/u),
             1,
@@ -1755,7 +1778,8 @@ describe("durable AttemptRuntime", () => {
 
         const report = yield* Effect.gen(function* () {
           const runtime = yield* AttemptRuntime;
-          assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+          const live = yield* runtime.isLive(request.spec.attemptId);
+          assert.isTrue(live);
           return yield* runtime.execute(request, recording.sink);
         }).pipe(
           Effect.provide(layer({ database, parent: [answer("Finished after the restart.")] })),
@@ -1926,10 +1950,8 @@ describe("durable AttemptRuntime", () => {
         const outbound = recording.outbound();
         assertAdmitted(request.spec.attemptId, outbound);
         assert.strictEqual(outbound.at(-1)?.payload._tag, "Failed");
-        assert.deepStrictEqual(
-          yield* runtime.finished(request.spec.attemptId),
-          Option.some(ParentFailed.make({ failure })),
-        );
+        const currentFinished = yield* runtime.finished(request.spec.attemptId);
+        assert.deepStrictEqual(currentFinished, Option.some(ParentFailed.make({ failure })));
       }).pipe(
         Effect.provide(
           layer({ database, parent: [delegate("First part"), delegate("Second part")] }),
@@ -2200,10 +2222,8 @@ describe("durable AttemptRuntime", () => {
             "The Pi parent's turn ended without an answer: model_error",
           );
           assertAdmitted(request.spec.attemptId, recording.outbound());
-          assert.deepStrictEqual(
-            yield* runtime.finished(request.spec.attemptId),
-            Option.some(ParentFailed.make({ failure })),
-          );
+          const currentFinished = yield* runtime.finished(request.spec.attemptId);
+          assert.deepStrictEqual(currentFinished, Option.some(ParentFailed.make({ failure })));
 
           const retry = yield* Effect.forkChild(
             runtime.execute(attemptRequest("run/step/21", 2), recordingSink().sink),

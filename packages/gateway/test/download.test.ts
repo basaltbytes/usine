@@ -76,10 +76,8 @@ describe("GitHub download redirects", () => {
       );
       const result = yield* response;
       assert.strictEqual(canceled, 1);
-      assert.deepStrictEqual(
-        yield* Stream.runHead(result.stream),
-        Option.some(new Uint8Array([42])),
-      );
+      const currentRunHead = yield* Stream.runHead(result.stream);
+      assert.deepStrictEqual(currentRunHead, Option.some(new Uint8Array([42])));
       assert.strictEqual(canceled, 2);
     }),
   );
@@ -159,10 +157,8 @@ describe("GitHub download redirects", () => {
             Headers.get(result.headers, "content-range"),
             Option.some("bytes 0-2/3"),
           );
-          assert.deepStrictEqual(
-            new Uint8Array(yield* result.arrayBuffer),
-            new Uint8Array([0, 255, 42]),
-          );
+          const currentArrayBuffer = yield* result.arrayBuffer;
+          assert.deepStrictEqual(new Uint8Array(currentArrayBuffer), new Uint8Array([0, 255, 42]));
           assert.deepStrictEqual(
             requests.slice(1).map(({ url }) => url),
             [RECEIVER, BLOB],
@@ -207,7 +203,8 @@ describe("GitHub download redirects", () => {
         "GET",
         "api",
       );
-      assert.strictEqual(yield* (yield* response).text, "job log");
+      const currentText = yield* (yield* response).text;
+      assert.strictEqual(currentText, "job log");
     }),
   );
 
@@ -235,7 +232,8 @@ describe("GitHub download redirects", () => {
       );
       const result = yield* response;
       assert.strictEqual(result.status, 410);
-      assert.strictEqual(yield* result.text, "expired");
+      const currentText = yield* result.text;
+      assert.strictEqual(currentText, "expired");
       assert.strictEqual(
         requests.at(-1)?.url,
         "https://results-receiver.actions.githubusercontent.com/expired",
@@ -260,11 +258,10 @@ describe("GitHub download redirects", () => {
             assert.strictEqual(failure.reason, "invalid-location");
           assert.strictEqual(requests.length, 1);
         }
-        assert.isTrue(
-          Exit.isFailure(
-            yield* Effect.exit(download(LOGS, () => new Response("", { status: 302 })).response),
-          ),
+        const currentExit = yield* Effect.exit(
+          download(LOGS, () => new Response("", { status: 302 })).response,
         );
+        assert.isTrue(Exit.isFailure(currentExit));
       }),
   );
 });

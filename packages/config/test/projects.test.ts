@@ -97,15 +97,12 @@ it.effect(
       expect(migrated.loops.map(({ name }) => name)).toEqual(
         five.loops.map(({ name }) => `basaltbytes-usine/${name}`),
       );
+      const decoded = yield* Effect.fromResult(migrateProjects(migrated));
       expect(
-        configurationDiff(
-          configurationEntities(migrated),
-          configurationEntities(yield* Effect.fromResult(migrateProjects(migrated))),
-        ),
+        configurationDiff(configurationEntities(migrated), configurationEntities(decoded)),
       ).toEqual([]);
-      const two = yield* Effect.fromResult(
-        migrateProjects(yield* legacy(["acme/one", "acme/two"], ["start-dev"])),
-      );
+      const legacyInstance = yield* legacy(["acme/one", "acme/two"], ["start-dev"]);
+      const two = yield* Effect.fromResult(migrateProjects(legacyInstance));
       expect(two.loops.map(({ name }) => name)).toEqual([
         "acme-one/start-dev",
         "acme-two/start-dev",

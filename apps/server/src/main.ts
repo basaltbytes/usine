@@ -105,7 +105,8 @@ const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
 
 const main = Effect.gen(function* () {
   const directory = InstanceDirectory.make(process.cwd());
-  const environment = yield* instanceEnvironment(directory, yield* ConfigProvider.ConfigProvider);
+  const configProvider = yield* ConfigProvider.ConfigProvider;
+  const environment = yield* instanceEnvironment(directory, configProvider);
   return yield* runCommand(directory).pipe(
     Effect.provideService(ConfigProvider.ConfigProvider, environment),
   );

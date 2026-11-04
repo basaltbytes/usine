@@ -14,14 +14,16 @@ export const loopControlContract = (adapter: PersistenceAdapter) => {
 
         yield* Effect.gen(function* () {
           const control = yield* LoopControl;
-          assert.strictEqual(yield* control.isPaused(loop), false);
+          const currentPaused = yield* control.isPaused(loop);
+          assert.strictEqual(currentPaused, false);
           assert.strictEqual((yield* control.pause(loop)).paused, true);
           assert.strictEqual((yield* control.pause(loop)).paused, true);
         }).pipe(Effect.provide(fixture.open));
 
         yield* Effect.gen(function* () {
           const control = yield* LoopControl;
-          assert.strictEqual(yield* control.isPaused(loop), true);
+          const currentPaused = yield* control.isPaused(loop);
+          assert.strictEqual(currentPaused, true);
           assert.deepStrictEqual(
             (yield* control.states).map((state) => [state.loop, state.paused]),
             [[loop, true]],

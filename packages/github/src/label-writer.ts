@@ -75,11 +75,8 @@ export class GitHubLabelWriter extends Context.Service<
               .execute(request)
               .pipe(Effect.mapError((error) => transportError("create-repository-label", error)));
             if (response.status < 200 || response.status >= 300) {
-              return yield* statusError(
-                "create-repository-label",
-                response,
-                yield* Clock.currentTimeMillis,
-              );
+              const now = yield* Clock.currentTimeMillis;
+              return yield* statusError("create-repository-label", response, now);
             }
             const created = yield* HttpClientResponse.schemaBodyJson(CreateLabelResponse)(
               response,

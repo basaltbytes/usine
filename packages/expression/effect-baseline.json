@@ -10,7 +10,6 @@
     "schemaSync": 1
   },
   "test/expression.test.ts": {
-    "schemaSync": 2,
-    "yieldInCallArgument": 6
+    "schemaSync": 2
   }
 }

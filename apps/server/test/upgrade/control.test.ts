@@ -43,9 +43,11 @@ it("checks the selected channel and waits for all admitted attempts before insta
           resume: Effect.void,
         });
         yield* upgrades.check();
-        expect(yield* Ref.get(f.requests)).toEqual(["next"]);
+        const requestsState = yield* Ref.get(f.requests);
+        expect(requestsState).toEqual(["next"]);
         expect((yield* upgrades.status).phase).toBe("waiting");
-        expect(yield* Deferred.isDone(f.launched)).toBe(false);
+        const launchedDone = yield* Deferred.isDone(f.launched);
+        expect(launchedDone).toBe(false);
         const journal = yield* bus.open;
         expect(journal.history).toHaveLength(2);
         expect(
@@ -56,7 +58,8 @@ it("checks the selected channel and waits for all admitted attempts before insta
         yield* upgrades.check();
         expect((yield* bus.open).revision).toBe(journal.revision);
         yield* Deferred.succeed(f.drained, undefined);
-        expect(yield* Deferred.await(f.launched)).toBe(target);
+        const launchedResult = yield* Deferred.await(f.launched);
+        expect(launchedResult).toBe(target);
         expect((yield* bus.open).revision).toBe(journal.revision + 1);
       }),
     ).pipe(Effect.provide(changeBusLayer)),
@@ -79,7 +82,8 @@ it("proposes without draining, and an immediate request bypasses the idle wait",
         expect((yield* upgrades.status).available).toBe(target);
         expect((yield* upgrades.status).phase).toBe("idle");
         yield* upgrades.request(UpgradeRequest.make({ timing: "now", version: Option.none() }));
-        expect(yield* Deferred.await(f.launched)).toBe(target);
+        const launchedResult = yield* Deferred.await(f.launched);
+        expect(launchedResult).toBe(target);
         const duplicate = yield* upgrades
           .request(UpgradeRequest.make({ timing: "idle", version: Option.none() }))
           .pipe(Effect.flip);
@@ -106,7 +110,8 @@ it("does not check when off, downgrade automatically, or retry a health-check ro
           resume: Effect.void,
         });
         yield* upgrades.check();
-        expect(yield* Ref.get(f.requests)).toEqual([]);
+        const requestsState = yield* Ref.get(f.requests);
+        expect(requestsState).toEqual([]);
         yield* Ref.set(
           f.result,
           Option.some(
@@ -122,7 +127,8 @@ it("does not check when off, downgrade automatically, or retry a health-check ro
         yield* Ref.set(settings, { upgradeChannel: "next", upgradeMode: "automatic" } as const);
         yield* upgrades.check();
         expect((yield* upgrades.status).outcome?.status).toBe("rolled-back");
-        expect(yield* Deferred.isDone(f.launched)).toBe(false);
+        const launchedDone = yield* Deferred.isDone(f.launched);
+        expect(launchedDone).toBe(false);
         const current = yield* makeUpgrades({
           running: "2.0.0",
           settings: Ref.get(settings),
@@ -165,7 +171,8 @@ it.each(["idle", "now"] as const)(
             .request(UpgradeRequest.make({ timing, version: Option.none() }))
             .pipe(Effect.flip);
           expect(error).toBeInstanceOf(UpgradeError);
-          expect(yield* Deferred.isDone(f.launched)).toBe(false);
+          const launchedDone = yield* Deferred.isDone(f.launched);
+          expect(launchedDone).toBe(false);
           const status = yield* upgrades.status;
           expect(status.channel).toBe("latest");
           expect(status.available).toBeNull();
@@ -175,7 +182,8 @@ it.each(["idle", "now"] as const)(
           expect((yield* upgrades.status).available).toBe(stable);
           yield* upgrades.request(UpgradeRequest.make({ timing, version: Option.none() }));
           yield* Deferred.succeed(f.drained, undefined);
-          expect(yield* Deferred.await(f.launched)).toBe(stable);
+          const launchedResult = yield* Deferred.await(f.launched);
+          expect(launchedResult).toBe(stable);
         }),
       ),
     );
@@ -206,7 +214,8 @@ it("rejects an automatic candidate when the channel changes during its lookup", 
         expect(status.channel).toBe("latest");
         expect(status.available).toBeNull();
         expect(status.phase).toBe("idle");
-        expect(yield* Deferred.isDone(f.launched)).toBe(false);
+        const launchedDone = yield* Deferred.isDone(f.launched);
+        expect(launchedDone).toBe(false);
       }),
     ),
   );
@@ -239,8 +248,10 @@ it.each(["off", "propose"] as const)(
           expect(status.mode).toBe(mode);
           expect(status.phase).toBe("idle");
           expect(status.available).toBe(mode === "off" ? null : target);
-          expect(yield* Ref.get(drainStarted)).toBe(false);
-          expect(yield* Deferred.isDone(f.launched)).toBe(false);
+          const drainStartedState = yield* Ref.get(drainStarted);
+          expect(drainStartedState).toBe(false);
+          const launchedDone = yield* Deferred.isDone(f.launched);
+          expect(launchedDone).toBe(false);
         }),
       ),
     );
@@ -267,7 +278,8 @@ it("refuses a missing helper before closing admission", async () => {
           .request(UpgradeRequest.make({ timing: "idle", version: Option.some(target) }))
           .pipe(Effect.flip);
         expect(error.message).toBe("Missing helper unit");
-        expect(yield* Ref.get(drainStarted)).toBe(false);
+        const drainStartedState = yield* Ref.get(drainStarted);
+        expect(drainStartedState).toBe(false);
         expect((yield* upgrades.status).phase).toBe("idle");
       }),
     ),
@@ -344,19 +356,24 @@ it.each(["propose", "automatic"] as const)(
             expect(error.message).toBe("Package unavailable");
             expect((yield* upgrades.status).phase).toBe("idle");
           }
-          expect(yield* Ref.get(drainStarted)).toBe(false);
-          expect(yield* Deferred.isDone(f.launched)).toBe(false);
+          const drainStartedState = yield* Ref.get(drainStarted);
+          expect(drainStartedState).toBe(false);
+          const launchedDone = yield* Deferred.isDone(f.launched);
+          expect(launchedDone).toBe(false);
           yield* Ref.set(ready, true);
           yield* upgrades.check();
           expect((yield* upgrades.status).available).toBe(target);
           if (mode === "automatic") {
-            expect(yield* Deferred.await(f.launched)).toBe(target);
-            expect(yield* Ref.get(drainStarted)).toBe(true);
+            const launchedResult = yield* Deferred.await(f.launched);
+            expect(launchedResult).toBe(target);
+            const currentDrainStartedState = yield* Ref.get(drainStarted);
+            expect(currentDrainStartedState).toBe(true);
           } else {
             yield* Ref.set(ready, false);
             yield* upgrades.check().pipe(Effect.flip);
             expect((yield* upgrades.status).available).toBe(target);
-            expect(yield* Ref.get(drainStarted)).toBe(false);
+            const nextDrainStartedState = yield* Ref.get(drainStarted);
+            expect(nextDrainStartedState).toBe(false);
           }
         }),
       ),
@@ -414,16 +431,15 @@ it("keeps the verified release and install outcome while a newer release is inco
         yield* Deferred.await(checking);
         expect((yield* upgrades.status).available).toBe(target);
         yield* Deferred.succeed(finishCheck, undefined);
-        expect(yield* Deferred.await(logged)).toEqual([
-          "Server upgrade check failed",
-          { previous, reason },
-        ]);
+        const loggedMessagesResult = yield* Deferred.await(logged);
+        expect(loggedMessagesResult).toEqual(["Server upgrade check failed", { previous, reason }]);
         const status = yield* upgrades.status;
         expect(status.available).toBe(target);
         expect(status.message).toBeNull();
         expect(status.outcome).toEqual(outcome);
         expect(status.phase).toBe("idle");
-        expect(yield* Deferred.isDone(f.launched)).toBe(false);
+        const launchedDone = yield* Deferred.isDone(f.launched);
+        expect(launchedDone).toBe(false);
         yield* Ref.set(ready, true);
         yield* upgrades.check();
         expect((yield* upgrades.status).available).toBe(next);
@@ -462,9 +478,11 @@ it.each([
           });
           yield* upgrades.check();
           if (outcome === "install") {
-            expect(yield* Deferred.await(f.launched)).toBe(target);
+            const launchedResult = yield* Deferred.await(f.launched);
+            expect(launchedResult).toBe(target);
           } else {
-            expect(yield* Deferred.isDone(f.launched)).toBe(false);
+            const launchedDone = yield* Deferred.isDone(f.launched);
+            expect(launchedDone).toBe(false);
           }
         }),
       ),
@@ -490,11 +508,13 @@ it("cancels a pending upgrade, resumes admission, and suppresses automatic re-re
         expect(waiting.target).toBe(target);
         expect(waiting.message).toContain("New attempts are deferred");
         yield* upgrades.cancel;
-        expect(yield* Ref.get(resumed)).toBe(true);
+        const resumedState = yield* Ref.get(resumed);
+        expect(resumedState).toBe(true);
         expect((yield* upgrades.status).phase).toBe("idle");
         yield* Deferred.succeed(f.drained, undefined);
         yield* upgrades.check();
-        expect(yield* Deferred.isDone(f.launched)).toBe(false);
+        const launchedDone = yield* Deferred.isDone(f.launched);
+        expect(launchedDone).toBe(false);
         yield* upgrades.request(
           UpgradeRequest.make({ timing: "now", version: Option.some(target) }),
         );

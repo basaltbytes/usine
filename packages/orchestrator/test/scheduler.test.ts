@@ -309,7 +309,8 @@ describe("Worker scheduler startup", () => {
               0,
             );
             yield* TestClock.adjust("1 minute");
-            assert.deepStrictEqual(yield* status.unavailable, []);
+            const currentUnavailable = yield* status.unavailable;
+            assert.deepStrictEqual(currentUnavailable, []);
             assert.strictEqual(
               (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
               1,
@@ -401,9 +402,10 @@ const withInstance = <A, E>(
   ) => Effect.Effect<A, E, CurrentInstance | FileSystem.FileSystem | Path.Path>,
 ) =>
   Effect.gen(function* () {
-    const root = InstanceDirectory.make(
-      yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({ prefix: "usine-workers-" }),
-    );
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+      prefix: "usine-workers-",
+    });
+    const root = InstanceDirectory.make(directory);
     yield* writeInstanceFiles(root, files);
     return yield* test(root).pipe(Effect.provide(reloadableInstanceLayer(root)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
@@ -878,8 +880,10 @@ describe("Worker scheduler lease order", () => {
                 Option.none(),
               ),
             );
-          const one = yield* Fiber.join(yield* reserve(1, "start-dev", ["ready-for-agent"]));
-          const two = yield* Fiber.join(yield* reserve(2, "start-dev", ["ready-for-agent"]));
+          const reservedAttempt = yield* reserve(1, "start-dev", ["ready-for-agent"]);
+          const one = yield* Fiber.join(reservedAttempt);
+          const currentReservedAttempt = yield* reserve(2, "start-dev", ["ready-for-agent"]);
+          const two = yield* Fiber.join(currentReservedAttempt);
           const triage = yield* reserve(3, "triage", ["bug"]);
           const merging = yield* reserve(4, "review-pr", ["ready-to-merge"]);
           const rebase = yield* reserve(5, "rebase-pr", ["conflicting"]);
@@ -951,7 +955,8 @@ describe("Worker scheduler slots occupied by Attempts that already run", () => {
           [{ worker: gone }],
         );
         yield* lease.release;
-        assert.deepStrictEqual(yield* scheduler.workers, [local]);
+        const currentWorkers = yield* scheduler.workers;
+        assert.deepStrictEqual(currentWorkers, [local]);
         const agent = yield* developer;
         assert.strictEqual(
           (yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none())).worker,
@@ -1053,7 +1058,8 @@ describe("Worker scheduler on reload", () => {
             ),
             [{ worker: spare, running: 1 }],
           );
-          assert.deepStrictEqual(yield* scheduler.workers, [local, spare]);
+          const currentWorkers = yield* scheduler.workers;
+          assert.deepStrictEqual(currentWorkers, [local, spare]);
 
           const waiting = yield* Effect.forkChild(
             scheduler.reserve(runOf(3), submission(agent, 3), Option.none()),
@@ -1067,7 +1073,8 @@ describe("Worker scheduler on reload", () => {
             ),
             1,
           );
-          assert.deepStrictEqual(yield* scheduler.workers, [local]);
+          const nextWorkers = yield* scheduler.workers;
+          assert.deepStrictEqual(nextWorkers, [local]);
           yield* onLocal.release;
           assert.strictEqual((yield* leaseOf(waiting)).worker, local);
         }).pipe(Effect.scoped),
@@ -1139,8 +1146,10 @@ describe("Worker scheduler on reload", () => {
           assert.deepStrictEqual(failure.agents, []);
           assert.include(failure.message, 'worker "gpu" (added or given more slots by the reload)');
           assert.include(failure.message, "less than 1.5 GiB per Attempt");
-          assert.strictEqual(yield* instances.get, running);
-          assert.deepStrictEqual(yield* scheduler.workers, [local]);
+          const currentInstance = yield* instances.get;
+          assert.strictEqual(currentInstance, running);
+          const currentWorkers = yield* scheduler.workers;
+          assert.deepStrictEqual(currentWorkers, [local]);
           yield* assertWaiting(waiting, "the refused Worker has no slot");
         }).pipe(Effect.scoped),
       ),
@@ -1182,7 +1191,8 @@ describe("Worker scheduler on reload", () => {
           assert(rekinded._tag === "RestartRequiredError", rekinded._tag);
           assert.deepStrictEqual(rekinded.fields, ["workers.spare.kind"]);
           assert.include(rekinded.message, 'worker "spare" changed kind from local to ssh');
-          assert.strictEqual(yield* instances.get, running);
+          const currentInstance = yield* instances.get;
+          assert.strictEqual(currentInstance, running);
         }).pipe(Effect.scoped),
     ),
   );
@@ -1211,7 +1221,8 @@ describe("Worker scheduler on reload", () => {
         yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 2))]]);
         yield* instances.reload;
         assert.deepStrictEqual(preflighted, ["build-1 x2: gpt-5.6-sol"]);
-        assert.deepStrictEqual(yield* scheduler.workers, [WorkerName.make("build-1")]);
+        const currentWorkers = yield* scheduler.workers;
+        assert.deepStrictEqual(currentWorkers, [WorkerName.make("build-1")]);
       }).pipe(Effect.scoped),
     ),
   );
@@ -1425,8 +1436,10 @@ describe("SSH Workers on reload", () => {
             !events.some((event) => event.startsWith("build-2 x")),
             "no preflight without the token",
           );
-          assert.strictEqual(yield* instances.get, running);
-          assert.deepStrictEqual(yield* scheduler.workers, [build1]);
+          const currentInstance = yield* instances.get;
+          assert.strictEqual(currentInstance, running);
+          const currentWorkers = yield* scheduler.workers;
+          assert.deepStrictEqual(currentWorkers, [build1]);
         }).pipe(Effect.scoped),
       ),
   );
@@ -1456,7 +1469,8 @@ describe("SSH Workers on reload", () => {
           "build-2 x1: gpt-5.6-sol",
           "remove build-2",
         ]);
-        assert.deepStrictEqual(yield* scheduler.workers, [build1]);
+        const currentWorkers = yield* scheduler.workers;
+        assert.deepStrictEqual(currentWorkers, [build1]);
       }).pipe(Effect.scoped),
     ),
   );
@@ -1510,7 +1524,8 @@ describe("SSH Workers on reload", () => {
             ],
           ]);
           yield* instances.reload;
-          assert.deepStrictEqual(yield* scheduler.workers, [build1, build2]);
+          const currentWorkers = yield* scheduler.workers;
+          assert.deepStrictEqual(currentWorkers, [build1, build2]);
           assert.deepStrictEqual(events, ["add build-2", "build-2 x1: gpt-5.6-sol"]);
           events.length = 0;
           yield* writeInstanceFiles(root, [
@@ -1522,7 +1537,8 @@ describe("SSH Workers on reload", () => {
           yield* next.release;
           yield* onSecond.release;
           assert.deepStrictEqual(events, ["add build-2", "build-2 x2: gpt-5.6-sol"]);
-          assert.deepStrictEqual(yield* scheduler.workers, [build1, build2]);
+          const nextWorkers = yield* scheduler.workers;
+          assert.deepStrictEqual(nextWorkers, [build1, build2]);
         }).pipe(Effect.scoped),
       ),
   );
@@ -1579,11 +1595,15 @@ describe("Worker status", () => {
               ...harnesses.map(({ harness, check }) => `${worker} ${harness} ${check._tag}`),
             ]),
           );
-          assert.deepStrictEqual(yield* checks, ["local Passed", "local codex Passed"]);
-          assert.deepStrictEqual(yield* status.slots, [{ worker: local, capacity: 2, leased: 0 }]);
+          const preflightChecks = yield* checks;
+          assert.deepStrictEqual(preflightChecks, ["local Passed", "local codex Passed"]);
+          const currentSlots = yield* status.slots;
+          assert.deepStrictEqual(currentSlots, [{ worker: local, capacity: 2, leased: 0 }]);
 
-          yield* scheduler.reserve(runOf(1), submission(yield* developer, 1), Option.none());
-          assert.deepStrictEqual(yield* status.slots, [{ worker: local, capacity: 2, leased: 1 }]);
+          const developerAgent = yield* developer;
+          yield* scheduler.reserve(runOf(1), submission(developerAgent, 1), Option.none());
+          const nextSlots = yield* status.slots;
+          assert.deepStrictEqual(nextSlots, [{ worker: local, capacity: 2, leased: 1 }]);
 
           yield* writeInstanceFiles(root, [
             [
@@ -1593,7 +1613,8 @@ describe("Worker status", () => {
           ]);
           const refused = yield* Effect.flip(instances.reload);
           assert(refused._tag === "ReloadPreflightError", refused._tag);
-          assert.deepStrictEqual(yield* checks, [
+          const currentPreflightChecks = yield* checks;
+          assert.deepStrictEqual(currentPreflightChecks, [
             "local Passed",
             "local claude Failed",
             "local codex Passed",
@@ -1706,7 +1727,8 @@ it.live("applies Cloudflare connection revisions and re-adds removed workers", (
         "https://second.example/",
         "https://changed.example/",
       ]);
-      assert.deepStrictEqual(yield* scheduler.workers, [
+      const currentWorkers = yield* scheduler.workers;
+      assert.deepStrictEqual(currentWorkers, [
         WorkerName.make("cf-one"),
         WorkerName.make("cf-two"),
       ]);
@@ -1765,7 +1787,8 @@ it.live("accepts a corrected Cloudflare worker after its added-worker preflight 
       ]);
       const refused = yield* instances.reload.pipe(Effect.flip);
       assert(refused._tag === "ReloadPreflightError", refused._tag);
-      assert.strictEqual(yield* instances.get, running);
+      const currentInstance = yield* instances.get;
+      assert.strictEqual(currentInstance, running);
       assert.isFalse(addresses.has(WorkerName.make("cf-two")));
 
       yield* writeInstanceFiles(root, [
@@ -1787,7 +1810,8 @@ it.live("accepts a corrected Cloudflare worker after its added-worker preflight 
         addresses.get(WorkerName.make("cf-two"))?.workerUrl.href,
         "https://second.example/",
       );
-      assert.deepStrictEqual(yield* scheduler.workers, [
+      const currentWorkers = yield* scheduler.workers;
+      assert.deepStrictEqual(currentWorkers, [
         WorkerName.make("cf-one"),
         WorkerName.make("cf-two"),
       ]);
@@ -1806,7 +1830,8 @@ it.live("accepts a corrected Cloudflare worker after its added-worker preflight 
       const changed = yield* instances.reload.pipe(Effect.flip);
       assert(changed._tag === "ReloadPreflightError", changed._tag);
       assert.include(changed.cause.message, "doesn't answer");
-      assert.strictEqual(yield* instances.get, removed);
+      const nextInstance = yield* instances.get;
+      assert.strictEqual(nextInstance, removed);
       assert.strictEqual(
         addresses.get(WorkerName.make("cf-two"))?.workerUrl.href,
         "https://typo.example/",
@@ -1833,7 +1858,8 @@ it.live(
 
         yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(cloudflareWorker("cf-one"))]]);
         yield* instances.reload;
-        assert.deepStrictEqual(yield* scheduler.workers, [WorkerName.make("cf-one"), cfTwo]);
+        const currentWorkers = yield* scheduler.workers;
+        assert.deepStrictEqual(currentWorkers, [WorkerName.make("cf-one"), cfTwo]);
 
         // The re-add waits on cf-three's preflight while cf-two's last Attempt ends, then fails.
         yield* writeInstanceFiles(root, [
@@ -1848,7 +1874,8 @@ it.live(
         const readding = yield* Effect.forkChild(instances.reload.pipe(Effect.flip));
         yield* Deferred.await(slow.entered);
         yield* lease.release;
-        assert.deepStrictEqual(yield* scheduler.workers, [WorkerName.make("cf-one")]);
+        const nextWorkers = yield* scheduler.workers;
+        assert.deepStrictEqual(nextWorkers, [WorkerName.make("cf-one")]);
         yield* Deferred.succeed(slow.proceed, undefined);
         const refused = yield* Fiber.join(readding);
         assert(refused._tag === "ReloadPreflightError", refused._tag);

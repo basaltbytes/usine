@@ -42,5 +42,7 @@ export const readStoredRequest = (durable: DurableHarness["Service"], attemptId:
       attemptId,
       found: task !== undefined,
     });
-    return task === undefined ? Option.none() : Option.some(yield* storedRequestOf(task.input));
+    if (task === undefined) return Option.none();
+    const storedRequest = yield* storedRequestOf(task.input);
+    return Option.some(storedRequest);
   });

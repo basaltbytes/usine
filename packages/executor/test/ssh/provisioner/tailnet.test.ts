@@ -341,10 +341,8 @@ describe("Boat tailnet", () => {
             assert(Schema.is(RemoteShell)(context.request.host));
             assert.notInclude(context.request.host.ssh.args, "-J");
             assert.strictEqual(context.request.environment.HTTPS_PROXY, "");
-            assert.deepStrictEqual(
-              yield* context.request.gatewayCredential,
-              Option.some("subscription"),
-            );
+            const currentGatewayCredential = yield* context.request.gatewayCredential;
+            assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
             return yield* completes(context);
           }),
         );

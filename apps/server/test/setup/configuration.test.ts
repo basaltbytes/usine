@@ -18,14 +18,14 @@ it("starts an empty instance with one database revision and resumes without crea
   Effect.runPromise(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const root = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-empty-setup-" }),
-      );
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-empty-setup-" });
+      const root = InstanceDirectory.make(directory);
       const first = yield* initializeConfiguration(root);
       assert.equal(first.number, 1);
       assert.deepEqual(first.instance.config.repos, []);
       assert.equal(Option.isNone(first.instance.config.operator), true);
-      assert.deepEqual(yield* fs.readDirectory(root), []);
+      const entries = yield* fs.readDirectory(root);
+      assert.deepEqual(entries, []);
       const second = yield* initializeConfiguration(root);
       assert.equal(second.number, first.number);
       assert.equal((yield* (yield* ConfigurationStore).list(Option.none())).length, 1);

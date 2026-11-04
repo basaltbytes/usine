@@ -43,9 +43,10 @@ const unreachableCloudflare = {
 
 const startupFailure = (workers: NonNullable<(typeof UsineConfig.Encoded)["workers"]>) =>
   Effect.gen(function* () {
-    const directory = InstanceDirectory.make(
-      yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({ prefix: "usine-engine-" }),
-    );
+    const currentDirectory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+      prefix: "usine-engine-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     const config = Schema.decodeSync(UsineConfig)({ version: 1, repos: [], workers });
     return yield* Layer.build(
       workerEngineLayer(
@@ -178,7 +179,8 @@ const assertCredentialIsolation = (variable: string) =>
     assert.strictEqual(unavailable.length, 1);
     assert.strictEqual(unavailable[0]?.worker, failed);
     assert.include(unavailable[0]?.message ?? "", variable);
-    const need = (yield* reads.overview(yield* (yield* CurrentInstance).get)).needsYou.find(
+    const currentInstance = yield* (yield* CurrentInstance).get;
+    const need = (yield* reads.overview(currentInstance)).needsYou.find(
       (need) => need._tag === "WorkerPreflightNeed",
     );
     assert(need?._tag === "WorkerPreflightNeed");
@@ -187,7 +189,8 @@ const assertCredentialIsolation = (variable: string) =>
     const lease = yield* steps.reserve(RunId.make("healthy-run"), submission(1), Option.none());
     assert.strictEqual(lease.worker, healthy);
     yield* lease.release;
-    assert.deepStrictEqual(yield* steps.workers, [failed, healthy]);
+    const currentWorkers = yield* steps.workers;
+    assert.deepStrictEqual(currentWorkers, [failed, healthy]);
   });
 
 it.effect(
@@ -195,9 +198,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-ssh-startup-" }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-ssh-startup-" });
+      const directory = InstanceDirectory.make(currentDirectory);
       // Only the SSH transport is scripted; address resolution, executor, scheduler, and storage are real.
       yield* fs.writeFileString(
         `${directory}/ssh`,
@@ -237,9 +239,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-cf-startup-" }),
-      );
+      const currentDirectory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-cf-startup-" });
+      const directory = InstanceDirectory.make(currentDirectory);
       const healthRequests: Array<string> = [];
       const fetch: typeof globalThis.fetch = async (input) => {
         const url = new URL(input instanceof Request ? input.url : String(input));
@@ -287,9 +288,11 @@ it.effect(
         const lease = yield* Fiber.join(waiting);
         assert.strictEqual(lease.worker, failed);
         assert.deepStrictEqual(healthRequests, ["healthy.test", "failed.test"]);
-        assert.deepStrictEqual(yield* status.unavailable, []);
+        const currentUnavailable = yield* status.unavailable;
+        assert.deepStrictEqual(currentUnavailable, []);
+        const currentInstance = yield* (yield* CurrentInstance).get;
         assert.isFalse(
-          (yield* reads.overview(yield* (yield* CurrentInstance).get)).needsYou.some(
+          (yield* reads.overview(currentInstance)).needsYou.some(
             (need) => need._tag === "WorkerPreflightNeed",
           ),
         );

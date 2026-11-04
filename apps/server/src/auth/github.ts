@@ -36,7 +36,8 @@ export const githubSignInLayer = (
   Layer.effect(
     GitHubSignIn,
     Effect.gen(function* () {
-      const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);
+      const httpClient = yield* HttpClient.HttpClient;
+      const client = HttpClient.filterStatusOk(httpClient);
       const config = yield* Config.all({
         clientId: Config.option(Config.schema(ClientId, "USINE_GITHUB_CLIENT_ID")),
         clientSecret: Config.option(Config.Redacted("USINE_GITHUB_CLIENT_SECRET")),
@@ -185,7 +186,8 @@ export const githubSignInLayer = (
               403,
             );
           }
-          return Option.some(yield* identity(result.access_token));
+          const memberIdentity = yield* identity(result.access_token);
+          return Option.some(memberIdentity);
         }),
         lookup: Effect.fn("GitHubSignIn.lookup")((login) =>
           request(

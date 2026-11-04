@@ -53,10 +53,8 @@ it.live(
           ]);
           const runtime = engineLayer(directory, worker.executor);
           const firstScope = yield* Scope.make();
-          const first = Context.get(
-            yield* Scope.provide(Layer.build(runtime), firstScope),
-            RunEngine,
-          );
+          const services = yield* Scope.provide(Layer.build(runtime), firstScope);
+          const first = Context.get(services, RunEngine);
           const ciOnGreen = [
             CiLabelMutation.make({
               item: ItemNumber.make(811),
@@ -84,13 +82,12 @@ it.live(
           assert(other._tag === "Claimed");
           yield* waitFor(first, other.runId, ({ run }) => run.state._tag === "Succeeded");
           yield* first.drain;
-          assert.strictEqual(yield* TxRef.get(worker.leased), 0);
+          const leasedState = yield* TxRef.get(worker.leased);
+          assert.strictEqual(leasedState, 0);
           yield* Scope.close(firstScope, Exit.void);
           const secondScope = yield* Scope.make();
-          const second = Context.get(
-            yield* Scope.provide(Layer.build(runtime), secondScope),
-            RunEngine,
-          );
+          const currentServices = yield* Scope.provide(Layer.build(runtime), secondScope);
+          const second = Context.get(currentServices, RunEngine);
           const waits = yield* second.awaitingCi;
           assert.strictEqual(waits.length, 1);
           const restored = waits[0];

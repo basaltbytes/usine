@@ -33,7 +33,8 @@ export const setupRoutes = (setup: Setup["Service"], origin: string) => ({
       SetupApi.endpoints.manifest.method,
       SetupApi.endpoints.manifest.path,
       Effect.gen(function* () {
-        const result = yield* setup.begin(yield* body(ManifestRequest));
+        const manifestRequest = yield* body(ManifestRequest);
+        const result = yield* setup.begin(manifestRequest);
         return json({ action: result.action, manifest: result.manifest }).pipe(
           HttpServerResponse.setCookieUnsafe(COOKIE, result.state, {
             httpOnly: true,

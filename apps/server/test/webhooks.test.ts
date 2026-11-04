@@ -97,7 +97,8 @@ it("verifies the raw body outside operator authentication and hints only current
         },
       );
       assert.deepEqual(urls, ["https://usine.example/webhooks/github"]);
-      const auth = authenticatedRoutes(yield* authFixture());
+      const authentication = yield* authFixture();
+      const auth = authenticatedRoutes(authentication);
       const web = HttpRouter.toWebHandler(
         Layer.merge(
           routes,
@@ -129,11 +130,13 @@ it("verifies the raw body outside operator authentication and hints only current
       assert.equal((yield* send(web.handler, body, signature(body), "")).status, 400);
       assert.deepEqual(hints, []);
       yield* TestClock.adjust("10 minutes");
-      assert.isTrue(yield* health.silent);
+      const currentSilent = yield* health.silent;
+      assert.isTrue(currentSilent);
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.deepEqual(hints, [repository, repository]);
-      assert.isFalse(yield* health.silent);
+      const nextSilent = yield* health.silent;
+      assert.isFalse(nextSilent);
       for (const [payload, event] of [
         ["{}", "ping"],
         [body, "ping"],
@@ -280,7 +283,8 @@ it("switches a running endpoint between modes and public URLs without rebuilding
       yield* TestClock.adjust("1 day");
       yield* SubscriptionRef.set(current, instance("endpoint"));
       yield* TestClock.adjust("1 millis");
-      assert.isFalse(yield* health.silent);
+      const currentSilent = yield* health.silent;
+      assert.isFalse(currentSilent);
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.deepEqual(hints, [repository]);
       yield* SubscriptionRef.update(current, (loaded) =>

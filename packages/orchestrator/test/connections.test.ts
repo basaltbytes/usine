@@ -39,7 +39,8 @@ for (const restart of [false, true]) {
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const root = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const root = InstanceDirectory.make(directory);
         yield* writeInstanceFiles(root, [["usine.yaml", yaml("original-host")]]);
         yield* fs.makeDirectory(`${root}/agents`);
         yield* fs.makeDirectory(`${root}/loops`);
@@ -135,7 +136,8 @@ for (const restart of [false, true]) {
             Effect.scoped,
             Effect.provide(reloadableInstanceLayer(root)),
           );
-        assert.deepStrictEqual(yield* fs.readDirectory(`${root}/.usine/attempt-connections`), []);
+        const entries = yield* fs.readDirectory(`${root}/.usine/attempt-connections`);
+        assert.deepStrictEqual(entries, []);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 }

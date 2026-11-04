@@ -259,12 +259,11 @@ const withFactory = <A, E>(
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-closed-items-",
-      }),
-    );
+    const currentDirectory = yield* fs.makeTempDirectoryScoped({
+      directory: sqliteTempDirectory(),
+      prefix: "usine-closed-items-",
+    });
+    const directory = InstanceDirectory.make(currentDirectory);
     const engine = localEngineLayer(directory).pipe(
       Layer.provide(executor),
       Layer.provide(alwaysHoldsLayer),
@@ -351,18 +350,23 @@ describe("Items no Loop acts on", () => {
           update(items, 468, { round: 2 });
           const blocked = (yield* polling.poll(instance)).submissions[0];
           assert(blocked?._tag === "CycleBlocked");
-          assert.deepStrictEqual(yield* needTags(instance), ["CycleBudgetNeed"]);
+          const attentionTags = yield* needTags(instance);
+          assert.deepStrictEqual(attentionTags, ["CycleBudgetNeed"]);
           update(items, 468, { state: "MERGED" });
           const merged = yield* polling.poll(instance);
           assert.deepStrictEqual(merged.submissions, []);
-          assert.deepStrictEqual(yield* budgets.asks, []);
-          assert.deepStrictEqual(yield* needTags(instance), []);
-          assert.strictEqual(yield* budgets.generation(gitHubItemKey(repository, 468)), 0);
+          const currentAsks = yield* budgets.asks;
+          assert.deepStrictEqual(currentAsks, []);
+          const currentAttentionTags = yield* needTags(instance);
+          assert.deepStrictEqual(currentAttentionTags, []);
+          const currentGeneration = yield* budgets.generation(gitHubItemKey(repository, 468));
+          assert.strictEqual(currentGeneration, 0);
           // The budget wasn't reset, so the reopened pull request is at its limit again.
           update(items, 468, { state: "OPEN" });
           const reopened = (yield* polling.poll(instance)).submissions[0];
           assert(reopened?._tag === "CycleBlocked");
-          assert.deepStrictEqual(yield* needTags(instance), ["CycleBudgetNeed"]);
+          const nextAttentionTags = yield* needTags(instance);
+          assert.deepStrictEqual(nextAttentionTags, ["CycleBudgetNeed"]);
         }),
       );
     },
@@ -383,11 +387,13 @@ describe("Items no Loop acts on", () => {
           yield* polling.poll(instance);
           const [failed] = yield* settledRuns;
           assert(failed?.run.state._tag === "Failed");
-          assert.deepStrictEqual(yield* needTags(instance), ["RunFailureNeed"]);
+          const attentionTags = yield* needTags(instance);
+          assert.deepStrictEqual(attentionTags, ["RunFailureNeed"]);
           assert.isNull((yield* operator.detail(instance, failed.run.id)).settledItemState);
           update(items, 177, { state: "CLOSED" });
           yield* polling.poll(instance);
-          assert.deepStrictEqual(yield* needTags(instance), []);
+          const currentAttentionTags = yield* needTags(instance);
+          assert.deepStrictEqual(currentAttentionTags, []);
           const detail = yield* operator.detail(instance, failed.run.id);
           assert.strictEqual(detail.settledItemState, "issue-closed");
           assert.isTrue(detail.run.canResolveFailure);
@@ -431,7 +437,8 @@ describe("Items no Loop acts on", () => {
           yield* polling.poll(instance);
           const [failed] = yield* settledRuns;
           assert(failed?.run.state._tag === "Failed");
-          assert.deepStrictEqual(yield* attention, {
+          const attentionNeeds = yield* attention;
+          assert.deepStrictEqual(attentionNeeds, {
             status: "needs-you",
             ring: true,
             taskNeedsYou: true,
@@ -439,7 +446,8 @@ describe("Items no Loop acts on", () => {
           });
           update(items, 470, { state: "MERGED" });
           yield* polling.poll(instance);
-          assert.deepStrictEqual(yield* attention, {
+          const currentAttentionNeeds = yield* attention;
+          assert.deepStrictEqual(currentAttentionNeeds, {
             status: "clear",
             ring: false,
             taskNeedsYou: false,
@@ -656,14 +664,16 @@ describe("Items no Loop acts on", () => {
           const reader = yield* RunReader;
           const opened = (yield* polling.poll(instance)).submissions[0];
           assert(opened?._tag === "Claimed");
-          assert.deepStrictEqual(yield* needTags(instance), ["ApprovalNeed"]);
+          const attentionTags = yield* needTags(instance);
+          assert.deepStrictEqual(attentionTags, ["ApprovalNeed"]);
           update(items, 74, { state: "CLOSED" });
           const closed = yield* polling.poll(instance);
           assert.strictEqual(closed.revokedRuns, 1);
           const revoked = yield* reader.inspect(opened.runId);
           assert(revoked.run.state._tag === "Canceled");
           assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
-          assert.deepStrictEqual(yield* needTags(instance), []);
+          const currentAttentionTags = yield* needTags(instance);
+          assert.deepStrictEqual(currentAttentionTags, []);
         }),
       );
     },
@@ -695,8 +705,10 @@ describe("Items no Loop acts on", () => {
           for (const number of [468, 469]) update(items, number, { state: "MERGED" });
           update(items, 177, { state: "CLOSED" });
           yield* polling.poll(instance);
-          assert.deepStrictEqual(yield* needTags(instance), []);
-          assert.deepStrictEqual(yield* budgets.asks, []);
+          const attentionTags = yield* needTags(instance);
+          assert.deepStrictEqual(attentionTags, []);
+          const currentAsks = yield* budgets.asks;
+          assert.deepStrictEqual(currentAsks, []);
         }),
       );
     },

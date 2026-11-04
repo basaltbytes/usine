@@ -35,7 +35,8 @@ describe("Codex child live contract", () => {
       () =>
         live(
           Effect.gen(function* () {
-            return yield* steeringContract(yield* CodexChildBackend, brain, child);
+            const codexChildBackend = yield* CodexChildBackend;
+            return yield* steeringContract(codexChildBackend, brain, child);
           }),
         ),
       210_000,
@@ -46,7 +47,8 @@ describe("Codex child live contract", () => {
       () =>
         live(
           Effect.gen(function* () {
-            return yield* interruptionContract(yield* CodexChildBackend, brain, child);
+            const codexChildBackend = yield* CodexChildBackend;
+            return yield* interruptionContract(codexChildBackend, brain, child);
           }),
         ),
       150_000,

@@ -35,12 +35,11 @@ describe("Attempt transcripts", () => {
   it.live("matches transcript usage across attempts, out-of-order reports, and redelivery", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-store-usage-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-store-usage-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
         const database = yield* RunDatabase;
@@ -194,14 +193,10 @@ describe("Attempt transcripts", () => {
             )
             .pipe(Effect.flip);
           assert.strictEqual(rejected._tag, "EnginePersistenceError");
-          assert.deepStrictEqual(
-            yield* store.transcript(TranscriptAllQuery.make({ attemptId })),
-            all,
-          );
-          assert.deepStrictEqual(
-            yield* store.transcript(TranscriptUsageQuery.make({ attemptId })),
-            usage,
-          );
+          const currentTranscript = yield* store.transcript(TranscriptAllQuery.make({ attemptId }));
+          assert.deepStrictEqual(currentTranscript, all);
+          const nextTranscript = yield* store.transcript(TranscriptUsageQuery.make({ attemptId }));
+          assert.deepStrictEqual(nextTranscript, usage);
           yield* database.run(sql`DROP TRIGGER reject_usage`).execute();
         }
       }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
@@ -211,12 +206,11 @@ describe("Attempt transcripts", () => {
   it.live.each([3, 5] as const)("reads stored v%s outbound envelopes", (version) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-store-protocol-v3-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-store-protocol-v3-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const submission = Submission.make({
         event: Event.make({
           id: EventId.make("protocol-v3-event"),
@@ -272,12 +266,11 @@ describe("Attempt transcripts", () => {
   it.live.each([4, 5] as const)("reads stored v%s inbound envelopes", (version) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({
-          directory: sqliteTempDirectory(),
-          prefix: "usine-store-protocol-v4-",
-        }),
-      );
+      const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-store-protocol-v4-",
+      });
+      const directory = InstanceDirectory.make(currentDirectory);
       const submission = Submission.make({
         event: Event.make({
           id: EventId.make("protocol-v4-event"),

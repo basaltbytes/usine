@@ -26,17 +26,15 @@ it.live(
       const remote = yield* makeRemote(root);
       const storage = new StubStorage();
       const firstScope = yield* Scope.make();
-      const first = Context.get(
-        yield* Scope.provide(
-          Layer.build(
-            localRuntime(instance, remote, {
-              attemptRuntime: stubAttemptRuntime(storage, worksFor(30_000)),
-            }),
-          ),
-          firstScope,
+      const services = yield* Scope.provide(
+        Layer.build(
+          localRuntime(instance, remote, {
+            attemptRuntime: stubAttemptRuntime(storage, worksFor(30_000)),
+          }),
         ),
-        RunEngine,
+        firstScope,
       );
+      const first = Context.get(services, RunEngine);
       const accepted = yield* first.submit(
         Submission.make({ ...submission(1), permissions: "read" }),
       );
@@ -46,7 +44,8 @@ it.live(
       yield* waitForStarted(first, attempt.id);
       const worktree = `${root}/.usine/workers/local/attempts/${safeSegment(attempt.id)}`;
       yield* Scope.close(firstScope, Exit.void);
-      assert.isTrue(yield* fs.exists(worktree));
+      const currentExists = yield* fs.exists(worktree);
+      assert.isTrue(currentExists);
 
       const preparing = yield* Deferred.make<void>();
       const refusing = yield* Ref.make(true);
@@ -60,10 +59,8 @@ it.live(
             cancel: (id) =>
               Effect.gen(function* () {
                 yield* Ref.update(observations, (all) => [...all, true]);
-                assert.isTrue(
-                  yield* fs.exists(worktree).pipe(Effect.orDie),
-                  "the checkout must exist until the parent stops",
-                );
+                const currentExists = yield* fs.exists(worktree).pipe(Effect.orDie);
+                assert.isTrue(currentExists, "the checkout must exist until the parent stops");
                 if (yield* Ref.get(refusing))
                   return yield* InfraFailure.make({ message: "Stop refused", cause: "offline" });
                 yield* original.cancel(id);
@@ -79,23 +76,23 @@ it.live(
             : fs.writeFileString(path, content, options),
       });
       const secondScope = yield* Scope.make();
-      const second = Context.get(
-        yield* Scope.provide(
-          Layer.build(
-            localRuntime(instance, remote, {
-              attemptRuntime: runtime,
-              platform: Layer.merge(NodeServices.layer, preparingFs),
-            }),
-          ),
-          secondScope,
+      const currentServices = yield* Scope.provide(
+        Layer.build(
+          localRuntime(instance, remote, {
+            attemptRuntime: runtime,
+            platform: Layer.merge(NodeServices.layer, preparingFs),
+          }),
         ),
-        RunEngine,
+        secondScope,
       );
+      const second = Context.get(currentServices, RunEngine);
       yield* Deferred.await(preparing);
       const failure = yield* Effect.flip(second.cancel(accepted.runId));
       assert.strictEqual(failure._tag, "AttemptCancellationError");
-      assert.isTrue(yield* fs.exists(worktree));
-      assert.isNotEmpty(yield* Ref.get(observations));
+      const nextExists = yield* fs.exists(worktree);
+      assert.isTrue(nextExists);
+      const observationsState = yield* Ref.get(observations);
+      assert.isNotEmpty(observationsState);
       yield* Ref.set(refusing, false);
       yield* Effect.repeat(fs.exists(worktree), {
         until: (exists) => !exists,

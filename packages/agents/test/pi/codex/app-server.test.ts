@@ -148,7 +148,8 @@ describe("Codex app-server transport", () => {
           yield* TestClock.adjust(0);
           assert.strictEqual(first.pollUnsafe(), undefined, "EOF alone is not process exit");
           assert.strictEqual(concurrent.pollUnsafe(), undefined, "concurrent callers must wait");
-          assert.strictEqual(yield* Deferred.isDone(process.killed), false);
+          const killedDone = yield* Deferred.isDone(process.killed);
+          assert.strictEqual(killedDone, false);
 
           yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(0));
           yield* Fiber.join(first);
@@ -188,8 +189,10 @@ describe("Codex app-server transport", () => {
       const error = yield* Fiber.join(scoped);
       const matchesError = Schema.is(SessionOperationError)(error);
       assert(matchesError);
-      assert.strictEqual(yield* Deferred.isDone(process.killed), true);
-      assert.strictEqual(yield* Deferred.isDone(process.exit), true);
+      const killedDone = yield* Deferred.isDone(process.killed);
+      assert.strictEqual(killedDone, true);
+      const exitDone = yield* Deferred.isDone(process.exit);
+      assert.strictEqual(exitDone, true);
     }),
   );
 
@@ -285,7 +288,8 @@ describe("Codex app-server transport", () => {
           assert.strictEqual(closing.pollUnsafe(), undefined, "stdout still holds a reply");
           yield* Deferred.succeed(readOutput, undefined);
           yield* Fiber.join(closing);
-          assert.deepStrictEqual(yield* Fiber.join(replied), { accepted: true });
+          const repliedResult = yield* Fiber.join(replied);
+          assert.deepStrictEqual(repliedResult, { accepted: true });
           const outcome = yield* Fiber.join(unanswered);
           assert(Result.isFailure(outcome));
           const matchesOutcomeFailure = Schema.is(SessionOperationError)(outcome.failure);

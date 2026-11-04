@@ -100,10 +100,14 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
               offset: cursor,
             });
           }
-          if ("stdout" in frame)
-            yield* Queue.offer(stdout, yield* Effect.fromResult(Base64.decode(frame.stdout)));
-          if ("stderr" in frame)
-            yield* Queue.offer(stderr, yield* Effect.fromResult(Base64.decode(frame.stderr)));
+          if ("stdout" in frame) {
+            const stdoutBytes = yield* Effect.fromResult(Base64.decode(frame.stdout));
+            yield* Queue.offer(stdout, stdoutBytes);
+          }
+          if ("stderr" in frame) {
+            const stderrBytes = yield* Effect.fromResult(Base64.decode(frame.stderr));
+            yield* Queue.offer(stderr, stderrBytes);
+          }
           if ("exitCode" in frame) {
             if (frame.exitCode === 0) {
               yield* stopRemote;

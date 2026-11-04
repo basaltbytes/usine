@@ -66,7 +66,8 @@ it("requires authentication even from loopback, binds cookie writes to CSRF, and
         )).status,
         401,
       );
-      const token = linkToken(yield* services.authentication.link);
+      const currentLink = yield* services.authentication.link;
+      const token = linkToken(currentLink);
       const response = yield* Effect.promise(() =>
         request(app, "/api/auth/link/consume", "POST", { token }),
       );
@@ -95,14 +96,16 @@ it("requires authentication even from loopback, binds cookie writes to CSRF, and
       const session = yield* Effect.promise(() =>
         request(app, "/api/auth/session", "GET", undefined, headers),
       );
+      const responseBody = yield* Effect.promise(() => session.json());
       const { csrf } = Schema.decodeUnknownSync(Schema.Struct({ csrf: Schema.String }))(
-        yield* Effect.promise(() => session.json()),
+        responseBody,
       );
       const authorized = { ...headers, "x-usine-csrf": csrf };
       const action = yield* Effect.promise(() =>
         request(app, "/api/future-route", "POST", {}, authorized),
       );
-      assert.deepEqual(yield* Effect.promise(() => action.json()), { actor: "alice" });
+      const currentResponseBody = yield* Effect.promise(() => action.json());
+      assert.deepEqual(currentResponseBody, { actor: "alice" });
       assert.equal(
         (yield* Effect.promise(() => request(app, "/api/auth/sign-out", "POST", {}, authorized)))
           .status,
@@ -135,8 +138,10 @@ it("enrolls the first admin only after a setup link and a cookie-bound GitHub we
         }),
       );
       assert.include(refused.headers.get("location") ?? "", "not%20a%20member");
-      assert.deepEqual(yield* services.store.members, []);
-      const token = linkToken(yield* services.authentication.link);
+      const currentMembers = yield* services.store.members;
+      assert.deepEqual(currentMembers, []);
+      const currentLink = yield* services.authentication.link;
+      const token = linkToken(currentLink);
       const opened = yield* Effect.promise(() =>
         request(app, "/api/auth/link/consume", "POST", { token }),
       );
@@ -197,7 +202,8 @@ it("issues a device token once, refuses non-members, and expires one-time links"
           .status,
         403,
       );
-      const token = linkToken(yield* services.authentication.link);
+      const currentLink = yield* services.authentication.link;
+      const token = linkToken(currentLink);
       yield* TestClock.adjust("11 minutes");
       assert.equal(
         (yield* services.authentication.consumeLink(token).pipe(Effect.flip)).status,
@@ -218,7 +224,8 @@ it("limits sign-in attempts globally and refuses cross-site link consumption", a
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
-      const token = linkToken(yield* services.authentication.link);
+      const currentLink = yield* services.authentication.link;
+      const token = linkToken(currentLink);
       assert.equal(
         (yield* Effect.promise(() =>
           request(
@@ -282,18 +289,16 @@ it("restricts link issuance to the local credential and binds links to the origi
         request(app, "/api/auth/link", "POST", {}, { authorization: `Bearer ${localSecret}` }),
       );
       assert.equal(response.status, 200);
-      const { url } = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(
-        yield* Effect.promise(() => response.json()),
-      );
+      const responseBody = yield* Effect.promise(() => response.json());
+      const { url } = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(responseBody);
       yield* services.store.remove(alice.id);
       assert.equal(
         (yield* services.authentication.consumeLink(linkToken(url)).pipe(Effect.flip)).status,
         401,
       );
       const setup = yield* authFixture([]);
-      const setupSession = yield* setup.authentication.consumeLink(
-        linkToken(yield* setup.authentication.link),
-      );
+      const currentLink = yield* setup.authentication.link;
+      const setupSession = yield* setup.authentication.consumeLink(linkToken(currentLink));
       const setupApp = HttpRouter.toWebHandler(authenticatedRoutes(setup).routes, {
         disableLogger: true,
       });
@@ -317,7 +322,8 @@ it("keeps valid sign-ins available after invalid challenges exhaust their limits
   Effect.runPromise(
     Effect.gen(function* () {
       const { authentication: auth } = yield* authFixture();
-      const link = linkToken(yield* auth.link);
+      const currentLink = yield* auth.link;
+      const link = linkToken(currentLink);
       const web = yield* auth.startWeb(false);
       const device = yield* auth.startDevice(TokenName.make("Phone"));
       for (let count = 0; count < 61; count++) {
@@ -329,7 +335,8 @@ it("keeps valid sign-ins available after invalid challenges exhaust their limits
       yield* auth.consumeLink(link);
       yield* auth.finishWeb(Redacted.value(web.state), "fake");
       yield* TestClock.adjust("2 seconds");
-      assert.isTrue(Option.isSome(yield* auth.pollDevice(Redacted.value(device.id))));
+      const deviceResult = yield* auth.pollDevice(Redacted.value(device.id));
+      assert.isTrue(Option.isSome(deviceResult));
     }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
   ));
 
@@ -356,7 +363,8 @@ it("persists a GitHub login rename through web and device sign-in", async () =>
         const session = yield* signIn;
         const access = yield* auth.authenticate(Redacted.value(session.secret));
         assert.equal(Option.getOrNull(access.member)?.login, renamed.login);
-        assert.deepEqual(yield* store.members, [renamed]);
+        const currentMembers = yield* store.members;
+        assert.deepEqual(currentMembers, [renamed]);
         yield* store.add(Member.make({ ...bob, login: alice.login }), false);
       }
     }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
@@ -380,7 +388,8 @@ it("defers operator enrollment when GitHub is unavailable and retries on the nex
           lookup: () => Effect.fail(authFailure("GitHub is unavailable", 502)),
         }),
       );
-      assert.deepEqual(yield* services.store.members, []);
+      const currentMembers = yield* services.store.members;
+      assert.deepEqual(currentMembers, []);
       yield* seed.pipe(Effect.provideService(GitHubSignIn, services.github));
       assert.equal((yield* services.store.members)[0]?.id, alice.id);
     }).pipe(Effect.scoped),
@@ -404,7 +413,8 @@ it("public health reports SQLite degradation and recovery without failing livene
           yield* Ref.set(state, sqliteReader);
           const response = yield* Effect.promise(() => request(app, "/api/health"));
           assert.equal(response.status, 200);
-          assert.deepEqual(yield* Effect.promise(() => response.json()), {
+          const responseBody = yield* Effect.promise(() => response.json());
+          assert.deepEqual(responseBody, {
             ok: true,
             sqliteReader,
           });

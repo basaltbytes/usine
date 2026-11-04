@@ -412,6 +412,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         instanceType: worker.address.instanceType,
       };
       yield* Effect.annotateCurrentSpan(fields);
+      const issuedAt = yield* issueTime;
       yield* worker.client
         .create(
           name,
@@ -420,7 +421,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             attempt,
             image: worker.address.image,
             instanceType: worker.address.instanceType,
-            credentials: noCredentials(yield* issueTime),
+            credentials: noCredentials(issuedAt),
           }),
         )
         .pipe(Effect.mapError(operationError(operation)));
@@ -891,7 +892,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           const salvage = (yield* Deferred.isDone(salvaged))
-            ? Option.some(yield* Effect.exit(Deferred.await(salvaged)))
+            ? yield* Effect.exit(Deferred.await(salvaged)).pipe(Effect.asSome)
             : Option.none();
           const retained =
             (yield* Ref.get(keep)) ||
@@ -1014,7 +1015,8 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             // Closes the checkout scope only if stopping the sandbox's commands succeeds.
             yield* stopCommands("cleanup", worker, name);
             yield* Scope.close(resource.scope, exit);
-            yield* Deferred.done(salvaged, yield* Effect.exit(resource.provisioned.salvaged));
+            const salvageExit = yield* Effect.exit(resource.provisioned.salvaged);
+            yield* Deferred.done(salvaged, salvageExit);
           },
           (effect) =>
             effect.pipe(
