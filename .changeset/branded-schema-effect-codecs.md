@@ -14,4 +14,4 @@
 "create-usine": patch
 ---
 
-Brand Schema records and errors so TypeScript callers construct or decode validated values. Run configuration formatting, persistence codecs, and stream message encoding inside Effects, with codec failures reported through the existing operation error channels. Configuration and HTTP JSON formats remain unchanged.
+Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.

@@ -481,7 +481,7 @@ for (const scenario of [
           const instance = yield* (yield* InstanceFolder).load(root);
           const store = yield* ConfigurationStore;
           const current = yield* store.read;
-          const decodedValue2 = yield* configurationEntities(instance);
+          const decodedValue2 = configurationEntities(instance);
           yield* store.commit({
             expected: current.number,
             actor: instance.config.operator,
@@ -568,7 +568,7 @@ for (const scenario of ["empty registry", "unmatched selector"] as const) {
         const instance = yield* (yield* InstanceFolder).load(root);
         const store = yield* ConfigurationStore;
         const current = yield* store.read;
-        const decodedValue4 = yield* configurationEntities(instance);
+        const decodedValue4 = configurationEntities(instance);
         yield* store.commit({
           expected: current.number,
           actor: instance.config.operator,

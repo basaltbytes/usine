@@ -111,8 +111,7 @@ const makeCodexChild = Effect.gen(function* () {
       let cursor: string | null = null;
       do {
         const params: ModelListParams = { cursor, includeHidden: true, limit: 100 };
-        const modelParams = yield* json(params, "launch", client);
-        const response = yield* connection.request("launch", "model/list", modelParams);
+        const response = yield* connection.request("launch", "model/list", json(params));
         const page = yield* decodeResponse(
           ModelListResponse,
           "launch",
@@ -164,8 +163,7 @@ const makeCodexChild = Effect.gen(function* () {
         ephemeral: false,
         serviceName: "usine",
       };
-      const threadRequest = yield* json(threadParams, "launch", client);
-      const threadJson = yield* connection.request("launch", "thread/start", threadRequest);
+      const threadJson = yield* connection.request("launch", "thread/start", json(threadParams));
       const thread = yield* decodeResponse(
         ThreadStartResponse,
         "launch",
@@ -236,12 +234,11 @@ const makeCodexChild = Effect.gen(function* () {
       let retrying = false;
       const startTurn = Effect.fn("CodexChildBackend.startTurn")(function* (message: string) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-        const turnRequest = yield* json(
-          { ...turnParams, input: [{ type: "text", text: message, text_elements: [] }] },
+        const response = yield* connection.request(
           "stream",
-          client,
+          "turn/start",
+          json({ ...turnParams, input: [{ type: "text", text: message, text_elements: [] }] }),
         );
-        const response = yield* connection.request("stream", "turn/start", turnRequest);
         const started = yield* decodeResponse(
           TurnStartResponse,
           "stream",
@@ -296,14 +293,15 @@ const makeCodexChild = Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         if (!turnActive || interrupting) return;
         interrupting = true;
-        yield* json({ threadId: thread.thread.id, turnId }, "interrupt", client).pipe(
-          Effect.flatMap((params) => connection.request("interrupt", "turn/interrupt", params)),
-          Effect.onError(() =>
-            Effect.sync(() => {
-              interrupting = false;
-            }),
-          ),
-        );
+        yield* connection
+          .request("interrupt", "turn/interrupt", json({ threadId: thread.thread.id, turnId }))
+          .pipe(
+            Effect.onError(() =>
+              Effect.sync(() => {
+                interrupting = false;
+              }),
+            ),
+          );
       });
       const steer: (message: string) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn(
         "CodexChildBackend.steer",
@@ -321,17 +319,16 @@ const makeCodexChild = Effect.gen(function* () {
             replayedGuidance = Option.some({ turnId, text, count: unread.length });
           return "read" as const;
         }
-        const steerRequest = yield* json(
-          {
+        // Codex records steered input as a user message once the running turn reads it.
+        yield* connection.request(
+          "steer",
+          "turn/steer",
+          json({
             threadId: thread.thread.id,
             expectedTurnId: turnId,
             input: [{ type: "text", text: message, text_elements: [] }],
-          },
-          "steer",
-          client,
+          }),
         );
-        // Codex records steered input as a user message once the running turn reads it.
-        yield* connection.request("steer", "turn/steer", steerRequest);
         return "queued" as const;
       });
       const conversation = yield* sessionConversation({
@@ -387,8 +384,7 @@ const makeCodexChild = Effect.gen(function* () {
           sandbox: "danger-full-access",
           excludeTurns: false,
         };
-        const resumeRequest = yield* json(params, "launch", client);
-        const response = yield* connection.request("launch", "thread/resume", resumeRequest);
+        const response = yield* connection.request("launch", "thread/resume", json(params));
         const restored = yield* decodeResponse(
           ThreadResumeResponse,
           "launch",

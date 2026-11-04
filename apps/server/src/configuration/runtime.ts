@@ -88,8 +88,8 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
         ),
       ),
     );
-    const currentEntities = yield* configurationEntities(current.instance.value);
-    const migratedEntities = yield* configurationEntities(migrated);
+    const currentEntities = configurationEntities(current.instance.value);
+    const migratedEntities = configurationEntities(migrated);
     yield* store
       .commit({
         expected: current.number,
@@ -134,7 +134,7 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
         invalidAgents: [],
         quarantinedLoops: [],
       });
-  const importedEntities = yield* configurationEntities(imported);
+  const importedEntities = configurationEntities(imported);
   yield* store
     .commit({
       expected: current.number,

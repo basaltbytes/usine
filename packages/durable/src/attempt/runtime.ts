@@ -6,12 +6,7 @@ import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { StepResult } from "@usine/core/step/result";
 import { type Brand, Deferred, Duration, Effect, Layer, Option, Result, Schema } from "effect";
 import { type AttemptRequest, AttemptRuntime, type FinishedAttempt } from "../attempt-runtime.ts";
-import {
-  durableError,
-  DurableHarness,
-  type DurableHarnessError,
-  type DurableStorageFailed,
-} from "../harness.ts";
+import { DurableHarness, type DurableHarnessError, type DurableStorageFailed } from "../harness.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc, RELEASE_GUIDANCE } from "./documents.ts";
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
@@ -72,7 +67,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     request: AttemptRequest,
   ) {
     const attemptId = request.spec.attemptId;
-    const input = yield* taskInput(request);
+    const input = taskInput(request);
     return yield* durable.use("create or find the Attempt task", async (harness, context) => {
       const root = await harness.root(context);
       return root.commit(async (tx) => {
@@ -196,9 +191,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
   const recordResult = Effect.fn("AttemptRuntime.recordResult")(
     function* (attemptId: AttemptId, result: StepResult) {
       yield* Effect.annotateCurrentSpan({ attemptId });
-      const encoded = yield* encodeResult(result).pipe(
-        Effect.mapError((cause) => durableError("encode the Attempt result", cause)),
-      );
+      const encoded = yield* encodeResult(result).pipe(Effect.orDie);
       yield* durable.use("record the Attempt's result", (harness, context) =>
         harness.commit(async (tx) => {
           const record = await tx.doc(AttemptRecordDoc, attemptId, null);
@@ -315,9 +308,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     }
     if (state.queued) {
       hub.childInputs.add(inputSequence);
-      const encoded = yield* encodeIntervention(intervention).pipe(
-        Effect.mapError((cause) => durableError("record the queued operator input", cause)),
-      );
+      const encoded = yield* encodeIntervention(intervention).pipe(Effect.orDie);
       yield* durable.use("record the queued operator input", (harness, context) =>
         harness.commit(async (tx) => {
           const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
@@ -495,9 +486,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
         context,
       );
     });
-    const encoded = yield* encodeIntervention(intervention).pipe(
-      Effect.mapError((cause) => durableError("record the queued operator input", cause)),
-    );
+    const encoded = yield* encodeIntervention(intervention).pipe(Effect.orDie);
     const queued = yield* durable.use("record the queued operator input", (harness, context) =>
       harness.commit(async (tx) => {
         const submission = await tx.submissionByRequest(parent, requestId);

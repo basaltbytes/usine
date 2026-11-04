@@ -907,13 +907,13 @@ describe("ConfigParser", () => {
       expect(Option.isNone((yield* parse("")).ci)).toBe(true);
       const configured = yield* parse("ci:\n  fix_loop: widgets/fix\n  timeout_seconds: 3600\n");
       expect(Option.isSome(configured.ci) && configured.ci.value.fixLoop).toBe("widgets/fix");
-      const decodedValue9 = yield* formatLoop(configured);
+      const decodedValue9 = formatLoop(configured);
       const roundtrip = yield* parser.parseLoopFile(
         InstancePath.make("loops/fix.md"),
         decodedValue9,
       );
       expect(roundtrip.ci).toEqual(configured.ci);
-      const valueDecoded1 = yield* formatLoop(configured);
+      const valueDecoded1 = formatLoop(configured);
       expect(valueDecoded1).toContain("fix_loop: widgets/fix");
       for (const ci of [
         "ci:\n  fix_loop: fix\n  timeout_seconds: 0\n",

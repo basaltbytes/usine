@@ -99,8 +99,8 @@ it.effect(
         five.loops.map(({ name }) => `basaltbytes-usine/${name}`),
       );
       const decoded = yield* Effect.fromResult(migrateProjects(migrated));
-      const valueDecoded2 = yield* configurationEntities(migrated);
-      const valueDecoded1 = yield* configurationEntities(decoded);
+      const valueDecoded2 = configurationEntities(migrated);
+      const valueDecoded1 = configurationEntities(decoded);
       expect(configurationDiff(valueDecoded2, valueDecoded1)).toEqual([]);
       const legacyInstance = yield* legacy(["acme/one", "acme/two"], ["start-dev"]);
       const two = yield* Effect.fromResult(migrateProjects(legacyInstance));

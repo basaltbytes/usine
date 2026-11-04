@@ -15,9 +15,9 @@ export const formatConfigurationEntity = (
 ): Effect.Effect<string, ConfigurationInvalid> => {
   const source =
     entity.key.kind === "agent"
-      ? Schema.decodeEffect(AgentJson)(entity.value).pipe(Effect.flatMap(formatAgent))
+      ? Schema.decodeEffect(AgentJson)(entity.value).pipe(Effect.map(formatAgent))
       : entity.key.kind === "loop"
-        ? Schema.decodeEffect(LoopJson)(entity.value).pipe(Effect.flatMap(formatLoop))
+        ? Schema.decodeEffect(LoopJson)(entity.value).pipe(Effect.map(formatLoop))
         : Effect.succeed(writeYaml(entity.value));
   return source.pipe(
     Effect.mapError((error) =>

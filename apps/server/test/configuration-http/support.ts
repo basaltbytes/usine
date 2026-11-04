@@ -115,7 +115,7 @@ export const harness = (
       quarantinedLoops: [],
       warnings: [],
     });
-    const decodedValue4 = yield* configurationEntities(initial);
+    const decodedValue4 = configurationEntities(initial);
     const first = yield* store.commit({
       expected: ConfigurationRevisionNumber.make(0),
       actor: initial.config.operator,

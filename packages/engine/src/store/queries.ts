@@ -1067,11 +1067,11 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     if (existing === undefined) {
       const ciOnGreenJson = yield* Schema.encodeEffect(Submission.fields.ciOnGreen)(
         submission.ciOnGreen,
-      );
+      ).pipe(Effect.orDie);
       const ciPolicyJson = yield* Option.match(submission.ciPolicy, {
         onNone: () => Effect.succeed(null),
         onSome: Schema.encodeEffect(CiPolicy),
-      });
+      }).pipe(Effect.orDie);
       const agentJson = yield* storedAgent(submission.agent);
       yield* database
         .insert(triggerEvents)

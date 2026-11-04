@@ -250,4 +250,4 @@ The domain services are the persistence boundary. `RunDatabase` is the current S
 
 ## Schema contracts
 
-Engine records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Persistence encoding and decoding run inside Effects and report failures through `EnginePersistenceError`.
+Engine records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Persistence encoding and decoding run inside Effects. Invalid stored data fails with `EnginePersistenceError`; internal encoding failures are defects.

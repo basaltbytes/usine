@@ -108,23 +108,19 @@ const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
  * Serializes `agent` as YAML frontmatter and a Markdown persona, with snake_case keys. The name
  * remains in the filename.
  */
-export const formatAgent = Effect.fn("Config.formatAgent")(function* (agent: AgentFile) {
-  const frontmatter = yield* Schema.encodeEffect(AuthoredAgentFrontmatter)(
-    AgentFrontmatter.make(agent),
-  );
-  return `---\n${writeYaml(frontmatter)}---\n${agent.persona}`;
-});
+export const formatAgent = (agent: AgentFile): string =>
+  // The value is already validated.
+  // @effect-diagnostics-next-line schemaSync:off
+  `---\n${writeYaml(Schema.encodeSync(AuthoredAgentFrontmatter)(AgentFrontmatter.make(agent)))}---\n${agent.persona}`;
 
 /**
  * Serializes `loop` as YAML frontmatter and a Markdown prompt, with snake_case keys. The name
  * remains in the filename.
  */
-export const formatLoop = Effect.fn("Config.formatLoop")(function* (loop: LoopFile) {
-  const frontmatter = yield* Schema.encodeEffect(AuthoredLoopFrontmatter)(
-    LoopFrontmatter.make(loop),
-  );
-  return `---\n${writeYaml(frontmatter)}---\n${loop.body}`;
-});
+export const formatLoop = (loop: LoopFile): string =>
+  // The value is already validated.
+  // @effect-diagnostics-next-line schemaSync:off
+  `---\n${writeYaml(Schema.encodeSync(AuthoredLoopFrontmatter)(LoopFrontmatter.make(loop)))}---\n${loop.body}`;
 
 interface Interpolation {
   readonly source: Source;

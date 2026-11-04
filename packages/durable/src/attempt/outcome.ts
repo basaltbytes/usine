@@ -7,8 +7,7 @@ import {
   InfraFailure,
 } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
-import { Effect, Match, Option, Result, Schema } from "effect";
-import { durableError } from "../harness.ts";
+import { Match, Option, Result, Schema } from "effect";
 import {
   AttemptReport,
   type FinishedAttempt,
@@ -21,7 +20,9 @@ import type { AttemptRecord, AttemptResult } from "./documents.ts";
 export type Settled = Result.Result<AttemptReport, AttemptFailure>;
 
 const failureJson = Schema.fromJsonString(AttemptFailure);
-const encodeFailure = Schema.encodeEffect(failureJson);
+// The attempt failure is already validated.
+// @effect-diagnostics-next-line schemaSync:off
+const encodeFailure = Schema.encodeSync(failureJson);
 const decodeFailure = Schema.decodeUnknownOption(failureJson);
 const decodeResult = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -46,19 +47,13 @@ const failureMessage = (failure: AttemptFailure): string =>
   }) || failure._tag;
 
 /** Returns the terminal task state for `failure`. */
-export const failedOutcome = (failure: AttemptFailure) =>
-  encodeFailure(failure).pipe(
-    Effect.mapBoth({
-      onSuccess: (detail): NextTaskState<never, AttemptResult> => ({
-        status: "terminal",
-        outcome: {
-          status: "failed",
-          error: { message: failureMessage(failure), detail },
-        },
-      }),
-      onFailure: (cause) => durableError("encode the failed outcome", cause),
-    }),
-  );
+export const failedOutcome = (failure: AttemptFailure): NextTaskState<never, AttemptResult> => ({
+  status: "terminal",
+  outcome: {
+    status: "failed",
+    error: { message: failureMessage(failure), detail: encodeFailure(failure) },
+  },
+});
 
 /** Returns the terminal task state for a parent that finished with `message`. */
 export const completedOutcome = (

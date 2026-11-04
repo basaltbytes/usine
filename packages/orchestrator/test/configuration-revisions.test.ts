@@ -42,7 +42,7 @@ it.live("applies committed agent brains and webhook settings live", () =>
     const services = yield* Layer.build(dependencies);
     const store = Context.get(services, ConfigurationStore);
     const initial = yield* Context.get(services, ConfigurationFolder).load(root);
-    const decodedValue2 = yield* configurationEntities(initial);
+    const decodedValue2 = configurationEntities(initial);
     const revision = yield* store.commit({
       expected: ConfigurationRevisionNumber.make(0),
       changes: configurationDiff([], decodedValue2),

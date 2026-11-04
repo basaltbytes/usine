@@ -202,26 +202,24 @@ export class ConfigurationFolder extends Context.Service<
                   { discard: true },
                 );
               });
-            const agents = yield* Effect.forEach(instance.agents, (agent) =>
-              formatAgent(agent).pipe(Effect.map((text) => [agent.name, text] as const)),
+            yield* write(
+              "agents",
+              instance.agents.map((agent) => [agent.name, formatAgent(agent)]),
             );
-            yield* write("agents", agents);
             if (instance.config.version === 1) {
-              const loops = yield* Effect.forEach(instance.loops, (loop) =>
-                formatLoop(loop).pipe(Effect.map((text) => [loop.name, text] as const)),
+              yield* write(
+                "loops",
+                instance.loops.map((loop) => [loop.name, formatLoop(loop)]),
               );
-              yield* write("loops", loops);
             } else {
               yield* write("loops", []);
               for (const project of instance.config.projects) {
-                const projectLoops = yield* Effect.forEach(
-                  instance.loops.filter((loop) => loop.name.startsWith(`${project.id}/`)),
-                  (loop) =>
-                    formatLoop(loop).pipe(
-                      Effect.map((text) => [loop.name.slice(project.id.length + 1), text] as const),
-                    ),
+                yield* write(
+                  `projects/${project.id}/loops`,
+                  instance.loops
+                    .filter((loop) => loop.name.startsWith(`${project.id}/`))
+                    .map((loop) => [loop.name.slice(project.id.length + 1), formatLoop(loop)]),
                 );
-                yield* write(`projects/${project.id}/loops`, projectLoops);
               }
             }
             yield* Effect.logInfo("Configuration exported", { directory: root });

@@ -42,9 +42,9 @@ const commit = (hour: number, slots: number) =>
     const store = yield* ConfigurationStore;
     const previous = yield* store.read;
     const decodedValue2 = yield* instance(slots);
-    const decodedValue1 = yield* configurationEntities(decodedValue2);
-    const fixtureValue1 = yield* Option.match(previous.instance, {
-      onNone: () => Effect.succeed([]),
+    const decodedValue1 = configurationEntities(decodedValue2);
+    const fixtureValue1 = Option.match(previous.instance, {
+      onNone: () => [],
       onSome: configurationEntities,
     });
     yield* store.commit({

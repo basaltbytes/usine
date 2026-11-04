@@ -114,4 +114,4 @@ The `/backup` operation requires `FileSystem` and `Path`. Provide `NodeServices.
 
 ## Schema contracts
 
-Attempt runtime records and errors use nominal Schema brands. Durable request and outcome codecs run inside Effects; storage operations report codec failures through the durable harness error channel.
+Attempt runtime records and errors use nominal Schema brands. Task-input and failed-outcome encoders are pure functions over validated values. Encoding failures in runtime operations are defects; storage failures use the durable harness error channel.

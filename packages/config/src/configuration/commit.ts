@@ -137,8 +137,10 @@ export const validateConfiguration = (
         errors: "all",
         onExcessProperty: "error",
       }).pipe(
-        Effect.flatMap(formatAgent),
-        Effect.mapError((e) => ConfigFileError.fromSchema(file, e)),
+        Effect.mapBoth({
+          onSuccess: formatAgent,
+          onFailure: (error) => ConfigFileError.fromSchema(file, error),
+        }),
         Effect.flatMap((text) => parser.parseAgentFile(file, text)),
         Effect.result,
       );
@@ -216,8 +218,8 @@ export const commit = (
   Effect.gen(function* () {
     if (current.number !== expected)
       return yield* StaleRevision.make({ expected, actual: current.number });
-    const before = yield* Option.match(current.instance, {
-      onNone: () => Effect.succeed([]),
+    const before = Option.match(current.instance, {
+      onNone: () => [],
       onSome: configurationEntities,
     });
     const entities = new Map(before.map((entry) => [entry.key.key, entry]));
@@ -284,7 +286,7 @@ export const commit = (
         ],
       });
     const number = ConfigurationRevisionNumber.make(current.number + 1);
-    const canonicalEntities = yield* configurationEntities(instance);
+    const canonicalEntities = configurationEntities(instance);
     return {
       configuration: Configuration.make({ number, instance: Option.some(instance) }),
       revision: ConfigurationRevision.make({

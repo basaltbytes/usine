@@ -124,8 +124,8 @@ export const sqliteConfigurationLayer = Layer.effect(
               if (Option.isNone(change.after))
                 yield* sql`DELETE FROM ${sql(entityTable)} WHERE key = ${change.key.key}`;
             }
-            const entities = yield* Option.match(result.configuration.instance, {
-              onNone: () => Effect.succeed([]),
+            const entities = Option.match(result.configuration.instance, {
+              onNone: () => [],
               onSome: configurationEntities,
             });
             yield* Effect.forEach(

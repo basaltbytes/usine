@@ -22,7 +22,7 @@ import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
 import { DateTime, Deferred, Effect, Option, Queue, Result, Schema } from "effect";
 import type { AttemptRequest } from "../attempt-runtime.ts";
-import { durableError, type DurableHarness, type DurableHarnessError } from "../harness.ts";
+import type { DurableHarness, DurableHarnessError } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import { entryEvents, ledgerUsage } from "./events.ts";
 import {
@@ -164,9 +164,7 @@ const emit = (
           payload,
         });
         outbound = yield* admitOutbound(hub, outbound, envelope);
-        const encoded = yield* encodeOutbound(envelope).pipe(
-          Effect.mapError((cause) => durableError("encode outbound envelope", cause)),
-        );
+        const encoded = yield* encodeOutbound(envelope).pipe(Effect.orDie);
         pending.push(encoded);
       }
       const cursor = advance(progress);

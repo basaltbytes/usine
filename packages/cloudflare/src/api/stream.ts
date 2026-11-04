@@ -1,4 +1,4 @@
-import { type Brand } from "effect";
+import type { Brand } from "effect";
 // Imports Option and Schema alone, not the whole `effect` index: the executor's sandbox shell
 // loads this module once per command.
 import * as Option from "effect/Option";

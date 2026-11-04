@@ -38,8 +38,8 @@ export const configurationLoopOperations = Effect.gen(function* () {
         identifier: ConfigurationEntityId.make(input.name),
       });
       const snapshot = yield* store.read;
-      const entities = yield* Option.match(snapshot.instance, {
-        onNone: () => Effect.succeed([]),
+      const entities = Option.match(snapshot.instance, {
+        onNone: () => [],
         onSome: configurationEntities,
       });
       const resolved = resolveConfigurationEntityKey(entities, requested);
@@ -63,8 +63,8 @@ export const configurationLoopOperations = Effect.gen(function* () {
   const check = Effect.fn("ConfigurationEditor.checkLoop")(function* (input: LoopDraft) {
     yield* Effect.annotateCurrentSpan({ loop: input.name });
     const snapshot = yield* store.read;
-    const entities = yield* Option.match(snapshot.instance, {
-      onNone: () => Effect.succeed([]),
+    const entities = Option.match(snapshot.instance, {
+      onNone: () => [],
       onSome: configurationEntities,
     });
     const resolved = resolveConfigurationEntityKey(

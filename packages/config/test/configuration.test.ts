@@ -104,7 +104,7 @@ Implement #{{ item.number }}.
 });
 
 const initialChanges = fixture.pipe(
-  Effect.flatMap(configurationEntities),
+  Effect.map(configurationEntities),
   Effect.map((entities) => configurationDiff([], entities)),
 );
 const decodeObject = Schema.decodeUnknownEffect(Schema.JsonObject);
@@ -119,7 +119,7 @@ describe("configuration domain without layers", () => {
     Effect.gen(function* () {
       const fixtureInstance = yield* fixture;
 
-      const original = yield* configurationEntities(fixtureInstance);
+      const original = configurationEntities(fixtureInstance);
       const added = ConfigurationEntity.make({
         key: ConfigurationEntityKey.make({
           kind: "label",
@@ -149,7 +149,7 @@ describe("configuration domain without layers", () => {
     Effect.gen(function* () {
       const fixtureInstance = yield* fixture;
 
-      const original = yield* configurationEntities(fixtureInstance);
+      const original = configurationEntities(fixtureInstance);
       const workers = original.filter(({ key }) => key.kind === "worker");
       const other = original.filter(({ key }) => key.kind !== "worker");
       expect(configurationDiff(original, [...other.reverse(), ...workers])).toEqual([]);
@@ -232,7 +232,7 @@ for (const [name, layer] of adapters)
         const directory = yield* fs.makeTempDirectoryScoped();
         const root = InstanceDirectory.make(directory);
 
-        const canonical = yield* configurationEntities(fixtureInstance);
+        const canonical = configurationEntities(fixtureInstance);
         const initial = yield* initialChanges;
         const changes = yield* Effect.forEach(initial, (change) =>
           Effect.gen(function* () {
@@ -254,12 +254,12 @@ for (const [name, layer] of adapters)
         const exportedInstance = yield* Effect.fromResult(migrateProjects(instance.value));
         yield* folder.export(root, exportedInstance);
         const reloadedInstance = yield* folder.load(root);
-        const imported = yield* configurationEntities(reloadedInstance);
+        const imported = configurationEntities(reloadedInstance);
         expect(new Set(imported.map(({ key }) => key.kind))).toEqual(
           new Set(["settings", "worker", "repository", "project", "label", "loop", "agent"]),
         );
         const migratedInstance = yield* Effect.fromResult(migrateProjects(instance.value));
-        const valueDecoded1 = yield* configurationEntities(migratedInstance);
+        const valueDecoded1 = configurationEntities(migratedInstance);
         expect(configurationDiff(valueDecoded1, imported)).toEqual([]);
         for (const entity of imported) {
           const formattedEntity = yield* formatConfigurationEntity(entity);
@@ -283,7 +283,7 @@ for (const [name, layer] of adapters)
         const store = yield* ConfigurationStore;
         yield* initialize;
 
-        const original = yield* configurationEntities(fixtureInstance);
+        const original = configurationEntities(fixtureInstance);
         const workers = original.filter(({ key }) => key.kind === "worker");
         const other = original.filter(({ key }) => key.kind !== "worker");
         const [settings, ...rest] = other;
@@ -315,8 +315,8 @@ for (const [name, layer] of adapters)
           original,
         ]) {
           const current = yield* store.read;
-          const valueDecoded2 = yield* Option.match(current.instance, {
-            onNone: () => Effect.succeed([]),
+          const valueDecoded2 = Option.match(current.instance, {
+            onNone: () => [],
             onSome: configurationEntities,
           });
           const changes = configurationDiff(valueDecoded2, candidate);
@@ -330,9 +330,7 @@ for (const [name, layer] of adapters)
               (yield* store.list(Option.some(entity.key))).map(({ number }) => number),
             ).toEqual([1]);
           const saved = yield* store.read;
-          const savedEntities = yield* Effect.transposeOption(
-            Option.map(saved.instance, configurationEntities),
-          );
+          const savedEntities = Option.map(saved.instance, configurationEntities);
           expect(savedEntities).toEqual(Option.some(candidate));
           expect(configurationDiff(candidate, candidate)).toEqual([]);
         }
@@ -364,7 +362,7 @@ for (const [name, layer] of adapters)
           initialRevision,
         )).configuration;
 
-        const original = yield* configurationEntities(fixtureInstance);
+        const original = configurationEntities(fixtureInstance);
         const workers = original.filter(({ key }) => key.kind === "worker");
         const other = original.filter(({ key }) => key.kind !== "worker");
         const added = ConfigurationEntity.make({
@@ -383,8 +381,8 @@ for (const [name, layer] of adapters)
           ];
           for (const target of [candidate, original]) {
             const current = yield* store.read;
-            const valueDecoded3 = yield* Option.match(current.instance, {
-              onNone: () => Effect.succeed([]),
+            const valueDecoded3 = Option.match(current.instance, {
+              onNone: () => [],
               onSome: configurationEntities,
             });
             const changes = configurationDiff(valueDecoded3, target);
@@ -438,7 +436,7 @@ for (const [name, layer] of adapters)
         yield* initialize;
         const current = yield* store.read;
 
-        const entities = yield* configurationEntities(fixtureInstance);
+        const entities = configurationEntities(fixtureInstance);
         const workers = entities.filter(({ key }) => key.kind === "worker");
         for (const changes of [
           workers.map(({ key, value }) =>

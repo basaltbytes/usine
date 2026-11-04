@@ -561,7 +561,7 @@ it("restores several deleted workers while preserving later additions and deleti
       const snapshot = yield* store.read;
       if (Option.isNone(snapshot.instance))
         return yield* Effect.die("Missing initial configuration");
-      const before = yield* configurationEntities(snapshot.instance.value);
+      const before = configurationEntities(snapshot.instance.value);
       yield* store.commit({
         expected: snapshot.number,
         actor: snapshot.actor,
