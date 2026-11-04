@@ -10,6 +10,8 @@ import {
 import { spawn } from "node:child_process";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
+  type BillingPool,
+  ChildSession,
   HarnessSession,
   HarnessSessionId,
   ProviderRecovered,
@@ -42,7 +44,7 @@ import {
   ClaudeChildBackend,
   ClaudeLoginLock,
   ChildBackend,
-  type ChildRequest,
+  ChildRequest,
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
@@ -485,7 +487,17 @@ const makeClaudeChild = Effect.gen(function* () {
   });
 
   const launch: ChildBackend["Service"]["launch"] = Effect.fn("ClaudeChildBackend.launch")(
-    function* (request) {
+    function* (input) {
+      const pool: BillingPool = Option.contains(input.session.gatewayCredential, "api-key")
+        ? "apiKeys"
+        : "claudePlan";
+      const request = ChildRequest.make({
+        ...input,
+        session: ChildSession.make({
+          ...input.session,
+          pool: Option.some(pool),
+        }),
+      });
       yield* Effect.annotateCurrentSpan({
         agent: request.session.agent,
         effort: request.session.brain.effort,
@@ -495,7 +507,7 @@ const makeClaudeChild = Effect.gen(function* () {
         sessionId: request.session.id,
         worker: request.worker,
       });
-      yield* Effect.logInfo("Launching Claude child session");
+      yield* Effect.logInfo("Launching Claude child session", { pool });
       const context = yield* Effect.context<never>();
       const scope = yield* Effect.scope;
       let boundary = Effect.void;

@@ -35,6 +35,8 @@ export interface RemoteMachine {
 }
 
 export interface RemoteAccess {
+  /** The harnesses whose model API keys were installed with this access. */
+  readonly apiKeyHarnesses: ReadonlySet<Harness>;
   /**
    * The shell for the Attempt's children, harvesting, and git commands: the machine's own, or one
    * that sends `secrets` through the SSH connection (`sendingShell`). An Attempt container gets

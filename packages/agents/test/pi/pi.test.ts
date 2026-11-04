@@ -291,6 +291,8 @@ describe("Pi child backend", () => {
   it.effect.each([
     { pool: "apiKeys", model: "openai/gpt-5.6-terra-2026-08-01" },
     { pool: "chatgptPlan", model: "openai-codex/gpt-5.6-sol" },
+    { pool: "apiKeys", model: "openai-codex/gpt-5.6-sol" },
+    { pool: "apiKeys", model: "ollama/qwen3" },
   ] as const)("normalizes $pool events and controls", ({ pool, model }) => {
     let options: PiStartOptions | undefined;
     const listeners: Array<(event: PiSessionEvent) => void> = [];
@@ -364,6 +366,11 @@ describe("Pi child backend", () => {
         assert.strictEqual(result.message, "Pi child done.");
         assert.strictEqual(running.session.brain.model, effectiveModel);
         assert.strictEqual(sessionPool(running.session), pool);
+        assert.deepStrictEqual(running.session.pool, Option.some(pool));
+        assert.deepStrictEqual(
+          running.session.endpoint,
+          pool === "apiKeys" ? Option.some(model.split("/")[0]) : Option.none(),
+        );
         const usage = events.find((event) => event._tag === "SessionTokensUpdated");
         assert(usage?._tag === "SessionTokensUpdated");
         assert.strictEqual(sessionPool(usage.session), pool);

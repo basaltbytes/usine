@@ -105,6 +105,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
                 "thread/start": {
                   thread: { id: "thread" },
                   model: "gpt-test",
+                  modelProvider: "openai",
                   instructionSources: [],
                 },
                 "turn/start": { turn: { id: "turn" } },

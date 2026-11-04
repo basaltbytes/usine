@@ -972,10 +972,17 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             Effect.gen(function* () {
               // Uses the RunSpec's brain, including on reattachment. Each child reads the kind when it
               // starts, so a preflight during the Attempt takes effect.
-              const gatewayCredential = worker.gatewayCredential(
-                machine,
-                prepared.spec.agent.brain.harness,
-              );
+              const gatewayCredential = worker
+                .gatewayCredential(machine, prepared.spec.agent.brain.harness)
+                .pipe(
+                  Effect.map((kind) =>
+                    Option.orElse(kind, () =>
+                      access.apiKeyHarnesses.has(prepared.spec.agent.brain.harness)
+                        ? Option.some("api-key" as const)
+                        : Option.none(),
+                    ),
+                  ),
+                );
               yield* checkoutHost.recordOutOfMemory(io.outOfMemory);
               const shell = yield* checkoutHost.shell.pipe(
                 Effect.mapError((error) =>
